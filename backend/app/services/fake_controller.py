@@ -17,8 +17,14 @@ A test drives it through its verbs, the public methods below: in process under
 pytest, and over HTTP as `POST /fake/<verb>`, the verb's name hyphenated and its
 keyword arguments the JSON body.
 
-Simplifications of the real controller: a headless session's conversation id
-is minted by its first send; an environment that is not `running` holds no
+A headless session takes the lowest free name, as KubeCoder's do, a name freed
+when its session ends or its environment restarts or loses its pod, so that a
+name may come back holding another conversation; the fake numbers its names
+from `claude-1`, where KubeCoder's first is `claude`. A session's conversation
+is the one its create resumed, else the first its lines name, as the worker
+reads it from `claude`'s output.
+
+Simplifications of the real controller: an environment that is not `running` holds no
 headless session; `wait=settled` is `wait=ready`, since no setup runs here; the
 create and the reset answer at once, taking no `wait`; a delete's teardown ends
 as it is answered; the node's cap is a flag, of the node or of one environment,
@@ -36,6 +42,7 @@ verb last set, with no poll behind it.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import posixpath
 import re
@@ -43,7 +50,6 @@ import secrets
 import socket
 import threading
 import time
-import uuid
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -199,7 +205,6 @@ class FakeEnvironment:
     sandbox_profile: bool = True
     """Whether its pod was composed with the sandbox AppArmor profile, which a
     boxed create needs."""
-    sessions_created: int = 0
     pod_started_at: datetime | None = None
     """Its pod's `startedAt`; None while it has no pod, `stopped`."""
     files: dict[str, bytes] = field(default_factory=dict)
@@ -643,8 +648,9 @@ class FakeController:
 
     @validate_call
     def play(self, env_id: str, name: str, lines: list[str]) -> list[int]:
-        """`claude` prints `lines`: the raw file grows by them, and an open
-        stream sends them. Returns each line's offset."""
+        """`claude` prints `lines`: the raw file grows by them, an open stream
+        sends them, and the first line naming a conversation binds a session
+        that has none to it. Returns each line's offset."""
         with self._changed:
             session = self._session(env_id, name)
             offsets: list[int] = []
@@ -656,6 +662,7 @@ class FakeController:
                 session.size += len(line.encode()) + 1
                 session.lines.append((session.size, line))
                 offsets.append(session.size)
+                session.session_id = session.session_id or _conversation(line) or ""
             self._changed.notify_all()
             return offsets
 
@@ -1118,10 +1125,9 @@ class FakeController:
             cwd = body.get("cwd") or "Example"
             cwd = cwd if cwd.startswith("/") else f"/work/{cwd}"
             box = _box(environment, body, cwd)
-            environment.sessions_created += 1
             session = FakeSession(
                 env_id,
-                f"claude-{environment.sessions_created}",
+                self._free_name(env_id),
                 cwd,
                 body.get("resume") or "",
                 create_body=body,
@@ -1159,8 +1165,6 @@ class FakeController:
             session.status = "busy"
             session.result = None
             failure = _spawn_failure(environment, session.box or ())
-            if failure is None:
-                session.session_id = session.session_id or str(uuid.uuid4())
             self._publish(self._sessions_frame(env_id))
             if failure is not None:
                 self._resolve(session, "spawn-failure", failure)
@@ -1325,6 +1329,15 @@ class FakeController:
                 "or under way; write or delete once the environment has settled",
             )
         return environment
+
+    def _free_name(self, env_id: str) -> str:
+        """The lowest name no session of the environment holds."""
+        taken = {name for held, name in self._sessions if held == env_id}
+        return next(
+            name
+            for name in (f"claude-{number}" for number in itertools.count(1))
+            if name not in taken
+        )
 
     def _session(self, env_id: str, name: str) -> FakeSession:
         session = self._sessions.get((env_id, name))
@@ -1631,6 +1644,16 @@ def _file_answer(body: bytes, data: bytes, status: int = 200) -> Response:
         content_type="application/octet-stream",
         headers={CONTENT_SHA256_HEADER: hashlib.sha256(data).hexdigest()},
     )
+
+
+def _conversation(line: str) -> str | None:
+    """The conversation a raw line names; None for one that names none."""
+    try:
+        payload = json.loads(line)
+    except ValueError:
+        return None
+    conversation = payload.get("session_id") if isinstance(payload, dict) else None
+    return conversation if isinstance(conversation, str) and conversation else None
 
 
 def _name_order(name: str) -> tuple[str, str]:

@@ -14,7 +14,9 @@ transition commits.
 
 The tick ends the chat's controller session, under its Session's lock, before
 it closes the chat, its Session then `ended`; a controller that does not
-answer leaves the chat open for the next tick. Create project, Finish, Reopen
+answer leaves the chat open for the next tick. A name that holds another
+conversation than the chat's is another session's, which the tick never ends
+(`ControllerClient.get_session_holding`). Create project, Finish, Reopen
 and Archive call no controller: a chat they close keeps its controller
 session, idle or interrupted, and nothing sends to it again. The definition chat never closes
 by timeout (F130.2).
@@ -56,8 +58,9 @@ _RECORD_PAGE = 32
 """The `server` records one read of a Session's takes, newest first."""
 
 _NOTHING_TO_END = (ControllerProblemType.NOT_FOUND, ControllerProblemType.CONFLICT)
-"""The controller's refusals of a session's end that leave no session to end:
-its environment gone, or not running, which no headless session outlives."""
+"""The controller's refusals of a session's end, or of its read before it, that
+leave no session to end: the session gone or another conversation's, its
+environment gone, or not running, which no headless session outlives."""
 
 
 class ChatCloseService:
@@ -172,22 +175,29 @@ class ChatCloseService:
         if session.controller_session is not None:
             # A controller session is created in its Session's Environment.
             assert session.environment_id is not None
-            self._end(session.environment_id, session.controller_session)
+            self._end(
+                session.environment_id,
+                session.controller_session,
+                session.conversation_id,
+            )
             session.state_code = SessionState.ENDED
             session.current_line = None
             work_moved(self._container.engine_bus(), session, state=True)
         self._close(db, self._records(db), chat, CloseCause.TIMEOUT, datetime.now(UTC))
 
-    def _end(self, env_id: str, name: str) -> None:
+    def _end(self, env_id: str, name: str, conversation_id: str | None) -> None:
         """End the controller session; one its environment no longer runs
-        is ended already.
+        is ended already, and a name that holds another conversation than
+        `conversation_id` is another session's, left as it is.
 
         Raises:
             ControllerUnreachable: The controller did not answer
             ExternalServiceException: The controller failed otherwise
         """
+        client = self._client()
         try:
-            self._client().end_session(env_id, name)
+            client.get_session_holding(env_id, name, conversation_id)
+            client.end_session(env_id, name)
         except ControllerProblem as problem:
             if problem.problem_type not in _NOTHING_TO_END:
                 raise

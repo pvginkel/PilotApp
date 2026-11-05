@@ -355,6 +355,36 @@ class TestStreamPosition:
             "claude-2", 80
         )
 
+    def test_a_server_record_it_is_told_of_ends_it_past_the_lines_before(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+    ) -> None:
+        """The line before a new controller session's create is of a file the
+        new one does not continue, whatever name it got."""
+        turn = _turn(session, project_session, 1, author=None)
+        _line(records, project_session, turn, 900)
+        records.append(project_session.id, RecordKind.SERVER, payload={"type": "gone"})
+        for n in range(40):
+            _server(records, project_session, f"Effect {n}")
+
+        assert (
+            stream_position(
+                session, project_session.id, replaced_by=("gone", "created")
+            )
+            is None
+        )
+        assert stream_position(session, project_session.id) == StreamPosition(
+            "claude-1", 900
+        )
+
+        _line(records, project_session, turn, 40)
+
+        assert stream_position(
+            session, project_session.id, replaced_by=("gone", "created")
+        ) == StreamPosition("claude-1", 40)
+
 
 def _docstrings(tree: ast.Module) -> set[ast.AST]:
     found: set[ast.AST] = set()

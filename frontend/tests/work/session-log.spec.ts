@@ -312,7 +312,7 @@ test.describe('A work item’s session log', () => {
     await controller.setStatus(environment, 'running');
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
     expect((await projects.work(project, work)).environment).toEqual({ id: environment, name });
-    await controller.play(environment, 'claude-2', [text('two', 'There are two stylesheets.')]);
+    await controller.play(environment, 'claude-1', [text('two', 'There are two stylesheets.')]);
     await expect(sessionLog.turns).toHaveCount(2);
     await expect(sessionLog.texts).toHaveText(['Looking at the stylesheets.', 'There are two stylesheets.']);
   });
@@ -334,12 +334,12 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.cue).toHaveText(`${name} is restarting`);
     await controller.setStatus(environment, 'running');
     await expect.poll(async () => (await projects.work(project, work)).current_line?.state).toBe('thinking');
-    await controller.play(environment, 'claude-2', [text('two', 'There are two stylesheets.')]);
+    await controller.play(environment, 'claude-1', [text('two', 'There are two stylesheets.')]);
     await expect(sessionLog.texts).toHaveText(['Looking at the stylesheets.', 'There are two stylesheets.']);
     await expect(sessionLog.turns).toHaveCount(2);
     await expect(sessionLog.turnEnds).toHaveText([/^\d\d:\d\d$/]);
 
-    await controller.finish(environment, 'claude-2');
+    await controller.finish(environment, 'claude-1');
     await expect(sessionLog.tail).toHaveText(/^The turn ended · \d\d:\d\d$/);
   });
 

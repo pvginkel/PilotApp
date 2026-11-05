@@ -41,6 +41,8 @@ from tests.support.locks import in_thread
 from tests.support.supervisor import WAIT_SECONDS, Supervise
 
 CLOSE_AFTER = timedelta(minutes=55)
+CONVERSATION = "conversation-1"
+"""The conversation of a chat with a controller session."""
 
 
 @pytest.fixture(autouse=True)
@@ -87,10 +89,10 @@ def store(
     return fake_controller
 
 
-def _headless(client: ControllerClient) -> str:
-    """An idle headless session in the store; its name."""
+def _headless(client: ControllerClient, conversation: str = CONVERSATION) -> str:
+    """An idle headless session in the store holding `conversation`; its name."""
     return client.create_headless_session(
-        STORE_ENVIRONMENT_ID, HeadlessCreateRequest()
+        STORE_ENVIRONMENT_ID, HeadlessCreateRequest(resume=conversation)
     ).name
 
 
@@ -112,7 +114,7 @@ def _chat(
         environment_id=STORE_ENVIRONMENT_ID,
         kind_code="chat",
         cwd="/work/PilotProjects",
-        conversation_id=None if controller_session is None else "conversation-1",
+        conversation_id=None if controller_session is None else CONVERSATION,
         controller_session=controller_session,
         token_hash=uuid.uuid4().hex * 2,
         state_code=state,
@@ -353,6 +355,39 @@ class TestCloseTimer:
             name,
         )
         assert store.sessions(STORE_ENVIRONMENT_ID) == []
+
+    def test_a_name_another_conversation_holds_is_left_to_it(
+        self,
+        session: DbSession,
+        closes: ChatCloseService,
+        store: ServedFakeController,
+        controller_client: ControllerClient,
+        opened: Project,
+    ) -> None:
+        """The store restarted under the idle chat, and a job's session took
+        its controller session's name: the close ends nothing of the job's
+        (F59.2)."""
+        name = _headless(controller_client)
+        run = _chat(
+            session,
+            opened,
+            _ago(CLOSE_AFTER + timedelta(seconds=5)),
+            controller_session=name,
+        )
+        store.restart(STORE_ENVIRONMENT_ID)
+        store.set_status(STORE_ENVIRONMENT_ID, "running")
+        assert _headless(controller_client, "conversation-of-a-job") == name
+        before = len(store.calls)
+
+        closes.run_close_timer(session)
+
+        assert _chat_row(session, run).close_cause_code is CloseCause.TIMEOUT
+        assert run.state_code is SessionState.ENDED
+        [held] = store.sessions(STORE_ENVIRONMENT_ID)
+        assert (held.name, held.session_id) == (name, "conversation-of-a-job")
+        assert store.calls[before:] == [
+            f"GET /environments/{STORE_ENVIRONMENT_ID}/sessions/{name}"
+        ]
 
     def test_a_chat_short_of_the_timeout_stays_open(
         self,

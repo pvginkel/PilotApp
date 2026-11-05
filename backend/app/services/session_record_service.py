@@ -128,9 +128,12 @@ def last_record(db: Session, session_id: uuid.UUID) -> StoredRecord | None:
     return next(iter(read_records(db, session_id, limit=1, newest_first=True)), None)
 
 
-def stream_position(db: Session, session_id: uuid.UUID) -> StreamPosition | None:
+def stream_position(
+    db: Session, session_id: uuid.UUID, *, replaced_by: Collection[str] = ()
+) -> StreamPosition | None:
     """The controller session and raw offset of the Session's last `claude` or
-    `result` record; None before its first."""
+    `result` record; None before its first, and None when a `server` record
+    whose `type` is one of `replaced_by` follows it."""
     before, limit = None, 1
     while True:
         page = read_records(
@@ -140,6 +143,11 @@ def stream_position(db: Session, session_id: uuid.UUID) -> StreamPosition | None
             record = stored.record
             if record.raw_offset is not None and record.controller_session is not None:
                 return StreamPosition(record.controller_session, record.raw_offset)
+            if (
+                record.kind_code == RecordKind.SERVER
+                and record.payload.get("type") in replaced_by
+            ):
+                return None
         if len(page) < limit:
             return None
         before, limit = page[-1].record.seq, _SEARCH_PAGE

@@ -897,7 +897,6 @@ class TestControllerClient:
 
         snapshot = controller_client.get_session(ENV, session_name)
         assert snapshot.status == "busy"
-        assert snapshot.session_id
 
     def test_send_message_during_a_turn_is_session_busy(
         self,
@@ -1001,6 +1000,84 @@ class TestControllerClient:
             controller_client.get_session(ENV, "claude-9")
 
         assert caught.value.problem_type is ControllerProblemType.NOT_FOUND
+
+    def test_get_session_holding_answers_the_session_of_the_conversation(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        name = controller_client.create_headless_session(
+            ENV, HeadlessCreateRequest(resume="conversation-1")
+        ).name
+
+        snapshot = controller_client.get_session_holding(ENV, name, "conversation-1")
+
+        assert (snapshot.name, snapshot.session_id) == (name, "conversation-1")
+        assert running.calls[-1] == f"GET /environments/{ENV}/sessions/{name}"
+
+    def test_get_session_holding_takes_any_headless_session_for_no_conversation(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        session_name: str,
+    ) -> None:
+        """A Session whose first turn has named no conversation yet: its
+        session holds none, or the one that turn minted."""
+        assert controller_client.get_session_holding(ENV, session_name, None).name == (
+            session_name
+        )
+        controller_client.send_message(ENV, session_name, "Check the badge.")
+        running.play(ENV, session_name, [json.dumps({"session_id": "minted-1"})])
+
+        snapshot = controller_client.get_session_holding(ENV, session_name, None)
+
+        assert snapshot.session_id == "minted-1"
+
+    @pytest.mark.parametrize(
+        ("resume", "held"),
+        [("conversation-2", "conversation-2"), (None, "none")],
+    )
+    def test_get_session_holding_a_name_another_conversation_holds_is_not_found(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        resume: str | None,
+        held: str,
+    ) -> None:
+        """KubeCoder gave the freed name to another create: the Session's
+        controller session is gone, as a `404` says (F59.2)."""
+        name = controller_client.create_headless_session(
+            ENV, HeadlessCreateRequest(resume=resume)
+        ).name
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.get_session_holding(ENV, name, "conversation-1")
+
+        assert caught.value.problem_type is ControllerProblemType.NOT_FOUND
+        assert caught.value.operation == f"read session {name} in environment {ENV}"
+        assert caught.value.cause == (
+            f"session {name} holds conversation {held}, not conversation-1"
+        )
+
+    def test_get_session_holding_an_interactive_session_is_not_found(
+        self, health_service: HealthService
+    ) -> None:
+        snapshot = {"name": "claude-1", "mode": "interactive", "sessionId": None}
+        answer = ("200 OK", [("Content-Type", "application/json")])
+        with _scripted(*answer, [json.dumps(snapshot).encode()]) as url:
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
+            with pytest.raises(ControllerProblem) as caught:
+                client.get_session_holding(ENV, "claude-1", None)
+
+        assert caught.value.problem_type is ControllerProblemType.NOT_FOUND
+        assert caught.value.cause == "session claude-1 is an interactive session"
+
+    def test_get_session_holding_of_an_unknown_one_is_not_found(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.get_session_holding(ENV, "claude-9", "conversation-1")
+
+        assert caught.value.problem_type is ControllerProblemType.NOT_FOUND
+        assert "404 not-found" in caught.value.cause
 
     def test_list_sessions(
         self,

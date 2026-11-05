@@ -4,9 +4,10 @@
  * environments are those Pilot's starts create in it, read from the work item
  * (`Projects.environment()`), and the store, where chats run, which `chats.ts` adds; a spec drives
  * them and their headless sessions through the fake's verbs, POST
- * /api/testing/controller/fake/<verb>, which take no sign-in. Pilot's headless sessions
- * in an environment are `claude-1`, `claude-2`, … in the order Pilot creates them there. The lines a
- * turn plays are the backend suite's invented ones (`rawTurn()`). A process in an environment writes,
+ * /api/testing/controller/fake/<verb>, which take no sign-in. A headless session in an environment
+ * takes the lowest free name of `claude-1`, `claude-2`, …, as KubeCoder's do: one that ends, or whose
+ * environment restarts, frees its name for the next. The lines a turn plays are the backend suite's
+ * invented ones (`rawTurn()`). A process in an environment writes,
  * deletes and reads its files as the controller's file endpoints serve them.
  *
  * The controller unreachable is a state the backend holds, which the gold bar reads (GET

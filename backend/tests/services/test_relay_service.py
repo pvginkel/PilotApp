@@ -174,6 +174,14 @@ def _headless(fake: ServedFakeController, client: ControllerClient) -> str:
     return client.create_headless_session(ENV, HeadlessCreateRequest()).name
 
 
+def _carrying_on(client: ControllerClient, conversation: str) -> str:
+    """A headless session created to carry `conversation` on, in the running
+    environment; its name."""
+    return client.create_headless_session(
+        ENV, HeadlessCreateRequest(resume=conversation)
+    ).name
+
+
 @pytest.fixture
 def controller_session(
     fake_controller: ServedFakeController, controller_client: ControllerClient
@@ -469,7 +477,7 @@ class TestSend:
         turn = _send(relays, session, idle, "Rename the badge", author=person)
 
         assert turn.error is not None and answer in turn.error
-        assert turn.error.startswith("Cannot send a turn to session ")
+        assert turn.error.startswith("Cannot read session ")
         assert turn.ended_at is not None
         assert [
             (stored.record.kind_code, stored.turn, stored.record.payload)
@@ -564,11 +572,12 @@ class TestSend:
         turn = _send(relays, session, idle, "Rename the badge", author=person)
 
         [created] = fake_controller.sessions(ENV)
-        assert created.name != controller_session
+        # The controller gives the freed name back (F59.2).
+        assert created.name == controller_session
         assert created.session_id == "conversation-1"
         assert created.status == "idle"
         assert fake_controller.calls[before:] == [
-            f"POST /environments/{ENV}/sessions/headless/{controller_session}/messages",
+            f"GET /environments/{ENV}/sessions/{controller_session}",
             f"POST /environments/{ENV}/sessions/headless",
         ]
         assert idle.controller_session == created.name
@@ -919,6 +928,43 @@ class TestSendTurn:
         ]
         assert (brief.ended_at, brief.error) == (None, None)
         assert run.state_code == SessionState.RUNNING
+
+    def test_a_turn_a_session_created_anew_under_the_old_name_has_is_not_sent_again(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        """The turns the gone session ended count for none of the new one's,
+        which took the freed name back (§8.2, §9.6)."""
+        for message in ("One", "Two"):
+            _send(relays, session, idle, message)
+            _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+            _relay(relays, idle)
+        controller_client.end_session(ENV, controller_session)
+        _send(relays, session, idle, "Three")
+        assert idle.controller_session == controller_session
+        # The new session's first turn went out and ended before the relay
+        # read it: its result's turn, 1, is below the gone session's last.
+        fake_controller.busy(ENV, controller_session)
+        fake_controller.finish(ENV, controller_session)
+        before = len(fake_controller.calls)
+
+        _relay(relays, idle)
+
+        assert not any(
+            call.endswith("/messages") for call in fake_controller.calls[before:]
+        )
+        assert (idle.state_code, idle.turns) == (SessionState.IDLE, 3)
+        results = [
+            stored.record.payload["turn"]
+            for stored in _records(session, idle.id)
+            if stored.record.kind_code == RecordKind.RESULT
+        ]
+        assert results == [1, 2, 1]
 
     def test_a_send_another_process_made_first_is_taken_as_sent(
         self,
@@ -1474,12 +1520,13 @@ class TestRelay:
         session: DbSession,
         relays: RelayService,
         fake_controller: ServedFakeController,
-        controller_session: str,
+        controller_client: ControllerClient,
         idle: models.Session,
     ) -> None:
         idle.conversation_id = "conversation-1"
+        idle.controller_session = _carrying_on(controller_client, "conversation-1")
         _send(relays, session, idle)
-        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+        _turn_of(fake_controller, idle.controller_session, raw_turn("turn_text"))
 
         _relay(relays, idle)
 
@@ -1695,16 +1742,17 @@ class _SendWatched(ServedFakeController):
 
 
 class _GoneOnce(ServedFakeController):
-    """The fake, running `after_404` once, as it refuses a send to a session it
-    does not have: another process's action then."""
+    """The fake, running `after_404` once, as it refuses the read of a session
+    it does not have, which a send makes first: another process's action
+    then."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
         self.after_404: Callable[[], None] | None = None
 
-    def _send(self, request: Request, env_id: str, name: str) -> Response:
+    def _get_session(self, request: Request, env_id: str, name: str) -> Response:
         try:
-            return super()._send(request, env_id, name)
+            return super()._get_session(request, env_id, name)
         except FakeControllerProblem as problem:
             hook, self.after_404 = self.after_404, None
             if problem.status == 404 and hook is not None:
@@ -2574,6 +2622,7 @@ class TestRelayHaltedEnd:
         relays: RelayService,
         fake_controller: ServedFakeController,
         controller_session: str,
+        controller_client: ControllerClient,
         project: Project,
     ) -> None:
         """DB 255: written once, at the turn end that carries its final
@@ -2581,8 +2630,9 @@ class TestRelayHaltedEnd:
         done and replaces it not."""
         run, _, _ = _done_run(session, container, project)
         asking = _pass_of(session, container, project, run, None)
-        clarifying = _agent_session(session, project, controller_session)
-        clarifying.conversation_id = "conv-camp"
+        carrying_on = _carrying_on(controller_client, CAMP)
+        clarifying = _agent_session(session, project, carrying_on)
+        clarifying.conversation_id = CAMP
         session.flush()
         container.record_service().place_work(
             project, clarifying, "Clarify cut-over.md"
@@ -2591,9 +2641,7 @@ class TestRelayHaltedEnd:
         session.flush()
         _usage(session, week=0.95)
         halted = _send(relays, session, clarifying, "Pilot asks about …")
-        _turn_of(
-            fake_controller, controller_session, raw_turn("turn_text"), result=REPLY
-        )
+        _turn_of(fake_controller, carrying_on, raw_turn("turn_text"), result=REPLY)
         _relay(relays, clarifying)
         [clarification] = _clarifications(session, asking)
         assert (clarification.reply, clarification.replied_at) == (
@@ -2609,7 +2657,7 @@ class TestRelayHaltedEnd:
         nudged = _send(relays, session, clarifying, "The subscription quota ran out.")
         _turn_of(
             fake_controller,
-            controller_session,
+            carrying_on,
             raw_turn("turn_text"),
             result="Nothing is left.",
         )
@@ -3463,8 +3511,36 @@ class TestInterrupt:
         self._interrupt(relays, work_item)
 
         assert fake_controller.calls[-1] == (
-            f"POST /environments/{ENV}/sessions/headless/"
-            f"{work_item.controller_session}/interrupt"
+            f"GET /environments/{ENV}/sessions/{work_item.controller_session}"
+        )
+
+    def test_a_name_another_conversation_holds_gets_no_interrupt(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_session: str,
+        work_item: models.Session,
+    ) -> None:
+        """Its environment restarted under the stopped turn, and another
+        session took the name: that session's turn runs on (F59.2)."""
+        _send(relays, session, work_item)
+        fake_controller.play(ENV, controller_session, raw_turn("turn_text")[:1])
+        work_item.conversation_id = CAMP
+        _stopped(work_item)
+        session.flush()
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+        _carrying_on(controller_client, "conversation-of-a-job")
+        fake_controller.busy(ENV, controller_session)
+
+        self._interrupt(relays, work_item)
+
+        held = fake_controller.session(ENV, controller_session)
+        assert (held.session_id, held.status) == ("conversation-of-a-job", "busy")
+        assert fake_controller.calls[-1] == (
+            f"GET /environments/{ENV}/sessions/{controller_session}"
         )
 
     def test_another_failure_raises_for_the_loop_to_run_again(
@@ -3630,14 +3706,15 @@ class TestRelayLoop:
             _send_committed(container, relays, run_id, person_id)
 
             loop_log.wait_for(rf"Loop relay:{run_id} started")
-            wait_until(lambda: hashes != [before], "the message sent anew")
+            wait_until(lambda: bool(hashes), "the message sent anew")
             created = _read(container, run_id)
             _turn_of(fake, created.controller_session or "", raw_turn("turn_text"))
             _idle(container, run_id)
         finally:
             fake.close()
 
-        assert hashes == [before, created.token_hash]
+        # Nothing went to the gone session: its read found none.
+        assert hashes == [created.token_hash]
         assert created.token_hash != before
 
     def test_a_work_items_run_that_ends_well_has_its_documents_read(
@@ -3874,10 +3951,11 @@ def _sends(fake: ServedFakeController, name: str) -> int:
     )
 
 
-def _streams(fake: ServedFakeController, name: str) -> int:
-    """How many response streams of the headless session `name` were opened."""
+def _streams(fake: ServedFakeController, name: str, since: int = 0) -> int:
+    """How many response streams of the headless session `name` were opened
+    after the fake's first `since` calls."""
     path = f"GET /environments/{ENV}/sessions/headless/{name}/response?"
-    return sum(1 for call in fake.calls if call.startswith(path))
+    return sum(1 for call in fake.calls[since:] if call.startswith(path))
 
 
 def _committed_records(
@@ -4113,13 +4191,14 @@ class TestEnvironmentRestartUnderARun:
         self,
         container: ServiceContainer,
         run_id: uuid.UUID,
+        name: str,
         lines: list[str],
         offsets: list[int],
         second: list[int],
     ) -> None:
         """Turn 1 ended by the server, with no result; the server's record
         outside any Turn; Turn 2, "continue", relayed from offset 0 of the new
-        controller session to its result."""
+        controller session to its result, under the name the gone one had."""
         records = _committed_records(container, run_id)
         first_turn = [s.record.seq for s in records if s.turn == 1]
         [gone] = [
@@ -4141,9 +4220,7 @@ class TestEnvironmentRestartUnderARun:
             if s.turn == 2 and s.record.kind_code == RecordKind.CLAUDE
         ]
         text = raw_turn("turn_text")
-        assert resumed == [
-            ("claude-2", offset) for offset, _ in _recorded(text, second)
-        ]
+        assert resumed == [(name, offset) for offset, _ in _recorded(text, second)]
         assert _claude_committed(container, run_id) == (
             _recorded(lines[:11], offsets) + _recorded(text, second)
         )
@@ -4152,7 +4229,7 @@ class TestEnvironmentRestartUnderARun:
         assert (carried_on.message, carried_on.author_user_id) == (CONTINUE, None)
         assert carried_on.ended_at is not None
         run = _read(container, run_id)
-        assert run.controller_session == "claude-2"
+        assert run.controller_session == name
         assert run.conversation_id == json.loads(lines[0])["session_id"]
 
     def test_an_environment_restart_is_waited_for_then_resumed_and_continued(
@@ -4178,33 +4255,38 @@ class TestEnvironmentRestartUnderARun:
         fake_controller.set_status(ENV, "running")
         relay_log.wait_for(
             rf"Session {run_id} lost controller session {name}; resumed as "
-            rf"claude-2 in environment {ENV}"
+            rf"{name} in environment {ENV}"
         )
         wait_until(
-            lambda: fake_controller.session(ENV, "claude-2").status == "busy",
+            lambda: fake_controller.session(ENV, name).status == "busy",
             "the continue sent",
         )
         # The resume moved the line on, before its Turn was sent.
         line = _read(container, run_id).current_line
         assert line is not None and line["state"] == "thinking"
         assert (
-            fake_controller.session(ENV, "claude-2").session_id
+            fake_controller.session(ENV, name).session_id
             == json.loads(lines[0])["session_id"]
         )
-        second = _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+        second = _turn_of(fake_controller, name, raw_turn("turn_text"))
         _idle(container, run_id)
 
-        self._assert_resumed(container, run_id, lines, offsets, second)
+        self._assert_resumed(container, run_id, name, lines, offsets, second)
         assert [
             (s.turn, s.record.payload)
             for s in _committed_records(container, run_id)
             if s.record.kind_code == RecordKind.SERVER
             and s.record.payload["type"] == RESTARTING
         ] == [(1, {"type": RESTARTING, "text": "Env-A is restarting…"})]
-        path = f"GET /environments/{ENV}/sessions/headless/claude-2/response"
-        assert [c for c in fake_controller.calls if c.startswith(path)][0] == (
-            f"{path}?format=raw&offset=0"
+        path = f"GET /environments/{ENV}/sessions/headless/{name}/response"
+        recreated = max(
+            index
+            for index, call in enumerate(fake_controller.calls)
+            if call == f"POST /environments/{ENV}/sessions/headless"
         )
+        assert [c for c in fake_controller.calls[recreated:] if c.startswith(path)][
+            0
+        ] == f"{path}?format=raw&offset=0"
 
     def test_a_controller_session_gone_under_a_run_is_resumed(
         self,
@@ -4221,13 +4303,13 @@ class TestEnvironmentRestartUnderARun:
 
         relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
         wait_until(
-            lambda: fake_controller.session(ENV, "claude-2").status == "busy",
+            lambda: fake_controller.session(ENV, name).status == "busy",
             "the continue sent",
         )
-        second = _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+        second = _turn_of(fake_controller, name, raw_turn("turn_text"))
         _idle(container, run_id)
 
-        self._assert_resumed(container, run_id, lines, offsets, second)
+        self._assert_resumed(container, run_id, name, lines, offsets, second)
         assert not relay_log.matching(r"Environment .* waiting for it to settle")
 
     def test_the_resumes_token_hash_is_committed_before_its_turn_is_sent(
@@ -4255,11 +4337,11 @@ class TestEnvironmentRestartUnderARun:
 
             relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
             wait_until(
-                lambda: fake.session(ENV, "claude-2").status == "busy",
+                lambda: fake.session(ENV, name).status == "busy",
                 "the continue sent",
             )
-            token = _token(fake.session(ENV, "claude-2").create_body)
-            assert at_send == [("claude-2", token_hash(token))]
+            token = _token(fake.session(ENV, name).create_body)
+            assert at_send == [(name, token_hash(token))]
             assert token_hash(token) != before
         finally:
             fake.close()
@@ -4289,10 +4371,10 @@ class TestEnvironmentRestartUnderARun:
         fake_controller.set_status(ENV, "running")
         relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
         wait_until(
-            lambda: fake_controller.session(ENV, "claude-2").status == "busy",
+            lambda: fake_controller.session(ENV, name).status == "busy",
             "the brief sent again",
         )
-        _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+        _turn_of(fake_controller, name, raw_turn("turn_text"))
         _idle(container, run_id)
         brief, again = _committed_turns(container, run_id)
         assert (again.message, again.author_user_id) == (brief.message, None)
@@ -4308,10 +4390,11 @@ class TestEnvironmentRestartUnderARun:
     ) -> None:
         container = committed_app.container
         relays, coordinator = _relay_service(container, supervise)
-        name = _headless(fake_controller, committed_controller_client)
-        run_id, person_id = _committed_session(container, name)
         # A continuation carries on the run's conversation from its placement.
         conversation = "5b0e7c2a-9d41-4f36-8a1e-3c7d6f2b9e10"
+        fake_controller.add_environment(ENV, status="running")
+        name = _carrying_on(committed_controller_client, conversation)
+        run_id, person_id = _committed_session(container, name)
         with scoped_session(container) as db:
             db.get_one(models.Session, run_id).conversation_id = conversation
         coordinator.fire_startup()
@@ -4325,11 +4408,11 @@ class TestEnvironmentRestartUnderARun:
         fake_controller.set_status(ENV, "running")
         relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
         wait_until(
-            lambda: fake_controller.session(ENV, "claude-2").status == "busy",
+            lambda: fake_controller.session(ENV, name).status == "busy",
             "its message sent again",
         )
-        assert fake_controller.session(ENV, "claude-2").session_id == conversation
-        _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+        assert fake_controller.session(ENV, name).session_id == conversation
+        _turn_of(fake_controller, name, raw_turn("turn_text"))
         _idle(container, run_id)
         brief, again = _committed_turns(container, run_id)
         assert (again.message, again.author_user_id) == (brief.message, None)
@@ -4424,25 +4507,28 @@ class TestTwoProcesses:
         wait_until(lambda: metric_value(RELAYS_RUNNING) == 2, "both relaying")
 
         with listening(RELAY_LOGGER) as log:
+            ended = len(fake_controller.calls)
             committed_controller_client.end_session(ENV, name)
             # A relay opens the stream only once its send was made or refused,
             # and a send after the turn's end starts a turn of its own.
             wait_until(
-                lambda: _streams(fake_controller, "claude-2") >= 2,
+                lambda: _streams(fake_controller, name, ended) >= 2,
                 "both relays past their send",
             )
-            _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+            _turn_of(fake_controller, name, raw_turn("turn_text"))
             _idle(container, run_id)
 
+        # The other relay tells the session created anew under the freed name
+        # by its token.
         assert len(log.matching(r"Session .* lost controller session .*")) == 1
-        assert [s.name for s in fake_controller.sessions(ENV)] == ["claude-2"]
+        assert [s.name for s in fake_controller.sessions(ENV)] == [name]
         # No line was recorded, so the Session has no conversation: the resume
         # sends the ended Turn's message again.
         assert [turn.message for turn in _committed_turns(container, run_id)] == [
             "Rename the badge",
             "Rename the badge",
         ]
-        assert _sends(fake_controller, "claude-2") >= 1
+        assert _sends(fake_controller, name) >= 2
         servers = [
             s
             for s in _committed_records(container, run_id)
@@ -4463,11 +4549,13 @@ class TestTwoProcesses:
             client.end_session(ENV, name)
 
             def another_process_resumes() -> None:
-                # Its resume committed between this send's 404 and its lock.
+                # Its resume committed between this send's 404 and its lock,
+                # its create given the freed name and minting a token.
                 created = client.create_headless_session(ENV, HeadlessCreateRequest())
                 with scoped_session(container) as db:
                     run = db.get_one(models.Session, run_id)
                     run.controller_session = created.name
+                    run.token_hash = uuid.uuid4().hex
 
             fake.after_404 = another_process_resumes
             create = f"POST /environments/{ENV}/sessions/headless"
@@ -4479,11 +4567,9 @@ class TestTwoProcesses:
         finally:
             fake.close()
 
-        assert [(s.name, s.status) for s in fake.sessions(ENV)] == [
-            ("claude-2", "busy")
-        ]
+        assert [(s.name, s.status) for s in fake.sessions(ENV)] == [(name, "busy")]
         assert fake.calls.count(create) == creates + 1
-        assert _read(container, run_id).controller_session == "claude-2"
+        assert _read(container, run_id).controller_session == name
         assert _committed_records(container, run_id) == []
 
     def test_two_shutdown_timers_stop_an_environment_once(
@@ -4529,6 +4615,8 @@ def _row_committed(container: ServiceContainer) -> Environment:
         return row
 
 
+CAMP = json.loads(raw_turn("turn_text")[0])["session_id"]
+"""The worker's run's conversation, the one the invented turns' lines name."""
 CUT_OVER = "/work/Example/docs/cut-over.md"
 DRAIN = "/work/Example/docs/drain.md"
 CUT_OVER_TEXT = """The cut-over.
@@ -4554,7 +4642,7 @@ def _done_run(
     and its work item done, and the two documents it registered, read."""
     _environment_row(db)
     run = _agent_session(db, project, None)
-    run.conversation_id = "conv-camp"
+    run.conversation_id = CAMP
     run.turns = 1
     db.flush()
     records = container.record_service()
@@ -4641,7 +4729,7 @@ class TestClarificationRun:
         clarifying = session.get_one(models.Session, clarification.id)
         assert (clarifying.kind_code, clarifying.conversation_id) == (
             "work",
-            "conv-camp",
+            CAMP,
         )
         assert session.get_one(Item, clarifying.id).title == (
             "Clarify cut-over.md and drain.md"
@@ -4716,12 +4804,14 @@ class TestClarificationRun:
         relays: RelayService,
         fake_controller: ServedFakeController,
         controller_session: str,
+        controller_client: ControllerClient,
         project: Project,
     ) -> None:
         run, _, _ = _done_run(session, container, project)
         asking = _pass_of(session, container, project, run, None)
-        clarifying = _agent_session(session, project, controller_session)
-        clarifying.conversation_id = "conv-camp"
+        carrying_on = _carrying_on(controller_client, CAMP)
+        clarifying = _agent_session(session, project, carrying_on)
+        clarifying.conversation_id = CAMP
         session.flush()
         container.record_service().place_work(
             project, clarifying, "Clarify cut-over.md"
@@ -4729,9 +4819,7 @@ class TestClarificationRun:
         session.add(ClarificationRun(id=clarifying.id, pass_id=asking.id))
         session.flush()
         turn = _send(relays, session, clarifying, "Pilot asks about …")
-        _turn_of(
-            fake_controller, controller_session, raw_turn("turn_text"), result=REPLY
-        )
+        _turn_of(fake_controller, carrying_on, raw_turn("turn_text"), result=REPLY)
 
         _relay(relays, clarifying)
 
@@ -4760,6 +4848,7 @@ class TestClarificationRun:
         relays: RelayService,
         fake_controller: ServedFakeController,
         controller_session: str,
+        controller_client: ControllerClient,
         project: Project,
         outcome: FinishOutcome,
     ) -> None:
@@ -4767,8 +4856,9 @@ class TestClarificationRun:
         (DB 256); its questions stand beside the asks."""
         run, _, _ = _done_run(session, container, project)
         asking = _pass_of(session, container, project, run, None)
-        clarifying = _agent_session(session, project, controller_session)
-        clarifying.conversation_id = "conv-camp"
+        carrying_on = _carrying_on(controller_client, CAMP)
+        clarifying = _agent_session(session, project, carrying_on)
+        clarifying.conversation_id = CAMP
         session.flush()
         container.record_service().place_work(
             project, clarifying, "Clarify cut-over.md"
@@ -4778,7 +4868,7 @@ class TestClarificationRun:
         _send(relays, session, clarifying, "Pilot asks about …")
         _turn_of(
             fake_controller,
-            controller_session,
+            carrying_on,
             raw_turn("turn_text"),
             outcome,
             result=REPLY,

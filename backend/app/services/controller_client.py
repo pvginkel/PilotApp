@@ -113,13 +113,18 @@ class ControllerProblem(ExternalServiceException):
         problem_type: ControllerProblemType,
         title: str,
         detail: str | None = None,
+        *,
+        cause: str | None = None,
     ) -> None:
+        """`cause` replaces the controller's answer as what went wrong, for a
+        problem Pilot reads from an answer that is no problem."""
         self.problem_type = problem_type
         self.title = title
         self.detail = detail
         super().__init__(
             operation,
-            f"the controller answered {_PROBLEM_STATUS[problem_type]} "
+            cause
+            or f"the controller answered {_PROBLEM_STATUS[problem_type]} "
             f"{problem_type}: {_reason(title, detail)}",
         )
 
@@ -694,6 +699,42 @@ class ControllerClient:
         operation = f"read session {name} in environment {env_id}"
         response = self._call("GET", _session(env_id, name), operation, expect=(200,))
         return _parse(SessionSnapshot, response.text, operation)
+
+    def get_session_holding(
+        self, env_id: str, name: str, conversation_id: str | None
+    ) -> SessionSnapshot:
+        """The headless session `name` while it holds the conversation
+        `conversation_id`; any headless one for None, a Session whose first
+        turn has named none yet.
+
+        KubeCoder gives a name an end or a restart freed to the next create,
+        and a send names no conversation, so a name holding another
+        conversation, or an interactive session, is the controller session
+        gone, as a `404` is.
+
+        Raises:
+            ControllerProblem: `not-found` for a session gone, or one holding
+                another conversation or none
+        """
+        snapshot = self.get_session(env_id, name)
+        if snapshot.mode == "headless" and (
+            conversation_id is None or snapshot.session_id == conversation_id
+        ):
+            return snapshot
+        if snapshot.mode != "headless":
+            cause = f"session {name} is an interactive session"
+        else:
+            held = snapshot.session_id or None
+            cause = (
+                f"session {name} holds conversation {held or 'none'}, "
+                f"not {conversation_id}"
+            )
+        raise ControllerProblem(
+            f"read session {name} in environment {env_id}",
+            ControllerProblemType.NOT_FOUND,
+            f"session {name} holds another conversation",
+            cause=cause,
+        )
 
     def list_sessions(self, env_id: str) -> list[SessionView]:
         operation = f"list the sessions of environment {env_id}"

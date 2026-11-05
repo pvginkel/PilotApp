@@ -330,6 +330,80 @@ class TestFakeController:
         assert response.status_code == 422
         assert fake.session("env-1", "claude-1").status == "idle"
 
+    def test_a_session_takes_the_lowest_free_name(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        """As KubeCoder's do: a name an end frees is the next create's."""
+        fake.add_environment("env-1", status="running")
+
+        def create() -> str:
+            response = http.post(
+                "/environments/env-1/sessions/headless", headers=BEARER
+            )
+            name: str = response.get_json()["name"]
+            return name
+
+        assert [create(), create(), create()] == ["claude-1", "claude-2", "claude-3"]
+        http.delete("/environments/env-1/sessions/claude-2", headers=BEARER)
+        assert create() == "claude-2"
+        assert create() == "claude-4"
+
+    @pytest.mark.parametrize("how", ["restart", "recreate_pod"])
+    def test_an_environments_restart_frees_every_name(
+        self, fake: FakeController, http: Client, how: str
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        fake.add_environment("env-2", status="running")
+        http.post("/environments/env-1/sessions/headless", headers=BEARER)
+        http.post("/environments/env-1/sessions/headless", headers=BEARER)
+        http.post("/environments/env-2/sessions/headless", headers=BEARER)
+
+        getattr(fake, how)("env-1")
+        fake.set_status("env-1", "running")
+        response = http.post("/environments/env-1/sessions/headless", headers=BEARER)
+
+        assert response.get_json()["name"] == "claude-1"
+        assert [s.name for s in fake.sessions("env-2")] == ["claude-1"]
+
+    def test_a_session_holds_the_conversation_its_create_resumed(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        http.post(
+            "/environments/env-1/sessions/headless",
+            json={"resume": "conversation-1"},
+            headers=BEARER,
+        )
+
+        fake.play("env-1", "claude-1", [json.dumps({"session_id": "conversation-2"})])
+
+        assert fake.session("env-1", "claude-1").session_id == "conversation-1"
+
+    def test_a_fresh_session_holds_the_first_conversation_its_lines_name(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        http.post("/environments/env-1/sessions/headless", headers=BEARER)
+        http.post(
+            "/environments/env-1/sessions/headless/claude-1/messages",
+            json={"message": "Check the badge."},
+            headers=BEARER,
+        )
+        assert fake.session("env-1", "claude-1").session_id == ""
+
+        fake.play(
+            "env-1",
+            "claude-1",
+            [
+                "not json",
+                json.dumps({"type": "system"}),
+                json.dumps({"session_id": "conversation-1"}),
+                json.dumps({"session_id": "conversation-2"}),
+            ],
+        )
+
+        assert fake.session("env-1", "claude-1").session_id == "conversation-1"
+
     def test_a_stopped_environment_holds_no_session(self, fake: FakeController) -> None:
         fake.add_environment("env-1", status="running")
         Client(fake).post("/environments/env-1/sessions/headless", headers=BEARER)

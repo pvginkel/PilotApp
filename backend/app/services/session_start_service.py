@@ -168,7 +168,12 @@ from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer, unheld_token_hash
 from app.services.quota_wall import confirmed, decided, quota_back
-from app.services.relay_service import CONTINUE, SESSION_GONE, RelayService
+from app.services.relay_service import (
+    CONTINUE,
+    SESSION_GONE,
+    STARTING,
+    RelayService,
+)
 from app.services.session_record_service import (
     SessionRecordService,
     read_records,
@@ -215,9 +220,6 @@ NUDGE_KEY = "nudges"
 PROBE_TIMER = "controller-probe"
 
 NUDGE_TIMER = "nudges"
-
-STARTING = "starting"
-"""The `type` of the `server` record that names a phase of the start."""
 
 START_FAILED = "start-failed"
 """The `type` of the `server` record a start that failed writes."""
@@ -348,6 +350,9 @@ class _Pending:
     brain: bool
     """The Session is a chat's or a job's: it runs in the store."""
     controller_session: str | None
+    token_hash: str
+    """The hash of the token its controller session's create minted."""
+    conversation_id: str | None
     create: ScopedCreate
     turn_id: int
     """The Turn the start sends: the brief, or a Resume's."""
@@ -769,7 +774,9 @@ class SessionStartService:
         if pending.resuming and pending.controller_session is not None:
             try:
                 lost = self._lost_reason(
-                    pending.environment, pending.controller_session
+                    pending.environment,
+                    pending.controller_session,
+                    pending.conversation_id,
                 )
             except ControllerUnreachable as error:
                 with scoped_session(self._container) as db:
@@ -781,9 +788,7 @@ class SessionStartService:
                 return
             if lost is not None:
                 with scoped_session(self._container) as db:
-                    pending = self._lost(
-                        db, session_id, pending.controller_session, lost
-                    )
+                    pending = self._lost(db, session_id, pending, lost)
                 if pending is None:
                     return
         if pending.controller_session is None:
@@ -1400,15 +1405,18 @@ class SessionStartService:
             self._environments.reclaim(db, session.environment_id)
         self._environments.arm_shutdown_timer(db, session.environment_id)
 
-    def _lost_reason(self, env_id: str, name: str) -> str | None:
-        """Why the controller session takes no turn: gone, ended, or its
-        environment not running; None when it takes one.
+    def _lost_reason(
+        self, env_id: str, name: str, conversation_id: str | None
+    ) -> str | None:
+        """Why the controller session takes no turn: gone, its name holding
+        another conversation than `conversation_id`, ended, or its environment
+        not running; None when it takes one.
 
         Raises:
             ExternalServiceException: The controller failed otherwise
         """
         try:
-            snapshot = self._client().get_session(env_id, name)
+            snapshot = self._client().get_session_holding(env_id, name, conversation_id)
         except ControllerProblem as problem:
             if problem.problem_type not in (
                 ControllerProblemType.NOT_FOUND,
@@ -1421,18 +1429,19 @@ class SessionStartService:
         return None
 
     def _lost(
-        self, db: Session, session_id: uuid.UUID, gone: str, reason: str
+        self, db: Session, session_id: uuid.UUID, gone: _Pending, reason: str
     ) -> _Pending | None:
         """Under the Session's lock, while it is `starting` on the controller
-        session `gone`: a `server` record saying it is gone, the Session left
-        with none, and the phase that starts its environment; the start as its
-        rows then have it. None when it has moved on."""
+        session `gone` read, by its name and the token its create minted: a
+        `server` record saying it is gone, the Session left with none, and the
+        phase that starts its environment; the start as its rows then have
+        it. None when it has moved on."""
         records = self._records(db)
         session = records.lock_session(session_id)
-        if (
-            session.state_code != SessionState.STARTING
-            or session.controller_session != gone
-        ):
+        if session.state_code != SessionState.STARTING or (
+            session.controller_session,
+            session.token_hash,
+        ) != (gone.controller_session, gone.token_hash):
             return None
         records.append(
             session_id,
@@ -2011,6 +2020,8 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         foreign=_foreign(session, environment),
         brain=session.kind_code != WORK_KIND,
         controller_session=session.controller_session,
+        token_hash=session.token_hash,
+        conversation_id=session.conversation_id,
         create=scoped_create(db, session),
         turn_id=turn.id,
         resuming=turn.seq > 1,

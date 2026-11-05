@@ -320,11 +320,12 @@ class TestRelayWatchdog:
             rf"session {name}"
         )
         watch_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
-        wait_until(lambda: _has_busy(wedged, "claude-2"), "the continue sent")
-        wedged.play(ENV, "claude-2", raw_turn("turn_text"))
-        wedged.finish(ENV, "claude-2", "success", "Done.")
+        # The new session takes the freed name back.
+        wait_until(lambda: _has_busy(wedged, name), "the continue sent")
+        wedged.play(ENV, name, raw_turn("turn_text"))
+        wedged.finish(ENV, name, "success", "Done.")
         _idle(container, run_id)
-        assert _read(container, run_id).controller_session == "claude-2"
+        assert _read(container, run_id).controller_session == name
 
     def test_an_environment_whose_pod_restarted_has_its_relay_restarted(
         self,
@@ -346,9 +347,10 @@ class TestRelayWatchdog:
         )
         watch_log.wait_for(rf"Environment {ENV} is not running: waiting for it to .*")
         wedged.set_status(ENV, "running")
-        wait_until(lambda: _has_busy(wedged, "claude-2"), "the continue sent")
-        wedged.play(ENV, "claude-2", raw_turn("turn_text"))
-        wedged.finish(ENV, "claude-2", "success", "Done.")
+        watch_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
+        wait_until(lambda: _has_busy(wedged, name), "the continue sent")
+        wedged.play(ENV, name, raw_turn("turn_text"))
+        wedged.finish(ENV, name, "success", "Done.")
         _idle(container, run_id)
 
     def test_an_environment_stopped_elsewhere_has_its_relay_restarted(

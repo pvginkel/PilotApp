@@ -77,6 +77,8 @@ MCP_URL = "https://pilot-mcp.example.com/mcp"
 STORE_REPO = "/work/PilotProjects"
 FOLDER = "/work/Projects/soup-club"
 WORDS = "What next?"
+CONVERSATION = "conversation-1"
+"""The conversation an idle chat's first turn named."""
 
 DRAFT_ASKS = """---
 title: Soup club
@@ -100,17 +102,26 @@ options:
 
 
 class _Sent(ServedFakeController):
-    """The fake, keeping each send's message; `during_create`, when set, run
-    once, as a headless create is answered."""
+    """The fake, keeping each send's message, and each accepted one with the
+    conversation its session held; `during_create`, when set, run once, as a
+    headless create is answered. With `answering`, an accepted send's turn
+    ends at once, its result held for the relay."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
         self.sent: list[str] = []
+        self.reached: list[tuple[str, str]] = []
+        self.answering = False
         self.during_create: Callable[[], None] | None = None
 
     def _send(self, request: Request, env_id: str, name: str) -> Response:
-        self.sent.append((request.get_json(silent=True) or {}).get("message"))
-        return super()._send(request, env_id, name)
+        message = (request.get_json(silent=True) or {}).get("message")
+        self.sent.append(message)
+        response = super()._send(request, env_id, name)
+        self.reached.append((self.session(env_id, name).session_id, message))
+        if self.answering:
+            self.finish(env_id, name, "success", "Done.")
+        return response
 
     def _create_session(self, request: Request, env_id: str) -> Response:
         hook, self.during_create = self.during_create, None
@@ -526,7 +537,7 @@ class TestSendStartsTheChat:
         person: User,
     ) -> None:
         run = _idle_chat(services, chats, session, fake, opened, person)
-        run.state_code, run.conversation_id = SessionState.STOPPED, "conversation-1"
+        run.state_code = SessionState.STOPPED
         session.flush()
 
         turn = _send(chats, opened, person, "Two")
@@ -583,17 +594,24 @@ def _idle_chat(
     person: User,
 ) -> models.Session:
     """The project's chat started with "One", its first turn ended: idle on
-    its headless session in the store."""
+    its headless session in the store, which holds the conversation that turn
+    named, `CONVERSATION`."""
     first = _send(chats, project, person, "One")
     clear_after_commit_callbacks()
     run = _up(services, db, first.session_id)
     assert run.controller_session is not None
+    fake.play(
+        STORE_ENVIRONMENT_ID,
+        run.controller_session,
+        [json.dumps({"type": "system", "subtype": "init", "session_id": CONVERSATION})],
+    )
     fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "success", "Done.")
     services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
     clear_after_commit_callbacks()
     run = _read(db, run.id)
-    assert run.state_code == SessionState.IDLE
+    assert (run.state_code, run.conversation_id) == (SessionState.IDLE, CONVERSATION)
     fake.sent.clear()
+    fake.reached.clear()
     return run
 
 
@@ -622,6 +640,48 @@ class TestSendToTheOpenChat:
         assert _read(session, run.id).state_code == SessionState.RUNNING
         assert _sends(session, run.id) == [(1, "One"), (2, "Two")]
         assert len(_chat_rows(session, opened)) == 1
+
+    def test_a_message_after_a_jobs_session_took_its_name_reaches_its_conversation(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """P-180: the store restarted under the idle chat, and a job's
+        session took its controller session's name, the store's latest. The
+        message reaches the chat's conversation, carried on in a session of
+        its own, and nothing of it the job's (F59.2)."""
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        name = run.controller_session
+        fake.restart(STORE_ENVIRONMENT_ID)
+        fake.set_status(STORE_ENVIRONMENT_ID, "running")
+        job = container.controller_client().create_headless_session(
+            STORE_ENVIRONMENT_ID, HeadlessCreateRequest(resume="conversation-of-a-job")
+        )
+        assert job.name == name
+        fake.answering = True
+
+        turn = _send(chats, opened, person, "Two")
+        services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
+
+        assert fake.reached == [(CONVERSATION, "Two")]
+        run = _read(session, run.id)
+        assert run.controller_session != name
+        assert (run.state_code, run.conversation_id) == (
+            SessionState.IDLE,
+            CONVERSATION,
+        )
+        assert session.get_one(Turn, turn.id).ended_at is not None
+        held = fake.session(STORE_ENVIRONMENT_ID, name)
+        assert (held.session_id, held.status, held.turn) == (
+            "conversation-of-a-job",
+            "idle",
+            0,
+        )
 
     def test_a_message_while_a_turn_of_it_runs_is_refused(
         self,
@@ -726,8 +786,6 @@ class TestStop:
         person: User,
     ) -> None:
         run = _idle_chat(services, chats, session, fake, opened, person)
-        # The conversation `claude`'s lines name; the fake's turns print none.
-        run.conversation_id = "conversation-1"
         _send(chats, opened, person, "Two")
         chats.stop(opened.id, person)
         clear_after_commit_callbacks()
@@ -2125,7 +2183,9 @@ def _committed_idle_chat(
     person_id, project_id = _committed(container, state)
     name = (
         client_of(container, fake)
-        .create_headless_session(STORE_ENVIRONMENT_ID, HeadlessCreateRequest())
+        .create_headless_session(
+            STORE_ENVIRONMENT_ID, HeadlessCreateRequest(resume=CONVERSATION)
+        )
         .name
     )
     with scoped_session(container) as db:
@@ -2137,7 +2197,7 @@ def _committed_idle_chat(
             environment_id=STORE_ENVIRONMENT_ID,
             kind_code="chat",
             cwd=STORE_REPO,
-            conversation_id="conversation-1",
+            conversation_id=CONVERSATION,
             controller_session=name,
             token_hash="a" * 64,
             state_code=SessionState.IDLE,

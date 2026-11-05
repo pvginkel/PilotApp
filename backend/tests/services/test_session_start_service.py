@@ -3360,17 +3360,21 @@ class TestRunOvertaken:
 
         (earlier,) = [each.name for each in committed_fake.sessions(FREE)]
         assert _committed(container, run_id).controller_session is None
+        assert _sends(committed_fake, FREE, earlier) == 0
+        unrecorded = committed_fake.session(FREE, earlier)
 
         starts.run(run_id, LoopHandle(f"start:{run_id}"))
 
         run = _committed(container, run_id)
         assert run.state_code == SessionState.RUNNING
-        assert run.controller_session not in (None, earlier)
+        # The reset swept the earlier session; its name is the new one's.
+        assert run.controller_session is not None
+        assert committed_fake.session(FREE, run.controller_session) is not unrecorded
         assert committed_fake.environment(FREE).resets == 2
         row = _committed_row(container, FREE)
         assert row.server_started_at is not None
         assert row.started_pod_at == committed_fake.environment(FREE).pod_started_at
-        assert _sends(committed_fake, FREE, earlier) == 0
+        assert _sends(committed_fake, FREE, run.controller_session) == 1
 
     def test_a_failure_of_the_overtaken_run_does_not_fail_the_resumes_start(
         self,
@@ -3603,6 +3607,22 @@ def _callbacks() -> set[str]:
     return {
         type(callback).__name__ for callback in after_commit_module._callbacks.get()
     }
+
+
+def _naming(conversation: str) -> list[str]:
+    """`claude`'s first line of a turn, naming the conversation it carries on."""
+    return [
+        json.dumps({"type": "system", "subtype": "init", "session_id": conversation})
+    ]
+
+
+def _named(fake: _Recording, run: models.Session, conversation: str = "conv-1") -> None:
+    """The run's turn in flight named its conversation: `claude`'s first line,
+    which binds its headless session to it, and the Session, as its relay
+    takes it from that line."""
+    assert run.environment_id is not None and run.controller_session is not None
+    fake.play(run.environment_id, run.controller_session, _naming(conversation))
+    run.conversation_id = conversation
 
 
 def _turn_ends(
@@ -3999,7 +4019,7 @@ def _stopped_item(
     """A work item stopped under its turn, its relay having recorded the
     interrupt's `result`, with its conversation."""
     run = _running(starts, db, project)
-    run.conversation_id = "conv-1"
+    _named(fake, run)
     starts.stop(db, run.id, person)
     clear_after_commit_callbacks()
     _turn_ends(starts, fake, run, "interrupted")
@@ -4160,7 +4180,7 @@ class TestResume:
         # stopped by the timer.
         failed = _failed_before_its_first_line(starts, fake, session, project)
         env_id = _env(session, failed.id)
-        earlier = failed.controller_session
+        earlier = failed.token_hash
         if state != "running":
             fake.set_status(env_id, state)
         records = len(_records(session, failed.id))
@@ -4181,7 +4201,8 @@ class TestResume:
         assert (run.state_code, run.environment_id) == (SessionState.RUNNING, env_id)
         assert _verbs(fake, env_id) == ["rename", "stop", "reset"]
         assert fake.environment(env_id).resets == 1
-        assert run.controller_session not in (None, earlier)
+        # Created anew, the reset having swept the earlier one.
+        assert run.controller_session is not None and run.token_hash != earlier
         assert [each.name for each in fake.sessions(env_id)] == [run.controller_session]
         assert fake.create_bodies[-1] == {"cwd": CWD}
         assert [turn.message for turn in _turns(session, run.id)] == [BRIEF, BRIEF]
@@ -4277,7 +4298,7 @@ class TestResume:
         project: Project,
     ) -> None:
         run = _running(starts, session, project)
-        run.conversation_id = "conv-1"
+        _named(fake, run)
         _turn_ends(starts, fake, run, "error")
         assert _read(session, run.id).state_code == SessionState.FAILED
 
@@ -4375,7 +4396,9 @@ class TestResume:
     ) -> None:
         stopped = _stopped_item(starts, fake, session, project, person)
         env_id = _env(session, stopped.id)
-        gone = stopped.controller_session
+        gone, name = stopped.token_hash, stopped.controller_session
+        assert name is not None
+        sent = _sends(fake, env_id, name)
         fake.restart(env_id)
         fake.set_status(env_id, "running")
         run = starts.resume(session, stopped.id)
@@ -4385,15 +4408,58 @@ class TestResume:
 
         run = _read(session, run.id)
         assert run.state_code == SessionState.RUNNING
-        assert run.controller_session not in (None, gone)
+        # The restart freed the gone session's name for the new one.
+        assert run.controller_session == name
+        assert run.token_hash != gone
         server = _server(session, run.id)
         assert server[-3][1]["type"] == SESSION_GONE
         assert "404 not-found" in server[-3][1]["reason"]
         assert server[-2:] == [(None, STARTING_ENV), (None, CREATING)]
         assert fake.create_bodies[-1] == {"cwd": CWD, "resume": "conv-1"}
+        assert _sends(fake, env_id, name) == sent + 1
+        assert fake.calls.count(CREATE_ENVIRONMENT) == 1
+
+    def test_a_name_another_conversation_holds_is_a_controller_session_gone(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """Its environment restarted while it was stopped, and another
+        session took its controller session's name: the Resume carries it on
+        in a session of its own, and sends the other one nothing (F59.2)."""
+        stopped = _stopped_item(starts, fake, session, project, person)
+        env_id = _env(session, stopped.id)
+        name = stopped.controller_session
+        assert name is not None
+        fake.restart(env_id)
+        fake.set_status(env_id, "running")
+        other = starts._client().create_headless_session(
+            env_id, HeadlessCreateRequest(resume="conversation-of-a-job")
+        )
+        assert other.name == name
+        sent = _sends(fake, env_id, name)
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.controller_session not in (None, name)
+        server = _server(session, run.id)
+        assert server[-3][1]["type"] == SESSION_GONE
+        assert server[-3][1]["reason"].endswith(
+            f"session {name} holds conversation conversation-of-a-job, not conv-1"
+        )
+        assert fake.create_bodies[-1] == {"cwd": CWD, "resume": "conv-1"}
         assert run.controller_session is not None
         assert _sends(fake, env_id, run.controller_session) == 1
-        assert fake.calls.count(CREATE_ENVIRONMENT) == 1
+        held = fake.session(env_id, name)
+        assert (held.session_id, held.status) == ("conversation-of-a-job", "idle")
+        assert _sends(fake, env_id, name) == sent
 
     def test_an_environment_stopped_meanwhile_is_started_again(
         self,
@@ -4954,7 +5020,7 @@ def _halted_end(
     cooperative stop, held at `week`: open, `idle`, its nudge owed, on its
     conversation (DB 232)."""
     run = _running(starts, db, project)
-    run.conversation_id = "conv-1"
+    _named(fake, run)
     _usage(db, week=week, five_hour=0.1)
     _turn_ends(starts, fake, run, "success")
     run = _read(db, run.id)
@@ -5128,7 +5194,7 @@ class TestNudge:
         and the job after its turn waits for the read (decision 44; design 3
         D2)."""
         run = _running(starts, session, project)
-        run.conversation_id = "conv-1"
+        _named(fake, run)
         container.document_service().register(project, run, "/work/Example/notes.md")
         _usage(session, week=0.95, five_hour=0.1)
         _turn_ends(starts, fake, run, "success")
@@ -5211,7 +5277,7 @@ class TestNudge:
         Transitions as they stood when the run was found ended (decision
         53)."""
         run = _running(starts, session, project)
-        run.conversation_id = "conv-1"
+        _named(fake, run)
         _transition(session, project, person, TransitionKind.PAUSED)
         _turn_ends(starts, fake, run, "success")
         assert _read(session, run.id).nudge_owed_at is not None
@@ -5233,7 +5299,7 @@ class TestNudge:
         project: Project,
     ) -> None:
         run = _running(hard_starts, session, project)
-        run.conversation_id = "conv-1"
+        _named(fake, run)
         _usage(session, week=0.95, five_hour=0.1)
         _hard_stop(hard_starts)
         clear_after_commit_callbacks()
@@ -5260,7 +5326,7 @@ class TestNudge:
         """One continuation, never two (DB 232): the Resume clears it, held
         by the halt that still holds, and no nudge follows it."""
         run = _running(hard_starts, session, project)
-        run.conversation_id = "conv-1"
+        _named(fake, run)
         _usage(session, week=0.95, five_hour=0.1)
         _hard_stop(hard_starts)
         _turn_ends(hard_starts, fake, run, "interrupted")
@@ -5429,6 +5495,7 @@ class TestNudgeLoop:
         env_id = _committed_env(container, work_id)
         name = _committed(container, work_id).controller_session
         assert name is not None
+        committed_fake.play(env_id, name, _naming("conv-1"))
         with scoped_session(container) as db:
             db.get_one(models.Session, work_id).conversation_id = "conv-1"
             _usage(db, week=0.95, five_hour=0.1)
@@ -5476,7 +5543,7 @@ def _walled_end(
     and `five_hour` the one at its end: `failed`, its nudge owed from its
     turn's end, on its conversation (the ruling on the wall)."""
     run = _running(starts, db, project)
-    run.conversation_id = "conv-1"
+    _named(fake, run)
     _usage(db, week=week, five_hour=five_hour)
     assert run.environment_id is not None and run.controller_session is not None
     fake.play(run.environment_id, run.controller_session, raw_turn("turn_wall"))
@@ -5813,6 +5880,7 @@ class TestQuotaWallLoop:
         env_id = _committed_env(container, work_id)
         name = _committed(container, work_id).controller_session
         assert name is not None
+        committed_fake.play(env_id, name, _naming("conv-1"))
         with scoped_session(container) as db:
             db.get_one(models.Session, work_id).conversation_id = "conv-1"
             _usage(db, week=0.5, five_hour=0.1)
