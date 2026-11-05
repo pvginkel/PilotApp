@@ -78,6 +78,7 @@ from app.services.relay_service import (
     RESTARTING,
     SEND_FAILED,
     SESSION_GONE,
+    STARTING,
     RelayService,
     Words,
 )
@@ -1012,6 +1013,71 @@ class TestSendTurn:
             if stored.record.kind_code == RecordKind.RESULT
         ]
         assert results == [1, 2, 1]
+
+    def test_a_turn_a_fresh_start_under_the_old_name_has_is_not_sent_again(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+    ) -> None:
+        """A Resume with no conversation to continue starts the Session fresh
+        (`SessionStartService._fresh`), with a `starting` record and no
+        `session-gone`: the turns the old session ended under the name the
+        new one took back count for none of the new one's (§8.2, §9.6)."""
+        fake = _SendWatched(keepalive_seconds=0.2)
+        try:
+            client = client_of(container, fake)
+            relays, _ = _relay_service(container, supervise)
+            name = _headless(fake, client)
+            _environment_row(session)
+            run = _agent_session(session, project, name)
+            # Its turns failed to spawn: it recorded no line, and has no
+            # conversation to continue.
+            for message in ("One", "Two"):
+                _send(relays, session, run, message)
+                fake.finish(ENV, name, "spawn-failure", "claude did not start")
+                _relay(relays, run)
+            assert run.conversation_id is None
+            client.end_session(ENV, name)
+            # The fresh start: its phase, its create given the freed name, and
+            # the Resume's Turn sent.
+            container.session_record_service().append(
+                run.id,
+                RecordKind.SERVER,
+                payload={"type": STARTING, "text": "Creating the session…"},
+            )
+            created = client.create_headless_session(ENV, HeadlessCreateRequest())
+            assert created.name == name
+            run.token_hash = uuid.uuid4().hex
+            run.state_code = SessionState.STARTING
+            turn = Turn(
+                session_id=run.id, seq=3, message="Two", started_at=datetime.now(UTC)
+            )
+            session.add(turn)
+            session.flush()
+            relays.send_turn(session, turn.id)
+            clear_after_commit_callbacks()
+            # The new session's first turn ended before the relay read it: its
+            # result's turn, 1, is below the old session's last.
+            fake.finish(ENV, name)
+            handle = LoopHandle(f"relay:{run.id}")
+            # A second send would leave the turn in flight: the run stops there.
+            fake.on_send = lambda to: handle._request_stop()
+            before = len(fake.calls)
+
+            relays.relay(run.id, handle)
+
+            assert not any(call.endswith("/messages") for call in fake.calls[before:])
+            assert (run.state_code, run.turns) == (SessionState.IDLE, 3)
+            results = [
+                stored.record.payload["turn"]
+                for stored in _records(session, run.id)
+                if stored.record.kind_code == RecordKind.RESULT
+            ]
+            assert results == [1, 2, 1]
+        finally:
+            fake.close()
 
     def test_a_turn_whose_name_another_conversation_holds_is_not_sent_there(
         self,

@@ -71,6 +71,7 @@ from app.services.auth_service import AuthContext
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
+    ControllerProblem,
     EnvironmentStatus,
     HeadlessCreateRequest,
 )
@@ -4465,6 +4466,67 @@ class TestResume:
         held = fake.session(env_id, name)
         assert (held.session_id, held.status) == ("conversation-of-a-job", "idle")
         assert _sends(fake, env_id, name) == sent
+
+    def test_a_controller_session_another_process_created_anew_under_the_name_stands(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Another process's start of the Resume found the controller session
+        gone too, and created it anew under the name the restart freed, with a
+        token of its own, before this start took the Session's lock: the name
+        alone does not tell the two apart, the token does, and this start
+        leaves the Session to that one (§8.1, §9.6)."""
+        stopped = _stopped_item(starts, fake, session, project, person)
+        env_id = _env(session, stopped.id)
+        name = stopped.controller_session
+        assert name is not None
+        fake.restart(env_id)
+        fake.set_status(env_id, "running")
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+        client = container.controller_client()
+        holding = client.get_session_holding
+        written: list[tuple[int | None, Any]] = []
+
+        def another_process_created_it_anew(*args: Any) -> Any:
+            try:
+                return holding(*args)
+            except ControllerProblem:
+                # Its start gave the gone session up and recorded the one it
+                # created, its Turn still to send.
+                created = client.create_headless_session(
+                    env_id, HeadlessCreateRequest(resume="conv-1")
+                )
+                assert created.name == name
+                other = _read(session, run.id)
+                other.controller_session = created.name
+                other.token_hash = "f" * 64
+                session.flush()
+                written.extend(_server(session, run.id))
+                raise
+
+        monkeypatch.setattr(
+            client, "get_session_holding", another_process_created_it_anew
+        )
+        sent = list(fake.sent)
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.controller_session, run.token_hash) == (
+            SessionState.STARTING,
+            name,
+            "f" * 64,
+        )
+        assert written and _server(session, run.id) == written
+        assert [s.name for s in fake.sessions(env_id)] == [name]
+        assert fake.sent == sent
 
     def test_an_environment_stopped_meanwhile_is_started_again(
         self,
