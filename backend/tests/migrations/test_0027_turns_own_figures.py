@@ -249,6 +249,7 @@ class TestTurnsOwnFigures:
                 ],
             ),
             (run, [{**text, "total_cost_usd": 0.0001}]),
+            (run, [{**resumed, "total_cost_usd": 0.0009}]),
         ]
         turns = [recorded.printed(each, *lines) for each, lines in printed]
         relayed = [
@@ -260,6 +261,7 @@ class TestTurnsOwnFigures:
 
         assert [_figures(session, turn) for turn in turns] == relayed
         assert relayed[2] == RESUMED_OWN
+        assert relayed[4] == Spent(RESUMED_OWN.tokens, Decimal("0.0008"))
 
 
 def _relayed(db: DbSession, turn: Turn, lines: list[dict[str, Any]]) -> Spent | None:

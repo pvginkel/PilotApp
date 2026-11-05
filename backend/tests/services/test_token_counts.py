@@ -383,6 +383,22 @@ class TestCountTokens:
 
         assert _spent(session, resumed) == (RESUMED_OWN.tokens, RESUMED_OWN.cost)
 
+    def test_a_turn_is_taken_against_the_latest_turn_that_reported_before_it(
+        self, session: DbSession, conversation: _Conversation
+    ) -> None:
+        """A third turn's own are its line's less the second's, never the
+        first's."""
+        conversation.printed(conversation.turn(), _result_line("turn_text"))
+        conversation.printed(conversation.turn(), _result_line("turn_resumed"))
+        third = conversation.turn()
+
+        conversation.printed(
+            third,
+            _figures(_result_line("turn_resumed"), _tokens(10, 500, 3000, 26), 0.0035),
+        )
+
+        assert _spent(session, third) == (_tokens(4, 30, 250, 6), Decimal("0.0006"))
+
 
 class TestReportedBefore:
     def test_a_conversations_first_turn_has_nothing_before_it(
@@ -420,6 +436,14 @@ class TestReportedBefore:
         )
 
         assert reported_before(session, conversation.turn().id) == TEXT
+
+    def test_it_is_the_latest_earlier_turn_that_reported(
+        self, session: DbSession, conversation: _Conversation
+    ) -> None:
+        conversation.printed(conversation.turn(), _result_line("turn_text"))
+        conversation.printed(conversation.turn(), _result_line("turn_resumed"))
+
+        assert reported_before(session, conversation.turn().id) == RESUMED
 
     def test_a_turn_with_no_result_line_is_passed_over(
         self, session: DbSession, conversation: _Conversation
