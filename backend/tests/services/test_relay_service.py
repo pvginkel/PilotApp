@@ -1013,6 +1013,73 @@ class TestSendTurn:
         ]
         assert results == [1, 2, 1]
 
+    def test_a_turn_whose_name_another_conversation_holds_is_not_sent_there(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+    ) -> None:
+        """The environment restarted before the relay's run sent a Turn written
+        before its send, and another conversation's create took the freed
+        name, idle at turn 0: the run's check takes the Session's controller
+        session as gone and resumes it, and sends that session nothing (§8.2,
+        §9.6; F59.2)."""
+        fake = _SendWatched(keepalive_seconds=0.2)
+        try:
+            client = client_of(container, fake)
+            relays, _ = _relay_service(container, supervise)
+            name = _headless(fake, client)
+            _environment_row(session)
+            run = _agent_session(session, project, name)
+            _send(relays, session, run, "One")
+            _turn_of(fake, name, raw_turn("turn_text"))
+            _relay(relays, run)
+            assert run.conversation_id == CAMP
+            # A Turn written before its send, as the follow-up turn is (F79).
+            turn = Turn(
+                session_id=run.id, seq=2, message="Two", started_at=datetime.now(UTC)
+            )
+            session.add(turn)
+            run.state_code = SessionState.RUNNING
+            run.turns, run.turn_started_at, run.turn_ended_at = 2, turn.started_at, None
+            session.flush()
+            fake.restart(ENV)
+            fake.set_status(ENV, "running")
+            assert _carrying_on(client, "conversation-of-a-job") == name
+            handle = LoopHandle(f"relay:{run.id}")
+            sent: list[str] = []
+
+            def sent_to(to: str) -> None:
+                # The run stops at its send, its stream closed as it opens.
+                sent.append(to)
+                handle._request_stop()
+
+            fake.on_send = sent_to
+
+            relays.relay(run.id, handle)
+
+            held = fake.session(ENV, name)
+            assert (held.session_id, held.status, held.turn) == (
+                "conversation-of-a-job",
+                "idle",
+                0,
+            )
+            assert run.controller_session not in (None, name)
+            assert sent == [run.controller_session]
+            assert turn.ended_at is not None
+            [gone] = [
+                stored.record.payload
+                for stored in _records(session, run.id)
+                if stored.record.kind_code == RecordKind.SERVER
+            ]
+            assert gone["type"] == SESSION_GONE
+            assert gone["reason"].endswith(
+                f"session {name} holds conversation conversation-of-a-job, not {CAMP}"
+            )
+        finally:
+            fake.close()
+
     def test_a_send_another_process_made_first_is_taken_as_sent(
         self,
         session: DbSession,
@@ -3127,6 +3194,55 @@ class TestStoppedUnderTheTurn:
         assert turn.ended_at is not None
         assert work_item.controller_session == controller_session
         assert work_item.state_code == SessionState.STOPPED
+
+    def test_a_name_another_conversation_holds_ends_its_turn_with_none_of_its_stream(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Its environment restarted under the stopped turn, and another
+        conversation's session took the name, busy with a turn of its own: the
+        stopped turn ends as its controller session's gone, and nothing of the
+        other's stream is the Session's (F59.2)."""
+        _send(relays, session, idle, "One")
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+        _relay(relays, idle)
+        turn = _send(relays, session, idle, "Two")
+        _stopped(idle)
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+        _carrying_on(controller_client, "conversation-of-a-job")
+        fake_controller.busy(ENV, controller_session)
+        fake_controller.play(ENV, controller_session, raw_turn("turn_tool"))
+        recorded = _claude(session, idle.id)
+        relay_turn = relays._relay_turn
+
+        def its_turn_ends(*args: Any) -> bool:
+            # Were the other session's stream opened, its turn ends there: the
+            # run comes back either way.
+            fake_controller.finish(ENV, controller_session)
+            return relay_turn(*args)
+
+        monkeypatch.setattr(relays, "_relay_turn", its_turn_ends)
+
+        _relay(relays, idle)
+
+        assert _claude(session, idle.id) == recorded
+        records = _records(session, idle.id)
+        assert [s.turn for s in records if s.record.kind_code == RecordKind.RESULT] == [
+            1
+        ]
+        [gone] = [s for s in records if s.record.kind_code == RecordKind.SERVER]
+        assert gone.turn is None and gone.record.payload["type"] == SESSION_GONE
+        assert (turn.ended_at is not None, turn.error) == (True, None)
+        assert idle.state_code == SessionState.STOPPED
+        held = fake_controller.session(ENV, controller_session)
+        assert (held.session_id, held.status) == ("conversation-of-a-job", "busy")
 
     def test_a_turn_ended_with_no_result_lets_go_of_the_documents_it_was_writing(
         self,
