@@ -62,6 +62,16 @@ options:
   - Monday
 ${recommended ? 'recommend: Friday\n' : ''}\`\`\`
 ${recommended ? THE_HOUR : ''}`;
+// A one-ask document: its one action, under the title alone, claimed by the pass.
+const ROLL_OUT = `# The roll-out
+
+\`\`\`action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-20T09:00:00Z
+note: ${CLAIM_NOTE}
+\`\`\`
+`;
 const ASK_PATH = '/work/Example/which-token.md';
 const ASK_TITLE = 'Which token goes first?';
 // What the work doing the action asks the person before it goes on.
@@ -75,17 +85,17 @@ interface Fixtures {
 }
 
 /**
- * The cut-over, A1 under `heading`, its decisions recommended where `recommended` says so, registered
- * by a work item's run in a project of the signed-in person's, read at the run's end, and the pass
- * after it ended, its action A1 claimed; answers their ids.
+ * A document of `text`, the cut-over or another whose action A1 the pass claimed, registered by a work
+ * item's run in a project of the signed-in person's, read at the run's end, and the pass after it
+ * ended; answers their ids.
  */
-async function registered({ people, projects, controller, chats }: Fixtures, heading: string, recommended = false) {
+async function registered({ people, projects, controller, chats }: Fixtures, text: string) {
   const me = await people.signIn();
   const project = await projects.make({ name: makeUnique('Claimed'), members: [me.handle!] });
   const work = await projects.startWork(project, { title: 'Planning the cut-over', brief: 'Plan the cut-over.', cwd: '/work/Example' });
   await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
   const { id: environment } = await projects.environment(project, work);
-  await controller.putFile(environment, CUT_OVER_PATH, cutOver(heading, recommended));
+  await controller.putFile(environment, CUT_OVER_PATH, text);
   const document = await projects.register(work, CUT_OVER_PATH);
   const passed = await chats.passing(project);
   await controller.finish(environment, 'claude-1');
@@ -95,12 +105,13 @@ async function registered({ people, projects, controller, chats }: Fixtures, hea
 }
 
 /**
- * The cut-over registered, and the work item that does A1 placed, the project paused first where
- * `paused` says so, which holds that work at the gate; answers their ids.
+ * The cut-over, A1 under `heading`, or the document of `text`, registered, and the work item that
+ * does A1 placed, the project paused first where `paused` says so, which holds that work at the gate;
+ * answers their ids.
  */
-async function claimed(fixtures: Fixtures, { heading = TOKEN, paused = false } = {}) {
+async function claimed(fixtures: Fixtures, { heading = TOKEN, paused = false, text = cutOver(heading) } = {}) {
   const { projects } = fixtures;
-  const { project, document } = await registered(fixtures, heading);
+  const { project, document } = await registered(fixtures, text);
   if (paused) await projects.transition(project, 'paused');
   const rotating = await projects.startWork(project, {
     title: ROTATING,
@@ -384,6 +395,24 @@ test.describe('A claimed action', () => {
     await item.send.click();
     await expect(item.root).toHaveAttribute('data-state', 'done');
   });
+
+  test('alone in its document, once the work doing it is stopped, its head says Pilot’s work left it undone, over its controls', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    timeline,
+  }) => {
+    const { project, document, rotating } = await claimed({ people, projects, controller, chats }, { text: ROLL_OUT });
+    await projects.stop(rotating);
+    await timeline.open(project);
+
+    const action = timeline.item(document).blockAt('A1');
+    await expect(action.root).toHaveClass(/\bopen\b/);
+    await expect(action.undone).toHaveText('Pilot’s work left it undone');
+    await expect(action.undone).toHaveAttribute('title', `${ROTATING} ended without doing it: it is yours again`);
+    await expect(action.done).toBeEnabled();
+  });
 });
 
 test.describe('A researched block', () => {
@@ -394,7 +423,7 @@ test.describe('A researched block', () => {
     chats,
     timeline,
   }) => {
-    const { project, document } = await registered({ people, projects, controller, chats }, TOKEN, true);
+    const { project, document } = await registered({ people, projects, controller, chats }, cutOver(TOKEN, true));
     const checking = await projects.startWork(project, {
       title: 'Checking the release calendar',
       brief: 'Check which day the release calendar leaves free.',
