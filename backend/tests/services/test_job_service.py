@@ -9,6 +9,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from dependency_injector import providers
@@ -54,12 +55,13 @@ OPERATION = "create Soup club"
 
 
 class _Sent(ServedFakeController):
-    """The fake, keeping each send's message; `during_create`, when set, run
-    once, as a headless create is answered."""
+    """The fake, keeping each send's message and each headless create's body;
+    `during_create`, when set, run once, as a headless create is answered."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
         self.sent: list[str] = []
+        self.create_bodies: list[dict[str, Any]] = []
         self.during_create: Callable[[], None] | None = None
 
     def _send(self, request: Request, env_id: str, name: str) -> Response:
@@ -67,6 +69,7 @@ class _Sent(ServedFakeController):
         return super()._send(request, env_id, name)
 
     def _create_session(self, request: Request, env_id: str) -> Response:
+        self.create_bodies.append(request.get_json(silent=True) or {})
         hook, self.during_create = self.during_create, None
         if hook is not None:
             hook()
@@ -216,7 +219,11 @@ class TestSetup:
             STORE_REPO,
             True,
             [FOLDER],
-            [f"PILOT_PROJECT={FOLDER}", f"PILOT_SESSION={job.id}"],
+            [
+                f"PILOT_PROJECT={FOLDER}",
+                f"PILOT_SESSION={job.id}",
+                "CLAUDE_CODE_PROMPT_CACHE_TTL=5m",
+            ],
         )
 
     @pytest.mark.parametrize("by_pilot", [True, False])
@@ -388,6 +395,28 @@ class TestSetupStart:
             == 2
         )
         assert fake.sent == [brief]
+
+    def test_its_create_runs_on_the_five_minute_prompt_cache(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Sent,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        """A job of a trigger but a wait's starts on the 5-minute prompt
+        cache (P-191)."""
+        fake.put_file(STORE_ENVIRONMENT_ID, f"{FOLDER}/plan.json", b"{}")
+        job = _setup(container, starts, opened)
+
+        starts.run(job.id, LoopHandle(f"start:{job.id}"))
+
+        (body,) = fake.create_bodies
+        assert body["env"][:3] == [
+            f"PILOT_PROJECT={FOLDER}",
+            f"PILOT_SESSION={job.id}",
+            "CLAUDE_CODE_PROMPT_CACHE_TTL=5m",
+        ]
 
 
 LATER = datetime(2026, 10, 27, 9, 35, 40, tzinfo=UTC)

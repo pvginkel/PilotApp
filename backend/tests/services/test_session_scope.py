@@ -1,6 +1,6 @@
 """What a Session's headless create is handed, derived in one place from its
-columns, its kind and its Project (TD §4.2, §4.5; F50, F84, F5.5; design 3
-§12; DB decision 57, assertion 244; V05, V13, V27)."""
+columns, its kind, its job's trigger and its Project (TD §4.2, §4.5; F50, F84,
+F5.5; design 3 §12; DB decision 57, assertion 244; V05, V13, V27)."""
 
 import pytest
 from sqlalchemy import text as sql
@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Project
-from app.models.reference import ProjectState, SessionState, Surface
+from app.models.reference import ProjectState, SessionState, Surface, WorkTrigger
+from app.services.container import ServiceContainer
 from app.services.controller_client import HeadlessCreateRequest
 from app.services.session_scope import ScopedCreate, project_folder, scoped_create
 
@@ -39,6 +40,23 @@ def _session(db: DbSession, project: Project, kind: str) -> models.Session:
     return run
 
 
+def _job(
+    container: ServiceContainer, project: Project, trigger: WorkTrigger
+) -> models.Session:
+    """A job's Session placed with its Work of trigger `trigger`."""
+    run = _session(container.db_session(), project, "job")
+    container.record_service().place_work(project, run, "A job", trigger=trigger)
+    return run
+
+
+def _brain(container: ServiceContainer, project: Project, kind: str) -> models.Session:
+    """A chat's Session, or a wait's run, whose create keeps Claude Code's
+    own prompt cache."""
+    if kind == "chat":
+        return _session(container.db_session(), project, "chat")
+    return _job(container, project, WorkTrigger.WAIT_FIRED)
+
+
 class TestScopedCreate:
     def test_a_work_items_create_is_its_columns_and_pilot_work(
         self, session: DbSession, project: Project
@@ -49,10 +67,14 @@ class TestScopedCreate:
 
     @pytest.mark.parametrize("kind", ["chat", "job"])
     def test_a_brain_sessions_create_is_boxed_to_its_projects_folder(
-        self, session: DbSession, project: Project, kind: str
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        kind: str,
     ) -> None:
         project.state_code, project.slug = ProjectState.OPEN, "soup-club"
-        run = _session(session, project, kind)
+        run = _brain(container, project, kind)
 
         assert scoped_create(session, run) == ScopedCreate(
             COLUMNS.model_copy(
@@ -81,10 +103,14 @@ class TestScopedCreate:
 
     @pytest.mark.parametrize("kind", ["chat", "job"])
     def test_a_finished_projects_brain_session_reads_only_with_no_surface(
-        self, session: DbSession, project: Project, kind: str
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        kind: str,
     ) -> None:
         project.state_code, project.slug = ProjectState.FINISHED, "soup-club"
-        run = _session(session, project, kind)
+        run = _brain(container, project, kind)
 
         assert scoped_create(session, run) == ScopedCreate(
             COLUMNS.model_copy(
@@ -122,6 +148,56 @@ class TestScopedCreate:
         scoped = scoped_create(session, run)
 
         assert (scoped.surface, scoped.request.sandbox_writable_dirs) == (None, None)
+
+
+class TestPromptCache:
+    """A job of a trigger but a wait's runs on the 5-minute prompt cache; a
+    wait's run, a chat and a work item's run keep Claude Code's own (P-191)."""
+
+    @pytest.mark.parametrize(
+        "trigger",
+        [WorkTrigger.SETUP, WorkTrigger.WORKER_TURN_ENDED, WorkTrigger.ITEM_DONE],
+    )
+    @pytest.mark.parametrize("state", [ProjectState.OPEN, ProjectState.FINISHED])
+    def test_a_jobs_create_runs_on_the_five_minute_prompt_cache(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        trigger: WorkTrigger,
+        state: ProjectState,
+    ) -> None:
+        project.state_code, project.slug = state, "soup-club"
+        run = _job(container, project, trigger)
+
+        request = scoped_create(container.db_session(), run).request
+
+        assert request.env == [
+            "PILOT_PROJECT=/work/Projects/soup-club",
+            f"PILOT_SESSION={run.id}",
+            "CLAUDE_CODE_PROMPT_CACHE_TTL=5m",
+        ]
+
+    @pytest.mark.parametrize("kind", ["chat", "job"])
+    def test_a_waits_run_and_a_chat_keep_claude_codes_own(
+        self, container: ServiceContainer, project: Project, kind: str
+    ) -> None:
+        run = _brain(container, project, kind)
+
+        request = scoped_create(container.db_session(), run).request
+
+        assert request.env is not None
+        assert not any(
+            entry.startswith("CLAUDE_CODE_PROMPT_CACHE_TTL=") for entry in request.env
+        )
+
+    def test_a_work_items_run_keeps_claude_codes_own(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        db = container.db_session()
+        run = _session(db, project, "work")
+        container.record_service().place_work(project, run, "Renaming the badge")
+
+        assert scoped_create(db, run).request.env is None
 
 
 class TestProjectFolder:

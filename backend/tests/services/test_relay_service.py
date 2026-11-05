@@ -664,6 +664,10 @@ class TestSend:
         run = _agent_session(session, project, "claude-gone")
         run.kind_code = kind
         session.flush()
+        if kind == "job":
+            container.record_service().place_work(
+                project, run, "Placing the next steps", trigger=WorkTrigger.ITEM_DONE
+            )
 
         _send(relays, session, run, "Rename the badge")
 
@@ -706,6 +710,47 @@ class TestSend:
         assert url_entry == f"PILOT_MCP_URL={MCP_URL}/store"
         (created,) = fake.sessions(ENV)
         assert created.box is not None
+
+    @pytest.mark.parametrize(
+        ("trigger", "five_minutes"),
+        [
+            (WorkTrigger.SETUP, True),
+            (WorkTrigger.WORKER_TURN_ENDED, True),
+            (WorkTrigger.ITEM_DONE, True),
+            (WorkTrigger.WAIT_FIRED, False),
+        ],
+    )
+    def test_a_jobs_re_create_keeps_its_prompt_cache(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        creating: tuple[RelayService, "_Creating"],
+        project: Project,
+        trigger: WorkTrigger,
+        five_minutes: bool,
+    ) -> None:
+        """A job of a trigger but a wait's is re-created on the 5-minute
+        prompt cache, as it was first created (P-191)."""
+        relays, fake = creating
+        project.state_code, project.slug = ProjectState.OPEN, "soup-club"
+        run = _agent_session(session, project, "claude-gone")
+        run.kind_code, run.cwd = "job", "/work/PilotProjects"
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Placing the next steps", trigger=trigger
+        )
+        fake.put_file(ENV, "/work/PilotProjects/CLAUDE.md", b"# Pilot\n")
+        fake.put_file(ENV, "/work/Projects/soup-club/plan.json", b"{}")
+
+        turn = _send(relays, session, run, "continue")
+
+        assert turn.error is None
+        (body,) = fake.create_bodies
+        assert body["env"][:2] == [
+            "PILOT_PROJECT=/work/Projects/soup-club",
+            f"PILOT_SESSION={run.id}",
+        ]
+        assert ("CLAUDE_CODE_PROMPT_CACHE_TTL=5m" in body["env"]) is five_minutes
 
     def test_a_finished_projects_chat_re_created_still_reads_only(
         self,

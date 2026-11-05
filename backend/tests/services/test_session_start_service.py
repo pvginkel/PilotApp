@@ -1147,6 +1147,7 @@ class TestPilotServerHanded:
     @pytest.mark.parametrize("kind", ["chat", "job"])
     def test_a_brain_sessions_create_hands_pilot_store(
         self,
+        container: ServiceContainer,
         starts: SessionStartService,
         fake: _Recording,
         session: DbSession,
@@ -1173,6 +1174,10 @@ class TestPilotServerHanded:
         session.flush()
         session.add(Turn(session_id=run.id, seq=1, message=BRIEF, started_at=now))
         session.flush()
+        if kind == "job":
+            container.record_service().place_work(
+                project, run, "Placing the next steps", trigger=WorkTrigger.ITEM_DONE
+            )
 
         _run(starts, run)
 
