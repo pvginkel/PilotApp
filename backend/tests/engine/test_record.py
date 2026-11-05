@@ -4308,9 +4308,10 @@ class TestRecordServiceDoneByItsSave:
         )
         container.record_service().done(item, _agent(session))
         container.record_service().undo(item)
-        widened = settled.replace(
-            "title: Cut-over\n", "title: Cut-over, both halves\n"
-        ) + "\n```action id=A2\n```\n"
+        widened = (
+            settled.replace("title: Cut-over\n", "title: Cut-over, both halves\n")
+            + "\n```action id=A2\n```\n"
+        )
         _saved(container, opened, item, document, widened)
         assert item.done_at is None
 
