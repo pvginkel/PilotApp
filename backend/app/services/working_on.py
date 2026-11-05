@@ -369,18 +369,26 @@ def _all_held(document: type[Item]) -> ColumnElement[bool]:
     return and_(open_.exists(), ~open_.where(~held()).exists())
 
 
+def _registered(document: type[Item]) -> ColumnElement[bool]:
+    """The Item `document` is a registered document (`source_path` set),
+    never a work item, which its own Session creates too."""
+    own = aliased(Document)
+    return (
+        select(own.id)
+        .where(own.id == document.id, own.source_path.is_not(None))
+        .correlate_except(own)
+        .exists()
+    )
+
+
 def _awaiting(document: type[Item]) -> ColumnElement[bool]:
     """The registered document `document`, or another its run registered,
     awaits its read (DB 246): the pass over them is placed only once none
     does (`TurnEndReadService`)."""
-    own = aliased(Document)
     row = aliased(Document)
     unread = aliased(Item)
     return and_(
-        select(own.id)
-        .where(own.id == document.id, own.source_path.is_not(None))
-        .correlate_except(own)
-        .exists(),
+        _registered(document),
         document.created_by_session_id.in_(
             select(unread.created_by_session_id)
             .join(row, row.id == unread.id)
@@ -391,12 +399,14 @@ def _awaiting(document: type[Item]) -> ColumnElement[bool]:
 
 
 def _passing(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
-    """The jobs `job` of the pass over `document` in flight: the job after
-    the turn of the run that registered it, a Retry of it included (DB
-    296)."""
+    """The jobs `job` of the pass over the registered document `document`
+    in flight: the job after the turn of the run that registered it, a Retry
+    of it included (DB 296). Never a work item: its own Session creates its
+    Item too, which the job after its turn would otherwise find."""
     return job.select(
         job.work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
         job.work.trigger_item_id == document.created_by_session_id,
+        _registered(document),
         job.in_flight(),
     )
 

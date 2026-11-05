@@ -154,6 +154,19 @@ class TestThePass:
             pitch.id: PilotsWork(Doing.PRE_RULING, job.id, pulse, None),
         }
 
+    def test_a_pass_in_flight_leaves_the_work_item_whose_turn_it_follows_alone(
+        self, camp: Camp
+    ) -> None:
+        # Its own Session created the work item's Item, as it registered the
+        # documents: the pass is over the documents alone.
+        run = camp.worker(SessionState.IDLE)
+        survey = camp.registered(run, REPORT)
+        job = camp.job_after(run)
+
+        assert camp.reading(camp.session.get_one(Item, run.id), survey) == {
+            survey.id: PilotsWork(Doing.PRE_RULING, job.id, True, None),
+        }
+
     def test_a_pass_owed_its_nudge_is_in_flight_without_a_pulse(
         self, camp: Camp
     ) -> None:
