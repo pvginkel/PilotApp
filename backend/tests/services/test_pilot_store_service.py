@@ -533,7 +533,7 @@ class TestPilotStoreServiceAnswer:
         )
 
     @pytest.mark.usefixtures("placing")
-    def test_the_answer_to_a_one_ask_item_is_its_done_and_places_the_job_after_it(
+    def test_the_answer_to_a_one_ask_item_is_its_done_and_places_no_job(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -541,8 +541,8 @@ class TestPilotStoreServiceAnswer:
         environment: Environment,
         person: User,
     ) -> None:
-        """A close the chat records on a person's behalf is theirs (DB
-        decision 45)."""
+        """A close the chat records on a person's behalf is theirs, and the
+        chat's own turn carries it out (P-182)."""
         run = _brain(session, project, environment)
         item = _bear(container, project, run, "decision", "Which tent?", DECISION)
 
@@ -558,7 +558,7 @@ class TestPilotStoreServiceAnswer:
 
         assert (item.done_cause_code, item.done_by_user_id) == ("answered", person.id)
         assert _effect_record(session, run)["toolUseId"] is None
-        assert _jobs_after(session, item) == [WorkTrigger.ITEM_DONE]
+        assert _jobs_after(session, item) == []
 
     def test_a_deferral_the_person_asks_for_is_recorded_with_its_to(
         self,
@@ -976,24 +976,17 @@ class TestPilotStoreServiceMark:
         }
         [effect] = _effects(session)
         assert (effect.kind_code, effect.item_id) == (EffectKind.MARKED, item.id)
-        assert _jobs_after(session, item) == [WorkTrigger.ITEM_DONE]
+        assert _jobs_after(session, item) == []
 
     @pytest.mark.parametrize(
-        ("kind", "title", "text", "mark", "verb", "jobs"),
+        ("kind", "title", "text", "mark", "verb"),
         [
-            ("notice", "The lake is open", NOTICE, "read", "Marked read", []),
-            (
-                "review",
-                "Camp survey",
-                REVIEW,
-                "reviewed",
-                "Marked reviewed",
-                [WorkTrigger.ITEM_DONE],
-            ),
+            ("notice", "The lake is open", NOTICE, "read", "Marked read"),
+            ("review", "Camp survey", REVIEW, "reviewed", "Marked reviewed"),
         ],
     )
     @pytest.mark.usefixtures("placing")
-    def test_read_and_reviewed_are_the_persons_mark_a_notices_read_starting_no_job(
+    def test_read_and_reviewed_are_the_persons_mark_and_start_no_job(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1005,7 +998,6 @@ class TestPilotStoreServiceMark:
         text: str,
         mark: Any,
         verb: str,
-        jobs: list[WorkTrigger],
     ) -> None:
         run = _brain(session, project, environment)
         item = _bear(container, project, run, kind, title, text)
@@ -1014,7 +1006,7 @@ class TestPilotStoreServiceMark:
 
         assert (item.done_cause_code, item.done_by_user_id) == ("marked", person.id)
         assert (line.verb, line.label) == (verb, title)
-        assert _jobs_after(session, item) == jobs
+        assert _jobs_after(session, item) == []
 
     def test_without_for_done_is_pilots_on_a_document_it_settled_whole(
         self,

@@ -3994,28 +3994,41 @@ class TestRecordServiceItemDone:
         )
         assert line.seq == item.seq + 1
 
-    def test_the_chats_answer_on_a_persons_behalf_is_theirs(
+    @pytest.mark.parametrize(
+        ("kind", "text", "close", "cause"),
+        [
+            pytest.param("decision", DECISION, "answer", "answered", id="answered"),
+            pytest.param("document", RECOMMENDED, "done", "marked", id="done"),
+            pytest.param("review", REVIEW, "reviewed", "marked", id="reviewed"),
+        ],
+    )
+    def test_a_close_the_chat_records_on_a_persons_behalf_places_none(
         self,
         session: DbSession,
         container: ServiceContainer,
         opened: Project,
         person: User,
+        kind: str,
+        text: str,
+        close: str,
+        cause: str,
     ) -> None:
+        """The person's close, the chat's own turn carrying it out (P-182)."""
         item, document = _bear(
-            session,
-            container,
-            opened,
-            _brain(session, opened),
-            "decision",
-            "Which tent?",
-            DECISION,
+            session, container, opened, _brain(session, opened), kind, "Camp", text
         )
+        records = container.record_service()
 
-        container.record_service().answer(
-            document, "D1", person, "Tunnel", via=AnswerChannel.CHAT
-        )
+        match close:
+            case "answer":
+                records.answer(document, "D1", person, "Tunnel", via=AnswerChannel.CHAT)
+            case "done":
+                records.done(item, person, via=AnswerChannel.CHAT)
+            case "reviewed":
+                records.reviewed(item, person, via=AnswerChannel.CHAT)
 
-        assert len(_jobs_after(session, item)) == 1
+        assert (item.done_cause_code, item.done_by_user_id) == (cause, person.id)
+        assert _jobs_after(session, item) == []
 
     def test_a_notices_read_and_pilots_own_done_place_none(
         self,
@@ -4108,6 +4121,225 @@ class TestRecordServiceItemDone:
 
         assert item.done_cause_code == "finished"
         assert _jobs_after(session, item) == []
+
+
+CUT_OVER = """---
+title: Cut-over
+---
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+
+```action id=A1
+```
+"""
+
+
+def _done_by_pilot(text: str) -> str:
+    """`text` with its action A1 done by Pilot."""
+    return text.replace(
+        "```action id=A1\n",
+        "```action id=A1\ndone: 2026-11-05T10:30:00Z\nby: agent\n"
+        "note: Put in; the deploy read it\n",
+    )
+
+
+def _saved(
+    container: ServiceContainer,
+    project: Project,
+    item: Item,
+    document: Document,
+    text: str,
+) -> None:
+    """An agent's save of the item as the ingest takes it: `text` published,
+    and the item done by it where it closes it."""
+    before = document.published_text
+    assert before is not None
+    container.document_service().publish(document, text)
+    container.record_service().done_by_its_save(project, item, document, before)
+
+
+@pytest.mark.usefixtures("placing")
+class TestRecordServiceDoneByItsSave:
+    """An item of Pilot's own is done by Pilot, cause `settled`, at the save
+    that writes its last open block's `done`, and no job follows it (DB 163;
+    P-181, P-182)."""
+
+    def test_the_done_of_its_one_block_closes_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        item, document = _bear(
+            session, container, opened, _brain(session, opened), "action", "Key", ACTION
+        )
+
+        _saved(container, opened, item, document, _done_by_pilot(ACTION))
+
+        assert item.done_at is not None
+        assert (item.done_cause_code, item.done_by_user_id) == (
+            "settled",
+            _agent(session).id,
+        )
+        assert _jobs_after(session, item) == []
+
+    def test_the_done_of_the_block_a_persons_answer_left_open_closes_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "document",
+            "Cut-over",
+            CUT_OVER,
+        )
+        container.record_service().answer(document, "D1", person, "Dome")
+        answered = document.published_text
+        assert answered is not None
+        assert item.done_at is None
+
+        _saved(container, opened, item, document, _done_by_pilot(answered))
+
+        assert item.done_cause_code == "settled"
+        assert _jobs_after(session, item) == []
+
+    def test_a_persons_close_after_it_is_refused_and_places_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session, container, opened, _brain(session, opened), "action", "Key", ACTION
+        )
+        _saved(container, opened, item, document, _done_by_pilot(ACTION))
+
+        with pytest.raises(InvalidOperationException, match="the item is done"):
+            container.record_service().done_action(document, "A1", person)
+
+        assert item.done_cause_code == "settled"
+        assert _jobs_after(session, item) == []
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "saved"),
+        [
+            pytest.param(
+                "document",
+                CUT_OVER,
+                _done_by_pilot(CUT_OVER),
+                id="a-block-left-open",
+            ),
+            pytest.param(
+                "decision",
+                DECISION,
+                DECISION.replace(
+                    "recommend: Dome\n",
+                    "recommend: Dome\nanswer: Dome\nby: agent\n"
+                    "at: 2026-11-05T10:30:00Z\n",
+                ),
+                id="an-answer-and-no-done",
+            ),
+        ],
+    )
+    def test_a_save_that_writes_no_last_done_leaves_it_open(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        kind: str,
+        text: str,
+        saved: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, opened, _brain(session, opened), kind, "Camp", text
+        )
+
+        _saved(container, opened, item, document, saved)
+
+        assert item.done_at is None
+
+    def test_the_save_after_an_undo_of_it_leaves_it_open(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        """Its block was done before that save."""
+        item, document = _bear(
+            session, container, opened, _brain(session, opened), "action", "Key", ACTION
+        )
+        done = _done_by_pilot(ACTION)
+        _saved(container, opened, item, document, done)
+        container.record_service().undo(item)
+
+        _saved(container, opened, item, document, done + "\nThe deploy read it.\n")
+
+        assert item.done_at is None
+
+    def test_an_item_done_already_or_of_an_archived_project_stays_as_it_is(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        brain = _brain(session, opened)
+        finished, finished_document = _bear(
+            session, container, opened, brain, "action", "Key", ACTION
+        )
+        container.record_service().close_unanswered(opened, person, FINISH)
+        archived, archived_document = _bear(
+            session, container, opened, brain, "action", "Token", ACTION
+        )
+        opened.archived = True
+        session.flush()
+
+        _saved(container, opened, finished, finished_document, _done_by_pilot(ACTION))
+        _saved(container, opened, archived, archived_document, _done_by_pilot(ACTION))
+
+        assert (finished.done_cause_code, finished.done_by_user_id) == (
+            "finished",
+            person.id,
+        )
+        assert archived.done_at is None
+
+
+class TestRecordServicePilotsOwn:
+    @pytest.mark.parametrize(
+        ("kind", "own"),
+        [("chat", True), ("job", True), ("work", False)],
+    )
+    def test_a_chats_and_a_jobs_items_are_pilots_own_and_a_workers_are_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        kind: str,
+        own: bool,
+    ) -> None:
+        run = models.Session(
+            project_id=opened.id,
+            kind_code=kind,
+            cwd=STORE_REPO,
+            token_hash=uuid.uuid4().hex,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        item, _ = _bear(session, container, opened, run, "action", "Key", ACTION)
+
+        assert container.record_service().pilots_own(item) is own
 
 
 @pytest.mark.usefixtures("placing")

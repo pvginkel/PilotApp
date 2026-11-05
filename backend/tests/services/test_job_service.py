@@ -23,7 +23,6 @@ from app.engine.views import ViewService, utc_time
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Item, Project, ProjectTransition, Turn, User, WaitFiring, Work
 from app.models.reference import (
-    AnswerChannel,
     ProjectState,
     RecordKind,
     SessionState,
@@ -1037,11 +1036,9 @@ def _item_done(
 def _closed(
     container: ServiceContainer, document: models.Document, person: User
 ) -> models.Session:
-    """The person's answer to the question, its close, through the chat; the
-    job it placed."""
-    container.record_service().answer(
-        document, "Q1", person, "Now", via=AnswerChannel.CHAT
-    )
+    """The person's answer to the question, its close, in the app; the job
+    it placed."""
+    container.record_service().answer(document, "Q1", person, "Now")
     db = container.db_session()
     work = db.scalars(
         select(Work)

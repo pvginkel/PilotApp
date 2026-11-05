@@ -1,7 +1,8 @@
 """The engine's side of the file put (design 1 §5.3): an agent's save of a
 path of the store's tree, gated, merged by ownership and published, in one
-transaction that holds the document's row; and what the reconcile's write-down
-does to a held `plan.json` (§5.5 step 2)."""
+transaction that holds the document's row, an item of Pilot's own closed by the
+save that writes its last open block's `done`; and what the reconcile's
+write-down does to a held `plan.json` (§5.5 step 2)."""
 
 import hashlib
 from collections.abc import Iterable, Mapping
@@ -24,6 +25,7 @@ from app.engine.bus import (
 from app.engine.documents import OPENING, DocumentService
 from app.engine.paths import PLAN, sha256_hex
 from app.engine.plan import PlanService
+from app.engine.record import RecordService
 from app.engine.tree import TreeDocument, TreeFile, TreePlan, TreeService
 from app.engine.views import ViewService
 from app.models import (
@@ -92,6 +94,7 @@ class IngestService:
         view_service: ViewService,
         document_service: DocumentService,
         plan_service: PlanService,
+        record_service: RecordService,
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
@@ -99,6 +102,7 @@ class IngestService:
         self.view_service = view_service
         self.document_service = document_service
         self.plan_service = plan_service
+        self.record_service = record_service
 
     def ingest(
         self,
@@ -125,8 +129,10 @@ class IngestService:
         ingest and held on any fault, else merged by ownership against the
         published text and published; the opening's is never read, and one
         that differs is reverted whole, never held. Either's faults replace
-        the path's `parse` Save Errors. Refused for a path the store does not
-        sync.
+        the path's `parse` Save Errors. A published save of an item of
+        Pilot's own that writes the `done` of its last open block closes it
+        (`RecordService.done_by_its_save`). Refused for a path the store does
+        not sync.
         """
         resolved = self.tree_service.resolve(path)
         if isinstance(resolved, TreeFile):
@@ -252,6 +258,18 @@ class IngestService:
         session: AgentSession | None,
     ) -> Ingested:
         project, document, item = resolved.project, resolved.document, resolved.item
+        own = (
+            item
+            if item is not None
+            and _kind(project, document, item) is dsl.DocumentKind.OWN_ITEM
+            and self.record_service.pilots_own(item)
+            else None
+        )
+        if own is not None:
+            # The save may close the item: it takes the lock a close takes,
+            # the project's row before the Session's and the document's (the
+            # start's lock order).
+            self.document_service.lock_project(project)
         in_turn = session is not None and self._in_turn(session)
         self.document_service.lock(document)
         held_before = self.tree_service.held(project, document)
@@ -273,11 +291,14 @@ class IngestService:
             self._raise(environment, path, ErrorKind.PARSE, faults)
             tree_text = text
         else:
-            merged = dsl.merge(_published(document), text, kind)
+            before = _published(document)
+            merged = dsl.merge(before, text, kind)
             self.document_service.publish(document, merged.text)
             faults = list(merged.reverted)
             self._raise(environment, path, ErrorKind.REVERTED, faults)
             tree_text = merged.text
+            if own is not None:
+                self.record_service.done_by_its_save(project, own, document, before)
         # No turn end is left to cut the Version of a save that landed after
         # its session's turn ended.
         versioned = (

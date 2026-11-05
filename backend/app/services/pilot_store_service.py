@@ -480,9 +480,10 @@ class PilotStoreService:
         *,
         note: str | None = None,
     ) -> EffectLine:
-        """`mark` on the item for the person whose handle is `person` (F86.3):
-        Done on a document, with its recommendations, Read on a notice,
-        Reviewed on a review, as the record marks them. Without `person`,
+        """`mark` on the item for the person whose handle is `person`, given
+        through the chat (F86.3): Done on a document, with its
+        recommendations, Read on a notice, Reviewed on a review, as the record
+        marks them. Without `person`,
         Pilot's own Done on a document it settled whole (DB decision 42), or
         on a registered document of one block it settled, or on an open wait,
         with its `note` (F27.4, DB 300). The call `tool_use_id`'s effect is
@@ -529,11 +530,11 @@ class PilotStoreService:
             user = self._person(person)
             match mark:
                 case "done":
-                    self.record_service.done(item, user)
+                    self.record_service.done(item, user, via=AnswerChannel.CHAT)
                 case "read":
-                    self.record_service.read(item, user)
+                    self.record_service.read(item, user, via=AnswerChannel.CHAT)
                 case "reviewed":
-                    self.record_service.reviewed(item, user)
+                    self.record_service.reviewed(item, user, via=AnswerChannel.CHAT)
         line = EffectLine(MARKED[mark], self._title(item), item_id=item.id)
         self.effect_service.record(
             brain.session_id,

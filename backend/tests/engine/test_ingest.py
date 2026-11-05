@@ -11,6 +11,7 @@ from typing import Any
 
 import pilot_dsl as dsl
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from psycopg.errors import LockNotAvailable
 from sqlalchemy import func, select
@@ -45,6 +46,7 @@ from app.models import (
     SaveError,
     SessionRecord,
     User,
+    Work,
 )
 from app.models.reference import (
     AttachmentSource,
@@ -59,6 +61,8 @@ from app.services.container import ServiceContainer
 from app.services.effect_service import EffectService
 from app.services.pilot_store_service import Brain
 from tests.support.fake_sidecar import FakeSidecar, Put
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 from tests.support.turns import end_turns, turn_in_flight
 
 DRAFT = "---\ntitle: Badge colours\n---\n\nWhich colours for the badges?\n"
@@ -1427,6 +1431,121 @@ class TestIngestServiceMerge:
         assert draft.writing_since is None
 
 
+ACTION = """---
+title: Put the key into OpenBao
+---
+
+```action id=A1
+```
+"""
+
+DONE = ACTION.replace(
+    "```action id=A1\n",
+    "```action id=A1\ndone: 2026-11-05T10:30:00Z\nby: agent\n"
+    "note: Put in; the deploy read it\n",
+)
+
+
+@pytest.fixture
+def placing(container: ServiceContainer, supervise: Supervise) -> None:
+    """The container's start on a controller, its loops never run, through
+    which a close places the job after it."""
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
+
+
+def _brain(db: DbSession, project: Project, environment: Environment) -> models.Session:
+    """A chat of the project's, a session of Pilot's own."""
+    chat = models.Session(
+        project_id=project.id,
+        environment_id=environment.id,
+        kind_code="chat",
+        cwd="/work/PilotProjects",
+        token_hash="2" * 64,
+        state_code=SessionState.RUNNING,
+    )
+    db.add(chat)
+    db.flush()
+    return chat
+
+
+def _jobs_after(db: DbSession, item_id: uuid.UUID) -> list[uuid.UUID]:
+    return list(db.scalars(select(Work.id).where(Work.trigger_item_id == item_id)))
+
+
+@pytest.mark.usefixtures("placing")
+class TestIngestServiceOwnItemDone:
+    """A save of an item of Pilot's own that writes its last open block's
+    `done` closes it, Pilot's, cause `settled`, with no job after it (P-181,
+    P-182)."""
+
+    def test_the_save_that_writes_its_last_open_blocks_done_closes_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        brain = _brain(session, project, environment)
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "action", "Put the key into OpenBao", brain, ACTION
+            )
+        path = tree_path(project, session.get_one(Document, item.id).path)
+
+        answer = _ingest(
+            container, path, DONE, environment, base=sha256_hex(ACTION), session=brain
+        )
+
+        assert (answer.held, answer.faults) == (False, ())
+        assert session.get_one(Document, item.id).published_text == DONE
+        agent = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        assert item.done_at is not None
+        assert (item.done_cause_code, item.done_by_user_id) == ("settled", agent.id)
+        assert _jobs_after(session, item.id) == []
+
+    def test_a_held_save_closes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        brain = _brain(session, project, environment)
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "action", "Put the key into OpenBao", brain, ACTION
+            )
+        path = tree_path(project, session.get_one(Document, item.id).path)
+
+        answer = _ingest(container, path, DONE + BROKEN, environment, session=brain)
+
+        assert answer.held
+        assert item.done_at is None
+
+    def test_an_item_a_workers_session_added_stays_open(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "action", "Put the key into OpenBao", project_session, ACTION
+            )
+        path = tree_path(project, session.get_one(Document, item.id).path)
+
+        answer = _ingest(container, path, DONE, environment, base=sha256_hex(ACTION))
+
+        assert answer.held is False
+        assert item.done_at is None
+
+
 class TestIngestServiceLateSave:
     """A save credited to a session with no turn in flight, its turn ended
     before the save landed, stays that session's: it cuts the session's
@@ -2548,6 +2667,43 @@ class TestIngestServiceRowLock:
         )
         with scoped_session(committed_app.container) as session:
             assert session.get_one(Document, document_id).published_text == merged
+
+    def test_a_save_of_an_item_of_pilots_own_waits_for_the_projects_row(
+        self, committed_app: Flask
+    ) -> None:
+        """The lock a close takes, before the Session's and the document's."""
+        _, handbook_id = _committed_handbook(committed_app)
+        run_id = _committed_run(committed_app, handbook_id)
+        path, item_id = _committed_item(committed_app, run_id)
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+        with scoped_session(container) as session:
+            project_id = session.get_one(Document, handbook_id).project_id
+
+        with engine.connect() as holder:
+            # As for a document's row: only the save's own lock conflicts.
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR KEY SHARE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.ingest_service().ingest(
+                    path,
+                    TWO_ASKS_EDITED.encode(),
+                    sha256_hex(TWO_ASKS),
+                    session.get_one(Environment, ENVIRONMENT_ID),
+                    session.get_one(models.Session, run_id),
+                )
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert session.get_one(Document, item_id).ingested_text is None
 
     def test_a_plan_save_waits_for_the_projects_row(self, committed_app: Flask) -> None:
         path, document_id = _committed_handbook(committed_app)
