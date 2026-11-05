@@ -487,14 +487,14 @@ test.describe('A researched block', () => {
 test.describe('A claimed action on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('while the run doing it waits on the person’s answer to a document it registered, that document’s Cancel names the action whole, its words wrapping inside the foot', async ({
+  test('while the run doing it waits on the person’s answer to a document it registered, that document’s Cancel names the action whole, its words wrapping inside the foot, a long name inside itself', async ({
     people,
     projects,
     controller,
     chats,
     overlay,
   }) => {
-    const heading = 'Rotate the CI token on Jenkins and in GitHub Actions';
+    const heading = 'Rotate the CI token on Jenkins and in GitHub Actions, then set PILOT_NOTIFICATION_BRIDGE_TOKEN_REFERENCE_NAME';
     const { project, asking } = await waiting({ people, projects, controller, chats }, heading);
 
     await overlay.open(project, asking);
