@@ -28,6 +28,12 @@ type State = Work['state'];
 export const STOPPABLE: readonly State[] = ['running', 'starting', 'held'];
 export const RESUMABLE: readonly State[] = ['stopped', 'failed'];
 
+/**
+ * Whether a job of Pilot's offers Retry: stopped or failed, not retried and owed no nudge — one
+ * whose turn died at the quota wall is not at its end until its nudge's run ends (D078).
+ */
+export const offersRetry = (work: Work) => RESUMABLE.includes(work.state) && work.retried === null && !work.nudge_owed;
+
 type Mutation =
   | ReturnType<typeof usePostSessionsStopBySessionId>
   | ReturnType<typeof usePostSessionsResumeBySessionId>

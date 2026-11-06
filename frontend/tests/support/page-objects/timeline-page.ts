@@ -21,7 +21,7 @@ import { waitTestEvent } from '../helpers';
  * its popover and Resume or Retry (F26, F26.8, F67, F145.2, F145.3). A wait open shows its request's
  * button, what it waits on — a card wait's cards and states and since when, a timed wait's due
  * time — and its firings; done, the note Pilot closed it with, and on a phone the menu its line
- * opens (F27, F13.9).
+ * opens (F27, F13.9). Pilot's job on an item stands in its line or its head (F59.1).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -115,8 +115,6 @@ export class TimelinePage {
       lineTitle: root.getByTestId('timeline.line.title'),
       lineTime: root.getByTestId('timeline.line.time'),
       said: root.getByTestId('timeline.line.said'),
-      /** A work item's line: how it closed, where its time does not say it. */
-      closed: root.getByTestId('timeline.line.closed'),
       note: root.getByTestId('timeline.line.note'),
       /** A line's Undo, Open and Discuss; a done line's show off a phone only while the mouse is on its `line` or the focus in it (F13.8). */
       undo: root.getByTestId('timeline.line.undo'),
@@ -126,6 +124,17 @@ export class TimelinePage {
       pilots: {
         root: root.getByTestId('timeline.line.pilots'),
         pulse: root.getByTestId('timeline.line.pilots.pulse'),
+      },
+      /**
+       * Pilot's job on the item (F59.1), in its line or its head: the button in whichever form it
+       * stands, `data-form` `running`, `failed`, `stopped` or `ended` and `data-state` the job's
+       * session's; its dot while it is under way, and its Retry once it failed or stopped. A done
+       * line's ended mark shows off a phone only while the mouse is on its `line` or the focus in it.
+       */
+      job: {
+        root: root.getByTestId('timeline.job'),
+        pulse: root.getByTestId('timeline.job.pulse'),
+        retry: root.getByTestId('timeline.job.retry'),
       },
       /** *In the chat* after a one-ask item's answer given in the chat. */
       lineInChat: root.getByTestId('timeline.line.in-chat'),
@@ -210,8 +219,9 @@ export class TimelinePage {
         firings: root.getByTestId('timeline.wait.firing'),
         /** The note Pilot closed it with, under its done line's title. */
         note: root.getByTestId('timeline.line.wait-note'),
-        /** The menu a tap on its done line opens on a phone, and its Discuss. */
+        /** The menu a tap on its done line opens on a phone, its row of Pilot's job on it, and its Discuss. */
         menu: root.getByTestId('timeline.line.menu'),
+        menuJob: root.getByTestId('timeline.line.menu.job'),
         menuDiscuss: root.getByTestId('timeline.line.menu.discuss'),
       },
       card: {

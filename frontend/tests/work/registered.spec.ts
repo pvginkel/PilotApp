@@ -3,11 +3,12 @@
  * a review titled by its file's name, with no text and no close until the turn that ends its run
  * has read it (review 7). Meanwhile, and while the pass after that turn runs, it is Pilot's line
  * (F13.7): a dashed circle in its kind's place, its title, what Pilot does on it going to the work
- * that does it, the pulse while the pass runs; then published as written, its title its text's,
- * its kind's icon back, live. Opened meanwhile, it reads only, under the gold strip saying what
+ * that does it, the pulse while the pass runs, the pass no line of its own and no job's button
+ * beside Pilot's; then published as written, its title its text's, its kind's icon back, the pass's
+ * mark in its head, live (F59.1). Opened meanwhile, it reads only, under the gold strip saying what
  * Pilot does on it (F28.9): awaiting its read, that nothing of it has been read yet, with no Stop;
- * under its pass, *Stop and take over*, which stops the pass, shown stopped with Retry, and hands
- * every document the pass covers to the person, live. A read that
+ * under its pass, *Stop and take over*, which stops the pass, shown stopped with Retry in the head
+ * of each document it covers, and hands every one of them to the person, live. A read that
  * fails keeps its file's name and no text, *Did not load* beside it: it opens to "The document did
  * not load", closes with Reviewed, and its work item's session log says why (ruling D1). Its close
  * is written back to its file, and the close that leaves none of the run's documents open
@@ -136,7 +137,7 @@ async function continued(projects: Projects, project: string, continuation: stri
 }
 
 test.describe('A registered document', () => {
-  test('is Pilot’s line until its run’s end reads it and the pass after it ends: its file’s name, “Awaiting the run” going to the work item, no pulse and no Open, and in the overlay the strip saying nothing of it has been read yet, with no Stop and no close; then its text’s title, Open, and “Pre-ruling” pulsing, opening the pass’s session log, the pass’s own line beside it; then its kind’s icon on a published card, live', async ({
+  test('is Pilot’s line until its run’s end reads it and the pass after it ends: its file’s name, “Awaiting the run” going to the work item, no pulse and no Open, and in the overlay the strip saying nothing of it has been read yet, with no Stop and no close; then its text’s title, Open, and “Pre-ruling” pulsing, opening the pass’s session log, the pass no line of its own and no job’s button beside it; then its kind’s icon on a published card, the ended pass’s mark in its head, live', async ({
     people,
     projects,
     controller,
@@ -185,7 +186,9 @@ test.describe('A registered document', () => {
     await expect(item.pilots.root).toHaveAttribute('href', sessionLogAddress(project, job));
     await expect(item.pilots.pulse).toBeVisible();
     await expect(item.open).toBeVisible();
-    await expect(timeline.item(job).root).toHaveAttribute('data-kind', 'work');
+    // The line's one button is the pass's: no job's beside it, and the pass no line of its own (F59.1, R26).
+    await expect(item.job.root).toHaveCount(0);
+    await expect(timeline.item(job).root).toHaveCount(0);
 
     await pass.end();
     await expect(item.root).toHaveAttribute('data-state', 'open');
@@ -197,6 +200,9 @@ test.describe('A registered document', () => {
     await expect(item.card.didNotLoad).toHaveCount(0);
     await expect(item.card.readTime).toHaveText('1 min read');
     await expect(item.card.reviewed).toBeVisible();
+    await expect(item.job.root).toHaveAttribute('data-form', 'ended');
+    await expect(item.job.root).toHaveAttribute('href', sessionLogAddress(project, job));
+    await expect(item.job.root).toBeVisible();
   });
 
   test('whose writer Pilot asked about a block carries the mark, live, in the block’s head inline, in the item’s head of a one-ask item and a confirmation, and none on a card nor any line under a title; the mark opens the document at the questions', async ({
@@ -257,7 +263,7 @@ test.describe('A registered document', () => {
     await expect(overlay.blockAt('Q1').writerAsked).toHaveText('Pilot asked the writer');
   });
 
-  test('opened while its pass pre-rules it reads only, under the gold strip: what Pilot does and Stop and take over, every control drawn and taking nothing, no foot; Stop and take over stops the pass, shown stopped with Retry, and every document the pass covers is the person’s, live', async ({
+  test('opened while its pass pre-rules it reads only, under the gold strip: what Pilot does and Stop and take over, every control drawn and taking nothing, no foot; Stop and take over stops the pass, shown stopped with Retry in the head of every document the pass covers, each of them the person’s, live', async ({
     people,
     projects,
     controller,
@@ -309,8 +315,14 @@ test.describe('A registered document', () => {
     await expect(overlay.strip.root).toHaveCount(0);
     await expect(dome).toBeEnabled();
     await expect(overlay.send).toBeVisible();
-    const stopped = timeline.item(job).work;
-    await expect(stopped.retry).toBeVisible();
+    for (const document of [kit, pitch]) {
+      const stopped = timeline.item(document).job;
+      await expect(stopped.root).toHaveAttribute('data-form', 'stopped');
+      await expect(stopped.root).toHaveAttribute('href', sessionLogAddress(project, job));
+      await expect(stopped.root).toContainText('Stopped');
+      await expect(stopped.pulse).toHaveCount(0);
+      await expect(stopped.retry).toBeVisible();
+    }
     expect((await projects.work(project, job)).state).toBe('stopped');
     expect((await projects.item(project, pitch)).pilots_work).toBeNull();
     await dome.click();
@@ -403,15 +415,16 @@ test.describe('A registered document', () => {
     const continuation = await continuationOf(projects, project, work);
     const continuationItem = timeline.item(continuation);
     await expect(continuationItem.title).toHaveText(TITLE);
-    // Pilot's job after the run's turn, placed once the run's documents were read (design 3 D2).
+    // Pilot's job after the run's turn, placed once the run's documents were read (design 3 D2), the
+    // pass on them, shows on them, no line of its own (F59.1).
     const job = (await projects.timeline(project)).items.find((item) => item.work?.pilots_own)!.id;
     expect(await timeline.items.evaluateAll((items) => items.map((each) => each.getAttribute('data-item-id')))).toEqual([
       work,
       survey,
       pitch,
-      job,
       continuation,
     ]);
+    await expect(pitchItem.job.root).toHaveAttribute('href', sessionLogAddress(project, job));
     await expect(surveyItem.undo).toHaveCount(0);
     await expect(pitchItem.undo).toHaveCount(0);
 

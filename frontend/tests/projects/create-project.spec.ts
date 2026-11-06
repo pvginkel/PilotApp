@@ -10,7 +10,8 @@
  * Discuss opens a new chat below it (F48.2). The setup, Pilot's first background job, is a work item
  * of Pilot's own: its line, its session log, no env chip and no Stop or Resume (F59.1, F26.3), and a
  * quiet done line once its turn ends. A job placed while it runs, the one after a worker's turn,
- * waits its turn behind it, its line saying so, and goes on once the setup's turn ends (F59.2).
+ * waits its turn behind it, on the worker's line, its session log saying so, and goes on once the
+ * setup's turn ends (F59.1, F59.2).
  * Failed, it offers Retry where a worker's Resume is: a fresh setup at the project's next place,
  * the failed line staying with its session log, saying it was retried and offering Retry no more;
  * a running or done job offers none (D2). Dead at the quota wall, it offers none while its nudge is
@@ -414,7 +415,7 @@ test.describe('The setup', () => {
     await expect(page).toHaveURL(`/projects/${id}/sessions/${setupId}`);
   });
 
-  test('a job placed while it runs, the one after a worker’s turn, waits its turn behind it, its line saying so, and goes on once its turn ends', async ({
+  test('a job placed while it runs, the one after a worker’s turn, waits its turn behind it, on the worker’s line, its session log saying so, and goes on once its turn ends', async ({
     page,
     people,
     projects,
@@ -423,6 +424,7 @@ test.describe('The setup', () => {
     chats,
     definitionChat,
     timeline,
+    sessionLog,
   }) => {
     const me = await people.signIn();
     const { id, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
@@ -444,14 +446,17 @@ test.describe('The setup', () => {
         return jobId;
       })
       .toBeDefined();
-    const job = timeline.item(jobId!);
-    await expect(job.title).toHaveText(NEXT);
-    await expect(job.work.line).toHaveAttribute('data-state', 'held');
-    await expect(job.work.cue).toHaveText('Waiting for the job before it');
+    await expect(timeline.item(jobId!).root).toHaveCount(0);
+    const job = timeline.item(work).job;
+    await expect(job.root).toHaveText(NEXT);
+    await expect(job.root).toHaveAttribute('data-state', 'held');
+    await job.root.click();
+    await expect(sessionLog.cue).toHaveText('Waiting for the job before it');
+    await page.keyboard.press('Escape');
+    await expect(sessionLog.overlay).toHaveCount(0);
 
     await controller.finish(chats.store, session, 'success', 'The plan is written.');
-    await expect(job.work.running).toBeVisible();
-    await expect(job.work.cue).not.toHaveText('Waiting for the job before it');
+    await expect(job.root).toHaveAttribute('data-state', 'running');
   });
 
   test('failed, it offers Retry; pressed, a fresh setup at the next place takes it on, the failed line saying so and offering Retry no more', async ({

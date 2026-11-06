@@ -13,8 +13,9 @@
  * F141.3). Session log, in every state, opens the session's records in the overlay (F26.3, F69).
  * Stop, while it runs, starts or is held, asks first in the row under the line, Esc dismissing the
  * question; Resume, in that row once it stopped or failed, carries it on (F67), disabled while the
- * project is archived, as its head's switch is (D012). Pilot's own work, a background job such as
- * the setup, has no env chip and no Stop or Resume (F26.3, F59.1), and Retry where Resume is once
+ * project is archived, as its head's switch is (D012). Pilot's own work, the setup, the one job
+ * drawn here (every other shows on the item it follows from, job.tsx), has no env chip and no Stop
+ * or Resume (F26.3, F59.1), and Retry where Resume is once
  * it stopped or failed: a fresh job for the same trigger at the project's next place, disabled
  * while the project is archived. Retried, its line says so under its stop or its failure, and
  * offers Retry no more. The row leads with the progress button once its run published its steps,
@@ -37,7 +38,7 @@ import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useNow } from '@/hooks/use-now';
 import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
-import { RESUMABLE, STOPPABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
+import { offersRetry, RESUMABLE, STOPPABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
 import { useEscape } from '@/lib/keys';
 import { progressStepMark, workLine } from '@/lib/utils/status-labels';
@@ -49,15 +50,9 @@ const TICK = 15_000;
 
 type Actions = 'stop' | 'resume' | 'retry' | 'log';
 
-/**
- * The actions a session offers: a worker's Stop or Resume by its state, a job's Retry while it is
- * stopped or failed, not retried and owed no nudge — one whose turn died at the quota wall is not at
- * its end until its nudge's run ends (D078) — else its session log alone.
- */
+/** The actions a session offers: a worker's Stop or Resume by its state, a job's Retry where it offers it, else its session log alone. */
 function actionsOf(work: Work): Actions {
-  if (work.pilots_own) {
-    return RESUMABLE.includes(work.state) && work.retried === null && !work.nudge_owed ? 'retry' : 'log';
-  }
+  if (work.pilots_own) return offersRetry(work) ? 'retry' : 'log';
   return STOPPABLE.includes(work.state) ? 'stop' : RESUMABLE.includes(work.state) ? 'resume' : 'log';
 }
 

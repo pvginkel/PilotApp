@@ -12,13 +12,16 @@
  * Create has, once its setup is done, Pilot's line under the setup saying it is ready to resume,
  * with nothing to press, gone at the resume (D083).
  *
+ * Pilot's jobs show on the items they follow from, not as lines of their own, the setup's aside
+ * (F59.1, job.tsx).
+ *
  * Opened at an item's address, the timeline goes to the item and flashes it; at a block's, to the
  * block, its collapsed section opened (F31.5), or to its item where its line or its card stands for
  * it; an address it draws nothing for leaves it at its end (F97). A segment opens its block's
  * collapsed section too (F33). Under a tab or the overlay it takes no focus, and keeps its scroll.
  */
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowDown, ArrowUp, Flag, TriangleAlert } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
@@ -29,7 +32,7 @@ import { Item } from '@/components/timeline/item';
 import { Opening } from '@/components/timeline/opening';
 import { rowsOf, type Row } from '@/components/timeline/rows';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
-import { titleOf, useTimeline, type TimelineItem } from '@/hooks/use-timeline';
+import { isLine, titleOf, useTimeline, type TimelineItem } from '@/hooks/use-timeline';
 
 /** How far from the end, in pixels, still reads as at the end. */
 const END_SLACK = 48;
@@ -51,7 +54,7 @@ interface TimelineProps {
 
 export function Timeline({ projectId, address, inert }: TimelineProps) {
   const { data } = useTimeline(projectId);
-  const items = data?.items;
+  const items = useMemo(() => data?.items.filter(isLine), [data]);
   const finishedAt = data?.finished_at ?? null;
   const readyAfter = data?.ready_after ?? null;
   // Every finish puts one, so a finished project's latest archive question is its latest finish's.

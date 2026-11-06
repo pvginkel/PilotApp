@@ -25,7 +25,6 @@ type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSche
 type LineStep = NonNullable<CurrentLine['step']>;
 type Condition = components['schemas']['ConditionsSchema.6c014b4.ConditionSchema'];
 type OverruleKind = components['schemas']['ConditionsSchema.6c014b4.OverruleKind'];
-type DoneCause = components['schemas']['TimelineSchema.1fdd8ae.DoneSchema']['cause'];
 type Doing = components['schemas']['TimelineSchema.1fdd8ae.Doing'];
 
 interface StepReading {
@@ -175,23 +174,41 @@ export function heldReasonLabel(reason: HeldReason, running: number | null): str
 }
 
 /**
- * What a work item's done line says of how it closed, under its title: a job withdrawn by the Undo
- * of the item whose close placed it, before its brief went out, which never ran (F14.1); null for
- * every other close, which its time stands for.
+ * How Pilot's job shows on the item it follows from (F59.1): under way while it is held, starts or
+ * runs, or its turn ended under a halt or a pause and owes the nudge that carries it on; ended once
+ * its turn ended or its session did; failed or stopped.
  */
-export function workClosedLabel(cause: DoneCause): string | null {
-  switch (cause) {
-    case 'withdrawn':
-      return 'Withdrawn by an Undo';
-    case 'answered':
-    case 'marked':
-    case 'settled':
-    case 'turn_ended':
-    case 'finished':
-    case 'cancelled':
-      return null;
+type JobForm = 'running' | 'ended' | 'failed' | 'stopped';
+
+export function jobForm(work: Work): JobForm {
+  switch (work.state) {
+    case 'held':
+    case 'starting':
+    case 'running':
+      return 'running';
+    case 'idle':
+      return work.nudge_owed ? 'running' : 'ended';
+    case 'ended':
+      return 'ended';
+    case 'failed':
+    case 'stopped':
+      return work.state;
     default: {
-      const unknown: never = cause;
+      const unknown: never = work.state;
+      return unknown;
+    }
+  }
+}
+
+/** What a failed or stopped job's button says after its title. */
+export function jobHaltLabel(form: 'failed' | 'stopped'): string {
+  switch (form) {
+    case 'failed':
+      return 'Failed';
+    case 'stopped':
+      return 'Stopped';
+    default: {
+      const unknown: never = form;
       return String(unknown);
     }
   }

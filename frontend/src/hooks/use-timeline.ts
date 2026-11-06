@@ -37,6 +37,13 @@ export function useTimelineItem(projectId: string, itemId: string | undefined): 
 
 export const isProse = (part: BodyPart): part is ProsePart => part.type === 'prose';
 
+/**
+ * Whether an entry of the read is a line of the timeline: every one but Pilot's jobs, each of which
+ * shows on the item it follows from, the setup aside (F59.1). A job keeps its entry, where its
+ * session log finds it.
+ */
+export const isLine = (item: TimelineItem) => item.work === null || !item.work.pilots_own || item.work.setup;
+
 /** A prose item's blocks, in their order. */
 export function blocksOf(item: TimelineItem): Block[] {
   return (item.body ?? []).flatMap((part) => (part.type === 'block' ? [part.block] : []));

@@ -13,7 +13,7 @@
  *
  * The server's `work_moved` carries a work item's session as it moves (F26.2, F80.2): it replaces
  * the item's in its project's timeline as read, with no read of its own, and so in the session log
- * over it. A read of the timeline under way when one arrives may have been made before it, so the
+ * over it; a job's goes too where an item shows it, as its job or as the job after its turn (F59.1). A read of the timeline under way when one arrives may have been made before it, so the
  * moves heard meanwhile go over that read once it lands.
  */
 
@@ -25,6 +25,7 @@ import type { components } from '@/lib/api/generated/types';
 
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
+type Job = components['schemas']['TimelineSchema.1fdd8ae.JobSchema'];
 
 /** The server's event, `{"project_id": <id>}`. */
 const EVENT = 'project_changed';
@@ -80,18 +81,24 @@ function readAgain(queryClient: QueryClient, projects: ReadonlySet<string>): voi
 const timelineOf = (project_id: string) => [TIMELINE, { path: { project_id } }];
 
 /**
- * Writes `work` into the item's in its project's timeline as read; given `from`, only while the
- * item there is still in one of those states, so that a move heard first is not undone.
+ * Writes `work` into the item's in its project's timeline as read, and into each item's job and job
+ * after its turn that is the item; given `from`, only where the session there is still in one of
+ * those states, so that a move heard first is not undone.
  */
 export function moveWork(queryClient: QueryClient, project: string, item: string, work: Work, from?: readonly Work['state'][]): void {
+  const moves = (current: Work | null) => from === undefined || (current !== null && from.includes(current.state));
+  const moveJob = (job: Job | null) => (job !== null && job.id === item && moves(job.work) ? { ...job, work } : job);
   queryClient.setQueryData<Timeline>(timelineOf(project), (timeline) =>
     timeline === undefined
       ? undefined
       : {
           ...timeline,
-          items: timeline.items.map((each) =>
-            each.id === item && (from === undefined || (each.work !== null && from.includes(each.work.state))) ? { ...each, work } : each,
-          ),
+          items: timeline.items.map((each) => {
+            const job = moveJob(each.job);
+            const afterTurn = moveJob(each.after_turn);
+            const moved = each.id === item && moves(each.work) ? { ...each, work } : each;
+            return job === each.job && afterTurn === each.after_turn ? moved : { ...moved, job, after_turn: afterTurn };
+          }),
         },
   );
 }

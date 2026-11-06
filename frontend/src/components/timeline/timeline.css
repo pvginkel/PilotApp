@@ -531,6 +531,17 @@
   .pilots-btn .avatar { width: 16px; height: 16px; }
   .pilots-btn.still { cursor: default; }
   .pilots-btn.still:hover { background: none; color: hsl(var(--muted-foreground)); }
+  /* Pilot's job on an item (F59.1, job.tsx) is that button, at a line's end or after a head's time,
+     its title cut short before the item's own gives way; failed or stopped, in the destructive
+     colour, its Retry beside it. On a line its 28px overhang the text's row, as the actions' do, so
+     that it adds no height. */
+  .job-btn { flex: 0 1 auto; min-width: 0; }
+  .job-btn .job-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .job-btn.halted, .job-btn.halted:hover:not(:disabled) { color: hsl(var(--destructive-text)); }
+  .line:has(.job-btn) .title { min-width: 6ch; }
+  @media (min-width: 901px) {
+    .line .job-btn, .line .job-retry { margin-block: -4px; }
+  }
 
   /* A work item's line is quiet: a session that ran reads as a footnote between the items,
      indented behind a 2px rule in the dividers' colour, one stroke down a run, stopping 1px short
@@ -614,9 +625,9 @@
 
   @media (max-width: 900px) {
     .feed-inner { padding: 12px 12px 64px; }
-    /* On the phone what Pilot does takes a row of its own under the title, its dot 4px in from the
-       title's left edge. */
-    .line .pilots-slot { display: flex; order: 9; flex-basis: 100%; margin: 0 0 2px 22px; }
+    /* On the phone what Pilot does, and Pilot's job with its Retry, take a row of their own under
+       the title, the dot 4px in from the title's left edge. */
+    .line .pilots-slot { display: flex; order: 9; flex-basis: 100%; gap: 4px; margin: 0 0 2px 22px; }
     .pinned { padding: 8px 12px 0; }
     /* On the phone an option's line goes under its label, Recommended staying at the label's end
        (F98.3). */

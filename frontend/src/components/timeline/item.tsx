@@ -13,11 +13,12 @@
  * title opening what is behind it, with its attachments' indicator (F13.6) and *In the chat* after a
  * one-ask item's answer given in the chat (F42.3), and its actions under the mouse (F13.8): Open
  * (F13.3), Undo while the record offers it (F14.1) and Discuss (F13.4); a work item's is quieter,
- * its Open the session log (F13.5, F26.6), and a job's an Undo withdrew says so (F14.1). A wait open
+ * its Open the session log (F13.5, F26.6). Pilot's job on an item shows on it, its line's or its
+ * head's (job.tsx, F59.1). A wait open
  * is its own (wait.tsx, F27); done, its line has nothing behind it, no Open and no Undo, and the note
  * Pilot closed it with under its title (F27.4). On a phone the line has Undo alone among its actions,
  * and a tap on it opens what its title opens, as a view whose head carries Discuss, or, on a line
- * with nothing behind it, a menu of its actions under it (F13.9).
+ * with nothing behind it, a menu of its actions under it, its job and Discuss (F13.9).
  */
 
 import { useCallback, useState, type AnimationEvent, type MouseEvent, type ReactNode } from 'react';
@@ -37,6 +38,7 @@ import { Confirmation } from '@/components/timeline/confirmation';
 import { DocumentCard, InlineDocument } from '@/components/timeline/document';
 import { isCard } from '@/components/timeline/document-state';
 import { ItemHead } from '@/components/timeline/item-head';
+import { JobButton, JobMark, JobMenuRow } from '@/components/timeline/job';
 import { kindOf } from '@/components/timeline/kinds';
 import { PilotsButton } from '@/components/timeline/pilots';
 import { UserAvatar } from '@/components/timeline/user-avatar';
@@ -52,7 +54,7 @@ import { useArchived } from '@/hooks/use-projects';
 import { blocksOf, isProse, titleOf, type BodyPart, type PilotsWork, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
 import { cn } from '@/lib/utils';
-import { workClosedLabel } from '@/lib/utils/status-labels';
+import { jobForm } from '@/lib/utils/status-labels';
 
 interface ItemProps {
   item: TimelineItem;
@@ -207,11 +209,12 @@ function inChatOf(item: TimelineItem) {
  * The same line for every kind: its icon, its title, a link to what is behind it where something
  * is, its actions, its attachments' indicator and when it was done; under the title the person's
  * answer to a one-ask item with its note, the other person's after their avatar, and *In the chat*
- * after it, kept whole, where it was given in the chat; under a job's title that an Undo withdrew
- * it (F14.1); under a wait's the note Pilot closed it with (F27.4). A confirmation's Yes leads it
- * with a green check, its No with a red cross (F22.5). It does not expand. Its actions, Open where
+ * after it, kept whole, where it was given in the chat; under a wait's the note Pilot closed it
+ * with (F27.4). A confirmation's Yes leads it with a green check, its No with a red cross (F22.5).
+ * It does not expand. Its actions, the mark of Pilot's job on it once the job ended, Open where
  * something is behind it, Undo while the record offers it and Discuss, show while the mouse is on
- * it or the focus in it, and always where nothing hovers (timeline.css, F13.8). On a phone Open and
+ * it or the focus in it, and always where nothing hovers (timeline.css, F13.8); a job not ended
+ * stands at its end beside the time, shown always (F59.1). On a phone the job's mark, Open and
  * Discuss leave it, and a tap on it anywhere but on a control of its own opens what its title
  * opens, or a wait's menu (F13.9).
  */
@@ -227,8 +230,8 @@ const onControl = (event: MouseEvent) => (event.target as Element).closest('a, b
 
 /**
  * A phone's line with nothing behind it, a wait's: a tap on it opens the menu of its actions under
- * it, as the mockup's `lineMenu()` offers them, Discuss, never Undo, and a tap on it again or
- * anywhere else closes the menu (F13.9).
+ * it, as the mockup's `lineMenu()` offers them, Pilot's job on it where one shows and Discuss, never
+ * Undo, and a tap on it again or anywhere else closes the menu (F13.9).
  */
 function MenuLine({ item }: { item: TimelineItem }) {
   const [open, setOpen] = useState(false);
@@ -240,6 +243,7 @@ function MenuLine({ item }: { item: TimelineItem }) {
       <Line item={item} onTap={(event) => !onControl(event) && setOpen(!open)} />
       {open && (
         <div className="line-menu" role="menu" aria-label="The line’s actions" data-testid="timeline.line.menu">
+          {item.job !== null && <JobMenuRow job={item.job} onOpen={close} />}
           <button
             type="button"
             role="menuitem"
@@ -267,7 +271,8 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
   const place = inChatOf(item);
   // An item's done line is drawn only once it is done.
   const done = item.done!;
-  const closed = item.kind === 'work' ? workClosedLabel(done.cause) : null;
+  const job = item.job;
+  const ended = job !== null && jobForm(job.work) === 'ended';
   const note = item.wait?.note ?? null;
   return (
     <div className="line" onClick={onTap} data-testid="timeline.line">
@@ -282,11 +287,13 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
         </Behind>
       )}
       <span className="line-acts">
+        {!phone && ended && <JobMark job={job} />}
         {!phone && item.form !== 'wait' && <Open item={item} />}
         {done.undo && <Undo item={item} />}
         {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       </span>
       <LineAttachments item={item} />
+      {job !== null && !ended && <JobButton job={job} />}
       <Time at={done.at} format="clock" testId="timeline.line.time" />
       {(said || place) && (
         <span className="said" data-testid="timeline.line.said">
@@ -304,11 +311,6 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
             </span>
           )}
           {place && <InChatButton place={place} testId="timeline.line.in-chat" />}
-        </span>
-      )}
-      {closed !== null && (
-        <span className="said" data-testid="timeline.line.closed">
-          <span className="said-text">{closed}</span>
         </span>
       )}
       {note !== null && (

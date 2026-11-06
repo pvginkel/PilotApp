@@ -1,6 +1,7 @@
 /**
  * An open item's head (F12): its kind's icon and label, its time with the full stamp as tooltip, a
- * confirmation's auto pilot mark (F4.4) and its reason line with its tooltip (F22.1), and the
+ * confirmation's auto pilot mark (F4.4), Pilot's job on the item in whichever form it stands
+ * (job.tsx, F59.1), a confirmation's reason line with its tooltip (F22.1), and the
  * Urgent and "for <user>" chips (F10.1, F107); the mark of Pilot's question to a registered
  * document's writer, where the head is its one block's (F52.2); after them what a document's head
  * adds; at its end
@@ -17,6 +18,7 @@ import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
 import { AutopilotMark } from '@/components/timeline/autopilot-mark';
+import { JobOn } from '@/components/timeline/job';
 import { kindOf } from '@/components/timeline/kinds';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import type { Block, TimelineItem } from '@/hooks/use-timeline';
@@ -86,6 +88,12 @@ export function ItemHead({ item, because = null, mayTake = false, asked = false,
         <>
           <span className="sep">·</span>
           <AutopilotMark testId="timeline.item.autopilot-mark" />
+        </>
+      )}
+      {item.job !== null && (
+        <>
+          <span className="sep">·</span>
+          <JobOn job={item.job} />
         </>
       )}
       {why !== null && (
