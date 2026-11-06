@@ -5,11 +5,10 @@
  * first, the files of one call under their folder, then the timeline's documents and reviews
  * newest first with Open, *Unsent* or Done and their stamp, each opening in the overlay at its
  * address. The head's Documents button toggles it (F2.3). Each project's panel is its own, open or
- * closed and on which tab, kept in the browser (F1.6, F133); until it is set, it stands open on a
- * window 1200 px wide or more. On a wide window it stands beside the timeline and the overlay
- * beside it, and Esc never closes it (F98.1); below that it lies over the timeline, it and the
- * overlay the one opened last on top and the first Esc closes, and going to an item closes it
- * (F98.2); on a phone its tabs are among the tabs at the bottom (tests/projects/phone-tabs.spec.ts). The tab's lists wait on its read, the
+ * closed and on which tab, kept in the browser (F1.6, F133); until it is set, it stands open. Off a
+ * phone, on a wide window and at the narrow width alike, it stands beside the timeline and the
+ * overlay beside it, nothing over it, and Esc never closes it, nor going to an item (F98.1,
+ * F98.2); on a phone its tabs are among the tabs at the bottom (tests/projects/phone-tabs.spec.ts). The tab's lists wait on its read, the
  * timeline's and the project document's: nothing under the headings while it is on its way, the
  * project document's row "Project document" until its title is read, and "The documents did not
  * load" in the lists' place where the read fails (F113).
@@ -265,10 +264,6 @@ test.describe('The side panel on a wide window', () => {
 });
 
 test.describe('The Documents tab’s read', () => {
-  // Below 1200 px the panel starts closed: the timeline is read before the tab opens, and the
-  // project document's read, which the tab alone makes, goes out as it opens.
-  test.use({ viewport: { width: 1100, height: 800 } });
-
   test('draws nothing under its headings while it is on its way, the project document’s row named “Project document” until its title is read; then “None yet.” under each list read empty', async ({
     page,
     people,
@@ -280,6 +275,10 @@ test.describe('The Documents tab’s read', () => {
     const me = await people.signIn();
     const name = makeUnique('Pending');
     const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    // Closed, and the page opened afresh: the timeline is read before the tab opens, and the
+    // project document's read, which the tab alone makes, goes out as it opens.
+    await timeline.open(id);
+    await panel.close.click();
     await timeline.open(id);
     await expect(panel.root).toHaveCount(0);
 
@@ -315,6 +314,8 @@ test.describe('The Documents tab’s read', () => {
     const id = await projects.makeWithSession({ name, members: [me.handle!] });
     await projects.place(id, { kind: 'document', title: 'Packing', text: 'We pack light.\n' });
     await timeline.open(id);
+    await panel.close.click();
+    await timeline.open(id);
     await expect(panel.root).toHaveCount(0);
 
     // The browser's session now lacks the editor role, and the API refuses the tab's read.
@@ -338,10 +339,10 @@ test.describe('The Documents tab’s read', () => {
   });
 });
 
-test.describe('The side panel below 1200 px', () => {
+test.describe('The side panel at the narrow width', () => {
   test.use({ viewport: { width: 1100, height: 800 } });
 
-  test('starts closed and lies over the timeline; it and the overlay lie over each other, the one opened last on top, which Esc closes first; with no overlay open Esc leaves it alone', async ({
+  test('stands open from the start beside the timeline, at 901 px and 1199 px too, its head lined up with the project’s; a row opens in the overlay to its left, nothing over the panel, Esc closing the overlay and never the panel, nor going to an item', async ({
     page,
     people,
     projects,
@@ -352,96 +353,45 @@ test.describe('The side panel below 1200 px', () => {
   }) => {
     const p = await placed(people, projects);
     await timeline.open(p.id);
-    await expect(panel.root).toHaveCount(0);
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'false');
-
-    await projectHead.documentsButton.click();
     await expect(panel.root).toBeVisible();
-    const [side, feed] = await Promise.all([panel.root.boundingBox(), timeline.root.boundingBox()]);
-    expect(side!.x + side!.width).toBeCloseTo(1100, 0);
-    expect(side!.width).toBeCloseTo(420, 0);
-    expect(feed!.x + feed!.width).toBeGreaterThan(side!.x + 100);
+    const beside = async (width: number) => {
+      const [side, feed, head, panelHead] = await Promise.all(
+        [panel.root, timeline.root, projectHead.root, panel.head].map(async (locator) => (await locator.boundingBox())!),
+      );
+      expect(side.width).toBeCloseTo(420, 0);
+      expect(side.x + side.width).toBeCloseTo(width, 0);
+      expect(feed.x + feed.width).toBeLessThanOrEqual(side.x + 1);
+      expect(head.x + head.width).toBeLessThanOrEqual(side.x + 1);
+      expect(panelHead.y).toBeCloseTo(head.y, 0);
+      expect(panelHead.height).toBeCloseTo(head.height, 0);
+    };
+    await beside(1100);
     await page.keyboard.press('Escape');
     await expect(panel.root).toBeVisible();
 
-    // A row opened: the overlay on top, and Esc shows the panel again.
+    await panel.documentsTab.click();
     await panel.document(p.tent).root.click();
     await expect(overlay.title).toHaveText('The tent');
+    const [sheet, side] = await Promise.all([overlay.root.boundingBox(), panel.root.boundingBox()]);
+    expect(sheet!.x + sheet!.width).toBeCloseTo(side!.x, 0);
     expect(await isOnTop(overlay.root)).toBe(true);
-    expect(await isOnTop(panel.root)).toBe(false);
-    await page.keyboard.press('Escape');
-    await expect(overlay.root).toHaveCount(0);
-    await expect(panel.root).toBeVisible();
     expect(await isOnTop(panel.root)).toBe(true);
-
-    // The overlay open, then the panel: the panel on top, and Esc shows the overlay again.
-    await panel.document(p.tent).root.click();
-    await expect(overlay.title).toHaveText('The tent');
-    await projectHead.documentsButton.focus();
-    await page.keyboard.press('Enter');
-    await expect(panel.root).toHaveCount(0);
-    await page.keyboard.press('Enter');
-    await expect(panel.root).toBeVisible();
-    expect(await isOnTop(panel.root)).toBe(true);
-    await page.keyboard.press('Escape');
-    await expect(panel.root).toHaveCount(0);
-    await expect(overlay.title).toHaveText('The tent');
-    expect(await isOnTop(overlay.root)).toBe(true);
-
-    // The panel over the overlay, and a row opened from it: the overlay on top again.
-    await page.keyboard.press('Enter');
-    expect(await isOnTop(panel.root)).toBe(true);
+    await expect(panel.root).not.toHaveAttribute('inert');
     await panel.document(p.packing).root.click();
     await expect(overlay.title).toHaveText('Packing');
-    expect(await isOnTop(overlay.root)).toBe(true);
     await page.keyboard.press('Escape');
     await expect(overlay.root).toHaveCount(0);
     await expect(panel.root).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(panel.root).toBeVisible();
-  });
-
-  test('going to an item closes it, at the item’s address opened or gone back to', async ({ page, people, projects, projectHead, timeline, overlay, panel }) => {
-    const p = await placed(people, projects);
-    await timeline.open(p.id);
-    await projectHead.documentsButton.click();
     await expect(panel.root).toBeVisible();
 
     await timeline.openAt(p.id, p.notice);
-    await expect(panel.root).toHaveCount(0);
-
-    await projectHead.documentsButton.click();
-    await expect(panel.root).toBeVisible();
-    await panel.document(p.tent).root.click();
-    await expect(overlay.title).toHaveText('The tent');
-    await page.keyboard.press('Escape');
-    await expect(overlay.root).toHaveCount(0);
-    await expect(panel.root).toBeVisible();
-    await page.goBack();
-    await expect(page).toHaveURL(documentAddress(p.id, p.tent));
-    await expect(panel.root).toBeVisible();
-    await page.goBack();
     await expect(page).toHaveURL(addressOf(p.id, p.notice));
-    await expect(panel.root).toHaveCount(0);
-  });
-
-  test('stands open from the start on a window 1200 px wide, and closed one pixel narrower, following the window until it is set', async ({
-    page,
-    people,
-    projects,
-    timeline,
-    panel,
-  }) => {
-    const me = await people.signIn();
-    const id = await projects.makeWithSession({ name: makeUnique('Threshold'), members: [me.handle!] });
-    await page.setViewportSize({ width: 1199, height: 800 });
-    await timeline.open(id);
-    await expect(panel.root).toHaveCount(0);
-    await page.setViewportSize({ width: 1200, height: 800 });
     await expect(panel.root).toBeVisible();
-    const [side, feed] = await Promise.all([panel.root.boundingBox(), timeline.root.boundingBox()]);
-    expect(feed!.x + feed!.width).toBeLessThanOrEqual(side!.x + 1);
-    await page.setViewportSize({ width: 1199, height: 800 });
-    await expect(panel.root).toHaveCount(0);
+    for (const width of [901, 1199]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect.poll(async () => (await panel.root.boundingBox())!.x).toBeCloseTo(width - 420, 0);
+      await beside(width);
+    }
   });
 });

@@ -27,23 +27,15 @@ interface DocumentsTabProps {
   documents: { projectDocument: string | null; lists: PanelRead };
   /** The handbook is listed under the project document: a phone's, whose head has no button for it. */
   handbook: boolean;
-  /** A row was opened in the overlay. */
-  onOpen: () => void;
 }
 
-export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists }, handbook, onOpen }: DocumentsTabProps) {
+export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists }, handbook }: DocumentsTabProps) {
   return (
     <div className="docs" data-testid="panel.documents">
       {!draft && (
         <ul>
           <li>
-            <Link
-              to="/projects/$projectId/project-document"
-              params={{ projectId }}
-              className="doc-row"
-              onClick={onOpen}
-              data-testid="panel.project-document"
-            >
+            <Link to="/projects/$projectId/project-document" params={{ projectId }} className="doc-row" data-testid="panel.project-document">
               <Row icon={<FileText className="icon" aria-hidden="true" />} title={projectDocument ?? 'Project document'}>
                 Project document
               </Row>
@@ -51,7 +43,7 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
           </li>
           {handbook && (
             <li>
-              <HandbookRow projectId={projectId} onOpen={onOpen} />
+              <HandbookRow projectId={projectId} />
             </li>
           )}
         </ul>
@@ -63,9 +55,9 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
       ) : (
         <>
           <h3>Attachments</h3>
-          {lists !== 'pending' && <Attachments projectId={projectId} draft={draft} batches={lists.batches} onOpen={onOpen} />}
+          {lists !== 'pending' && <Attachments projectId={projectId} draft={draft} batches={lists.batches} />}
           {!draft && <h3>In the timeline</h3>}
-          {!draft && lists !== 'pending' && <TimelineDocuments projectId={projectId} documents={lists.documents} onOpen={onOpen} />}
+          {!draft && lists !== 'pending' && <TimelineDocuments projectId={projectId} documents={lists.documents} />}
         </>
       )}
     </div>
@@ -73,10 +65,10 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
 }
 
 /** The handbook, opening at its address as the project document does. */
-function HandbookRow({ projectId, onOpen }: { projectId: string; onOpen: () => void }) {
+function HandbookRow({ projectId }: { projectId: string }) {
   const { data } = useGetProjectsHandbookByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
   return (
-    <Link to="/projects/$projectId/handbook" params={{ projectId }} className="doc-row" onClick={onOpen} data-testid="panel.handbook">
+    <Link to="/projects/$projectId/handbook" params={{ projectId }} className="doc-row" data-testid="panel.handbook">
       <Row icon={<NotebookText className="icon" aria-hidden="true" />} title={data?.title ?? 'Handbook'}>
         Handbook
       </Row>
@@ -88,10 +80,9 @@ interface AttachmentsProps {
   projectId: string;
   draft: boolean;
   batches: Batch[];
-  onOpen: () => void;
 }
 
-function Attachments({ projectId, draft, batches, onOpen }: AttachmentsProps) {
+function Attachments({ projectId, draft, batches }: AttachmentsProps) {
   if (batches.length === 0) {
     return (
       <p className="none" data-testid="panel.attachments.none">
@@ -106,19 +97,19 @@ function Attachments({ projectId, draft, batches, onOpen }: AttachmentsProps) {
       {batches.map((batch) =>
         batch.attachments.length === 1 ? (
           <li key={batch.batch}>
-            <AttachmentRow projectId={projectId} item={batch.item} attachment={batch.attachments[0]} onOpen={onOpen}>
+            <AttachmentRow projectId={projectId} item={batch.item} attachment={batch.attachments[0]}>
               <Hung item={batch.item} at={batch.attachments[0].copied_at} />
             </AttachmentRow>
           </li>
         ) : (
-          <BatchRows key={batch.batch} projectId={projectId} batch={batch} onOpen={onOpen} />
+          <BatchRows key={batch.batch} projectId={projectId} batch={batch} />
         ),
       )}
     </ul>
   );
 }
 
-function TimelineDocuments({ projectId, documents, onOpen }: { projectId: string; documents: TimelineItem[]; onOpen: () => void }) {
+function TimelineDocuments({ projectId, documents }: { projectId: string; documents: TimelineItem[] }) {
   if (documents.length === 0) {
     return (
       <p className="none" data-testid="panel.timeline-documents.none">
@@ -130,7 +121,7 @@ function TimelineDocuments({ projectId, documents, onOpen }: { projectId: string
     <ul data-testid="panel.timeline-documents">
       {documents.map((item) => (
         <li key={item.id}>
-          <DocumentRow projectId={projectId} item={item} onOpen={onOpen} />
+          <DocumentRow projectId={projectId} item={item} />
         </li>
       ))}
     </ul>
@@ -168,19 +159,18 @@ interface AttachmentRowProps {
   projectId: string;
   item: TimelineItem | null;
   attachment: Attachment;
-  onOpen: () => void;
   /** The line under its title. */
   children: ReactNode;
 }
 
 /** An attachment, opening at its address under its item's (F28.5), or under its project's where it hangs on none. */
-function AttachmentRow({ projectId, item, attachment, onOpen, children }: AttachmentRowProps) {
+function AttachmentRow({ projectId, item, attachment, children }: AttachmentRowProps) {
   const row = (
     <Row icon={<Paperclip className="icon" aria-hidden="true" />} title={attachment.title}>
       {children}
     </Row>
   );
-  const props = { className: 'doc-row', onClick: onOpen, 'data-testid': 'panel.attachment', 'data-attachment-id': attachment.id };
+  const props = { className: 'doc-row', 'data-testid': 'panel.attachment', 'data-attachment-id': attachment.id };
   return item === null ? (
     <Link to="/projects/$projectId/attachments/$attachmentId" params={{ projectId, attachmentId: attachment.id }} {...props}>
       {row}
@@ -193,7 +183,7 @@ function AttachmentRow({ projectId, item, attachment, onOpen, children }: Attach
 }
 
 /** Files attached in one call: their folder, with their item and stamp, and each file under it by its title and file name. */
-function BatchRows({ projectId, batch, onOpen }: { projectId: string; batch: Batch; onOpen: () => void }) {
+function BatchRows({ projectId, batch }: { projectId: string; batch: Batch }) {
   const { item, attachments } = batch;
   return (
     <li className="doc-batch" data-testid="panel.batch" data-batch={batch.batch}>
@@ -205,7 +195,7 @@ function BatchRows({ projectId, batch, onOpen }: { projectId: string; batch: Bat
       <ul>
         {attachments.map((attachment) => (
           <li key={attachment.id}>
-            <AttachmentRow projectId={projectId} item={item} attachment={attachment} onOpen={onOpen}>
+            <AttachmentRow projectId={projectId} item={item} attachment={attachment}>
               {attachment.filename}
             </AttachmentRow>
           </li>
@@ -237,7 +227,7 @@ function folderOf(attachments: Attachment[]): string | null {
 const STATES = { open: 'Open', unsent: 'Unsent', done: 'Done' } as const;
 
 /** A document or review of the timeline, opening at the document's address (F97). */
-function DocumentRow({ projectId, item, onOpen }: { projectId: string; item: TimelineItem; onOpen: () => void }) {
+function DocumentRow({ projectId, item }: { projectId: string; item: TimelineItem }) {
   const state = item.done !== null ? 'done' : isUnsent(item) ? 'unsent' : 'open';
   const Icon = item.kind === 'review' ? BookOpen : FileText;
   return (
@@ -245,7 +235,6 @@ function DocumentRow({ projectId, item, onOpen }: { projectId: string; item: Tim
       to="/projects/$projectId/documents/$documentId"
       params={{ projectId, documentId: item.id }}
       className="doc-row"
-      onClick={onOpen}
       data-testid="panel.document"
       data-item-id={item.id}
       data-state={state}

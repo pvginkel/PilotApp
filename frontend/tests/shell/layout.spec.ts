@@ -1,6 +1,9 @@
 /**
  * The frame every screen sits in. Off a phone the top bar over the side column, which stands
- * beside the centre. On a phone (F98.3, F111) no top bar: a project's head is the page's top, the
+ * beside the centre; at the narrow width, above 900 px and below 1200 px (F98.2, F111), the side
+ * column is the phone's drawer, opened from the top bar's toggle, its first part, and lying under
+ * the top bar over the centre, behind its scrim, with no head of its own; switching projects closes
+ * it. On a phone (F98.3, F111) no top bar: a project's head is the page's top, the
  * drawer's button its first part, and a screen with no head has the button alone where a head's
  * stands; the drawer lies over the head and opens on the top bar's block of colour, its avatar
  * opening the profile menu; it stands on the project list's tint with no rule at its edge, and the
@@ -95,6 +98,90 @@ test.describe('The frame off a phone', () => {
 
     // The scale a pixel down off a phone: base is 15px.
     await expectListHead(projectList.head, '15px');
+  });
+});
+
+test.describe('The frame at the narrow width', () => {
+  test.use({ viewport: { width: 1100, height: 800 } });
+
+  test('stands the top bar over the centre, the drawer’s toggle its first part in the bar’s white; the drawer opens from it under the top bar, with no head, behind its scrim, which closes it; at 1200 px the side column stands again', async ({
+    page,
+    people,
+    shell,
+  }) => {
+    await people.signIn();
+    // At a stable address: the bare address moves on to a project, which closes the drawer.
+    await shell.open('/profile');
+
+    await expect(shell.topBar).toBeVisible();
+    await expect(shell.side).toBeHidden();
+    await expect(shell.scrim).toBeHidden();
+    await expect(shell.drawerHead).toHaveCount(0);
+    await expect(shell.drawerToggle).toHaveCount(1);
+    await expect(shell.topBar.getByTestId('shell.drawer-toggle')).toBeVisible();
+    await expect(shell.drawerToggle).toHaveAccessibleName('Projects');
+    await expect(shell.drawerToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(shell.drawerToggle).toHaveCSS('color', 'rgb(255, 255, 255)');
+    const first = await shell.topBar.evaluate((bar) => bar.querySelector('button, a[href], input, select, [tabindex]')?.getAttribute('data-testid'));
+    expect(first).toBe('shell.drawer-toggle');
+    const [top, toggle, brand, centre] = await Promise.all(
+      [shell.topBar, shell.drawerToggle, shell.brand, shell.centre].map(async (locator) => (await locator.boundingBox())!),
+    );
+    expect(toggle.width).toBe(36);
+    expect(toggle.x + 8).toBeCloseTo(20, 0);
+    expect(toggle.x + toggle.width).toBeLessThanOrEqual(brand.x);
+    expect(centre).toMatchObject({ x: 0, y: top.y + top.height, width: 1100 });
+
+    await shell.drawerToggle.click();
+    await expect(shell.drawerToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect.poll(async () => (await shell.side.boundingBox())?.x).toBe(0);
+    expect(await shell.side.boundingBox()).toMatchObject({ y: top.y + top.height, width: 300 });
+    await expect(shell.side).toHaveCSS('background-color', await colourOf(page, 'hsl(var(--side))'));
+    await expect(shell.side).toHaveCSS('border-right-width', '0px');
+    await expect(shell.scrim).toBeVisible();
+    await expect(shell.scrim).toHaveCSS('opacity', '1');
+    // The top bar lies over the drawer: its toggle takes the press that closes it.
+    expect(await shell.drawerToggle.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+    })).toBe(true);
+    await shell.drawerToggle.click();
+    await expect(shell.side).toBeHidden();
+
+    await shell.drawerToggle.click();
+    await expect(shell.side).toBeInViewport();
+    await shell.scrim.click({ position: { x: 600, y: 300 } });
+    await expect(shell.side).toBeHidden();
+    await expect(shell.scrim).toBeHidden();
+    await expect(shell.drawerToggle).toHaveAttribute('aria-expanded', 'false');
+
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await expect(shell.drawerToggle).toHaveCount(0);
+    await expect(shell.scrim).toHaveCount(0);
+    await expect(shell.side).toBeVisible();
+    expect((await shell.side.boundingBox())!.width).toBe(264);
+    await page.setViewportSize({ width: 901, height: 800 });
+    await expect(shell.drawerToggle).toBeVisible();
+    await expect(shell.side).toBeHidden();
+  });
+
+  test('switching projects from the drawer closes it, and Back finds it closed', async ({ page, people, projects, projectList, shell }) => {
+    const me = await people.signIn();
+    const aId = await projects.make({ name: makeUnique('A'), members: [me.handle!] });
+    const b = makeUnique('B');
+    const bId = await projects.make({ name: b, members: [me.handle!] });
+    await projectList.open(aId);
+
+    await shell.drawerToggle.click();
+    await expect(shell.side).toBeVisible();
+    await projectList.tab(b).click();
+    await expect(page).toHaveURL(`/projects/${bId}`);
+    await expect(shell.side).toBeHidden();
+    await expect(shell.scrim).toBeHidden();
+
+    await page.goBack();
+    await expect(page).toHaveURL(`/projects/${aId}`);
+    await expect(shell.side).toBeHidden();
   });
 });
 

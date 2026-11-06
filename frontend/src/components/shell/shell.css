@@ -95,6 +95,8 @@
 
   .head-drawer { --h: 36px; flex: none; align-self: center; margin: 0 -4px 0 0; }
   .head-drawer .icon { width: 20px; height: 20px; }
+  /* At the narrow width, the top bar's first part: its icon on the bar's padding, in its white. */
+  .topbar .head-drawer, .topbar .head-drawer:hover:not(:disabled) { margin-left: -8px; color: inherit; }
   .drawer-bar { flex: none; display: flex; align-items: center; height: var(--head); padding: 0 12px 0 8px; }
 
   /* ---- The profile menu ----------------------------------------------------------------- */
@@ -142,7 +144,7 @@
   }
 
   /* Not positioned on a wide window: the overlay in it lies over the side column too, placed on
-     .app. */
+     .app. With a drawer it is (below), and the overlay is placed on it. */
   .centre { grid-area: 1 / 2 / 3 / 3; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
   /* ---- The gold bar on a phone, across the page's top: a line per condition that holds all
@@ -194,10 +196,11 @@
   dl.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: var(--text-base); }
   dl.keys dd { margin: 0; color: hsl(var(--muted-foreground)); }
 
-  /* ---- The drawer, where the frame gives the app one (data-drawer): the side column over the
-     centre, on the project list's tint with no rule at its edge, and behind it a scrim that
-     darkens the page as it comes in, its opacity the share of its way the drawer has come; under
-     reduced motion it comes and goes at once. The centre's overlay lies over the centre alone. -- */
+  /* ---- The drawer, where the frame gives the app one (data-drawer), on a phone and at the narrow
+     width: the side column over the centre, on the project list's tint with no rule at its edge,
+     and behind it a scrim that darkens the page as it comes in, its opacity the share of its way
+     the drawer has come; under reduced motion it comes and goes at once. The centre's overlay
+     lies over the centre alone. ---------------------------------------------------------------- */
 
   .app[data-drawer] { grid-template-columns: minmax(0, 1fr); transition: --drawer 160ms ease-out; }
   .app[data-drawer="open"] { --drawer: 1; }

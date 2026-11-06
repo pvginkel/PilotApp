@@ -1,7 +1,7 @@
 /**
- * The drawer's button (F98.3): the first part of a screen's head, or, on a screen with no head,
- * alone at the top-left, where a head's stands. Off a phone the frame gives no drawer, and there
- * is no button.
+ * The drawer's button (F98.3): on a phone the first part of a screen's head, or, on a screen with
+ * no head, alone at the top-left, where a head's stands. Off a phone no screen draws it: at the
+ * narrow width it is the top bar's (F98.2, `top-bar.tsx`), and a wide window has no drawer.
  */
 
 import { createContext, useCallback, useContext, useLayoutEffect, useState, type ReactNode } from 'react';
@@ -28,7 +28,7 @@ export function DrawerProvider({ drawer, children }: { drawer: Drawer; children:
       <ClaimContext.Provider value={claim}>
         {heads === 0 && (
           <div className="drawer-bar">
-            <Toggle drawer={drawer} />
+            <DrawerToggle drawer={drawer} />
           </div>
         )}
         {children}
@@ -43,10 +43,10 @@ export function DrawerButton() {
   const claim = useContext(ClaimContext);
   // Before the paint, so that the button never stands twice.
   useLayoutEffect(() => claim?.(), [claim]);
-  return drawer && <Toggle drawer={drawer} />;
+  return drawer && <DrawerToggle drawer={drawer} />;
 }
 
-function Toggle({ drawer }: { drawer: Drawer }) {
+export function DrawerToggle({ drawer }: { drawer: Drawer }) {
   return (
     <button
       type="button"

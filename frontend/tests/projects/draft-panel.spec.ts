@@ -12,8 +12,8 @@
  * there: Discuss quotes the ask into its composer (F39.1), an ask answered in it shows *In the chat*
  * going to the message (F42.3), and the answer's effect line, as a quote's chip, goes back to the ask
  * in the Draft tab (F41, F39.3). The Documents tab lists what Pilot attached so far, hung on nothing
- * (F36.6), each opening in the overlay. Below a wide window the panel lies over the definition chat,
- * and Discuss on an ask closes it.
+ * (F36.6), each opening in the overlay. At the narrow width the panel stands beside the definition
+ * chat as on a wide window, and Discuss on an ask leaves it open.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -386,10 +386,10 @@ test.describe('A draft’s Documents tab', () => {
   });
 });
 
-test.describe('A draft’s panel below a wide window', () => {
+test.describe('A draft’s panel at the narrow width', () => {
   test.use({ viewport: { width: 1000, height: 700 } });
 
-  test('stands closed until the head’s toggle opens it over the definition chat; Discuss on an ask closes it, the quote in the composer', async ({
+  test('stands open from the start beside the definition chat, on its Draft tab; Discuss on an ask leaves it open, the quote in the composer', async ({
     people,
     projects,
     projectHead,
@@ -402,14 +402,15 @@ test.describe('A draft’s panel below a wide window', () => {
     await projects.saveProjectDocument(id, 'draft', draftText(title, SLEEP));
     await projects.endTurn(id);
     await projectHead.open(id);
-    await expect(panel.root).toHaveCount(0);
-
-    await projectHead.draftPanelButton.click();
     await expect(panel.draftTab).toHaveAttribute('aria-selected', 'true');
+    const [side, chat] = await Promise.all([panel.root.boundingBox(), definitionChat.root.boundingBox()]);
+    expect(side!.x + side!.width).toBeCloseTo(1000, 0);
+    expect(chat!.x + chat!.width).toBeLessThanOrEqual(side!.x + 1);
     expect(await isOnTop(panel.draft.root)).toBe(true);
 
     await panel.draftBlock('D1').discuss.click();
-    await expect(panel.root).toHaveCount(0);
+    await expect(panel.root).toBeVisible();
+    await expect(panel.draftTab).toHaveAttribute('aria-selected', 'true');
     await expect(definitionChat.quote).toHaveAttribute('data-quote', 'block project.md/D1');
     await expect(definitionChat.field).toBeFocused();
   });

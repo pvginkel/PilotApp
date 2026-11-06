@@ -241,11 +241,10 @@ test.describe('Discuss', () => {
   });
 });
 
-test.describe('Discuss below a wide window', () => {
+test.describe('Discuss at the narrow width', () => {
   test.use({ viewport: { width: 1100, height: 800 } });
 
-  test('in an overlay puts the panel over it, the focus in the field', async ({
-    page,
+  test('in an overlay shows the Chat tab beside it, the overlay still open and nothing over either, the focus in the field', async ({
     people,
     projects,
     overlay,
@@ -256,14 +255,16 @@ test.describe('Discuss below a wide window', () => {
     const project = await projects.makeWithSession({ name: makeUnique('Narrow'), members: [me.handle!] });
     const packing = await projects.place(project, { kind: 'document', title: 'Packing', text: PACKING });
     await overlay.open(project, packing);
-    await expect(panel.root).toHaveCount(0);
+    await panel.documentsTab.click();
 
     await overlay.discuss.click();
-    await expect(page.locator('.project')).toHaveAttribute('data-front', 'panel');
+    await expect(chat.tab).toHaveAttribute('aria-selected', 'true');
     await expect(panel.root).not.toHaveAttribute('inert');
     await expect(chat.quoteLabel).toHaveText('Packing');
     await expect(chat.field).toBeFocused();
     await expect(overlay.root).toBeVisible();
+    const [sheet, side] = await Promise.all([overlay.root.boundingBox(), panel.root.boundingBox()]);
+    expect(sheet!.x + sheet!.width).toBeCloseTo(side!.x, 0);
   });
 });
 

@@ -314,15 +314,10 @@ test.describe('The Chat tab’s closed chats', () => {
 });
 
 test.describe('The Chat tab’s read', () => {
-  // Below 1200 px the panel starts closed: the project and its chats, which the head's Discuss
-  // reads for its dot, are read before the tab opens.
-  test.use({ viewport: { width: 1100, height: 800 } });
-
   test('draws nothing while it is on its way, then says what to ask where the project has no chat', async ({
     page,
     people,
     projects,
-    projectHead,
     projectList,
     timeline,
     chat,
@@ -333,7 +328,6 @@ test.describe('The Chat tab’s read', () => {
     const other = await projects.make({ name: makeUnique('Elsewhere'), members: [me.handle!] });
     // The panel left open on the Chat tab, the project opens with it: the list's first read is the tab's.
     await timeline.open(project);
-    await projectHead.discussButton.click();
     await expect(chat.root).toBeVisible();
     await timeline.open(other);
 
@@ -355,8 +349,8 @@ test.describe('The Chat tab’s read', () => {
     page,
     people,
     projects,
-    projectHead,
     timeline,
+    panel,
     controller,
     chat,
     chats,
@@ -369,8 +363,12 @@ test.describe('The Chat tab’s read', () => {
     await controller.finish(chats.store, session, 'success', 'It is packed.');
     // Seen to its end: the tab marks nothing while the list's reads fail.
     await chats.seen(project);
+    // Left on the Documents tab, and the page opened afresh: the project and its chats, which the
+    // head's Discuss reads for its dot, are read before the tab opens.
     await timeline.open(project);
-    await projectHead.documentsButton.click();
+    await panel.documentsTab.click();
+    await timeline.open(project);
+    await expect(chat.root).toHaveCount(0);
 
     // The browser's session now lacks the editor role, and the API refuses the list's next read.
     await expectConsoleError(page, /403/);

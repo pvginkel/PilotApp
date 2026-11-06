@@ -15,11 +15,10 @@
  * top, with what it quotes in the composer (F39), and *In the chat* on a block answered in the chat
  * opens it there at the message that gave the answer (F42.3). A draft's panel has the Draft and
  * Documents tabs (F46.3), its chat standing in the timeline's place: there Discuss and *In the chat*
- * take the definition chat, closing an overlay over it and, below a wide window, the panel. An
- * ask of the draft gone to from its chat opens the Draft tab at it, and past Create the project
- * document. While an overlay is open, the timeline under its backdrop takes no focus, nor the panel
- * where the overlay lies over it; the head's buttons do, the Documents button being how the panel
- * opens over the overlay below a wide window (F98.2). On a phone the screen is its own
+ * take the definition chat, closing an overlay over it. An ask of the draft gone to from its chat
+ * opens the Draft tab at it, and past Create the project document. While an overlay is open, the
+ * timeline under its backdrop takes no focus; the head's buttons and the panel beside it do, at the
+ * narrow width as on a wide window (F98.2). On a phone the screen is its own
  * (`PhoneProject`), its tabs at the bottom standing for the panel, whose state it leaves alone, and
  * what the address opens in the overlay a view pushed over them (F98.4): there an item's address,
  * and a block's whose item is read and no card, opens the item alone (F99) rather than the timeline
@@ -43,7 +42,7 @@ import { Timeline } from '@/components/timeline/timeline';
 import { discussIn, DiscussContext } from '@/hooks/use-discuss';
 import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
-import { usePanel, useWideWindow } from '@/hooks/use-panel';
+import { usePanel } from '@/hooks/use-panel';
 import { usePhone } from '@/hooks/use-phone';
 import { useProjectHead, type ProjectHead as ProjectHeadOf } from '@/hooks/use-projects';
 import { useTimelineItem, type TimelineItem } from '@/hooks/use-timeline';
@@ -80,7 +79,6 @@ function Project() {
     overlaid !== null || attached !== null || loose !== null || alone !== null || handbook || projectDocument || sessionId !== undefined
       ? pathname
       : null;
-  const toItem = itemId === undefined || attached !== null ? null : `${itemId}/${blockId ?? ''}`;
   const overlays = (
     <>
       {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
@@ -97,7 +95,7 @@ function Project() {
       {overlays}
     </PhoneProject>
   ) : (
-    <DeskProject projectId={projectId} project={data} overlay={overlay} goneTo={goneTo} toItem={toItem}>
+    <DeskProject projectId={projectId} project={data} overlay={overlay} goneTo={goneTo}>
       {overlays}
     </DeskProject>
   );
@@ -109,22 +107,18 @@ interface DeskProjectProps {
   /** What the overlay shows, by its address, or none. */
   overlay: string | null;
   goneTo: { item: string; block: string | null } | null;
-  /** The item, or its block, the address goes to, by its ids, or none. */
-  toItem: string | null;
   /** The overlays the address opens. */
   children: ReactNode;
 }
 
 /** Off a phone: the head over the timeline, or a draft's definition chat, and the side panel beside them. */
-function DeskProject({ projectId, project: data, overlay, goneTo, toItem, children }: DeskProjectProps) {
+function DeskProject({ projectId, project: data, overlay, goneTo, children }: DeskProjectProps) {
   const draft = data?.state === 'draft';
-  const { panel, front, covered, show, close, toggle, overlayOnTop } = usePanel(projectId, draft, overlay, toItem);
-  const wide = useWideWindow();
+  const { panel, show, close, toggle } = usePanel(projectId, draft);
   const navigate = useNavigate();
-  // A draft's chat stands in the timeline's place, under the overlay and, below a wide window, the panel.
+  // A draft's chat stands in the timeline's place, under the overlay.
   const toDefinitionChat = () => {
     if (overlay !== null) void navigate({ to: '/projects/$projectId', params: { projectId } });
-    if (!wide) close();
   };
   const discuss = (quote: QuoteRef | null) => {
     discussIn(projectId, quote);
@@ -152,7 +146,7 @@ function DeskProject({ projectId, project: data, overlay, goneTo, toItem, childr
     <DiscussContext.Provider value={discuss}>
       <InChatContext.Provider value={inChat}>
         <DraftBlockContext.Provider value={toDraftBlock}>
-          <div className="project" data-panel={panelShown ? 'open' : 'closed'} data-front={front}>
+          <div className="project" data-panel={panelShown ? 'open' : 'closed'}>
             <div className="project-main">
               {data && (
                 <ProjectHead
@@ -187,8 +181,6 @@ function DeskProject({ projectId, project: data, overlay, goneTo, toItem, childr
                 head={head}
                 onTab={show}
                 onClose={close}
-                onOpen={overlayOnTop}
-                covered={covered}
               />
             )}
             {children}

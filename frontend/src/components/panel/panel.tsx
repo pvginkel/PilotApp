@@ -1,11 +1,11 @@
 /**
  * The side panel (F38.1), its shell: the tab strip, Chat first with the unread dot (F43), then
  * Documents with its count (F37.3), and the close cross; a draft's, Draft in Chat's place (F46.3).
- * On a wide window it stands beside the timeline, its head as tall as the project's head and its
- * tab's text on the project name's baseline, in whatever font (F98.1); below one it lies over the
- * timeline, with a head of its own height (F98.2). On a phone its tab stands alone between the
- * project's head and the tabs at the bottom, which carry the names, the dot and the count, and its
- * Documents tab lists the handbook, which the phone's head has no button for (F98.3, F129.4).
+ * Off a phone, wide or narrow, it stands beside the timeline, its head as tall as the project's
+ * head and its tab's text on the project name's baseline, in whatever font (F98.1, F98.2). On a
+ * phone its tab stands alone between the project's head and the tabs at the bottom, which carry the
+ * names, the dot and the count, and its Documents tab lists the handbook, which the phone's head
+ * has no button for (F98.3, F129.4).
  */
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
@@ -14,7 +14,7 @@ import { ProjectChat } from '@/components/chat/project-chat';
 import { DocumentsTab } from '@/components/panel/documents-tab';
 import { DraftTab } from '@/components/panel/draft-tab';
 import { useChatDot } from '@/hooks/use-chats';
-import { usePanelDocuments, useWideWindow, type PanelDocuments } from '@/hooks/use-panel';
+import { usePanelDocuments, type PanelDocuments } from '@/hooks/use-panel';
 import type { components } from '@/lib/api/generated/types';
 import type { PanelTab } from '@/lib/browser-state';
 import { cn } from '@/lib/utils';
@@ -28,21 +28,17 @@ interface PanelProps {
   /** The project's members, as its head reads them. */
   members: readonly Member[];
   tab: PanelTab;
-  /** The project's head, once drawn, which a wide window's panel head lines up with. */
+  /** The project's head, once drawn, which the panel's head lines up with. */
   head: HTMLElement | null;
   onTab: (tab: PanelTab) => void;
   onClose: () => void;
-  /** A row was opened in the overlay. */
-  onOpen: () => void;
-  /** It lies under the overlay and its backdrop: it takes no focus. */
-  covered: boolean;
 }
 
-export function Panel({ projectId, draft, members, tab, head, onTab, onClose, onOpen, covered }: PanelProps) {
+export function Panel({ projectId, draft, members, tab, head, onTab, onClose }: PanelProps) {
   const documents = usePanelDocuments(projectId);
-  const panelHead = useAlignedHead(head, useWideWindow());
+  const panelHead = useAlignedHead(head);
   return (
-    <aside className="panel" aria-label={labelOf(draft)} inert={covered} data-testid="panel">
+    <aside className="panel" aria-label={labelOf(draft)} data-testid="panel">
       <div ref={panelHead} className="panel-head" role="tablist" data-testid="panel.head">
         {draft ? (
           <button
@@ -85,46 +81,35 @@ export function Panel({ projectId, draft, members, tab, head, onTab, onClose, on
           <X className="icon" aria-hidden="true" />
         </button>
       </div>
-      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} handbook={false} onOpen={onOpen} covered={covered} />
+      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} handbook={false} covered={false} />
     </aside>
   );
 }
 
-type PhonePanelProps = Pick<PanelProps, 'projectId' | 'draft' | 'members' | 'tab' | 'covered'> & {
+type PhonePanelProps = Pick<PanelProps, 'projectId' | 'draft' | 'members' | 'tab'> & {
   /** The Documents tab's lists, which the tabs at the bottom read for its count. */
   documents: PanelDocuments;
+  /** A view lies over it: it takes no focus. */
+  covered: boolean;
 };
-
-/** On a phone what a row opens is a view pushed over the tab. */
-const overlayOnTop = () => undefined;
 
 /** The panel on a phone: its tab alone, with no head (F98.3). */
 export function PhonePanel({ projectId, draft, members, tab, documents, covered }: PhonePanelProps) {
   return (
     <aside className="panel" aria-label={labelOf(draft)} inert={covered} data-testid="panel">
-      <PanelBody
-        projectId={projectId}
-        draft={draft}
-        members={members}
-        tab={tab}
-        documents={documents}
-        handbook
-        onOpen={overlayOnTop}
-        covered={covered}
-      />
+      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} handbook covered={covered} />
     </aside>
   );
 }
 
 const labelOf = (draft: boolean) => (draft ? 'The draft and its documents' : 'The project’s chat and documents');
 
-type PanelBodyProps = Omit<PanelProps, 'head' | 'onTab' | 'onClose'> & {
-  documents: PanelDocuments;
+type PanelBodyProps = PhonePanelProps & {
   /** The Documents tab lists the handbook. */
   handbook: boolean;
 };
 
-function PanelBody({ projectId, draft, members, tab, documents, handbook, onOpen, covered }: PanelBodyProps) {
+function PanelBody({ projectId, draft, members, tab, documents, handbook, covered }: PanelBodyProps) {
   return (
     <div className={cn('panel-body', tab === 'chat' && 'chat')} role="tabpanel" data-testid="panel.body">
       {tab === 'chat' ? (
@@ -132,7 +117,7 @@ function PanelBody({ projectId, draft, members, tab, documents, handbook, onOpen
       ) : tab === 'draft' ? (
         <DraftTab projectId={projectId} />
       ) : (
-        <DocumentsTab projectId={projectId} draft={draft} documents={documents} handbook={handbook} onOpen={onOpen} />
+        <DocumentsTab projectId={projectId} draft={draft} documents={documents} handbook={handbook} />
       )}
     </div>
   );
@@ -156,8 +141,8 @@ function ChatTab({ projectId, on, onTab }: { projectId: string; on: boolean; onT
   );
 }
 
-/** The panel's head, lined up with the project's on a wide window: its height, and its tab's baseline on the name's. */
-function useAlignedHead(head: HTMLElement | null, wide: boolean): RefObject<HTMLDivElement | null> {
+/** The panel's head, lined up with the project's: its height, and its tab's baseline on the name's. */
+function useAlignedHead(head: HTMLElement | null): RefObject<HTMLDivElement | null> {
   const panelHead = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const own = panelHead.current!;
@@ -165,7 +150,7 @@ function useAlignedHead(head: HTMLElement | null, wide: boolean): RefObject<HTML
       own.style.height = '';
       own.style.removeProperty('--tab-top');
     };
-    if (!wide || head === null) {
+    if (head === null) {
       reset();
       return undefined;
     }
@@ -184,7 +169,7 @@ function useAlignedHead(head: HTMLElement | null, wide: boolean): RefObject<HTML
       observer.disconnect();
       reset();
     };
-  }, [head, wide]);
+  }, [head]);
   return panelHead;
 }
 
