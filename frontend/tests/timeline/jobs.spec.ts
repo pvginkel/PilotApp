@@ -1,7 +1,8 @@
 /**
  * Pilot's jobs on the items they follow from (F59.1): no line of its own but the setup's; while it
  * is queued or runs, its button at the end of the item's line beside the time, the pulsing dot,
- * Pilot's mark and its title, shown always and adding no height; once ended, Pilot's mark among the
+ * Pilot's mark and its title, shown always and adding no height, a work item's quiet line's
+ * included, the job after its run's turn; once ended, Pilot's mark among the
  * line's actions, first, under the mouse; failed or stopped, the button in the destructive colour
  * saying so, with Retry beside it, whose job then stands in its place. An open card carries it in
  * its head after the time. Each opens the job's session log, which still opens at its address
@@ -161,6 +162,45 @@ test.describe('Pilot’s job on a line', () => {
     await expect(timeline.item(failedId).root).toHaveCount(0);
     await expect(timeline.item(retryId).root).toHaveCount(0);
     expect((await projects.work(project, failedId)).retried?.id).toBe(retryId);
+  });
+});
+
+test.describe('Pilot’s job on a work item’s quiet line', () => {
+  test('after the run’s turn stands on its line, adding no height to it, running or ended', async ({
+    page,
+    people,
+    projects,
+    chats,
+    controller,
+    timeline,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Quiet job'), members: [me.handle!] });
+    const started = await chats.opening(project);
+    const work = await projects.startWork(project, { title: 'Surveying the camp', brief: 'Survey the camp.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    const { id: environment } = await projects.environment(project, work);
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(work);
+
+    await controller.finish(environment, 'claude-1');
+    const session = await started();
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    await expect(item.root).toHaveClass(/\bquiet\b/);
+    await expect(item.job.root).toHaveAttribute('data-form', 'running');
+    await expect(item.job.root).toHaveText(NEXT);
+    await away(page);
+    const running = await box(item.line);
+
+    await controller.finish(chats.store, session, 'success', 'Nothing is next.');
+    await expect(item.job.root).toHaveAttribute('data-form', 'ended');
+    await away(page);
+    expect((await box(item.line)).height).toBe(running.height);
+    await item.line.hover();
+    await expect(item.job.root).toBeVisible();
+    expect((await box(item.line)).height).toBe(running.height);
   });
 });
 

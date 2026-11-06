@@ -14,9 +14,8 @@
  * one-ask item's answer given in the chat (F42.3), and its actions under the mouse (F13.8): Open
  * (F13.3), Undo while the record offers it (F14.1) and Discuss (F13.4); a work item's is quieter,
  * its Open the session log (F13.5, F26.6). Pilot's job on an item shows on it, its line's or its
- * head's (job.tsx, F59.1). A wait open
- * is its own (wait.tsx, F27); done, its line has nothing behind it, no Open and no Undo, and the note
- * Pilot closed it with under its title (F27.4). On a phone the line has Undo alone among its actions,
+ * head's (job.tsx, F59.1). A wait open is its own (wait.tsx, F27); done, its line has nothing behind
+ * it, no Open and no Undo, and the note Pilot closed it with under its title (F27.4). On a phone the line has Undo alone among its actions,
  * and a tap on it opens what its title opens, as a view whose head carries Discuss, or, on a line
  * with nothing behind it, a menu of its actions under it, its job and Discuss (F13.9).
  */

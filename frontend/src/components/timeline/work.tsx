@@ -15,9 +15,8 @@
  * question; Resume, in that row once it stopped or failed, carries it on (F67), disabled while the
  * project is archived, as its head's switch is (D012). Pilot's own work, the setup, the one job
  * drawn here (every other shows on the item it follows from, job.tsx), has no env chip and no Stop
- * or Resume (F26.3, F59.1), and Retry where Resume is once
- * it stopped or failed: a fresh job for the same trigger at the project's next place, disabled
- * while the project is archived. Retried, its line says so under its stop or its failure, and
+ * or Resume (F26.3, F59.1), and Retry where Resume is once it stopped or failed: a fresh job for
+ * the same trigger at the project's next place, disabled while the project is archived. Retried, its line says so under its stop or its failure, and
  * offers Retry no more. The row leads with the progress button once its run published its steps,
  * the plan's donut and the first step in progress, opening their list (F145.2, F145.3), until the
  * list is emptied; a job publishes none. A tile with nothing for the row has no row. Once this

@@ -13,7 +13,8 @@
  *
  * The server's `work_moved` carries a work item's session as it moves (F26.2, F80.2): it replaces
  * the item's in its project's timeline as read, with no read of its own, and so in the session log
- * over it; a job's goes too where an item shows it, as its job or as the job after its turn (F59.1). A read of the timeline under way when one arrives may have been made before it, so the
+ * over it; a job's goes too where an item shows it, as its job or as the job after its turn
+ * (F59.1). A read of the timeline under way when one arrives may have been made before it, so the
  * moves heard meanwhile go over that read once it lands.
  */
 
