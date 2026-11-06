@@ -584,6 +584,53 @@ test.describe('Off a phone, the session log’s popover', () => {
     await expect(one).toBeFocused();
   });
 
+  test('leaves the timeline where it was scrolled under it, closed by its cross, Esc or a press outside it, and a press on a card’s Open there opens the card', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    sessionLog,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Scrolled'), members: [me.handle!] });
+    const cards: string[] = [];
+    for (const title of ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot']) cards.push(await projects.place(project, { kind: 'document', title, text: card(title) }));
+    const work = await projects.startWork(project, { title: TITLE, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    await timeline.open(project);
+    const opener = timeline.item(work).work.sessionLog;
+    // The timeline scrolled to its top under the popover, its opener off the stage.
+    const toTop = () => timeline.root.evaluate((feed) => (feed.scrollTop = 0));
+    const top = () => timeline.root.evaluate((feed) => feed.scrollTop);
+
+    await opener.click();
+    await toTop();
+    await sessionLog.close.click();
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    expect(await top()).toBe(0);
+
+    await opener.click();
+    await toTop();
+    await page.keyboard.press('Escape');
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    expect(await top()).toBe(0);
+
+    await opener.click();
+    await toTop();
+    const pop = (await sessionLog.overlay.boundingBox())!;
+    const stage = (await timeline.root.locator('xpath=..').boundingBox())!;
+    let below: string | null = null;
+    for (const id of cards) {
+      const box = (await timeline.item(id).card.open.boundingBox())!;
+      if (box.y > pop.y + pop.height && box.y + box.height < stage.y + stage.height) below = id;
+    }
+    expect(below).not.toBeNull();
+    await timeline.item(below!).card.open.click();
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(documentAddress(project, below!));
+  });
+
   test('lies over the tab showing, which keeps its place in the line, in the same place as over the timeline; closing it shows the tab again at its address; another project closes it, and the row brings back the tab under it', async ({
     page,
     people,

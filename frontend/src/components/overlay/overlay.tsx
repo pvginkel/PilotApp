@@ -90,9 +90,10 @@ export function Overlay({
       if (!(opener instanceof HTMLElement) || !opener.isConnected) return;
       // A press outside a popover gives the focus to what it pressed.
       if (!view && (!focusLost() || opener.closest('[inert]') !== null)) return;
-      opener.focus();
+      // What lies under a popover scrolls while it is open: it stays where it was left.
+      opener.focus({ preventScroll: pop });
     },
-    [opener, view],
+    [opener, view, pop],
   );
   const closing = useRef(onClose);
   useEffect(() => {
