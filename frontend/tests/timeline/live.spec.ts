@@ -1,12 +1,15 @@
 /**
  * The screens kept live (F80.2): the server's `project_changed` reads again what the screens show
- * of the project it names — its timeline, its head and the tabs' badges — and a stream that comes
- * back up reads them all again, covering whatever it missed while it was down.
+ * of the project it names — its timeline, its head and the tabs' badges — leaving a read under way
+ * to land first, and a stream that comes back up reads them all again, covering whatever it missed
+ * while it was down.
  */
 
+import type { Request } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { createDeploymentSseHelper } from '../support/helpers/deployment-sse';
+import { slowNetwork } from '../support/network';
 import { ProjectHeadPage } from '../support/page-objects/project-head-page';
 
 const QUESTION = '```question id=Q1\n```\n';
@@ -36,6 +39,41 @@ test.describe('Live updates', () => {
     await expect(timeline.banner(storm)).toBeVisible();
     await expect(projectList.badge(name)).toHaveText('1');
     await expect(projectList.badge(name)).toHaveAttribute('data-urgent', 'true');
+  });
+
+  test('a change made while the timeline is being read leaves that read to land, and the timeline is read again after it', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Under way'), members: [me.handle!] });
+    const isRead = (request: Request) => new URL(request.url()).pathname === `/api/projects/${id}/timeline`;
+    const reads = new Set<Request>();
+    let most = 0;
+    page.on('request', (request) => {
+      if (!isRead(request)) return;
+      reads.add(request);
+      most = Math.max(most, reads.size);
+    });
+    page.on('response', (response) => reads.delete(response.request()));
+    await timeline.open(id);
+    await deploymentSse.ensureConnected();
+
+    // Each read the page sends takes a second, and the second change's event comes while the read
+    // the first change's sent is under way.
+    const restore = await slowNetwork(page, 1_000);
+    most = reads.size;
+    const read = page.waitForRequest(isRead);
+    const one = await projects.place(id, { kind: 'notice', title: 'One', text: 'One.\n' });
+    await read;
+    const two = await projects.place(id, { kind: 'notice', title: 'Two', text: 'Two.\n' });
+    await expect(timeline.item(one).root).toBeVisible();
+    await expect(timeline.item(two).root).toBeVisible();
+    expect(most).toBe(1);
+    await restore();
   });
 
   test('a second tab follows the head the first one changes', async ({ context, people, projects, projectHead }) => {

@@ -9,7 +9,7 @@
  * document it lets go: Pilot's dots come and go live (F35). An event reaches only the browsers
  * whose stream the sending process holds, so each time the stream comes up everything they show is
  * read again (design 2 §6.2). Nothing waits for the stream: the screens are read without it
- * (SSE-4).
+ * (SSE-4). A read under way when the event arrives is left to land, and read again once it has.
  *
  * The server's `work_moved` carries a work item's session as it moves (F26.2, F80.2): it replaces
  * the item's in its project's timeline as read, with no read of its own, and so in the session log
@@ -19,7 +19,7 @@
  */
 
 import { useEffect } from 'react';
-import { useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
+import { useQueryClient, type Query, type QueryClient, type QueryFilters } from '@tanstack/react-query';
 import { useSseContext } from '@/contexts/sse-context';
 import type { ItemDocument } from '@/hooks/use-document';
 import type { components } from '@/lib/api/generated/types';
@@ -52,29 +52,47 @@ const DRAFT = 'getProjectsDraftByProjectId';
 const CHATS = 'getProjectsChatsByProjectId';
 
 /**
- * The queries under `queryKey` read again. A first read still under way may predate the event, and
- * an invalidation hands back that read rather than a new one (TanStack Query reuses the fetch in
- * flight of a query holding no data yet), so it is cancelled first.
+ * Reads again the queries `read` is handed, never over a read under way: a query whose read is under
+ * way is read again once that read lands. A read made over one cancels it, so events closer together
+ * than a read takes would keep every read from landing, and an `await` on the query's invalidation,
+ * as Create project's, from ending. A read under way may predate the event, and is not taken for it.
  */
-function invalidate(queryClient: QueryClient, queryKey: QueryKey): void {
-  void queryClient
-    .cancelQueries({ queryKey, predicate: (query) => query.state.data === undefined })
-    .then(() => queryClient.invalidateQueries({ queryKey }));
+function reader(queryClient: QueryClient): { read: (filters: QueryFilters) => void; stop: () => void } {
+  const cache = queryClient.getQueryCache();
+  const owed = new Set<Query>();
+  const readOne = (query: Query) => {
+    if (query.state.fetchStatus === 'idle') void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true });
+    else owed.add(query);
+  };
+  const unwatch = cache.subscribe((event) => {
+    if (event.type === 'removed') owed.delete(event.query);
+    if (event.type !== 'updated' || event.query.state.fetchStatus !== 'idle' || !owed.delete(event.query)) return;
+    // Once every listener has heard the read land: the moves heard over it go onto it first.
+    const { query } = event;
+    queueMicrotask(() => readOne(query));
+  });
+  return {
+    read: (filters) => cache.findAll(filters).forEach(readOne),
+    stop: () => {
+      unwatch();
+      owed.clear();
+    },
+  };
 }
 
-function readAgain(queryClient: QueryClient, projects: ReadonlySet<string>): void {
-  invalidate(queryClient, LISTS);
+function readAgain(read: (filters: QueryFilters) => void, projects: ReadonlySet<string>): void {
+  read({ queryKey: LISTS });
   for (const project_id of projects) {
     for (const key of [HEAD, TIMELINE, HANDBOOK, DRAFT, CHATS]) {
-      invalidate(queryClient, [key, { path: { project_id } }]);
+      read({ queryKey: [key, { path: { project_id } }] });
     }
   }
   // A document's read is keyed by its item; what it read names its project.
-  void queryClient.invalidateQueries({
+  read({
     queryKey: [DOCUMENT],
     predicate: (query) => {
-      const read = query.state.data as ItemDocument | undefined;
-      return read !== undefined && projects.has(read.project_id);
+      const shown = query.state.data as ItemDocument | undefined;
+      return shown !== undefined && projects.has(shown.project_id);
     },
   });
 }
@@ -113,17 +131,19 @@ export function useProjectEvents(): void {
     // connection hears each event once per person.
     const pending = new Set<string>();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const { read, stop } = reader(queryClient);
     const unsubscribe = addEventListener(EVENT, (data) => {
       pending.add((data as ProjectChanged).project_id);
       timer ??= setTimeout(() => {
         timer = undefined;
-        readAgain(queryClient, new Set(pending));
+        readAgain(read, new Set(pending));
         pending.clear();
       });
     });
     return () => {
       unsubscribe();
       clearTimeout(timer);
+      stop();
     };
   }, [addEventListener, queryClient]);
 
