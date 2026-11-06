@@ -360,7 +360,7 @@ test.describe('The Chat tab’s read', () => {
     // Seen to its end: the tab marks nothing while the list's reads fail.
     await chats.seen(project);
     // Left on the Documents tab, and the page opened afresh: the project and its chats, which the
-    // head's Discuss reads for its dot, are read before the tab opens.
+    // Chat tab reads for its dot, are read before the tab opens.
     await timeline.open(project);
     await panel.documentsTab.click();
     await timeline.open(project);
