@@ -11,8 +11,8 @@
  * words. Their form events are `chat.send`'s and `chat.stop`'s.
  *
  * The unread dot (F43): the list says whether a reply of Pilot's came after the person last saw the
- * chat to its end, on any device, and the dot stands on the head's Discuss and the Chat tab while it
- * does and this page does not show the chat at its end. Shown there, in a page in view, the chat is
+ * chat to its end, on any device, and the dot stands on the Chat tab, the panel's or the phone's,
+ * while it does and this page does not show the chat at its end. Shown there, in a page in view, the chat is
  * marked seen, its answer into the list as read: a reply watched arriving leaves no dot. No other browser hears of
  * the mark; each drops its dot at its next read of the list. Its form events are `chat.read`'s.
  */
@@ -114,7 +114,7 @@ function setAtEnd(projectId: string, shown: boolean): void {
   atEndListeners.forEach((listener) => listener());
 }
 
-/** Whether the unread dot stands on the project's Discuss and Chat tab. */
+/** Whether the unread dot stands on the project's Chat tab. */
 export function useChatDot(projectId: string): boolean {
   const { data } = useGetProjectsChatsByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
   const shown = useSyncExternalStore(subscribeAtEnd, () => atEnd.has(projectId));

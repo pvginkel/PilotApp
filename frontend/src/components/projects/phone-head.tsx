@@ -5,8 +5,9 @@
  * their word the tooltip's and a screen reader's; the plan's donut alone, a tap on it showing the Plan
  * tab (F3.7); the members, two circles at most (F2.5); the plan's notes button while it shows (F2.7);
  * the project's menu (F2.4). A draft's has its name, the Draft chip, its members and its menu. The
- * tabs at the bottom stand for Discuss, the Documents button and the draft-panel toggle, and the
- * Documents tab lists the handbook. A tight head gives way in the name alone, cut to nothing (D073).
+ * project's chat and documents, and a draft's Draft, are tabs at the bottom (`phone-project.tsx`),
+ * the Documents tab listing the handbook. A tight head gives way in the name alone, cut to nothing
+ * (D073).
  */
 
 import { Archive } from 'lucide-react';
