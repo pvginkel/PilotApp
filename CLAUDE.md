@@ -6,7 +6,7 @@ timeline per managed project shows its work, its decision documents and their as
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
 **Its first screens are in**: the handle step, the project list, a project's head and its timeline,
-its work items, its documents in the overlay and the side panel, on the record's schema, the engine
+its work items, its documents in tabs beside the side panel, on the record's schema, the engine
 behind it (`backend/app/engine/`), the sync of the store's tree, the server's jobs on the KubeCoder
 controller, Pilot's MCP server with the worker's round trip, the project's chat in the side panel,
 with the brain's tools, a new project: the plus, its definition chat and draft, Create project and
@@ -214,10 +214,10 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   signed-in test's session included, and the person on the record, with the handle they choose.
 - [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md),
   [`docs/timeline.md`](docs/timeline.md), [`docs/documents.md`](docs/documents.md): the UI's shell,
-  tokens, shared pieces and links in text, the phone's frame and drawer; the projects' API and
+  tokens, shared pieces and links in text, the phone's frame and the drawer; the projects' API and
   screens, the plus and Create project, a project on a phone, its tabs and views; the timeline's
-  API, live event and screens; a document read alone, a draft's asks, the attachments, the overlay
-  and the side panel with a draft's Draft tab.
+  API, live event and screens; a document read alone, a draft's asks, the attachments, the tabs, the
+  tab line and the side panel with a draft's Draft tab.
 - [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
   [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
   schema and the dev seed, the block DSL, the store's tree and its files, and the engine between

@@ -1,13 +1,14 @@
-# Documents, the overlay and the panel
+# Documents, their tabs and the panel
 
 A project's documents as a signed-in person reads them apart from the timeline: a document read on
-its own, a draft's asks answered in place, the attachments and their stream, the overlay that shows
-them, and the side panel with its Documents tab and a draft's Draft tab. The reads are
-`backend/app/api/items.py`, `projects.py` and `attachments.py`, on `TimelineService` and
-`AttachmentService`; the screens are `frontend/src/components/overlay/` and
-`components/panel/`. A document on the timeline, inline or as a card, its blocks, its *Unsent* and
-its *Send answers*, is [`timeline.md`](timeline.md)'s, and the overlay draws its text the same way.
-The panel's Chat tab, and Discuss in the overlay's head, are [`chats.md`](chats.md)'s.
+its own, a draft's asks answered in place, the attachments and their stream, what opens them, off a
+phone a tab on the project's tab line and on a phone a view, and the side panel with its Documents
+tab and a draft's Draft tab. The reads are `backend/app/api/items.py`, `projects.py` and
+`attachments.py`, on `TimelineService` and `AttachmentService`; the screens are
+`frontend/src/components/overlay/`, `components/projects/doc-tabs.tsx` and `components/panel/`. A
+document on the timeline, inline or as a card, its blocks, its *Unsent* and its *Send answers*, is
+[`timeline.md`](timeline.md)'s, and an opened document draws its text the same way. The panel's
+Chat tab, and Discuss in an opened document's head, are [`chats.md`](chats.md)'s.
 
 ## Reading a document on its own
 
@@ -73,34 +74,66 @@ the sign-in and the `editor` role, `404` for an unknown id. It sends `Content-Le
 The title and the stored type do not travel on the stream: the timeline's `attachments` carry them
 ([`timeline.md`](timeline.md)).
 
-## The overlay
+## What opens
 
-`Overlay` (`components/overlay/overlay.tsx`) is a page over the project's timeline: a backdrop and
-the sheet, whose head holds the titles, Discuss once what it shows is read, quoting it
-([`chats.md`](chats.md)), maximize and the cross, over its body and its foot. It
-opens in place, two thirds of the window wide, at least 640px and at most the text column with its
-scrollbar, and maximized it takes the window's width; on a wide window both stop at the open panel.
-It lies over the side column and the centre, under the top bar. The cross, Esc and a click on the
-backdrop close it, which goes to the project's address (`useOverlayClose`,
-`hooks/use-overlay-close.ts`). Its body keeps its scroll while what it shows is read again, and
-starts at its top for each thing it shows. Where a read fails, its body reads "The document did not
-load." A work item's session log opens in it too ([`work.md`](work.md)), and on a phone the item
-alone ([`timeline.md`](timeline.md)).
+`Overlay` (`components/overlay/overlay.tsx`) draws what a project opens: a document, an attachment,
+the handbook and the project document, a work item's session log ([`work.md`](work.md)) and, on a
+phone, the item alone ([`timeline.md`](timeline.md)). Its head holds the titles and, once what it
+shows is read, its buttons: Pilot's job on it and its Undo where it has them, then Discuss, quoting
+it ([`chats.md`](chats.md)). The head stands at its top however tall it is, its buttons level with
+the title's first line, the title at weight 600. Under it stand the strip where what it shows has
+one (below), the body and the foot. Its body keeps its scroll while what it shows is read again.
+Where a read fails, its body reads "The document did not load."
 
-**On a phone** what it shows is a view pushed over the tabs ([`projects.md`](projects.md) has the
-views and Back): the whole screen under the gold bar, over the project's head and the tabs, with no
-backdrop, maximize or cross. Its head starts with the arrow back ("Back"), where the head's drawer
-button stands, 8px from the left and the top, at the top however tall the head. The arrow, Esc and
-the browser's Back take the view off, showing what lay under it, another view or the tab; closing is
-Back, never a new entry.
+**Off a phone, a tab.** A document, an attachment, the handbook and the project document each open
+as a tab in the timeline's place (`.stage`), the side panel beside it, at the timeline's width and on
+the page's own colour, its head's and its foot's text in the timeline's column. A tab has no
+backdrop, maximize or cross: the cross of its tab on the tab line closes it, and so does *Send
+answers* (below); Esc closes no tab. Its body's scroll is kept while another tab shows, for as long
+as the page, and set back once as its body's column first draws, a tab read to its end showing its
+end; a tab closed and opened again starts at its top. While a tab shows, the timeline or a draft's
+definition chat under it takes no focus (`inert`); the head, the tab line and the panel beside it
+do. A tab takes the focus as it shows only where the focus would be lost, and gives it back as it
+closes where it is lost then; a tab's cross gives it to the tab showing next.
 
-**The focus.** The sheet is a dialog named by its titles. It takes the focus as it opens, and
-again when what it shows replaces what had it, and gives it back as it closes to what had it before,
-where that is still on the page. While it is open the timeline under its backdrop takes no focus
-(`inert`), nor the panel below 1200px where the overlay lies over it. The project's head does: its
-Discuss and Documents buttons, and the overlay's own Discuss, are how the panel opens over the
-overlay below 1200px.
-On a phone the head, the tab and the tabs under a view take none.
+**The tab line** (`DocTabs`, `components/projects/doc-tabs.tsx`, its model `useDocTabs` in
+`hooks/use-doc-tabs.ts`) is the project head's last row while a document is open, a `<nav>` after the
+head, and goes once the last one closes. The timeline's tab stands first, a draft's definition chat,
+"Chat", in its place, and never closes; then a tab per document in the order they opened, each its
+icon, its title cut short and whole in its tooltip, and its cross, the middle button closing it too;
+*Close all* at the line's far right closes every tab and shows the timeline. Where the tabs do not
+fit, the line scrolls, the tab showing scrolled into it. Closing the tab showing shows the one that
+showed before it.
+
+**The address follows the tab showing.** A document's, an attachment's, the handbook's or the project
+document's address shows its tab, opening it at the line's end where it is not open, and a document
+already open shows the tab it has; a document's tab shows again at the document's own address, not
+at a block's or its box's; any other address of the project shows the timeline. Off a phone a move
+between the project's addresses replaces the browser's entry rather than adding one
+(`useTabReplace()`), so that Back does not move between tabs.
+
+**Each project's line is kept in the browser** (`browser-state.ts`'s `lines`, [`ui.md`](ui.md)): its
+tabs in the order they opened and the order they showed in, nothing once no tab is open; the scrolls
+stay in the page. A reload finds the line as it was left. The project's row in the list, the
+drawer's included, brings back the tab the project was left on, at the tab's address in the entry's
+place, but for the row of the project on screen, which shows its timeline; every other arrival at a
+project's own address, a fresh page included, shows its timeline, the line beside it (D151).
+
+**The session log's popover.** Off a phone a work item's session log is the Overlay's popover, over
+the tab showing, the timeline or a document's, which its cross, Esc and a press outside it close
+([`work.md`](work.md)).
+
+**On a phone, a view** pushed over the tabs ([`projects.md`](projects.md) has the views and Back):
+the whole screen under the gold bar, over the project's head and the tabs, with no backdrop,
+maximize or cross. Its head starts with the arrow back ("Back"), where the head's drawer button
+stands, 8px from the left and the top. The arrow, Esc and the browser's Back take the view off,
+showing what lay under it, another view or the tab; closing is Back, never a new entry. A view keeps
+its body's scroll while another lies over it, in the page, by its history entry
+(`use-phone-tab.ts`), and sets it back as it shows again once its read is drawn, so that Back from an
+attachment shows its document where it was read; a view opened afresh or reloaded starts at its top,
+and the session log's view keeps its own scroll, at its end. A view takes the focus as it opens, and
+again when what it shows replaces what had it, and gives it back as it closes to what had it before;
+the head, the tab and the tabs under it take none.
 
 ### A document
 
@@ -108,7 +141,9 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
 
 - **The head**: the title, and under it the project's name, the step, the segment bar, *Done* or
   *Unsent*, and *Edited <time>*, a pencil in place of its word at 600px and below
-  ([`timeline.md`](timeline.md)).
+  ([`timeline.md`](timeline.md)); then Pilot's job on the item, the read's `job`, in the form the
+  timeline draws it ([`work.md`](work.md)), and the item's Undo while `done.undo` holds, before
+  Discuss. On a phone a job queued, running, failed or stopped takes a row under the head's top line.
 - **The body**: the summary as its lead, the attachments, then Pilot's questions to the writer
   (below), then the text as an inline document draws it, every block answered in place, every
   settled section collapsed and every held block its line, a claimed action reading "Pilot does it"
@@ -117,12 +152,12 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
   to its block, which flashes, its section opened first.
 - **The foot**: on a done item, "Done · <stamp>", then " · Pilot", or the other person's name, where
   the signed-in person did not do it; on an open review, Reviewed; on an open document, *Send
-  answers*, which closes the overlay once the record holds the answers, each disabled while the
+  answers*, which closes its tab, on a phone its view, once the record holds the answers, each disabled while the
   project is archived (D012); on an open one-ask item or notice, nothing; and on a document that is
   Pilot's, no foot. Before them stands the Cancel where the document offers it (below).
 
-**A document Pilot is working on** (`pilots_work` set, [`round-trip.md`](round-trip.md)) opens
-read-only under the strip (`PilotStrip`, `overlay/pilot-strip.tsx`), which `Overlay` draws between
+**A document Pilot is working on** (`pilots_work` set, [`round-trip.md`](round-trip.md)) opens,
+in its tab as in its view, read-only under the strip (`PilotStrip`, `overlay/pilot-strip.tsx`), which `Overlay` draws between
 its head and its body: every block drawn whole and its controls disabled (`LockedContext`,
 `timeline/locked.ts`), the options not chosen and the fields faded, and no foot. The strip, gold as
 the gold bar
@@ -140,7 +175,8 @@ is ([`ui.md`](ui.md)), holds Pilot's mark and a sentence (`pilotsStripWords()`, 
 - `waiting_on_answer`: "Pilot waits on your answer to <document> before it goes on with what is
   open here.";
 
-<work> linking the work item and <document> the run's document. While `pre_ruling`,
+<work> linking the work item and <document> the run's document; while `pre_ruling` it links
+nothing, and the pass's job in the head opens the pass's session log. While `pre_ruling`,
 `asking_writer`, `doing` or `researching` it ends in *Stop and take over*, the gold bar's button
 with a square, which asks nothing first: it calls the take-over (`POST take-over`,
 [`round-trip.md`](round-trip.md)), stays disabled from the click until the document reads back as
@@ -166,8 +202,8 @@ each question, muted, after its block's local id. Once the reply comes, each que
 under it where the reply kept every heading asked for (`split`), else the reply whole under the
 questions, as Markdown. While the clarification run is in flight (`asking_writer`), each question of
 the last section reads "Awaiting the writer’s reply" under it; where the run's turn ended with no
-text, the questions stand alone. The document's clarification address opens the overlay at the box,
-and an asked block's mark in the overlay goes to it there, the address unchanged; either way it
+text, the questions stand alone. The document's clarification address opens the document at the box,
+and an asked block's mark in the opened document goes to it there, the address unchanged; either way it
 flashes (`useClarificationBox`, `overlay/clarification-box.ts`).
 
 A registered document whose read failed ([`round-trip.md`](round-trip.md)) draws its head, titled
@@ -183,11 +219,12 @@ no item reads "The document did not load."
 ### An attachment
 
 At an attachment's address, the head is its clip and title over "Attachment of “<item>”", or
-"Attachment of the draft" for one hung on nothing, and there is no foot. Opened from the document's
-overlay, an arrow with no label leads back to the document; on a phone, where the view's own arrow
-is Back, the document's title in its head is the link to it, Back to it where the document's view
-lies under the attachment's, opened at its address or at one of its blocks'. The body goes by the type it was stored with
-(`attachment-overlay.tsx`):
+"Attachment of the draft" for one hung on nothing, and there is no foot. Off a phone it is a tab of
+its own, and where its item is a document or a review, the document's title in its head is the link
+to it, opening the document's tab. On a phone, at its address under its document's, where the
+view's own arrow is Back, the document's title in its head is the link to it, Back to it where the
+document's view lies under the attachment's, opened at its address or at one of its blocks'. The
+body goes by the type it was stored with (`attachment-overlay.tsx`):
 
 - Markdown (`text/markdown`), rendered read only, its front matter left out and a fenced ask shown
   as plain code: an attachment is reader's material, never an item;
@@ -201,9 +238,9 @@ An attachment its item does not carry reads "The document did not load."
 
 ### The handbook and the project document
 
-The head's handbook button opens the handbook, on a phone the Documents tab's row for it (below),
-and the Documents tab's first row the project document (`HandbookOverlay`, `ProjectDocumentOverlay`,
-read by `useHandbook` and `useProjectDraft`). Each is read only, with no foot. Its head is the icon
+The Documents tab's first row opens the project document and its second the handbook (below), each
+as a tab of its own, on a phone a view (`HandbookOverlay`, `ProjectDocumentOverlay`, read by
+`useHandbook` and `useProjectDraft`). Each is read only, with no foot. Its head is the icon
 and the text's title, else "Handbook" or "Project document", over "<project> · Handbook" or
 "<project> · Project document"; its body is its prose as Markdown and its asks, in their order, or
 *Empty* while it has nothing past its title, then Pilot's dots while a turn saves it. A fenced ask
@@ -213,49 +250,54 @@ who gave it and *In the chat* where it was given there, and with no chevron and 
 left open at Create stands open, its controls disabled. A failed read, a draft's handbook included,
 reads "The document did not load."
 
+**A link to the project's attached material.** In either, a link to a path in the project's
+`attachments/`, as written, a leading `./` and escapes allowed (`linksMaterial` and `pathOfLink` in
+`hooks/use-timeline.ts`), is `MaterialLink` (`project-document-overlay.tsx`, through `Markdown`'s
+`materialLink`). It opens the attachment where it hangs, at its address under its item's, the
+opening's for a draft's material after Create, or under the project's where it hangs on nothing: off
+a phone a tab of its own, adding no entry, on a phone a view pushed over this one. A path naming no
+attachment is its words alone, and every other link opens in a new browser tab.
+
 ### Live
 
-What the overlay shows is read again on its project's `project_changed`, on every rise of the event
+What a tab or a view shows is read again on its project's `project_changed`, on every rise of the event
 stream, when the window regains focus and after the person's own writes
 ([`timeline.md`](timeline.md)). A save of the handbook or the project document raises one where it
 changes the published text or makes its session the one writing it, and a turn's end raises one for
-each document it lets go ([`engine.md`](engine.md)), so an open overlay shows Pilot's new text, and
+each document it lets go ([`engine.md`](engine.md)), so an open document shows Pilot's new text, and
 its dots come and go, as they happen.
 
 ## The side panel
 
-`Panel` (`components/panel/panel.tsx`) stands beside the project's head and timeline: a tab strip,
-Chat first, with the unread dot ([`chats.md`](chats.md)), then Documents, with its count, and the
-close cross. The head's Discuss ([`projects.md`](projects.md)) opens it on the Chat tab and its
-Documents button on the Documents tab, each closing it where its tab is showing; Discuss elsewhere
-and *In the chat* open it on the Chat tab, on top. A draft's panel stands beside its definition
-chat, with Draft in Chat's place: the head's Draft toggle opens it on the Draft tab or closes it
-where that tab shows, and an ask a quote or an effect line goes to opens it there, on top. A draft's
-Discuss and *In the chat* go to its definition chat instead ([`chats.md`](chats.md)).
+`Panel` (`components/panel/panel.tsx`) stands beside the project's head and timeline, or the tab
+showing: a tab strip, Chat first, with the unread dot ([`chats.md`](chats.md)), then Documents, with
+its count. Off a phone it is always open, at every width, the narrow one included, and has no cross:
+nothing closes it, and nothing lies over it. Its head stands as tall as the project's head with no
+tab line under it, its tab on the name's baseline. Discuss and *In the chat* show its Chat tab. A
+draft's panel stands beside its definition chat, with Draft in Chat's place, and an ask a quote or an
+effect line goes to shows the Draft tab at it. A draft's Discuss and *In the chat* go to its
+definition chat instead ([`chats.md`](chats.md)).
 
-**Each project's own.** A project's panel, open or closed, and its tab are kept in the browser
-(`usePanel`, `browser-state.ts`'s `panels`, [`ui.md`](ui.md)) as the person last left them, so
-switching projects brings each back as it was. Until the person sets it, it stands open on a wide
-window and closed below one, following the window live, on its first tab: an open project's Chat, a
+**Its tab, each project's own.** A project's panel shows the tab the person last left it on, kept
+in the browser (`usePanel`, `browser-state.ts`'s `panels`, [`ui.md`](ui.md)), so switching projects
+brings each back as it was; a project not opened before shows its first: an open project's Chat, a
 draft's Draft. A remembered Chat reads as Draft for a draft and Draft as Chat for an open project,
-so a panel open on the Draft tab at Create project stays open, on the Chat tab.
+so a panel on the Draft tab at Create project shows the Chat tab after it.
 
-- **A wide window**, 1200px and over: the open panel stands beside the timeline, 420px wide, and the
-  overlay beside it, to its left. Its head takes the project head's height, its tab on the name's
-  baseline.
-- **Below 1200px** it lies over the timeline, and of the panel and the overlay the one opened last
-  is on top: the overlay whenever what it shows changes or a row of the panel opens, the panel when
-  a button of the head, a tab, a Discuss or *In the chat* opens it. Going to an item's or a block's
-  address, not an attachment's, on a load or by history, closes the panel and keeps it closed.
-- **A phone**, 900px and below, has no panel beside the timeline: its Chat, Documents and Draft tabs
-  are among the tabs at the bottom, each between the head and the tabs, drawn without the panel's
-  head (`PhonePanel`), and the state kept per project is neither read nor written there
-  ([`projects.md`](projects.md)).
+**Its width** is dragged at the divider at its left (`PanelDivider`,
+`components/panel/panel-divider.tsx`, a `separator`), in a project and a draft alike, or moved 16px
+by an arrow key while the divider has the focus. The browser keeps one width for every project's
+panel, in pixels, 420 until dragged, and one for every draft's, as a share of the window, half until
+dragged, so that it stays half on another screen; dragging one leaves the other (`panelWidths`,
+D148). Whatever is kept, the panel stands at least 320px wide and leaves at least 440px to its left,
+for the timeline's column, a draft's chat or the tab showing; a width held in for want of room stays
+kept as it was. The divider sets `--panel` on the project's page (`.project`), which the panel's
+width reads.
 
-**Esc.** On a wide window Esc closes the overlay and never the panel. Below 1200px, where the two
-lie over each other, it closes the one on top first. With no overlay open, Esc leaves the panel
-alone. The panel takes Esc only while it is open below 1200px over an open overlay, on top of it;
-it shares the overlay's rank, so it is always the one opened later ([`ui.md`](ui.md)).
+**A phone**, 900px and below, has no panel beside the timeline: its Chat, Documents and Draft tabs
+are among the tabs at the bottom, each between the head and the tabs, drawn without the panel's head
+(`PhonePanel`), and neither the tab kept per project nor the width is read or written there
+([`projects.md`](projects.md)).
 
 ### The Draft tab
 
@@ -271,7 +313,7 @@ routes above), its Discuss quoting it as `project.md/<local id>`, its unsent wor
 are ([`ui.md`](ui.md)). An ask gone to is scrolled into view and
 flashed (`hooks/use-draft-place.ts`). A link to material Pilot attached,
 `[words](attachments/<batch>/<filename>)` relative to the draft's folder (a leading `./` dropped,
-escapes decoded), opens that attachment in the overlay. Every other link, ticket id, repo and
+escapes decoded), opens that attachment, off a phone in a tab of its own, on a phone a view. Every other link, ticket id, repo and
 environment in the draft reads as plain words.
 
 ### The Documents tab
@@ -281,8 +323,9 @@ environment in the draft reads as plain words.
 
 - **The project document** first: its title, the text's, else, and until it is read, "Project
   document", over "Project document".
-- **The handbook**, on a phone, under it (D125): its title, the text's, else, and until it is read,
-  "Handbook", over "Handbook". Off a phone the tab does not list it: the head's button opens it.
+- **The handbook** under it, on a phone (D125) and off one alike, the project's head having no
+  button for it (D149): its title, the text's, else, and until it is read, "Handbook", over
+  "Handbook".
 - **Attachments**, newest batch first, a batch being the files hung in one call. A batch of one is
   its title over "<item> · <stamp>"; a batch of several is a folder row, the last directory their
   sources share, else "N files", over "<item> · <stamp>", with each file under it, its title over
@@ -291,7 +334,7 @@ environment in the draft reads as plain words.
 - **In the timeline**: the timeline's documents and reviews, newest first, each its title over
   "<Open | Unsent | Done> · <stamp>", *Unsent* as the timeline reads it. With none: "None yet."
 
-Every row opens in the overlay at its address, on a phone a view. While either read is under way the
+Every row opens at its address, off a phone in its tab, on a phone a view. While either read is under way the
 two headings stand with nothing under them, and while either's latest read failed, "The documents
 did not load." stands in their place, under the project document's row. The tab's count is the
 attachments and the documents, the project document left out, and stands only once both are read.
@@ -305,22 +348,23 @@ here what you point it at in the chat: a card, a handover, a design."
 
 | Address | Opens |
 |---|---|
-| `/projects/<project>/documents/<item>` | the item's document in the overlay |
-| `/projects/<project>/documents/<item>/clarification` | the item's document in the overlay, at the box of Pilot's questions to its writer |
-| `/projects/<project>/documents/<item>/attachments/<attachment>` | the attachment in the document's overlay, in the document's place, with the arrow back |
-| `/projects/<project>/items/<item>/attachments/<attachment>` | the attachment in the overlay, over the timeline where it stands |
-| `/projects/<project>/attachments/<attachment>` | the attachment in the overlay, wherever it hangs: a draft's, on nothing, and the same one once Create hangs it on the opening |
+| `/projects/<project>/documents/<item>` | the item's document |
+| `/projects/<project>/documents/<item>/clarification` | the item's document, at the box of Pilot's questions to its writer |
+| `/projects/<project>/documents/<item>/attachments/<attachment>` | the attachment, its document a link in its head; on a phone a view over the document's |
+| `/projects/<project>/items/<item>/attachments/<attachment>` | the attachment; on a phone a view over the timeline where it stands |
+| `/projects/<project>/attachments/<attachment>` | the attachment, wherever it hangs: a draft's, on nothing, and the same one once Create hangs it on the opening |
 | `/projects/<project>/handbook` | the handbook |
 | `/projects/<project>/project-document` | the project document |
 
 The routes draw nothing of their own: the project's route (`routes/_shell/projects/$projectId.tsx`)
-draws the overlay over the timeline from them, as it does from a card's block address
-([`timeline.md`](timeline.md)). An attachment's chip on the timeline, the done line's indicator and
-a row of the Documents tab open its address under its item's, and its chip in the document's overlay
-the one under the document's; a draft's Documents tab and its links open the one under the
-project's. Closing the overlay goes to the project's address, and on a phone is Back. Another
-project's address closes it, since the project's route remounts, while the panel comes back as that
-project left it.
+draws from them, off a phone, the tab showing, and on a phone the view, as it does from a card's
+block address ([`timeline.md`](timeline.md)). An attachment's chip on the timeline, the done line's
+indicator and a row of the Documents tab open its address under its item's, and its chip in an
+opened document the one under the document's; a draft's Documents tab and its links open the one
+under the project's. Closing a tab shows, at its address, the tab that showed before it; on a phone
+closing a view is Back. Another project's address remounts the project's route, closing whatever
+the last one opened, its session log's popover among them, while its tab line and its panel's tab
+come back as that project left them.
 
 ## Testing it
 
@@ -330,8 +374,9 @@ The reads are pinned in `TestItemDocument`, `TestProjectDocument` and `TestPilot
 and the stream in `tests/engine/test_attachments.py`, `tests/services/test_attachment_service.py`
 and `tests/api/test_attachments.py`; a draft's answers in `tests/services/test_draft_service.py`.
 The browser suites are `frontend/tests/timeline/overlay.spec.ts`, `attachments.spec.ts` and
-`project-documents.spec.ts`, and `tests/projects/panel.spec.ts`, `draft-panel.spec.ts` and, for the
-views on a phone, `phone-views.spec.ts`.
+`project-documents.spec.ts`, and `tests/projects/doc-tabs.spec.ts` (the tab line, its addresses and
+what the browser keeps of it), `panel.spec.ts` (its width among the rest), `draft-panel.spec.ts`
+and, for the views on a phone, `phone-views.spec.ts`.
 
 A spec hangs files on an item with `projects.attach(itemId, files)`, or on nothing in a draft with
 `projects.attachToDraft(projectId, files)`, saves the handbook or the project document with
@@ -339,16 +384,20 @@ A spec hangs files on an item with `projects.attach(itemId, files)`, or on nothi
 `projects.answerProjectDocument(projectId, role, block, answer, handle)`, over the record's testing
 endpoints ([`projects.md`](projects.md)), on a project made with a session. The `overlay` fixture
 (`tests/support/page-objects/overlay-page.ts`) opens a document's address (`open`), the handbook or
-the project document (`openProjectDocument`), and reads the overlay's head, body, foot and
-attachment view, its head's Discuss among them, on a phone the view's arrow back (`back`) and an
-attachment's link to its document (`documentLink`), its clarification box and sections
+the project document (`openProjectDocument`), and reads what opens, its head, body and foot, the
+head's Discuss, Pilot's job (`job`: `root`, `pulse`, `retry`) and Undo (`undo`) among them, an
+attachment's link to its document (`documentLink`), a link to attached material (`materialLinks`)
+and on a phone the view's arrow back (`back`), its clarification box and sections
 (`clarificationBox`, `clarification(n)`, pinned in `tests/work/clarification.spec.ts`), the strip
 (`strip`: `root`, `text`, `link`, `stop`), the unread body (`unread`) and the Cancel (`cancel`:
 `line`, `links`, `button`), pinned in `tests/work/registered.spec.ts` and `claimed.spec.ts`; the
-`panel` fixture
-(`panel-page.ts`) reads the panel, its Documents tab, on a phone with the handbook's row
-(`handbook`), and a draft's Draft tab (`draft`, `draftBlock(id)`), and the `chat` fixture
-its Chat tab ([`chats.md`](chats.md)). On the default 1280px viewport the panel stands open, on the
-Chat tab, a draft's on the Draft tab. A draft's page draws no timeline, so `timeline.open()`, which
+`docTabs` fixture
+(`doc-tabs-page.ts`) the tab line (`first`, `document(id)`, `attachment(id)`, `tab(key)`, `closeAll`,
+`keys()`), a spec closing a document's tab by `docTabs.document(id).close`; the `panel` fixture
+(`panel-page.ts`) reads the panel, its Documents tab with the handbook's row (`handbook`), a draft's
+Draft tab (`draft`, `draftBlock(id)`) and the divider (`divider`, `drag(by, along?)`, `width()`),
+and the `chat` fixture its Chat tab ([`chats.md`](chats.md)). On the default 1280px viewport the
+panel stands on the Chat tab, a draft's on the Draft tab. Storage is per Playwright context, so a reload or a `page.goto` of a
+project finds the tabs its test opened, and the next test none. A draft's page draws no timeline, so `timeline.open()`, which
 waits for the timeline's read, never returns on one: a spec opens a draft with
 `projectList.open(id)` or `projectHead.open(id)`.

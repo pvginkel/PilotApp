@@ -17,7 +17,8 @@ Pilot is still working on one line until it is done, read-only under a gold stri
 take over, and which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its
 work items, each a
 session Pilot runs, live on the timeline with its one current line, the steps its run publishes on
-a donut, Stop and Resume, and its session log, and Pilot's own background jobs among them, one at a time per project, each a session of
+a donut, Stop and Resume, and its session log, which shows what each turn was sent, and Pilot's own
+background jobs, each shown on the item it follows from, one at a time per project, each a session of
 the brain's, fresh but for a wait's run: the setup, the pre-ruling pass after every worker's turn,
 which may ask the worker's writer, or claim an action or research a fact for a work item of
 Pilot's, the blocks held through its run, the plan's next
@@ -26,9 +27,9 @@ records itself, and a wait's run, with Retry on one that failed
 ([`docs/work.md`](docs/work.md)); each
 project's status as one icon on its tab, which pauses it, and the gold bar, a badge in the top bar
 or a line on a phone, while the controller does not answer, Pilot updates its store or a usage
-halt holds; and the overlay that opens a document, an attachment or the handbook,
-beside the side panel with the project's chat and its documents
-([`docs/documents.md`](docs/documents.md)); and on a phone no top bar, the head in one line, the
+halt holds; and on the desktop the tabs that open a document, an attachment or the handbook in the
+timeline's place, each project's kept in the browser, beside the side panel, always open, its width
+dragged, with the project's chat and its documents ([`docs/documents.md`](docs/documents.md)); and on a phone no top bar, the head in one line, the
 tabs at the bottom and what opens from them a view pushed over them, the item alone from a
 notification's link among them, Back the browser's ([`docs/projects.md`](docs/projects.md)). A
 project starts from the plus beside the list, as a draft: its definition chat stands in the

@@ -128,7 +128,8 @@ its run when three things hold:
 - no run of the wait is in flight.
 
 The run is one job of Pilot's own, trigger `wait_fired`, its trigger item the wait, titled `Checking
-"<wait title>"` ([`work.md`](work.md)). Firings recorded later join it until its brief, and none
+"<wait title>"`, shown on the wait's line or its head, the latest run where there were several
+([`work.md`](work.md)). Firings recorded later join it until its brief, and none
 extends the window. A firing recorded after its brief waits for the next run, which is placed only
 once this one has ended. The window counts from each firing's `fired_at`, so a restart reads the
 same rows. The tick is the window's granularity, so a run is placed between the window and one tick
@@ -188,7 +189,8 @@ and the marking Session consumes it on the spot, so it never offers Undo. Its no
 refused. Finish's close writes no note.
 
 A wait's run held before its brief when the wait closes is withdrawn. Its Session is stopped by no
-one and never starts, its line is done `withdrawn`, and its firings are left untaken. A run already
+one and never starts, its work item is done `withdrawn` and shows nowhere, the wait showing the run
+before it where it had one, and its firings are left untaken. A run already
 briefed keeps the firings it took. The close locks that run's Session before the Wait's row, the
 brief's own order, so a run briefed first keeps its firings and a run withdrawn takes none. Retry of a wait's run is refused while
 its wait is done ("the wait it follows is done") or while another run of the wait is in flight

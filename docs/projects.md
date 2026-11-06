@@ -4,9 +4,9 @@ A project as a signed-in person reads and changes it: the project list, a projec
 transitions and its members. The API is `backend/app/api/projects.py` on `ProjectService`
 (`backend/app/services/project_service.py`), the screens are `frontend/src/components/projects/`,
 the tables are [`record.md`](record.md)'s, and the frame the screens sit in is [`ui.md`](ui.md). The
-timeline under a project's head, and its items, are [`timeline.md`](timeline.md)'s; the overlay over
-it and the side panel beside it, with the project's handbook and project document, are
-[`documents.md`](documents.md)'s.
+timeline under a project's head, and its items, are [`timeline.md`](timeline.md)'s; a document's
+tab in its place, the tab line under the head and the side panel beside them, with the project's
+handbook and project document, are [`documents.md`](documents.md)'s.
 On a phone a project's screen is its own: the head in one line, the tabs at the bottom and the views
 pushed over them (below).
 
@@ -34,7 +34,10 @@ projects too.
   failed, a job of Pilot's own only until it is retried, and neither while its nudge is owed
   ([`usage.md`](usage.md)); never a wait and never an item for another
   person (before the caller has a handle, every item for someone is another's); `urgent` whether one
-  of them is urgent.
+  of them is urgent. The list is read with PostgreSQL's JIT off (`SET LOCAL jit = off` in
+  `ProjectService.tabs`): its badge's and status's queries evaluate `waiting()` over every
+  project, and once the record grows their plan passes `jit_above_cost`, where the JIT compile
+  alone took seconds a query.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, name, ticket, repo, state,
   archived, autopilot, status, member, members, progress, tasks, notes, running_work, open_items,
   autopilot_may_take, create_refusal}`. A member is `{handle, name, initials, avatar_slot}`, in the
@@ -176,7 +179,8 @@ folder moves from `draft-<number>` to its slug.
 
 ## The project list
 
-The side column (`project-column.tsx`), on a phone the drawer ([`ui.md`](ui.md)). Its head reads
+The side column (`project-column.tsx`), on a phone and at the narrow width the drawer
+([`ui.md`](ui.md)). Its head reads
 "Projects", at the base size, with the plus ("New project") and the overflow menu ("More"), which
 holds *Archived*, at its right, their icons 16px. The plus starts a new project (`POST
 /api/projects`, above) and opens the draft at its address, the focus in its definition chat's
@@ -215,9 +219,12 @@ browser remembers while that project is in the list, else the list's first in th
 no project the centre reads "No projects yet" and the address stays `/`. Under it are an item's
 address and a block's ([`timeline.md`](timeline.md)), and a document's, an attachment's, the
 handbook's and the project document's ([`documents.md`](documents.md)), at which the project's tab
-is current too. The project's route remounts on each project, so whatever it opened (the plan, the
-notes, the menu, a dialog, the overlay) is closed on the next one, while the side panel comes back
-as that project left it, and a phone shows its Timeline (below); the drawer closes on any change of
+is current too. Off a phone the project's row in the list brings back the document's tab the
+project was left on, but for the row of the project on screen, which shows its timeline, adding an
+entry; any other arrival at the project's own address, a fresh page's included, shows its timeline
+(D151). The project's route remounts on each project, so whatever it opened (the plan, the notes,
+the menu, a dialog, the session log's popover) is closed on the next one, while its tab line and its
+side panel's tab come back as that project left them, and a phone shows its Timeline (below); the drawer closes on any change of
 address ([`ui.md`](ui.md)).
 
 The list and the head are read again when the window regains focus, after each of the person's
@@ -227,9 +234,11 @@ event stream comes up ([`timeline.md`](timeline.md)).
 ## The head
 
 `project-head.tsx` draws the head off a phone in two rows: the name, its chip and the ticket and the
-repo, then the auto pilot switch; below them the step button, the members, Discuss, the Documents
-button, the handbook's, the plan's notes button and the project's menu. The two rows share one
-line. A phone's head is its own, in one line (below).
+repo, then the auto pilot switch; below them the step button, the members, the plan's notes button
+and the project's menu. The two rows share one line. Nothing in it opens or closes the side panel,
+which stands open beside it: the chat is the panel's Chat tab, the documents and the handbook its
+Documents tab ([`documents.md`](documents.md)). While a document is open, the tab line stands under
+it as its last row. A phone's head is its own, in one line (below).
 
 **A tight head** gives way in one order (D073):
 
@@ -242,10 +251,10 @@ line. A phone's head is its own, in one line (below).
 The ticket, the chips, auto pilot and the icons keep their size. A head whose parts, each at its
 floor, would still run its menu past it in one line stands in its two rows. It is measured in one
 line on every change of the head's width or its parts. So the switch, the menu and the icons stay
-inside the head, and nothing overlaps, down to 1200px with the side panel open.
+inside the head, and nothing overlaps, down to 1200px beside a 420px side panel.
 
-- **The chips.** A draft shows "Draft", its name, its members, the Draft tab's toggle and its menu,
-  and no switch, step, Discuss, Documents, handbook or notes button: its Create project stands at
+- **The chips.** A draft shows "Draft", its name, its members and its menu, and no switch, step or
+  notes button: its Create project stands at
   its definition chat's end (below). A finished project shows the "Finished" chip in place of the
   switch. An archived project shows "Archived" after its name and the rest as it was left, the
   switch disabled.
@@ -260,8 +269,6 @@ inside the head, and nothing overlaps, down to 1200px with the side panel open.
   While the write is pending both buttons are disabled and Esc sends nothing. The dialog closes once
   the head is read again, and goes without an answer once the head shows auto pilot on, the project
   finished or archived, as another session may leave it.
-- **The Draft tab's toggle**, a draft's, opens the side panel on its Draft tab, or closes it where
-  that tab shows ([`documents.md`](documents.md)).
 - **The warning triangle** stands after the switch while a work item runs, starts or is held whose
   start was briefed under the switch's other setting (`work.autopilot`, as the timeline reads it),
   its tooltip "The change applies to work started from now on: a running session keeps the grants
@@ -277,11 +284,6 @@ inside the head, and nothing overlaps, down to 1200px with the side panel open.
   notes", each note its summary and then its content.
 - **The members** are small avatars, overlapping by 2px, in the order they joined, in a group named
   "Members"; a tight head folds them (above).
-- **Discuss**, pressed while the side panel shows its Chat tab, opens that tab with nothing quoted
-  or closes it, and carries the unread dot while a reply of Pilot's is unread
-  ([`chats.md`](chats.md)); **the Documents button**, pressed while the panel shows its Documents
-  tab, opens that tab or closes it; **the handbook's** opens the handbook in the overlay
-  ([`documents.md`](documents.md)).
 
 The popovers and the menu close on a press outside them and on Esc.
 
@@ -291,8 +293,8 @@ its label, named "Auto pilot" to a screen reader, and its warning triangle, or t
 its place; the plan's donut alone (`PlanDonut`), with no button's chrome and no step's name, its
 tooltip the step button's, a tap on it showing the Plan tab (below); the members, two circles at
 most, the first member's avatar and then the second's, or a "+N" whose tooltip names the rest; the
-plan's notes button while it shows; and the project's menu. It has no Discuss, Documents or Draft
-button, which the tabs stand for, and no handbook, which the Documents tab lists
+plan's notes button while it shows; and the project's menu. As off a phone, it has no Discuss,
+Documents, handbook or Draft button: the tabs stand for them, the Documents tab listing the handbook
 ([`documents.md`](documents.md)). The Archived and Finished chips show their icon alone, their word
 the tooltip's and a screen reader's (D128). Only the name gives way, cut to nothing: an archived or
 finished head with its ticket, three members and the notes' button holds its line from about 390px
@@ -336,8 +338,8 @@ is an entry of its own, pushed over the Timeline's; a change between the other t
 that Back from any of them shows the Timeline, and on the Timeline Back is the browser's own. An
 address gone to keeps no tab: a project opens on its Timeline, always, a draft on its Chat, and
 switching projects is an entry like any address. A tab the project does not have, a draft's Draft
-past Create, shows the Timeline. The side panel the desktop keeps per project is neither read nor
-written on a phone.
+past Create, shows the Timeline. What the desktop keeps per project in the browser, the side
+panel's tab and width and the tab line, is neither read nor written on a phone.
 
 **What opens from a tab is a view** pushed over it: a document, an attachment, the project document,
 the handbook, a session log ([`documents.md`](documents.md), [`work.md`](work.md)) and the item
@@ -345,7 +347,8 @@ alone, which an item's address opens on a phone ([`timeline.md`](timeline.md)). 
 screen over the head and the tabs, which take no focus under it. It is an entry of its own, pushed
 over the one it was opened from, whose tab it keeps under it, and a view opened from a view lies on
 top of it; the entry's state lists the views, bottom to top. The view's arrow back, Esc and the
-browser's Back take the one on top off, showing what lay under it. A view's address reached cold — a
+browser's Back take the one on top off, showing what lay under it where it was read, since a view
+keeps its scroll while another lies over it ([`documents.md`](documents.md)). A view's address reached cold — a
 notification's link, a link from another app, a typed address — lies over the project's Timeline, an
 entry of the Timeline put under it, so that Back lands there. Discuss and *In the chat* anywhere on
 the screen show the Chat tab, a draft's its Chat, every view taken off first
@@ -490,7 +493,7 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
 - `POST /api/testing/items/<id>/clarification` `{reply?}` places the clarification run of the pass
   that asked about the registered document `<id>` (`writer-questions` first), on the conversation of
   the run that registered it, as a pass's end places it ([`round-trip.md`](round-trip.md)), and
-  answers `201` `{id}`, the run's. The pass that asked stands as a done job's line; with a `reply`,
+  answers `201` `{id}`, the run's. The pass that asked stands done, an ended job ([`work.md`](work.md)); with a `reply`,
   so does the run, its turn ended with the reply, nothing started; with none, the run starts through
   the gate and its turn's end records the reply. An unknown item is a `404`; an item whose writer was asked
   nothing, a pass with its clarification run already, and, with no reply, a finished or an archived
@@ -527,7 +530,7 @@ wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`
 `created()` waits for its draft, `projectList.statusIcon(name)` reads a tab's icon, its status and
 its glyphs, and `projectList.written(id, kind)` waits for its pause or resume to be written;
 `projectHead.autopilotWarning` is the triangle, `autopilotDialog` the switch's dialog,
-`discussButton` and `discussDot` are Discuss and its dot, `memberAvatars` and `membersMore` the
+`controls()` gives the head's controls' test ids in order, `memberAvatars` and `membersMore` the
 members and their count, and on a phone `donut` the donut alone; the definition chat's page object
 reads Create project (`definitionChat.createReady`, `createButton` and `createLine`), and its
 `create()` presses it and waits for its success ([`chats.md`](chats.md)); `phoneTabs`

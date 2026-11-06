@@ -56,6 +56,8 @@ for the live event:
   update standing or lifted; null for a person's stop and for an interrupt made elsewhere;
 - `pilots_own`: whether it is Pilot's own work, a job ([below](#pilots-own-work)), false for a
   worker's run;
+- `setup`: whether it is the setup, the job Create project placed, or a Retry of it, the one job
+  with a line of its own ([below](#pilots-own-work));
 - `retried`: `{id, at}`, the job a Retry of this one placed and when, a person's or the store's
   update's at its lift; null while it is not retried, and always for a worker's run;
 - `nudge_owed`: whether a nudge is owed to it, which carries it on once nothing holds it
@@ -72,7 +74,9 @@ fails it (D137), and unless a cooperative usage halt or its project's pause hold
 ([`usage.md`](usage.md)), cause
 `turn_ended`, by no one, or by
 Finish's close, and a job withdrawn before its brief by an Undo or its wait's close, cause
-`withdrawn` ([below](#pilots-own-work)); it then draws as its done line ([`timeline.md`](timeline.md)).
+`withdrawn` ([below](#pilots-own-work)). A worker's run and the setup then draw as their done line
+([`timeline.md`](timeline.md)); any other job shows its ended mark on the item it follows from, and
+a withdrawn job nowhere ([below](#pilots-own-work)).
 
 ## Live
 
@@ -88,12 +92,14 @@ SSE event `work_moved`, `{project_id, item_id, work}`, `work` read after the com
 a Session with no work item.
 
 `useProjectEvents` (`frontend/src/hooks/use-project-events.ts`) writes each `work_moved`'s `work`
-into the item in its project's timeline as read, with no read of its own, and the session log over
-it follows. A move heard while that timeline is being read goes over the read once it lands.
+into the item in its project's timeline as read, and into each item's `job` and `after_turn` that is
+the same job (`moveWork`), with no read of its own, and the session log follows. A move heard while that timeline is being read goes over the read once it lands.
 
 ## On the timeline
 
-An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
+An open work item, a worker's run or the setup (`WorkItem`,
+`frontend/src/components/timeline/work.tsx`), is the following; every other job shows on the item it
+follows from ([below](#pilots-own-work)):
 
 - **Its head**, an item's head ([`timeline.md`](timeline.md)), with the env chip once its start has
   an environment, but for Pilot's own work, the environment's name linked to KubeCoder's Open by its
@@ -125,13 +131,13 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   usage halt's hard stop, "Stopped at the week's limit · <time>", "Stopped at the five-hour limit ·
   <time>", or "Stopped at the usage limit · <time>" once neither halt holds, and for a job the
   store's update stopped, "Stopped for Pilot's update · <time>"; "Failed · <error>";
-  and nothing once `idle` or `ended`. A retried job's line has a second under it, "Retried
+  and nothing once `idle` or `ended`. A retried setup's line has a second under it, "Retried
   as a new job below · <time>".
 - **The row under the line**: the progress button once its run has published steps
   ([below](#its-progress)), then Resume while `stopped` or `failed`, disabled while the project is
-  archived, as its head's switch is (D012), the API refusing it until Bring back. Pilot's own work
-  has no Stop or Resume: a job `stopped` or `failed`, not retried and owed no nudge offers Retry
-  there, disabled while the project is archived. A tile with none of them has no row. Stop asks
+  archived, as its head's switch is (D012), the API refusing it until Bring back. The setup has no
+  Stop or Resume: `stopped` or `failed`, not retried and owed no nudge, it offers Retry there,
+  disabled while the project is archived. A tile with none of them has no row. Stop asks
   first in the row's place, the progress button going with the row, "Stop the session? Its turn
   ends where it is; Resume sends it on.", with Stop it and Cancel, which takes the focus; Stop's
   icon pressed again puts the focus back on Cancel, and Esc or Cancel puts it back on Stop's icon.
@@ -194,7 +200,7 @@ at its trigger's instant:
   5-minute prompt cache, but for a wait's run (below);
 - its Work has the trigger that started it, the Item that set it off as its trigger item where it
   has one, and no repository;
-- its Item is next on the timeline.
+- its Item takes the timeline's next place, where only the setup draws a line of its own (below).
 
 It starts through the gate as a chat does (`start_brain`, [`sessions.md`](sessions.md)): held while
 its project is paused, the setup's never, a Retry's included, while the store's update is unlifted,
@@ -343,29 +349,74 @@ quota wall while its nudge is owed, which is not at its end until the run its nu
 wait's run retried is briefed fresh with the firings the runs it retries took, and with any still
 pending.
 
-On the timeline, a job's `pilots_own` is true. Its line has its session log, and neither the env
-chip, the store's once its start takes it, nor Stop or Resume. A pass's job, and the job after the
-writer's reply, stops through Stop and take over on a document it goes over, by the person, and the
-lift never retries it ([`round-trip.md`](round-trip.md)). Its session log's head names no
-environment. A failed or stopped job shows so, offers Retry, and its project's badge counts it until
-it is retried. A withdrawn job's done line says "Withdrawn by an Undo" under its title
-(`workClosedLabel`).
+**On the timeline**, a job's `pilots_own` is true, and no job draws a line of its own but the setup
+and its Retries, `setup` true (`isLine`, `frontend/src/hooks/use-timeline.ts`): every other job
+keeps its entry in `items`, where its session log finds it, and shows on the item it follows from,
+as that item's `job` ([`timeline.md`](timeline.md)). A pass shows on each document it pre-rules,
+the pass after the writer's reply included; any other job on its trigger item: the worker's run
+whose turn ended, the item of Pilot's whose close placed it, the wait that fired. Where several
+stand on one item, the latest placed shows, a Retry over the job it retries; where the latest was
+withdrawn, the one before it, so that a withdrawn job shows nowhere. A worker's run carries besides,
+as `after_turn`, the job after its turn, its latest Retry where it was retried, wherever that job
+shows (`jobs_on`, `backend/app/services/working_on.py`).
+
+The job draws in one of three forms (`frontend/src/components/timeline/job.tsx`, `jobForm()` in
+`status-labels.ts`), each opening its session log, whose tail says what they have no room for: why
+it is held, the stop's cause, the error.
+
+- **Under way**, while it is held, starts or runs, or its turn ended owing its nudge: a ghost
+  button, the pulsing dot, Pilot's avatar and the job's title (`JobButton`).
+- **Failed or stopped**: the same button with no dot, in the destructive colour, "<title> · Failed"
+  or "<title> · Stopped", and Retry beside it while the job offers it (`offersRetry`), disabled
+  while the project is archived. Pressed from the keyboard, Retry puts the focus on the job's button
+  once it lands, the one the retry's job then draws in.
+- **Ended**: Pilot's mark without the avatar's circle, an icon button (`JobMark`).
+
+A done line draws the ended mark first among its actions, shown with them, and the other forms at
+its end before the time, shown always; on a phone it draws no mark, and the other forms take a row
+under its title. An open card's head draws the job after its time; an opened document's head and a
+worker's run's session log's draw it among their buttons ([`documents.md`](documents.md), below); a
+phone's menu of a wait's line offers it as a row before Discuss. The line of an item Pilot is
+working on draws none: its one button is the pass's ([`timeline.md`](timeline.md)).
+
+A job has neither the env chip, the store's once its start takes it, nor Stop or Resume. A pass's
+job, and the job after the writer's reply, stops through Stop and take over on a document it goes
+over, by the person, and the lift never retries it ([`round-trip.md`](round-trip.md)). Its session
+log's head names no environment. A failed or stopped job offers Retry, and its project's badge counts
+it, until it is retried.
 
 ## The session log
 
 At `/projects/<project>/sessions/<session>`, the item's id, the project's route opens the session
-log in the overlay over the timeline, on a phone a view pushed over the tabs (`SessionLogOverlay`,
-`frontend/src/components/overlay/session-log-overlay.tsx`; the overlay is
-[`documents.md`](documents.md)'s). An open item's Session log and a done work line's Open go there,
-on a phone a tap on the done line ([`timeline.md`](timeline.md)). An address that names no work item
-of the project reads "The session log did not load".
+log (`SessionLogOverlay`, `frontend/src/components/overlay/session-log-overlay.tsx`, on
+[`documents.md`](documents.md)'s `Overlay`). An open item's Session log, a done work line's Open and
+its title, and a job's button or mark go there, on a phone a tap on the done line
+([`timeline.md`](timeline.md)). An address that names no work item of the project reads "The session
+log did not load".
 
-- **Its head**: "Session log", over the item's title, its environment's link once its start has
-  one, but for Pilot's own work, and the session's id; and Discuss, quoting the work item into the
-  chat ([`chats.md`](chats.md)), the view on a phone keeping it, so that a finished work item is
-  discussed from there (D127).
+**Off a phone it is a popover** (`sheet pop`, a dialog) over the tab showing, the timeline or a
+document's (D147), in one place and of one size whichever item it opens from: 90% of the column's
+text width, centred on it, between the stage's top and bottom, at most 560px high. It does not
+scroll with what lies under it, which keeps its scroll and is not `inert`. Its cross,
+Esc and a press outside it close it, and so does a click on a link to its own address, so that the
+button that opened it closes it; a press anywhere else outside it closes it and then does what it
+does, so that a line's title or a job's button opening another log shows that log in its place. At
+the log's address the tab under it is the one the project's tab line showed last, which the close
+goes to, replacing the entry, the focus going back to what opened it without scrolling. **On a
+phone** it is a view pushed over the tabs, or over the view it opened from.
+
+- **Its head**: "Session log", the session's id its tooltip (`Session <id>`), over the item's title
+  and, but for Pilot's own work, a dot and its environment's link once its start has one (D147). A
+  worker's run's head carries the job after its turn, its `after_turn`, in whichever form it stands
+  ([above](#pilots-own-work)), and that job's log then takes its place, on a phone pushed over it.
+  The popover has no Discuss; the view on a phone has, quoting the work item into the chat
+  ([`chats.md`](chats.md)), so that a finished work item is discussed from there (D127).
+- **What each turn was sent**: before a turn's reply stands what the server sent it, as Pilot's
+  message, folded with Show more, "Pilot" and its time under it (`SentMessage`, `.log-sent`): a work
+  item's brief, a continuation's message, a Resume's `continue`, every turn with no author, in a work
+  item's log and a job's alike (D150). A turn sent and not yet answered shows its message alone.
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
-  (`ReplyBody`), bare in the log's column, 6px in from either side (D002): the text as Markdown, the
+  (`ReplyBody`), each under what it was sent, bare in the log's column, 6px in from either side (D002): the text as Markdown, the
   runs of tool calls with their summaries, a sub-agent's card with its own steps, the phantom of the
   text block under way, a failed turn's error, each effect of the session's calls, and the server's
   word on a document the session registered, as a notice: "Could not read <path> because <reason>"
@@ -395,7 +446,10 @@ The records come through `useChatStream` on `sessionTransport`
 the session on the browser's SSE connection, reads the records by page from the first, then takes
 the frames that came meanwhile, a record it got both ways once ([`sessions.md`](sessions.md) has the
 routes). A read or a subscribe that fails drops the stream, which reopens after its last record, and
-so does a new SSE connection. The stream's `end` ends nothing here: the tail follows `work`.
+so does a new SSE connection. The stream's `end` ends nothing here: the tail follows `work`. What
+each turn was sent is read apart, from `GET /api/sessions/<id>/turns` (`useSessionTurns`,
+`hooks/use-session-turns.ts`), since no record carries a server's turn's message, and read again once
+a record names a turn the last read did not hold; the log merges the two by the turn's number.
 
 **The view.** A record outside any Turn, the start's lines, a failed start and a gone session, falls
 in the Turn in flight, else in the next one. A Turn ends at its `result`, at a failed send or start,
@@ -430,9 +484,13 @@ registered document ([`round-trip.md`](round-trip.md)), with `clarification.spec
 clarification run and its reply, and `claimed.spec.ts`, a claimed action. Pilot's jobs are pinned in
 `backend/tests/services/test_job_service.py` (their placement, the queue, the triggers, the
 withdrawal and Retry), `test_start_gate.py`, `test_brief_service.py` and
-`backend/tests/models/test_work.py` (`retried_by`); the setup's line, its queue's and Retry's, and
-the pause at Create, in `frontend/tests/projects/create-project.spec.ts`, and a withdrawn job's in
-`frontend/tests/timeline/undo.spec.ts`.
+`backend/tests/models/test_work.py` (`retried_by`), and where each shows in `TestJobsOn`
+(`backend/tests/services/test_working_on.py`); the setup's line, its queue's and Retry's, and the
+pause at Create, in `frontend/tests/projects/create-project.spec.ts`; a job on the item it follows
+from, its forms, its Retry, an open card's head, the phone's row and a wait menu's, and the job in an
+opened document's head and a run's log's, in `frontend/tests/timeline/jobs.spec.ts`; and a withdrawn
+job, shown nowhere, in `frontend/tests/timeline/undo.spec.ts`. The session log's popover is pinned in
+`session-log.spec.ts`, and what the log shows a turn was sent there too.
 
 Each Playwright backend's controller is the fake it serves itself
 ([`controller.md`](controller.md)), which the `controller` fixture
@@ -475,8 +533,12 @@ with none started in the writer's environment, where `controller.finish(env, <it
 a reply's steps in order and `effects` the effects standing on their own. The `timeline` page
 object's `item(id).work` reads the open item (`environment`, `running`, `line`, whose `data-state`
 is the Session's state, `cue`, `step`, `sessionLog`, `stop`, `row`, `progress`, with
-`progressRing` and `progressName`, `steps`, its popover, `resume`, `stopConfirm`, `retry`), and
-the `sessionLog` fixture the log (`sessionLogAddress()`) and its head's `discuss`. A spec placing an
+`progressRing` and `progressName`, `steps`, its popover, `resume`, `stopConfirm`, `retry`), its
+`item(id).job` Pilot's job on the item (`root`, with `data-form` its form, `pulse`, `retry`), and
+the `sessionLog` fixture the log (`sessionLogAddress()`, `overlay`, the popover or the view), its
+head (`head`, `sub`, `close`, the job after a run's turn `job`, a phone's `discuss`) and what each
+turn was sent (`sent`, `sentTexts`, `sentEnds`, `sentMore`). A job's own entry draws nothing:
+`timeline.item(jobId).root` has none. A spec placing an
 item in a project while a work item's start there still writes waits for that item to run first. The
 backends run with `WORK_PARALLELISM_MAX` 10000 and `PROJECT_PARALLELISM_MAX` 3
 (`loadAppBackendEnv()`, [`controller.md`](controller.md), which also gives them their store,

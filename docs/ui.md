@@ -5,7 +5,7 @@ is its frame as built: the shell every screen sits in, the tokens and the shared
 what the browser remembers, links in text and the PWA. The screens have their own pages:
 [`projects.md`](projects.md) for the project list and the head, [`timeline.md`](timeline.md) for a
 project's timeline and its items, [`work.md`](work.md) for a work item's line and its session log,
-[`documents.md`](documents.md) for the overlay and the side panel, and [`sign-in.md`](sign-in.md)
+[`documents.md`](documents.md) for a document's tab, the tab line and the side panel, and [`sign-in.md`](sign-in.md)
 for the handle step and the profile page.
 
 ## Where things go
@@ -26,7 +26,8 @@ are the template's (`CLAUDE.md` § Template ownership). The app's own:
 (`src/hooks/use-phone.ts`, the media query `(max-width: 900px)`, every phone rule's width). Off a
 phone, `DeskFrame` (`components/shell/desk-frame.tsx`): the top bar, then, in `.app`'s grid, the
 side column (`nav.tabs`, the project list) and the centre (`main.centre`) beside it, where the child
-route shows. On a phone, `PhoneFrame` (`phone-frame.tsx`): no top bar, the gold bar across the
+route shows; at the narrow width, 901px to 1199px (`useNarrow()`, `src/hooks/use-narrow.ts`), the
+side column is the drawer over the centre instead (below), the rest as on a wide window. On a phone, `PhoneFrame` (`phone-frame.tsx`): no top bar, the gold bar across the
 page's top, and under it the centre, the side column a drawer over it (below). A screen whose phone
 use differs draws a phone component of its own under the same address, as a project's does
 ([`projects.md`](projects.md)). The shell reads the signed-in person through `useSelf()` (`GET
@@ -35,8 +36,8 @@ handle step stands in place of the side column and the centre, under the top bar
 under the drawer's head, which opens no drawer there; a screen under the shell reads the person with
 `usePerson()`, whose handle, name and avatar slot are never null.
 
-- **The top bar** (`components/shell/top-bar.tsx`), off a phone: the logo and the name, the gold
-  bar's badges after them, none at the handle step, and the person's avatar, which opens the profile
+- **The top bar** (`components/shell/top-bar.tsx`), off a phone: at the narrow width the drawer's
+  toggle first (below); the logo and the name, the gold bar's badges after them, none at the handle step, and the person's avatar, which opens the profile
   menu (`profile-menu.tsx`). The menu holds the person's name, Theme (System, Light, Dark), Profile
   once the handle is chosen, and Sign out. It keeps the template's `app-shell.topbar.user*` test
   ids, on a phone too, where it opens from the drawer's head, so the template's sign-in specs pass
@@ -87,15 +88,18 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
   and the lines, reads it, writes each event over the read, and reads it again at every rise of the
   stream's `isConnected`. The overrule posts `POST /api/quota-overrules` `{kind: offer}`
   ([`usage.md`](usage.md)).
-- **The drawer**, on a phone: the side column over the centre, the screen's head included, 300px
-  wide, at most 85% of the window, on the project list's tint (`--side`) with no rule at its right
-  edge. It opens on the drawer's head (`.drawer-head`), the top bar's block of colour: Pilot's logo
-  and name, white on the primary, and the avatar with the profile menu. Its button, "Projects"
-  (`DrawerButton`, `components/shell/drawer.tsx`), is the first part of a screen's head; on a screen
-  with no head, `DrawerProvider` stands it alone at the top-left (`.drawer-bar`), at the same place,
-  8px from the left and from the top under the gold bar, 36px square, where a view's arrow back
-  stands too ([`documents.md`](documents.md)). The open drawer covers its own button: its scrim
-  closes it, and so does any change of address, so that coming back finds it closed. Behind it, the
+- **The drawer**, on a phone and at the narrow width: the side column over the centre, 300px wide,
+  at most 85% of the window, on the project list's tint (`--side`) with no rule at its right edge.
+  Its button, "Projects" (`DrawerToggle`, `components/shell/drawer.tsx`, test id
+  `shell.drawer-toggle`), opens and closes it. On a phone the drawer covers the screen's head too and
+  opens on the drawer's head (`.drawer-head`), the top bar's block of colour: Pilot's logo and name,
+  white on the primary, and the avatar with the profile menu. Its button there is the first part of
+  a screen's head (`DrawerButton`); on a screen with no head, `DrawerProvider` stands it alone at the
+  top-left (`.drawer-bar`), at the same place, 8px from the left and from the top under the gold
+  bar, 36px square, where a view's arrow back stands too ([`documents.md`](documents.md)), and the
+  open drawer covers it. At the narrow width the drawer lies under the top bar, with no head of its
+  own, and its button is the top bar's first part, in the bar's white. Its scrim closes it, and so
+  does any change of address, so that coming back finds it closed. Behind it, the
   scrim darkens the page, `--scrim`, 30% black in the light theme and 80% in the dark, its opacity
   the share of its way the drawer has come: the slide and the darkening follow one number,
   `@property --drawer`, over 160ms. Under reduced motion (`prefers-reduced-motion: reduce`) the
@@ -140,7 +144,7 @@ is base, its line 1.6. Which text takes which step is the mockup's:
   label, a small button, a done line's answer and its time, a step's line, the working cue, a quote.
 - **xs**: a timestamp elsewhere, a card id, a divider, a chip, Recommended, *In the chat*, a quiet
   line's icon, time and button.
-- **lg**: an item's title, a project's name in the list, the overlay's title, an empty state's and
+- **lg**: an item's title, a project's name in the list, an opened document's title, an empty state's and
   a dialog's title, a prose h2.
 - **xl**: the project head's title, the profile's, a prose h1.
 - **2xl**: Pilot's name in the top bar and the drawer's head.
@@ -160,8 +164,8 @@ initials 14.5, 12 and 10.2px, and Pilot's mark 13/20 of the circle.
 
 **The gold bar's** are `--gold`, `--gold-foreground` and `--gold-edge`, its surface, its text and
 the rule under each line, light and dark; a badge redeclares the light theme's three on
-`.gold-badge`, so that it is the one gold in both themes on the top bar's blue. The overlay's
-strip over a document Pilot is working on takes the theme's three as the phone's gold line does,
+`.gold-badge`, so that it is the one gold in both themes on the top bar's blue. The
+strip over an opened document Pilot is working on takes the theme's three as the phone's gold line does,
 its button the gold bar's ([`documents.md`](documents.md)). `tests/shell/gold-bar.spec.ts`
 measures the bar's text at 4.5:1 or better and its hue gold in each theme, and
 `tests/work/registered.spec.ts` the strip's.
@@ -210,12 +214,12 @@ In `src/components/shared/`:
   (`singleTilde: false`, here, in `HeadingWords` and in `quotes.ts`'s parser alike), its text linked as the record's words are except in code and inside a link, every
   link opening in a new tab. Given `documentLink`, as the Draft tab gives it
   ([`documents.md`](documents.md)), it draws every link through that component and links nothing
-  else. A quote tag ([`chats.md`](chats.md) has its forms) is a chip (`QuoteChip`) that goes to what
+  else; given `materialLink`, as the project document and the handbook give it, it draws a link to a
+  path in the project's `attachments/` through that component, and every other link as without it. A quote tag ([`chats.md`](chats.md) has its forms) is a chip (`QuoteChip`) that goes to what
   it quotes, from any screen under a project's address (`useOpenQuote`): an item to its address, a
-  block to its own, which opens the overlay where its document is a card, a draft's ask,
-  `project.md/<local id>`, to the ask in the Draft tab, past Create to the project document's
-  overlay, the handbook and the project document to their overlays, and an attachment to its
-  address, under its item's where it hangs on one, found in the timeline's read by its batch and its
+  block to its own, which opens its document where it is a card, a draft's ask,
+  `project.md/<local id>`, to the ask in the Draft tab, past Create to the project document, the
+  handbook and the project document to their addresses, and an attachment to its address, under its item's where it hangs on one, found in the timeline's read by its batch and its
   filename, a folder's keeping its slashes; a path naming no attachment there goes nowhere. Inside a
   code span or fence, or raw HTML, as the text's own Markdown parse reads it, or behind a backslash
   escape, the tag shows as written (`quotesToLinks`, `lib/chat/quotes.ts`).
@@ -245,10 +249,10 @@ icon on its text's capitals in a flex row;
 ## The keys
 
 `src/lib/keys.ts`. Esc closes the top-most open thing, one per press. The layers' ranks, bottom to
-top, are `console`; `overlay` and `panel`, sharing one; `plan`; `menu`; `dialog`; and `keys`. Within
-a rank, the thing opened last is on top. An open thing registers with `useEscape(layer, open,
-close)`, stamped when `open` turns true. The panel registers only while it lies on top of an open
-overlay, so of the two the one opened last closes first ([`documents.md`](documents.md)). `?` opens
+top, are `console`; `overlay`, the session log's popover off a phone and a view on one, never a
+document's tab, which Esc does not close ([`documents.md`](documents.md)); `plan`; `menu`;
+`dialog`; and `keys`. Within a rank, the thing opened last is on top. An open thing registers with
+`useEscape(layer, open, close)`, stamped when `open` turns true. `?` opens
 the keys list, which names Ctrl+Enter, Esc and `?`. Neither key acts in a text field or with a
 modifier held; Esc in a console's own field closes the console, and Ctrl+Enter sends a text field
 that has one Send (`TextField`).
@@ -256,13 +260,17 @@ that has one Send (`TextField`).
 ## What the browser remembers
 
 `src/lib/browser-state.ts`, one localStorage entry, `pilot`: the theme, the current project (which
-the bare address opens), the chevrons of *Other projects* and *Finished*, and each project's side
-panel, `{open, tab}` by the project's id, once the person set it ([`documents.md`](documents.md)),
-which a phone neither reads nor writes: its tab and its views are the history entry's
-([`projects.md`](projects.md)). Nothing of it is on the server. A component reads it with
-`useBrowserState()` and changes it with `rememberInBrowser(change)`, a panel with
-`rememberPanel(projectId, panel)`, which keeps what another tab of the browser keeps for the other
-projects.
+the bare address opens), the chevrons of *Other projects* and *Finished*, and, off a phone
+([`documents.md`](documents.md)): each project's side panel's tab, `panels`, `{tab}` by the project's
+id, once the person set it; the panel's two widths, `panelWidths`, `{project, draft}`, every
+project's in pixels and every draft's as a share of the window; and each project's tab line,
+`lines`, `{tabs, seen}` by the project's id, its tabs in the order they opened and their keys in the
+order they showed, while it has a tab open. A phone neither reads nor writes the panel's or the
+line's: its tab and its views are the history entry's ([`projects.md`](projects.md)). Nothing of it
+is on the server. A component reads it with `useBrowserState()` and changes it with
+`rememberInBrowser(change)`, a panel's tab with `rememberPanel(projectId, panel)`, a width with
+`rememberPanelWidth(kind, width)` and a line with `rememberLine(projectId, line)`, each keeping what
+another tab of the browser keeps for the rest.
 
 The unsent text of every answer's field and of the chat's composer is a second entry,
 `pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other` and `/no`
@@ -364,8 +372,8 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
 - `shell`: `open(path)` opens an address once the signed-in person is read; `goldBadges`,
   `goldBadge(code)` and `goldPopover` read the badges and the week's halt's popover, `goldBar` and
   `goldLine(code)` the phone's lines, `goldText(line)` a line's words without its button, and
-  `goldOverrule(line)` its overrule's button; on a phone `drawerToggle` is the drawer's button,
-  `drawerHead` its head and `scrim` the scrim. Every spec's page reduces motion
+  `goldOverrule(line)` its overrule's button; `drawerToggle` is the drawer's button, on a phone
+  and at the narrow width, `drawerHead` the phone's drawer's head and `scrim` the scrim. Every spec's page reduces motion
   (`tests/support/fixtures-infrastructure.ts`), so the drawer opens at once; a spec that measures
   the slide asks for `reducedMotion: 'no-preference'` first.
 - `controller` drives the worker's fake controller, and `conditions` reads what the gold bar reads
@@ -377,6 +385,6 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an
   environment on the record through `POST /api/testing/environments` ([`projects.md`](projects.md)).
 - The page objects `handleStep`, `profile`, `projectList`, `projectHead`, `phoneTabs`, `timeline`,
-  `overlay`, `sessionLog`, `panel` and `chat`, and `projects`, `chats` and `waits`
+  `overlay`, `sessionLog`, `docTabs`, `panel` and `chat`, and `projects`, `chats` and `waits`
   ([`projects.md`](projects.md), [`timeline.md`](timeline.md), [`work.md`](work.md),
   [`documents.md`](documents.md), [`chats.md`](chats.md), [`waits.md`](waits.md)).

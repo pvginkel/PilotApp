@@ -30,7 +30,7 @@ A registered document is a review on the timeline from its registration, in one 
   title, summary and blocks, and its file in the tree (`inbox/<seq>-<slug>.md`,
   [`projection.md`](projection.md)); its version 1 is `registered`, of the Session that registered
   it. It is answered and closed as any document.
-- **Its read failed**: `read_failed_at` set, no text. Its line keeps its file's name, its overlay
+- **Its read failed**: `read_failed_at` set, no text. Its line keeps its file's name, opened it
   reads "The document did not load" ([`documents.md`](documents.md)), it closes with Reviewed as any
   document with no block, its work item's session log says why, and the continuation's message
   names it (D044).
@@ -58,7 +58,8 @@ A document that is Pilot's waits on nobody: `waiting()` (`backend/app/services/t
 leaves it out, and with it the badge, the project's *waiting on you* and the standing notification
 ([`projects.md`](projects.md), [`notifications.md`](notifications.md)). Its timeline item carries
 what Pilot does on it, `pilots_work`, and is one line ([`timeline.md`](timeline.md)); opened, it is
-read-only under a gold strip ([`documents.md`](documents.md)). The app's controls take nothing on
+read-only under a gold strip, the pass's job in its head ([`documents.md`](documents.md)), and the
+pass shows on it once it is the person's again ([`work.md`](work.md)). The app's controls take nothing on
 it: an answer, an action's Done, whose note is the paste-back, and a document's Done are refused
 `409`, "… because Pilot is working on the item", and so is each of them on a held block in a
 document that is the person's, "… because Pilot is working on block A1", or `blocks A1, A2` for a
@@ -155,7 +156,7 @@ ends so under a cooperative usage halt or its project's pause, the run left open
 records its reply too, and no later turn of the run replaces it. The reply is
 split per block under the headings asked for, a heading matched outside a fence at its level and by
 its text, its part running to the next heading of the same or a higher level, and shown whole where
-any heading is missing (`reply_parts`): the document's `clarifications`, the overlay's section
+any heading is missing (`reply_parts`): the document's `clarifications`, the opened document's section
 ([`documents.md`](documents.md)). The job after the run's turn is briefed with it, *the writer
 answered* ([`work.md`](work.md)), and asks nothing: `ask_writer` is refused there, and in a pass
 whose run another pass asked about, so a Retry of a pass that asked asks nothing: one round per

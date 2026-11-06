@@ -6,7 +6,7 @@ store, run under any limit, small in volume and mostly a person's own doing. Thi
 limits as built: the reading, the week's and the five-hour halts and their settings, the week's
 overrule, what a halt does to running work, a run halted or paused at its turn's end, the nudge,
 the quota wall, and each turn's tokens. The halts show on the gold bar ([`ui.md`](ui.md)), a held
-or stopped work item's line says why ([`work.md`](work.md)), the tables are in
+or stopped work item's line says why, a job's session log ([`work.md`](work.md)), the tables are in
 [`record.md`](record.md), and the loops and timers run as [`jobs.md`](jobs.md) says.
 
 | Service | Does |

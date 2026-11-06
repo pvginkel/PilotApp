@@ -567,6 +567,11 @@ gets both ways is the same `seq`. The routes are behind the API's `editor` gate,
 - `GET /api/sessions/<id>/records?after=<seq>&limit=<n>` answers `{records, ended}`: the records
   after `after` (0 by default), at most `limit` (200 by default, 1 to 1,000), in order. `ended` is
   true when the page holds the last record and the Session is `ended` or `failed`.
+- `GET /api/sessions/<id>/turns` answers `{turns}`, the Session's Turns in order, each `{turn, at,
+  author, message}`: its number from 1, when it was sent (its `started_at`), its author's handle,
+  null for the server's own, and what was sent, the server's own message, such as a work item's
+  brief or its continuation, or a person's words as the agent read them. No record carries what a
+  Turn of the server's own was sent; the session log reads it here ([`work.md`](work.md)).
 - `POST /api/sessions/<id>/stream` `{request_id, view}` opens a view of the Session's live frames on
   the caller's connection: `204`; `409` `NOT_CONNECTED` when this process holds no connection under
   `request_id`, the browser's stream being on another pod or just dropped, to retry; `403` for

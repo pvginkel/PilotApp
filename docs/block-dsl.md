@@ -35,7 +35,7 @@ at: 2026-10-12T09:40:00Z
 `---` first line with no closing `---` opens no front matter. The keys the record reads:
 
 - `title`;
-- `summary`, shown on the item's card and as the lead of its overlay ([`timeline.md`](timeline.md),
+- `summary`, shown on the item's card and as the lead of the opened document ([`timeline.md`](timeline.md),
   [`documents.md`](documents.md));
 - `step`, the id of a task of the project's plan, a removed task included;
 - `urgent`, `true` or `false`;

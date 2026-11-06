@@ -66,8 +66,8 @@ commit:
 - **At the gate**, a job's start and a Chat's are held, `held_reason` `store_update`. The update is
   read after the pause and before the outage. The setup is held too, though the pause lets it
   through. A work item's start, Resume and nudge go on: a worker's run is in an environment of its
-  own and never touches the store ([`sessions.md`](sessions.md)). A held job's line reads "Waiting
-  for Pilot's update" ([`work.md`](work.md)).
+  own and never touches the store ([`sessions.md`](sessions.md)). A held job's session log reads "Waiting
+  for Pilot's update" in its tail, and so does the setup's line ([`work.md`](work.md)).
 - **A job's owed nudge** is not sent until the lift ([`usage.md`](usage.md)).
 - **A message to a project's chat** is refused `409` "Cannot send a message to Pilot in <project>
   because Pilot is updating", and the composer keeps the words ([`chats.md`](chats.md)). A send
@@ -140,9 +140,10 @@ neither does one a person took over meanwhile, its stop then the person's
 Pilot works on: the documents its pass goes over stay Pilot's. A chat is
 not retried: it stays the open one, and the next message after the lift goes to it
 ([`chats.md`](chats.md)).
-A stopped job's line reads "Stopped for Pilot's update · <time>", and its session log ends "Stopped
-by Pilot for its update · <time>". Once retried, its line has "Retried as a new job below" under it
-([`work.md`](work.md)).
+A stopped job shows stopped on the item it follows from, the setup's line reading "Stopped for
+Pilot's update · <time>", and its session log ends "Stopped by Pilot for its update · <time>". Once
+retried, the item shows the retry's job in its place, and the setup's line has "Retried as a new job
+below" under it ([`work.md`](work.md)).
 
 ## Testing it
 
@@ -169,6 +170,7 @@ gives:
 The fixture also lifts an update a spec left standing. The specs wait two ticks, `TICKS_MS`. The
 cases are `tests/shell/gold-bar.spec.ts` (the condition before the week's halt),
 `tests/chat/composer.spec.ts` (a message refused, its words kept) and
-`tests/work/store-update.spec.ts` (a held job's line, a stopped job's, its retry at the lift). The backend's are
+`tests/work/store-update.spec.ts` (a held job's button and its log's cue, a stopped job's and its log's tail, its retry in its place
+at the lift). The backend's are
 `tests/services/test_store_updater.py`, `test_store_update_service.py`, `tests/test_cli.py`
 `TestUpdateStore` and `tests/api/test_testing_record.py` `TestCreateStoreUpdate`.
