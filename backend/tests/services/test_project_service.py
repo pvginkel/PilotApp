@@ -447,6 +447,15 @@ class TestTabs:
             (finished.id, "Third", None, ProjectState.FINISHED),
         ]
 
+    def test_reads_with_jit_off(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        _make(container, name="First")
+
+        container.project_service().tabs(ADA, archived=False)
+
+        assert session.scalar(sql("SHOW jit")) == "off"
+
     def test_the_archived_projects_are_a_list_of_their_own(
         self, container: ServiceContainer
     ) -> None:
