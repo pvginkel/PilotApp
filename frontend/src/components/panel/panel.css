@@ -7,6 +7,9 @@
      frame gives a drawer and .centre is positioned (shell.css). */
   .project { flex: 1; min-height: 0; display: flex; }
   .project-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* The timeline's place, under the head and the tab line: a document's tab lies over the timeline
+     there (overlay.css), which keeps its scroll under it. */
+  .stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; isolation: isolate; }
 
   /* A page of its own in the project list's colour, as the overlay is. */
   .panel {

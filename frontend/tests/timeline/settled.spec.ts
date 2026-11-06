@@ -332,12 +332,13 @@ test.describe('A settled section’s block address', () => {
     await expect(page.getByTestId('overlay')).toHaveCount(0);
   });
 
-  test('of a card opens it in the overlay at the block, its section open, and closing returns to the project’s address', async ({
+  test('of a card opens it in its tab at the block, its section open, and closing its tab returns to the project’s address, the timeline where it was', async ({
     page,
     people,
     projects,
     timeline,
     overlay,
+    docTabs,
   }) => {
     await page.setViewportSize({ width: 1280, height: 520 });
     const me = await people.signIn();
@@ -354,7 +355,7 @@ test.describe('A settled section’s block address', () => {
     await expect(overlay.settledLines).toHaveCount(0);
     await expect(page).toHaveURL(addressOf(id, trip, 'D3'));
 
-    await overlay.close.click();
+    await docTabs.document(trip).close.click();
     await expect(overlay.root).toHaveCount(0);
     await expect(page).toHaveURL(`/projects/${id}`);
     await expect(timeline.item(trip).card.root).toBeInViewport();

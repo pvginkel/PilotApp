@@ -190,7 +190,7 @@ test.describe('The Draft tab', () => {
     await expect(overlay.sub).toHaveText('Attachment of the draft');
     await expect(overlay.attachment.prose).toContainText('The lake.');
 
-    // The definition chat lies under the overlay: Discuss closes it.
+    // The definition chat lies under the attachment's tab: Discuss shows the chat's.
     await overlay.discuss.click();
     await expect(page).toHaveURL(`/projects/${id}`);
     await expect(overlay.root).toHaveCount(0);

@@ -324,6 +324,7 @@ test.describe('A registered document', () => {
     chats,
     timeline,
     overlay,
+    docTabs,
     sessionLog,
     page,
   }) => {
@@ -354,7 +355,7 @@ test.describe('A registered document', () => {
     await expect(overlay.failed).toHaveText('The document did not load.');
     await expect(overlay.strip.root).toHaveCount(0);
     await expect(overlay.reviewed).toBeVisible();
-    await overlay.close.click();
+    await docTabs.document(survey).close.click();
 
     await item.card.reviewed.click();
     await expect(item.root).toHaveAttribute('data-state', 'done');

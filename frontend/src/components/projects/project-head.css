@@ -69,6 +69,85 @@
   .notes-pop { width: 340px; }
   .notes-pop .note-list { padding: 0 14px; }
 
+  /* The tab line under the head while a document is open (doc-tabs.tsx; the mockup's "The open
+     documents"): the head's rule moves under the tabs, running from the sides of the tab showing to
+     the page's edges, and the head keeps less room under its controls. The timeline first, which
+     does not close; then a tab per document, in the order they opened, each with its cross; Close
+     all at the far right. Every tab is a tab's shape: the one showing on the page's colour with the
+     primary across its top, the others muted. Where the tabs do not fit they narrow, then the line
+     scrolls. */
+  .feed-head:has(+ .doc-tabs) { min-height: 0; padding-bottom: 4px; border-bottom: 0; }
+  .doc-tabs {
+    flex: none;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    height: 36px;
+    padding: 0 16px 0 18px;
+    box-shadow: inset 0 -1px 0 hsl(var(--border));
+  }
+  .doc-tabs-row { position: relative; flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 4px; height: 100%; padding-top: 2px; overflow-x: auto; scrollbar-width: none; }
+  .doc-tabs-row::-webkit-scrollbar { display: none; }
+  .doc-tabs .close-all { flex: none; align-self: center; }
+  /* A tab as wide as its title, from 200px to 300px, a longer title cut short. */
+  .dtab {
+    position: relative;
+    min-width: 200px;
+    max-width: 300px;
+    display: flex;
+    align-items: center;
+    height: 100%;
+    border: 1px solid hsl(var(--border));
+    border-radius: 6px 6px 0 0;
+    background: hsl(var(--side));
+    color: hsl(var(--muted-foreground));
+    font: inherit;
+    font-size: var(--text-base);
+  }
+  .dtab.first { flex: none; min-width: 0; gap: 7px; padding: 0 14px 0 12px; cursor: pointer; }
+  .dtab:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+  /* The primary across the top is the tab's own background, its top 2px from the outer edge, under
+     a top border that lets it through: the tab's rounded outline clips it, so it follows the
+     corners as the tab's sides do. */
+  .dtab.on {
+    border-top-color: transparent;
+    border-bottom-color: transparent;
+    background: linear-gradient(hsl(var(--primary)), hsl(var(--primary))) border-box 0 0 / 100% 2px no-repeat, hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+  .dtab-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 100%;
+    padding: 0 4px 0 12px;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .dtab .icon { flex: none; }
+  .dtab .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dtab-x {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    margin-right: 6px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: none;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+  }
+  .dtab-x:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+  .dtab-x .icon { width: 14px; height: 14px; }
+
   /* A head whose menu runs past it in one row, its parts at their floors, stands in its two rows
      (project-head.tsx); the plan opens under the step. */
   .feed-head.two-rows { flex-direction: column; align-items: stretch; gap: 8px; }

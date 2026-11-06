@@ -17,6 +17,7 @@ import { Console } from '@/components/timeline/console';
 import { Note } from '@/components/timeline/note';
 import { DEFERRED, Said } from '@/components/timeline/said';
 import type { Answer, Saving, Sent } from '@/hooks/use-answer';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { Block } from '@/hooks/use-timeline';
 import { useUnsentText } from '@/hooks/use-unsent-text';
 import { cn } from '@/lib/utils';
@@ -54,6 +55,7 @@ type ClaimedWork = NonNullable<Block['claim']>['work'];
 /** Pilot's claim: "Pilot does it", the work item that does it, where one is named, its link (F21.6). */
 function Claimed({ block, work }: { block: Block; work: ClaimedWork }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const replace = useTabReplace();
   return (
     <div className="answer" data-testid="timeline.block.claim">
       <div className="claimed">
@@ -65,6 +67,7 @@ function Claimed({ block, work }: { block: Block; work: ClaimedWork }) {
             <Link
               to="/projects/$projectId/items/$itemId"
               params={{ projectId, itemId: work.id }}
+              replace={replace}
               className="claimed-work"
               title="Go to the work item that does it"
               data-testid="timeline.block.claim.work"

@@ -15,7 +15,7 @@
  * Opened at an item's address, the timeline goes to the item and flashes it; at a block's, to the
  * block, its collapsed section opened (F31.5), or to its item where its line or its card stands for
  * it; an address it draws nothing for leaves it at its end (F97). A segment opens its block's
- * collapsed section too (F33). Under an overlay's backdrop it takes no focus.
+ * collapsed section too (F33). Under a tab or the overlay it takes no focus, and keeps its scroll.
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
@@ -45,7 +45,7 @@ interface Address {
 interface TimelineProps {
   projectId: string;
   address: Address | null;
-  /** It lies under an overlay's backdrop. */
+  /** It lies under a tab or the overlay. */
   inert: boolean;
 }
 

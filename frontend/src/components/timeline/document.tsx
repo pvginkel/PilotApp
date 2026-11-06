@@ -39,6 +39,7 @@ import { autopilotMayTake } from '@/components/timeline/may-take';
 import { isSettled, piecesOf, SectionsContext } from '@/components/timeline/sections';
 import { SettledLines } from '@/components/timeline/settled';
 import { PilotWriting } from '@/components/timeline/writing';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useReviewed, useSend } from '@/hooks/use-marks';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { blocksOf, isAnswered, titleOf, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
@@ -77,12 +78,13 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
 export function DocumentCard({ item }: { item: TimelineItem }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const navigate = useNavigate();
+  const replace = useTabReplace();
   const blocks = blocksOf(item);
   const autopilotOff = useAutopilotOff(projectId);
   const read = readOf(item);
   const params = { projectId, documentId: item.id };
   const openAt = (itemId: string, blockId: string) =>
-    void navigate({ to: '/projects/$projectId/items/$itemId/blocks/$blockId', params: { projectId, itemId, blockId } });
+    void navigate({ to: '/projects/$projectId/items/$itemId/blocks/$blockId', params: { projectId, itemId, blockId }, replace });
   return (
     <div className="item-body">
       <DocumentHead item={item} />
@@ -116,6 +118,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
           <Link
             to="/projects/$projectId/documents/$documentId"
             params={params}
+            replace={replace}
             className="btn btn-primary"
             data-testid="timeline.item.open"
           >

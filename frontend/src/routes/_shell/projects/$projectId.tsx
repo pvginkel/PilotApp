@@ -2,31 +2,33 @@
  * A project at its own address, by its id (F1.6): its head over its timeline. The browser
  * remembers it as the current project, which the bare address opens. Under it an item's address,
  * and under that a block's, open the timeline at the item or the block, and a document's opens
- * the document in the overlay over the timeline (F97), as a block's does where its document is a
- * card, at the block (F33), and the address under a document's of the box of Pilot's questions to
- * its writer at the box (F52.2). An attachment's address under an item's opens it in the overlay over
- * the timeline where the timeline stands, and under a document's in the document's overlay
- * (F28.5), and under the project's, wherever it hangs, a draft's material hung on nothing
- * (F36.6). The handbook's address, and the project document's, open it in the overlay over the
- * timeline (F129.4, F37.4), and a work item's session log's opens it there (F69). Another
- * project's address closes it. A draft has its definition chat in the timeline's place (F46.1),
- * once the head says it is one, Create project at its end once the project can be created (D119).
- * Beside the head and the timeline stands the side panel, the project's own (F38.1); Discuss anywhere on the project's screens opens it on the Chat tab, on
- * top, with what it quotes in the composer (F39), and *In the chat* on a block answered in the chat
- * opens it there at the message that gave the answer (F42.3). A draft's panel has the Draft and
- * Documents tabs (F46.3), its chat standing in the timeline's place: there Discuss and *In the chat*
- * take the definition chat, closing an overlay over it. An ask of the draft gone to from its chat
- * opens the Draft tab at it, and past Create the project document. While an overlay is open, the
- * timeline under its backdrop takes no focus; the head's buttons and the panel beside it do, at the
- * narrow width as on a wide window (F98.2). On a phone the screen is its own
- * (`PhoneProject`), its tabs at the bottom standing for the panel, whose state it leaves alone, and
- * what the address opens in the overlay a view pushed over them (F98.4): there an item's address,
- * and a block's whose item is read and no card, opens the item alone (F99) rather than the timeline
- * at it.
+ * the document (F97), as a block's does where its document is a card, at the block (F33), and the
+ * address under a document's of the box of Pilot's questions to its writer at the box (F52.2). An
+ * attachment's address under an item's or a document's opens it (F28.5), and under the project's,
+ * wherever it hangs, a draft's material hung on nothing (F36.6). The handbook's address, and the
+ * project document's, open it (F129.4, F37.4), and a work item's session log's opens it in the
+ * overlay over the timeline (F69). Another project's address closes them. A draft has its
+ * definition chat in the timeline's place (F46.1), once the head says it is one, Create project at
+ * its end once the project can be created (D119). Off a phone, what opens as a document is a tab
+ * in the timeline's place (F28.1, F28.8), the tab line the head's last row while one is open
+ * (`use-doc-tabs.ts`), the address following the tab showing and a move to another of the
+ * project's addresses replacing the browser's entry (F97); beside the head and the timeline stands
+ * the side panel, the project's own (F38.1). Discuss anywhere on the project's screens opens it on
+ * the Chat tab, on top, with what it quotes in the composer (F39), and *In the chat* on a block
+ * answered in the chat opens it there at the message that gave the answer (F42.3). A draft's
+ * panel has the Draft and Documents tabs (F46.3), its chat standing in the timeline's place: there
+ * Discuss and *In the chat* take the definition chat, showing its tab. An ask of the draft gone to
+ * from its chat opens the Draft tab at it, and past Create the project document. While a tab or
+ * the overlay shows, the timeline under it takes no focus; the head's buttons, the tab line and
+ * the panel beside it do, at the narrow width as on a wide window (F98.2). On a phone the screen
+ * is its own (`PhoneProject`), its tabs at the bottom standing for the panel, whose state it leaves
+ * alone, and what the address opens a view pushed over them (F98.4): there an item's address, and
+ * a block's whose item is read and no card, opens the item alone (F99) rather than the timeline at
+ * it.
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { createFileRoute, useMatch, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
+import { createFileRoute, useMatch, useMatches, useNavigate, useParams, useRouter } from '@tanstack/react-router';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { ItemAttachmentOverlay, ProjectAttachmentOverlay } from '@/components/overlay/attachment-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
@@ -35,10 +37,12 @@ import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/pr
 import { SessionLogOverlay } from '@/components/overlay/session-log-overlay';
 import { Panel } from '@/components/panel/panel';
 import { CreateProject } from '@/components/projects/create-project';
+import { DocTabs } from '@/components/projects/doc-tabs';
 import { PhoneProject } from '@/components/projects/phone-project';
 import { ProjectHead } from '@/components/projects/project-head';
 import { isCard } from '@/components/timeline/document-state';
 import { Timeline } from '@/components/timeline/timeline';
+import { DocTabContext, TabMovesContext, useDocTabs, type DocTab } from '@/hooks/use-doc-tabs';
 import { discussIn, DiscussContext } from '@/hooks/use-discuss';
 import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
@@ -63,40 +67,63 @@ function Project() {
   const { data } = useProjectHead(projectId);
   const addressed = useTimelineItem(projectId, blockId === undefined ? undefined : itemId);
   const box = useMatch({ from: '/_shell/projects/$projectId/documents/$documentId/clarification', shouldThrow: false }) !== undefined;
-  const overlaid =
+  const opened =
     documentId !== undefined ? { documentId, block: null, attachment: attachmentId ?? null, box } : cardAt(addressed, blockId);
   const attached = itemId !== undefined && attachmentId !== undefined ? { itemId, attachmentId } : null;
   const loose = itemId === undefined && documentId === undefined ? (attachmentId ?? null) : null;
-  const goneTo = itemId === undefined || attached !== null ? null : { item: itemId, block: blockId ?? null };
+  // A card's block opens its document, not the timeline at it.
+  const goneTo = itemId === undefined || attached !== null || opened !== null ? null : { item: itemId, block: blockId ?? null };
   const phone = usePhone();
   // A block's address waits for the read, which says whether its item is a card.
   const alone =
-    phone && goneTo !== null && overlaid === null && (goneTo.block === null || addressed !== undefined) ? { itemId: goneTo.item, block: goneTo.block } : null;
+    phone && itemId !== undefined && attached === null && opened === null && (blockId === undefined || addressed !== undefined)
+      ? { itemId, block: blockId ?? null }
+      : null;
   const handbook = useMatch({ from: '/_shell/projects/$projectId/handbook', shouldThrow: false }) !== undefined;
   const projectDocument = useMatch({ from: '/_shell/projects/$projectId/project-document', shouldThrow: false }) !== undefined;
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const overlay =
-    overlaid !== null || attached !== null || loose !== null || alone !== null || handbook || projectDocument || sessionId !== undefined
-      ? pathname
-      : null;
-  const overlays = (
+  // The matches' address: the router takes a new location a render before the matches it draws.
+  const pathname = useMatches({ select: (matches) => matches.at(-1)!.pathname });
+  const router = useRouter();
+  const documents = (
     <>
-      {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
-      {alone !== null && <ItemOverlay projectId={projectId} project={data} {...alone} />}
+      {opened !== null && <DocumentOverlay projectId={projectId} project={data} {...opened} />}
       {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
       {loose !== null && <ProjectAttachmentOverlay projectId={projectId} attachmentId={loose} />}
       {handbook && <HandbookOverlay projectId={projectId} project={data} />}
       {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
-      {sessionId !== undefined && <SessionLogOverlay projectId={projectId} sessionId={sessionId} />}
     </>
   );
-  return phone ? (
-    <PhoneProject projectId={projectId} project={data} overlaid={overlay !== null}>
-      {overlays}
-    </PhoneProject>
-  ) : (
-    <DeskProject projectId={projectId} project={data} overlay={overlay} goneTo={goneTo}>
-      {overlays}
+  const log = sessionId === undefined ? null : <SessionLogOverlay projectId={projectId} sessionId={sessionId} />;
+  if (phone) {
+    const overlaid = opened !== null || attached !== null || loose !== null || alone !== null || handbook || projectDocument || sessionId !== undefined;
+    return (
+      <PhoneProject projectId={projectId} project={data} overlaid={overlaid}>
+        {documents}
+        {alone !== null && <ItemOverlay projectId={projectId} project={data} {...alone} />}
+        {log}
+      </PhoneProject>
+    );
+  }
+  // A document's tab shows it again at its own address, not at a block's or its box's.
+  const documentTab = (id: string): DocTab => ({
+    key: `document ${id}`,
+    kind: 'document',
+    id,
+    href: router.buildLocation({ to: '/projects/$projectId/documents/$documentId', params: { projectId, documentId: id } }).pathname,
+  });
+  const tab: DocTab | null =
+    opened !== null && opened.attachment === null
+      ? documentTab(opened.documentId)
+      : attachmentId !== undefined
+        ? { key: `attachment ${attachmentId}`, kind: 'attachment', id: attachmentId, href: pathname }
+        : handbook
+          ? { key: 'handbook', kind: 'handbook', id: null, href: pathname }
+          : projectDocument
+            ? { key: 'project-document', kind: 'project-document', id: null, href: pathname }
+            : null;
+  return (
+    <DeskProject projectId={projectId} project={data} tab={tab} goneTo={goneTo} log={log}>
+      {documents}
     </DeskProject>
   );
 }
@@ -104,21 +131,28 @@ function Project() {
 interface DeskProjectProps {
   projectId: string;
   project: ProjectHeadOf | undefined;
-  /** What the overlay shows, by its address, or none. */
-  overlay: string | null;
+  /** The tab the address shows, none for the timeline. */
+  tab: DocTab | null;
   goneTo: { item: string; block: string | null } | null;
-  /** The overlays the address opens. */
+  /** The session log the address opens in the overlay, or none. */
+  log: ReactNode | null;
+  /** What the tab showing shows. */
   children: ReactNode;
 }
 
-/** Off a phone: the head over the timeline, or a draft's definition chat, and the side panel beside them. */
-function DeskProject({ projectId, project: data, overlay, goneTo, children }: DeskProjectProps) {
+/**
+ * Off a phone: the head over the tab line, and the timeline, or a draft's definition chat, or the
+ * tab showing in its place; the side panel beside them.
+ */
+function DeskProject({ projectId, project: data, tab, goneTo, log, children }: DeskProjectProps) {
   const draft = data?.state === 'draft';
   const { panel, show, close, toggle } = usePanel(projectId, draft);
+  const line = useDocTabs(projectId, tab);
   const navigate = useNavigate();
-  // A draft's chat stands in the timeline's place, under the overlay.
+  const covered = tab !== null || log !== null;
+  // A draft's chat is its first tab.
   const toDefinitionChat = () => {
-    if (overlay !== null) void navigate({ to: '/projects/$projectId', params: { projectId } });
+    if (covered) line.show(null);
   };
   const discuss = (quote: QuoteRef | null) => {
     discussIn(projectId, quote);
@@ -132,7 +166,7 @@ function DeskProject({ projectId, project: data, overlay, goneTo, children }: De
   };
   const toDraftBlock = (block: string) => {
     if (!draft) {
-      void navigate({ to: '/projects/$projectId/project-document', params: { projectId } });
+      void navigate({ to: '/projects/$projectId/project-document', params: { projectId }, replace: true });
       return;
     }
     goToDraftBlock(projectId, block);
@@ -143,55 +177,65 @@ function DeskProject({ projectId, project: data, overlay, goneTo, children }: De
   const panelShown = panel.open && data !== undefined;
   const chatShown = panelShown && panel.tab === 'chat';
   return (
-    <DiscussContext.Provider value={discuss}>
-      <InChatContext.Provider value={inChat}>
-        <DraftBlockContext.Provider value={toDraftBlock}>
-          <div className="project" data-panel={panelShown ? 'open' : 'closed'}>
-            <div className="project-main">
-              {data && (
-                <ProjectHead
-                  ref={setHead}
-                  project={data}
-                  panel={{
-                    chat: { shown: chatShown, toggle: () => (chatShown ? close() : discuss(null)) },
-                    documents: { shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') },
-                    draftTab: { shown: panelShown && panel.tab === 'draft', toggle: () => toggle('draft') },
-                  }}
+    <TabMovesContext.Provider value>
+      <DiscussContext.Provider value={discuss}>
+        <InChatContext.Provider value={inChat}>
+          <DraftBlockContext.Provider value={toDraftBlock}>
+            <div className="project" data-panel={panelShown ? 'open' : 'closed'}>
+              <div className="project-main">
+                {data && (
+                  <ProjectHead
+                    ref={setHead}
+                    project={data}
+                    panel={{
+                      chat: { shown: chatShown, toggle: () => (chatShown ? close() : discuss(null)) },
+                      documents: { shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') },
+                      draftTab: { shown: panelShown && panel.tab === 'draft', toggle: () => toggle('draft') },
+                    }}
+                  />
+                )}
+                {data && <DocTabs projectId={projectId} draft={draft} line={line} />}
+                <div className="stage">
+                  {data !== undefined &&
+                    (draft ? (
+                      <ProjectChat
+                        projectId={projectId}
+                        members={data.members}
+                        home="feed"
+                        covered={covered}
+                        end={<CreateProject project={data} />}
+                      />
+                    ) : (
+                      <Timeline projectId={projectId} address={goneTo} inert={covered} />
+                    ))}
+                  {tab !== null && (
+                    <DocTabContext.Provider key={tab.key} value={line.shown(tab.key)}>
+                      {children}
+                    </DocTabContext.Provider>
+                  )}
+                </div>
+              </div>
+              {panelShown && (
+                <Panel
+                  projectId={projectId}
+                  draft={draft}
+                  members={data.members}
+                  tab={panel.tab}
+                  head={head}
+                  onTab={show}
+                  onClose={close}
                 />
               )}
-              {data !== undefined &&
-                (draft ? (
-                  <ProjectChat
-                    projectId={projectId}
-                    members={data.members}
-                    home="feed"
-                    covered={overlay !== null}
-                    end={<CreateProject project={data} />}
-                  />
-                ) : (
-                  <Timeline projectId={projectId} address={goneTo} inert={overlay !== null} />
-                ))}
+              {log}
             </div>
-            {panelShown && (
-              <Panel
-                projectId={projectId}
-                draft={draft}
-                members={data.members}
-                tab={panel.tab}
-                head={head}
-                onTab={show}
-                onClose={close}
-              />
-            )}
-            {children}
-          </div>
-        </DraftBlockContext.Provider>
-      </InChatContext.Provider>
-    </DiscussContext.Provider>
+          </DraftBlockContext.Provider>
+        </InChatContext.Provider>
+      </DiscussContext.Provider>
+    </TabMovesContext.Provider>
   );
 }
 
-/** The document a block's address opens in the overlay, at the block: its item, where it is a card. */
+/** The document a block's address opens, at the block: its item, where it is a card. */
 function cardAt(item: TimelineItem | null | undefined, blockId: string | undefined) {
   return item !== undefined && item !== null && blockId !== undefined && isCard(item)
     ? { documentId: item.id, block: blockId, attachment: null, box: false }

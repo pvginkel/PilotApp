@@ -155,7 +155,11 @@ function useAlignedHead(head: HTMLElement | null): RefObject<HTMLDivElement | nu
       return undefined;
     }
     const align = () => {
-      own.style.height = `${head.offsetHeight}px`;
+      // The head's height as it stands with no tab line under it (project-head.css): its bottom
+      // padding its top's, and its rule the panel head's.
+      const box = getComputedStyle(head);
+      const ruled = parseFloat(getComputedStyle(own).borderBottomWidth) - parseFloat(box.borderBottomWidth);
+      own.style.height = `${head.getBoundingClientRect().height + parseFloat(box.paddingTop) - parseFloat(box.paddingBottom) + ruled}px`;
       const tab = own.querySelector<HTMLElement>('.ptab')!;
       const want = baselineOf(head.querySelector('h1')!) - head.getBoundingClientRect().top;
       const now = baselineOf(tab) - own.getBoundingClientRect().top;

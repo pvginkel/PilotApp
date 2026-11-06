@@ -40,7 +40,7 @@ interface ComposerProps {
   onSent: () => void;
   /** Discuss put the focus in the field. */
   onDiscussed: () => void;
-  /** It lies under the overlay and its backdrop: it takes no focus. */
+  /** It lies under a tab or the overlay: it takes no focus. */
   covered: boolean;
 }
 

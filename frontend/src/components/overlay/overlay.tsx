@@ -1,17 +1,23 @@
 /**
- * The overlay (F28.1): a page of its own over the project's timeline, part of the page at the
- * mockup's width, opening in place, and the whole page once maximized; its cross, Esc and its
- * backdrop close it. Its body keeps its scroll while what it shows is read again, and starts at
- * its top for each thing it shows. A segment in it goes to its block in its body, which flashes
- * (F33), and opened at a block it goes there once its body draws it; either opens the block's
- * collapsed section (F31.5). Its head carries Discuss, quoting what it shows (F39.1); a strip under its head, where what
- * it shows has one, says what Pilot does on it (F28.9). On a phone
- * it is a view pushed over the tabs (F98.4): the whole screen over the head and the tabs, with no
- * animation, no backdrop, no maximize and no cross, an arrow back at the left of its head where
- * the head's drawer button stands; the arrow, Esc and Back take it off (`use-phone-tab.ts`). It
- * takes the focus as it opens, and again when what it shows replaces what had it, and gives it
- * back as it closes to what had it before, as a dialog does; the timeline under its backdrop takes
- * none meanwhile (the project's route).
+ * The overlay (F28.1): what opens as a document. Off a phone a document, an attachment, the
+ * handbook and the project document are each a tab (`use-doc-tabs.ts`): in the timeline's place,
+ * the side panel beside it, at the timeline's width, on the page's own colour, its head's and its
+ * foot's text in the timeline's column; no maximize, backdrop or cross, closed by its tab's cross
+ * or Done and never by Esc; its body's scroll kept while another tab shows. It takes the focus as
+ * it shows where the focus would be lost under it, and gives it back as it closes to what had it
+ * before where the focus is lost then. Off a phone the session log is a page of its own over the
+ * project's timeline, part of the page at the mockup's width, opening in place, and the whole page
+ * once maximized; its cross, Esc and its backdrop close it. Its body keeps its scroll while what
+ * it shows is read again, and starts at its top for each thing it shows. A segment in it goes to
+ * its block in its body, which flashes (F33), and opened at a block it goes there once its body
+ * draws it; either opens the block's collapsed section (F31.5). Its head carries Discuss, quoting
+ * what it shows (F39.1); a strip under its head, where what it shows has one, says what Pilot does
+ * on it (F28.9). On a phone it is a view pushed over the tabs (F98.4): the whole screen over the
+ * head and the tabs, with no animation, no backdrop, no maximize and no cross, an arrow back at the
+ * left of its head where the head's drawer button stands; the arrow, Esc and Back take it off
+ * (`use-phone-tab.ts`). Outside a tab it takes the focus as it opens, and again when what it shows
+ * replaces what had it, and gives it back as it closes to what had it before, as a dialog does;
+ * the timeline under it takes none meanwhile (the project's route).
  */
 
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
@@ -20,6 +26,7 @@ import { ArrowLeft, Maximize2, Minimize2, X } from 'lucide-react';
 import { scrollToIn } from '@/components/overlay/scroll-to';
 import { blockKey, FlashContext, GoToContext, useFlashes } from '@/components/timeline/flash';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
+import { DocTabContext } from '@/hooks/use-doc-tabs';
 import { PhoneViewContext } from '@/hooks/use-phone-tab';
 import { useEscape } from '@/lib/keys';
 import { cn } from '@/lib/utils';
@@ -29,8 +36,6 @@ interface OverlayProps {
   showing: string;
   /** A block of what it shows, to go to once its body draws it. */
   at?: { item: string; block: string } | null;
-  /** Before its titles: an attachment's way back to its document, off a phone. */
-  back?: ReactNode;
   /** Its head's titles: the title and the line under it. */
   titles: ReactNode;
   /** Its head's Discuss, once what it shows is read. */
@@ -38,33 +43,47 @@ interface OverlayProps {
   /** Under its head: what Pilot does on a document that is Pilot's. */
   strip?: ReactNode;
   foot: ReactNode;
-  /** Closes it: `useOverlayClose`'s. */
+  /** Closes it: `useOverlayClose`'s; off a phone, a tab's close is its tab's. */
   onClose: () => void;
   /** Its body, the scroll container, for what it shows. */
   bodyRef?: RefObject<HTMLDivElement | null>;
   children: ReactNode;
 }
 
-export function Overlay({ showing, at = null, back = null, titles, discuss = null, strip = null, foot, onClose, bodyRef, children }: OverlayProps) {
+export function Overlay({ showing, at = null, titles, discuss = null, strip = null, foot, onClose, bodyRef, children }: OverlayProps) {
   const view = useContext(PhoneViewContext) !== null;
+  const tab = useContext(DocTabContext);
+  const inTab = tab !== null;
   const [max, setMax] = useState(false);
   const sheet = useRef<HTMLElement>(null);
   const titlesId = useId();
   const [opener] = useState(() => document.activeElement);
   useEffect(() => {
-    if (!sheet.current!.contains(document.activeElement)) sheet.current!.focus({ preventScroll: true });
-  }, [showing]);
+    if (sheet.current!.contains(document.activeElement) || (inTab && !focusLost())) return;
+    sheet.current!.focus({ preventScroll: true });
+  }, [showing, inTab]);
   useEffect(
     () => () => {
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      if (!(opener instanceof HTMLElement) || !opener.isConnected) return;
+      if (inTab && (!focusLost() || opener.closest('[inert]') !== null)) return;
+      opener.focus();
     },
-    [opener],
+    [opener, inTab],
   );
   const ownBody = useRef<HTMLDivElement>(null);
   const body = bodyRef ?? ownBody;
   const { fresh, flashed, flash } = useFlashes();
   const sections = useSections(at === null ? null : blockKey(at.item, at.block));
-  useEscape('overlay', true, onClose);
+  useEscape('overlay', !inTab, onClose);
+  // A tab's body is where it was left, and its head's and foot's text stand in its column, which
+  // the body's scrollbar narrows.
+  const [left] = useState(() => tab?.scroll ?? 0);
+  useLayoutEffect(() => {
+    if (!inTab) return;
+    const element = sheet.current!.querySelector<HTMLElement>(':scope > .sheet-body')!;
+    element.scrollTop = left;
+    sheet.current!.style.setProperty('--gutter', `${element.offsetWidth - element.clientWidth}px`);
+  }, [showing, inTab, left]);
   const blockIn = (blockId: string) => body.current!.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
   // The block is drawn in the body.
   const goTo = (itemId: string, blockId: string, behavior: ScrollBehavior = 'smooth') => {
@@ -91,11 +110,11 @@ export function Overlay({ showing, at = null, back = null, titles, discuss = nul
     <FlashContext.Provider value={{ fresh, flashed }}>
       <GoToContext.Provider value={goToSegment}>
         <SectionsContext.Provider value={sections}>
-          {!view && <div className="sheet-backdrop" onClick={onClose} data-testid="overlay.backdrop" />}
+          {!view && !inTab && <div className="sheet-backdrop" onClick={onClose} data-testid="overlay.backdrop" />}
           <section
             ref={sheet}
-            className={cn('sheet', max && 'max')}
-            role="dialog"
+            className={cn('sheet', max && 'max', inTab && 'tabbed')}
+            role={inTab ? 'tabpanel' : 'dialog'}
             aria-labelledby={titlesId}
             tabIndex={-1}
             data-testid="overlay"
@@ -112,14 +131,12 @@ export function Overlay({ showing, at = null, back = null, titles, discuss = nul
                 >
                   <ArrowLeft className="icon" aria-hidden="true" />
                 </button>
-              ) : (
-                back
-              )}
+              ) : null}
               <div id={titlesId} className="titles">
                 {titles}
               </div>
               {discuss}
-              {!view && (
+              {!view && !inTab && (
                 <>
                   <button
                     type="button"
@@ -145,7 +162,13 @@ export function Overlay({ showing, at = null, back = null, titles, discuss = nul
               )}
             </div>
             {strip}
-            <div key={showing} ref={body} className="sheet-body" data-testid="overlay.body">
+            <div
+              key={showing}
+              ref={body}
+              className="sheet-body"
+              onScroll={tab === null ? undefined : (event) => tab.keep(event.currentTarget.scrollTop)}
+              data-testid="overlay.body"
+            >
               <div className="column">{children}</div>
             </div>
             {foot && (
@@ -158,6 +181,12 @@ export function Overlay({ showing, at = null, back = null, titles, discuss = nul
       </GoToContext.Provider>
     </FlashContext.Provider>
   );
+}
+
+/** No element has the focus, or the one that has it lies under what an `inert` takes out. */
+function focusLost(): boolean {
+  const active = document.activeElement;
+  return active === null || active === document.body || active.closest('[inert]') !== null;
 }
 
 /** What it shows where a read of it fails (F113). */

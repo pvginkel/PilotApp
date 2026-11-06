@@ -2,14 +2,15 @@
  * The attachments hung on an item, reader's material (F17.5, F36): on an open item, a chip per
  * attachment, its clip and its title; on a done line, an indicator (F13.6), the clip opening the
  * one, unlike Open's document icon beside it (D039), a documents icon opening a menu of several.
- * Each opens in the overlay's attachment view (F28.5) at its address under its item's, or, in the
- * document's overlay, under the document's, which gives it its way back.
+ * Each opens (F28.5) at its address under its item's, or, in the item's document opened, under the
+ * document's, which gives it its way to the document.
  */
 
 import type { ReactNode } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { Files, Paperclip } from 'lucide-react';
 import { Menu, MenuItem } from '@/components/shared/menu';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { Attachment, TimelineItem } from '@/hooks/use-timeline';
 
 interface AttachmentsProps {
@@ -44,6 +45,7 @@ export function Attachments({ item, inDocument = false }: AttachmentsProps) {
 export function LineAttachments({ item }: { item: TimelineItem }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const navigate = useNavigate();
+  const replace = useTabReplace();
   const { attachments } = item;
   if (attachments.length === 0) return null;
   if (attachments.length === 1) {
@@ -88,6 +90,7 @@ export function LineAttachments({ item }: { item: TimelineItem }) {
             void navigate({
               to: '/projects/$projectId/items/$itemId/attachments/$attachmentId',
               params: { projectId, itemId: item.id, attachmentId: attachment.id },
+              replace,
             })
           }
           testId="timeline.line.attachments.item"
@@ -114,7 +117,8 @@ interface AttachmentLinkProps {
 
 function AttachmentLink({ item, attachment, inDocument = false, className, title, label, testId, children }: AttachmentLinkProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
-  const shared = { className, title, 'aria-label': label, 'data-testid': testId, 'data-attachment-id': attachment.id };
+  const replace = useTabReplace();
+  const shared = { replace, className, title, 'aria-label': label, 'data-testid': testId, 'data-attachment-id': attachment.id };
   return inDocument ? (
     <Link
       to="/projects/$projectId/documents/$documentId/attachments/$attachmentId"

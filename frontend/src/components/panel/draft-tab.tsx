@@ -3,7 +3,7 @@
  * project's live events (F80.2): its title, then its prose and its asks in their order, each ask
  * answered in place (F47.4), then Pilot's dots while a turn saves it (F35), or, once none does, what
  * Create project does with it. Before its first save it reads "Empty" and what it is for (the
- * mockup's `renderDraft`). A link in it to a document Pilot attached opens that in the overlay;
+ * mockup's `renderDraft`). A link in it to a document Pilot attached opens that at its address;
  * nothing else in it links (F47.3). An ask an effect line or a quote goes to is scrolled into view
  * and flashed (use-draft-place.ts). A read that fails says so (F113).
  */
@@ -14,6 +14,7 @@ import { Markdown, type DocumentLinkProps } from '@/components/shared/markdown';
 import { DraftBlock } from '@/components/timeline/block';
 import { useFlashes } from '@/components/timeline/flash';
 import { PilotWriting } from '@/components/timeline/writing';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useProjectDraft } from '@/hooks/use-document';
 import { useDraftPlace } from '@/hooks/use-draft-place';
 import { hungAt } from '@/hooks/use-timeline';
@@ -90,16 +91,18 @@ export function DraftTab({ projectId }: { projectId: string }) {
   );
 }
 
-/** A link of the draft: to an attachment by its path in the project's folder, in the overlay; any other its words alone. */
+/** A link of the draft: to an attachment by its path in the project's folder, at its address; any other its words alone. */
 function DraftLink({ href, children }: DocumentLinkProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
+  const replace = useTabReplace();
   const hung = data === undefined ? undefined : hungAt(data, pathOf(href));
   if (hung === undefined) return <>{children}</>;
   return (
     <Link
       to="/projects/$projectId/attachments/$attachmentId"
       params={{ projectId, attachmentId: hung.attachment.id }}
+      replace={replace}
       data-testid="panel.draft.link"
     >
       {children}

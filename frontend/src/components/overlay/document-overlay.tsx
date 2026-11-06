@@ -1,5 +1,5 @@
 /**
- * An item's document in the overlay, at its own address over its project's timeline (F28, F97),
+ * An item's document, at its own address: off a phone in its tab, on a phone a view (F28, F97),
  * read on its own: as Done fixed it where Done did, else as it stands (F13.3), and read again as
  * the timeline is. Its head holds its title, the project, the step, the segment bar, *Unsent* or
  * *Done* (D026), and *Edited <time>* with Pilot's mark (F28.2, F28.7); its body the summary as its
@@ -9,11 +9,12 @@
  * the box of the questions and the writer's reply (F52.2), which an asked block's mark goes to, as
  * the box's address opens the document at it. *Edited* and the dots tell of the text as it
  * stands, so a document read as Done fixed it has neither; its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
- * Reviewed on an open review, or *Send answers* on an open document, which closes the overlay
- * (F28.4), after the Cancel of a document a run of Pilot's put to the person while the run holds a
+ * Reviewed on an open review, or *Send answers* on an open document, which closes its tab or its
+ * view (F28.4), after the Cancel of a document a run of Pilot's put to the person while the run holds a
  * block of another document (F28.9). Opened at a block, it goes to the block once it draws it (F33). Its attachments stand
- * between the lead and the text, each opening, at its address under the document's, in place of
- * the document, with an arrow back to it (F28.3, F28.5). A read that fails, or finds no document
+ * between the lead and the text, each opening at its address under the document's: off a phone a
+ * tab of its own, on a phone a view over the document's, the document a link in its head (F28.3,
+ * F28.5). A read that fails, or finds no document
  * of the project, reads "The document did not load" (F113), and so does a registered document
  * whose read at its run's end failed, under its head, its foot Reviewed (F85.1, ruling D1). A
  * document that is Pilot's opens read-only under the strip that says what Pilot does on it (F28.9):
@@ -22,8 +23,8 @@
  */
 
 import type { ReactNode } from 'react';
-import { Link, useParams } from '@tanstack/react-router';
-import { ArrowLeft, Check } from 'lucide-react';
+import { useParams } from '@tanstack/react-router';
+import { Check } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfAttachment, quoteOfItem } from '@/components/chat/discuss-quotes';
 import { AttachmentBody, AttachmentTitles } from '@/components/overlay/attachment-overlay';
@@ -79,7 +80,6 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
     return (
       <Overlay
         showing={`attachment ${attachment}`}
-        back={<Back projectId={projectId} documentId={documentId} />}
         titles={headed && shown && <AttachmentTitles item={headed} attachment={shown} document={{ projectId, documentId }} />}
         discuss={shown && <DiscussButton quote={quoteOfAttachment(shown)} testId="overlay.discuss" />}
         foot={null}
@@ -108,22 +108,6 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
         item && <Body item={item} box={clarification} />
       )}
     </Overlay>
-  );
-}
-
-/** An attachment's way back to its document, off a phone: an arrow, no label. */
-function Back({ projectId, documentId }: { projectId: string; documentId: string }) {
-  return (
-    <Link
-      to="/projects/$projectId/documents/$documentId"
-      params={{ projectId, documentId }}
-      className="btn btn-ghost btn-sm btn-icon back"
-      title="Back to the document"
-      aria-label="Back"
-      data-testid="overlay.back"
-    >
-      <ArrowLeft className="icon" aria-hidden="true" />
-    </Link>
   );
 }
 

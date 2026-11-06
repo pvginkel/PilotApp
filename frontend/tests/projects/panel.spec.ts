@@ -3,11 +3,11 @@
  * opens on until the person picks another (tests/chat/chat-tab.spec.ts), the Documents tab with its
  * count, and a close cross; the Documents tab lists the project document first, then the attachments newest
  * first, the files of one call under their folder, then the timeline's documents and reviews
- * newest first with Open, *Unsent* or Done and their stamp, each opening in the overlay at its
+ * newest first with Open, *Unsent* or Done and their stamp, each opening in its tab at its
  * address. The head's Documents button toggles it (F2.3). Each project's panel is its own, open or
  * closed and on which tab, kept in the browser (F1.6, F133); until it is set, it stands open. Off a
- * phone, on a wide window and at the narrow width alike, it stands beside the timeline and the
- * overlay beside it, nothing over it, and Esc never closes it, nor going to an item (F98.1,
+ * phone, on a wide window and at the narrow width alike, it stands beside the timeline and the tab
+ * showing, nothing over it, and Esc never closes it, nor going to an item (F98.1,
  * F98.2); on a phone its tabs are among the tabs at the bottom (tests/projects/phone-tabs.spec.ts). The tab's lists wait on its read, the
  * timeline's and the project document's: nothing under the headings while it is on its way, the
  * project document's row "Project document" until its title is read, and "The documents did not
@@ -145,12 +145,13 @@ test.describe('The side panel on a wide window', () => {
     expect(panelHead.height).toBeCloseTo(head.height, 0);
   });
 
-  test('a row opens in the overlay at its address, to the panel’s left; Esc, the cross and the backdrop close the overlay, never the panel', async ({
+  test('a row opens in its tab at its address, to the panel’s left; its tab’s cross and Close all close the tabs, Esc neither a tab nor the panel', async ({
     page,
     people,
     projects,
     timeline,
     overlay,
+    docTabs,
     panel,
   }) => {
     const p = await placed(people, projects);
@@ -164,18 +165,16 @@ test.describe('The side panel on a wide window', () => {
     expect(sheet!.x + sheet!.width).toBeCloseTo(side!.x, 0);
     expect(await isOnTop(panel.root)).toBe(true);
     await page.keyboard.press('Escape');
-    await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${p.id}`);
-    await expect(panel.root).toBeVisible();
-    await page.keyboard.press('Escape');
+    await expect(overlay.root).toBeVisible();
+    await expect(page).toHaveURL(projectDocumentAddress(p.id));
     await expect(panel.root).toBeVisible();
 
     await panel.attachment(p.map).root.click();
     await expect(page).toHaveURL(attachmentAddress(p.id, p.notice, p.map));
     await expect(overlay.title).toHaveText('The map');
     await expect(overlay.attachment.text).toHaveText('North.');
-    await overlay.close.click();
-    await expect(overlay.root).toHaveCount(0);
+    await docTabs.attachment(p.map).close.click();
+    await expect(overlay.role).toHaveText('Project document');
     await expect(panel.root).toBeVisible();
 
     await panel.document(p.tent).root.click();
@@ -184,16 +183,15 @@ test.describe('The side panel on a wide window', () => {
     await panel.document(p.survey).root.click();
     await expect(page).toHaveURL(documentAddress(p.id, p.survey));
     await expect(overlay.title).toHaveText('Campsites');
-    // The panel's tab chosen beside the overlay: Esc still closes the overlay.
+    // The panel's tab chosen beside the tab: Esc closes neither.
     await panel.documentsTab.click();
     await page.keyboard.press('Escape');
-    await expect(overlay.root).toHaveCount(0);
+    await expect(overlay.title).toHaveText('Campsites');
     await expect(panel.root).toBeVisible();
 
-    await panel.document(p.survey).root.click();
-    await expect(overlay.title).toHaveText('Campsites');
-    await overlay.backdrop.click({ position: { x: 5, y: 5 } });
+    await docTabs.closeAll.click();
     await expect(overlay.root).toHaveCount(0);
+    await expect(page).toHaveURL(`/projects/${p.id}`);
     await expect(panel.root).toBeVisible();
   });
 
@@ -342,13 +340,14 @@ test.describe('The Documents tab’s read', () => {
 test.describe('The side panel at the narrow width', () => {
   test.use({ viewport: { width: 1100, height: 800 } });
 
-  test('stands open from the start beside the timeline, at 901 px and 1199 px too, its head lined up with the project’s; a row opens in the overlay to its left, nothing over the panel, Esc closing the overlay and never the panel, nor going to an item', async ({
+  test('stands open from the start beside the timeline, at 901 px and 1199 px too, its head lined up with the project’s; a row opens in its tab to its left, nothing over the panel, Esc closing neither, nor going to an item', async ({
     page,
     people,
     projects,
     projectHead,
     timeline,
     overlay,
+    docTabs,
     panel,
   }) => {
     const p = await placed(people, projects);
@@ -380,9 +379,10 @@ test.describe('The side panel at the narrow width', () => {
     await panel.document(p.packing).root.click();
     await expect(overlay.title).toHaveText('Packing');
     await page.keyboard.press('Escape');
-    await expect(overlay.root).toHaveCount(0);
+    await expect(overlay.title).toHaveText('Packing');
     await expect(panel.root).toBeVisible();
-    await page.keyboard.press('Escape');
+    await docTabs.closeAll.click();
+    await expect(overlay.root).toHaveCount(0);
     await expect(panel.root).toBeVisible();
 
     await timeline.openAt(p.id, p.notice);

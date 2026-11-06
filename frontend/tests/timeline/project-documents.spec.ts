@@ -1,6 +1,6 @@
 /**
- * The project's handbook (F129.4) and its project document, `project.md` (F37.4), in the overlay,
- * each at its own address over the project's timeline (F97), as an attachment opens: rendered,
+ * The project's handbook (F129.4) and its project document, `project.md` (F37.4), each at its own
+ * address in its tab in the project's timeline's place (F97), as an attachment opens: rendered,
  * read only, no foot; *Empty* before the first save, Pilot's dots while a turn saves it (F35), and
  * "The document did not load" for a read that fails (F113). Its asks stand in their places, read
  * only (D1): an answered one closed, its answer and who gave it showing, an open one open, and
@@ -23,13 +23,14 @@ const HANDBOOK = '# Handbook\n\nHow the trip is planned.\n\n- We **always** pack
 const NOTE = { id: 'one', summary: 'Summary one', content: 'Content one' };
 
 test.describe('The handbook', () => {
-  test('a button in the head’s icon group, left of the notes button, opens it at its address in the overlay over the timeline: rendered, read only, no foot; the side panel’s Documents lists none', async ({
+  test('a button in the head’s icon group, left of the notes button, opens it at its address in its tab: rendered, read only, no foot; the side panel’s Documents lists none', async ({
     page,
     people,
     projects,
     projectHead,
     timeline,
     overlay,
+    docTabs,
     panel,
   }) => {
     const me = await people.signIn();
@@ -68,15 +69,15 @@ test.describe('The handbook', () => {
     await expect(overlay.empty).toHaveCount(0);
     await expect(overlay.writing).toHaveCount(0);
 
-    await overlay.close.click();
+    await docTabs.tab('handbook').close.click();
     await expect(overlay.root).toHaveCount(0);
     await expect(page).toHaveURL(`/projects/${id}`);
 
     await projectHead.handbookButton.click();
     await expect(overlay.root).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(overlay.root).toBeVisible();
+    await expect(page).toHaveURL(handbookAddress(id));
   });
 
   test('reads Empty before its first save; a save shows on its next read, with Pilot’s dots while the turn runs, gone once a read finds it ended', async ({
@@ -114,6 +115,7 @@ test.describe('The handbook', () => {
     projects,
     projectHead,
     overlay,
+    docTabs,
   }) => {
     const me = await people.signIn();
     const draft = await projects.make({ name: makeUnique('Draft'), state: 'draft', members: [me.handle!], notes: [NOTE] });
@@ -125,18 +127,19 @@ test.describe('The handbook', () => {
     await expect(overlay.failed).toHaveText('The document did not load.');
     await expect(overlay.title).toHaveCount(0);
     await expect(overlay.foot).toHaveCount(0);
-    await overlay.close.click();
+    await docTabs.tab('handbook').close.click();
     await expect(page).toHaveURL(`/projects/${draft}`);
   });
 });
 
 test.describe('The project document', () => {
-  test('opens at its own address in the overlay over the timeline, read only: Empty as born with its title alone, then its prose once saved', async ({
+  test('opens at its own address in its tab in the timeline’s place, read only: Empty as born with its title alone, then its prose once saved', async ({
     page,
     people,
     projects,
     timeline,
     overlay,
+    docTabs,
   }) => {
     const me = await people.signIn();
     const name = makeUnique('Recipes');
@@ -159,7 +162,7 @@ test.describe('The project document', () => {
     await expect(overlay.foot).toHaveCount(0);
     await expect(overlay.writing).toBeVisible();
 
-    await overlay.close.click();
+    await docTabs.tab('project-document').close.click();
     await expect(overlay.root).toHaveCount(0);
     await expect(page).toHaveURL(`/projects/${id}`);
   });

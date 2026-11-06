@@ -1,10 +1,10 @@
 /**
  * Attachments, reader's material (F17.5, F36): a chip each on every item the timeline draws that
  * carries one — a one-ask item, a notice, the opening, an inline document, a confirmation's card,
- * a document's card — and in the overlay's body; a done line's indicator, a document icon for the
- * one and a documents icon opening a menu of several (F13.6). Each opens in the overlay's
- * attachment view (F28.5), "Attachment of “<item>”" under its title, with an arrow back to the
- * document it was opened from; by its type a Markdown file read only, its fenced asks plain code,
+ * a document's card — and in an opened document's body; a done line's indicator, a document icon
+ * for the one and a documents icon opening a menu of several (F13.6). Each opens as a tab of its
+ * own (F28.5), "Attachment of “<item>”" under its title, the document it hangs on a link there;
+ * by its type a Markdown file read only, its fenced asks plain code,
  * an image inline, an SVG as an image that runs no script, plain text in a monospace block, and
  * anything else its title and size with Download, streamed.
  */
@@ -89,12 +89,13 @@ test.describe('Attachments', () => {
     await expect(timeline.item(bare).attachments).toHaveCount(0);
   });
 
-  test('open from the timeline in the overlay’s attachment view, “Attachment of” its item with no way back; a Markdown file read only, its front matter left out, its fenced ask plain code; closing returns to the project', async ({
+  test('open from the timeline in a tab of their own, “Attachment of” an item that is no document with no link; a Markdown file read only, its front matter left out, its fenced ask plain code; closing returns to the project', async ({
     page,
     people,
     projects,
     timeline,
     overlay,
+    docTabs,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Attached'), members: [me.handle!] });
@@ -106,7 +107,7 @@ test.describe('Attachments', () => {
     await expect(page).toHaveURL(attachmentAddress(id, decision, notes));
     await expect(overlay.title).toHaveText('Tent notes');
     await expect(overlay.sub).toHaveText('Attachment of “Which tent?”');
-    await expect(overlay.back).toHaveCount(0);
+    await expect(overlay.documentLink).toHaveCount(0);
     await expect(overlay.foot).toHaveCount(0);
     await expect(overlay.attachment.root).toHaveAttribute('data-view', 'markdown');
     await expect(overlay.attachment.prose.locator('h1')).toHaveText('The tents we looked at');
@@ -115,18 +116,20 @@ test.describe('Attachments', () => {
     await expect(overlay.attachment.prose.locator('pre code')).toHaveText('options:\n  - Dome\n');
     await expect(overlay.blocks).toHaveCount(0);
     // The timeline under it stays the item's, open.
-    await expect(timeline.item(decision).block.root).toBeVisible();
+    await expect(timeline.item(decision).block.root).toBeAttached();
 
-    await overlay.close.click();
+    await docTabs.attachment(notes).close.click();
     await expect(page).toHaveURL(`/projects/${id}`);
     await expect(overlay.root).toHaveCount(0);
+    await expect(timeline.item(decision).block.root).toBeVisible();
   });
 
-  test('open from a document’s overlay in its place, the chips between the lead and the text, with an arrow back to it; Esc closes the overlay', async ({
+  test('open from a document’s tab as a tab of their own, the chips between the lead and the text, the document a link in its head that shows its tab; Esc closes neither', async ({
     page,
     people,
     projects,
     overlay,
+    docTabs,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Attached'), members: [me.handle!] });
@@ -145,21 +148,22 @@ test.describe('Attachments', () => {
     await expect(overlay.title).toHaveText('Route map');
     await expect(overlay.sub).toHaveText('Attachment of “The trip”');
     await expect(overlay.attachment.prose.locator('h1')).toHaveText('Route map');
-    await expect(overlay.back).toBeVisible();
-    await expect(overlay.back).toHaveText('');
+    await expect(overlay.back).toHaveCount(0);
     await expect(overlay.foot).toHaveCount(0);
+    expect(await docTabs.keys()).toEqual([`document ${trip}`, `attachment ${map}`]);
 
-    await overlay.back.click();
+    await overlay.documentLink.click();
     await expect(page).toHaveURL(documentAddress(id, trip));
     await expect(overlay.title).toHaveText('The trip');
     await expect(overlay.summary).toHaveText(SUMMARY);
-    await expect(overlay.back).toHaveCount(0);
+    await expect(overlay.documentLink).toHaveCount(0);
 
     await overlay.attachmentChip(notes).click();
     await expect(overlay.title).toHaveText('Tent notes');
+    expect(await docTabs.keys()).toEqual([`document ${trip}`, `attachment ${map}`, `attachment ${notes}`]);
     await page.keyboard.press('Escape');
-    await expect(page).toHaveURL(`/projects/${id}`);
-    await expect(overlay.root).toHaveCount(0);
+    await expect(page).toHaveURL(documentAttachmentAddress(id, trip, notes));
+    await expect(overlay.title).toHaveText('Tent notes');
   });
 
   test('show an image inline from its stream, an SVG as an image that runs no script, and plain text in a monospace block', async ({
@@ -227,6 +231,7 @@ test.describe('Attachments', () => {
     projects,
     timeline,
     overlay,
+    docTabs,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Attached'), members: [me.handle!] });
@@ -252,7 +257,7 @@ test.describe('Attachments', () => {
     await expect(page).toHaveURL(attachmentAddress(id, one, notes));
     await expect(overlay.title).toHaveText('Tent notes');
     await expect(overlay.sub).toHaveText('Attachment of “Which tent?”');
-    await overlay.close.click();
+    await docTabs.first.click();
 
     await timeline.item(several).lineAttachments.click();
     await expect(timeline.item(several).lineAttachmentItems).toHaveText(['Lake map', 'Route map']);
@@ -263,7 +268,7 @@ test.describe('Attachments', () => {
     await expect(overlay.sub).toHaveText('Attachment of “Where do we pitch?”');
   });
 
-  test('that an address names on no item of it read “The document did not load”', async ({ page, people, projects, overlay }) => {
+  test('that an address names on no item of it read “The document did not load”', async ({ page, people, projects, overlay, docTabs }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Attached'), members: [me.handle!] });
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: LONG });
@@ -274,12 +279,11 @@ test.describe('Attachments', () => {
     await expect(overlay.failed).toHaveText('The document did not load.');
     await expect(overlay.attachment.root).toHaveCount(0);
 
-    await page.goto(documentAttachmentAddress(id, trip, randomUUID()));
+    const missing = randomUUID();
+    await page.goto(documentAttachmentAddress(id, trip, missing));
     await expect(overlay.failed).toHaveText('The document did not load.');
-    await expect(overlay.back).toBeVisible();
-    await overlay.back.click();
-    await expect(overlay.title).toHaveText('The trip');
-    await expect(overlay.attachments).toHaveText(['Tent notes']);
+    await expect(docTabs.attachment(missing).title).toHaveText('Attachment');
+    await expect(overlay.documentLink).toHaveCount(0);
   });
 });
 

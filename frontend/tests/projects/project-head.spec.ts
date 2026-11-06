@@ -1,11 +1,12 @@
 /**
  * A project's head (F2): the name, the ticket and the repo, linked; the step button and the plan
- * popover (F2.2, F3); the handbook's button (F129.4; its overlay in
+ * popover (F2.2, F3); the handbook's button (F129.4; its tab in
  * timeline/project-documents.spec.ts); the plan's notes and a step's (F2.7, F3.6); the members (F2.5); the auto
  * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's head, with its draft-panel
  * toggle (F46.2; its panel in draft-panel.spec.ts), and an archived project's head (D012); a tight head
  * beside the side panel giving way in one order, the repo, the name, the step's name to its floor,
- * then the members folding to a count, then standing in two rows, its menu clear of the panel;
+ * then the members folding to a count, then standing in two rows, its menu clear of the panel,
+ * a tab open or not;
  * everything it opens closed on another project (F1.6); on a phone one line (F2.8): the switch
  * without its label, the donut alone showing the Plan tab (F3.7), the members two circles at most,
  * the name giving way, a draft's, a finished and an archived project's, their chips their icon alone.
@@ -622,6 +623,36 @@ test.describe('A tight head beside the side panel', () => {
       await clear(projectHead, panel);
     });
   }
+
+  test('an archived head at 1240px with a tab open stands in its two rows over the tab line, as with none', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    panel,
+    docTabs,
+  }) => {
+    await page.setViewportSize({ width: 1240, height: 720 });
+    const me = await people.signIn({ name: 'Test Person' });
+    const { handles } = await six(people, me.handle!);
+    const id = await projects.make({
+      name: `${makeUnique('Archived')} has a long name`,
+      archived: true,
+      ticket: 'PL-7',
+      members: handles,
+      tasks: [LONG_STEP],
+      notes: [note('one')],
+    });
+    await projectHead.open(id);
+    expect(await twoRows(projectHead)).toBe(true);
+
+    await projectHead.handbookButton.click();
+    await expect(docTabs.tab('handbook').root).toBeVisible();
+    await clear(projectHead, panel);
+    expect(await twoRows(projectHead)).toBe(true);
+    const [head, line] = await Promise.all([projectHead.root.boundingBox(), docTabs.root.boundingBox()]);
+    expect(line!.y).toBeCloseTo(head!.y + head!.height, 0);
+  });
 
   test('the members unfold as the window widens', async ({ page, people, projects, projectHead, panel }) => {
     await page.setViewportSize({ width: 1200, height: 720 });

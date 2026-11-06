@@ -62,12 +62,13 @@ test.describe('A quote', () => {
     await expect(overlay.blockAt('D1').root).toBeVisible();
   });
 
-  test('by a path is a chip opening the handbook’s, the project document’s or an attachment’s overlay; a path naming any other file shows as written', async ({
+  test('by a path is a chip opening the handbook’s, the project document’s or an attachment’s tab; a path naming any other file shows as written', async ({
     page,
     people,
     projects,
     timeline,
     overlay,
+    docTabs,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Paths'), members: [me.handle!] });
@@ -101,13 +102,13 @@ test.describe('A quote', () => {
     await chips.nth(0).click();
     await expect(page).toHaveURL(handbookAddress(id));
     await expect(overlay.role).toHaveText('Handbook');
-    await page.keyboard.press('Escape');
+    await docTabs.first.click();
     await expect(overlay.root).toHaveCount(0);
 
     await chips.nth(1).click();
     await expect(page).toHaveURL(projectDocumentAddress(id));
     await expect(overlay.role).toHaveText('Project document');
-    await page.keyboard.press('Escape');
+    await docTabs.first.click();
     await expect(overlay.root).toHaveCount(0);
 
     await chips.nth(2).click();

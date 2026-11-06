@@ -332,6 +332,7 @@ test.describe('A claimed action', () => {
     chats,
     timeline,
     overlay,
+    docTabs,
     page,
   }) => {
     const { project, document, asking } = await waiting({ people, projects, controller, chats });
@@ -341,10 +342,13 @@ test.describe('A claimed action', () => {
     await expect(overlay.strip.text).toHaveText(`Pilot waits on your answer to ${ASK_TITLE} before it goes on with what is open here.`);
     await expect(overlay.strip.stop).toHaveCount(0);
     await expect(overlay.blockAt('A1').done).toBeDisabled();
+    // Read-only in its tab; the strip's link opens the other document's beside it.
+    await expect(docTabs.document(document).show).toHaveAttribute('aria-selected', 'true');
     await overlay.strip.link.click();
     await expect(page).toHaveURL(documentAddress(project, asking));
     await expect(overlay.title).toHaveText(ASK_TITLE);
     await expect(overlay.strip.root).toHaveCount(0);
+    expect(await docTabs.keys()).toEqual([`document ${document}`, `document ${asking}`]);
 
     await expect(overlay.cancel.line).toHaveText(`Pilot asks this as part of its work on ${CUT_OVER_TITLE}.`);
     await expect(overlay.cancel.links).toHaveAttribute('href', documentAddress(project, document));
@@ -355,7 +359,7 @@ test.describe('A claimed action', () => {
     const cancelled = (await projects.item(project, asking)).done;
     expect([cancelled?.cause, cancelled?.undo]).toEqual(['cancelled', false]);
 
-    await overlay.close.click();
+    await docTabs.closeAll.click();
     await expect(timeline.item(asking).root).toHaveAttribute('data-state', 'done');
     await expect(timeline.item(asking).undo).toHaveCount(0);
     const item = timeline.item(document);

@@ -3,8 +3,8 @@
  * handbook under it (F129.4), named by its title once read, as the project document is; then the
  * attachments, newest first, each with its title and its item and stamp, the files attached in one
  * call together under their folder (F37.1); then the timeline's documents and reviews, newest
- * first, each with its state, Open, *Unsent* (D026) or Done, and its stamp (F37.2). Each opens in
- * the overlay at its address. The project document's row is named "Project document" until its
+ * first, each with its state, Open, *Unsent* (D026) or Done, and its stamp (F37.2). Each opens at
+ * its address: off a phone in its tab, on a phone a view. The project document's row is named "Project document" until its
  * title is read; under the headings stands nothing while the tab's read is under way, and "None
  * yet." under a list read empty; a failed read says so in the lists' place (F113). A draft's lists
  * the attachments alone, what Pilot attached so far in its definition chat, hung on nothing, each
@@ -16,6 +16,7 @@ import { Link } from '@tanstack/react-router';
 import { BookOpen, FileText, Folder, NotebookText, Paperclip } from 'lucide-react';
 import { Time } from '@/components/shared/time';
 import { isUnsent } from '@/components/timeline/document-state';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { Batch, PanelRead } from '@/hooks/use-panel';
 import { titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
 import { useGetProjectsHandbookByProjectId } from '@/lib/api/generated/hooks';
@@ -30,12 +31,19 @@ interface DocumentsTabProps {
 }
 
 export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists }, handbook }: DocumentsTabProps) {
+  const replace = useTabReplace();
   return (
     <div className="docs" data-testid="panel.documents">
       {!draft && (
         <ul>
           <li>
-            <Link to="/projects/$projectId/project-document" params={{ projectId }} className="doc-row" data-testid="panel.project-document">
+            <Link
+              to="/projects/$projectId/project-document"
+              params={{ projectId }}
+              replace={replace}
+              className="doc-row"
+              data-testid="panel.project-document"
+            >
               <Row icon={<FileText className="icon" aria-hidden="true" />} title={projectDocument ?? 'Project document'}>
                 Project document
               </Row>
@@ -67,8 +75,9 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
 /** The handbook, opening at its address as the project document does. */
 function HandbookRow({ projectId }: { projectId: string }) {
   const { data } = useGetProjectsHandbookByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
+  const replace = useTabReplace();
   return (
-    <Link to="/projects/$projectId/handbook" params={{ projectId }} className="doc-row" data-testid="panel.handbook">
+    <Link to="/projects/$projectId/handbook" params={{ projectId }} replace={replace} className="doc-row" data-testid="panel.handbook">
       <Row icon={<NotebookText className="icon" aria-hidden="true" />} title={data?.title ?? 'Handbook'}>
         Handbook
       </Row>
@@ -170,7 +179,8 @@ function AttachmentRow({ projectId, item, attachment, children }: AttachmentRowP
       {children}
     </Row>
   );
-  const props = { className: 'doc-row', 'data-testid': 'panel.attachment', 'data-attachment-id': attachment.id };
+  const replace = useTabReplace();
+  const props = { replace, className: 'doc-row', 'data-testid': 'panel.attachment', 'data-attachment-id': attachment.id };
   return item === null ? (
     <Link to="/projects/$projectId/attachments/$attachmentId" params={{ projectId, attachmentId: attachment.id }} {...props}>
       {row}
@@ -230,10 +240,12 @@ const STATES = { open: 'Open', unsent: 'Unsent', done: 'Done' } as const;
 function DocumentRow({ projectId, item }: { projectId: string; item: TimelineItem }) {
   const state = item.done !== null ? 'done' : isUnsent(item) ? 'unsent' : 'open';
   const Icon = item.kind === 'review' ? BookOpen : FileText;
+  const replace = useTabReplace();
   return (
     <Link
       to="/projects/$projectId/documents/$documentId"
       params={{ projectId, documentId: item.id }}
+      replace={replace}
       className="doc-row"
       data-testid="panel.document"
       data-item-id={item.id}

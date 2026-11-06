@@ -5,7 +5,7 @@
  * once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
  * (F2.5); Discuss, toggling the side panel's Chat tab with nothing quoted and carrying the unread
  * dot (F2.3, F39.2, F43), the Documents button, toggling its Documents tab, and the handbook,
- * opening in the overlay (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
+ * opening in its tab (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
  * has no handbook (F129.2), has in its head its name, the Draft chip, its members, the draft-panel
  * toggle, toggling the side panel's Draft tab (F46.2), and its menu; its Create project stands at
  * its definition chat's end (`create-project.tsx`). An archived project's reads as it was left,
@@ -155,12 +155,13 @@ function DraftButton({ shown, toggle }: Toggled) {
   );
 }
 
-/** The handbook at its address, in the overlay. */
+/** The handbook at its address, in its tab. */
 function HandbookButton({ projectId }: { projectId: string }) {
   return (
     <Link
       to="/projects/$projectId/handbook"
       params={{ projectId }}
+      replace
       className="btn btn-ghost btn-sm btn-icon head-icon"
       title="The handbook"
       aria-label="The handbook"

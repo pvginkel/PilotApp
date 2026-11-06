@@ -1,21 +1,19 @@
 /**
- * The overlay (F28): a document at its own address opens over its project's timeline, and closing
- * it, by its cross, Esc or its backdrop, returns to the project's address (F97); it is part of the
- * page at the mockup's width, maximized the whole of it (F28.1). Its head holds the title, the
+ * A document opened (F28): a document at its own address opens in its tab, in the timeline's place
+ * under the tab line, the side panel beside it (F28.1, F97; the tabs whole in
+ * tests/projects/doc-tabs.spec.ts). Its head holds the title, the
  * project, the step, the segment bar, *Unsent* or *Done*, and *Edited <time>* (F28.2, F28.7, D026);
  * its body the summary as its lead, the prose and every block answered in place, and Pilot's dots
- * (F28.3); its foot "Done · <stamp> · <who>", Reviewed, or *Send answers*, which closes it (F28.4).
+ * (F28.3); its foot "Done · <stamp> · <who>", Reviewed, or *Send answers*, which closes its tab (F28.4).
  * It stays live and keeps its scroll; a read that fails reads "The document did not load" (F113).
  * A done line's Open shows the document as it was done (F13.3), its answers closed (F31.2), a
  * finished project's included, with neither *Edited* nor Pilot's dots where Done fixed the text.
  * Switching projects closes it (F1.6), and on a phone it is a view, the whole screen over the head
  * and its drawer's button, with no maximize or cross, its arrow back taking it off (F98.4; the views
- * whole in tests/projects/phone-views.spec.ts). Esc closes what lies over it first. It takes the focus as it opens, keeps Tab off the
- * timeline under its backdrop, and gives the focus back as it closes.
+ * whole in tests/projects/phone-views.spec.ts). Esc closes what lies over it, and never its tab.
  */
 
 import { randomUUID } from 'node:crypto';
-import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
@@ -58,7 +56,7 @@ async function itemOf(projects: Projects, project: string, item: string): Promis
 }
 
 test.describe('A document’s address', () => {
-  test('opens it in the overlay over its project’s timeline: its title, project, step and segment bar in its head, the summary leading its body, then its prose and blocks', async ({
+  test('opens it in its tab in its project’s timeline’s place: its title, project, step and segment bar in its head, the summary leading its body, then its prose and blocks', async ({
     page,
     people,
     projectList,
@@ -66,6 +64,7 @@ test.describe('A document’s address', () => {
     shell,
     timeline,
     overlay,
+    docTabs,
     panel,
   }) => {
     const me = await people.signIn();
@@ -111,81 +110,17 @@ test.describe('A document’s address', () => {
     await expect(overlay.send).toHaveText('Send answers');
     await expect(overlay.send).toBeDisabled();
 
-    // Part of the page, at the mockup's width: the column and the scrollbar, left of the side panel,
-    // which stands open at the window's right (F98.1).
+    // In the timeline's place under the tab line, left of the side panel, which stands open at the
+    // window's right (F28.1, F98.1).
     const viewport = page.viewportSize()!;
     const box = (await overlay.root.boundingBox())!;
     const side = (await panel.root.boundingBox())!;
     const app = (await shell.app.boundingBox())!;
-    expect(box.width).toBe(844);
+    const line = (await docTabs.root.boundingBox())!;
     expect(box.x + box.width).toBe(side.x);
     expect(side.x + side.width).toBe(viewport.width);
-    expect(box.y).toBe(app.y);
+    expect(box.y).toBeCloseTo(line.y + line.height, 0);
     expect(box.y + box.height).toBe(app.y + app.height);
-  });
-
-  test('maximized it takes the page beside the side panel, and restored it is the mockup’s width again; with the panel closed it and its backdrop reach the window’s right, maximized the whole of it', async ({
-    page,
-    people,
-    projects,
-    overlay,
-    panel,
-  }) => {
-    const me = await people.signIn();
-    const id = await projects.makeWithSession({ name: makeUnique('Maximize'), members: [me.handle!] });
-    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
-    await overlay.open(id, trip);
-    const width = async () => (await overlay.root.boundingBox())!.width;
-
-    await expect(overlay.maximize).toHaveAttribute('title', 'Maximize');
-    await overlay.maximize.click();
-    await expect(overlay.root).toHaveClass(/\bmax\b/);
-    await expect(overlay.maximize).toHaveAttribute('title', 'Restore');
-    await expect.poll(width).toBe((await panel.root.boundingBox())!.x);
-
-    await overlay.maximize.click();
-    await expect(overlay.root).not.toHaveClass(/\bmax\b/);
-    await expect(overlay.maximize).toHaveAttribute('title', 'Maximize');
-    await expect.poll(width).toBe(844);
-
-    const viewport = page.viewportSize()!;
-    const right = async (locator: Locator) => {
-      const box = (await locator.boundingBox())!;
-      return box.x + box.width;
-    };
-    await panel.close.click();
-    await expect(panel.root).toHaveCount(0);
-    await expect.poll(() => right(overlay.root)).toBe(viewport.width);
-    await expect.poll(() => right(overlay.backdrop)).toBe(viewport.width);
-    expect(await width()).toBe(844);
-    await overlay.maximize.click();
-    await expect.poll(width).toBe(viewport.width);
-  });
-
-  test('closes by its cross, by Esc and by its backdrop, the side column’s part included, each back at the project’s address', async ({
-    page,
-    people,
-    projects,
-    timeline,
-    overlay,
-  }) => {
-    const me = await people.signIn();
-    const id = await projects.makeWithSession({ name: makeUnique('Close'), members: [me.handle!] });
-    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
-
-    for (const close of [
-      () => overlay.close.click(),
-      () => page.keyboard.press('Escape'),
-      () => overlay.backdrop.click({ position: { x: 10, y: 200 } }),
-    ]) {
-      await overlay.open(id, trip);
-      await expect(overlay.root).toBeVisible();
-      await close();
-      await expect(overlay.root).toHaveCount(0);
-      await expect(overlay.backdrop).toHaveCount(0);
-      await expect(page).toHaveURL(`/projects/${id}`);
-      await expect(timeline.item(trip).root).toBeVisible();
-    }
   });
 
   test('reads “The document did not load” for an address that names no document of the project', async ({
@@ -193,6 +128,7 @@ test.describe('A document’s address', () => {
     people,
     projects,
     overlay,
+    docTabs,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Missing'), members: [me.handle!] });
@@ -204,14 +140,15 @@ test.describe('A document’s address', () => {
       await expect(overlay.failed).toHaveText('The document did not load.');
       await expect(overlay.title).toHaveCount(0);
       await expect(overlay.foot).toHaveCount(0);
-      await overlay.close.click();
+      await expect(docTabs.titles).toHaveText(['Document']);
+      await docTabs.closeAll.click();
       await expect(page).toHaveURL(`/projects/${id}`);
     }
   });
 });
 
-test.describe('A document in the overlay', () => {
-  test('takes each answer in place, reads Unsent, and a segment goes to its block there and flashes it; Send answers sends and closes it', async ({
+test.describe('A document in its tab', () => {
+  test('takes each answer in place, reads Unsent, and a segment goes to its block there and flashes it; Send answers sends and closes its tab', async ({
     page,
     people,
     projects,
@@ -248,7 +185,7 @@ test.describe('A document in the overlay', () => {
     expect((await itemOf(projects, id, trip)).done).toMatchObject({ cause: 'marked', by: { kind: 'person', handle: me.handle } });
   });
 
-  test('asks over the overlay before it sends with recommendations: Esc closes the dialog first, Confirm sends and closes the overlay', async ({
+  test('asks over its tab before it sends with recommendations: Esc closes the dialog alone, Confirm sends and closes the tab', async ({
     page,
     people,
     projects,
@@ -325,7 +262,7 @@ test.describe('A document in the overlay', () => {
 });
 
 test.describe('A done line’s Open', () => {
-  test('shows the document in the overlay as Done fixed it, Done in its head and foot', async ({ page, people, projects, timeline, overlay }) => {
+  test('shows the document in its tab as Done fixed it, Done in its head and foot', async ({ page, people, projects, timeline, overlay }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('As done'), members: [me.handle!] });
     const notes = await projects.place(id, { kind: 'document', title: 'Packing notes', text: 'We leave on Friday.\n' });
@@ -445,42 +382,8 @@ test.describe('A done line’s Open', () => {
   });
 });
 
-test.describe('The focus and the overlay', () => {
-  test('it takes the focus as it opens, Tab never reaches the timeline under its backdrop, and it gives the focus back to Open as it closes', async ({
-    page,
-    people,
-    projects,
-    timeline,
-    overlay,
-  }) => {
-    const me = await people.signIn();
-    const id = await projects.makeWithSession({ name: makeUnique('Focus'), members: [me.handle!] });
-    const notes = await projects.place(id, { kind: 'document', title: 'Packing notes', text: 'We leave on Friday.\n' });
-    await projects.send(notes);
-    await timeline.open(id);
-    const { open } = timeline.item(notes);
-
-    await open.focus();
-    await page.keyboard.press('Enter');
-    await expect(overlay.root).toBeFocused();
-    await expect(overlay.root).toHaveAccessibleName(/Packing notes/);
-    let inOverlay = 0;
-    for (let step = 0; step < 16; step++) {
-      await page.keyboard.press('Tab');
-      expect(await timeline.root.evaluate((root) => root.contains(document.activeElement))).toBe(false);
-      if (await overlay.root.evaluate((root) => root.contains(document.activeElement))) inOverlay++;
-    }
-    expect(inOverlay).toBeGreaterThan(0);
-
-    await overlay.close.focus();
-    await page.keyboard.press('Enter');
-    await expect(overlay.root).toHaveCount(0);
-    await expect(open).toBeFocused();
-  });
-});
-
-test.describe('Esc over the overlay', () => {
-  test('closes the keys list first, then the overlay', async ({ page, people, projects, overlay, shell }) => {
+test.describe('Esc over a document’s tab', () => {
+  test('closes the keys list, and never the tab', async ({ page, people, projects, overlay, shell }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Keys'), members: [me.handle!] });
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
@@ -492,8 +395,8 @@ test.describe('Esc over the overlay', () => {
     await expect(shell.keys).toBeHidden();
     await expect(overlay.root).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(overlay.root).toBeVisible();
+    await expect(page).toHaveURL(documentAddress(id, trip));
   });
 });
 

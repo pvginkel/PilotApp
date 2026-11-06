@@ -9,6 +9,7 @@
 
 import { Link, useParams } from '@tanstack/react-router';
 import { X } from 'lucide-react';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { ItemDocument } from '@/hooks/use-document';
 import { useArchived } from '@/hooks/use-projects';
 import { usePostItemsCancelByItemId } from '@/lib/api/generated/hooks';
@@ -62,6 +63,7 @@ export function RunCancel({ itemId, cancel }: { itemId: string; cancel: Cancel }
 /** The documents whose blocks it takes back, each linking its address, in their order. */
 function Documents({ projectId, cancel }: { projectId: string; cancel: Cancel }) {
   const documents = [...new Map(cancel.takes_back.map(({ document }) => [document.id, document])).values()];
+  const replace = useTabReplace();
   return AND.formatToParts(documents.map(({ id }) => id)).map((part, index) => {
     if (part.type === 'literal') return part.value;
     const document = documents.find(({ id }) => id === part.value)!;
@@ -70,6 +72,7 @@ function Documents({ projectId, cancel }: { projectId: string; cancel: Cancel })
         key={index}
         to="/projects/$projectId/documents/$documentId"
         params={{ projectId, documentId: document.id }}
+        replace={replace}
         className="link"
         data-testid="overlay.cancel.link"
       >

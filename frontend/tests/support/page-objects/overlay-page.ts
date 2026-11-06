@@ -4,18 +4,17 @@ import { waitTestEvent } from '../helpers';
 import { blockParts, settledParts } from './timeline-page';
 
 /**
- * The overlay (F28): an item's document over its project's timeline, opened at the document's own
- * address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
+ * A document opened (F28): off a phone in its tab in its project's timeline's place, on a phone a
+ * view, opened at the document's own address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
  * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, the sections
  * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
- * foot; maximize, the cross and the backdrop; over the text, the box of Pilot's questions to a
+ * foot; the session log's maximize, cross and backdrop off a phone; over the text, the box of Pilot's questions to a
  * registered document's writer and the reply (F52.2), which its own address opens it at. A document that is Pilot's has the strip under its head,
  * what Pilot does on it in `data-doing`, its words, its link and *Stop and take over* (F28.9), and
  * one awaiting its read says that its text comes once it is read; one a run of Pilot's put to the
  * person while it holds a block of another document has the Cancel in its foot. Showing an attachment (F28.5), its head is its title
- * over "Attachment of “<item>”" and, opened from the document, Back; its body the attachment by
- * its type. On a phone it is a view (F98.4): Back is its arrow, with no maximize, cross or
- * backdrop, and an attachment's document is a link in its head. Showing the handbook or the project document (F129.4, F37.4), its head is the title over
+ * over "Attachment of “<item>”", its document a link there; its body the attachment by its type.
+ * On a phone it is a view (F98.4): Back is its arrow, with no maximize, cross or backdrop. Showing the handbook or the project document (F129.4, F37.4), its head is the title over
  * the project and what it is; its body the prose and Pilot's dots, or *Empty*. Showing the item
  * alone on a phone (F99), its head is the project's name over the item's step; its body the item as
  * the timeline draws it (`TimelinePage.item(id, overlay.alone)`).
@@ -26,9 +25,9 @@ export class OverlayPage {
   readonly head: Locator;
   readonly title: Locator;
   readonly sub: Locator;
-  /** Off a phone an attachment's arrow back to its document; on a phone the view's arrow back. */
+  /** On a phone the view's arrow back. */
   readonly back: Locator;
-  /** On a phone, an attachment's document in its head, the link to it. */
+  /** An attachment's document in its head, the link to it. */
   readonly documentLink: Locator;
   readonly project: Locator;
   /** What a read-only document of the project is: Handbook, Project document. */

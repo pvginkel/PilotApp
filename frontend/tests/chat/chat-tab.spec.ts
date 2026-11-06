@@ -202,7 +202,6 @@ test.describe('The Chat tab', () => {
 
     await chat.messageTexts.getByTestId('chat.quote').click();
     await expect(page).toHaveURL(addressOf(project, packing, 'D1'));
-    await page.goBack();
     await chat.quotes.first().click();
     await expect(page).toHaveURL(addressOf(project, packing));
   });

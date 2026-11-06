@@ -124,12 +124,13 @@ test.describe('A larger document', () => {
     await expect(settled.unsent).toHaveText('Unsent');
   });
 
-  test('Open opens it in the overlay at its address, and closing the overlay returns to the project’s', async ({
+  test('Open opens it in its tab at its address, and closing its tab returns to the project’s', async ({
     page,
     people,
     projects,
     timeline,
     overlay,
+    docTabs,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Open'), members: [me.handle!] });
@@ -144,7 +145,7 @@ test.describe('A larger document', () => {
     await expect(overlay.blocks).toHaveCount(4);
     await expect(overlay.settledLine('D3').answer).toHaveText("Deferred to the project's end");
 
-    await overlay.close.click();
+    await docTabs.document(trip).close.click();
     await expect(overlay.root).toHaveCount(0);
     await expect(page).toHaveURL(`/projects/${id}`);
     await expect(timeline.item(trip).card.root).toBeVisible();

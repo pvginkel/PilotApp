@@ -1,20 +1,21 @@
 /**
- * An attachment in the overlay (F28.5), reader's material and never an item (F36). Its head is its
- * clip and title over "Attachment of “<item>”", with, opened from the item's document, an arrow
- * back to it, with no label, and Discuss, quoting it by its path in the project's folder (F39.1).
- * On a phone, where the view's own arrow is Back, the document's title there is the link to it,
- * Back to it where its view lies under the attachment's (F98.4). Its body goes by its type: Markdown as a read-only document, its
+ * An attachment opened (F28.5), reader's material and never an item (F36): off a phone a tab of its
+ * own, on a phone a view. Its head is its clip and title over "Attachment of “<item>”", and
+ * Discuss, quoting it by its path in the project's folder (F39.1). In its tab, where its item is a
+ * document or a review, the document's title there is the link to it, opening its tab; on a phone, opened
+ * from the item's document, the link is Back to it where its view lies under the attachment's,
+ * the view's own arrow Back (F98.4). Its body goes by its type: Markdown as a read-only document, its
  * front matter left out and its fenced asks plain code, never blocks; a raster image inline from
  * its stream; an SVG inline only as an image, which runs no script, its text read from the stream
  * that serves it as a download; other text in a monospace block; anything else its title, its
- * file's name and size, and Download. Opened at its address under its item's, it lies over the
- * timeline where the timeline stands. At its address under its project's, it is found wherever it
+ * file's name and size, and Download. Opened at its address under its item's, on a phone it lies
+ * over the timeline where the timeline stands. At its address under its project's, it is found wherever it
  * hangs: on nothing, as a draft's material does until Create project (F36.6), its head's line then
  * "Attachment of the draft", or on an item.
  */
 
 import { useContext } from 'react';
-import { Link, useRouter } from '@tanstack/react-router';
+import { Link, useParams, useRouter } from '@tanstack/react-router';
 import { Download, Paperclip } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfAttachment } from '@/components/chat/discuss-quotes';
@@ -22,6 +23,7 @@ import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { attachmentUrl, useAttachmentText } from '@/hooks/use-attachment';
+import { DocTabContext } from '@/hooks/use-doc-tabs';
 import { useOverlayClose } from '@/hooks/use-overlay-close';
 import { PhoneViewContext, type PhoneView } from '@/hooks/use-phone-tab';
 import { attachmentIn, hungById, titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
@@ -77,6 +79,7 @@ interface AttachmentTitlesProps {
 /** Its title over what it hangs on: its item, or none, a draft's material. */
 export function AttachmentTitles({ item, attachment, document }: AttachmentTitlesProps) {
   const view = useContext(PhoneViewContext);
+  const tab = useContext(DocTabContext) !== null;
   return (
     <>
       <h2 title={attachment.title} data-testid="overlay.title">
@@ -89,6 +92,10 @@ export function AttachmentTitles({ item, attachment, document }: AttachmentTitle
           <span>
             Attachment of{' '}
             <DocumentLink view={view} {...document} title={titleOf(item)} />
+          </span>
+        ) : tab && (document !== undefined || item.kind === 'document' || item.kind === 'review') ? (
+          <span>
+            Attachment of <TabDocumentLink documentId={item.id} title={titleOf(item)} />
           </span>
         ) : (
           <span>
@@ -130,6 +137,23 @@ function DocumentLink({ view, projectId, documentId, title }: DocumentLinkProps)
         event.preventDefault();
         view.back();
       }}
+      data-testid="overlay.document-link"
+    >
+      “{title}”
+    </Link>
+  );
+}
+
+/** In an attachment's tab, the way to its item's document: its tab. */
+function TabDocumentLink({ documentId, title }: { documentId: string; title: string }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  return (
+    <Link
+      to="/projects/$projectId/documents/$documentId"
+      params={{ projectId, documentId }}
+      replace
+      className="link"
+      title="Open the document"
       data-testid="overlay.document-link"
     >
       “{title}”

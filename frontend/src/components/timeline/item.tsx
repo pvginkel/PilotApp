@@ -44,6 +44,7 @@ import { WorkItem } from '@/components/timeline/work';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useDiscuss } from '@/hooks/use-discuss';
 import { useDismiss } from '@/hooks/use-dismiss';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useRead, useUndo } from '@/hooks/use-marks';
 import { usePhone } from '@/hooks/use-phone';
 import { useArchived } from '@/hooks/use-projects';
@@ -360,11 +361,13 @@ function LineLead({ item }: { item: TimelineItem }) {
  */
 function Open({ item }: { item: TimelineItem }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const replace = useTabReplace();
   if (item.kind === 'work') {
     return (
       <Link
         to="/projects/$projectId/sessions/$sessionId"
         params={{ projectId, sessionId: item.id }}
+        replace={replace}
         className="btn btn-ghost btn-sm btn-icon"
         title="Open the session log"
         aria-label="Open"
@@ -378,6 +381,7 @@ function Open({ item }: { item: TimelineItem }) {
     <Link
       to="/projects/$projectId/documents/$documentId"
       params={{ projectId, documentId: item.id }}
+      replace={replace}
       className="btn btn-ghost btn-sm btn-icon"
       title="Open the document"
       aria-label="Open"

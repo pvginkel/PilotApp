@@ -33,6 +33,7 @@ import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { StepsButton } from '@/components/shared/steps-button';
 import { Time } from '@/components/shared/time';
 import { ItemHead } from '@/components/timeline/item-head';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useNow } from '@/hooks/use-now';
 import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
@@ -391,11 +392,13 @@ function Line({ work }: { work: Work }) {
  */
 function SessionLog({ item, rest }: { item: TimelineItem; rest?: (element: HTMLElement | null) => void }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const replace = useTabReplace();
   return (
     <Link
       ref={rest}
       to="/projects/$projectId/sessions/$sessionId"
       params={{ projectId, sessionId: item.id }}
+      replace={replace}
       className="btn btn-ghost btn-sm btn-icon work-log"
       title="Session log"
       aria-label="Session log"

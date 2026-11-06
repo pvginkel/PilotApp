@@ -11,6 +11,7 @@
 import { Link, useParams } from '@tanstack/react-router';
 import { Square } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { PilotsWork } from '@/hooks/use-timeline';
 import { usePostItemsTakeOverByItemId } from '@/lib/api/generated/hooks';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
@@ -43,12 +44,14 @@ export function PilotStrip({ itemId, pilots, read }: PilotStripProps) {
 /** What the sentence links: the work item doing it, or the run's document awaiting the person's answer. */
 function Linked({ pilots }: { pilots: PilotsWork }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const replace = useTabReplace();
   const { doing, work, asked_in: askedIn } = pilots;
   if (doing === 'waiting_on_answer' && askedIn !== null) {
     return (
       <Link
         to="/projects/$projectId/documents/$documentId"
         params={{ projectId, documentId: askedIn.id }}
+        replace={replace}
         className="link"
         data-testid="overlay.pilot-strip.link"
       >
@@ -61,6 +64,7 @@ function Linked({ pilots }: { pilots: PilotsWork }) {
       <Link
         to="/projects/$projectId/items/$itemId"
         params={{ projectId, itemId: work.id }}
+        replace={replace}
         className="link"
         data-testid="overlay.pilot-strip.link"
       >

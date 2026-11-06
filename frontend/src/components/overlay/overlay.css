@@ -41,8 +41,6 @@
     border-bottom: 1px solid hsl(var(--border));
   }
   .sheet-head .titles { flex: 1; min-width: 0; }
-  /* An attachment's Back: the arrow hangs into the padding, level with the text under it. */
-  .sheet-head .back { margin-left: -6px; }
   .sheet-head h2 { margin: 0; font-size: var(--text-lg); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sheet-head .sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .sheet-head .sub .segbar { align-self: center; }
@@ -159,6 +157,28 @@
   .log-tail .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .log-tail.failed { color: hsl(var(--destructive-text)); }
   .log-cue { margin-top: 6px; }
+
+  /* Off a phone a document is a tab (the mockup's 901px block): it takes the timeline's place under
+     the tab line, on the page's own colour, its column where the timeline's is; the line's cross
+     closes it. The head's and the foot's text stand in the column's lane: --gutter is the body's
+     scrollbar (overlay.tsx). */
+  @media (min-width: 901px) {
+    .sheet.tabbed {
+      --background: inherit;
+      --card: inherit;
+      inset: 0;
+      z-index: 7;
+      width: auto;
+      max-width: none;
+      border-left: 0;
+      box-shadow: none;
+      transition: none;
+    }
+    .sheet.tabbed .sheet-body .column { margin: 0 auto; padding: 20px 24px 40px; }
+    .sheet.tabbed :is(.sheet-head, .sheet-foot) { --lane: max(0px, calc((100% - var(--gutter, 0px) - var(--column)) / 2)); }
+    .sheet.tabbed .sheet-head { padding-left: calc(var(--lane) + 24px); padding-right: calc(var(--lane) + 16px + var(--gutter, 0px)); }
+    .sheet.tabbed .sheet-foot { padding-left: calc(var(--lane) + 24px); padding-right: calc(var(--lane) + 24px + var(--gutter, 0px)); }
+  }
 
   /* A phone: a view pushed over the tabs, the whole screen over the head and the tabs (F98.4; the
      mockup's 900px block). Its arrow back stands where the head's drawer button stands, 8px from

@@ -12,7 +12,7 @@
  * ask, or in a draft "Tell Pilot what to manage" (F113). Sticky scroll keeps a streaming reply in
  * view while the reader is at the bottom; only their own scrolling lets go, and their message sent
  * from the composer under it, or a quote Discuss put there, goes back to the bottom. Shown at its
- * end, and not lying under the overlay, the chat is seen (F43). *In the chat* takes it to the
+ * end, and not lying under a tab or the overlay, the chat is seen (F43). *In the chat* takes it to the
  * message that gave an answer (F42.3): the chats before loaded until the one holding it, the
  * pinning let go, the message scrolled into the middle of the view and flashed, and kept in its
  * place, as *load more* keeps the line in view, until the reader scrolls. On a phone it is the same
@@ -43,7 +43,7 @@ interface ProjectChatProps {
   projectId: string;
   members: readonly Member[];
   home: ChatHome;
-  /** It lies under the overlay and its backdrop: it takes no focus. */
+  /** It lies under a tab or the overlay: it takes no focus. */
   covered: boolean;
   /** What stands at the transcript's end, after its last chat, scrolling with it. */
   end?: ReactNode;

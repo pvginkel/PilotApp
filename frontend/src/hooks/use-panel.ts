@@ -3,7 +3,7 @@
  * left it, kept in the browser and nothing of it on the server (F1.6, F133); until they set it,
  * open on its first tab: an open project's Chat, a draft's Draft (F46.3), each standing for the
  * other across Create project. Off a phone, wide or narrow, it stands beside the timeline, or a
- * draft's definition chat, and the overlay beside it; nothing lies over it, and Esc never closes it
+ * draft's definition chat, or the tab showing in their place; nothing lies over it, and Esc never closes it
  * (F98.1, F98.2). Its Documents tab lists the project document, the attachments, a batch of several
  * together, and the timeline's documents and reviews, newest first (F37), from the project's
  * timeline and its project document, read as one; a draft's lists what Pilot attached so far, hung

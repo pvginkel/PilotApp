@@ -9,6 +9,7 @@
 
 import { Link, useParams } from '@tanstack/react-router';
 import { Avatar } from '@/components/shared/avatar';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { PilotsWork } from '@/hooks/use-timeline';
 import { pilotsDoingLabel } from '@/lib/utils/status-labels';
 
@@ -21,6 +22,7 @@ interface PilotsButtonProps {
 
 export function PilotsButton({ pilots, mark = true, testId }: PilotsButtonProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const replace = useTabReplace();
   const { doing, work, pulse } = pilots;
   const words = (
     <>
@@ -47,6 +49,7 @@ export function PilotsButton({ pilots, mark = true, testId }: PilotsButtonProps)
       <Link
         to="/projects/$projectId/sessions/$sessionId"
         params={{ projectId, sessionId: work.id }}
+        replace={replace}
         className="btn btn-ghost btn-sm pilots-btn"
         title={`Open the session log of Pilot’s job: ${work.title}`}
         data-testid={testId}
@@ -60,6 +63,7 @@ export function PilotsButton({ pilots, mark = true, testId }: PilotsButtonProps)
     <Link
       to="/projects/$projectId/items/$itemId"
       params={{ projectId, itemId: work.id }}
+      replace={replace}
       className="btn btn-ghost btn-sm pilots-btn"
       title={`Go to the work item: ${work.title}`}
       data-testid={testId}

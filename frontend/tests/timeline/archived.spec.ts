@@ -19,6 +19,7 @@ test.describe('An archived project’s timeline', () => {
     projects,
     timeline,
     overlay,
+    docTabs,
     deploymentSse,
   }) => {
     const me = await people.signIn();
@@ -54,7 +55,7 @@ test.describe('An archived project’s timeline', () => {
     await expect(answered.undo).toHaveCount(0);
     await review.card.open.click();
     await expect(overlay.reviewed).toBeDisabled();
-    await overlay.close.click();
+    await docTabs.closeAll.click();
 
     await projects.transition(id, 'brought_back');
     // The question's Send waits for words; the rest take a click at once.

@@ -5,8 +5,10 @@
  * `people` signs the spec in as a fresh person, `projects` puts projects on the record, `links` sets
  * what links in text, `controller` drives the worker's fake controller, `shell` is the frame every
  * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
- * list, `projectHead` a project's head, `timeline` its timeline, `overlay` the overlay over it,
- * `sessionLog` a work item's session log in it, `panel` the side panel beside it, `chat` its Chat tab,
+ * list, `projectHead` a project's head, `timeline` its timeline, `overlay` a document opened, in its
+ * tab or its view, or the session log over the timeline,
+ * `sessionLog` a work item's session log in it, `docTabs` the desktop's tab line under the head, `panel`
+ * the side panel beside it, `chat` its Chat tab,
  * `phoneTabs` a phone's tabs at the bottom and the page over them,
  * `chats` puts a project's chats in the store's fake environment and sends their messages,
  * `bridge` adds registrations to the worker's fake notification bridge and reads what they show,
@@ -22,6 +24,7 @@ import { infrastructureFixtures } from './fixtures-infrastructure';
 import { Links } from './links';
 import { NotificationBridge } from './notification-bridge';
 import { ChatPage } from './page-objects/chat-page';
+import { DocTabsPage } from './page-objects/doc-tabs-page';
 import { HandleStepPage } from './page-objects/handle-step-page';
 import { OverlayPage } from './page-objects/overlay-page';
 import { PanelPage } from './page-objects/panel-page';
@@ -50,6 +53,7 @@ interface DomainFixtures {
   timeline: TimelinePage;
   overlay: OverlayPage;
   sessionLog: SessionLogPage;
+  docTabs: DocTabsPage;
   panel: PanelPage;
   phoneTabs: PhoneTabsPage;
   chat: ChatPage;
@@ -115,6 +119,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   sessionLog: async ({ page }, use) => {
     await use(new SessionLogPage(page));
+  },
+  docTabs: async ({ page }, use) => {
+    await use(new DocTabsPage(page));
   },
   panel: async ({ page }, use) => {
     await use(new PanelPage(page));
