@@ -78,6 +78,32 @@ test.describe('The test suite lock', () => {
     }
   });
 
+  test('keeps a run with no bound waiting until the holder lets it go', async () => {
+    const first = await acquireTestSuiteLock(file, { waitSeconds: 1, holder: FIRST });
+    const heard: HolderNote[] = [];
+    let settled = false;
+    const waiting = acquireTestSuiteLock(file, {
+      waitSeconds: null,
+      holder: SECOND,
+      onWait: holder => heard.push(holder),
+    }).finally(() => {
+      settled = true;
+    });
+
+    // Past the notice, and past what a bound of one second would have allowed.
+    await expect.poll(() => heard, { timeout: 5000 }).toEqual([FIRST]);
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 1500));
+    expect(settled).toBe(false);
+
+    first.release();
+    const second = await waiting;
+    try {
+      expect(readHolderNote(file)).toEqual(SECOND);
+    } finally {
+      second.release();
+    }
+  });
+
   test('dies with a holder that is killed', async () => {
     // A runner of its own, holding the lock until it is killed: Node strips the module's types.
     const script = `

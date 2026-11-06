@@ -23,9 +23,11 @@ const SPEC_REPO = '/work/PilotAppSpecs';
 // The spec repo's git ignores /.locks/.
 const LOCK_FILE = join(SPEC_REPO, '.locks', 'test-suite.lock');
 
-// A full suite holds the lock for about 20 minutes. A wait gives up well inside the 10 minutes an
-// agent's command may take at most, so that it reads why the run ended.
-const DEFAULT_WAIT_SECONDS = 300;
+// A run waits for the lock without a bound unless PLAYWRIGHT_SUITE_LOCK_WAIT sets one: its caller's
+// own timeout bounds it, an agent's command and the run loop's gate an hour each. Under
+// `kc project test`, a run that gave up would read as a red suite, since kc exits 1 for any
+// statement that failed.
+const DEFAULT_WAIT_SECONDS = null;
 
 // How long a run takes the lock before it says that it waits.
 const WAIT_NOTICE_MS = 1000;
@@ -79,16 +81,21 @@ export function readHolderNote(file: string): HolderNote {
 }
 
 /**
- * Take the lock on `file`, waiting at most `waitSeconds`, and write `holder` into it once taken.
- * `onWait` hears the holder's note if the lock is not taken at once. Rejects with
- * TestSuiteLockTimeout when the wait runs out.
+ * Take the lock on `file`, waiting at most `waitSeconds`, or without a bound when it is null, and
+ * write `holder` into it once taken. `onWait` hears the holder's note if the lock is not taken at
+ * once. Rejects with TestSuiteLockTimeout when the wait runs out.
  */
 export async function acquireTestSuiteLock(
   file: string,
-  options: { waitSeconds: number; holder: HolderNote; onWait?: (holder: HolderNote) => void }
+  options: { waitSeconds: number | null; holder: HolderNote; onWait?: (holder: HolderNote) => void }
 ): Promise<HeldLock> {
   mkdirSync(dirname(file), { recursive: true });
-  const wait = options.waitSeconds > 0 ? ['--wait', String(options.waitSeconds)] : ['--nonblock'];
+  const wait =
+    options.waitSeconds === null
+      ? []
+      : options.waitSeconds > 0
+        ? ['--wait', String(options.waitSeconds)]
+        : ['--nonblock'];
   const child = spawn(
     'flock',
     [...wait, '--conflict-exit-code', String(FLOCK_TIMEOUT_CODE), file, 'sh', '-c', 'echo locked && exec cat'],
@@ -134,8 +141,8 @@ export async function acquireTestSuiteLock(
 
 /**
  * Take the test suite lock for this run, in the runner's process (global setup), and hold it until
- * the runner ends. A run that gives up waiting ends here with LOCK_TIMEOUT_EXIT_CODE, having run
- * nothing. PLAYWRIGHT_SUITE_LOCK_WAIT sets the wait in seconds.
+ * the runner ends. PLAYWRIGHT_SUITE_LOCK_WAIT bounds the wait in seconds; a run that gives up ends
+ * here with LOCK_TIMEOUT_EXIT_CODE, having run nothing.
  */
 export async function holdTestSuiteLock(): Promise<void> {
   const file = testSuiteLockFile();
@@ -147,6 +154,8 @@ export async function holdTestSuiteLock(): Promise<void> {
   const waitSeconds = process.env.PLAYWRIGHT_SUITE_LOCK_WAIT && Number.isFinite(configured)
     ? configured
     : DEFAULT_WAIT_SECONDS;
+  // Only a bounded wait gives up.
+  const limit = waitSeconds === null ? '' : formatSeconds(waitSeconds);
 
   try {
     // Never released here: the runner's end lets it go.
@@ -160,7 +169,7 @@ export async function holdTestSuiteLock(): Promise<void> {
       },
       onWait: holder =>
         console.log(
-          `⏳ Waiting up to ${formatSeconds(waitSeconds)} for the test suite lock, held by ${describeHolder(holder)}`
+          `⏳ Waiting${limit && ` up to ${limit}`} for the test suite lock, held by ${describeHolder(holder)}`
         ),
     });
   } catch (error) {
@@ -168,7 +177,7 @@ export async function holdTestSuiteLock(): Promise<void> {
       throw error;
     }
     console.error(
-      `⛔ Gave up after ${formatSeconds(waitSeconds)} waiting for the test suite lock, held by ` +
+      `⛔ Gave up after ${limit} waiting for the test suite lock, held by ` +
         `${describeHolder(error.holder)}. No test ran, so none failed: run the suite again once ` +
         `that run is done (${file}). Exit code ${LOCK_TIMEOUT_EXIT_CODE}.`
     );
