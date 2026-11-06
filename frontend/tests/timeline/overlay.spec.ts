@@ -1,8 +1,9 @@
 /**
  * A document opened (F28): a document at its own address opens in its tab, in the timeline's place
  * under the tab line, the side panel beside it (F28.1, F97; the tabs whole in
- * tests/projects/doc-tabs.spec.ts). Its head holds the title, the
- * project, the step, the segment bar, *Unsent* or *Done*, and *Edited <time>* (F28.2, F28.7, D026);
+ * tests/projects/doc-tabs.spec.ts). Its head holds the title, bold, the
+ * project, the step, the segment bar, *Unsent* or *Done*, and *Edited <time>* (F28.2, F28.7, D026),
+ * Discuss level with the title's line, in its tab as in a phone's view;
  * its body the summary as its lead, the prose and every block answered in place, and Pilot's dots
  * (F28.3); its foot "Done · <stamp> · <who>", Reviewed, or *Send answers*, which closes its tab (F28.4).
  * It stays live and keeps its scroll; a read that fails reads "The document did not load" (F113).
@@ -14,6 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
@@ -50,6 +52,14 @@ const DEFERRED_TENT = '```decision id=D1\noptions:\n  - Dome\n  - Tunnel\nanswer
 const PILOTS_PITCH = '```question id=Q1\nanswer: Lake Garda\nby: agent\nat: 2026-10-20T09:00:00Z\n```\n';
 const BUILD = [{ id: 'build', title: 'Build the card', status: 'in_progress' as const }];
 
+/** The button's middle is the title's line's, which is not the head's. */
+async function expectLevelWithTitle(button: Locator, title: Locator, head: Locator): Promise<void> {
+  const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
+  const [at, line, whole] = [(await button.boundingBox())!, (await title.boundingBox())!, (await head.boundingBox())!];
+  expect(Math.abs(middle(whole) - middle(line))).toBeGreaterThan(4);
+  expect(Math.abs(middle(at) - middle(line))).toBeLessThanOrEqual(1);
+}
+
 /** An item as the project's timeline reads it. */
 async function itemOf(projects: Projects, project: string, item: string): Promise<TimelineItem> {
   return (await projects.timeline(project)).items.find((each) => each.id === item)!;
@@ -83,6 +93,9 @@ test.describe('A document’s address', () => {
     await expect(overlay.project).toHaveText(name);
     await expect(overlay.step).toHaveText('Build the card');
     await expect(overlay.segments).toHaveCount(3);
+    // The title bold, Discuss level with its line and not the middle of the head under it.
+    expect(await overlay.title.evaluate((title) => getComputedStyle(title).fontWeight)).toBe('600');
+    await expectLevelWithTitle(overlay.discuss, overlay.title, overlay.head);
     await expect(overlay.unsent).toHaveCount(0);
     await expect(overlay.doneChip).toHaveCount(0);
     await expect(overlay.edited).toHaveCount(0);
@@ -410,6 +423,8 @@ test.describe('On a phone', () => {
     await overlay.open(id, trip);
 
     await expect(overlay.root).toBeVisible();
+    expect(await overlay.title.evaluate((title) => getComputedStyle(title).fontWeight)).toBe('600');
+    await expectLevelWithTitle(overlay.discuss, overlay.title, overlay.head);
     const box = (await overlay.root.boundingBox())!;
     const app = (await shell.app.boundingBox())!;
     expect(box.x).toBe(0);

@@ -332,7 +332,7 @@
     cursor: default;
     overflow-y: auto;
   }
-  .popover h3 { margin: 0 0 6px; padding: 0 14px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
+  .popover h3 { margin: 0 0 6px; padding: 0 14px; font-size: var(--text-sm); font-weight: 600; color: hsl(var(--muted-foreground)); }
 
   /* ---- Steps behind a button (steps-button.tsx): the plan's donut and the plan popover
      (PilotAppSpecs design/mockup/style.css) ------------------------------------------------ */

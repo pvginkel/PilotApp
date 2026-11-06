@@ -397,7 +397,7 @@ test.describe('The setup', () => {
 
     await setup.work.sessionLog.click();
     await expect(sessionLog.item).toHaveText(SETUP);
-    await expect(sessionLog.session).toHaveText(setupId);
+    await expect(sessionLog.title).toHaveAttribute('title', `Session ${setupId}`);
     await expect(sessionLog.environment).toHaveCount(0);
     // A job of Pilot's own shows its brief as Pilot's message, as a work item's log does.
     await expect(sessionLog.sentTexts).toHaveCount(1);

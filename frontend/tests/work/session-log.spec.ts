@@ -1,7 +1,8 @@
 /**
- * A work item's session log (F69): the overlay at its own address over its project's timeline,
- * its head "Session log" over the item's title, its environment's link once its start has one, and
- * its session's id; its
+ * A work item's session log (F69): at its own address, off a phone a popover over the tab showing,
+ * in one place and of one size, closed by its cross, Esc, a press outside it or its own button,
+ * with no Discuss (F69.1); its head "Session log", the session's id its tooltip, over the item's
+ * title and its environment's link once its start has one, a dot between them alone; its
  * body the session's records as the chat renders a reply — a run of calls, a sub-agent's card,
  * the phantom fading in and gone at its record, a quote a chip once its tag has closed, each effect
  * of a call as its line where the call ran (F41) — streamed while it is open; its tail the working
@@ -19,6 +20,7 @@ import { rawTurn } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
+import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { attachmentAddress } from '../support/page-objects/timeline-page';
 
@@ -85,10 +87,11 @@ test.describe('A work item’s session log', () => {
     await sessionLog.open(project, work);
 
     await expect(sessionLog.title).toHaveText('Session log');
+    await expect(sessionLog.title).toHaveAttribute('title', `Session ${work}`);
     await expect(sessionLog.item).toHaveText(TITLE);
     await expect(sessionLog.environment).toHaveText(name);
     await expect(sessionLog.environment).toHaveAttribute('href', `${KUBECODER}/environments/${environment}/ssh/open`);
-    await expect(sessionLog.session).toHaveText(work);
+    await expect(sessionLog.sub).toHaveText(`${TITLE}·${name}`);
     // The server's lines while the session comes up show in the cue alone.
     await expect(sessionLog.cue).toHaveText('Creating the session');
     await expect(sessionLog.tail).toHaveCount(0);
@@ -413,8 +416,10 @@ test.describe('A work item’s session log', () => {
     await sessionLog.open(project, work);
     await expect(sessionLog.failures).toHaveText([error!]);
     await expect(sessionLog.tail).toHaveText(/^Failed · \d\d:\d\d$/);
-    await expect(sessionLog.session).toHaveText(work);
+    await expect(sessionLog.title).toHaveAttribute('title', `Session ${work}`);
     await expect(sessionLog.environment).toHaveCount(0);
+    // No dot without the link: none ends the line.
+    await expect(sessionLog.sub).toHaveText(TITLE);
   });
 
   test('a start the pause holds reads "Paused" in the cue, and names no environment before its take', async ({ people, projects, sessionLog }) => {
@@ -424,8 +429,9 @@ test.describe('A work item’s session log', () => {
     await sessionLog.open(project, work);
     await expect(sessionLog.cue).toHaveText('Paused');
     await expect(sessionLog.tail).toHaveCount(0);
-    await expect(sessionLog.session).toHaveText(work);
+    await expect(sessionLog.title).toHaveAttribute('title', `Session ${work}`);
     await expect(sessionLog.environment).toHaveCount(0);
+    await expect(sessionLog.sub).toHaveText(TITLE);
   });
 
   test('sticks to its end while it grows, lets go when the reader scrolls up, and sticks again once they scroll back down', async ({
@@ -473,5 +479,164 @@ test.describe('A work item’s session log', () => {
 
     await page.goto(sessionLogAddress(project, randomUUID()));
     await expect(sessionLog.failed).toHaveText('The session log did not load.');
+  });
+});
+
+/** A document long enough to be a card on the timeline. */
+const card = (title: string) =>
+  `---\ntitle: ${title}\n---\n\n${Array.from({ length: 12 }, (_, i) => `Paragraph ${i + 1} of ${title}, long enough to wrap onto a second line of the card.`).join('\n\n')}\n`;
+
+/** The vertical middle of a box. */
+const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
+
+test.describe('Off a phone, the session log’s popover', () => {
+  // Tall enough that the timeline's last lines stand clear of the popover over it.
+  test.use({ viewport: { width: 1280, height: 1200 } });
+
+  test('lies over the timeline in one place and of one size whichever item it opens from — 90 % of the column’s text width, centred on it and between the stage’s top and bottom, at most 560 px high — and does not scroll with it; it has no Discuss, its title is bold, its cross is level with the title, closes it and adds no entry to the history', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    sessionLog,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Popover'), members: [me.handle!] });
+    for (const title of ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot']) await projects.place(project, { kind: 'document', title, text: card(title) });
+    const first = await projects.startWork(project, { title: TITLE, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    const second = await projects.startWork(project, { title: 'Surveying the scripts', brief: 'Survey the scripts.', cwd: '/work/Example' });
+    await timeline.open(project);
+    const entries = await page.evaluate(() => history.length);
+
+    await timeline.item(first).work.sessionLog.click();
+    await expect(page).toHaveURL(sessionLogAddress(project, first));
+    await expect(sessionLog.item).toHaveText(TITLE);
+    await expect(sessionLog.discuss).toHaveCount(0);
+    await expect(timeline.root).not.toHaveAttribute('inert');
+    const stage = (await timeline.root.locator('xpath=..').boundingBox())!;
+    const column = (await timeline.root.locator('.feed-inner').boundingBox())!;
+    const box = (await sessionLog.overlay.boundingBox())!;
+    expect(box.width).toBeCloseTo(0.9 * (column.width - 48), 0);
+    expect(box.x + box.width / 2).toBeCloseTo(column.x + column.width / 2, 0);
+    expect(box.height).toBeCloseTo(Math.min(560, stage.height - 32), 0);
+    expect(box.height).toBe(560);
+    expect(middle(box)).toBeCloseTo(middle(stage), 0);
+
+    // The timeline scrolls under it, and it stays where it is.
+    const scrolled = await timeline.root.evaluate((feed) => {
+      const before = feed.scrollTop;
+      feed.scrollTop = 0;
+      return before - feed.scrollTop;
+    });
+    expect(scrolled).toBeGreaterThan(200);
+    expect(await sessionLog.overlay.boundingBox()).toEqual(box);
+
+    expect(await sessionLog.title.evaluate((title) => getComputedStyle(title).fontWeight)).toBe('600');
+    const [title, close] = [(await sessionLog.title.boundingBox())!, (await sessionLog.close.boundingBox())!];
+    expect(Math.abs(middle(close) - middle(title))).toBeLessThanOrEqual(1);
+
+    await sessionLog.close.click();
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(`/projects/${project}`);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+
+    await timeline.item(second).work.sessionLog.click();
+    await expect(sessionLog.item).toHaveText('Surveying the scripts');
+    expect(await sessionLog.overlay.boundingBox()).toEqual(box);
+  });
+
+  test('closes on a press outside it, the press doing what it does, and on its own button; another item’s button shows that item’s log in its place; Esc gives the focus back to the button that opened it', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    panel,
+    sessionLog,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Popover'), members: [me.handle!] });
+    const first = await projects.startWork(project, { title: TITLE, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    const second = await projects.startWork(project, { title: 'Surveying the scripts', brief: 'Survey the scripts.', cwd: '/work/Example' });
+    await timeline.open(project);
+    const [one, two] = [timeline.item(first).work.sessionLog, timeline.item(second).work.sessionLog];
+
+    await one.click();
+    await expect(sessionLog.item).toHaveText(TITLE);
+    await two.click();
+    await expect(page).toHaveURL(sessionLogAddress(project, second));
+    await expect(sessionLog.item).toHaveText('Surveying the scripts');
+    await two.click();
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(`/projects/${project}`);
+
+    await one.click();
+    await expect(sessionLog.overlay).toBeVisible();
+    await panel.documentsTab.click();
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(`/projects/${project}`);
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(panel.documentsTab).toBeFocused();
+
+    await one.click();
+    await expect(sessionLog.overlay).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(one).toBeFocused();
+  });
+
+  test('lies over the tab showing, which keeps its place in the line, in the same place as over the timeline; closing it shows the tab again at its address; another project closes it, and the row brings back the tab under it', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    timeline,
+    docTabs,
+    sessionLog,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Under');
+    const otherName = makeUnique('Other');
+    const project = await projects.makeWithSession({ name, members: [me.handle!] });
+    const other = await projects.makeWithSession({ name: otherName, members: [me.handle!] });
+    const packing = await projects.place(project, { kind: 'document', title: 'Packing', text: card('Packing') });
+    const work = await projects.startWork(project, { title: TITLE, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    const tab = page.locator('[data-testid="overlay"][role="tabpanel"]');
+    await timeline.open(project);
+    await timeline.item(packing).card.open.click();
+    await expect(tab.getByTestId('overlay.title')).toHaveText('Packing');
+    // Over the timeline, the tab line showing as it does over the tab.
+    await docTabs.first.click();
+    await timeline.item(work).work.sessionLog.click();
+    const overTimeline = (await sessionLog.overlay.boundingBox())!;
+    await sessionLog.close.click();
+    await docTabs.document(packing).show.click();
+
+    // Reached cold, over the tab the line showed last.
+    await sessionLog.open(project, work);
+    await expect(sessionLog.item).toHaveText(TITLE);
+    await expect(docTabs.document(packing).show).toHaveAttribute('aria-selected', 'true');
+    await expect(tab.getByTestId('overlay.title')).toHaveText('Packing');
+    expect(await sessionLog.overlay.boundingBox()).toEqual(overTimeline);
+    expect(
+      await sessionLog.overlay.evaluate((pop) => {
+        const box = pop.getBoundingClientRect();
+        return pop.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }),
+    ).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(documentAddress(project, packing));
+    await expect(tab.getByTestId('overlay.title')).toHaveText('Packing');
+
+    await page.goto(sessionLogAddress(project, work));
+    await expect(sessionLog.item).toHaveText(TITLE);
+    await projectList.tab(otherName).click();
+    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await projectList.tab(name).click();
+    await expect(page).toHaveURL(documentAddress(project, packing));
+    await expect(tab.getByTestId('overlay.title')).toHaveText('Packing');
+    await expect(sessionLog.overlay).toHaveCount(0);
   });
 });

@@ -6,52 +6,38 @@
      on its. */
   .sheet { --background: var(--side); --card: var(--side); }
 
-  /* It and its backdrop lie over the side column and the centre, under the top bar; the drawer
-     lies over them. */
-  .sheet-backdrop {
-    position: absolute;
-    inset: 0 var(--panel-space, 0px) 0 0;
-    z-index: 18;
-    background: rgb(0 0 0 / 0.28);
-  }
+  /* What it lies over: a phone's view the centre, under the top bar, the drawer over it; off a
+     phone a tab and the session log's popover the stage. */
   .sheet {
     position: absolute;
-    top: 0;
-    right: var(--panel-space, 0px);
-    bottom: 0;
+    inset: 0;
     z-index: 19;
     display: flex;
     flex-direction: column;
-    width: min(max(66.667vw, 640px), calc(var(--column) + 24px));
-    max-width: calc(100vw - var(--panel-space, 0px));
-    border-left: 1px solid hsl(var(--border));
     background: hsl(var(--background));
-    box-shadow: var(--shadow-lg);
-    transition: width 160ms ease-out;
   }
-  .sheet.max { width: calc(100vw - var(--panel-space, 0px)); }
   /* It takes the focus as it opens, as a dialog does, with no ring round the whole of it. */
   .sheet:focus-visible { outline: none; }
+  /* Its buttons stand level with the title's first line, however many lines the head has. */
   .sheet-head {
+    --title-line: calc(var(--text-lg) * 1.35);
     flex: none;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     padding: 10px 16px 10px 32px;
     border-bottom: 1px solid hsl(var(--border));
   }
+  .sheet-head > .btn-sm { flex: none; margin-block: calc((var(--title-line) - var(--h)) / 2); }
   .sheet-head .titles { flex: 1; min-width: 0; }
-  .sheet-head h2 { margin: 0; font-size: var(--text-lg); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sheet-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: var(--title-line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sheet-head .sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .sheet-head .sub .segbar { align-self: center; }
   .sheet-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
   .sheet-head .edited .avatar { align-self: center; }
   .sheet-head .btn-icon + .btn-icon { margin-left: -10px; }
   .sheet-body { flex: 1; overflow-y: auto; scrollbar-gutter: stable; }
-  .sheet-body .column { max-width: var(--column); margin: 0 auto; padding: 20px 32px 40px; }
-  /* No wider than the column and the scrollbar: the column stands at the left, under the title,
-     what the scrollbar leaves over at its right. */
-  .sheet:not(.max) .sheet-body .column { margin-left: 0; }
+  .sheet-body .column { max-width: var(--column); padding: 20px 32px 40px; }
   .sheet-foot {
     flex: none;
     display: flex;
@@ -157,37 +143,50 @@
   .log-tail .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .log-tail.failed { color: hsl(var(--destructive-text)); }
   .log-cue { margin-top: 6px; }
+  /* The head's environment link and the dot before it, on one line. */
+  .log-env { display: inline-flex; align-items: baseline; gap: inherit; }
 
   /* Off a phone a document is a tab (the mockup's 901px block): it takes the timeline's place under
      the tab line, on the page's own colour, its column where the timeline's is; the line's cross
      closes it. The head's and the foot's text stand in the column's lane: --gutter is the body's
      scrollbar (overlay.tsx). */
   @media (min-width: 901px) {
-    .sheet.tabbed {
-      --background: inherit;
-      --card: inherit;
-      inset: 0;
-      z-index: 7;
-      width: auto;
-      max-width: none;
-      border-left: 0;
-      box-shadow: none;
-      transition: none;
-    }
+    .sheet.tabbed { --background: inherit; --card: inherit; z-index: 7; }
     .sheet.tabbed .sheet-body .column { margin: 0 auto; padding: 20px 24px 40px; }
     .sheet.tabbed :is(.sheet-head, .sheet-foot) { --lane: max(0px, calc((100% - var(--gutter, 0px) - var(--column)) / 2)); }
     .sheet.tabbed .sheet-head { padding-left: calc(var(--lane) + 24px); padding-right: calc(var(--lane) + 16px + var(--gutter, 0px)); }
     .sheet.tabbed .sheet-foot { padding-left: calc(var(--lane) + 24px); padding-right: calc(var(--lane) + 24px + var(--gutter, 0px)); }
+
+    /* The session log off a phone (the mockup's `.log-pop`): a popover over the tab showing, 90 % of
+       the column's text width and centred on it, the column narrowed by the scrollbar of what it
+       lies over, as wide as its body's (--gutter, overlay.tsx); between the stage's top and bottom,
+       at most 560px high. */
+    .sheet.pop {
+      --column-w: calc(min(var(--column), 100% - var(--gutter, 0px)) - 48px);
+      right: auto;
+      left: calc(max(0px, (100% - var(--gutter, 0px) - var(--column)) / 2) + 24px + var(--column-w) * 0.05);
+      z-index: 8;
+      width: calc(var(--column-w) * 0.9);
+      height: min(560px, calc(100% - 32px));
+      margin: auto 0;
+      border: 1px solid hsl(var(--border));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+      overflow: hidden;
+    }
+    .sheet.pop .sheet-head { --title-line: calc(var(--text-base) * 1.4); gap: 6px; padding: 8px 8px 8px 16px; }
+    .sheet.pop .sheet-head h2 { font-size: var(--text-base); }
+    .sheet.pop .sheet-head .sub { gap: 6px; }
+    .sheet.pop .sheet-body .column { max-width: none; padding: 12px 16px 14px; }
   }
 
   /* A phone: a view pushed over the tabs, the whole screen over the head and the tabs (F98.4; the
      mockup's 900px block). Its arrow back stands where the head's drawer button stands, 8px from
      the left and the top, at the top however tall its head. */
   @media (max-width: 900px) {
-    .sheet { left: 0; right: 0; width: auto; max-width: none; border-left: 0; box-shadow: none; }
     .sheet-body .column { padding: 16px 16px 32px; }
     .sheet-head { padding: 8px 12px 8px 8px; gap: 6px; }
-    .sheet-head .view-back { --h: 36px; flex: none; align-self: flex-start; }
+    .sheet-head .view-back { --h: 36px; flex: none; }
     .sheet-head .view-back .icon { width: 20px; height: 20px; }
     .sheet-foot { padding: 10px 16px; }
     /* The strip's button under its words, at the right. */

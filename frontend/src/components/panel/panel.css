@@ -2,9 +2,9 @@
    and "The documents tab"). */
 
 @layer components {
-  /* The project's head over its timeline, and the panel beside them. Neither is positioned: the
-     overlay lies over the side column and the centre, placed on .app, or on the centre where the
-     frame gives a drawer and .centre is positioned (shell.css). */
+  /* The project's head over its timeline, and the panel beside them. Neither is positioned: on a
+     phone the overlay's view lies over the centre, positioned where the frame gives a drawer
+     (shell.css). */
   .project { flex: 1; min-height: 0; display: flex; }
   .project-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   /* The timeline's place, under the head and the tab line: a document's tab lies over the timeline
@@ -38,9 +38,6 @@
   .panel-divider::after { content: ""; position: absolute; inset: 0 auto 0 2px; width: 2px; }
   .panel-divider:is(:hover, [data-dragging], :focus-visible)::after { background: hsl(var(--primary)); }
   .panel-divider:focus-visible { outline: none; }
-  /* Off a phone the panel stands beside the timeline, and the overlay opens to its left (F98.1,
-     F98.2). */
-  .project[data-panel="open"] { --panel-space: var(--panel); }
   /* Its height and --tab-top are lined up with the project's head (panel.tsx). */
   .panel-head {
     flex: none;

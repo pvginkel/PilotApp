@@ -6,25 +6,29 @@
  * or Done and never by Esc; its body's scroll kept while another tab shows, set back once its read
  * is drawn. It takes the focus as it shows where the focus would be lost under it, and gives it
  * back as it closes to what had it before where the focus is lost then. Off a phone the session
- * log is a page of its own over the project's timeline, part of the page at the mockup's width,
- * opening in place, and the whole page once maximized; its cross, Esc and its backdrop close it.
+ * log is a popover over the tab showing (F69.1): in one place and of one size, 90 % of the
+ * column's text width, centred on it and between the stage's top and bottom, at most 560 px high,
+ * not scrolling with what lies under it; its cross, Esc and a press outside it close it, and so
+ * does a click on a link to its own address, its opener's. It takes the focus as it opens, and
+ * gives it back as it closes to what had it before where the focus is lost then.
  * Its body keeps its scroll while what it shows is read again, and starts at its top for each thing
  * it shows afresh. A segment in it goes to
  * its block in its body, which flashes (F33), and opened at a block it goes there once its body
  * draws it; either opens the block's collapsed section (F31.5). Its head carries Discuss, quoting
- * what it shows (F39.1); a strip under its head, where what it shows has one, says what Pilot does
- * on it (F28.9). On a phone it is a view pushed over the tabs (F98.4): the whole screen over the
- * head and the tabs, with no animation, no backdrop, no maximize and no cross, an arrow back at the
- * left of its head where the head's drawer button stands; the arrow, Esc and Back take it off
- * (`use-phone-tab.ts`), and its body keeps its scroll while another view lies over it, set back as
- * it shows again once its read is drawn. Outside a tab it takes the focus as it opens, and again
- * when what it shows replaces what had it, and gives it back as it closes to what had it before, as
- * a dialog does; the timeline under it takes none meanwhile (the project's route).
+ * what it shows (F39.1), its buttons level with its title's first line; a strip under its head,
+ * where what it shows has one, says what Pilot does on it (F28.9). On a phone it is a view pushed
+ * over the tabs (F98.4): the whole screen over the head and the tabs, with no animation, no
+ * backdrop, no maximize and no cross, an arrow back at the left of its head where the head's drawer
+ * button stands; the arrow, Esc and Back take it off (`use-phone-tab.ts`), and its body keeps its
+ * scroll while another view lies over it, set back as it shows again once its read is drawn. There
+ * it takes the focus as it opens, and again when what it shows replaces what had it, and gives it
+ * back as it closes to what had it before, as a dialog does; the timeline under it takes none
+ * meanwhile (the project's route).
  */
 
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
-import { ArrowLeft, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, X } from 'lucide-react';
 import { scrollToIn } from '@/components/overlay/scroll-to';
 import { blockKey, FlashContext, GoToContext, useFlashes } from '@/components/timeline/flash';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
@@ -70,9 +74,10 @@ export function Overlay({
   const view = phoneView !== null;
   const tab = useContext(DocTabContext);
   const inTab = tab !== null;
+  // Off a phone outside a tab: the session log's popover.
+  const pop = !view && !inTab;
   // Where its body's scroll is kept while another tab shows, or another view lies over it.
   const kept = ownScroll ? null : (tab ?? phoneView);
-  const [max, setMax] = useState(false);
   const sheet = useRef<HTMLElement>(null);
   const titlesId = useId();
   const [opener] = useState(() => document.activeElement);
@@ -83,11 +88,41 @@ export function Overlay({
   useEffect(
     () => () => {
       if (!(opener instanceof HTMLElement) || !opener.isConnected) return;
-      if (inTab && (!focusLost() || opener.closest('[inert]') !== null)) return;
+      // A press outside a popover gives the focus to what it pressed.
+      if (!view && (!focusLost() || opener.closest('[inert]') !== null)) return;
       opener.focus();
     },
-    [opener, inTab],
+    [opener, view],
   );
+  const closing = useRef(onClose);
+  useEffect(() => {
+    closing.current = onClose;
+  });
+  useEffect(() => {
+    if (!pop) return undefined;
+    const outside = (event: Event) => !sheet.current!.contains(event.target as Node);
+    // A link to the address showing, the popover's: its opener, whose click closes it.
+    const own = (event: Event) => {
+      const link = (event.target as Element).closest('a[href]');
+      return link instanceof HTMLAnchorElement && link.origin === window.location.origin && link.pathname === window.location.pathname;
+    };
+    const press = (event: PointerEvent) => {
+      if (outside(event) && !own(event)) closing.current();
+    };
+    // Before the link's own handler, which would go to the address showing.
+    const click = (event: MouseEvent) => {
+      if (!outside(event) || !own(event) || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closing.current();
+    };
+    document.addEventListener('pointerdown', press);
+    document.addEventListener('click', click, true);
+    return () => {
+      document.removeEventListener('pointerdown', press);
+      document.removeEventListener('click', click, true);
+    };
+  }, [pop]);
   const ownBody = useRef<HTMLDivElement>(null);
   const body = bodyRef ?? ownBody;
   const { fresh, flashed, flash } = useFlashes();
@@ -96,12 +131,13 @@ export function Overlay({
   // Its body for what it shows is where it was left, as its body mounts.
   const [left, setLeft] = useState(() => ({ showing, top: kept?.scroll ?? 0 }));
   if (left.showing !== showing) setLeft({ showing, top: kept?.scroll ?? 0 });
-  // A tab's head's and foot's text stand in its column, which the body's scrollbar narrows.
+  // A tab's head's and foot's text stand in its column, which the body's scrollbar narrows; the
+  // popover centres on the column of what lies under it, narrowed by a scrollbar as wide.
   useLayoutEffect(() => {
-    if (!inTab) return;
+    if (view) return;
     const element = sheet.current!.querySelector<HTMLElement>(':scope > .sheet-body')!;
     sheet.current!.style.setProperty('--gutter', `${element.offsetWidth - element.clientWidth}px`);
-  }, [left, inTab]);
+  }, [left, view]);
   // What its body draws may come after the body mounts, its read gone from the cache: the scroll is
   // set back once, as its column first draws, unless it scrolls first. The browser holds it to
   // what the body reaches.
@@ -146,16 +182,14 @@ export function Overlay({
     reached.current = key;
     goTo(at.item, at.block, 'instant');
   });
-  const resize = max ? 'Restore' : 'Maximize';
 
   return (
     <FlashContext.Provider value={{ fresh, flashed }}>
       <GoToContext.Provider value={goToSegment}>
         <SectionsContext.Provider value={sections}>
-          {!view && !inTab && <div className="sheet-backdrop" onClick={onClose} data-testid="overlay.backdrop" />}
           <section
             ref={sheet}
-            className={cn('sheet', max && 'max', inTab && 'tabbed')}
+            className={cn('sheet', inTab && 'tabbed', pop && 'pop')}
             role={inTab ? 'tabpanel' : 'dialog'}
             aria-labelledby={titlesId}
             tabIndex={-1}
@@ -178,29 +212,17 @@ export function Overlay({
                 {titles}
               </div>
               {discuss}
-              {!view && !inTab && (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm btn-icon maximize"
-                    onClick={() => setMax(!max)}
-                    title={resize}
-                    aria-label={resize}
-                    data-testid="overlay.maximize"
-                  >
-                    {max ? <Minimize2 className="icon" aria-hidden="true" /> : <Maximize2 className="icon" aria-hidden="true" />}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm btn-icon"
-                    onClick={onClose}
-                    title="Close (Esc)"
-                    aria-label="Close"
-                    data-testid="overlay.close"
-                  >
-                    <X className="icon" aria-hidden="true" />
-                  </button>
-                </>
+              {pop && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm btn-icon"
+                  onClick={onClose}
+                  title="Close (Esc)"
+                  aria-label="Close"
+                  data-testid="overlay.close"
+                >
+                  <X className="icon" aria-hidden="true" />
+                </button>
               )}
             </div>
             {strip}

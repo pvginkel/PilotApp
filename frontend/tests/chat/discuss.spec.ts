@@ -126,11 +126,12 @@ test.describe('Discuss', () => {
     await expect(chat.field).toBeFocused();
   });
 
-  test('on an overlay’s head quotes what it shows: a document the item, the handbook, the project document and an attachment by their paths, a session log its work item', async ({
+  test('on an overlay’s head quotes what it shows: a document the item, the handbook, the project document and an attachment by their paths; the session log’s popover has none', async ({
     people,
     projects,
     timeline,
     overlay,
+    docTabs,
     sessionLog,
     chat,
   }) => {
@@ -165,17 +166,16 @@ test.describe('Discuss', () => {
     await expect(chat.quote).toHaveAttribute('data-quote', 'path project.md');
     await expect(chat.quoteLabel).toHaveText('The trip plan');
 
-    await sessionLog.open(project, work);
-    await expect(sessionLog.discuss).toHaveAttribute('title', 'Discuss: ask Pilot about this session');
-    await sessionLog.discuss.click();
-    await expect(chat.quote).toHaveAttribute('data-quote', `item ${work}`);
-    await expect(chat.field).toBeFocused();
-
     // An attachment at its address under its item's.
-    await overlay.close.click();
+    await docTabs.first.click();
     await timeline.item(packing).attachment(notes!).click();
     await overlay.discuss.click();
     await expect(chat.quote).toHaveAttribute('data-quote', `path attachments/${batch}/tent-notes.md`);
+
+    // Off a phone the session log is a popover with no Discuss (F69.1; the phone's view has it, D127).
+    await sessionLog.open(project, work);
+    await expect(sessionLog.item).toHaveText('Survey the stylesheets');
+    await expect(sessionLog.discuss).toHaveCount(0);
   });
 
   test('sends a file quoted by its path as its path tag, the message opening with its line', async ({

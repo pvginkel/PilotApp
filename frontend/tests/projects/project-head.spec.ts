@@ -153,6 +153,7 @@ test.describe('The plan popover', () => {
     await expect(projectHead.plan).toHaveCount(0);
     await projectHead.step.click();
     await expect(projectHead.planHeading).toHaveText('The plan · 1 of 4 done');
+    expect(await projectHead.planHeading.evaluate((heading) => getComputedStyle(heading).fontWeight)).toBe('600');
     await expect(projectHead.planSteps).toHaveText(['Step a', 'Step b', 'Step c', 'Step d']);
     expect(await projectHead.planSteps.evaluateAll((steps) => steps.map((element) => element.dataset.state))).toEqual(['done', 'now', 'pending', 'now']);
     await expect(projectHead.planStep('Step b').root.locator('.mark')).toHaveAccessibleName('In progress');

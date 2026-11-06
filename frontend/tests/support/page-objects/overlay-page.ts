@@ -8,7 +8,7 @@ import { blockParts, settledParts } from './timeline-page';
  * view, opened at the document's own address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
  * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, the sections
  * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
- * foot; the session log's maximize, cross and backdrop off a phone; over the text, the box of Pilot's questions to a
+ * foot; off a phone the session log's popover's cross, and no tab, view or popover draws a maximize or a backdrop; over the text, the box of Pilot's questions to a
  * registered document's writer and the reply (F52.2), which its own address opens it at. A document that is Pilot's has the strip under its head,
  * what Pilot does on it in `data-doing`, its words, its link and *Stop and take over* (F28.9), and
  * one awaiting its read says that its text comes once it is read; one a run of Pilot's put to the

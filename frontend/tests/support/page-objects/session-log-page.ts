@@ -3,9 +3,9 @@ import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
 
 /**
- * A work item's session log in the overlay (F69), at its own address over its project's timeline:
- * its head with "Session log", the item's title, the environment's link, the session's id and
- * Discuss; its
+ * A work item's session log in the overlay (F69), at its own address: off a phone its popover over
+ * the tab showing, a dialog, on a phone a view. Its head with "Session log", the session's id its
+ * tooltip, the item's title and the environment's link, on a phone Discuss, off one the cross; its
  * body with a reply per turn — text, a run of calls, a sub-agent's card, the phantom, a failure, the
  * server's word on a file the session registered, a call's effects in its place and an effect whose
  * call no record shows in its own — each ended one closing on its time, and before it what the
@@ -14,10 +14,13 @@ import { waitTestEvent } from '../helpers';
  */
 export class SessionLogPage {
   readonly overlay: Locator;
+  readonly head: Locator;
   readonly title: Locator;
+  /** The line under the title: the item's title, the dot and the environment's link. */
+  readonly sub: Locator;
   readonly item: Locator;
   readonly environment: Locator;
-  readonly session: Locator;
+  readonly close: Locator;
   readonly body: Locator;
   readonly log: Locator;
   readonly turns: Locator;
@@ -44,11 +47,14 @@ export class SessionLogPage {
   readonly discuss: Locator;
 
   constructor(private readonly page: Page) {
-    this.overlay = page.getByTestId('overlay');
+    // A dialog, never a tab, which it may lie over.
+    this.overlay = page.locator('[data-testid="overlay"][role="dialog"]');
+    this.head = this.overlay.getByTestId('overlay.head');
     this.title = this.overlay.getByTestId('overlay.title');
+    this.sub = this.overlay.getByTestId('overlay.sub');
     this.item = this.overlay.getByTestId('session-log.item');
     this.environment = this.overlay.getByTestId('session-log.environment');
-    this.session = this.overlay.getByTestId('session-log.session');
+    this.close = this.overlay.getByTestId('overlay.close');
     this.body = this.overlay.getByTestId('overlay.body');
     this.log = this.overlay.getByTestId('session-log');
     this.turns = this.log.getByTestId('session-log.turn');

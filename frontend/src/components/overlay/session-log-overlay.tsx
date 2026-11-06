@@ -1,8 +1,9 @@
 /**
- * A work item's session log in the overlay (F69), at its own address over its project's timeline,
- * by the item's id, which is its session's (F97). Its head is "Session log" over the item's title,
- * its environment's link once its start has one, none for Pilot's own work (F26.3), and the
- * session's id, and Discuss, quoting the item (F69.1). Its body is the session's records rendered
+ * A work item's session log in the overlay (F69), at its own address, by the item's id, which is
+ * its session's (F97): off a phone its popover over the tab showing, on a phone a view. Its head is
+ * "Session log", the session's id its tooltip, over the item's title and its environment's link
+ * once its start has one, none for Pilot's own work (F26.3); on a phone Discuss, quoting the item
+ * (F69.1, D127). Its body is the session's records rendered
  * as the chat renders a reply — the runs of calls, the sub-agents' cards, the phantom — streamed
  * from the first record while it is open (F40.3), one reply per turn, each ended one closing on
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
@@ -30,6 +31,7 @@ import { Time } from '@/components/shared/time';
 import { useSseContext } from '@/contexts/sse-context';
 import { useChatStream } from '@/hooks/use-chat-stream';
 import { useOverlayClose } from '@/hooks/use-overlay-close';
+import { usePhone } from '@/hooks/use-phone';
 import { usePerson } from '@/hooks/use-self';
 import { useSessionTransport } from '@/hooks/use-session-transport';
 import { useSessionTurns, type SessionTurn } from '@/hooks/use-session-turns';
@@ -58,11 +60,14 @@ export function SessionLogOverlay({ projectId, sessionId }: SessionLogOverlayPro
   const work = item?.work ?? undefined;
   const failed = error !== null || (data !== undefined && work === undefined);
   const body = useRef<HTMLDivElement>(null);
+  const phone = usePhone();
   return (
     <Overlay
       showing={`session ${sessionId}`}
       titles={item && work && <Titles item={item} work={work} />}
-      discuss={item && work && <DiscussButton quote={quoteOfItem(item)} title="Discuss: ask Pilot about this session" testId="overlay.discuss" />}
+      discuss={
+        phone && item && work && <DiscussButton quote={quoteOfItem(item)} title="Discuss: ask Pilot about this session" testId="overlay.discuss" />
+      }
       foot={null}
       onClose={close}
       bodyRef={body}
@@ -80,23 +85,20 @@ export function SessionLogOverlay({ projectId, sessionId }: SessionLogOverlayPro
 function Titles({ item, work }: { item: TimelineItem; work: Work }) {
   return (
     <>
-      <h2 data-testid="overlay.title">
+      <h2 title={`Session ${item.id}`} data-testid="overlay.title">
         <ScrollText className="icon" aria-hidden="true" /> Session log
       </h2>
       <div className="sub" data-testid="overlay.sub">
         <span data-testid="session-log.item">
           <LinkedText text={titleOf(item)} />
         </span>
-        <span>·</span>
+        {/* The dot goes with the link, so that no line ends on it. */}
         {!work.pilots_own && work.environment !== null && (
-          <>
-            <EnvironmentLink environment={work.environment} testId="session-log.environment" />
+          <span className="log-env">
             <span>·</span>
-          </>
+            <EnvironmentLink environment={work.environment} testId="session-log.environment" />
+          </span>
         )}
-        <span className="mono" title="The session's id" data-testid="session-log.session">
-          {item.id}
-        </span>
       </div>
     </>
   );
