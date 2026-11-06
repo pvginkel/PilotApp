@@ -35,6 +35,11 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
 
+  // A whole test's budget, each of its waits on its own below. The longest specs make some fifty
+  // backend round trips in turn, which a node loaded by other environments slows about threefold,
+  // past Playwright's default of 30 s.
+  timeout: 60_000,
+
   expect: {
     timeout: 10000,
   },
