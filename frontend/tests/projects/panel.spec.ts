@@ -9,13 +9,17 @@
  * browser, and whether it is open kept no more (F1.6, F133); on a wide window and at the narrow
  * width alike, it stands beside the timeline and the tab showing, nothing over it, and Esc never
  * closes it, nor going to an item (F98.1, F98.2); on a phone its tabs are among the tabs at the
- * bottom (tests/projects/phone-tabs.spec.ts). The tab's lists wait on its read, the timeline's and
+ * bottom (tests/projects/phone-tabs.spec.ts). Off a phone its divider is dragged, or moved by the
+ * arrow keys, the width kept in the browser, every project's in pixels from 420 px and every
+ * draft's as a share of the window from half, the one apart from the other, and held within its
+ * bounds at every width, 901 px included (R12). The tab's lists wait on its read, the timeline's and
  * the project document's: nothing under the headings while it is on its way, the project
  * document's row "Project document" until its title is read, and "The documents did not load" in
  * the lists' place where a read fails (F113).
  */
 
 import { randomUUID } from 'node:crypto';
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { expectConsoleError, makeUnique, waitForUiState } from '../support/helpers';
 import { slowNetwork } from '../support/network';
@@ -399,5 +403,111 @@ test.describe('The side panel at the narrow width', () => {
       await expect.poll(async () => (await panel.root.boundingBox())!.x).toBeCloseTo(width - 420, 0);
       await beside(width);
     }
+  });
+});
+
+test.describe('The side panel’s width', () => {
+  test.use({ viewport: { width: 1600, height: 800 } });
+
+  test('a project’s is dragged at its divider from 420 px, a document’s tab and the timeline beside it, and kept in pixels, every project’s, after a reload too; a draft’s apart from it, half the window, kept as a share of it', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    timeline,
+    overlay,
+    panel,
+    definitionChat,
+  }) => {
+    const me = await people.signIn();
+    const one = await projects.makeWithSession({ name: makeUnique('Width'), members: [me.handle!] });
+    const other = await projects.make({ name: makeUnique('Width'), members: [me.handle!] });
+    const { id: draft } = await projects.makeDraft({ members: [me.handle!] });
+    const packing = await projects.place(one, { kind: 'document', title: 'Packing', text: ASKS });
+    const besideIt = async (left: Locator, width: number, viewport: number) => {
+      const [side, beside] = await Promise.all([panel.root.boundingBox(), left.boundingBox()]);
+      expect(side!.width).toBeCloseTo(width, 0);
+      expect(side!.x + side!.width).toBeCloseTo(viewport, 0);
+      expect(beside!.x + beside!.width).toBeLessThanOrEqual(side!.x + 1);
+    };
+
+    await timeline.open(one);
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '420');
+    await besideIt(timeline.root, 420, 1600);
+    await panel.drag(-60);
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '480');
+    await besideIt(timeline.root, 480, 1600);
+    await page.goto(documentAddress(one, packing));
+    await expect(overlay.title).toHaveText('Packing');
+    const [sheet, side] = await Promise.all([overlay.root.boundingBox(), panel.root.boundingBox()]);
+    expect(sheet!.x + sheet!.width).toBeCloseTo(side!.x, 0);
+
+    await page.reload();
+    await waitForUiState(page, 'project.head', 'ready');
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '480');
+    await timeline.open(other);
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '480');
+
+    await projectHead.open(draft);
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '800');
+    await besideIt(definitionChat.root, 800, 1600);
+    // Across the Draft tab's text, selecting none of it.
+    await panel.drag(200, panel.draft.empty);
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '600');
+    expect(await page.evaluate(() => window.getSelection()!.toString())).toBe('');
+    // A share of the window: three eighths of it on another.
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '450');
+    await besideIt(definitionChat.root, 450, 1200);
+    await timeline.open(one);
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '480');
+    await besideIt(timeline.root, 480, 1200);
+  });
+
+  test('stands no narrower than 320 px and leaves 440 px to its left at every width off a phone, 901 px included, a width held in for want of room kept as it was; the arrow keys move it; a phone has no divider', async ({
+    page,
+    people,
+    projects,
+    shell,
+    panel,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Bounds'), members: [me.handle!] });
+    const left = async () => (await panel.root.boundingBox())!.x - (await shell.centre.boundingBox())!.x;
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await timeline.open(id);
+
+    await panel.drag(300);
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '320');
+    await expect(panel.divider).toHaveAttribute('aria-valuemin', '320');
+    expect(await panel.width()).toBeCloseTo(320, 0);
+    // The centre is the window less the project list's 264 px.
+    await panel.drag(-700);
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '496');
+    await expect(panel.divider).toHaveAttribute('aria-valuemax', '496');
+    expect(await left()).toBeCloseTo(440, 0);
+
+    // The narrow width gives the centre the whole window.
+    await page.setViewportSize({ width: 901, height: 800 });
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '461');
+    expect(await left()).toBeCloseTo(440, 0);
+    await panel.drag(0);
+    await page.setViewportSize({ width: 1600, height: 800 });
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '496');
+    expect(await panel.width()).toBeCloseTo(496, 0);
+
+    await panel.divider.focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '512');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '480');
+    await page.reload();
+    await waitForUiState(page, 'project.head', 'ready');
+    await expect(panel.divider).toHaveAttribute('aria-valuenow', '480');
+
+    await page.setViewportSize({ width: 400, height: 800 });
+    await expect(panel.divider).toHaveCount(0);
   });
 });

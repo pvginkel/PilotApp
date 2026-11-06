@@ -13,7 +13,7 @@
  * in the timeline's place (F28.1, F28.8), the tab line the head's last row while one is open
  * (`use-doc-tabs.ts`), the address following the tab showing and a move to another of the
  * project's addresses replacing the browser's entry (F97); beside the head and the timeline stands
- * the side panel, the project's own and always open (F38.1). Discuss anywhere on the project's
+ * the side panel, the project's own and always open (F38.1), its width dragged at its divider. Discuss anywhere on the project's
  * screens shows its Chat tab, with what it quotes in the composer (F39), and *In the chat* on a
  * block answered in the chat shows it there at the message that gave the answer (F42.3). A draft's
  * panel has the Draft and Documents tabs (F46.3), its chat standing in the timeline's place: there
@@ -36,6 +36,7 @@ import { ItemOverlay } from '@/components/overlay/item-overlay';
 import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
 import { SessionLogOverlay } from '@/components/overlay/session-log-overlay';
 import { Panel } from '@/components/panel/panel';
+import { PanelDivider } from '@/components/panel/panel-divider';
 import { CreateProject } from '@/components/projects/create-project';
 import { DocTabs } from '@/components/projects/doc-tabs';
 import { PhoneProject } from '@/components/projects/phone-project';
@@ -179,12 +180,13 @@ function DeskProject({ projectId, project: data, tab, goneTo, log, children }: D
     panel.show('draft');
   };
   const [head, setHead] = useState<HTMLElement | null>(null);
+  const [page, setPage] = useState<HTMLElement | null>(null);
   return (
     <TabMovesContext.Provider value>
       <DiscussContext.Provider value={discuss}>
         <InChatContext.Provider value={inChat}>
           <DraftBlockContext.Provider value={toDraftBlock}>
-            <div className="project" data-panel={data !== undefined ? 'open' : 'closed'}>
+            <div ref={setPage} className="project" data-panel={data !== undefined ? 'open' : 'closed'}>
               <div className="project-main">
                 {data && <ProjectHead ref={setHead} project={data} />}
                 {data && <DocTabs projectId={projectId} draft={draft} line={line} />}
@@ -210,7 +212,10 @@ function DeskProject({ projectId, project: data, tab, goneTo, log, children }: D
               </div>
               {/* Not before the head is read, which says whether it is a draft. */}
               {data !== undefined && (
-                <Panel projectId={projectId} draft={draft} members={data.members} tab={panel.tab} head={head} onTab={panel.show} />
+                <>
+                  <PanelDivider project={page} draft={draft} />
+                  <Panel projectId={projectId} draft={draft} members={data.members} tab={panel.tab} head={head} onTab={panel.show} />
+                </>
               )}
               {log}
             </div>

@@ -11,15 +11,18 @@ interface PanelRow {
 }
 
 /**
- * The side panel (F38.1): its head with the Documents tab and the tab's count; the Documents tab
- * (F37) with the project document, the handbook, the attachments, a batch of several under its
- * folder, and the timeline's documents and reviews, each a row with its title and the line under
- * it, "None yet" where a list is empty, and the line in the lists' place where the tab's read failed.
+ * The side panel (F38.1): the divider at its left, its head with the Documents tab and the tab's
+ * count; the Documents tab (F37) with the project document, the handbook, the attachments, a batch
+ * of several under its folder, and the timeline's documents and reviews, each a row with its title
+ * and the line under it, "None yet" where a list is empty, and the line in the lists' place where
+ * the tab's read failed.
  * A draft's has the Draft tab in the Chat tab's place (F46.3): the draft's title, its text and its
  * asks, Pilot's dots, the foot, "Empty", and the line where its read failed.
  */
 export class PanelPage {
   readonly root: Locator;
+  /** The divider at its left, off a phone: its width in `aria-valuenow`, its bounds in `aria-valuemin` and `aria-valuemax`. */
+  readonly divider: Locator;
   readonly head: Locator;
   /** The tabs in the head, in their order. */
   readonly tabs: Locator;
@@ -58,6 +61,7 @@ export class PanelPage {
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('panel');
+    this.divider = page.getByTestId('panel.divider');
     this.head = this.root.getByTestId('panel.head');
     this.tabs = this.head.getByRole('tab');
     this.draftTab = this.head.getByTestId('panel.tab.draft');
@@ -85,6 +89,22 @@ export class PanelPage {
       empty: this.body.getByTestId('panel.draft.empty'),
       failed: this.body.getByTestId('panel.draft.failed'),
     };
+  }
+
+  /** Drags the divider `by` pixels across, leftwards the panel the wider: at its middle, or level with the middle of `along`. */
+  async drag(by: number, along?: Locator): Promise<void> {
+    const box = (await this.divider.boundingBox())!;
+    const level = along === undefined ? box : (await along.boundingBox())!;
+    const [x, y] = [box.x + box.width / 2, level.y + level.height / 2];
+    await this.page.mouse.move(x, y);
+    await this.page.mouse.down();
+    await this.page.mouse.move(x + by, y, { steps: 4 });
+    await this.page.mouse.up();
+  }
+
+  /** The panel's width as drawn. */
+  async width(): Promise<number> {
+    return (await this.root.boundingBox())!.width;
   }
 
   /** An ask of the draft in the Draft tab, by its local id. */

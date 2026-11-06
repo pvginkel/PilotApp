@@ -72,7 +72,6 @@
   /* A screen's head on a phone, and the drawer's. */
   --head: 52px;
   --tabs: 264px;
-  --panel: 420px;
 }
 
 /* Off the phone, above 900px, the scale a pixel down. */

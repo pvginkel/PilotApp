@@ -24,6 +24,18 @@ interface Panel {
   tab: PanelTab;
 }
 
+/**
+ * The side panel's width off a phone, as the person last dragged it (R12): one for every project,
+ * in pixels, and one for every draft, a share of the window, so that it stays half on another
+ * screen. Until dragged, 420 px and half.
+ */
+interface PanelWidths {
+  project: number;
+  draft: number;
+}
+
+const PANEL_WIDTHS: PanelWidths = { project: 420, draft: 0.5 };
+
 /** What a tab of the desktop's tab line shows (F28.8). */
 const DOC_TAB_KINDS = ['document', 'attachment', 'handbook', 'project-document'] as const;
 type DocTabKind = (typeof DOC_TAB_KINDS)[number];
@@ -56,6 +68,7 @@ interface BrowserState {
   chevrons: Record<Group, boolean>;
   /** Each project's side panel, by the project's id, once the person set it (F1.6, F38.1). */
   panels: Record<string, Panel>;
+  panelWidths: PanelWidths;
   /** Each project's tab line, by the project's id, while a tab of it is open (F1.6, F28.8). */
   lines: Record<string, KeptLine>;
 }
@@ -72,6 +85,7 @@ function load(): BrowserState {
     project: typeof saved.project === 'string' ? saved.project : null,
     chevrons: { others: chevrons.others === true, finished: chevrons.finished === true },
     panels: loadPanels(saved.panels),
+    panelWidths: loadPanelWidths(saved.panelWidths),
     lines: loadLines(saved.lines),
   };
 }
@@ -85,6 +99,14 @@ function loadPanels(saved: unknown): Record<string, Panel> {
     panels[projectId] = { tab: PANEL_TABS.find((each) => each === tab) ?? PANEL_TABS[0] };
   }
   return panels;
+}
+
+function loadPanelWidths(saved: unknown): PanelWidths {
+  const { project, draft } = (typeof saved === 'object' && saved !== null ? saved : {}) as Partial<Record<keyof PanelWidths, unknown>>;
+  return {
+    project: typeof project === 'number' && project > 0 ? project : PANEL_WIDTHS.project,
+    draft: typeof draft === 'number' && draft > 0 && draft < 1 ? draft : PANEL_WIDTHS.draft,
+  };
 }
 
 function loadLines(saved: unknown): Record<string, KeptLine> {
@@ -130,6 +152,11 @@ export function rememberInBrowser(change: Partial<BrowserState>): void {
 /** Keeps a project's side panel as the person set it, over what another tab keeps for the others. */
 export function rememberPanel(projectId: string, panel: Panel): void {
   rememberInBrowser({ panels: { ...load().panels, [projectId]: panel } });
+}
+
+/** Keeps the width of every project's side panel, or of every draft's, over what another tab keeps for the other. */
+export function rememberPanelWidth(kind: keyof PanelWidths, width: number): void {
+  rememberInBrowser({ panelWidths: { ...load().panelWidths, [kind]: width } });
 }
 
 /** Keeps a project's tab line as the person left it, over what another tab keeps for the others; nothing once no tab is open. */

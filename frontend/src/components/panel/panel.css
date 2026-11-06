@@ -23,6 +23,21 @@
     border-left: 1px solid hsl(var(--border));
     background: hsl(var(--background));
   }
+  /* The divider between the panel and what stands left of it (panel-divider.tsx), over the
+     panel's rule, taking no room: the rule in the primary while it is pointed at, dragged or
+     focused. */
+  .panel-divider {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 8px;
+    margin: 0 -5px 0 -3px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .panel-divider::after { content: ""; position: absolute; inset: 0 auto 0 2px; width: 2px; }
+  .panel-divider:is(:hover, [data-dragging], :focus-visible)::after { background: hsl(var(--primary)); }
+  .panel-divider:focus-visible { outline: none; }
   /* Off a phone the panel stands beside the timeline, and the overlay opens to its left (F98.1,
      F98.2). */
   .project[data-panel="open"] { --panel-space: var(--panel); }
