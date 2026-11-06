@@ -5,5 +5,10 @@
  * This file is never overwritten by template updates.
  */
 
+import { holdTestSuiteLock } from './test-suite-lock';
+
 /** The app's setup of a Playwright run. */
-export async function loadAppGlobalSetup(): Promise<void> {}
+export async function loadAppGlobalSetup(): Promise<void> {
+  // One run at a time across the project's environments, held until this runner ends.
+  await holdTestSuiteLock();
+}

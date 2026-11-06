@@ -126,7 +126,8 @@ fake, and its notification bridge at the bridge's fake it serves too, and holds 
 off for a day; the Playwright run's own setup, which `frontend/tests/support/global-setup.ts`
 runs from `loadAppGlobalSetup()` in the app-owned `frontend/tests/support/global-setup-extensions.ts`
 in the runner's process, before it seeds the run's database, where the template gives an app no
-place for a step of a run's setup; `run-suite`'s Playwright worker count,
+place for a step of a run's setup: this app's takes the test suite lock, one run at a time across
+the project's environments, held until the runner ends; `run-suite`'s Playwright worker count,
 which `tools/suite_runner/local.py` reads from `PLAYWRIGHT_WORKERS` when no `--workers` is given,
 where the library's `modernApp.test` fixes run-suite's flags and so left CI on the Playwright
 config's count; the completion of `useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which

@@ -80,6 +80,12 @@ cexec modern-app sh -c 'cd frontend && pnpm playwright test' 2>&1 | tail -3
 cexec go sh -c 'cd sidecar && go test -race ./...'
 ```
 
+A Playwright run takes the test suite lock first: one run at a time across the project's
+environments, which share one node (`frontend/tests/support/test-suite-lock.ts`). It waits for the
+lock at most five minutes, `PLAYWRIGHT_SUITE_LOCK_WAIT` seconds when set, saying whose run holds it.
+A run that gives up exits with 75 having run no test, and `kc project test` fails with it: that is
+no failure of the slice, and the suite runs again once the other run is done.
+
 Then the same verbs from the root of every other repo the slice touched, each where it declares
 them: `../PilotDeploy`, whose `test` reads `../PilotApp/docs/architecture/architecture.yaml` and so
 needs this checkout beside it, and a registry repo the slice changed in `/work/scratch/`
