@@ -91,9 +91,7 @@ test.describe('The tabs at the bottom on a phone', () => {
     await expect(phoneTabs.tabs).toHaveText(['Timeline', 'Chat', 'Plan', 'Documents']);
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     for (const key of ['chat', 'plan', 'documents'] as const) await expect(phoneTabs.tab(key)).toHaveAttribute('aria-selected', 'false');
-    await expect(projectHead.discussButton).toHaveCount(0);
-    await expect(projectHead.documentsButton).toHaveCount(0);
-    await expect(projectHead.draftPanelButton).toHaveCount(0);
+    expect(await projectHead.controls()).toEqual(['shell.drawer-toggle', 'project.autopilot', 'project.donut', 'project.menu.button']);
 
     const bar = await boxOf(phoneTabs.root);
     expect(bar.x).toBe(0);
@@ -291,7 +289,7 @@ test.describe('The tabs at the bottom on a phone', () => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Kept'), members: [me.handle!] });
     await timeline.open(id);
-    const kept = { [id]: { open: true, tab: 'documents' } };
+    const kept = { [id]: { tab: 'documents' } };
     await page.evaluate((panels) => localStorage.setItem('pilot', JSON.stringify({ ...JSON.parse(localStorage.getItem('pilot') ?? '{}'), panels })), kept);
     await timeline.open(id);
 
@@ -359,7 +357,6 @@ test.describe('A draft’s tabs on a phone', () => {
 
     await expect(phoneTabs.tabs).toHaveText(['Chat', 'Draft', 'Documents']);
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
-    await expect(projectHead.draftPanelButton).toHaveCount(0);
     await expect(definitionChat.createButton).toBeVisible();
     await expectBetween(definitionChat.root, projectHead, phoneTabs);
 

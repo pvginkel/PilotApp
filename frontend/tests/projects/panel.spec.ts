@@ -1,17 +1,18 @@
 /**
  * The side panel (F38.1) and its Documents tab (F37). It has the Chat tab, first and the one it
- * opens on until the person picks another (tests/chat/chat-tab.spec.ts), the Documents tab with its
- * count, and a close cross; the Documents tab lists the project document first, then the attachments newest
- * first, the files of one call under their folder, then the timeline's documents and reviews
- * newest first with Open, *Unsent* or Done and their stamp, each opening in its tab at its
- * address. The head's Documents button toggles it (F2.3). Each project's panel is its own, open or
- * closed and on which tab, kept in the browser (F1.6, F133); until it is set, it stands open. Off a
- * phone, on a wide window and at the narrow width alike, it stands beside the timeline and the tab
- * showing, nothing over it, and Esc never closes it, nor going to an item (F98.1,
- * F98.2); on a phone its tabs are among the tabs at the bottom (tests/projects/phone-tabs.spec.ts). The tab's lists wait on its read, the
- * timeline's and the project document's: nothing under the headings while it is on its way, the
- * project document's row "Project document" until its title is read, and "The documents did not
- * load" in the lists' place where the read fails (F113).
+ * opens on until the person picks another (tests/chat/chat-tab.spec.ts), and the Documents tab with
+ * its count; the Documents tab lists the project document first, 10px under the tab bar, and the
+ * handbook under it, then the attachments newest first, the files of one call under their folder,
+ * then the timeline's documents and reviews newest first with Open, *Unsent* or Done and their
+ * stamp, each opening in its tab at its address. Off a phone it is always open, with no cross and
+ * nothing in the head toggling it (F2.3), each project's on the tab it was left on, kept in the
+ * browser, and whether it is open kept no more (F1.6, F133); on a wide window and at the narrow
+ * width alike, it stands beside the timeline and the tab showing, nothing over it, and Esc never
+ * closes it, nor going to an item (F98.1, F98.2); on a phone its tabs are among the tabs at the
+ * bottom (tests/projects/phone-tabs.spec.ts). The tab's lists wait on its read, the timeline's and
+ * the project document's: nothing under the headings while it is on its way, the project
+ * document's row "Project document" until its title is read, and "The documents did not load" in
+ * the lists' place where a read fails (F113).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -105,16 +106,21 @@ test.describe('The side panel on a wide window', () => {
     await expect(panel.head.getByRole('tab')).toHaveText(['Chat', /^Documents/]);
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'false');
     await expect(panel.count).toHaveText('8');
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'false');
     await panel.documentsTab.click();
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'true');
 
     await expect(panel.projectDocument.title).toHaveText(p.name);
     await expect(panel.projectDocument.sub).toHaveText('Project document');
-    await expect(panel.body.locator('h3')).toHaveText(['Attachments', 'In the timeline']);
-    const [first, heading] = await Promise.all([panel.projectDocument.root.boundingBox(), panel.body.locator('h3').first().boundingBox()]);
-    expect(first!.y).toBeLessThan(heading!.y);
+    await expect(panel.handbook.title).toHaveText('Handbook');
+    await expect(panel.handbook.sub).toHaveText('Handbook');
+    await expect(panel.headings).toHaveText(['Attachments', 'In the timeline']);
+    // The project document 10px under the tab bar, the handbook right under it, the first heading 14px under that.
+    const [body, first, handbook, heading] = await Promise.all(
+      [panel.body, panel.projectDocument.root, panel.handbook.root, panel.headings.first()].map(async (locator) => (await locator.boundingBox())!),
+    );
+    expect(first.y - body.y).toBeCloseTo(10, 0);
+    expect(handbook.y).toBeCloseTo(first.y + first.height, 0);
+    expect(heading.y - (handbook.y + handbook.height)).toBeCloseTo(14, 0);
 
     await expect(panel.attachments.getByTestId('panel.row.title')).toHaveText(['Site notes', 'Kit list', 'Weights', 'The map']);
     await expect(panel.attachment(p.photos).sub).toHaveText(`Campsites · ${stamp(attachmentOf(p.survey, p.photos).copied_at)}`);
@@ -195,7 +201,7 @@ test.describe('The side panel on a wide window', () => {
     await expect(panel.root).toBeVisible();
   });
 
-  test('the head’s Documents button, between the members and the handbook’s, shows its Documents tab and then toggles it, and its cross closes it; each project’s panel comes back as it was left, kept in the browser', async ({
+  test('has no cross, and the head nothing that toggles it: it stands on every project, each on the tab it was left on, kept in the browser, one not opened before on its Chat tab, one kept closed open', async ({
     page,
     people,
     projects,
@@ -203,6 +209,7 @@ test.describe('The side panel on a wide window', () => {
     projectList,
     timeline,
     panel,
+    chat,
   }) => {
     const me = await people.signIn();
     const oneName = makeUnique('Kept');
@@ -211,46 +218,42 @@ test.describe('The side panel on a wide window', () => {
     const other = await projects.makeWithSession({ name: otherName, members: [me.handle!] });
     await timeline.open(one);
 
-    const [members, documents, handbook] = await Promise.all(
-      [projectHead.members, projectHead.documentsButton, projectHead.handbookButton].map(async (locator) => (await locator.boundingBox())!),
-    );
-    expect(documents.x).toBeGreaterThan(members.x + members.width);
-    expect(handbook.x).toBeCloseTo(documents.x + documents.width, 0);
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-label', 'The project’s documents');
-
+    await expect(panel.head.getByRole('button')).toHaveCount(0);
+    expect(await projectHead.controls()).toEqual(['project.autopilot', 'project.step', 'project.menu.button']);
     await expect(panel.count).toHaveCount(0);
-    // Open on the Chat tab, the button shows the Documents tab; on it, the button closes the panel.
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'false');
-    await projectHead.documentsButton.click();
+    await panel.documentsTab.click();
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'true');
     await expect(panel.noAttachments).toHaveText('None yet. A session attaches reader’s material here: a design, a survey, a log.');
     await expect(panel.noDocuments).toHaveText('None yet.');
     await expect(panel.projectDocument.title).toHaveText(oneName);
 
-    await projectHead.documentsButton.click();
-    await expect(panel.root).toHaveCount(0);
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'false');
-    await projectHead.documentsButton.click();
-    await expect(panel.root).toBeVisible();
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'true');
-    await panel.close.click();
-    await expect(panel.root).toHaveCount(0);
-
     await projectList.tab(otherName).click();
     await expect(page).toHaveURL(`/projects/${other}`);
-    await expect(panel.root).toBeVisible();
+    await expect(projectHead.name).toHaveText(otherName);
+    await expect(chat.tab).toHaveAttribute('aria-selected', 'true');
     await projectList.tab(oneName).click();
     await expect(page).toHaveURL(`/projects/${one}`);
     await expect(projectHead.name).toHaveText(oneName);
-    await expect(panel.root).toHaveCount(0);
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
 
     await timeline.open(one);
     await expect(projectHead.name).toHaveText(oneName);
-    await expect(panel.root).toHaveCount(0);
-    const kept = await page.evaluate(() => (JSON.parse(localStorage.getItem('pilot')!) as { panels: Record<string, unknown> }).panels);
-    expect(kept[one]).toEqual({ open: false, tab: 'documents' });
-    expect(kept[other]).toBeUndefined();
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
+    const kept = () => page.evaluate(() => (JSON.parse(localStorage.getItem('pilot')!) as { panels: Record<string, unknown> }).panels);
+    expect((await kept())[one]).toEqual({ tab: 'documents' });
+    expect((await kept())[other]).toBeUndefined();
+
+    // Whether a panel is open is kept no more: one kept closed stands open, on the tab it was left on.
+    await page.evaluate((id) => {
+      const saved = JSON.parse(localStorage.getItem('pilot')!) as { panels: Record<string, unknown> };
+      saved.panels[id] = { open: false, tab: 'documents' };
+      localStorage.setItem('pilot', JSON.stringify(saved));
+    }, other);
+    await timeline.open(other);
+    await expect(projectHead.name).toHaveText(otherName);
+    await expect(panel.root).toBeVisible();
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
+    expect((await kept())[other]).toEqual({ tab: 'documents' });
   });
 
   test('stands only once the project’s head is read: not at an address naming no project', async ({ page, people, panel }) => {
@@ -267,22 +270,27 @@ test.describe('The Documents tab’s read', () => {
     people,
     projects,
     projectHead,
+    projectList,
     timeline,
     panel,
   }) => {
     const me = await people.signIn();
     const name = makeUnique('Pending');
     const id = await projects.makeWithSession({ name, members: [me.handle!] });
-    // Closed, and the page opened afresh: the timeline is read before the tab opens, and the
-    // project document's read, which the tab alone makes, goes out as it opens.
+    const otherName = makeUnique('Elsewhere');
+    const other = await projects.makeWithSession({ name: otherName, members: [me.handle!] });
+    // Left on the tab, and the page opened afresh on another project: none of the project's reads
+    // has landed in it as the project is gone to from the list, and the tab's go out as it stands.
     await timeline.open(id);
-    await panel.close.click();
-    await timeline.open(id);
-    await expect(panel.root).toHaveCount(0);
+    await panel.documentsTab.click();
+    await expect(panel.projectDocument.title).toHaveText(name);
+    await timeline.open(other);
 
     const restore = await slowNetwork(page, 1_000);
     const read = panel.read();
-    await projectHead.documentsButton.click();
+    await projectList.tab(name).click();
+    await expect(projectHead.name).toHaveText(name);
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
     await expect(panel.headings).toHaveText(['Attachments', 'In the timeline']);
     await expect(panel.projectDocument.title).toHaveText('Project document');
     await expect(panel.projectDocument.sub).toHaveText('Project document');
@@ -298,12 +306,11 @@ test.describe('The Documents tab’s read', () => {
     await expect(panel.failed).toHaveCount(0);
   });
 
-  test('says “The documents did not load” in the lists’ place where it fails, the row named “Project document”, and draws the lists once a later read lands', async ({
+  test('says “The documents did not load” in the lists’ place where a read fails, the rows above them as last read, and draws the lists once a later read lands', async ({
     page,
     auth,
     people,
     projects,
-    projectHead,
     timeline,
     panel,
   }) => {
@@ -312,19 +319,18 @@ test.describe('The Documents tab’s read', () => {
     const id = await projects.makeWithSession({ name, members: [me.handle!] });
     await projects.place(id, { kind: 'document', title: 'Packing', text: 'We pack light.\n' });
     await timeline.open(id);
-    await panel.close.click();
-    await timeline.open(id);
-    await expect(panel.root).toHaveCount(0);
+    await panel.documentsTab.click();
+    await expect(panel.documents.getByTestId('panel.row.title')).toHaveText(['Packing']);
 
-    // The browser's session now lacks the editor role, and the API refuses the tab's read.
+    // The browser's session now lacks the editor role, and the API refuses the tab's next read.
     await expectConsoleError(page, /403/);
     await auth.createSession({ name: 'Test Person', roles: [] });
-    await projectHead.documentsButton.click();
+    await timeline.refocus();
     await expect(panel.failed).toHaveText('The documents did not load.');
     await expect(panel.headings).toHaveCount(0);
     await expect(panel.documents).toHaveCount(0);
     await expect(panel.noAttachments).toHaveCount(0);
-    await expect(panel.projectDocument.title).toHaveText('Project document');
+    await expect(panel.projectDocument.title).toHaveText(name);
     await expect(panel.count).toHaveCount(0);
 
     await people.firstSignIn();

@@ -1,9 +1,9 @@
 /**
- * A project's head (F2): the name, the ticket and the repo, linked; the step button and the plan
- * popover (F2.2, F3); the handbook's button (F129.4; its tab in
- * timeline/project-documents.spec.ts); the plan's notes and a step's (F2.7, F3.6); the members (F2.5); the auto
- * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's head, with its draft-panel
- * toggle (F46.2; its panel in draft-panel.spec.ts), and an archived project's head (D012); a tight head
+ * A project's head (F2): the name, the ticket and the repo, linked; its controls, with no Discuss,
+ * Documents or handbook button (F2.3); the step button and the plan popover (F2.2, F3); the plan's
+ * notes and a step's (F2.7, F3.6); the members (F2.5); the auto pilot switch, the Finished chip in
+ * its place (F2.6, F4.1); a draft's head, its menu its one control (F46.2; its panel in
+ * draft-panel.spec.ts), and an archived project's head (D012); a tight head
  * beside the side panel giving way in one order, the repo, the name, the step's name to its floor,
  * then the members folding to a count, then standing in two rows, its menu clear of the panel,
  * a tab open or not;
@@ -60,6 +60,24 @@ test.describe('The head', () => {
     await ticket.click();
     expect((await opened).url()).toBe(`${backendUrl}/tickets/PL-7`);
     await expect(page).toHaveURL(`/projects/${id}`);
+  });
+
+  test('has no Discuss, Documents or handbook button: its controls are the switch, the step button, the plan’s notes and the menu, the icons after the members', async ({
+    people,
+    projects,
+    projectHead,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Controls'), members: [me.handle!], tasks: [step('a', 'in_progress')], notes: [note('one')] });
+    await projectHead.open(id);
+
+    expect(await projectHead.controls()).toEqual(['project.autopilot', 'project.step', 'project.notes.button', 'project.menu.button']);
+    const [members, notes, menu] = await Promise.all(
+      [projectHead.members, projectHead.notesButton, projectHead.menuButton].map(async (locator) => (await locator.boundingBox())!),
+    );
+    expect(notes.x).toBeGreaterThan(members.x + members.width);
+    // Icon buttons side by side touch.
+    expect(menu.x).toBeCloseTo(notes.x + notes.width, 0);
   });
 
   test('reads the record again when the window comes back into focus', async ({ page, people, projects, projectHead }) => {
@@ -333,7 +351,7 @@ test.describe('Auto pilot', () => {
 });
 
 test.describe('A draft’s head', () => {
-  test('has its name, the Draft chip, its members and the draft-panel toggle, and no switch, step, Discuss or Documents button; its side panel stands on the Draft tab on a wide window', async ({
+  test('has its name, the Draft chip, its members and its menu, its one control: no switch, step or toggle; its side panel stands on the Draft tab on a wide window', async ({
     people,
     projects,
     projectHead,
@@ -350,10 +368,7 @@ test.describe('A draft’s head', () => {
     await expect(projectHead.members.locator('.avatar')).toHaveCount(1);
     await expect(projectHead.autopilot).toHaveCount(0);
     await expect(projectHead.step).toHaveCount(0);
-    await expect(projectHead.discussButton).toHaveCount(0);
-    await expect(projectHead.documentsButton).toHaveCount(0);
-    await expect(projectHead.handbookButton).toHaveCount(0);
-    await expect(projectHead.draftPanelButton).toHaveAttribute('aria-pressed', 'true');
+    expect(await projectHead.controls()).toEqual(['project.menu.button']);
     await expect(panel.draftTab).toHaveAttribute('aria-selected', 'true');
 
     await projectHead.open(untitled);
@@ -570,7 +585,7 @@ test.describe('A tight head beside the side panel', () => {
       const { handles, names } = await six(people, me.handle!);
       const id = await projects.make({
         name: `${makeUnique('Six')} has a long name`,
-        ticket: 'RB-12',
+        ticket: 'RB-1207',
         repo: 'pvginkel/Recipes',
         members: handles,
         tasks: [LONG_STEP],
@@ -591,21 +606,21 @@ test.describe('A tight head beside the side panel', () => {
   }
 
   for (const font of ['the default font', 'a wider font'] as const) {
-    test(`an archived head at 1240px, in ${font}, stands in its two rows once its parts at their floors run past it in one, and in one again once brought back`, async ({
+    test(`an archived head at 1200px, in ${font}, stands in its two rows once its parts at their floors run past it in one, and in one again once brought back`, async ({
       page,
       people,
       projects,
       projectHead,
       panel,
     }) => {
-      await page.setViewportSize({ width: 1240, height: 720 });
+      await page.setViewportSize({ width: 1200, height: 720 });
       if (font === 'a wider font') await widen(page);
       const me = await people.signIn({ name: 'Test Person' });
       const { handles } = await six(people, me.handle!);
       const id = await projects.make({
         name: `${makeUnique('Archived')} has a long name`,
         archived: true,
-        ticket: 'PL-7',
+        ticket: 'PILOT-1207',
         members: handles,
         tasks: [LONG_STEP],
         notes: [note('one')],
@@ -624,7 +639,7 @@ test.describe('A tight head beside the side panel', () => {
     });
   }
 
-  test('an archived head at 1240px with a tab open stands in its two rows over the tab line, as with none', async ({
+  test('an archived head at 1200px with a tab open stands in its two rows over the tab line, as with none', async ({
     page,
     people,
     projects,
@@ -632,13 +647,13 @@ test.describe('A tight head beside the side panel', () => {
     panel,
     docTabs,
   }) => {
-    await page.setViewportSize({ width: 1240, height: 720 });
+    await page.setViewportSize({ width: 1200, height: 720 });
     const me = await people.signIn({ name: 'Test Person' });
     const { handles } = await six(people, me.handle!);
     const id = await projects.make({
       name: `${makeUnique('Archived')} has a long name`,
       archived: true,
-      ticket: 'PL-7',
+      ticket: 'PILOT-1207',
       members: handles,
       tasks: [LONG_STEP],
       notes: [note('one')],
@@ -646,7 +661,8 @@ test.describe('A tight head beside the side panel', () => {
     await projectHead.open(id);
     expect(await twoRows(projectHead)).toBe(true);
 
-    await projectHead.handbookButton.click();
+    await panel.documentsTab.click();
+    await panel.handbook.root.click();
     await expect(docTabs.tab('handbook').root).toBeVisible();
     await clear(projectHead, panel);
     expect(await twoRows(projectHead)).toBe(true);
@@ -719,7 +735,7 @@ test.describe('Switching projects', () => {
 test.describe('The head on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('is one line: the drawer’s button, the name and the ticket, the switch without its label, the donut alone, the members, the notes’ button and the menu, with no repo, step button, Discuss, Documents, handbook or Draft button', async ({
+  test('is one line: the drawer’s button, the name and the ticket, the switch without its label, the donut alone, the members, the notes’ button and the menu, with no repo or step button', async ({
     people,
     projects,
     projectHead,
@@ -736,16 +752,7 @@ test.describe('The head on a phone', () => {
     });
     await projectHead.open(id);
 
-    for (const absent of [
-      projectHead.repo,
-      projectHead.step,
-      projectHead.discussButton,
-      projectHead.documentsButton,
-      projectHead.handbookButton,
-      projectHead.draftPanelButton,
-    ]) {
-      await expect(absent).toHaveCount(0);
-    }
+    for (const absent of [projectHead.repo, projectHead.step]) await expect(absent).toHaveCount(0);
     await expect(projectHead.autopilot).toHaveText('');
     await expect(projectHead.autopilot).toHaveAccessibleName('Auto pilot');
     await expect(projectHead.donut).toHaveText('');
@@ -881,9 +888,7 @@ test.describe('The head on a phone', () => {
 
     await expect(projectHead.name).toHaveText(name);
     await expect(projectHead.draft).toHaveText('Draft');
-    for (const absent of [projectHead.autopilot, projectHead.donut, projectHead.notesButton, projectHead.draftPanelButton, projectHead.handbookButton]) {
-      await expect(absent).toHaveCount(0);
-    }
+    for (const absent of [projectHead.autopilot, projectHead.donut, projectHead.notesButton]) await expect(absent).toHaveCount(0);
     const head = await boxOf(projectHead.root);
     const parts = await Promise.all([shell.drawerToggle, projectHead.name, projectHead.draft, projectHead.members, projectHead.menuButton].map(boxOf));
     for (const box of parts) expect(box.y + box.height / 2).toBeCloseTo(head.y + head.height / 2, -1);

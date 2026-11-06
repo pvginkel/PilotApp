@@ -46,7 +46,6 @@ test.describe('The Chat tab', () => {
     page,
     people,
     projects,
-    projectHead,
     timeline,
     panel,
     chat,
@@ -60,22 +59,20 @@ test.describe('The Chat tab', () => {
     await expect(panel.head.getByRole('tab')).toHaveText(['Chat', 'Documents']);
     await expect(chat.tab).toHaveAttribute('aria-selected', 'true');
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'false');
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'false');
     await expect(chat.empty).toHaveText(EMPTY);
     await expect(chat.failed).toHaveCount(0);
 
     await panel.documentsTab.click();
     await expect(chat.root).toHaveCount(0);
     await expect(panel.projectDocument.root).toBeVisible();
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'true');
     const kept = () => page.evaluate(() => (JSON.parse(localStorage.getItem('pilot')!) as { panels: Record<string, unknown> }).panels);
-    expect((await kept())[project]).toEqual({ open: true, tab: 'documents' });
+    expect((await kept())[project]).toEqual({ tab: 'documents' });
 
     await timeline.open(project);
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
     await chat.tab.click();
     await expect(chat.empty).toHaveText(EMPTY);
-    expect((await kept())[project]).toEqual({ open: true, tab: 'chat' });
+    expect((await kept())[project]).toEqual({ tab: 'chat' });
   });
 
   test('streams a chat that opens while it shows: the person’s message on the right under the day, the server’s lines in the cue alone, the phantom, then the reply bare in the column over its time and Pilot’s avatar', async ({

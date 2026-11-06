@@ -248,9 +248,9 @@ test.describe('The keyboard focus', () => {
     const restore = await slowNetwork(page, 1_000);
     await item.stop.click();
     await item.stopConfirm.yes.click();
-    await projectHead.documentsButton.focus();
+    await projectHead.menuButton.focus();
     await expect(item.resume).toBeVisible();
-    await expect(projectHead.documentsButton).toBeFocused();
+    await expect(projectHead.menuButton).toBeFocused();
 
     await restore();
     await turnEnded(projects, work);

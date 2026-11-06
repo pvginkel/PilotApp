@@ -1,7 +1,7 @@
 /**
- * A draft's side panel (F46.2, F46.3): the head's draft-panel toggle opens and closes it, and its
- * tabs are Draft and Documents, open or closed and on which tab the draft's own in the browser
- * (F1.6, F133); until set, it stands open beside the definition chat on a wide window, on Draft.
+ * A draft's side panel (F46.2, F46.3): always open beside the definition chat on a wide window,
+ * with no cross and nothing in the head toggling it, its tabs Draft and Documents, on which tab
+ * the draft's own in the browser (F1.6, F133); until set, on Draft.
  * The Draft tab shows `project.md` as Pilot writes it, live: "Empty" before the first save, then its
  * title, its prose and its asks, Pilot's dots while the turn runs and what Create project does once
  * it ended; a link in it to a document Pilot attached opens that in the overlay, and nothing else
@@ -45,7 +45,7 @@ const FOOT = 'Change anything in the chat. Create project hands it to Pilot, whi
 
 
 test.describe('A draft’s panel', () => {
-  test('stands open beside the definition chat on a wide window, on its Draft tab; the head’s toggle closes and opens it, and its state and tab are the draft’s own in the browser', async ({
+  test('stands open beside the definition chat on a wide window, on its Draft tab, with no cross and nothing in the head toggling it; its tab is the draft’s own, kept in the browser', async ({
     page,
     people,
     projects,
@@ -61,35 +61,27 @@ test.describe('A draft’s panel', () => {
     await expect(panel.tabs).toHaveText(['Draft', 'Documents']);
     await expect(panel.draftTab).toHaveAttribute('aria-selected', 'true');
     await expect(panel.root).toHaveAttribute('aria-label', 'The draft and its documents');
-    const toggle = projectHead.draftPanelButton;
-    await expect(toggle).toHaveAttribute('title', 'The draft: what Pilot will set up');
-    await expect(toggle).toHaveAccessibleName('The draft');
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(panel.head.getByRole('button')).toHaveCount(0);
+    expect(await projectHead.controls()).toEqual(['project.menu.button']);
     // Beside the chat, not over it.
     const [chatBox, panelBox] = await Promise.all([definitionChat.root.boundingBox(), panel.root.boundingBox()]);
     expect(chatBox!.x + chatBox!.width).toBeLessThanOrEqual(panelBox!.x + 0.5);
-    await expect(projectHead.discussButton).toHaveCount(0);
-    await expect(projectHead.documentsButton).toHaveCount(0);
 
     await panel.documentsTab.click();
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    await toggle.click();
+    // It opens on its Attachments heading, 18px under the tab bar.
+    const [body, heading] = await Promise.all([panel.body, panel.headings.first()].map(async (locator) => (await locator.boundingBox())!));
+    expect(heading.y - body.y).toBeCloseTo(18, 0);
+    await panel.draftTab.click();
     await expect(panel.draftTab).toHaveAttribute('aria-selected', 'true');
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    await toggle.click();
-    await expect(panel.root).toHaveCount(0);
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await panel.documentsTab.click();
 
     await page.reload();
     await waitForUiState(page, 'project.head', 'ready');
-    await expect(panel.root).toHaveCount(0);
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
     await projectHead.open(other);
     await expect(panel.draftTab).toHaveAttribute('aria-selected', 'true');
-    await panel.documentsTab.click();
     await projectHead.open(id);
-    await expect(panel.root).toHaveCount(0);
-    await projectHead.open(other);
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
   });
 });

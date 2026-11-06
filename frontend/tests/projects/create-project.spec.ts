@@ -265,10 +265,8 @@ test.describe('Create project', () => {
     expect((await projects.head(id)).state).toBe('open');
     await expect(projectHead.name).toHaveText(title);
     await expect(projectHead.draft).toHaveCount(0);
-    await expect(projectHead.draftPanelButton).toHaveCount(0);
     await expect(projectHead.autopilot).toBeVisible();
-    await expect(projectHead.discussButton).toBeVisible();
-    await expect(projectHead.handbookButton).toBeVisible();
+    await expect(projectHead.step).toBeVisible();
 
     // The draft's Draft tab, remembered, reads as Chat.
     await expect(panel.tabs).toHaveText(['Chat', /^Documents/]);
@@ -277,11 +275,12 @@ test.describe('Create project', () => {
     await expect(panel.headings).toHaveText(['Attachments', 'In the timeline']);
     await expect(panel.projectDocument.root).toBeVisible();
     await expect(panel.projectDocument.title).toHaveText(title);
+    await expect(panel.handbook.root).toBeVisible();
     await panel.projectDocument.root.click();
     await expect(page).toHaveURL(`/projects/${id}/project-document`);
   });
 
-  test('leaves the definition chat in the Chat tab above its line, with no label, and Discuss opens a new chat below it', async ({
+  test('leaves the definition chat in the Chat tab above its line, with no label, and the next message opens a new chat below it', async ({
     page,
     people,
     projects,
@@ -290,7 +289,6 @@ test.describe('Create project', () => {
     chats,
     definitionChat,
     chat,
-    panel,
   }) => {
     const me = await people.signIn();
     const { id, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
@@ -306,9 +304,6 @@ test.describe('Create project', () => {
     await expect(chat.closed).toHaveText('');
 
     const opened = await chats.opening(id, slug);
-    await panel.close.click();
-    await projectHead.discussButton.click();
-    await expect(chat.tab).toHaveAttribute('aria-selected', 'true');
     await chat.field.fill('What comes first?');
     await chat.send.click();
     await opened();

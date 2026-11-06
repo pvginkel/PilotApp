@@ -1,15 +1,13 @@
 /**
  * The side panel (F38.1), its shell: the tab strip, Chat first with the unread dot (F43), then
- * Documents with its count (F37.3), and the close cross; a draft's, Draft in Chat's place (F46.3).
- * Off a phone, wide or narrow, it stands beside the timeline, its head as tall as the project's
- * head and its tab's text on the project name's baseline, in whatever font (F98.1, F98.2). On a
- * phone its tab stands alone between the project's head and the tabs at the bottom, which carry the
- * names, the dot and the count, and its Documents tab lists the handbook, which the phone's head
- * has no button for (F98.3, F129.4).
+ * Documents with its count (F37.3); a draft's, Draft in Chat's place (F46.3). Off a phone, wide or
+ * narrow, it stands beside the timeline, always open, with no cross, its head as tall as the
+ * project's head and its tab's text on the project name's baseline, in whatever font (F98.1,
+ * F98.2). On a phone its tab stands alone between the project's head and the tabs at the bottom,
+ * which carry the names, the dot and the count (F98.3).
  */
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
-import { X } from 'lucide-react';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { DocumentsTab } from '@/components/panel/documents-tab';
 import { DraftTab } from '@/components/panel/draft-tab';
@@ -31,10 +29,9 @@ interface PanelProps {
   /** The project's head, once drawn, which the panel's head lines up with. */
   head: HTMLElement | null;
   onTab: (tab: PanelTab) => void;
-  onClose: () => void;
 }
 
-export function Panel({ projectId, draft, members, tab, head, onTab, onClose }: PanelProps) {
+export function Panel({ projectId, draft, members, tab, head, onTab }: PanelProps) {
   const documents = usePanelDocuments(projectId);
   const panelHead = useAlignedHead(head);
   return (
@@ -69,19 +66,8 @@ export function Panel({ projectId, draft, members, tab, head, onTab, onClose }: 
             </span>
           )}
         </button>
-        <span className="grow" />
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm btn-icon"
-          onClick={onClose}
-          title="Close"
-          aria-label="Close the panel"
-          data-testid="panel.close"
-        >
-          <X className="icon" aria-hidden="true" />
-        </button>
       </div>
-      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} handbook={false} covered={false} />
+      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} covered={false} />
     </aside>
   );
 }
@@ -97,19 +83,14 @@ type PhonePanelProps = Pick<PanelProps, 'projectId' | 'draft' | 'members' | 'tab
 export function PhonePanel({ projectId, draft, members, tab, documents, covered }: PhonePanelProps) {
   return (
     <aside className="panel" aria-label={labelOf(draft)} inert={covered} data-testid="panel">
-      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} handbook covered={covered} />
+      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} covered={covered} />
     </aside>
   );
 }
 
 const labelOf = (draft: boolean) => (draft ? 'The draft and its documents' : 'The project’s chat and documents');
 
-type PanelBodyProps = PhonePanelProps & {
-  /** The Documents tab lists the handbook. */
-  handbook: boolean;
-};
-
-function PanelBody({ projectId, draft, members, tab, documents, handbook, covered }: PanelBodyProps) {
+function PanelBody({ projectId, draft, members, tab, documents, covered }: PhonePanelProps) {
   return (
     <div className={cn('panel-body', tab === 'chat' && 'chat')} role="tabpanel" data-testid="panel.body">
       {tab === 'chat' ? (
@@ -117,7 +98,7 @@ function PanelBody({ projectId, draft, members, tab, documents, handbook, covere
       ) : tab === 'draft' ? (
         <DraftTab projectId={projectId} />
       ) : (
-        <DocumentsTab projectId={projectId} draft={draft} documents={documents} handbook={handbook} />
+        <DocumentsTab projectId={projectId} draft={draft} documents={documents} />
       )}
     </div>
   );

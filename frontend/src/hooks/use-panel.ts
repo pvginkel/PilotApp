@@ -1,27 +1,23 @@
 /**
- * The side panel (F38.1): each project's own, open or closed and on which tab, as the person last
- * left it, kept in the browser and nothing of it on the server (F1.6, F133); until they set it,
- * open on its first tab: an open project's Chat, a draft's Draft (F46.3), each standing for the
- * other across Create project. Off a phone, wide or narrow, it stands beside the timeline, or a
- * draft's definition chat, or the tab showing in their place; nothing lies over it, and Esc never closes it
- * (F98.1, F98.2). Its Documents tab lists the project document, the attachments, a batch of several
- * together, and the timeline's documents and reviews, newest first (F37), from the project's
- * timeline and its project document, read as one; a draft's lists what Pilot attached so far, hung
- * on nothing (F36.6).
+ * The side panel (F38.1): off a phone, wide or narrow, always open beside the timeline, or a
+ * draft's definition chat, or the tab showing in their place; nothing lies over it, and nothing
+ * closes it (F98.1, F98.2). Each project's shows the tab the person last left it on, kept in the
+ * browser and nothing of it on the server (F1.6, F133); until they pick one, its first: an open
+ * project's Chat, a draft's Draft (F46.3), each standing for the other across Create project. Its
+ * Documents tab lists the project document, the attachments, a batch of several together, and the
+ * timeline's documents and reviews, newest first (F37), from the project's timeline and its project
+ * document, read as one; a draft's lists what Pilot attached so far, hung on nothing (F36.6).
  */
 
 import { useGetProjectsDraftByProjectId, useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
-import { PANEL_TABS, rememberPanel, useBrowserState, type Panel, type PanelTab } from '@/lib/browser-state';
+import { PANEL_TABS, rememberPanel, useBrowserState, type PanelTab } from '@/lib/browser-state';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 import type { Attachment, TimelineItem } from '@/hooks/use-timeline';
 
 interface PanelState {
-  panel: Panel;
-  /** Opens the panel on the tab. */
+  /** The tab showing. */
+  tab: PanelTab;
   show: (tab: PanelTab) => void;
-  close: () => void;
-  /** Closes the panel when the tab is the one showing, else shows it (F2.3). */
-  toggle: (tab: PanelTab) => void;
 }
 
 /** A draft's first tab is Draft where an open project's is Chat; Documents is either's. */
@@ -30,15 +26,9 @@ const tabOf = (tab: PanelTab, draft: boolean): PanelTab => (tab === 'documents' 
 /** The project's panel, a draft's if `draft`. */
 export function usePanel(projectId: string, draft: boolean): PanelState {
   const { panels } = useBrowserState();
-  const left = panels[projectId] ?? { open: true, tab: PANEL_TABS[0] };
-  const panel = { ...left, tab: tabOf(left.tab, draft) };
-  const show = (tab: PanelTab) => rememberPanel(projectId, { open: true, tab });
-  const close = () => rememberPanel(projectId, { ...panel, open: false });
   return {
-    panel,
-    show,
-    close,
-    toggle: (tab) => (panel.open && panel.tab === tab ? close() : show(tab)),
+    tab: tabOf(panels[projectId]?.tab ?? PANEL_TABS[0], draft),
+    show: (tab) => rememberPanel(projectId, { tab }),
   };
 }
 

@@ -1,6 +1,6 @@
 /**
- * The panel's Documents tab (F37): the project document first, read only (F37.4), on a phone the
- * handbook under it (F129.4), named by its title once read, as the project document is; then the
+ * The panel's Documents tab (F37): the project document first, read only (F37.4), the handbook
+ * under it (F129.4), named by its title once read, as the project document is; then the
  * attachments, newest first, each with its title and its item and stamp, the files attached in one
  * call together under their folder (F37.1); then the timeline's documents and reviews, newest
  * first, each with its state, Open, *Unsent* (D026) or Done, and its stamp (F37.2). Each opens at
@@ -26,11 +26,9 @@ interface DocumentsTabProps {
   /** The project is a draft. */
   draft: boolean;
   documents: { projectDocument: string | null; lists: PanelRead };
-  /** The handbook is listed under the project document: a phone's, whose head has no button for it. */
-  handbook: boolean;
 }
 
-export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists }, handbook }: DocumentsTabProps) {
+export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists } }: DocumentsTabProps) {
   const replace = useTabReplace();
   return (
     <div className="docs" data-testid="panel.documents">
@@ -49,11 +47,9 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
               </Row>
             </Link>
           </li>
-          {handbook && (
-            <li>
-              <HandbookRow projectId={projectId} />
-            </li>
-          )}
+          <li>
+            <HandbookRow projectId={projectId} />
+          </li>
         </ul>
       )}
       {lists === 'failed' ? (

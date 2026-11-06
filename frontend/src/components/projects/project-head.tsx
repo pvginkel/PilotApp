@@ -3,13 +3,12 @@
  * its dialog as it turns on while confirmations it would take are open (F4.2), its warning
  * triangle while work briefed under the other setting runs (F4.3), or the Finished chip
  * once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
- * (F2.5); Discuss, toggling the side panel's Chat tab with nothing quoted and carrying the unread
- * dot (F2.3, F39.2, F43), the Documents button, toggling its Documents tab, and the handbook,
- * opening in its tab (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
- * has no handbook (F129.2), has in its head its name, the Draft chip, its members, the draft-panel
- * toggle, toggling the side panel's Draft tab (F46.2), and its menu; its Create project stands at
- * its definition chat's end (`create-project.tsx`). An archived project's reads as it was left,
- * marked archived, its switch not to be flipped (D012). A phone's head is `phone-head.tsx`'s.
+ * (F2.5); the plan's notes (F2.7); the project's menu (F2.4). The side panel beside it is always
+ * open, and nothing in the head toggles it (F2.3): the chat is its Chat tab, the documents and the
+ * handbook its Documents tab. A draft, which has no handbook (F129.2), has in its head its name,
+ * the Draft chip, its members and its menu (F46.2); its Create project stands at its definition
+ * chat's end (`create-project.tsx`). An archived project's reads as it was left, marked archived,
+ * its switch not to be flipped (D012). A phone's head is `phone-head.tsx`'s.
  *
  * In a tight head its parts give way in one order: the repo, the name, the step's name down to its
  * floor, then the members, folding to the first avatars and a count; the ticket, the chips, auto
@@ -19,35 +18,24 @@
 
 import { useCallback, useLayoutEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
-import { Archive, FileText, Files, Flag, MessagesSquare, NotebookText, TriangleAlert } from 'lucide-react';
+import { Archive, Flag, TriangleAlert } from 'lucide-react';
 import { AutopilotDialog } from '@/components/projects/autopilot-dialog';
 import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
-import { useChatDot } from '@/hooks/use-chats';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { STOPPABLE } from '@/hooks/use-work-acts';
 import { useGetProjectsTimelineByProjectId, usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
-import { cn } from '@/lib/utils';
-
-/** A tab of the side panel: whether it is showing, and its toggle. */
-interface Toggled {
-  shown: boolean;
-  toggle: () => void;
-}
 
 interface ProjectHeadProps {
   project: Project;
-  /** The side panel's Chat tab, Documents tab and a draft's Draft tab. */
-  panel: { chat: Toggled; documents: Toggled; draftTab: Toggled };
   ref?: (element: HTMLElement | null) => void;
 }
 
-export function ProjectHead({ project, panel, ref }: ProjectHeadProps) {
+export function ProjectHead({ project, ref }: ProjectHeadProps) {
   const draft = project.state === 'draft';
   const [head, setHead] = useState<HTMLElement | null>(null);
   useRows(head);
@@ -91,84 +79,10 @@ export function ProjectHead({ project, panel, ref }: ProjectHeadProps) {
       <div className="head-row">
         {!draft && <StepButton tasks={project.tasks} />}
         <Members members={project.members} />
-        {!draft && <DiscussButton projectId={project.id} {...panel.chat} />}
-        {!draft && <DocumentsButton {...panel.documents} />}
-        {!draft && <HandbookButton projectId={project.id} />}
         {!draft && <NotesButton notes={project.notes} />}
-        {draft && <DraftButton {...panel.draftTab} />}
         <ProjectMenu project={project} />
       </div>
     </header>
-  );
-}
-
-/** Discuss for the whole project: the side panel's Chat tab, closing the panel where it is the tab showing; its dot while a reply is unread. */
-function DiscussButton({ projectId, shown, toggle }: Toggled & { projectId: string }) {
-  const unread = useChatDot(projectId);
-  return (
-    <button
-      type="button"
-      className={cn('btn btn-ghost btn-sm btn-icon head-icon head-discuss', shown && 'on')}
-      onClick={toggle}
-      aria-pressed={shown}
-      title="Discuss the project with Pilot"
-      aria-label={unread ? 'Discuss the project with Pilot, a reply unread' : 'Discuss the project with Pilot'}
-      data-testid="project.discuss"
-    >
-      <MessagesSquare className="icon" aria-hidden="true" />
-      {unread && <span className="unread" data-testid="project.discuss.unread" />}
-    </button>
-  );
-}
-
-/** The side panel's Documents tab, closing the panel where it is the tab showing. */
-function DocumentsButton({ shown, toggle }: Toggled) {
-  return (
-    <button
-      type="button"
-      className={cn('btn btn-ghost btn-sm btn-icon head-icon', shown && 'on')}
-      onClick={toggle}
-      aria-pressed={shown}
-      title="The project’s documents"
-      aria-label="The project’s documents"
-      data-testid="project.documents"
-    >
-      <Files className="icon" aria-hidden="true" />
-    </button>
-  );
-}
-
-/** A draft's side panel's Draft tab, closing the panel where it is the tab showing (F46.2). */
-function DraftButton({ shown, toggle }: Toggled) {
-  return (
-    <button
-      type="button"
-      className={cn('btn btn-ghost btn-sm btn-icon head-icon', shown && 'on')}
-      onClick={toggle}
-      aria-pressed={shown}
-      title="The draft: what Pilot will set up"
-      aria-label="The draft"
-      data-testid="project.draft-panel"
-    >
-      <FileText className="icon" aria-hidden="true" />
-    </button>
-  );
-}
-
-/** The handbook at its address, in its tab. */
-function HandbookButton({ projectId }: { projectId: string }) {
-  return (
-    <Link
-      to="/projects/$projectId/handbook"
-      params={{ projectId }}
-      replace
-      className="btn btn-ghost btn-sm btn-icon head-icon"
-      title="The handbook"
-      aria-label="The handbook"
-      data-testid="project.handbook"
-    >
-      <NotebookText className="icon" aria-hidden="true" />
-    </Link>
   );
 }
 

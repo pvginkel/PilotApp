@@ -36,8 +36,6 @@
     padding: 0 10px 0 8px;
     border-bottom: 1px solid hsl(var(--border));
   }
-  .panel-head .grow { flex: 1; }
-  .panel-head .btn { align-self: center; }
   .ptab {
     position: relative;
     display: inline-flex;
@@ -75,6 +73,9 @@
 
   /* The Documents tab. */
   .docs { padding: 4px 8px 16px; }
+  /* An open project's own documents start 10px under the tab bar; a draft's tab opens on its
+     Attachments heading. */
+  .docs > ul:first-child { padding-top: 6px; }
   .docs h3 { margin: 14px 8px 6px; font-size: var(--text-sm); font-weight: 600; color: hsl(var(--muted-foreground)); }
   .docs ul { margin: 0; padding: 0; list-style: none; }
   .docs .none { margin: 0 8px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }

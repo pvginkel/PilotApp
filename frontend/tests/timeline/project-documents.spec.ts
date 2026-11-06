@@ -4,9 +4,10 @@
  * read only, no foot; *Empty* before the first save, Pilot's dots while a turn saves it (F35), and
  * "The document did not load" for a read that fails (F113). Its asks stand in their places, read
  * only (D1): an answered one closed, its answer and who gave it showing, an open one open, and
- * nothing in either to press; a text of asks alone is no longer *Empty*. The handbook's button stands in the
- * head's icon group, left of the notes button (F2.3, F2.7), and the side panel's Documents lists
- * none; a draft has none, nor a handbook (F129.2). A save shows live as it lands, Pilot's dots with
+ * nothing in either to press; a text of asks alone is no longer *Empty*. The side panel's Documents
+ * lists the handbook by its title right under the project document, opening it in its tab, and
+ * the head has no button for it (F2.3); a draft's Documents has no row for it, nor a draft a
+ * handbook (F129.2). A save shows live as it lands, Pilot's dots with
  * it until the turn ends, the project document's renaming the project, and once a stream that went
  * down comes back up. On a phone the Documents tab lists the handbook under the project document,
  * by its title, and neither the head nor the project's menu has it; it opens as a view, the whole
@@ -23,7 +24,7 @@ const HANDBOOK = '# Handbook\n\nHow the trip is planned.\n\n- We **always** pack
 const NOTE = { id: 'one', summary: 'Summary one', content: 'Content one' };
 
 test.describe('The handbook', () => {
-  test('a button in the head’s icon group, left of the notes button, opens it at its address in its tab: rendered, read only, no foot; the side panel’s Documents lists none', async ({
+  test('its row in the side panel’s Documents, by its title right under the project document, opens it at its address in its tab: rendered, read only, no foot', async ({
     page,
     people,
     projects,
@@ -41,19 +42,16 @@ test.describe('The handbook', () => {
     await projects.endTurn(id);
     await projectHead.open(id);
 
-    await expect(projectHead.handbookButton).toHaveText('');
-    await expect(projectHead.handbookButton).toHaveAttribute('aria-label', 'The handbook');
-    const [members, handbook, notes] = await Promise.all(
-      [projectHead.members, projectHead.handbookButton, projectHead.notesButton].map(async (locator) => (await locator.boundingBox())!),
-    );
-    expect(handbook.x).toBeGreaterThan(members.x + members.width);
-    // Icon buttons side by side touch.
-    expect(notes.x).toBeCloseTo(handbook.x + handbook.width, 0);
-    await projectHead.documentsButton.click();
-    await expect(panel.projectDocument.root).toBeVisible();
-    await expect(panel.handbook.root).toHaveCount(0);
+    expect(await projectHead.controls()).toEqual(['project.autopilot', 'project.step', 'project.notes.button', 'project.menu.button']);
+    await panel.documentsTab.click();
+    await expect(panel.handbook.title).toHaveText('Handbook');
+    await expect(panel.handbook.sub).toHaveText('Handbook');
+    await expect(panel.body.locator('.doc-row').first()).toHaveAttribute('data-testid', 'panel.project-document');
+    await expect(panel.body.locator('.doc-row').nth(1)).toHaveAttribute('data-testid', 'panel.handbook');
+    const [projectDocument, handbook] = [await panel.projectDocument.root.boundingBox(), await panel.handbook.root.boundingBox()];
+    expect(handbook!.y).toBeCloseTo(projectDocument!.y + projectDocument!.height, 0);
 
-    await projectHead.handbookButton.click();
+    await panel.handbook.root.click();
     await expect(page).toHaveURL(handbookAddress(id));
     await expect(overlay.root).toBeVisible();
     await expect(timeline.item(trip).root).toBeAttached();
@@ -73,7 +71,7 @@ test.describe('The handbook', () => {
     await expect(overlay.root).toHaveCount(0);
     await expect(page).toHaveURL(`/projects/${id}`);
 
-    await projectHead.handbookButton.click();
+    await panel.handbook.root.click();
     await expect(overlay.root).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(overlay.root).toBeVisible();
@@ -109,19 +107,22 @@ test.describe('The handbook', () => {
     await expect(page).toHaveURL(handbookAddress(id));
   });
 
-  test('a draft has none: no button in its head, and the handbook’s address reads “The document did not load”', async ({
+  test('a draft has none: no row in its Documents, and the handbook’s address reads “The document did not load”', async ({
     page,
     people,
     projects,
     projectHead,
     overlay,
     docTabs,
+    panel,
   }) => {
     const me = await people.signIn();
     const draft = await projects.make({ name: makeUnique('Draft'), state: 'draft', members: [me.handle!], notes: [NOTE] });
     await projectHead.open(draft);
     await expect(projectHead.draft).toBeVisible();
-    await expect(projectHead.handbookButton).toHaveCount(0);
+    await panel.documentsTab.click();
+    await expect(panel.headings).toHaveText(['Attachments']);
+    await expect(panel.handbook.root).toHaveCount(0);
 
     await page.goto(handbookAddress(draft));
     await expect(overlay.failed).toHaveText('The document did not load.');
@@ -447,7 +448,7 @@ test.describe('On a phone', () => {
     const draft = await projects.make({ name: makeUnique('Draft'), state: 'draft', members: [me.handle!] });
     await projectHead.open(id);
 
-    await expect(projectHead.handbookButton).toHaveCount(0);
+    expect(await projectHead.controls()).toEqual(['shell.drawer-toggle', 'project.autopilot', 'project.donut', 'project.notes.button', 'project.menu.button']);
     await projectHead.menuButton.tap();
     await expect(projectHead.menuItems.first()).toBeVisible();
     await expect(projectHead.menuItems.filter({ hasText: /handbook/i })).toHaveCount(0);

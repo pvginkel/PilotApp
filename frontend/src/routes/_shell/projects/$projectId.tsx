@@ -13,9 +13,9 @@
  * in the timeline's place (F28.1, F28.8), the tab line the head's last row while one is open
  * (`use-doc-tabs.ts`), the address following the tab showing and a move to another of the
  * project's addresses replacing the browser's entry (F97); beside the head and the timeline stands
- * the side panel, the project's own (F38.1). Discuss anywhere on the project's screens opens it on
- * the Chat tab, on top, with what it quotes in the composer (F39), and *In the chat* on a block
- * answered in the chat opens it there at the message that gave the answer (F42.3). A draft's
+ * the side panel, the project's own and always open (F38.1). Discuss anywhere on the project's
+ * screens shows its Chat tab, with what it quotes in the composer (F39), and *In the chat* on a
+ * block answered in the chat shows it there at the message that gave the answer (F42.3). A draft's
  * panel has the Draft and Documents tabs (F46.3), its chat standing in the timeline's place: there
  * Discuss and *In the chat* take the definition chat, showing its tab. An ask of the draft gone to
  * from its chat opens the Draft tab at it, and past Create the project document. While a tab or
@@ -152,7 +152,7 @@ interface DeskProjectProps {
  */
 function DeskProject({ projectId, project: data, tab, goneTo, log, children }: DeskProjectProps) {
   const draft = data?.state === 'draft';
-  const { panel, show, close, toggle } = usePanel(projectId, draft);
+  const panel = usePanel(projectId, draft);
   const line = useDocTabs(projectId, tab);
   const navigate = useNavigate();
   const covered = tab !== null || log !== null;
@@ -163,12 +163,12 @@ function DeskProject({ projectId, project: data, tab, goneTo, log, children }: D
   const discuss = (quote: QuoteRef | null) => {
     discussIn(projectId, quote);
     if (draft) toDefinitionChat();
-    else show('chat');
+    else panel.show('chat');
   };
   const inChat = (place: ChatPlace) => {
     goToChat(projectId, place);
     if (draft) toDefinitionChat();
-    else show('chat');
+    else panel.show('chat');
   };
   const toDraftBlock = (block: string) => {
     if (!draft) {
@@ -176,30 +176,17 @@ function DeskProject({ projectId, project: data, tab, goneTo, log, children }: D
       return;
     }
     goToDraftBlock(projectId, block);
-    show('draft');
+    panel.show('draft');
   };
   const [head, setHead] = useState<HTMLElement | null>(null);
-  // Not before the head is read, which says whether it is a draft.
-  const panelShown = panel.open && data !== undefined;
-  const chatShown = panelShown && panel.tab === 'chat';
   return (
     <TabMovesContext.Provider value>
       <DiscussContext.Provider value={discuss}>
         <InChatContext.Provider value={inChat}>
           <DraftBlockContext.Provider value={toDraftBlock}>
-            <div className="project" data-panel={panelShown ? 'open' : 'closed'}>
+            <div className="project" data-panel={data !== undefined ? 'open' : 'closed'}>
               <div className="project-main">
-                {data && (
-                  <ProjectHead
-                    ref={setHead}
-                    project={data}
-                    panel={{
-                      chat: { shown: chatShown, toggle: () => (chatShown ? close() : discuss(null)) },
-                      documents: { shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') },
-                      draftTab: { shown: panelShown && panel.tab === 'draft', toggle: () => toggle('draft') },
-                    }}
-                  />
-                )}
+                {data && <ProjectHead ref={setHead} project={data} />}
                 {data && <DocTabs projectId={projectId} draft={draft} line={line} />}
                 <div className="stage">
                   {data !== undefined &&
@@ -221,16 +208,9 @@ function DeskProject({ projectId, project: data, tab, goneTo, log, children }: D
                   )}
                 </div>
               </div>
-              {panelShown && (
-                <Panel
-                  projectId={projectId}
-                  draft={draft}
-                  members={data.members}
-                  tab={panel.tab}
-                  head={head}
-                  onTab={show}
-                  onClose={close}
-                />
+              {/* Not before the head is read, which says whether it is a draft. */}
+              {data !== undefined && (
+                <Panel projectId={projectId} draft={draft} members={data.members} tab={panel.tab} head={head} onTab={panel.show} />
               )}
               {log}
             </div>

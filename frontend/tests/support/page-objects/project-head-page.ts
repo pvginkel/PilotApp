@@ -7,11 +7,9 @@ type Ask = Exclude<Act, 'join' | 'leave'>;
 
 /**
  * A project's head (F2), auto pilot's switch, its dialog and its warning triangle (F4), the plan popover its
- * step button opens (F3), Discuss and its unread dot (F2.3, F39.2, F43), the Documents button
- * (F2.3), the handbook's button (F129.4), the plan's notes (F2.7), the members and the count they
- * fold to in a tight head (F2.5), a draft's draft-panel toggle (F46.2), and the project's menu and
- * the dialogs it opens (F2.4). On a phone the head is one line, its donut alone standing for the step
- * button (F2.8, F3.7).
+ * step button opens (F3), the plan's notes (F2.7), the members and the count they fold to in a
+ * tight head (F2.5), and the project's menu and the dialogs it opens (F2.4). On a phone the head is
+ * one line, its donut alone standing for the step button (F2.8, F3.7).
  */
 export class ProjectHeadPage {
   readonly root: Locator;
@@ -35,13 +33,8 @@ export class ProjectHeadPage {
   readonly members: Locator;
   readonly memberAvatars: Locator;
   readonly membersMore: Locator;
-  readonly documentsButton: Locator;
-  readonly discussButton: Locator;
-  readonly discussDot: Locator;
-  readonly handbookButton: Locator;
   readonly notesButton: Locator;
   readonly notes: Locator;
-  readonly draftPanelButton: Locator;
   readonly menuButton: Locator;
   readonly menu: Locator;
   readonly menuItems: Locator;
@@ -74,13 +67,8 @@ export class ProjectHeadPage {
     this.members = page.getByTestId('project.members');
     this.membersMore = page.getByTestId('project.members.more');
     this.memberAvatars = this.members.locator('.avatar:not([data-testid="project.members.more"])');
-    this.documentsButton = page.getByTestId('project.documents');
-    this.discussButton = page.getByTestId('project.discuss');
-    this.discussDot = this.discussButton.getByTestId('project.discuss.unread');
-    this.handbookButton = page.getByTestId('project.handbook');
     this.notesButton = page.getByTestId('project.notes.button');
     this.notes = page.getByTestId('project.notes');
-    this.draftPanelButton = page.getByTestId('project.draft-panel');
     this.menuButton = page.getByTestId('project.menu.button');
     this.menu = page.getByTestId('project.menu');
     this.menuItems = this.menu.getByRole('menuitem');
@@ -90,6 +78,12 @@ export class ProjectHeadPage {
   async open(id: string): Promise<void> {
     await this.page.goto(`/projects/${id}`);
     await waitForUiState(this.page, 'project.head', 'ready');
+  }
+
+  /** The test ids of the head's controls, its buttons and the links drawn as one, in their order, once its menu, the last, is drawn. */
+  async controls(): Promise<(string | null)[]> {
+    await this.menuButton.waitFor();
+    return this.root.locator('button, a.btn').evaluateAll((controls) => controls.map((control) => control.getAttribute('data-testid')));
   }
 
   /** The plan popover's step titled `title`, with its notes icon and the notes it lists. */

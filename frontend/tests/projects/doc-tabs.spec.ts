@@ -355,11 +355,10 @@ test.describe('Documents in tabs', () => {
     await expect(overlay.documentLink).toHaveCount(0);
   });
 
-  test('the handbook opens as a tab of its own from the head’s button, and the project document from the Documents tab', async ({
+  test('the handbook and the project document each open as a tab of their own from the Documents tab', async ({
     page,
     people,
     projects,
-    projectHead,
     overlay,
     docTabs,
     panel,
@@ -370,12 +369,13 @@ test.describe('Documents in tabs', () => {
     await projects.saveProjectDocument(id, 'handbook', '---\ntitle: How we camp\n---\n\nWe leave no trace.\n');
     await timeline.open(id);
 
-    await projectHead.handbookButton.click();
+    await panel.documentsTab.click();
+    await expect(panel.handbook.title).toHaveText('How we camp');
+    await panel.handbook.root.click();
     await expect(page).toHaveURL(handbookAddress(id));
     await expect(docTabs.tab('handbook').title).toHaveText('How we camp');
     await expect(overlay.role).toHaveText('Handbook');
 
-    await panel.documentsTab.click();
     await panel.projectDocument.root.click();
     await expect(page).toHaveURL(projectDocumentAddress(id));
     expect(await docTabs.keys()).toEqual(['handbook', 'project-document']);

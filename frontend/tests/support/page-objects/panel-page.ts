@@ -11,8 +11,8 @@ interface PanelRow {
 }
 
 /**
- * The side panel (F38.1): its head with the Documents tab, the tab's count and the close cross;
- * the Documents tab (F37) with the project document, on a phone the handbook, the attachments, a batch of several under its
+ * The side panel (F38.1): its head with the Documents tab and the tab's count; the Documents tab
+ * (F37) with the project document, the handbook, the attachments, a batch of several under its
  * folder, and the timeline's documents and reviews, each a row with its title and the line under
  * it, "None yet" where a list is empty, and the line in the lists' place where the tab's read failed.
  * A draft's has the Draft tab in the Chat tab's place (F46.3): the draft's title, its text and its
@@ -26,12 +26,11 @@ export class PanelPage {
   readonly draftTab: Locator;
   readonly documentsTab: Locator;
   readonly count: Locator;
-  readonly close: Locator;
   readonly body: Locator;
   /** The lists' headings. */
   readonly headings: Locator;
   readonly projectDocument: PanelRow;
-  /** The handbook under the project document: a phone's. */
+  /** The handbook under the project document. */
   readonly handbook: PanelRow;
   /** Every attachment's row, a batch's files included, in their order. */
   readonly attachments: Locator;
@@ -64,7 +63,6 @@ export class PanelPage {
     this.draftTab = this.head.getByTestId('panel.tab.draft');
     this.documentsTab = this.head.getByTestId('panel.tab.documents');
     this.count = this.head.getByTestId('panel.tab.documents.count');
-    this.close = this.head.getByTestId('panel.close');
     this.body = this.root.getByTestId('panel.body');
     this.headings = this.body.locator('h3');
     this.projectDocument = rowOf(this.body.getByTestId('panel.project-document'));

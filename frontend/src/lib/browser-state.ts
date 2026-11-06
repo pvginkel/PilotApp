@@ -19,9 +19,8 @@ export type Group = (typeof GROUPS)[number];
 export const PANEL_TABS = ['chat', 'draft', 'documents'] as const;
 export type PanelTab = (typeof PANEL_TABS)[number];
 
-/** A project's side panel as the person last left it: open or not, and its tab. */
-export interface Panel {
-  open: boolean;
+/** A project's side panel as the person last left it: its tab. */
+interface Panel {
   tab: PanelTab;
 }
 
@@ -82,8 +81,8 @@ function loadPanels(saved: unknown): Record<string, Panel> {
   const panels: Record<string, Panel> = {};
   for (const [projectId, panel] of Object.entries(saved as Record<string, unknown>)) {
     if (typeof panel !== 'object' || panel === null) continue;
-    const { open, tab } = panel as Partial<Record<keyof Panel, unknown>>;
-    panels[projectId] = { open: open === true, tab: PANEL_TABS.find((each) => each === tab) ?? PANEL_TABS[0] };
+    const { tab } = panel as Partial<Record<keyof Panel, unknown>>;
+    panels[projectId] = { tab: PANEL_TABS.find((each) => each === tab) ?? PANEL_TABS[0] };
   }
   return panels;
 }

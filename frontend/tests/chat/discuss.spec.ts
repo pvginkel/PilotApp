@@ -1,12 +1,12 @@
 /**
  * Discuss (F39): on every item head, done line, block of a document, confirmation card, overlay
- * head and session log it opens the side panel on the Chat tab, on top, and puts what it stands on
- * in the composer as a chip that can be dropped, which the sent message carries as its tag before
- * the words (F38.3, F39.3); the handbook's, the project document's and an attachment's overlay
- * quote the file by its path in the project's folder. The head's Discuss toggles the Chat tab with
- * nothing quoted (F2.3, F39.2). Either puts the focus in the composer's field.
+ * head and session log it shows the side panel's Chat tab and puts what it stands on in the
+ * composer as a chip that can be dropped, which the sent message carries as its tag before the
+ * words (F38.3, F39.3); the handbook's, the project document's and an attachment's overlay quote
+ * the file by its path in the project's folder. It puts the focus in the composer's field. The head
+ * has none (F2.3; tests/projects/panel.spec.ts).
  *
- * The unread dot (F43) stands on the head's Discuss and the Chat tab while a reply of Pilot's came
+ * The unread dot (F43) stands on the Chat tab while a reply of Pilot's came
  * after the person last saw the chat to its end; the chat shown at its end is marked seen, so a
  * reply watched arriving leaves none, one arriving below where the reader scrolled stands until they
  * scroll to the end, and another device of the person drops its dot at its next read of the list.
@@ -15,7 +15,6 @@
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { ChatPage } from '../support/page-objects/chat-page';
-import { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import { attachmentAddress, TimelinePage } from '../support/page-objects/timeline-page';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
@@ -41,7 +40,7 @@ const itemTag = (id: string, title: string) => `<quoted_item id="${id}">${title}
 const pathTag = (path: string, title: string) => `<quoted_path path="${path}">${title}</quoted_path path="${path}">`;
 
 test.describe('Discuss', () => {
-  test('on an item’s head opens the Chat tab, on top, the item quoted over the field, the focus in it; the quote can be dropped, and the message sent carries it as its tag before the words', async ({
+  test('on an item’s head shows the Chat tab, the item quoted over the field, the focus in it; the quote can be dropped, and the message sent carries it as its tag before the words', async ({
     people,
     projects,
     controller,
@@ -54,8 +53,8 @@ test.describe('Discuss', () => {
     const project = await projects.makeWithSession({ name: makeUnique('Discuss'), members: [me.handle!] });
     const decision = await projects.place(project, { kind: 'decision', title: 'Which tent?', text: DECISION });
     await timeline.open(project);
-    await panel.close.click();
-    await expect(panel.root).toHaveCount(0);
+    await panel.documentsTab.click();
+    await expect(chat.tab).toHaveAttribute('aria-selected', 'false');
 
     const item = timeline.item(decision);
     await expect(item.discuss).toHaveAttribute('title', 'Discuss: quote this into the project’s chat');
@@ -206,39 +205,6 @@ test.describe('Discuss', () => {
     expect(send).toMatchObject({ message: `${pathTag(path, 'Tent notes')} Is this current?` });
     await controller.finish(chats.store, session, 'success', 'It is.');
   });
-
-  test('on the head toggles the Chat tab with nothing quoted, the focus in the field', async ({
-    people,
-    projects,
-    projectHead,
-    timeline,
-    panel,
-    chat,
-  }) => {
-    const me = await people.signIn();
-    const project = await projects.makeWithSession({ name: makeUnique('Head'), members: [me.handle!] });
-    const notice = await projects.place(project, { kind: 'notice', title: 'Storm tonight', text: 'Tie the tent down.\n' });
-    await timeline.open(project);
-    const discuss = projectHead.discussButton;
-    await expect(discuss).toHaveAttribute('title', 'Discuss the project with Pilot');
-    await expect(discuss).toHaveAttribute('aria-pressed', 'true');
-
-    await discuss.click();
-    await expect(panel.root).toHaveCount(0);
-    await expect(discuss).toHaveAttribute('aria-pressed', 'false');
-
-    await timeline.item(notice).discuss.click();
-    await expect(chat.quote).toHaveCount(1);
-    await panel.documentsTab.click();
-    await expect(discuss).toHaveAttribute('aria-pressed', 'false');
-    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'true');
-
-    await discuss.click();
-    await expect(chat.tab).toHaveAttribute('aria-selected', 'true');
-    await expect(discuss).toHaveAttribute('aria-pressed', 'true');
-    await expect(chat.quote).toHaveCount(0);
-    await expect(chat.field).toBeFocused();
-  });
 });
 
 test.describe('Discuss at the narrow width', () => {
@@ -269,12 +235,11 @@ test.describe('Discuss at the narrow width', () => {
 });
 
 test.describe('The unread dot', () => {
-  test('stands on the head’s Discuss and the Chat tab once a reply came while the chat was not in view; the chat seen to its end takes it away, and another device drops it at its next read', async ({
+  test('stands on the Chat tab once a reply came while the chat was not in view; the chat seen to its end takes it away, and another device drops it at its next read', async ({
     page,
     people,
     projects,
     controller,
-    projectHead,
     timeline,
     panel,
     chat,
@@ -286,37 +251,32 @@ test.describe('The unread dot', () => {
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     await panel.documentsTab.click();
-    await expect(projectHead.discussDot).toHaveCount(0);
     await expect(chat.tabDot).toHaveCount(0);
 
     const { session } = await chats.start(project, 'Which tent?');
     await controller.play(chats.store, session, [text('dome', 'The dome.')]);
     await controller.finish(chats.store, session, 'success', 'The dome.');
-    await expect(projectHead.discussDot).toBeVisible();
     await expect(chat.tabDot).toBeVisible();
-    await expect(projectHead.discussButton).toHaveAccessibleName('Discuss the project with Pilot, a reply unread');
+    await expect(chat.tabDot).toHaveAccessibleName('Unread reply');
     expect((await chats.list(project)).unread).toBe(true);
 
     // The person's other device, its panel on the Documents tab as this one's.
     const other = await page.context().newPage();
-    const otherHead = new ProjectHeadPage(other);
+    const otherChat = new ChatPage(other);
     await other.goto(`/projects/${project}`);
-    await expect(otherHead.discussDot).toBeVisible();
-    await expect(new ChatPage(other).tabDot).toBeVisible();
+    await expect(otherChat.tabDot).toBeVisible();
 
     const marked = chat.acted('read');
     await chat.tab.click();
     await marked;
     await expect(chat.texts).toHaveText(['The dome.']);
     await expect(chat.tabDot).toHaveCount(0);
-    await expect(projectHead.discussDot).toHaveCount(0);
     expect((await chats.list(project)).unread).toBe(false);
     await panel.documentsTab.click();
     await expect(chat.tabDot).toHaveCount(0);
-    await expect(projectHead.discussDot).toHaveCount(0);
 
     await new TimelinePage(other).refocus();
-    await expect(otherHead.discussDot).toHaveCount(0);
+    await expect(otherChat.tabDot).toHaveCount(0);
     await other.close();
   });
 
@@ -324,7 +284,6 @@ test.describe('The unread dot', () => {
     people,
     projects,
     controller,
-    projectHead,
     timeline,
     panel,
     chat,
@@ -344,10 +303,8 @@ test.describe('The unread dot', () => {
     await marked;
     await expect(chat.texts).toHaveText(['The gas one.']);
     expect((await chats.list(project)).unread).toBe(false);
-    await expect(projectHead.discussDot).toHaveCount(0);
     await panel.documentsTab.click();
     await expect(chat.tabDot).toHaveCount(0);
-    await expect(projectHead.discussDot).toHaveCount(0);
   });
 
   test('stands on the Chat tab while a reply came below where the reader scrolled, and goes once they scroll to the chat’s end', async ({
