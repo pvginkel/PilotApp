@@ -33,9 +33,10 @@ with no turn and no database connection held, and what goes out then is the
 latest state: a burst of commits comes to one send per window.
 
 A send the bridge refuses or does not answer is owed, `notification_owed_at`
-the time of the try: the project's next reconcile sends the current state
-again, the timer's once `retry_seconds` have passed. The log says so when a
-membership turns owed and when its owed send goes out, not at each retry.
+the time of the try, and so is one still due when the loop is told to stop,
+from the stop: the project's next reconcile sends the current state again, the
+timer's once `retry_seconds` have passed. The log says so when a membership
+turns owed and when its owed send goes out, not at each retry.
 
 A token's set (`submit_all`) has the person's current state submitted through
 it whatever went before (F94.3, DB 224). A token's clear (`dismiss_all`) is
@@ -198,7 +199,8 @@ class NotificationReconcileService:
         submitted or dismissed when it differs or is owed. A person whose last
         send is not yet `spacing_seconds` old is compared again once it is,
         the run waiting with no turn and no database connection held. Returns
-        once each is, or when the loop is told to stop."""
+        once each is, or when the loop is told to stop, what is due of those
+        it had still to compare left owed."""
         with scoped_session(self._container) as db:
             people = db.scalars(
                 select(ProjectMember.user_id)
@@ -208,18 +210,22 @@ class NotificationReconcileService:
             ).all()
         while people:
             spaced: list[tuple[uuid.UUID, datetime]] = []
-            for person_id in people:
+            for at, person_id in enumerate(people):
                 if handle.stopping:
+                    self._leave_owed(
+                        project_id, [*(person for person, _ in spaced), *people[at:]]
+                    )
                     return
                 after = self._reconcile_member(project_id, person_id)
                 if after is not None:
                     spaced.append((person_id, after))
             if not spaced:
                 return
+            people = [person_id for person_id, _ in spaced]
             wake = min(at for _, at in spaced)
             if handle.wait(max((wake - datetime.now(UTC)).total_seconds(), 0.0)):
+                self._leave_owed(project_id, people)
                 return
-            people = [person_id for person_id, _ in spaced]
 
     def dismiss_cleared(
         self,
@@ -397,6 +403,39 @@ class NotificationReconcileService:
             if cleared:
                 self._dismiss_once(due.token, project_id, due.handle)
         return None
+
+    def _leave_owed(self, project_id: uuid.UUID, people: Sequence[uuid.UUID]) -> None:
+        """Each person's send that is due and not yet owed, owed from now,
+        in their turn, with nothing sent."""
+        for person_id in people:
+            with self._turn(person_id, project_id):
+                with scoped_session(self._container) as db:
+                    # The person's row first, as `_take` locks it: a clear
+                    # committed first is read, and one after waits for this
+                    # write.
+                    db.execute(
+                        select(User.id)
+                        .where(User.id == person_id)
+                        .with_for_update(read=True)
+                    )
+                    due = self._due(db, project_id, person_id)
+                    if due is None or due.owed:
+                        continue
+                    now = datetime.now(UTC)
+                    for membership in db.scalars(
+                        select(ProjectMember)
+                        .where(ProjectMember.id.in_(due.membership_ids))
+                        .order_by(ProjectMember.id)
+                        .with_for_update(key_share=True)
+                    ):
+                        membership.notification_owed_at = now
+                logger.info(
+                    "The %s of project %s's notification to %s is owed: the run "
+                    "stopped before it went out",
+                    due.call,
+                    project_id,
+                    due.handle,
+                )
 
     def _turn(
         self, person_id: uuid.UUID, project_id: uuid.UUID

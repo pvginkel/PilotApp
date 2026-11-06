@@ -1123,7 +1123,51 @@ class TestNotificationReconcileServiceSpacing:
         assert calls[0] == 2
         assert _shown(bridge, project_id).message == "Which tent?"
 
-    def test_a_stop_during_the_wait_ends_the_run_with_nothing_sent(
+    def test_a_stop_during_the_wait_leaves_the_send_owed_for_the_process_that_runs_on(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+        log: LogWaiter,
+    ) -> None:
+        """V05: a roll's old process drained inside the window sends nothing
+        and leaves the send owed; the new one's retry timer sends the latest
+        state."""
+        project_id = _project(container)
+        _give_token(container, "ada", ADA_TOKEN)
+        old, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        new, new_supervisor, _ = _service(
+            container, supervise, retry_seconds=0, spacing_seconds=SPACING
+        )
+        _ask(container, project_id)
+        _reconcile(old, project_id)
+        _ask(container, project_id, "Which site?")
+        handle = _Window(lambda waits: handle._request_stop())
+
+        old.reconcile(project_id, handle)
+
+        assert len(handle.asked) == 1
+        assert len(bridge.calls("ada")) == 1
+        assert _owed(container, project_id)
+        log.wait_for(
+            rf"The submit of project {project_id}'s notification to ada is owed: "
+            "the run stopped before it went out"
+        )
+        with patch.object(
+            new_supervisor, "start_loop", wraps=new_supervisor.start_loop
+        ) as start:
+            with scoped_session(container) as db:
+                new.retry(db)
+        assert [(call.args[0], call.kwargs) for call in start.call_args_list] == [
+            (NOTIFICATION_JOB, {"key": str(project_id), "again": False})
+        ]
+        _reconcile(new, project_id)
+
+        assert [call.alerted for call in bridge.calls("ada")] == [True, False]
+        assert _shown(bridge, project_id).message == "Which site?, +1"
+        assert not _owed(container, project_id)
+
+    def test_a_stop_before_a_persons_compare_leaves_their_send_owed(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
@@ -1133,15 +1177,14 @@ class TestNotificationReconcileServiceSpacing:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
         _ask(container, project_id)
-        _reconcile(service, project_id)
-        _ask(container, project_id, "Which site?")
-        handle = _Window(lambda waits: handle._request_stop())
+        handle = LoopHandle("test")
+        handle._request_stop()
 
         service.reconcile(project_id, handle)
 
-        assert len(handle.asked) == 1
-        assert len(bridge.calls("ada")) == 1
-        assert _last_sent(container, project_id)[1] == "Which tent?"
+        assert bridge.calls("ada") == []
+        assert _owed(container, project_id)
+        assert _last_sent(container, project_id) == (None, None, None)
 
     def test_two_processes_keep_one_window_and_send_once_at_its_end(
         self,
