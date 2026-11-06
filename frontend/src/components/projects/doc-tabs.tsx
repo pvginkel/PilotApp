@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { BookOpen, CopyX, FileText, List, MessageSquare, NotebookText, Paperclip, X, type LucideIcon } from 'lucide-react';
 import { attachmentTextQuery } from '@/hooks/use-attachment';
-import { TIMELINE, type DocTab, type TabLine } from '@/hooks/use-doc-tabs';
+import { TIMELINE, type TabLine } from '@/hooks/use-doc-tabs';
 import { hungById, titleOf } from '@/hooks/use-timeline';
 import {
   useGetItemsDocumentByItemId,
@@ -21,6 +21,7 @@ import {
   useGetProjectsHandbookByProjectId,
   useGetProjectsTimelineByProjectId,
 } from '@/lib/api/generated/hooks';
+import type { DocTab } from '@/lib/browser-state';
 import { cn } from '@/lib/utils';
 
 interface DocTabsProps {

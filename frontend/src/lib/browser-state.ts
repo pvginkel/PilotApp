@@ -25,6 +25,30 @@ export interface Panel {
   tab: PanelTab;
 }
 
+/** What a tab of the desktop's tab line shows (F28.8). */
+const DOC_TAB_KINDS = ['document', 'attachment', 'handbook', 'project-document'] as const;
+type DocTabKind = (typeof DOC_TAB_KINDS)[number];
+
+/** A tab of the line: what it shows, and the address that shows it again. */
+export interface DocTab {
+  /** One per thing shown: `document <item>`, `attachment <attachment>`, `handbook`, `project-document`. */
+  key: string;
+  kind: DocTabKind;
+  /** The item's or the attachment's id; none for the handbook and the project document. */
+  id: string | null;
+  /** An attachment's at its document's address: the document, whose read its body waits on. */
+  documentId?: string;
+  href: string;
+}
+
+/** A project's tab line as the person last left it (F28.8). */
+export interface KeptLine {
+  /** The open tabs, in the order they opened. */
+  tabs: readonly DocTab[];
+  /** The keys in the order they last showed, the latest first, the timeline's among them. */
+  seen: readonly string[];
+}
+
 interface BrowserState {
   theme: Theme;
   /** The project last on screen, which the bare address opens (F1.6). */
@@ -33,6 +57,8 @@ interface BrowserState {
   chevrons: Record<Group, boolean>;
   /** Each project's side panel, by the project's id, once the person set it (F1.6, F38.1). */
   panels: Record<string, Panel>;
+  /** Each project's tab line, by the project's id, while a tab of it is open (F1.6, F28.8). */
+  lines: Record<string, KeptLine>;
 }
 
 const STORAGE_KEY = 'pilot';
@@ -47,6 +73,7 @@ function load(): BrowserState {
     project: typeof saved.project === 'string' ? saved.project : null,
     chevrons: { others: chevrons.others === true, finished: chevrons.finished === true },
     panels: loadPanels(saved.panels),
+    lines: loadLines(saved.lines),
   };
 }
 
@@ -59,6 +86,32 @@ function loadPanels(saved: unknown): Record<string, Panel> {
     panels[projectId] = { open: open === true, tab: PANEL_TABS.find((each) => each === tab) ?? PANEL_TABS[0] };
   }
   return panels;
+}
+
+function loadLines(saved: unknown): Record<string, KeptLine> {
+  if (typeof saved !== 'object' || saved === null) return {};
+  const lines: Record<string, KeptLine> = {};
+  for (const [projectId, line] of Object.entries(saved as Record<string, unknown>)) {
+    if (typeof line !== 'object' || line === null) continue;
+    const { tabs, seen } = line as Partial<Record<keyof KeptLine, unknown>>;
+    const kept = Array.isArray(tabs) ? tabs.filter(isDocTab) : [];
+    if (kept.length === 0) continue;
+    const shown = Array.isArray(seen) ? seen.filter((key): key is string => typeof key === 'string') : [];
+    lines[projectId] = { tabs: kept, seen: shown };
+  }
+  return lines;
+}
+
+function isDocTab(tab: unknown): tab is DocTab {
+  if (typeof tab !== 'object' || tab === null) return false;
+  const { key, kind, id, documentId, href } = tab as Partial<Record<keyof DocTab, unknown>>;
+  return (
+    typeof key === 'string' &&
+    DOC_TAB_KINDS.some((each) => each === kind) &&
+    (id === null || typeof id === 'string') &&
+    (documentId === undefined || typeof documentId === 'string') &&
+    typeof href === 'string'
+  );
 }
 
 let state = load();
@@ -78,6 +131,14 @@ export function rememberInBrowser(change: Partial<BrowserState>): void {
 /** Keeps a project's side panel as the person set it, over what another tab keeps for the others. */
 export function rememberPanel(projectId: string, panel: Panel): void {
   rememberInBrowser({ panels: { ...load().panels, [projectId]: panel } });
+}
+
+/** Keeps a project's tab line as the person left it, over what another tab keeps for the others; nothing once no tab is open. */
+export function rememberLine(projectId: string, line: KeptLine): void {
+  const lines = { ...load().lines };
+  if (line.tabs.length === 0) delete lines[projectId];
+  else lines[projectId] = { tabs: line.tabs, seen: line.seen };
+  rememberInBrowser({ lines });
 }
 
 function subscribe(listener: () => void): () => void {

@@ -1,12 +1,12 @@
 /**
  * A project's tab (F1.1, F1.2): its name, its ticket id and its status line, opening the project
- * at its own address; its status icon, the pause (F1.3, F141); and the badge counting the items
- * waiting on the person, orange when one of them is urgent (F1.4). The tab of the project on
- * screen, at its own address or an item's under it, is the current page's. An <a> itself, its
- * text links through spans (F91, F93).
+ * at its own address, which off a phone moves on to the tab it was left on (F1.6); its status
+ * icon, the pause (F1.3, F141); and the badge counting the items waiting on the person, orange
+ * when one of them is urgent (F1.4). The tab of the project on screen, at its own address or an
+ * item's under it, is the current page's. An <a> itself, its text links through spans (F91, F93).
  */
 
-import { Link } from '@tanstack/react-router';
+import { Link, useParams } from '@tanstack/react-router';
 import { StatusIcon } from '@/components/projects/status-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
@@ -16,10 +16,13 @@ import { cn } from '@/lib/utils';
 
 export function ProjectTab({ project, archived = false }: { project: Project; archived?: boolean }) {
   const status = projectStatusLine(project);
+  // The tab of the project on screen is no switch (F1.6): it goes to the project's own address.
+  const onScreen = useParams({ strict: false, select: (params) => params.projectId === project.id });
   return (
     <Link
       to="/projects/$projectId"
       params={{ projectId: project.id }}
+      state={onScreen ? undefined : { fromList: true }}
       className={cn('tab', project.state === 'finished' && 'finished')}
       data-testid="projects.tab"
     >

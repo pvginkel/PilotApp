@@ -4,50 +4,58 @@
  * by. The tab showing is the address's (F97): a document's, an attachment's, the handbook's or the
  * project document's shows its tab, opening it at the line's end where it is not open, in the
  * frame the address is first drawn in; any other address of the project shows the timeline. A
- * tab's change replaces the browser's entry, so that Back does not move between tabs. Each tab's
- * scroll is kept while another shows (F28.1). The line lives as long as the page; nothing of it is
- * on a phone, whose documents are views (F98.4).
+ * tab's change replaces the browser's entry, so that Back does not move between tabs. The line and
+ * the order the tabs showed in are kept in the browser (F133), so that after a reload the line is
+ * as it was left, and the project's row in the list brings back the tab it was left on (F1.6).
+ * Each tab's scroll is kept while another shows, as long as the page (F28.1). Nothing of it is on
+ * a phone, whose documents are views (F98.4).
  */
 
 import { createContext, useContext, useLayoutEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { browserState, rememberLine, type DocTab, type KeptLine } from '@/lib/browser-state';
 
-export type DocTabKind = 'document' | 'attachment' | 'handbook' | 'project-document';
-
-/** A tab of the line: what it shows, and the address that shows it again. */
-export interface DocTab {
-  /** One per thing shown: `document <item>`, `attachment <attachment>`, `handbook`, `project-document`. */
-  key: string;
-  kind: DocTabKind;
-  /** The item's or the attachment's id; none for the handbook and the project document. */
-  id: string | null;
-  /** An attachment's at its document's address: the document, whose read its body waits on. */
-  documentId?: string;
-  href: string;
+declare module '@tanstack/react-router' {
+  interface HistoryState {
+    /** Gone to from the project's row in the list, which off a phone shows the tab it was left on (F1.6). */
+    fromList?: boolean;
+  }
 }
 
 /** The timeline's key in the order the tabs showed in: a draft's definition chat in its place. */
 export const TIMELINE = 'timeline';
 
-interface Line {
-  tabs: readonly DocTab[];
-  /** The keys in the order they last showed, the latest first. */
-  seen: readonly string[];
-  /** The key of the address the line last took its tab from. */
+interface Line extends KeptLine {
+  /** The key of the address the line last took its tab from, none before the page showed one. */
   synced: string | null;
 }
 
 const EMPTY: Line = { tabs: [], seen: [], synced: null };
+/** Each project's line in this page, from the one the browser keeps. */
 const lines = new Map<string, Line>();
 const listeners = new Set<() => void>();
 /** Each project's tabs' scroll, by the tab's key. */
 const scrolls = new Map<string, Map<string, number>>();
 
-const lineOf = (projectId: string): Line => lines.get(projectId) ?? EMPTY;
+function lineOf(projectId: string): Line {
+  let line = lines.get(projectId);
+  if (line === undefined) {
+    line = { ...EMPTY, ...browserState().lines[projectId] };
+    lines.set(projectId, line);
+  }
+  return line;
+}
 
 function write(projectId: string, line: Line): void {
   lines.set(projectId, line);
+  rememberLine(projectId, line);
   listeners.forEach((listener) => listener());
+}
+
+/** The tab the project's line was left on, none for the timeline. */
+export function tabLeftOn(projectId: string): DocTab | null {
+  const { tabs, seen } = lineOf(projectId);
+  return tabs.find((tab) => tab.key === seen[0]) ?? null;
 }
 
 function subscribe(listener: () => void): () => void {

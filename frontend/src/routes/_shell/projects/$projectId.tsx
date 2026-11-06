@@ -28,7 +28,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { createFileRoute, useMatch, useMatches, useNavigate, useParams, useRouter } from '@tanstack/react-router';
+import { createFileRoute, redirect, useMatch, useMatches, useNavigate, useParams, useRouter } from '@tanstack/react-router';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { ItemAttachmentOverlay, ProjectAttachmentOverlay } from '@/components/overlay/attachment-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
@@ -42,21 +42,27 @@ import { PhoneProject } from '@/components/projects/phone-project';
 import { ProjectHead } from '@/components/projects/project-head';
 import { isCard } from '@/components/timeline/document-state';
 import { Timeline } from '@/components/timeline/timeline';
-import { DocTabContext, TabMovesContext, useDocTabs, type DocTab } from '@/hooks/use-doc-tabs';
+import { DocTabContext, tabLeftOn, TabMovesContext, useDocTabs } from '@/hooks/use-doc-tabs';
 import { discussIn, DiscussContext } from '@/hooks/use-discuss';
 import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePanel } from '@/hooks/use-panel';
-import { usePhone } from '@/hooks/use-phone';
+import { isPhone, usePhone } from '@/hooks/use-phone';
 import { useProjectHead, type ProjectHead as ProjectHeadOf } from '@/hooks/use-projects';
 import { useTimelineItem, type TimelineItem } from '@/hooks/use-timeline';
-import { rememberInBrowser } from '@/lib/browser-state';
+import { rememberInBrowser, type DocTab } from '@/lib/browser-state';
 import type { QuoteRef } from '@/lib/chat/quotes';
 
 export const Route = createFileRoute('/_shell/projects/$projectId')({
   // Everything a project opens under its route starts closed on each project, and its timeline
   // at its end (F1.6), or at the address it is opened at.
   remountDeps: ({ params }) => params.projectId,
+  // Off a phone, a project gone to from its row in the list shows the tab it was left on, at the
+  // tab's address in the entry's place (F1.6); at its own address however else, its timeline.
+  beforeLoad: ({ params, location, preload }) => {
+    const tab = !preload && location.state.fromList === true && !isPhone() ? tabLeftOn(params.projectId) : null;
+    if (tab !== null) throw redirect({ href: tab.href, replace: true });
+  },
   component: Project,
 });
 

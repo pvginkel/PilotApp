@@ -13,6 +13,8 @@ function subscribe(listener: () => void): () => void {
   return () => phone.removeEventListener('change', listener);
 }
 
+export const isPhone = (): boolean => phone.matches;
+
 export function usePhone(): boolean {
-  return useSyncExternalStore(subscribe, () => phone.matches);
+  return useSyncExternalStore(subscribe, isPhone);
 }

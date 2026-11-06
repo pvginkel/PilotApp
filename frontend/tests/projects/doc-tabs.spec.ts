@@ -9,7 +9,11 @@
  * cross. An attachment is a tab of its own, its document a link in its head. Each tab keeps its
  * scroll while another shows, the timeline's included. The address follows the tab showing, a
  * tab's change replacing the browser's entry, and a document's address reached cold opens its
- * tab. A draft's first tab is its definition chat.
+ * tab. A draft's first tab is its definition chat. Each project's line, its tab showing and the
+ * order the tabs showed in are kept in the browser (F133): after a reload the line is as it was
+ * left, the project's own address shows its timeline beside it, and its row in the list, the
+ * drawer's too, brings back the tab it was left on, at the tab's address in the entry's place
+ * (F1.6).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -436,6 +440,167 @@ test.describe('Documents in tabs', () => {
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
     await expect(page).toHaveURL(`/projects/${id}`);
     await expect(definitionChat.quote).toBeVisible();
+  });
+});
+
+test.describe('Each project’s line kept in the browser', () => {
+  test('after a reload the line is as it was left, its tab showing and the order the tabs showed in with it; the project’s own address in a fresh page shows its timeline, the line beside it', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    docTabs,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Reload'), members: [me.handle!] });
+    const [a, b, c] = await Promise.all(
+      ['Alpha', 'Bravo', 'Charlie'].map((title) => projects.place(id, { kind: 'document', title, text: card(title) })),
+    );
+    await timeline.open(id);
+    for (const each of [a, b, c]) {
+      await timeline.item(each).card.open.click();
+      await docTabs.first.click();
+    }
+    // Shown in the order c, a, b: b's showing, and closing it goes back to a, not to its neighbours.
+    await docTabs.document(c).show.click();
+    await docTabs.document(a).show.click();
+    await docTabs.document(b).show.click();
+
+    await page.reload();
+    await expect(page).toHaveURL(documentAddress(id, b));
+    await expect(overlay.title).toHaveText('Bravo');
+    expect(await docTabs.keys()).toEqual([a, b, c].map((each) => `document ${each}`));
+    await expect(docTabs.document(b).show).toHaveAttribute('aria-selected', 'true');
+    await docTabs.document(b).close.click();
+    await expect(page).toHaveURL(documentAddress(id, a));
+    await expect(overlay.title).toHaveText('Alpha');
+
+    await page.goto(`/projects/${id}`);
+    await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
+    await expect(overlay.root).toHaveCount(0);
+    expect(await docTabs.keys()).toEqual([a, c].map((each) => `document ${each}`));
+    // The timeline showed last: closing a goes back to it, then closing c too.
+    await docTabs.document(a).show.click();
+    await page.reload();
+    await docTabs.document(a).close.click();
+    await expect(page).toHaveURL(`/projects/${id}`);
+    await docTabs.document(c).close.click();
+    await expect(docTabs.root).toHaveCount(0);
+    await page.reload();
+    await expect(timeline.item(a).root).toBeVisible();
+    await expect(docTabs.root).toHaveCount(0);
+  });
+
+  test('reached from its row in the list, a project shows the tab it was left on, its address the tab’s in the entry’s place; each project’s line is its own', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    timeline,
+    overlay,
+    docTabs,
+  }) => {
+    const me = await people.signIn();
+    const [first, second] = [makeUnique('Left on'), makeUnique('Other')];
+    const one = await projects.makeWithSession({ name: first, members: [me.handle!] });
+    const other = await projects.makeWithSession({ name: second, members: [me.handle!] });
+    const [a, b] = await Promise.all(['Alpha', 'Bravo'].map((title) => projects.place(one, { kind: 'document', title, text: card(title) })));
+    const c = await projects.place(other, { kind: 'document', title: 'Charlie', text: card('Charlie') });
+    await timeline.open(one);
+    await timeline.item(a).card.open.click();
+    await docTabs.first.click();
+    await timeline.item(b).card.open.click();
+    await docTabs.document(a).show.click();
+
+    await projectList.tab(second).click();
+    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(docTabs.root).toHaveCount(0);
+    await timeline.item(c).card.open.click();
+
+    await projectList.tab(first).click();
+    await expect(page).toHaveURL(documentAddress(one, a));
+    await expect(overlay.title).toHaveText('Alpha');
+    expect(await docTabs.keys()).toEqual([a, b].map((each) => `document ${each}`));
+    await expect(docTabs.document(a).show).toHaveAttribute('aria-selected', 'true');
+    // The project's own address took no entry: Back is the other project, as it was left.
+    await page.goBack();
+    await expect(page).toHaveURL(documentAddress(other, c));
+    await expect(overlay.title).toHaveText('Charlie');
+    expect(await docTabs.keys()).toEqual([`document ${c}`]);
+
+    // Left on its timeline, a project's row shows its timeline, its line beside it.
+    await docTabs.first.click();
+    await projectList.tab(first).click();
+    await expect(page).toHaveURL(documentAddress(one, a));
+    await projectList.tab(second).click();
+    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
+    expect(await docTabs.keys()).toEqual([`document ${c}`]);
+
+    // In a fresh page too, from what the browser keeps.
+    await page.reload();
+    await projectList.tab(first).click();
+    await expect(page).toHaveURL(documentAddress(one, a));
+    await expect(overlay.title).toHaveText('Alpha');
+  });
+
+  test('on a phone, a project’s row opens it on its Timeline tab, whatever tab the desktop left it on', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    shell,
+    timeline,
+    phoneTabs,
+  }) => {
+    const me = await people.signIn();
+    const [first, second] = [makeUnique('Desk'), makeUnique('Other')];
+    const one = await projects.makeWithSession({ name: first, members: [me.handle!] });
+    const other = await projects.makeWithSession({ name: second, members: [me.handle!] });
+    const a = await projects.place(one, { kind: 'document', title: 'Alpha', text: card('Alpha') });
+    await timeline.open(one);
+    await timeline.item(a).card.open.click();
+    await projectList.tab(second).click();
+    await expect(page).toHaveURL(`/projects/${other}`);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shell.drawerToggle.click();
+    await projectList.tab(first).click();
+    await expect(page).toHaveURL(`/projects/${one}`);
+    await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
+  });
+});
+
+test.describe('Each project’s line at the narrow width', () => {
+  test.use({ viewport: { width: 1100, height: 800 } });
+
+  test('reached from its row in the drawer, a project shows the tab it was left on', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    shell,
+    timeline,
+    overlay,
+    docTabs,
+  }) => {
+    const me = await people.signIn();
+    const [first, second] = [makeUnique('Drawer'), makeUnique('Other')];
+    const one = await projects.makeWithSession({ name: first, members: [me.handle!] });
+    const other = await projects.makeWithSession({ name: second, members: [me.handle!] });
+    const a = await projects.place(one, { kind: 'document', title: 'Alpha', text: card('Alpha') });
+    await timeline.open(one);
+    await timeline.item(a).card.open.click();
+
+    await shell.drawerToggle.click();
+    await projectList.tab(second).click();
+    await expect(page).toHaveURL(`/projects/${other}`);
+    await shell.drawerToggle.click();
+    await projectList.tab(first).click();
+    await expect(page).toHaveURL(documentAddress(one, a));
+    await expect(overlay.title).toHaveText('Alpha');
+    await expect(docTabs.document(a).show).toHaveAttribute('aria-selected', 'true');
   });
 });
 
