@@ -14,7 +14,8 @@
  * `bridge` adds registrations to the worker's fake notification bridge and reads what they show,
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
  * `waits` adds the brain's waits, fires them, places their runs and closes them.
- * `conditions`, the worker's, reads what the gold bar reads.
+ * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
+ * server serve the app once before the worker's first test.
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
@@ -66,6 +67,7 @@ interface DomainFixtures {
 
 interface DomainWorkerFixtures {
   conditions: Conditions;
+  warmFrontend: void;
 }
 
 export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFixtures>({
@@ -95,6 +97,19 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
       await conditions.dispose();
     },
     { scope: 'worker', auto: true },
+  ],
+  // The worker's dev server starts on an empty dependency cache (process/servers.ts), so the first
+  // page it serves waits for the dependencies' pre-bundling and every module's transform: on a
+  // loaded node, the whole of a 10 s wait armed before that page. Loaded here once, on the
+  // fixture's own timeout, the app is served from the server's cache to every test's page.
+  warmFrontend: [
+    async ({ browser, _serviceManager }, use) => {
+      const page = await browser.newPage();
+      await page.goto(_serviceManager.frontendUrl, { waitUntil: 'load' });
+      await page.close();
+      await use();
+    },
+    { scope: 'worker', auto: true, timeout: 120_000 },
   ],
   shell: async ({ page }, use) => {
     await use(new ShellPage(page));
