@@ -93,8 +93,9 @@ def sends(
     supervise: Supervise,
 ) -> None:
     """The container's reconcile and alarms on a supervisor of their own,
-    STARTUP fired, so that what a commit asks for goes out; the outage holds,
-    and its alarm is due at once."""
+    STARTUP fired, so that what a commit asks for goes out, with no window
+    between a person's sends; the outage holds, and its alarm is due at
+    once."""
     supervisor, coordinator = supervise(container)
     outage = ControllerOutage()
     cipher = container.notification_token_cipher()
@@ -106,6 +107,7 @@ def sends(
                 engine_bus=EngineBus(),
                 notification_token_cipher=cipher,
                 bridge_configured=True,
+                spacing_seconds=0.0,
             )
         )
     )

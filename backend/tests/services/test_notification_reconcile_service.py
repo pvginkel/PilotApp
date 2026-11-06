@@ -9,14 +9,15 @@ called as its loop calls it; the loops themselves run where a test fires
 STARTUP."""
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from flask import Flask
-from sqlalchemy import select
+from sqlalchemy import Integer, cast, func, literal, select
+from sqlalchemy.pool import QueuePool
 
 from app import models
 from app.database import scoped_session
@@ -31,6 +32,7 @@ from app.models.reference import (
 )
 from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.schemas.testing_record import InventedProjectCreateSchema
+from app.services.advisory_turn import turn_key
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.fake_notification_bridge import FakeCall, FakeNotification
@@ -39,6 +41,7 @@ from app.services.notification_reconcile_service import (
     NOTIFICATION_CLEAR_DISMISSES_TOTAL,
     NOTIFICATION_CLEAR_JOB,
     NOTIFICATION_JOB,
+    NOTIFICATION_LOCK,
     NOTIFICATION_RECONCILES_TOTAL,
     NotificationReconcileService,
 )
@@ -53,6 +56,7 @@ from tests.support.fake_notification_bridge import (
 from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import (
     LogWaiter,
+    RoundsHandle,
     Supervise,
     listening,
     metric_value,
@@ -67,6 +71,9 @@ SUPERVISOR_LOGGER = "app.services.supervisor"
 
 DECISION = "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n"
 QUESTION = "```question id=Q1\n```\n"
+
+SPACING = 0.3
+"""A person's window between two sends in one project, in the tests of it."""
 
 
 @pytest.fixture(autouse=True)
@@ -115,11 +122,14 @@ def _service(
     *,
     engine_bus: EngineBus | None = None,
     retry_seconds: float = 60.0,
+    spacing_seconds: float | None = 0.0,
     configured: bool = True,
 ) -> tuple[NotificationReconcileService, Supervisor, LifecycleCoordinator]:
     """The reconcile on a supervisor of its own, hearing `engine_bus`: a bus
-    of its own unless one is given."""
+    of its own unless one is given. No window between a person's sends unless
+    `spacing_seconds` gives one; none for the service's own."""
     supervisor, coordinator = supervise(container)
+    spacing = {} if spacing_seconds is None else {"spacing_seconds": spacing_seconds}
     service = NotificationReconcileService(
         container=container,
         supervisor=supervisor,
@@ -127,6 +137,7 @@ def _service(
         notification_token_cipher=container.notification_token_cipher(),
         bridge_configured=configured,
         retry_seconds=retry_seconds,
+        **spacing,
     )
     return service, supervisor, coordinator
 
@@ -322,6 +333,53 @@ def _shown(
     bridge: WatchedFakeNotificationBridge, project_id: uuid.UUID, name: str = "ada"
 ) -> FakeNotification:
     return bridge.shown(name)[str(project_id)]
+
+
+def _sent_at(
+    container: ServiceContainer, project_id: uuid.UUID, handle: str = "ada"
+) -> datetime:
+    sent_at = _memberships(container, project_id, handle)[-1].notification_sent_at
+    assert sent_at is not None
+    return sent_at
+
+
+def _checked_out(container: ServiceContainer) -> int:
+    """The app's pooled database connections in use."""
+    pool = container.session_maker().kw["bind"].pool
+    assert isinstance(pool, QueuePool)
+    return pool.checkedout()
+
+
+def _turn_free(
+    container: ServiceContainer, project_id: uuid.UUID, handle: str = "ada"
+) -> bool:
+    """Whether the person's turn in the project is free: taken and let go at
+    once, on a session of its own."""
+    person_id = _memberships(container, project_id, handle)[0].user_id
+    with container.session_maker()() as db:
+        free: bool = db.scalar(
+            select(
+                func.pg_try_advisory_xact_lock(
+                    cast(literal(NOTIFICATION_LOCK), Integer),
+                    cast(literal(turn_key(person_id.bytes, project_id.bytes)), Integer),
+                )
+            )
+        )
+        db.rollback()
+        return free
+
+
+class _Window(RoundsHandle):
+    """A loop's handle that keeps the seconds of each wait asked and calls
+    `between` with their count, on the run's thread, before it sleeps."""
+
+    def __init__(self, between: Callable[[int], None]) -> None:
+        super().__init__("test", between)
+        self.asked: list[float] = []
+
+    def wait(self, seconds: float) -> bool:
+        self.asked.append(seconds)
+        return super().wait(seconds)
 
 
 def _reconciles(outcome: str) -> float:
@@ -905,6 +963,216 @@ class TestNotificationReconcileServiceStartup:
             "Which tent?",
             f"{_timeline(container, asking)}/items/{tent}",
         )
+
+
+class TestNotificationReconcileServiceSpacing:
+    def test_a_persons_sends_are_two_seconds_apart(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        """V05: the window the service keeps of its own runs two seconds from
+        the person's last send."""
+        project_id = _project(container)
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _ = _service(container, supervise, spacing_seconds=None)
+        _ask(container, project_id)
+        _reconcile(service, project_id)
+        last = _sent_at(container, project_id)
+        _ask(container, project_id, "Which site?")
+        entered: list[datetime] = []
+
+        def stop(waits: int) -> None:
+            entered.append(datetime.now(UTC))
+            handle._request_stop()
+
+        handle = _Window(stop)
+        before = datetime.now(UTC)
+        service.reconcile(project_id, handle)
+
+        window_end = last + timedelta(seconds=2)
+        [asked] = handle.asked
+        assert (
+            (window_end - entered[0]).total_seconds()
+            <= asked
+            <= (window_end - before).total_seconds()
+        )
+        assert len(bridge.calls("ada")) == 1
+
+    def test_a_change_inside_the_window_goes_out_at_its_end_the_latest_state(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        """V05: two changes inside the window come to one send at its end,
+        the latest; the wait holds no turn and no database connection."""
+        project_id = _project(container)
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        _ask(container, project_id)
+        _reconcile(service, project_id)
+        first = _sent_at(container, project_id)
+        _ask(container, project_id, "Which site?")
+        deferred = _reconciles("deferred")
+        during: list[tuple[int, int, bool]] = []
+
+        def in_the_window(waits: int) -> None:
+            during.append(
+                (
+                    _checked_out(container),
+                    len(bridge.calls("ada")),
+                    _turn_free(container, project_id),
+                )
+            )
+            if waits == 1:
+                _ask(container, project_id, "Which stove?")
+
+        service.reconcile(project_id, _Window(in_the_window))
+
+        assert during[0] == (0, 1, True)
+        assert [call.alerted for call in bridge.calls("ada")] == [True, False]
+        assert _shown(bridge, project_id).message == "Which stove?, +2"
+        assert _sent_at(container, project_id) - first >= timedelta(seconds=SPACING)
+        assert _reconciles("deferred") >= deferred + 1
+
+    def test_a_change_undone_inside_the_window_sends_nothing(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        project_id = _project(container)
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        _ask(container, project_id)
+        _reconcile(service, project_id)
+        site = _bear(container, project_id, "decision", "Which site?", DECISION)
+        unchanged = _reconciles("unchanged")
+
+        def answer(waits: int) -> None:
+            if waits == 1:
+                _answer(container, "ada", site, "Dome")
+
+        service.reconcile(project_id, _Window(answer))
+
+        assert bridge.calls("ada") == [FakeCall("submit", str(project_id), True)]
+        assert _shown(bridge, project_id).message == "Which tent?"
+        assert _reconciles("unchanged") == unchanged + 1
+
+    def test_a_window_is_one_persons_in_one_project(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        """V05: Ada's window in Camp holds neither Ben's send in it nor hers in
+        another project."""
+        camp = _project(container, ("ada", "ben"))
+        lake = _project(container, environment_id=None)
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        _ask(container, camp)
+        _reconcile(service, camp)
+        _give_token(container, "ben", BEN_TOKEN)
+        _ask(container, camp, "Which site?")
+        _ask(container, lake, "Which lake?")
+        during: list[tuple[int, int]] = []
+
+        def in_the_window(waits: int) -> None:
+            if waits == 1:
+                _reconcile(service, lake)
+                during.append((len(bridge.calls("ada")), len(bridge.calls("ben"))))
+
+        service.reconcile(camp, _Window(in_the_window))
+
+        assert during == [(2, 1)]
+        assert _shown(bridge, lake).message == "Which lake?"
+        assert _shown(bridge, camp, "ben").message == "Which site?, +1"
+        assert _shown(bridge, camp).message == "Which site?, +1"
+        assert len(bridge.calls("ada")) == 3
+
+    def test_a_rejoin_waits_for_the_window_of_the_dismiss_its_leave_sent(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        project_id = _project(container, ("ada", "ben"))
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        _ask(container, project_id)
+        _reconcile(service, project_id)
+        _leave(container, "ada", project_id)
+        _reconcile(service, project_id)
+        _join(container, "ada", project_id)
+        calls: list[int] = []
+
+        def in_the_window(waits: int) -> None:
+            calls.append(len(bridge.calls("ada")))
+
+        handle = _Window(in_the_window)
+        service.reconcile(project_id, handle)
+
+        assert [call.call for call in bridge.calls("ada")] == [
+            "submit",
+            "dismiss",
+            "submit",
+        ]
+        assert calls[0] == 2
+        assert _shown(bridge, project_id).message == "Which tent?"
+
+    def test_a_stop_during_the_wait_ends_the_run_with_nothing_sent(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        project_id = _project(container)
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        _ask(container, project_id)
+        _reconcile(service, project_id)
+        _ask(container, project_id, "Which site?")
+        handle = _Window(lambda waits: handle._request_stop())
+
+        service.reconcile(project_id, handle)
+
+        assert len(handle.asked) == 1
+        assert len(bridge.calls("ada")) == 1
+        assert _last_sent(container, project_id)[1] == "Which tent?"
+
+    def test_two_processes_keep_one_window_and_send_once_at_its_end(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        """V05: the new process, which sent nothing yet, keeps the window of
+        the old one's send, and of the two reconciles inside it one sends."""
+        project_id = _project(container)
+        _give_token(container, "ada", ADA_TOKEN)
+        old, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        new, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        _ask(container, project_id)
+        _reconcile(old, project_id)
+        first = _sent_at(container, project_id)
+        _ask(container, project_id, "Which site?")
+        during: list[int] = []
+
+        def old_reconciles_too(waits: int) -> None:
+            during.append(len(bridge.calls("ada")))
+            if waits == 1:
+                _ask(container, project_id, "Which stove?")
+                _reconcile(old, project_id)
+
+        new.reconcile(project_id, _Window(old_reconciles_too))
+
+        assert during[0] == 1
+        assert [call.call for call in bridge.calls("ada")] == ["submit"] * 2
+        assert _shown(bridge, project_id).message == "Which stove?, +2"
+        assert _sent_at(container, project_id) - first >= timedelta(seconds=SPACING)
 
 
 class TestNotificationReconcileServiceBus:

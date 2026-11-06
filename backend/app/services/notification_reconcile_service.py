@@ -24,6 +24,14 @@ call no row or table is locked, and no request or commit waits on it. The
 write is dropped when the person's token changed during the call: the set or
 clear that changed it says what the record holds since.
 
+A person's sends in one project go out at most once in `spacing_seconds`, two
+by default (F94.4; DB decision 70). The window runs from their last try, sent
+or owed, as their memberships' `notification_sent_at` and
+`notification_owed_at` record it, so that it holds across the two processes of
+a roll. A send due inside it is compared again at its end, the run waiting
+with no turn and no database connection held, and what goes out then is the
+latest state: a burst of commits comes to one send per window.
+
 A send the bridge refuses or does not answer is owed, `notification_owed_at`
 the time of the try: the project's next reconcile sends the current state
 again, the timer's once `retry_seconds` have passed. The log says so when a
@@ -49,7 +57,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -81,6 +89,9 @@ NOTIFICATION_RETRY_TIMER = "notification-retry"
 NOTIFICATION_RETRY_SECONDS = 60.0
 """The least time between two of the retry timer's tries of an owed send."""
 
+NOTIFICATION_SPACING_SECONDS = 2.0
+"""The least time between two of a person's sends in one project (F94.4)."""
+
 NOTIFICATION_LOCK = 224
 """The first key of a member's turn (`advisory_turn`); the second is drawn
 from the person's and the project's ids."""
@@ -91,8 +102,10 @@ _PRIORITY: BridgePriority = "high"
 NOTIFICATION_RECONCILES_TOTAL = Counter(
     "pilot_notification_reconciles_total",
     "Compares of what a member should see of a project with what their "
-    "membership last sent, by outcome: unchanged, sent, owed (the send failed) "
-    "or superseded (the person's token changed during the send)",
+    "membership last sent, by outcome: unchanged, sent, owed (the send failed), "
+    "superseded (the person's token changed during the send) or deferred (their "
+    "last send in the project is not two seconds old yet, and they are compared "
+    "again once it is)",
     ["outcome"],
 )
 NOTIFICATION_CLEAR_DISMISSES_TOTAL = Counter(
@@ -116,6 +129,9 @@ class _Due:
     notification: StandingNotification | None
     """What to submit; none to dismiss."""
     owed: bool
+    last_try: datetime | None
+    """When the person's last send in the project was tried, sent or owed;
+    none before their first."""
     sealed: str
     """The person's token as the record held it, sealed."""
     token: str
@@ -137,6 +153,7 @@ class NotificationReconcileService:
         notification_token_cipher: NotificationTokenCipher,
         bridge_configured: bool,
         retry_seconds: float = NOTIFICATION_RETRY_SECONDS,
+        spacing_seconds: float = NOTIFICATION_SPACING_SECONDS,
     ) -> None:
         """Register the `notification` job, whose reconcile runs at STARTUP,
         the `notification-clear` job and the retry timer, and hear the
@@ -153,12 +170,15 @@ class NotificationReconcileService:
             bridge_configured: False sends nothing
             retry_seconds: The least time between two of the retry timer's
                 tries of an owed send
+            spacing_seconds: The least time between two of a person's sends
+                in one project
         """
         self._container = container
         self._supervisor = supervisor
         self._cipher = notification_token_cipher
         self._configured = bridge_configured
         self._retry_after = timedelta(seconds=retry_seconds)
+        self._spacing = timedelta(seconds=spacing_seconds)
         self._clears = itertools.count(1)
         if not bridge_configured:
             return
@@ -175,8 +195,10 @@ class NotificationReconcileService:
         """The loop `notification:<project id>`'s run: for each person with a
         membership of the project that is open, stands or is owed, in their
         turn, what they should see compared with what was last sent, and
-        submitted or dismissed when it differs or is owed. Returns once each
-        is, or when the loop is told to stop."""
+        submitted or dismissed when it differs or is owed. A person whose last
+        send is not yet `spacing_seconds` old is compared again once it is,
+        the run waiting with no turn and no database connection held. Returns
+        once each is, or when the loop is told to stop."""
         with scoped_session(self._container) as db:
             people = db.scalars(
                 select(ProjectMember.user_id)
@@ -184,10 +206,20 @@ class NotificationReconcileService:
                 .distinct()
                 .order_by(ProjectMember.user_id)
             ).all()
-        for person_id in people:
-            if handle.stopping:
+        while people:
+            spaced: list[tuple[uuid.UUID, datetime]] = []
+            for person_id in people:
+                if handle.stopping:
+                    return
+                after = self._reconcile_member(project_id, person_id)
+                if after is not None:
+                    spaced.append((person_id, after))
+            if not spaced:
                 return
-            self._reconcile_member(project_id, person_id)
+            wake = min(at for _, at in spaced)
+            if handle.wait(max((wake - datetime.now(UTC)).total_seconds(), 0.0)):
+                return
+            people = [person_id for person_id, _ in spaced]
 
     def dismiss_cleared(
         self,
@@ -343,18 +375,28 @@ class NotificationReconcileService:
             key=next(self._clears),
         )
 
-    def _reconcile_member(self, project_id: uuid.UUID, person_id: uuid.UUID) -> None:
+    def _reconcile_member(
+        self, project_id: uuid.UUID, person_id: uuid.UUID
+    ) -> datetime | None:
+        """The person's compare and send, in their turn; with their last send
+        not yet `spacing_seconds` old, nothing sent, and the time it is."""
         with self._turn(person_id, project_id):
             with scoped_session(self._container) as db:
                 due = self._due(db, project_id, person_id)
             if due is None:
                 NOTIFICATION_RECONCILES_TOTAL.labels(outcome="unchanged").inc()
-                return
+                return None
+            if due.last_try is not None:
+                after = due.last_try + self._spacing
+                if after > datetime.now(UTC):
+                    NOTIFICATION_RECONCILES_TOTAL.labels(outcome="deferred").inc()
+                    return after
             failure = self._send(due)
             with scoped_session(self._container) as db:
                 cleared = self._take(db, due, failure)
             if cleared:
                 self._dismiss_once(due.token, project_id, due.handle)
+        return None
 
     def _turn(
         self, person_id: uuid.UUID, project_id: uuid.UUID
@@ -400,6 +442,21 @@ class NotificationReconcileService:
         owed = any(m.notification_owed_at is not None for m in memberships)
         if not owed and _shows(shown, notification):
             return None
+        # A closed membership's last dismiss counts too: a rejoin's first
+        # submit waits for it.
+        last_try: datetime | None = db.scalar(
+            select(
+                func.max(
+                    func.greatest(
+                        ProjectMember.notification_sent_at,
+                        ProjectMember.notification_owed_at,
+                    )
+                )
+            ).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == person_id,
+            )
+        )
         token = self._cipher.open(person)
         # Nothing of a person's with no token stands or is owed: the clear
         # that dropped it read it all dismissed (`dismiss_all`).
@@ -412,6 +469,7 @@ class NotificationReconcileService:
             holder_id=holder.id,
             notification=notification,
             owed=owed,
+            last_try=last_try,
             sealed=person.notification_token,
             token=token,
         )
