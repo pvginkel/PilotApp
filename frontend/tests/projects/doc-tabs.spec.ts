@@ -652,9 +652,11 @@ test.describe('The focus and a tab', () => {
     const notes = await projects.place(id, { kind: 'document', title: 'Packing notes', text: 'We leave on Friday.\n' });
     await projects.send(notes);
     await timeline.open(id);
-    const { lineTitle } = timeline.item(notes);
+    const { lineTitle, open } = timeline.item(notes);
 
     await lineTitle.focus();
+    await page.keyboard.press('Tab');
+    await expect(open).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(overlay.root).toBeFocused();
     await expect(overlay.root).toHaveAccessibleName(/Packing notes/);
@@ -670,7 +672,7 @@ test.describe('The focus and a tab', () => {
     await page.keyboard.press('Enter');
     await expect(overlay.root).toHaveCount(0);
     await expect(docTabs.root).toHaveCount(0);
-    await expect(lineTitle).toBeFocused();
+    await expect(open).toBeFocused();
   });
 
   test('a tab shown from the line, or opened from the side panel, leaves the focus where it was; one closed by Done gives it back to what opened it', async ({

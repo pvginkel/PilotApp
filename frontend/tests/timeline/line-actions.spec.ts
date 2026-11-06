@@ -97,6 +97,35 @@ test.describe('A done line’s actions', () => {
     expect(await height(item.line)).toBe(line);
   });
 
+  test('take the focus back from the session log Open opened, from the keyboard or the mouse', async ({ page, people, projects, timeline, sessionLog }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Back to Open'), members: [me.handle!] });
+    const work = await projects.startWork(id, { title: 'Surveying the stylesheets', brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    await projects.transition(id, 'finished');
+    await timeline.open(id);
+    const item = timeline.item(work);
+
+    await away(page);
+    await item.lineTitle.focus();
+    await page.keyboard.press('Tab');
+    await expect(item.open).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(sessionLog.overlay).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(item.open).toBeFocused();
+    await expect(item.open).toBeVisible();
+
+    await item.line.hover();
+    await item.open.click();
+    await expect(sessionLog.overlay).toBeFocused();
+    await away(page);
+    await page.keyboard.press('Escape');
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(item.open).toBeFocused();
+    await expect(item.open).toBeVisible();
+  });
+
   test.describe('on a screen with no hover wider than a phone', () => {
     test.use({ hasTouch: true });
 

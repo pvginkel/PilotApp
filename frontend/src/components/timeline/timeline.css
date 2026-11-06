@@ -563,12 +563,13 @@
      taking no room until then, and always on a screen with no hover wider than a phone; a phone's
      line keeps Undo alone (F13.9). Shown, a button's 28px overhangs the text's row, a line's or a
      quiet one's, so they add no height. The attachments' indicator after them touches them while
-     they show. */
+     they show. Hidden, each stays a box of no size that can take the focus, which shows them: a
+     sheet closing gives the focus back to the one that opened it. */
   .line-acts { display: contents; }
   .line .line-acts .btn { margin-block: -4px; }
   .line .line-acts:not(:empty) + :is(.btn-icon, .menu-anchor) { margin-left: -10px; }
   @media (hover: hover) and (min-width: 901px) {
-    .line:not(:hover):not(:focus-within) .line-acts { display: none; }
+    .line:not(:hover):not(:focus-within) .line-acts > * { position: absolute; width: 0; height: 0; border: 0; overflow: hidden; }
     .line:not(:hover):not(:focus-within) .line-acts + :is(.btn-icon, .menu-anchor) { margin-left: 0; }
   }
 
