@@ -1156,7 +1156,11 @@ class TestNotificationReconcileWiring:
                 )
                 db.add(person)
                 db.flush()
-                project = Project(created_by_user_id=person.id)
+                project = Project(
+                    created_by_user_id=person.id,
+                    state_code=ProjectState.OPEN,
+                    slug="camp",
+                )
                 db.add(project)
                 db.flush()
                 db.add(
@@ -1164,6 +1168,38 @@ class TestNotificationReconcileWiring:
                         project_id=project.id,
                         user_id=person.id,
                         joined_at=datetime.now(UTC),
+                    )
+                )
+                # A stopped work item waits on Ada, so that her notification
+                # stands.
+                db.add(Environment(id="env-a", name="A", exempt=False))
+                run = AgentSession(
+                    project_id=project.id,
+                    environment_id="env-a",
+                    kind_code="work",
+                    cwd="/work/Example",
+                    token_hash="1" * 64,
+                    state_code=SessionState.STOPPED,
+                )
+                db.add(run)
+                db.flush()
+                db.add(
+                    Item(
+                        id=run.id,
+                        project_id=project.id,
+                        seq=1,
+                        kind_code="work",
+                        title="Build the camp",
+                        created_by_session_id=run.id,
+                    )
+                )
+                db.flush()
+                db.add(
+                    Work(
+                        id=run.id,
+                        project_id=project.id,
+                        session_kind_code="work",
+                        autopilot=False,
                     )
                 )
                 container.engine_bus().emit(ProjectChanged(project.id))

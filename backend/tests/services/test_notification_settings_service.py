@@ -184,12 +184,21 @@ def _alarms(container: ServiceContainer) -> bool:
 
 
 def _project(container: ServiceContainer) -> str:
-    """Ada's project, not started; its id, the notification's sequence id."""
+    """Ada's project, a decision waiting on her; its id, the notification's
+    sequence id."""
     with scoped_session(container):
-        project = container.test_data_service().project(
+        data = container.test_data_service()
+        project = data.project(
             InventedProjectCreateSchema.model_validate(
                 {"members": ["ada"], "name": "Camp"}
             )
+        )
+        data.item(
+            project.id,
+            "decision",
+            "Which tent?",
+            "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n",
+            by_pilot=True,
         )
         return str(project.id)
 
