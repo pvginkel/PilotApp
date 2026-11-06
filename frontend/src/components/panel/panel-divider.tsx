@@ -5,8 +5,8 @@
  * the window, dragging one leaving the other (F133). Whatever is kept, the panel stands no narrower
  * than `PANEL_LEAST` and leaves `BESIDE_LEAST` to its left, the timeline's column, a draft's chat
  * or the tab showing, at every width off a phone, 901 px included; a width held in for want of room
- * stays kept as it was. It sets `--panel` on the project's page, which the panel's width and the
- * overlay's inset read (panel.css, overlay.css).
+ * stays kept as it was. It sets `--panel` on the project's page, which the panel's width reads
+ * (panel.css).
  */
 
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
