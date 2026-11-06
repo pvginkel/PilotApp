@@ -5,7 +5,7 @@
  * once the Turn is stored, so that read holds it.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useGetSessionsTurnsBySessionId } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
 import type { ChatRecord } from '@/lib/chat/records';
@@ -17,9 +17,15 @@ export function useSessionTurns(sessionId: string, records: readonly ChatRecord[
   const named = useMemo(() => records.reduce((top, record) => Math.max(top, record.turn ?? 0), 0), [records]);
   const { data, error, isFetching, refetch } = useGetSessionsTurnsBySessionId({ path: { session_id: sessionId } });
   const held = data?.turns.at(-1)?.turn ?? 0;
+  // The newest Turn a re-read was asked for: a re-read that failed is not asked again until a
+  // newer Turn is named, so that a failing read does not loop.
+  const asked = useRef(0);
   useEffect(() => {
-    if (data !== undefined && !isFetching && named > held) void refetch();
-  }, [data, isFetching, named, held, refetch]);
+    if (data === undefined || isFetching || named <= held) return;
+    if (error !== null && named <= asked.current) return;
+    asked.current = named;
+    void refetch();
+  }, [data, error, isFetching, named, held, refetch]);
   useUiStateInstrumentation('session-log.turns', {
     isLoading: isFetching,
     error,
