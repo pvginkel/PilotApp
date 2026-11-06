@@ -97,36 +97,42 @@ test.describe('Documents in tabs', () => {
     timeline,
     overlay,
     docTabs,
+    panel,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Close'), members: [me.handle!] });
-    const [a, b, c] = await Promise.all(
-      ['Alpha', 'Bravo', 'Charlie'].map((title) => projects.place(id, { kind: 'document', title, text: card(title) })),
+    const [a, b, c, d, e] = await Promise.all(
+      ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo'].map((title) => projects.place(id, { kind: 'document', title, text: card(title) })),
     );
     await timeline.open(id);
-    await timeline.item(a).card.open.click();
-    for (const each of [b, c]) {
-      await docTabs.first.click();
-      await timeline.item(each).card.open.click();
-    }
-    // Shown in the order a, c, b: closing b goes back to c, then to a.
-    await docTabs.document(a).show.click();
-    await docTabs.document(c).show.click();
+    await panel.documentsTab.click();
+    for (const each of [a, b, c, d, e]) await panel.document(each).root.click();
+    // Shown in the order d, b, the line a to e: closing b goes back to d, neither of its neighbours
+    // nor the line's last tab.
+    await docTabs.document(d).show.click();
     await docTabs.document(b).show.click();
     await docTabs.document(b).close.click();
-    await expect(page).toHaveURL(documentAddress(id, c));
-    await expect(overlay.title).toHaveText('Charlie');
-    expect(await docTabs.keys()).toEqual([`document ${a}`, `document ${c}`]);
+    await expect(page).toHaveURL(documentAddress(id, d));
+    await expect(overlay.title).toHaveText('Delta');
+    expect(await docTabs.keys()).toEqual([a, c, d, e].map((each) => `document ${each}`));
     // The cross took its tab away under the focus: the tab showing has it.
-    await expect(docTabs.document(c).show).toBeFocused();
+    await expect(docTabs.document(d).show).toBeFocused();
+    // Shown in the order the timeline, c: closing c goes back to the timeline.
+    await docTabs.first.click();
+    await docTabs.document(c).show.click();
+    await docTabs.document(c).close.click();
+    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(overlay.root).toHaveCount(0);
+    expect(await docTabs.keys()).toEqual([a, d, e].map((each) => `document ${each}`));
 
     // Closing a tab that is not showing leaves the tab showing as it is.
-    await docTabs.document(a).root.click({ button: 'middle' });
-    expect(await docTabs.keys()).toEqual([`document ${c}`]);
-    await expect(page).toHaveURL(documentAddress(id, c));
-    await expect(overlay.title).toHaveText('Charlie');
+    await docTabs.document(d).show.click();
+    for (const each of [a, e]) await docTabs.document(each).root.click({ button: 'middle' });
+    expect(await docTabs.keys()).toEqual([`document ${d}`]);
+    await expect(page).toHaveURL(documentAddress(id, d));
+    await expect(overlay.title).toHaveText('Delta');
 
-    await docTabs.document(c).close.click();
+    await docTabs.document(d).close.click();
     await expect(page).toHaveURL(`/projects/${id}`);
     await expect(overlay.root).toHaveCount(0);
     await expect(docTabs.root).toHaveCount(0);
@@ -256,6 +262,35 @@ test.describe('Documents in tabs', () => {
     await panel.document(long).root.click();
     await expect(overlay.title).toHaveText('The long trip');
     expect(await overlay.scrollTop()).toBe(0);
+  });
+
+  test('an attachment’s tab keeps its scroll while another shows for longer than its text is kept unread', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    docTabs,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 520 });
+    await page.clock.install();
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Kept'), members: [me.handle!] });
+    const notice = await projects.place(id, { kind: 'notice', title: 'The camp', text: 'What we saw.\n' });
+    const paragraphs = Array.from({ length: 80 }, (_, index) => `Paragraph ${index + 1} of the map.`).join('\n\n');
+    const [map] = await projects.attach(notice, [{ ...NOTES, title: 'Camp map', filename: 'camp-map.md', content: `${paragraphs}\n` }]);
+    await timeline.open(id);
+    await timeline.item(notice).attachment(map).click();
+    await expect(overlay.attachment.root).toContainText('Paragraph 80 of the map.');
+    await overlay.body.evaluate((body) => body.scrollTo({ top: 300 }));
+    await expect.poll(() => overlay.scrollTop()).toBe(300);
+
+    // Past the five minutes a query no one reads is kept for.
+    await docTabs.first.click();
+    await page.clock.fastForward('06:00');
+    await docTabs.attachment(map).show.click();
+    await expect(overlay.attachment.root).toContainText('Paragraph 80 of the map.');
+    expect(await overlay.scrollTop()).toBe(300);
   });
 
   test('an attachment is a tab of its own, “Attachment of <item>” in its head, its document a link there that shows the document’s tab', async ({

@@ -9,8 +9,10 @@
  */
 
 import { useLayoutEffect, useRef, type MouseEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { BookOpen, CopyX, FileText, List, MessageSquare, NotebookText, Paperclip, X, type LucideIcon } from 'lucide-react';
+import { attachmentTextQuery } from '@/hooks/use-attachment';
 import { TIMELINE, type DocTab, type TabLine } from '@/hooks/use-doc-tabs';
 import { hungById, titleOf } from '@/hooks/use-timeline';
 import {
@@ -121,6 +123,9 @@ function DocumentTab(props: TabProps) {
 
 function AttachmentTab(props: TabProps) {
   const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: props.projectId } });
+  // Fetching nothing, it keeps the text its body reads cached while another tab shows: the tab's
+  // scroll is set back once, as its body mounts.
+  useQuery({ ...attachmentTextQuery(props.tab.id!), enabled: false });
   const hung = data && hungById(data, props.tab.id!);
   return <TabFace {...props} title={hung?.attachment.title ?? 'Attachment'} icon={Paperclip} />;
 }
