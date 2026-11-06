@@ -20,10 +20,9 @@ from app.database import scoped_session
 from app.engine.bus import EngineBus
 from app.exceptions import InvalidOperationException, ValidationException
 from app.models import User
-from app.models.reference import Condition
 from app.schemas.task_schema import TaskInfo, TaskStartResponse, TaskStatus
 from app.schemas.testing_record import InventedProjectCreateSchema
-from app.services.alarm_service import AlarmService
+from app.services.alarm_service import ALARM_SEQUENCE_ID, AlarmService
 from app.services.condition_service import ConditionService
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
@@ -372,7 +371,7 @@ class TestStartSave:
         _save(container, ADA_TOKEN)
 
         wait_until(
-            lambda: set(bridge.shown("ada")) == {project_id, Condition.OUTAGE.value},
+            lambda: set(bridge.shown("ada")) == {project_id, ALARM_SEQUENCE_ID},
             "the project's notification and the outage's alarm shown",
         )
 
@@ -395,7 +394,7 @@ class TestStartSave:
         assert sorted(resubmits, key=lambda call: str(call.sequence_id)) == sorted(
             [
                 FakeCall("submit", project_id, False),
-                FakeCall("submit", Condition.OUTAGE.value, False),
+                FakeCall("submit", ALARM_SEQUENCE_ID, False),
             ],
             key=lambda call: str(call.sequence_id),
         )
@@ -525,6 +524,6 @@ class TestSwitchAlarms:
 
         _switch(container, True)
         wait_until(
-            lambda: set(bridge.shown("ada")) == {Condition.OUTAGE.value},
+            lambda: set(bridge.shown("ada")) == {ALARM_SEQUENCE_ID},
             "the outage's alarm shown again",
         )

@@ -16,6 +16,7 @@ export class ProfilePage {
   readonly tokenProgress: Locator;
   readonly tokenError: Locator;
   readonly alarms: Locator;
+  readonly alarmsNote: Locator;
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('profile');
@@ -30,6 +31,7 @@ export class ProfilePage {
     this.tokenProgress = page.getByTestId('profile.token.progress');
     this.tokenError = page.getByTestId('profile.token.error');
     this.alarms = page.getByTestId('profile.alarms');
+    this.alarmsNote = page.getByTestId('profile.alarms.note');
   }
 
   /** Types `token` and saves it; returns once the save has ended, as `outcome` expects, its one-shot sent or refused. */

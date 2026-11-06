@@ -1,5 +1,5 @@
-"""User: Pilot's row, written by the revisions, and what a row must hold;
-Alarm, what Pilot last sent a person for a Condition."""
+"""User: Pilot's row, written by the revisions, and what a row must hold,
+what Pilot last sent of a person's alarm notification among it."""
 
 from datetime import UTC, datetime
 
@@ -7,8 +7,8 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.models import Alarm, User
-from app.models.reference import Condition, UserKind
+from app.models import User
+from app.models.reference import UserKind
 from tests.support.database import violated_constraint
 
 _SENT = datetime(2026, 10, 12, 14, 2, tzinfo=UTC)
@@ -118,103 +118,64 @@ class TestUser:
         assert violated_constraint(session) == "ck_users_person"
 
 
-class TestAlarm:
-    def test_an_alarm_is_written(self, session: Session, person: User) -> None:
-        alarm = Alarm(
-            user_id=person.id,
-            condition_code=Condition.OUTAGE,
-            standing=True,
-            sent_at=_SENT,
-        )
-        session.add(alarm)
+class TestUserAlarm:
+    def test_a_standing_alarm_notification_is_written(
+        self, session: Session, person: User
+    ) -> None:
+        person.alarm_text = "The controller has been unreachable, +1"
+        person.alarm_sent_at = _SENT
         session.flush()
-        session.refresh(alarm)
+        session.refresh(person)
 
-        assert alarm.id is not None
-        assert alarm.user_kind_code == UserKind.PERSON
-        assert alarm.owed_at is None
+        assert (person.alarm_text, person.alarm_sent_at, person.alarm_owed_at) == (
+            "The controller has been unreachable, +1",
+            _SENT,
+            None,
+        )
 
-    def test_a_person_holds_one_per_condition_of_each(
+    def test_a_dismissed_one_keeps_when_it_went_out(
         self, session: Session, person: User
     ) -> None:
-        session.add_all(
-            Alarm(
-                user_id=person.id,
-                condition_code=condition,
-                standing=True,
-                sent_at=_SENT,
-            )
-            for condition in Condition
-        )
+        person.alarm_sent_at = _SENT
         session.flush()
+        session.refresh(person)
 
-        assert set(
-            session.scalars(
-                select(Alarm.condition_code).where(Alarm.user_id == person.id)
-            )
-        ) == set(Condition)
+        assert (person.alarm_text, person.alarm_sent_at) == (None, _SENT)
 
-    def test_a_second_alarm_for_a_condition_is_refused(
-        self, session: Session, person: User
-    ) -> None:
-        session.add_all(
-            Alarm(
-                user_id=person.id,
-                condition_code=Condition.WEEK_HALT,
-                standing=False,
-                sent_at=_SENT,
-            )
-            for _ in range(2)
-        )
+    def test_a_standing_one_was_sent(self, session: Session, person: User) -> None:
+        person.alarm_text = "The week's usage halt"
 
-        assert violated_constraint(session) == "alarms_user_id_condition_code_key"
-
-    def test_pilot_holds_none(self, session: Session) -> None:
-        pilot = session.scalars(
-            select(User).where(User.kind_code == UserKind.AGENT)
-        ).one()
-        session.add(
-            Alarm(
-                user_id=pilot.id,
-                condition_code=Condition.OUTAGE,
-                standing=True,
-                sent_at=_SENT,
-            )
-        )
-
-        assert violated_constraint(session) == "alarms_user_id_user_kind_code_fkey"
-
-    def test_an_alarm_names_a_person_s_kind(
-        self, session: Session, person: User
-    ) -> None:
-        session.add(
-            Alarm(
-                user_id=person.id,
-                user_kind_code=UserKind.AGENT,
-                condition_code=Condition.OUTAGE,
-                standing=False,
-            )
-        )
-
-        assert violated_constraint(session) == "ck_alarms_person"
-
-    def test_a_standing_alarm_was_sent(self, session: Session, person: User) -> None:
-        session.add(
-            Alarm(user_id=person.id, condition_code=Condition.OUTAGE, standing=True)
-        )
-
-        assert violated_constraint(session) == "ck_alarms_standing_sent"
+        assert violated_constraint(session) == "ck_users_alarm_sent"
 
     def test_a_first_submit_that_failed_is_owed(
         self, session: Session, person: User
     ) -> None:
-        alarm = Alarm(
-            user_id=person.id,
-            condition_code=Condition.FIVE_HOUR_HALT,
-            standing=False,
-            owed_at=_SENT,
-        )
-        session.add(alarm)
+        person.alarm_owed_at = _SENT
         session.flush()
+        session.refresh(person)
 
-        assert (alarm.standing, alarm.sent_at, alarm.owed_at) == (False, None, _SENT)
+        assert (person.alarm_text, person.alarm_sent_at, person.alarm_owed_at) == (
+            None,
+            None,
+            _SENT,
+        )
+
+    # A standing one, a dismissed one and an owed one (DB 238).
+    @pytest.mark.parametrize(
+        "columns",
+        [
+            {"alarm_text": "The week's usage halt", "alarm_sent_at": _SENT},
+            {"alarm_sent_at": _SENT},
+            {"alarm_owed_at": _SENT},
+        ],
+    )
+    def test_pilot_is_sent_none(
+        self, session: Session, columns: dict[str, object]
+    ) -> None:
+        pilot = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        for column, value in columns.items():
+            setattr(pilot, column, value)
+
+        assert violated_constraint(session) == "ck_users_agent"

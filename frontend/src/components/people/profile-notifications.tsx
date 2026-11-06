@@ -162,9 +162,9 @@ export function AlarmsSwitch({ on, tokenSet }: { on: boolean; tokenSet: boolean 
         </span>
         Send me alarms
       </button>
-      <p>
-        A notification while Pilot cannot reach KubeCoder for five minutes, or while a usage limit halts the work, through
-        your token.
+      <p data-testid="profile.alarms.note">
+        A notification while Pilot cannot reach KubeCoder for five minutes, or while the week&rsquo;s usage limit halts
+        the work, through your token.
       </p>
     </>
   );

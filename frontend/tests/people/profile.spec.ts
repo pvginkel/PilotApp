@@ -183,7 +183,7 @@ test.describe("The profile page's notification token", () => {
 });
 
 test.describe("The profile page's alarms switch", () => {
-  test('is on by default, and disabled while no token is set', async ({ people, shell, profile }) => {
+  test("is on by default, disabled while no token is set, and names the outage and the week's limit", async ({ people, shell, profile }) => {
     await people.signIn();
     await shell.open('/profile');
 
@@ -191,6 +191,9 @@ test.describe("The profile page's alarms switch", () => {
     await expect(profile.alarms).toHaveAccessibleName('Send me alarms');
     await expect(profile.alarms).toHaveAttribute('aria-checked', 'true');
     await expect(profile.alarms).toBeDisabled();
+    await expect(profile.alarmsNote).toHaveText(
+      'A notification while Pilot cannot reach KubeCoder for five minutes, or while the week\u2019s usage limit halts the work, through your token.',
+    );
   });
 
   test('turns off and on again with a token set, and stays as turned', async ({ page, people, shell, profile, bridge, deploymentSse }) => {

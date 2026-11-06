@@ -13,8 +13,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import scoped_session
-from app.models import Alarm, Project, ProjectMember, User
-from app.models.reference import Condition, NotificationPriority, UserKind
+from app.models import Project, ProjectMember, User
+from app.models.reference import UserKind
 from app.services.container import ServiceContainer
 from app.services.notification_settings_service import ONE_SHOT_MESSAGE
 from tests.support.fake_notification_bridge import (
@@ -474,8 +474,7 @@ def _standing_membership(
         project_id=project.id,
         user_id=person.id,
         joined_at=sent,
-        notification_priority_code=NotificationPriority.DEFAULT,
-        notification_text="Not started",
+        notification_text="Which tent?",
         notification_url=f"https://pilot.example.com/projects/{project.id}",
         notification_sent_at=sent,
     )
@@ -484,16 +483,10 @@ def _standing_membership(
     return member
 
 
-def _standing_alarm(session: Session, person: User) -> Alarm:
-    alarm = Alarm(
-        user_id=person.id,
-        condition_code=Condition.WEEK_HALT,
-        standing=True,
-        sent_at=datetime(2026, 10, 30, 9, 0, tzinfo=UTC),
-    )
-    session.add(alarm)
+def _standing_alarm(session: Session, person: User) -> None:
+    person.alarm_text = "The week's usage halt"
+    person.alarm_sent_at = datetime(2026, 10, 30, 9, 0, tzinfo=UTC)
     session.flush()
-    return alarm
 
 
 class TestClearNotificationToken:
@@ -507,7 +500,7 @@ class TestClearNotificationToken:
     ) -> None:
         person.notification_token = _seal(container, ADA_TOKEN)
         member = _standing_membership(session, project, person)
-        alarm = _standing_alarm(session, person)
+        _standing_alarm(session, person)
         _sign_in(client, subject="subject-ada", name="Ada Example")
 
         response = client.delete(TOKEN)
@@ -516,15 +509,13 @@ class TestClearNotificationToken:
         assert response.get_json()["notification_token_set"] is False
         session.refresh(person)
         session.refresh(member)
-        session.refresh(alarm)
         assert person.notification_token is None
         assert (
-            member.notification_priority_code,
             member.notification_text,
             member.notification_url,
             member.notification_owed_at,
-        ) == (None, None, None, None)
-        assert (alarm.standing, alarm.owed_at) == (False, None)
+        ) == (None, None, None)
+        assert (person.alarm_text, person.alarm_owed_at) == (None, None)
 
     def test_with_no_token_there_is_nothing_to_clear(
         self, client: FlaskClient, person: User

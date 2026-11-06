@@ -24,7 +24,6 @@ from app.database import scoped_session
 from app.engine.bus import EngineBus, ProjectChanged, WorkMoved
 from app.models import Project, ProjectMember, User
 from app.models.reference import (
-    NotificationPriority,
     ProgressState,
     SessionState,
     TaskStatus,
@@ -309,13 +308,11 @@ def _memberships(
 
 def _last_sent(
     container: ServiceContainer, project_id: uuid.UUID, handle: str = "ada"
-) -> tuple[NotificationPriority | None, str | None, str | None]:
+) -> tuple[str | None, str | None]:
+    """The text and `url` the person's latest membership last sent; none
+    while none stands."""
     membership = _memberships(container, project_id, handle)[-1]
-    return (
-        membership.notification_priority_code,
-        membership.notification_text,
-        membership.notification_url,
-    )
+    return membership.notification_text, membership.notification_url
 
 
 def _owed(container: ServiceContainer, project_id: uuid.UUID) -> bool:
@@ -405,7 +402,7 @@ class TestNotificationReconcileServiceReconcile:
         _reconcile(service, project_id)
 
         assert bridge.calls("ada") == []
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
         assert _reconciles("unchanged") == unchanged + 2
 
         tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
@@ -425,12 +422,10 @@ class TestNotificationReconcileServiceReconcile:
         assert bridge.calls("ben") == []
         [membership] = _memberships(container, project_id)
         assert (
-            membership.notification_priority_code,
             membership.notification_text,
             membership.notification_url,
             membership.notification_owed_at,
         ) == (
-            NotificationPriority.HIGH,
             "Which tent?",
             f"{_timeline(container, project_id)}/items/{tent}",
             None,
@@ -511,11 +506,7 @@ class TestNotificationReconcileServiceReconcile:
             False,
             False,
         ]
-        assert _last_sent(container, project_id) == (
-            NotificationPriority.HIGH,
-            "Storm shelter?",
-            shown.url,
-        )
+        assert _last_sent(container, project_id) == ("Storm shelter?", shown.url)
 
     def test_answering_the_last_ask_dismisses_and_the_next_alerts_anew(
         self,
@@ -533,7 +524,7 @@ class TestNotificationReconcileServiceReconcile:
         _reconcile(service, project_id)
 
         assert bridge.shown("ada") == {}
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
 
         _bear(container, project_id, "decision", "Which site?", DECISION)
         _reconcile(service, project_id)
@@ -633,7 +624,7 @@ class TestNotificationReconcileServiceReconcile:
 
         assert bridge.shown("ada") == {}
         [closed] = _memberships(container, project_id)
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
         assert closed.notification_sent_at is not None
         assert closed.notification_sent_at > submitted_at
 
@@ -647,8 +638,8 @@ class TestNotificationReconcileServiceReconcile:
             FakeCall("submit", str(project_id), True),
         ]
         closed, rejoined = _memberships(container, project_id)
-        assert closed.notification_priority_code is None
-        assert rejoined.notification_priority_code is NotificationPriority.HIGH
+        assert closed.notification_text is None
+        assert rejoined.notification_text == "Which tent?"
 
     def test_archive_dismisses_and_bring_back_submits(
         self,
@@ -665,12 +656,12 @@ class TestNotificationReconcileServiceReconcile:
         _transition(container, project_id, TransitionKind.ARCHIVED)
         _reconcile(service, project_id)
         assert bridge.shown("ada") == {}
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
 
         _transition(container, project_id, TransitionKind.BROUGHT_BACK)
         _reconcile(service, project_id)
         assert _shown(bridge, project_id).message == "Which tent?"
-        assert _last_sent(container, project_id)[0] is NotificationPriority.HIGH
+        assert _last_sent(container, project_id)[0] is not None
 
     def test_a_draft_and_a_finished_project_hold_theirs_while_something_waits(
         self,
@@ -714,7 +705,7 @@ class TestNotificationReconcileServiceOwed:
         _reconcile(service, project_id)
 
         assert _owed(container, project_id)
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
         assert _reconciles("owed") == owed + 2
         failures = [
             record
@@ -730,7 +721,7 @@ class TestNotificationReconcileServiceOwed:
         _reconcile(service, project_id)
 
         assert not _owed(container, project_id)
-        assert _last_sent(container, project_id)[0] is NotificationPriority.HIGH
+        assert _last_sent(container, project_id)[0] is not None
         log.wait_for(
             rf"The owed submit of project {project_id}'s notification to ada went out"
         )
@@ -768,14 +759,14 @@ class TestNotificationReconcileServiceOwed:
         _leave(container, "ada", project_id)
         _reconcile(service, project_id)
         assert _owed(container, project_id)
-        assert _last_sent(container, project_id)[0] is NotificationPriority.HIGH
+        assert _last_sent(container, project_id)[0] is not None
 
         bridge.unreachable(on=False)
         _reconcile(service, project_id)
 
         assert bridge.shown("ada") == {}
         assert not _owed(container, project_id)
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
 
     def test_a_rejoin_takes_the_place_of_an_owed_dismiss(
         self,
@@ -799,12 +790,9 @@ class TestNotificationReconcileServiceOwed:
         assert _shown(bridge, project_id).message == "Which tent?"
         assert [call.call for call in bridge.calls("ada")] == ["submit", "submit"]
         closed, rejoined = _memberships(container, project_id)
-        assert (closed.notification_priority_code, closed.notification_owed_at) == (
-            None,
-            None,
-        )
-        assert (rejoined.notification_priority_code, rejoined.notification_owed_at) == (
-            NotificationPriority.HIGH,
+        assert (closed.notification_text, closed.notification_owed_at) == (None, None)
+        assert (rejoined.notification_text, rejoined.notification_owed_at) == (
+            "Which tent?",
             None,
         )
 
@@ -913,7 +901,8 @@ class TestNotificationReconcileServiceStartup:
     ) -> None:
         """V12: the notifications the ladder left standing, at `min` with
         nothing waiting and at `default` with an ask, as the release before
-        this one sent and recorded them."""
+        this one sent them and revision 0028 keeps them: their text and `url`,
+        their priority dropped."""
         idle = _project(container, environment_id=None)
         asking = _project(container, environment_id=None)
         tent = _ask(container, asking)
@@ -937,7 +926,6 @@ class TestNotificationReconcileServiceStartup:
                 membership = db.scalars(
                     select(ProjectMember).where(ProjectMember.project_id == project_id)
                 ).one()
-                membership.notification_priority_code = NotificationPriority(priority)
                 membership.notification_text = text
                 membership.notification_url = url
                 membership.notification_sent_at = datetime.now(UTC)
@@ -957,9 +945,8 @@ class TestNotificationReconcileServiceStartup:
                 alerted=False,
             )
         }
-        assert _last_sent(container, idle) == (None, None, None)
+        assert _last_sent(container, idle) == (None, None)
         assert _last_sent(container, asking) == (
-            NotificationPriority.HIGH,
             "Which tent?",
             f"{_timeline(container, asking)}/items/{tent}",
         )
@@ -1184,7 +1171,7 @@ class TestNotificationReconcileServiceSpacing:
 
         assert bridge.calls("ada") == []
         assert _owed(container, project_id)
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
 
     def test_two_processes_keep_one_window_and_send_once_at_its_end(
         self,
@@ -1332,9 +1319,9 @@ class TestNotificationReconcileServiceSubmitAll:
 
         _set(container, service, "ada", "token-of-ada-rotated")
 
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
         # An archived project's is left to its reconcile, through the token.
-        assert _last_sent(container, archived)[0] is NotificationPriority.HIGH
+        assert _last_sent(container, archived)[0] is not None
         _reconcile(service, project_id)
         _reconcile(service, archived)
         assert [call.call for call in bridge.calls("ada")] == [
@@ -1344,7 +1331,7 @@ class TestNotificationReconcileServiceSubmitAll:
             "dismiss",
         ]
         assert set(bridge.shown("ada")) == {str(project_id)}
-        assert _last_sent(container, project_id)[0] is NotificationPriority.HIGH
+        assert _last_sent(container, project_id)[0] is not None
 
     def test_its_reconciles_are_asked_for_once_it_commits(
         self,
@@ -1387,7 +1374,7 @@ class TestNotificationReconcileServiceDismissAll:
         _clear(container, service, "ada")
 
         for project_id in (standing, owed):
-            assert _last_sent(container, project_id) == (None, None, None)
+            assert _last_sent(container, project_id) == (None, None)
             assert not _owed(container, project_id)
         coordinator.fire_startup()
         log.wait_for(rf"Loop {NOTIFICATION_CLEAR_JOB}:1 ended")
@@ -1468,7 +1455,6 @@ class TestNotificationReconcileServiceDismissAll:
             membership = db.scalars(
                 select(ProjectMember).where(ProjectMember.project_id == project_id)
             ).one()
-            membership.notification_priority_code = NotificationPriority.HIGH
             membership.notification_text = "Which tent?"
             membership.notification_url = _timeline(container, project_id)
             membership.notification_sent_at = datetime.now(UTC)
@@ -1481,7 +1467,7 @@ class TestNotificationReconcileServiceDismissAll:
             _set(container, service, "ada", ADA_TOKEN)
 
         start.assert_not_called()
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
 
 
 class TestNotificationReconcileServiceInFlight:
@@ -1505,7 +1491,7 @@ class TestNotificationReconcileServiceInFlight:
             FakeCall("dismiss", str(project_id), False),
         ]
         assert bridge.shown("ada") == {}
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
         assert not _owed(container, project_id)
         assert _reconciles("superseded") == superseded + 1
         assert _clear_dismisses("sent") == sent + 1
@@ -1548,7 +1534,7 @@ class TestNotificationReconcileServiceInFlight:
             "dismiss",
         ]
         assert bridge.shown("ada") == {}
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
 
     @pytest.mark.parametrize("answered", [True, False])
     def test_a_clear_committing_during_the_write_back_reads_what_it_wrote(
@@ -1582,7 +1568,7 @@ class TestNotificationReconcileServiceInFlight:
             _reconcile(service, project_id)
         clears[0].result()
 
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
         assert not _owed(container, project_id)
         _reconcile(service, project_id)
         bridge.unreachable(on=False)
@@ -1609,11 +1595,11 @@ class TestNotificationReconcileServiceInFlight:
         bridge.on_submit = replace
 
         _reconcile(service, project_id)
-        assert _last_sent(container, project_id) == (None, None, None)
+        assert _last_sent(container, project_id) == (None, None)
         _reconcile(service, project_id)
 
         assert [call.call for call in bridge.calls("ada")] == ["submit", "submit"]
-        assert _last_sent(container, project_id)[0] is NotificationPriority.HIGH
+        assert _last_sent(container, project_id)[0] is not None
 
     def test_two_processes_take_turns_and_the_phone_ends_on_the_latest_state(
         self,
@@ -1642,4 +1628,4 @@ class TestNotificationReconcileServiceInFlight:
 
         assert [call.call for call in bridge.calls("ada")] == ["submit"] * 3
         assert _shown(bridge, project_id).message == "Which stove?, +2"
-        assert _last_sent(container, project_id)[1] == "Which stove?, +2"
+        assert _last_sent(container, project_id)[0] == "Which stove?, +2"

@@ -1,5 +1,5 @@
 """The conditions that hold all work, which the gold bar shows (UC *The gold
-bar*; DB Condition): the controller unreachable (F125; design 2 §13.4), Pilot
+bar*): the controller unreachable (F125; design 2 §13.4), Pilot
 updating its store, a Store Update unlifted (F144.4; design 5 D8), and the
 week's and the five-hour usage halts (F135.7; `UsageHalts`).
 

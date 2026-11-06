@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models import Project, ProjectMember, ProjectTransition, User
-from app.models.reference import NotificationPriority, ProjectState, TransitionKind
+from app.models.reference import ProjectState, TransitionKind
 from tests.support.database import violated_constraint
 
 
@@ -146,8 +146,7 @@ class TestProjectMember:
             project_id=project.id,
             user_id=person.id,
             joined_at=sent,
-            notification_priority_code=NotificationPriority.DEFAULT,
-            notification_text="Draft · Decision waiting: Pick the name",
+            notification_text="Pick the name, +1",
             notification_url=f"https://pilot.example.com/projects/{project.id}",
             notification_sent_at=sent,
         )
@@ -155,7 +154,7 @@ class TestProjectMember:
         session.flush()
         session.refresh(member)
 
-        assert member.notification_priority_code == NotificationPriority.DEFAULT
+        assert member.notification_text == "Pick the name, +1"
         assert member.notification_owed_at is None
 
     def test_a_dismissed_notification_keeps_when_it_went_out(
@@ -171,8 +170,12 @@ class TestProjectMember:
         )
         session.add(member)
         session.flush()
+        session.refresh(member)
 
-        assert member.notification_priority_code is None
+        assert (member.notification_text, member.notification_sent_at) == (
+            None,
+            dismissed,
+        )
 
     def test_a_submit_never_sent_is_owed(
         self, session: Session, project: Project, person: User
@@ -192,18 +195,14 @@ class TestProjectMember:
             owed,
         )
 
-    # Each leaves one of the three out of a standing notification.
-    @pytest.mark.parametrize(
-        "missing",
-        ["notification_priority_code", "notification_text", "notification_url"],
-    )
-    def test_a_standing_notification_has_its_priority_text_and_url(
+    # Each leaves one of the two out of a standing notification.
+    @pytest.mark.parametrize("missing", ["notification_text", "notification_url"])
+    def test_a_standing_notification_has_its_text_and_url(
         self, session: Session, project: Project, person: User, missing: str
     ) -> None:
         sent = datetime(2026, 10, 14, 15, 5, tzinfo=UTC)
         values: dict[str, object] = {
-            "notification_priority_code": NotificationPriority.MIN,
-            "notification_text": "Draft",
+            "notification_text": "Pick the name",
             "notification_url": f"https://pilot.example.com/projects/{project.id}",
         }
         del values[missing]
@@ -227,8 +226,7 @@ class TestProjectMember:
                 project_id=project.id,
                 user_id=person.id,
                 joined_at=datetime(2026, 10, 14, 15, 5, tzinfo=UTC),
-                notification_priority_code=NotificationPriority.HIGH,
-                notification_text="Draft · Decision waiting: Pick the name",
+                notification_text="Pick the name",
                 notification_url=f"https://pilot.example.com/projects/{project.id}",
             )
         )

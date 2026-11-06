@@ -1,12 +1,13 @@
-"""The alarms (F142; DB Alarm, decision 55; V09, V10, V16, V18, V19): a
-standing notification per person and condition that holds, submitted and
-dismissed through the fake bridge.
+"""The alarms (F142, F135.7, F144.4; DB decision 70; V06, V12): one
+notification per person, under one sequence id, standing while the outage or
+the week's halt is due, submitted, updated and dismissed through the fake
+bridge.
 
-The halts' alarms are proven one step in from the conditions service, the
-reconcile driven with them holding by their Condition codes (the B1 ruling);
-the wiring from the conditions service with the outage. Every test is on a
-database of its own: an alarm's turn is an advisory lock on a connection of
-its own, which reads committed rows alone."""
+The halts are proven one step in from the conditions service, the reconcile
+driven with them holding by their codes; the wiring from the conditions
+service with the outage and the store's update. Every test is on a database of
+its own: a person's turn is an advisory lock on a connection of its own, which
+reads committed rows alone."""
 
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
@@ -15,19 +16,18 @@ from unittest.mock import patch
 
 import pytest
 from flask import Flask
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.database import scoped_session
-from app.models import Alarm, StoreUpdate, User
-from app.models.reference import Condition
+from app.models import StoreUpdate, User
+from app.schemas.conditions import ConditionCode
 from app.services.alarm_service import (
     ALARM_CLEAR_DISMISSES_TOTAL,
     ALARM_CLEAR_JOB,
     ALARM_JOB,
     ALARM_RECONCILES_TOTAL,
-    ALARM_TEXTS,
+    ALARM_SEQUENCE_ID,
     AlarmService,
-    AlarmText,
 )
 from app.services.condition_service import ConditionService
 from app.services.container import ServiceContainer
@@ -55,8 +55,11 @@ BEN_TOKEN = "token-of-ben"
 LOGGER = "app.services.alarm_service"
 SUPERVISOR_LOGGER = "app.services.supervisor"
 LONG_AGO = timedelta(hours=1)
+OUTAGE = "The controller has been unreachable"
+WEEK = "The week's usage halt"
 
 type _Built = tuple[AlarmService, ControllerOutage, Supervisor, LifecycleCoordinator]
+type _LastSent = tuple[str | None, datetime | None, datetime | None]
 
 
 @pytest.fixture(autouse=True)
@@ -129,7 +132,9 @@ def _service(
     return service, outage, supervisor, coordinator
 
 
-def _reconcile(service: AlarmService, holding: Mapping[Condition, datetime]) -> None:
+def _reconcile(
+    service: AlarmService, holding: Mapping[ConditionCode, datetime]
+) -> None:
     service.reconcile_holding(holding, LoopHandle("test"))
 
 
@@ -180,47 +185,45 @@ def _clear(container: ServiceContainer, service: AlarmService, handle: str) -> N
         service.dismiss_all(container.db_session(), person, token)
 
 
-def _alarm(
-    container: ServiceContainer, handle: str, condition: Condition
-) -> Alarm | None:
-    """The person's Alarm for the condition, as committed."""
-    with scoped_session(container) as db:
-        alarm = db.scalars(
-            select(Alarm)
-            .join(User, User.id == Alarm.user_id)
-            .where(User.handle == handle, Alarm.condition_code == condition)
-        ).one_or_none()
-        db.expunge_all()
-        return alarm
+def _last_sent(container: ServiceContainer, handle: str) -> _LastSent:
+    """The text, sent time and owed time of the person's alarm notification,
+    as committed."""
+    with scoped_session(container):
+        person = _person(container, handle)
+        return person.alarm_text, person.alarm_sent_at, person.alarm_owed_at
 
 
-def _standing(container: ServiceContainer, handle: str, condition: Condition) -> bool:
-    alarm = _alarm(container, handle, condition)
-    return alarm is not None and alarm.standing
+def _standing(container: ServiceContainer, handle: str) -> bool:
+    return _last_sent(container, handle)[0] is not None
 
 
-def _owed(container: ServiceContainer, handle: str, condition: Condition) -> bool:
-    alarm = _alarm(container, handle, condition)
-    return alarm is not None and alarm.owed_at is not None
+def _owed(container: ServiceContainer, handle: str) -> bool:
+    return _last_sent(container, handle)[2] is not None
 
 
 def _holders(container: ServiceContainer) -> set[str]:
-    """The handles of every User holding an Alarm."""
+    """The handles of every User whose alarm notification was ever sent or is
+    owed."""
     with scoped_session(container) as db:
         return set(
-            db.scalars(select(User.handle).join(Alarm, Alarm.user_id == User.id))
+            db.scalars(
+                select(User.handle).where(
+                    or_(
+                        User.alarm_sent_at.is_not(None), User.alarm_owed_at.is_not(None)
+                    )
+                )
+            )
         )
 
 
 def _expected(
-    container: ServiceContainer, condition: Condition, *, alerted: bool = True
+    container: ServiceContainer, message: str, *, alerted: bool = True
 ) -> FakeNotification:
-    text = ALARM_TEXTS[condition]
     return FakeNotification(
-        sequence_id=condition.value,
-        priority=text.priority,
-        title=text.title,
-        message=text.message,
+        sequence_id=ALARM_SEQUENCE_ID,
+        priority="high",
+        title="Pilot",
+        message=message,
         url=f"{container.config().baseurl}/",
         alerted=alerted,
     )
@@ -242,49 +245,31 @@ class TestAlarmServiceHolding:
 
         assert service.holding() == {}
 
-    def test_the_outage_holds_by_its_condition_code_from_its_turn_on(
+    def test_the_outage_holds_by_its_code_from_its_turn_on(
         self, container: ServiceContainer, supervise: Supervise
     ) -> None:
         service, outage, _, _ = _service(container, supervise)
 
         outage.call_unanswered()
 
-        assert service.holding() == {Condition.OUTAGE: outage.since}
+        assert service.holding() == {ConditionCode.OUTAGE: outage.since}
 
-    def test_the_stores_update_holds_by_its_condition_code_from_its_made_at(
+    def test_the_stores_update_holds_by_its_code_from_its_made_at(
         self, container: ServiceContainer, supervise: Supervise
     ) -> None:
         service, _, _, _ = _service(container, supervise)
         with scoped_session(container) as db:
             made_at = hold(db).made_at
 
-        assert service.holding() == {Condition.STORE_UPDATE: made_at}
-
-    def test_every_condition_has_its_fixed_text(self) -> None:
-        assert set(ALARM_TEXTS) == set(Condition)
-
-    def test_the_stores_update_alarms_at_default_priority_in_design_5s_words(
-        self,
-    ) -> None:
-        """Q2: it alarms, `default` priority, as the five-hour halt does."""
-        assert ALARM_TEXTS[Condition.STORE_UPDATE] == AlarmText(
-            title="Pilot is updating its store",
-            message="No chat answers and no job starts until it is done.",
-            priority="default",
-        )
+        assert service.holding() == {ConditionCode.STORE_UPDATE: made_at}
 
 
 class TestAlarmServiceReconcile:
-    @pytest.mark.parametrize(
-        "condition",
-        [Condition.WEEK_HALT, Condition.FIVE_HOUR_HALT, Condition.STORE_UPDATE],
-    )
-    def test_a_halt_or_the_stores_update_is_submitted_at_once_to_each_person_with_a_token_and_the_switch(
+    def test_the_weeks_halt_is_submitted_at_once_to_each_person_with_a_token_and_the_switch(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
-        condition: Condition,
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         _give_token(container, "ben", BEN_TOKEN)
@@ -293,19 +278,36 @@ class TestAlarmServiceReconcile:
         service, _, _, _ = _service(container, supervise)
         sent = _reconciles("sent")
 
-        _reconcile(service, {condition: _now()})
+        _reconcile(service, {ConditionCode.WEEK_HALT: _now()})
 
-        assert bridge.shown("ada") == {condition.value: _expected(container, condition)}
+        assert bridge.shown("ada") == {ALARM_SEQUENCE_ID: _expected(container, WEEK)}
         assert bridge.calls("ben") == []
-        alarm = _alarm(container, "ada", condition)
-        assert alarm is not None
-        assert (alarm.standing, alarm.owed_at) == (True, None)
-        assert alarm.sent_at is not None
+        text, sent_at, owed_at = _last_sent(container, "ada")
+        assert (text, owed_at) == (WEEK, None)
+        assert sent_at is not None
         # Ben with the switch off, Cal with no token, and Pilot: none.
         assert _holders(container) == {"ada"}
         assert _reconciles("sent") == sent + 1
 
-    def test_a_halt_that_ceases_is_dismissed(
+    @pytest.mark.parametrize(
+        "condition", [ConditionCode.FIVE_HOUR_HALT, ConditionCode.STORE_UPDATE]
+    )
+    def test_the_five_hour_halt_and_the_stores_update_alarm_nobody(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+        condition: ConditionCode,
+    ) -> None:
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _, _ = _service(container, supervise)
+
+        _reconcile(service, {condition: _now() - LONG_AGO})
+
+        assert bridge.calls("ada") == []
+        assert _holders(container) == set()
+
+    def test_the_last_condition_that_ceases_dismisses_it(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
@@ -313,22 +315,20 @@ class TestAlarmServiceReconcile:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        _reconcile(service, {Condition.WEEK_HALT: _now()})
-        submitted = _alarm(container, "ada", Condition.WEEK_HALT)
-        assert submitted is not None and submitted.sent_at is not None
+        _reconcile(service, {ConditionCode.WEEK_HALT: _now()})
+        submitted = _last_sent(container, "ada")[1]
+        assert submitted is not None
 
         _reconcile(service, {})
 
         assert bridge.shown("ada") == {}
         assert bridge.calls("ada") == [
-            FakeCall("submit", "week_halt", True),
-            FakeCall("dismiss", "week_halt", False),
+            FakeCall("submit", ALARM_SEQUENCE_ID, True),
+            FakeCall("dismiss", ALARM_SEQUENCE_ID, False),
         ]
-        dismissed = _alarm(container, "ada", Condition.WEEK_HALT)
-        assert dismissed is not None
-        assert (dismissed.standing, dismissed.owed_at) == (False, None)
-        assert dismissed.sent_at is not None
-        assert dismissed.sent_at > submitted.sent_at
+        text, dismissed, owed_at = _last_sent(container, "ada")
+        assert (text, owed_at) == (None, None)
+        assert dismissed is not None and dismissed > submitted
 
     def test_what_stands_is_not_sent_again(
         self,
@@ -338,16 +338,51 @@ class TestAlarmServiceReconcile:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        holding = {Condition.WEEK_HALT: _now()}
+        holding = {ConditionCode.WEEK_HALT: _now()}
         _reconcile(service, holding)
         unchanged = _reconciles("unchanged")
 
         _reconcile(service, holding)
 
-        assert bridge.calls("ada") == [FakeCall("submit", "week_halt", True)]
+        assert bridge.calls("ada") == [FakeCall("submit", ALARM_SEQUENCE_ID, True)]
         assert _reconciles("unchanged") == unchanged + 1
 
-    def test_each_condition_has_an_alarm_of_its_own(
+    @pytest.mark.parametrize(
+        ("outage_age", "week_age", "text"),
+        [
+            pytest.param(2, 1, f"{WEEK}, +1", id="the-weeks-halt-latest"),
+            pytest.param(1, 2, f"{OUTAGE}, +1", id="the-outage-latest"),
+        ],
+    )
+    def test_its_text_is_the_conditions_due_the_latest_begun_first(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+        outage_age: int,
+        week_age: int,
+        text: str,
+    ) -> None:
+        """The five-hour halt and the store's update, begun last, count for
+        nothing."""
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _, _ = _service(container, supervise)
+        now = _now()
+
+        _reconcile(
+            service,
+            {
+                ConditionCode.OUTAGE: now - outage_age * LONG_AGO,
+                ConditionCode.WEEK_HALT: now - week_age * LONG_AGO,
+                ConditionCode.FIVE_HOUR_HALT: now,
+                ConditionCode.STORE_UPDATE: now,
+            },
+        )
+
+        assert bridge.shown("ada") == {ALARM_SEQUENCE_ID: _expected(container, text)}
+        assert _last_sent(container, "ada")[0] == text
+
+    def test_a_turn_of_the_conditions_due_updates_it_in_place_silently(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
@@ -355,28 +390,32 @@ class TestAlarmServiceReconcile:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        since = _now() - LONG_AGO
+        week = _now() - 2 * LONG_AGO
+        outage = _now() - LONG_AGO
+        _reconcile(service, {ConditionCode.WEEK_HALT: week})
+
         _reconcile(
-            service,
-            {
-                Condition.OUTAGE: since,
-                Condition.STORE_UPDATE: since,
-                Condition.WEEK_HALT: since,
-                Condition.FIVE_HOUR_HALT: since,
-            },
+            service, {ConditionCode.WEEK_HALT: week, ConditionCode.OUTAGE: outage}
         )
-        assert bridge.shown("ada") == {
-            condition.value: _expected(container, condition) for condition in Condition
-        }
-
-        _reconcile(service, {Condition.FIVE_HOUR_HALT: since})
 
         assert bridge.shown("ada") == {
-            "five_hour_halt": _expected(container, Condition.FIVE_HOUR_HALT)
+            ALARM_SEQUENCE_ID: _expected(container, f"{OUTAGE}, +1", alerted=False)
         }
+
+        _reconcile(service, {ConditionCode.OUTAGE: outage})
+
+        assert bridge.shown("ada") == {
+            ALARM_SEQUENCE_ID: _expected(container, OUTAGE, alerted=False)
+        }
+        assert bridge.calls("ada") == [
+            FakeCall("submit", ALARM_SEQUENCE_ID, True),
+            FakeCall("submit", ALARM_SEQUENCE_ID, False),
+            FakeCall("submit", ALARM_SEQUENCE_ID, False),
+        ]
+        assert _last_sent(container, "ada")[0] == OUTAGE
 
     @pytest.mark.parametrize(("seconds", "due"), [(299, False), (301, True)])
-    def test_the_outages_alarm_is_due_once_the_outage_has_held_its_time(
+    def test_the_outage_is_due_once_it_has_held_its_time(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
@@ -387,10 +426,12 @@ class TestAlarmServiceReconcile:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise, outage_after_seconds=300)
 
-        _reconcile(service, {Condition.OUTAGE: _now() - timedelta(seconds=seconds)})
+        _reconcile(service, {ConditionCode.OUTAGE: _now() - timedelta(seconds=seconds)})
 
-        assert ("outage" in bridge.shown("ada")) is due
-        assert _standing(container, "ada", Condition.OUTAGE) is due
+        assert bridge.shown("ada") == (
+            {ALARM_SEQUENCE_ID: _expected(container, OUTAGE)} if due else {}
+        )
+        assert _standing(container, "ada") is due
 
 
 class TestAlarmServiceConditions:
@@ -444,43 +485,36 @@ class TestAlarmServiceConditions:
         since = outage.since
         assert since is not None
 
-        wait_until(
-            lambda: _standing(container, "ada", Condition.OUTAGE),
-            "the outage's alarm submitted",
-        )
-        assert "outage" in bridge.shown("ada")
-        alarm = _alarm(container, "ada", Condition.OUTAGE)
-        assert alarm is not None and alarm.sent_at is not None
-        assert alarm.sent_at - since >= timedelta(seconds=0.3)
+        wait_until(lambda: _standing(container, "ada"), "the outage's alarm submitted")
+        assert bridge.shown("ada") == {ALARM_SEQUENCE_ID: _expected(container, OUTAGE)}
+        sent_at = _last_sent(container, "ada")[1]
+        assert sent_at is not None
+        assert sent_at - since >= timedelta(seconds=0.3)
 
         outage.probe_answered()
 
         wait_until(lambda: bridge.shown("ada") == {}, "the outage's alarm dismissed")
         assert [call.call for call in bridge.calls("ada")] == ["submit", "dismiss"]
 
-    def test_the_stores_update_reaches_the_phone_at_once_and_leaves_at_its_lift(
+    def test_the_stores_update_reaches_no_phone(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
     ) -> None:
-        """Read through the conditions service, due from its `made_at` with
-        no wait of the outage's (Q2)."""
+        """Read through the conditions service, which holds it until its
+        lift."""
         _give_token(container, "ada", ADA_TOKEN)
-        service, _, _, _ = _service(container, supervise, outage_after_seconds=3600)
+        service, _, _, _ = _service(container, supervise)
         with scoped_session(container) as db:
             update_id = hold(db).id
 
         service.reconcile(LoopHandle("test"))
-
-        assert bridge.shown("ada") == {
-            "store_update": _expected(container, Condition.STORE_UPDATE)
-        }
         with scoped_session(container) as db:
             lift(db, db.get_one(StoreUpdate, update_id))
         service.reconcile(LoopHandle("test"))
-        assert bridge.shown("ada") == {}
-        assert [call.call for call in bridge.calls("ada")] == ["submit", "dismiss"]
+
+        assert bridge.calls("ada") == []
 
     def test_startup_dismisses_an_outage_alarm_a_stopped_process_left_standing(
         self,
@@ -490,17 +524,14 @@ class TestAlarmServiceConditions:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         earlier, _, _, _ = _service(container, supervise)
-        _reconcile(earlier, {Condition.OUTAGE: _now() - LONG_AGO})
-        assert "outage" in bridge.shown("ada")
+        _reconcile(earlier, {ConditionCode.OUTAGE: _now() - LONG_AGO})
+        assert ALARM_SEQUENCE_ID in bridge.shown("ada")
         _, _, _, coordinator = _service(container, supervise)
 
         coordinator.fire_startup()
 
         wait_until(lambda: bridge.shown("ada") == {}, "the outage's alarm dismissed")
-        wait_until(
-            lambda: not _standing(container, "ada", Condition.OUTAGE),
-            "the dismiss recorded",
-        )
+        wait_until(lambda: not _standing(container, "ada"), "the dismiss recorded")
 
 
 class TestAlarmServiceOwed:
@@ -513,23 +544,22 @@ class TestAlarmServiceOwed:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        holding = {Condition.WEEK_HALT: _now()}
+        holding = {ConditionCode.WEEK_HALT: _now()}
         owed = _reconciles("owed")
         bridge.unreachable()
 
         _reconcile(service, holding)
         _reconcile(service, holding)
 
-        alarm = _alarm(container, "ada", Condition.WEEK_HALT)
-        assert alarm is not None
-        assert (alarm.standing, alarm.sent_at) == (False, None)
-        assert alarm.owed_at is not None
+        text, sent_at, owed_at = _last_sent(container, "ada")
+        assert (text, sent_at) == (None, None)
+        assert owed_at is not None
         assert _reconciles("owed") == owed + 2
         failures = [
             record
             for record in log.records
             if record.getMessage().startswith(
-                "The submit of the week_halt alarm to ada is owed"
+                "The submit of the alarm notification to ada is owed"
             )
         ]
         assert len(failures) == 1
@@ -538,9 +568,9 @@ class TestAlarmServiceOwed:
         bridge.unreachable(on=False)
         _reconcile(service, holding)
 
-        assert _standing(container, "ada", Condition.WEEK_HALT)
-        assert not _owed(container, "ada", Condition.WEEK_HALT)
-        log.wait_for("The owed submit of the week_halt alarm to ada went out")
+        assert _standing(container, "ada")
+        assert not _owed(container, "ada")
+        log.wait_for("The owed submit of the alarm notification to ada went out")
 
     def test_a_refused_token_is_owed(
         self,
@@ -553,10 +583,32 @@ class TestAlarmServiceOwed:
         service, _, _, _ = _service(container, supervise)
         bridge.rotate_token("ada", "a-rotated-token")
 
-        _reconcile(service, {Condition.WEEK_HALT: _now()})
+        _reconcile(service, {ConditionCode.WEEK_HALT: _now()})
 
-        assert _owed(container, "ada", Condition.WEEK_HALT)
-        log.wait_for(r"The submit of the week_halt alarm to ada is owed: .*401.*")
+        assert _owed(container, "ada")
+        log.wait_for(r"The submit of the alarm notification to ada is owed: .*401.*")
+
+    def test_an_update_the_bridge_does_not_take_keeps_what_was_last_sent(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _, _ = _service(container, supervise)
+        week = _now() - 2 * LONG_AGO
+        _reconcile(service, {ConditionCode.WEEK_HALT: week})
+        both = {ConditionCode.WEEK_HALT: week, ConditionCode.OUTAGE: _now() - LONG_AGO}
+        bridge.unreachable()
+
+        _reconcile(service, both)
+
+        assert _last_sent(container, "ada")[0] == WEEK
+        assert _owed(container, "ada")
+        bridge.unreachable(on=False)
+        _reconcile(service, both)
+        assert _last_sent(container, "ada")[0] == f"{OUTAGE}, +1"
+        assert not _owed(container, "ada")
 
     def test_an_owed_dismiss_is_sent_again_with_nothing_else_changed(
         self,
@@ -566,18 +618,18 @@ class TestAlarmServiceOwed:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        _reconcile(service, {Condition.WEEK_HALT: _now()})
+        _reconcile(service, {ConditionCode.WEEK_HALT: _now()})
         bridge.unreachable()
         _reconcile(service, {})
-        assert _owed(container, "ada", Condition.WEEK_HALT)
-        assert _standing(container, "ada", Condition.WEEK_HALT)
+        assert _owed(container, "ada")
+        assert _standing(container, "ada")
 
         bridge.unreachable(on=False)
         _reconcile(service, {})
 
         assert bridge.shown("ada") == {}
-        assert not _owed(container, "ada", Condition.WEEK_HALT)
-        assert not _standing(container, "ada", Condition.WEEK_HALT)
+        assert not _owed(container, "ada")
+        assert not _standing(container, "ada")
 
 
 class TestAlarmServiceRetry:
@@ -621,21 +673,16 @@ class TestAlarmServiceRetry:
         ("age", "asked"),
         [(None, False), (timedelta(0), False), (timedelta(seconds=61), True)],
     )
-    def test_the_timer_asks_for_it_while_an_alarm_is_owed_past_its_retry(
+    def test_the_timer_asks_for_it_while_a_send_is_owed_past_its_retry(
         self,
         container: ServiceContainer,
         supervise: Supervise,
         age: timedelta | None,
         asked: bool,
     ) -> None:
-        with scoped_session(container) as db:
-            db.add(
-                Alarm(
-                    user_id=_person(container, "ada").id,
-                    condition_code=Condition.WEEK_HALT,
-                    standing=False,
-                    owed_at=None if age is None else _now() - age,
-                )
+        with scoped_session(container):
+            _person(container, "ada").alarm_owed_at = (
+                None if age is None else _now() - age
             )
         service, _, supervisor, _ = _service(container, supervise, retry_seconds=60)
 
@@ -664,15 +711,15 @@ class TestAlarmServiceRetry:
         coordinator.fire_startup()
 
         outage.call_unanswered()
-        log.wait_for(r"The submit of the outage alarm to ada is owed: .*")
+        log.wait_for(r"The submit of the alarm notification to ada is owed: .*")
         bridge.unreachable(on=False)
 
-        log.wait_for("The owed submit of the outage alarm to ada went out")
-        assert bridge.shown("ada") == {"outage": _expected(container, Condition.OUTAGE)}
+        log.wait_for("The owed submit of the alarm notification to ada went out")
+        assert bridge.shown("ada") == {ALARM_SEQUENCE_ID: _expected(container, OUTAGE)}
 
 
 class TestAlarmServiceSwitched:
-    def test_off_dismisses_the_persons_standing_alarms_and_on_submits_them(
+    def test_off_dismisses_the_persons_alarm_and_on_submits_it(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
@@ -681,22 +728,20 @@ class TestAlarmServiceSwitched:
         _give_token(container, "ada", ADA_TOKEN)
         _give_token(container, "ben", BEN_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        holding = {Condition.WEEK_HALT: _now()}
+        holding = {ConditionCode.WEEK_HALT: _now()}
         _reconcile(service, holding)
 
         _switch(container, service, "ada", on=False)
         _reconcile(service, holding)
 
         assert bridge.shown("ada") == {}
-        assert not _standing(container, "ada", Condition.WEEK_HALT)
-        assert set(bridge.shown("ben")) == {"week_halt"}
+        assert not _standing(container, "ada")
+        assert set(bridge.shown("ben")) == {ALARM_SEQUENCE_ID}
 
         _switch(container, service, "ada", on=True)
         _reconcile(service, holding)
 
-        assert bridge.shown("ada") == {
-            "week_halt": _expected(container, Condition.WEEK_HALT)
-        }
+        assert bridge.shown("ada") == {ALARM_SEQUENCE_ID: _expected(container, WEEK)}
         assert [call.call for call in bridge.calls("ada")] == [
             "submit",
             "dismiss",
@@ -711,19 +756,19 @@ class TestAlarmServiceSwitched:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        holding = {Condition.WEEK_HALT: _now()}
+        holding = {ConditionCode.WEEK_HALT: _now()}
         _reconcile(service, holding)
         bridge.unreachable()
         _switch(container, service, "ada", on=False)
 
         _reconcile(service, holding)
 
-        assert _owed(container, "ada", Condition.WEEK_HALT)
-        assert _standing(container, "ada", Condition.WEEK_HALT)
+        assert _owed(container, "ada")
+        assert _standing(container, "ada")
         bridge.unreachable(on=False)
         _reconcile(service, holding)
         assert bridge.shown("ada") == {}
-        assert not _owed(container, "ada", Condition.WEEK_HALT)
+        assert not _owed(container, "ada")
 
     def test_its_reconcile_is_asked_for_once_it_commits(
         self, container: ServiceContainer, supervise: Supervise
@@ -754,7 +799,7 @@ class TestAlarmServiceSwitched:
 
 
 class TestAlarmServiceSubmitAll:
-    def test_a_first_token_has_the_alarms_due_submitted_through_it(
+    def test_a_first_token_has_the_alarm_submitted_through_it(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
@@ -766,7 +811,7 @@ class TestAlarmServiceSubmitAll:
         _set(container, service, "ada", ADA_TOKEN)
         service.reconcile(LoopHandle("test"))
 
-        assert bridge.shown("ada") == {"outage": _expected(container, Condition.OUTAGE)}
+        assert bridge.shown("ada") == {ALARM_SEQUENCE_ID: _expected(container, OUTAGE)}
 
     def test_a_replace_resubmits_through_the_new_token_and_sends_nothing_through_the_old(
         self,
@@ -777,28 +822,44 @@ class TestAlarmServiceSubmitAll:
         _give_token(container, "ada", ADA_TOKEN)
         service, outage, _, _ = _service(container, supervise, outage_after_seconds=0)
         outage.call_unanswered()
-        assert outage.since is not None
-        _reconcile(
-            service, {Condition.OUTAGE: outage.since, Condition.WEEK_HALT: _now()}
-        )
+        service.reconcile(LoopHandle("test"))
         bridge.rotate_token("ada", "token-of-ada-rotated")
 
         _set(container, service, "ada", "token-of-ada-rotated")
 
-        assert not _standing(container, "ada", Condition.OUTAGE)
-        # The week's halt ceased: left standing, for its dismiss.
-        assert _standing(container, "ada", Condition.WEEK_HALT)
+        assert not _standing(container, "ada")
         service.reconcile(LoopHandle("test"))
-        assert [(call.call, call.sequence_id) for call in bridge.calls("ada")] == [
-            ("submit", "outage"),
-            ("submit", "week_halt"),
-            ("submit", "outage"),
-            ("dismiss", "week_halt"),
+        assert bridge.calls("ada") == [
+            FakeCall("submit", ALARM_SEQUENCE_ID, True),
+            FakeCall("submit", ALARM_SEQUENCE_ID, False),
         ]
         assert bridge.shown("ada") == {
-            "outage": _expected(container, Condition.OUTAGE, alerted=False)
+            ALARM_SEQUENCE_ID: _expected(container, OUTAGE, alerted=False)
         }
-        assert _standing(container, "ada", Condition.OUTAGE)
+        assert _standing(container, "ada")
+
+    def test_a_replace_with_none_due_leaves_it_standing_for_its_dismiss(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        """The week's halt ceased before the replace: its dismiss goes
+        through the new token."""
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _, _ = _service(container, supervise)
+        _reconcile(service, {ConditionCode.WEEK_HALT: _now()})
+        bridge.rotate_token("ada", "token-of-ada-rotated")
+
+        _set(container, service, "ada", "token-of-ada-rotated")
+
+        assert _standing(container, "ada")
+        service.reconcile(LoopHandle("test"))
+        assert bridge.calls("ada") == [
+            FakeCall("submit", ALARM_SEQUENCE_ID, True),
+            FakeCall("dismiss", ALARM_SEQUENCE_ID, False),
+        ]
+        assert not _standing(container, "ada")
 
     def test_with_the_switch_off_nothing_is_submitted(
         self,
@@ -839,30 +900,39 @@ class TestAlarmServiceDismissAll:
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
+        """An owed update among what stood."""
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, coordinator = _service(container, supervise)
-        _reconcile(service, {Condition.WEEK_HALT: _now()})
+        week = _now() - LONG_AGO
+        _reconcile(service, {ConditionCode.WEEK_HALT: week})
         bridge.unreachable()
-        _reconcile(
-            service, {Condition.WEEK_HALT: _now(), Condition.FIVE_HOUR_HALT: _now()}
-        )
+        _reconcile(service, {ConditionCode.WEEK_HALT: week, ConditionCode.OUTAGE: week})
         bridge.unreachable(on=False)
-        assert _owed(container, "ada", Condition.FIVE_HOUR_HALT)
+        assert _owed(container, "ada")
         sent = _clear_dismisses("sent")
 
         _clear(container, service, "ada")
 
-        for condition in (Condition.WEEK_HALT, Condition.FIVE_HOUR_HALT):
-            assert not _standing(container, "ada", condition)
-            assert not _owed(container, "ada", condition)
+        assert not _standing(container, "ada")
+        assert not _owed(container, "ada")
         coordinator.fire_startup()
         log.wait_for(rf"Loop {ALARM_CLEAR_JOB}:1 ended")
         assert bridge.shown("ada") == {}
         assert bridge.calls("ada")[1:] == [
-            FakeCall("dismiss", "five_hour_halt", False),
-            FakeCall("dismiss", "week_halt", False),
+            FakeCall("dismiss", ALARM_SEQUENCE_ID, False)
         ]
-        assert _clear_dismisses("sent") == sent + 2
+        assert _clear_dismisses("sent") == sent + 1
+
+    def test_a_clear_with_none_standing_or_owed_dismisses_nothing(
+        self, container: ServiceContainer, supervise: Supervise
+    ) -> None:
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, supervisor, _ = _service(container, supervise)
+
+        with patch.object(supervisor, "start_loop") as start:
+            _clear(container, service, "ada")
+
+        start.assert_not_called()
 
     def test_a_dismiss_the_bridge_does_not_take_is_logged_counted_and_not_owed(
         self,
@@ -873,26 +943,23 @@ class TestAlarmServiceDismissAll:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        _reconcile(service, {Condition.WEEK_HALT: _now()})
+        _reconcile(service, {ConditionCode.WEEK_HALT: _now()})
         unanswered = _clear_dismisses("unanswered")
         bridge.unreachable()
         _clear(container, service, "ada")
 
         service.dismiss_cleared(
-            _person(container, "ada").id,
-            ADA_TOKEN,
-            (Condition.WEEK_HALT,),
-            LoopHandle("clear"),
+            _person(container, "ada").id, ADA_TOKEN, LoopHandle("clear")
         )
 
         log.wait_for(
-            "The dismiss of the week_halt alarm to ada after their token's clear"
-            r" failed, and it stays on the phone: .*"
+            "The dismiss of the alarm notification to ada after their token's"
+            r" clear failed, and it stays on the phone: .*"
         )
         assert _clear_dismisses("unanswered") == unanswered + 1
-        assert not _owed(container, "ada", Condition.WEEK_HALT)
+        assert not _owed(container, "ada")
         bridge.unreachable(on=False)
-        assert set(bridge.shown("ada")) == {"week_halt"}
+        assert set(bridge.shown("ada")) == {ALARM_SEQUENCE_ID}
 
     def test_the_same_token_set_again_is_not_dismissed(
         self,
@@ -903,39 +970,48 @@ class TestAlarmServiceDismissAll:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, _ = _service(container, supervise)
-        holding = {Condition.WEEK_HALT: _now()}
+        holding = {ConditionCode.WEEK_HALT: _now()}
         _reconcile(service, holding)
         _clear(container, service, "ada")
         _set(container, service, "ada", ADA_TOKEN)
         _reconcile(service, holding)
 
         service.dismiss_cleared(
-            _person(container, "ada").id,
-            ADA_TOKEN,
-            (Condition.WEEK_HALT,),
-            LoopHandle("clear"),
+            _person(container, "ada").id, ADA_TOKEN, LoopHandle("clear")
         )
 
         assert [call.call for call in bridge.calls("ada")] == ["submit", "submit"]
-        assert set(bridge.shown("ada")) == {"week_halt"}
+        assert set(bridge.shown("ada")) == {ALARM_SEQUENCE_ID}
         log.wait_for(
-            "ada holds the token they cleared again: the week_halt alarm is not"
-            " dismissed"
+            "ada holds the token they cleared again: their alarm notification is"
+            " not dismissed"
         )
+
+    def test_a_stop_before_it_runs_dismisses_nothing(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _, _ = _service(container, supervise)
+        _reconcile(service, {ConditionCode.WEEK_HALT: _now()})
+        _clear(container, service, "ada")
+        handle = LoopHandle("clear")
+        handle._request_stop()
+
+        service.dismiss_cleared(_person(container, "ada").id, ADA_TOKEN, handle)
+
+        assert set(bridge.shown("ada")) == {ALARM_SEQUENCE_ID}
 
     def test_with_no_bridge_the_record_alone_moves(
         self, container: ServiceContainer, supervise: Supervise
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
-        with scoped_session(container) as db:
-            db.add(
-                Alarm(
-                    user_id=_person(container, "ada").id,
-                    condition_code=Condition.WEEK_HALT,
-                    standing=True,
-                    sent_at=_now(),
-                )
-            )
+        with scoped_session(container):
+            person = _person(container, "ada")
+            person.alarm_text = WEEK
+            person.alarm_sent_at = _now()
         service, _, supervisor, _ = _service(container, supervise, configured=False)
 
         with patch.object(supervisor, "start_loop") as start:
@@ -943,7 +1019,7 @@ class TestAlarmServiceDismissAll:
             _set(container, service, "ada", ADA_TOKEN)
 
         start.assert_not_called()
-        assert not _standing(container, "ada", Condition.WEEK_HALT)
+        assert not _standing(container, "ada")
 
 
 class TestAlarmServiceInFlight:
@@ -958,14 +1034,14 @@ class TestAlarmServiceInFlight:
         superseded, sent = _reconciles("superseded"), _clear_dismisses("sent")
         bridge.on_submit = lambda: _clear(container, service, "ada")
 
-        _reconcile(service, {Condition.WEEK_HALT: _now()})
+        _reconcile(service, {ConditionCode.WEEK_HALT: _now()})
 
         assert bridge.calls("ada") == [
-            FakeCall("submit", "week_halt", True),
-            FakeCall("dismiss", "week_halt", False),
+            FakeCall("submit", ALARM_SEQUENCE_ID, True),
+            FakeCall("dismiss", ALARM_SEQUENCE_ID, False),
         ]
         assert bridge.shown("ada") == {}
-        assert _alarm(container, "ada", Condition.WEEK_HALT) is None
+        assert _last_sent(container, "ada") == (None, None, None)
         assert _reconciles("superseded") == superseded + 1
         assert _clear_dismisses("sent") == sent + 1
 
@@ -980,7 +1056,7 @@ class TestAlarmServiceInFlight:
     ) -> None:
         _give_token(container, "ada", ADA_TOKEN)
         service, _, _, coordinator = _service(container, supervise)
-        holding = {Condition.WEEK_HALT: _now()}
+        holding = {ConditionCode.WEEK_HALT: _now()}
         if not answered:
             bridge.unreachable()
         take = service._take
@@ -1000,8 +1076,8 @@ class TestAlarmServiceInFlight:
             _reconcile(service, holding)
         clears[0].result()
 
-        assert not _standing(container, "ada", Condition.WEEK_HALT)
-        assert not _owed(container, "ada", Condition.WEEK_HALT)
+        assert not _standing(container, "ada")
+        assert not _owed(container, "ada")
         _reconcile(service, holding)
         bridge.unreachable(on=False)
         coordinator.fire_startup()
@@ -1018,7 +1094,7 @@ class TestAlarmServiceInFlight:
         _give_token(container, "ada", ADA_TOKEN)
         old, _, _, _ = _service(container, supervise)
         new, _, _, _ = _service(container, supervise)
-        holding = {Condition.WEEK_HALT: _now()}
+        holding = {ConditionCode.WEEK_HALT: _now()}
         bridge.unreachable()
         _reconcile(old, holding)
         bridge.unreachable(on=False)
@@ -1037,5 +1113,5 @@ class TestAlarmServiceInFlight:
 
         assert [call.call for call in bridge.calls("ada")] == ["submit", "dismiss"]
         assert bridge.shown("ada") == {}
-        assert not _standing(container, "ada", Condition.WEEK_HALT)
-        assert not _owed(container, "ada", Condition.WEEK_HALT)
+        assert not _standing(container, "ada")
+        assert not _owed(container, "ada")

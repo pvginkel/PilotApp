@@ -37,14 +37,17 @@ from app.models import Session as AgentSession
 from app.models.reference import (
     ChatKind,
     CloseCause,
-    Condition,
     FiringCause,
     ProjectState,
     SessionState,
     UserKind,
     WorkTrigger,
 )
-from app.services.alarm_service import ALARM_RETRY_TIMER, AlarmService
+from app.services.alarm_service import (
+    ALARM_RETRY_TIMER,
+    ALARM_SEQUENCE_ID,
+    AlarmService,
+)
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import (
     ServiceContainer,
@@ -1267,7 +1270,7 @@ class TestAlarmWiring:
             wait_until(lambda: _alarm_ticks() >= ticks + 2, "two retry ticks")
             outage.call_unanswered()
             wait_until(
-                lambda: Condition.OUTAGE.value in fake_notification_bridge.shown("ada"),
+                lambda: ALARM_SEQUENCE_ID in fake_notification_bridge.shown("ada"),
                 "the outage's alarm shown",
             )
             outage.probe_answered()

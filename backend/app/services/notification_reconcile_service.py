@@ -65,7 +65,6 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.database import scoped_session
 from app.engine.bus import EngineBus, EngineEvent, ProjectChanged
 from app.models import Project, ProjectMember, User
-from app.models.reference import NotificationPriority
 from app.services.advisory_turn import advisory_turn, turn_key
 from app.services.notification_bridge_client import (
     BridgeOutcome,
@@ -471,11 +470,7 @@ class NotificationReconcileService:
             db.get_one(Project, project_id), [holder]
         )[holder.id]
         shown = next(
-            (
-                m
-                for m in reversed(memberships)
-                if m.notification_priority_code is not None
-            ),
+            (m for m in reversed(memberships) if m.notification_text is not None),
             None,
         )
         owed = any(m.notification_owed_at is not None for m in memberships)
@@ -588,7 +583,6 @@ class NotificationReconcileService:
                 membership.notification_sent_at = now
         if due.notification is not None:
             holder = next(m for m in memberships if m.id == due.holder_id)
-            holder.notification_priority_code = NotificationPriority.HIGH
             holder.notification_text = due.notification.message
             holder.notification_url = due.notification.url
             holder.notification_sent_at = now
@@ -634,7 +628,7 @@ def _looked_at() -> ColumnElement[bool]:
 
 
 def _standing() -> ColumnElement[bool]:
-    return ProjectMember.notification_priority_code.is_not(None)
+    return ProjectMember.notification_text.is_not(None)
 
 
 def _shows(
@@ -653,6 +647,5 @@ def _shows(
 
 def _unsent(membership: ProjectMember) -> None:
     """Nothing standing from `membership`."""
-    membership.notification_priority_code = None
     membership.notification_text = None
     membership.notification_url = None

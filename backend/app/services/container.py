@@ -626,9 +626,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         sse_connection_manager=sse_connection_manager,
     )
     register_for_background_startup(lambda c: c.condition_service())
-    # The alarms, a standing notification per person and condition that holds
-    # (F142); its jobs and timer register on the supervisor, and it hears the
-    # conditions service, when built, before STARTUP.
+    # The alarms, one notification per person while a condition that alarms
+    # is due (F142); its jobs and timer register on the supervisor, and it
+    # hears the conditions service, when built, before STARTUP.
     alarm_service = providers.Singleton(
         AlarmService,
         container=__self__,
