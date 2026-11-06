@@ -5,7 +5,7 @@
 
 import { useSyncExternalStore } from 'react';
 
-const narrow = window.matchMedia('(min-width: 901px) and (max-width: 1199px)');
+const narrow = window.matchMedia('(width > 900px) and (width < 1200px)');
 
 function subscribe(listener: () => void): () => void {
   narrow.addEventListener('change', listener);
