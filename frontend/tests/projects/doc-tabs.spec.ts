@@ -504,8 +504,9 @@ test.describe('Each project’s line kept in the browser', () => {
     await page.reload();
     await expect(page).toHaveURL(documentAddress(id, b));
     await expect(overlay.title).toHaveText('Bravo');
-    expect(await docTabs.keys()).toEqual([a, b, c].map((each) => `document ${each}`));
+    // The line is drawn once the project's head is read, which may land after the document.
     await expect(docTabs.document(b).show).toHaveAttribute('aria-selected', 'true');
+    expect(await docTabs.keys()).toEqual([a, b, c].map((each) => `document ${each}`));
     await docTabs.document(b).close.click();
     await expect(page).toHaveURL(documentAddress(id, a));
     await expect(overlay.title).toHaveText('Alpha');
