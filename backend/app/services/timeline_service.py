@@ -255,8 +255,9 @@ def work_status(
     reason what holds that nudge now, read as the gate reads a start's halt,
     pause and the store's update; one Finish closed owes none, its nudge
     never sent to a done item. One whose start has no environment yet has
-    none (DB 107). A job's is Pilot's own (F59.1); a retried one's names the
-    job its Retry placed, created at the press. Its progress is its list of
+    none (DB 107). A job's is Pilot's own (F59.1), the setup's and its
+    Retries' the setup (F49); a retried one's names the job its Retry
+    placed, created at the press. Its progress is its list of
     steps, in order (F145.1)."""
     stopper = aliased(User)
     retry = aliased(AgentSession)
@@ -421,6 +422,7 @@ def work_status(
             ),
             autopilot=autopilot,
             pilots_own=session.kind_code == JOB_KIND,
+            setup=trigger is WorkTrigger.SETUP,
             held_reason=held[session.id].reason if session.id in held else None,
             held_running=held[session.id].running if session.id in held else None,
             stopped_at=(
@@ -450,7 +452,7 @@ def work_status(
             name,
             autopilot,
             _,
-            _,
+            trigger,
             stopped_by,
             retry_id,
             retried_at,

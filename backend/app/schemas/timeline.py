@@ -630,6 +630,14 @@ class WorkSchema(BaseModel):
             "worker's run"
         )
     )
+    setup: bool = Field(
+        description=(
+            "Whether it is the setup, the job Create project placed, or a Retry "
+            "of it (F49): the one job of Pilot's with a line of its own on the "
+            "timeline, where every other shows on the item it follows from "
+            "(F59.1); false for every other job and for a worker's run"
+        )
+    )
     held_reason: HeldReason | None = Field(
         description=(
             "Why the gate holds its start, which its line says: a work "

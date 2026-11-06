@@ -286,6 +286,7 @@ class TestProjectEventService:
                     "error": None,
                     "autopilot": False,
                     "pilots_own": False,
+                    "setup": False,
                     "held_reason": None,
                     "held_running": None,
                     "stopped_at": None,

@@ -1959,6 +1959,7 @@ class TestTimeline:
             "error": None,
             "autopilot": False,
             "pilots_own": False,
+            "setup": False,
             "held_reason": None,
             "held_running": None,
             "stopped_at": None,
@@ -2447,6 +2448,43 @@ class TestWorkStatus:
         assert found[failed.id].retried == RetriedSchema(id=retry.id, at=pressed)
         assert found[failed.id].state is SessionState.FAILED
         assert found[retry.id].retried is None
+
+    def test_the_setup_and_its_retry_are_the_setup_and_no_other_job_or_run_is(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """F49, F59.1: the setup keeps a line of its own, a Retry of it
+        taking its trigger; every other job shows on the item it follows
+        from."""
+        project = _make(container)
+        failed = _job(session, project, environment, SessionState.FAILED)
+        retry = _job(session, project, environment, SessionState.HELD)
+        _retried(session, failed, retry)
+        bearer = _run(session, project, environment, SessionState.RUNNING)
+        notice = _bear(container, project, bearer, "notice", "The site", NOTICE)
+        after = _job(session, project, environment, SessionState.RUNNING)
+        placed = session.get_one(Work, after.id)
+        placed.trigger_code = WorkTrigger.ITEM_DONE
+        placed.trigger_item_id = notice.id
+        session.flush()
+        worker = _work(session, project, environment, SessionState.RUNNING)
+
+        found = work_status(
+            session,
+            [failed.id, retry.id, after.id, worker.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+        )
+
+        assert [found[each.id].setup for each in (failed, retry, after, worker)] == [
+            True,
+            True,
+            False,
+            False,
+        ]
 
     @pytest.mark.parametrize(
         "state", [SessionState.HELD, SessionState.STOPPED, SessionState.FAILED]

@@ -4605,6 +4605,11 @@
             ],
             "description": "The job a person's Retry of this failed or stopped job placed, at the project's next place, which its line names: it offers Retry no more, and no badge counts it (F94.5); null while it is not retried"
           },
+          "setup": {
+            "description": "Whether it is the setup, the job Create project placed, or a Retry of it (F49): the one job of Pilot's with a line of its own on the timeline, where every other shows on the item it follows from (F59.1); false for every other job and for a worker's run",
+            "title": "Setup",
+            "type": "boolean"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -4666,6 +4671,7 @@
           "error",
           "autopilot",
           "pilots_own",
+          "setup",
           "held_reason",
           "held_running",
           "stopped_at",
@@ -9987,6 +9993,11 @@
             ],
             "description": "The job a person's Retry of this failed or stopped job placed, at the project's next place, which its line names: it offers Retry no more, and no badge counts it (F94.5); null while it is not retried"
           },
+          "setup": {
+            "description": "Whether it is the setup, the job Create project placed, or a Retry of it (F49): the one job of Pilot's with a line of its own on the timeline, where every other shows on the item it follows from (F59.1); false for every other job and for a worker's run",
+            "title": "Setup",
+            "type": "boolean"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -10048,6 +10059,7 @@
           "error",
           "autopilot",
           "pilots_own",
+          "setup",
           "held_reason",
           "held_running",
           "stopped_at",
@@ -10395,6 +10407,11 @@
             ],
             "description": "The job a person's Retry of this failed or stopped job placed, at the project's next place, which its line names: it offers Retry no more, and no badge counts it (F94.5); null while it is not retried"
           },
+          "setup": {
+            "description": "Whether it is the setup, the job Create project placed, or a Retry of it (F49): the one job of Pilot's with a line of its own on the timeline, where every other shows on the item it follows from (F59.1); false for every other job and for a worker's run",
+            "title": "Setup",
+            "type": "boolean"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -10456,6 +10473,7 @@
           "error",
           "autopilot",
           "pilots_own",
+          "setup",
           "held_reason",
           "held_running",
           "stopped_at",
