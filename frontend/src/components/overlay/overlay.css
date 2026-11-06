@@ -139,6 +139,20 @@
   /* A work item's session log (session-log-overlay.tsx; the mockup's `.log-tail`): its turns, each
      ended one closing on its time, then the cue or how it ended. */
   .log-turn + .log-turn { margin-top: 12px; }
+  /* What the server sent a turn, as Pilot's message: the chat's message (person-message.tsx), on
+     the right in the primary's tint, folded, Pilot, the time and the mark under it. */
+  .log-sent { display: flex; flex-direction: column; align-items: flex-end; width: fit-content; max-width: 91%; min-width: 0; margin: 0 0 8px auto; }
+  .log-sent .bubble {
+    max-width: 100%;
+    padding: 8px 12px;
+    border: 1px solid hsl(var(--primary-muted-foreground) / 0.2);
+    border-radius: var(--radius);
+    background: hsl(var(--primary-muted));
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .log-sent .fold.long::after { background: linear-gradient(hsl(var(--primary-muted) / 0), hsl(var(--primary-muted))); }
+  .log-sent .end { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
   .log-turn-end { margin: 4px 6px 0; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
   .log-turn-end .failed { color: hsl(var(--destructive-text)); }
   .log-tail { display: flex; align-items: baseline; gap: 8px; margin: 12px 6px 0; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }

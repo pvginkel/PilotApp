@@ -7,7 +7,8 @@
  * of a call as its line where the call ran (F41) — streamed while it is open; its tail the working
  * cue while the session is held, starts or runs, else "Stopped by you · <time>", the environment
  * stopped under it or in error, "The turn ended · <time>" or "Failed · <time>" under the error
- * (F69.2, F125).
+ * (F69.2, F125). Before each turn's reply stands what the server sent it, as Pilot's message,
+ * folded: the brief, a Resume's.
  * It follows the item through a Resume, sticks to its end until the reader scrolls up, and Esc
  * closes it.
  */
@@ -125,6 +126,51 @@ test.describe('A work item’s session log', () => {
     const { done } = await projects.item(project, work);
     await expect(sessionLog.tail).toHaveText(`The turn ended · ${clock(done!.at)}`);
     await expect(sessionLog.cue).toHaveCount(0);
+  });
+
+  test('shows what the server sent each turn as Pilot’s message before its reply: the brief, folded until Show more unfolds it whole, and a Resume’s before the turn it starts', async ({
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Log'), members: [me.handle!] });
+    const steps = Array.from({ length: 24 }, (_, n) => `Step ${n + 1}: read the next stylesheet.`);
+    const brief = ['Survey the stylesheets.', ...steps].join('\n');
+    const work = await projects.startWork(project, { title: TITLE, brief, cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    const { id: environment } = await projects.environment(project, work);
+    await sessionLog.open(project, work);
+
+    // The brief shows before the turn has a reply, folded, Pilot and its time under it.
+    const first = sessionLog.turns.first();
+    await expect(first.getByTestId('session-log.sent.text')).toContainText('Survey the stylesheets.');
+    await expect(sessionLog.sentEnds).toHaveText([/^Pilot\s*\d\d:\d\d$/]);
+    await expect(sessionLog.sentTexts.first()).toHaveClass(/\bfold\b.*\blong\b/);
+    await sessionLog.sentMore.click();
+    await expect(sessionLog.sentMore).toHaveCount(0);
+    await expect(sessionLog.sentTexts.first()).not.toHaveClass(/\bfold\b/);
+    await expect(sessionLog.sentTexts.first()).toHaveText(brief);
+
+    // Its reply follows it in the same turn.
+    await controller.play(environment, 'claude-1', [text('looking', 'Looking at the stylesheets.')]);
+    await expect(first.getByTestId('chat.text')).toHaveText(['Looking at the stylesheets.']);
+    await expect(first.locator(':scope > *').first()).toHaveAttribute('data-testid', 'session-log.sent');
+
+    // A Resume's message stands before the turn it starts, a short one whole with no Show more.
+    await projects.stop(work);
+    await expect.poll(async () => (await projects.records(work)).records.at(-1)?.kind).toBe('result');
+    await projects.resume(work);
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    await controller.play(environment, 'claude-1', [text('two', 'There are two stylesheets.')]);
+    await expect(sessionLog.turns).toHaveCount(2);
+    const second = sessionLog.turns.nth(1);
+    await expect(second.getByTestId('session-log.sent.text')).toHaveText('continue');
+    await expect(second.getByTestId('session-log.sent.text.more')).toHaveCount(0);
+    await expect(second.getByTestId('chat.text')).toHaveText(['There are two stylesheets.']);
+    await expect(second.locator(':scope > *').first()).toHaveAttribute('data-testid', 'session-log.sent');
+    await expect(sessionLog.turnEnds).toHaveText([/^\d\d:\d\d · Stopped$/]);
   });
 
   test('shows each effect of its session’s calls as one line where the call ran — “Registered · inbox/<n>”, “Attached · <title>” — whether its record comes before the call’s line or after it, one whose call no record shows where its record stands, and a click goes to its item', async ({

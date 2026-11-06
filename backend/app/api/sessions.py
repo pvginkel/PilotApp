@@ -1,5 +1,6 @@
 """A Session's records by REST, and its live frames on the browser's SSE
-connection (design 2 §11.1; F40.3's stream); a work item's Stop and Resume
+connection (design 2 §11.1; F40.3's stream); its Turns, what each was sent,
+which its session log shows (F69); a work item's Stop and Resume
 (F67), and Retry on a job of Pilot's own that failed or stopped.
 
 Access is the API's `editor` gate. The stream routes subscribe only the
@@ -20,6 +21,8 @@ from app.schemas.session_schema import (
     SessionRecordPageSchema,
     SessionRecordsQuerySchema,
     SessionStreamViewSchema,
+    SessionTurnSchema,
+    SessionTurnsSchema,
 )
 from app.schemas.timeline import WorkSchema
 from app.services.container import ServiceContainer
@@ -62,6 +65,29 @@ def get_session_records(
     return SessionRecordPageSchema(
         records=[to_record_schema(stored) for stored in page.records],
         ended=page.ended,
+    )
+
+
+@sessions_bp.route("/<uuid:session_id>/turns", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=SessionTurnsSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_session_turns(
+    session_id: uuid.UUID,
+    record_service: SessionRecordService = Provide[
+        ServiceContainer.session_record_service
+    ],
+) -> Any:
+    """The Session's Turns in order, each with what was sent and its author."""
+    return SessionTurnsSchema(
+        turns=[
+            SessionTurnSchema.model_validate(sent, from_attributes=True)
+            for sent in record_service.read_turns(session_id)
+        ]
     )
 
 

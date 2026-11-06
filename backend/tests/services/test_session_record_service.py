@@ -1,5 +1,5 @@
 """A Session's records: the one read function and the writer (design 2 §10,
-§11.4)."""
+§11.4); and its Turns as its session log reads them."""
 
 import ast
 import threading
@@ -22,6 +22,7 @@ from app.models.reference import RecordKind, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.session_record_service import (
     RECORDS_WRITTEN_TOTAL,
+    SentTurn,
     SessionRecordService,
     StreamPosition,
     last_record,
@@ -750,3 +751,61 @@ class TestReadPage:
     def test_it_refuses_an_unknown_session(self, records: SessionRecordService) -> None:
         with pytest.raises(RecordNotFoundException):
             records.read_page(uuid.uuid4(), after=0, limit=10)
+
+
+class TestReadTurns:
+    def test_it_reads_each_turns_message_the_servers_own_included(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        second = _turn(session, project_session, 2, person)
+        first = _turn(session, project_session, 1, None)
+        third = _turn(session, project_session, 3, None)
+
+        assert records.read_turns(project_session.id) == [
+            SentTurn(1, first.started_at, None, "Message 1"),
+            SentTurn(2, second.started_at, "ada", "Brief.\n\nWords 2"),
+            SentTurn(3, third.started_at, None, "Message 3"),
+        ]
+
+    def test_a_server_turn_needs_no_record_of_its_own(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+    ) -> None:
+        _turn(session, project_session, 1, None)
+
+        assert [sent.message for sent in records.read_turns(project_session.id)] == [
+            "Message 1"
+        ]
+        assert read_records(session, project_session.id, limit=10) == []
+
+    def test_it_reads_one_sessions_turns_only(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        other = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(other)
+        session.flush()
+        _turn(session, other, 1, None)
+
+        assert records.read_turns(project_session.id) == []
+
+    def test_it_refuses_an_unknown_session(self, records: SessionRecordService) -> None:
+        with pytest.raises(RecordNotFoundException):
+            records.read_turns(uuid.uuid4())

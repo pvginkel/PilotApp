@@ -6,7 +6,8 @@
  * as the chat renders a reply — the runs of calls, the sub-agents' cards, the phantom — streamed
  * from the first record while it is open (F40.3), one reply per turn, each ended one closing on
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
- * (F69.2). Its tail is the working cue while the session is held, starts or runs, else how it
+ * (F69.2). Before a turn's reply stands what the server sent it, as Pilot's message, folded: the
+ * brief, a continuation, a Resume's; a turn sent and not yet answered shows its message alone. Its tail is the working cue while the session is held, starts or runs, else how it
  * ended: "Stopped by you · <time>", by whom else, by Pilot at the usage limit, the environment
  * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6);
  * a run whose turn ended under a halt or a pause adds, under its end, what holds its nudge, as its
@@ -22,6 +23,8 @@ import { ReplyBody, ReplyCue } from '@/components/chat/pilot-reply';
 import { StepLine } from '@/components/chat/step-line';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
+import { Avatar } from '@/components/shared/avatar';
+import { Fold } from '@/components/shared/fold';
 import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { useSseContext } from '@/contexts/sse-context';
@@ -29,6 +32,7 @@ import { useChatStream } from '@/hooks/use-chat-stream';
 import { useOverlayClose } from '@/hooks/use-overlay-close';
 import { usePerson } from '@/hooks/use-self';
 import { useSessionTransport } from '@/hooks/use-session-transport';
+import { useSessionTurns, type SessionTurn } from '@/hooks/use-session-turns';
 import { useStickyBottom } from '@/hooks/use-sticky-bottom';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
@@ -121,21 +125,26 @@ function SessionLog({ item, work, body }: SessionLogProps) {
     () => buildChatView(item.id, stream.records, { running: live }).flatMap((entry) => (entry.kind === 'turn' ? [entry] : [])),
     [item.id, stream.records, live],
   );
+  const sentTurns = useSessionTurns(item.id, stream.records);
+  const entries = useMemo(() => logEntries(item.id, turns, sentTurns), [item.id, turns, sentTurns]);
   const last = turns.at(-1)?.turn;
   const endedAt = (work.state === 'idle' ? item.done?.at : undefined) ?? last?.endedAt ?? null;
   const tail = sessionLogTail(work, handle, endedAt);
 
   return (
     <div ref={wrapper} className="session-log" data-testid="session-log">
-      {turns.map(({ key, turn }) => (
+      {entries.map(({ key, turn, sent }, index) => (
         <div key={key} className="log-turn" data-testid="session-log.turn">
-          <ReplyBody
-            turn={turn}
-            phantom={turn === last ? stream.phantom : null}
-            liveFrom={stream.liveFrom}
-            streamed={stream.streamed}
-          />
-          {turn !== last && <TurnEnd turn={turn} />}
+          {sent && <SentMessage sent={sent} />}
+          {turn && (
+            <ReplyBody
+              turn={turn}
+              phantom={turn === last ? stream.phantom : null}
+              liveFrom={stream.liveFrom}
+              streamed={stream.streamed}
+            />
+          )}
+          {turn && index < entries.length - 1 && <TurnEnd turn={turn} />}
         </div>
       ))}
       {tail === null ? (
@@ -175,6 +184,49 @@ function SessionLog({ item, work, body }: SessionLogProps) {
         </>
       )}
     </div>
+  );
+}
+
+interface LogEntry {
+  key: string;
+  /** Its reply, once a record of it has come. */
+  turn?: TurnView;
+  /** What the server sent it, a turn of its own; none for a person's turn, or before the read. */
+  sent?: SessionTurn;
+}
+
+/** The turns in their order: each reply, under what the server sent it, and the turns sent with no reply yet. */
+function logEntries(sessionId: string, turns: readonly { key: string; turn: TurnView }[], sentTurns: SessionTurn[] | undefined): LogEntry[] {
+  const sent = new Map((sentTurns ?? []).filter((each) => each.author === null).map((each) => [each.turn, each]));
+  const entries: (LogEntry & { number: number })[] = turns.map(({ key, turn }) => ({
+    key,
+    number: turn.turn,
+    turn,
+    sent: sent.get(turn.turn),
+  }));
+  const replied = new Set(entries.map((entry) => entry.number));
+  for (const each of sent.values()) {
+    // The key is the one the chat's view gives the turn, so that its reply joins the same entry.
+    if (!replied.has(each.turn)) entries.push({ key: `${sessionId}:${each.turn}`, number: each.turn, sent: each });
+  }
+  return entries.sort((a, b) => a.number - b.number);
+}
+
+/** What the server sent a turn, as Pilot's message (the chat's message, F38.2): folded until Show more, Pilot and the time under it. */
+function SentMessage({ sent }: { sent: SessionTurn }) {
+  return (
+    <section className="log-sent" data-testid="session-log.sent">
+      <div className="bubble">
+        <Fold testId="session-log.sent.text">
+          <LinkedText text={sent.message} />
+        </Fold>
+      </div>
+      <div className="end" data-testid="session-log.sent.end">
+        <span>Pilot</span>
+        <Time at={sent.at} format="clock" />
+        <Avatar who="pilot" size="xs" />
+      </div>
+    </section>
   );
 }
 

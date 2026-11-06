@@ -83,6 +83,29 @@ class SessionRecordPageSchema(BaseModel):
     )
 
 
+class SessionTurnSchema(BaseModel):
+    """A Turn of the Session: what was sent, and by whom."""
+
+    turn: int = Field(..., description="The Turn's number in its Session, from 1")
+    at: datetime = Field(..., description="When it was sent")
+    author: str | None = Field(
+        ...,
+        description="The handle of the Turn's author; null for the server's own",
+    )
+    message: str = Field(
+        ...,
+        description="What was sent: the server's own message, such as a work "
+        "item's brief or its continuation, or a person's words as the agent "
+        "read them",
+    )
+
+
+class SessionTurnsSchema(BaseModel):
+    """The Session's Turns, in order."""
+
+    turns: list[SessionTurnSchema]
+
+
 class SessionStreamViewSchema(BaseModel):
     """A view of a Session's stream on the browser's SSE connection."""
 

@@ -1,5 +1,5 @@
 """A Session's records: the one read function and the writer (design 2 §10,
-§11.4).
+§11.4); and its Turns as its session log reads them, what each was sent.
 
 `read_records` is the only query of `session_records` in the server; a test
 pins it. The writer numbers a record under the Session row's lock, so a
@@ -10,6 +10,7 @@ Session's records run from 1 without a gap in the order written (DB assertion
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from prometheus_client import Counter
@@ -58,6 +59,17 @@ class StoredRecord:
     """A `send`'s author, by handle."""
     words: str | None
     """A `send`'s words, its Turn's (DB assertion 219)."""
+
+
+@dataclass(frozen=True)
+class SentTurn:
+    """A Turn as the session log reads it: what was sent, and by whom."""
+
+    turn: int
+    at: datetime
+    author: str | None
+    """The author's handle; none for the server's own Turn."""
+    message: str
 
 
 @dataclass(frozen=True)
@@ -178,8 +190,8 @@ def to_record_schema(stored: StoredRecord) -> SessionRecordSchema:
 
 
 class SessionRecordService:
-    """Writes a Session's records and reads its pages, in the caller's
-    transaction. A record a chat's `chat.md` shows moves the file's hash
+    """Writes a Session's records and reads its pages and its Turns, in the
+    caller's transaction. A record a chat's `chat.md` shows moves the file's hash
     (`ViewService.recorded`)."""
 
     def __init__(
@@ -273,3 +285,22 @@ class SessionRecordService:
             records=records[:limit],
             ended=state in STREAM_ENDED_STATES and len(records) <= limit,
         )
+
+    def read_turns(self, session_id: uuid.UUID) -> list[SentTurn]:
+        """The Session's Turns in order, each with what was sent and its
+        author, the server's own included, which no record carries.
+
+        Raises:
+            RecordNotFoundException: No Session has the id
+        """
+        self.require_session(session_id)
+        statement = (
+            select(Turn.seq, Turn.started_at, User.handle, Turn.message)
+            .outerjoin(User, User.id == Turn.author_user_id)
+            .where(Turn.session_id == session_id)
+            .order_by(Turn.seq)
+        )
+        return [
+            SentTurn(turn, at, author, message)
+            for turn, at, author, message in self.db.execute(statement)
+        ]

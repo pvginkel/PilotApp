@@ -1,5 +1,6 @@
 """The session routes: the records by page, the stream's subscribe (design 2
-§11.1, §11.2), and a work item's Stop and Resume (F67)."""
+§11.1, §11.2), the Turns with what each was sent (F69), and a work item's Stop
+and Resume (F67)."""
 
 import json
 import uuid
@@ -265,6 +266,69 @@ class TestGetSessionRecords:
         assert client.get("/api/sessions/not-a-uuid/records").status_code == 404
 
 
+class TestGetSessionTurns:
+    def test_it_answers_each_turns_message_and_author_in_order(
+        self,
+        session: DbSession,
+        client: FlaskClient,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        at = datetime(2026, 11, 6, 9, 30, tzinfo=UTC)
+        session.add_all(
+            [
+                Turn(
+                    session_id=project_session.id,
+                    seq=2,
+                    author_user_id=person.id,
+                    message="The chat's brief.\n\nWhat next?",
+                    words="What next?",
+                    started_at=at,
+                ),
+                Turn(
+                    session_id=project_session.id,
+                    seq=1,
+                    message="Survey the stylesheets.",
+                    started_at=at,
+                ),
+            ]
+        )
+        session.flush()
+
+        response = client.get(f"/api/sessions/{project_session.id}/turns")
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "turns": [
+                {
+                    "turn": 1,
+                    "at": "2026-11-06T09:30:00Z",
+                    "author": None,
+                    "message": "Survey the stylesheets.",
+                },
+                {
+                    "turn": 2,
+                    "at": "2026-11-06T09:30:00Z",
+                    "author": "ada",
+                    "message": "The chat's brief.\n\nWhat next?",
+                },
+            ]
+        }
+
+    def test_a_session_before_its_first_turn_has_none(
+        self, client: FlaskClient, project_session: models.Session
+    ) -> None:
+        response = client.get(f"/api/sessions/{project_session.id}/turns")
+
+        assert response.status_code == 200
+        assert response.get_json() == {"turns": []}
+
+    def test_it_answers_404_for_an_unknown_session(self, client: FlaskClient) -> None:
+        response = client.get(f"/api/sessions/{uuid.uuid4()}/turns")
+
+        assert response.status_code == 404
+
+
 class TestSubscribeSessionStream:
     def test_it_subscribes_the_callers_connection(
         self,
@@ -505,6 +569,7 @@ class TestTheEditorGate:
         body = {"request_id": "req-1", "view": "chat"}
 
         assert client.get(f"{url}/records").status_code == 403
+        assert client.get(f"{url}/turns").status_code == 403
         assert client.post(f"{url}/stream", json=body).status_code == 403
         assert client.delete(f"{url}/stream", json=body).status_code == 403
 

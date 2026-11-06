@@ -8,7 +8,8 @@ import { waitTestEvent } from '../helpers';
  * Discuss; its
  * body with a reply per turn — text, a run of calls, a sub-agent's card, the phantom, a failure, the
  * server's word on a file the session registered, a call's effects in its place and an effect whose
- * call no record shows in its own — each ended one closing on its time; and its
+ * call no record shows in its own — each ended one closing on its time, and before it what the
+ * server sent the turn, as Pilot's message, folded; and its
  * tail, the working cue or how it ended.
  */
 export class SessionLogPage {
@@ -21,6 +22,11 @@ export class SessionLogPage {
   readonly log: Locator;
   readonly turns: Locator;
   readonly turnEnds: Locator;
+  /** What the server sent each turn, as Pilot's message: its text, folded, and under it Pilot and the time. */
+  readonly sent: Locator;
+  readonly sentTexts: Locator;
+  readonly sentEnds: Locator;
+  readonly sentMore: Locator;
   /** The replies' steps in their order, each a text, a call or a run of them, a card, a notice or an effect. */
   readonly steps: Locator;
   readonly texts: Locator;
@@ -47,6 +53,10 @@ export class SessionLogPage {
     this.log = this.overlay.getByTestId('session-log');
     this.turns = this.log.getByTestId('session-log.turn');
     this.turnEnds = this.log.getByTestId('session-log.turn-end');
+    this.sent = this.log.getByTestId('session-log.sent');
+    this.sentTexts = this.log.getByTestId('session-log.sent.text');
+    this.sentEnds = this.log.getByTestId('session-log.sent.end');
+    this.sentMore = this.log.getByTestId('session-log.sent.text.more');
     this.steps = this.log.getByTestId('chat.reply').locator(':scope > *');
     this.texts = this.log.getByTestId('chat.text');
     this.tools = this.log.getByTestId('chat.tool');

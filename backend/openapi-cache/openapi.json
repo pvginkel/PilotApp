@@ -6975,6 +6975,64 @@
         "title": "SessionStreamViewSchema",
         "type": "object"
       },
+      "SessionTurnsSchema.01118bb": {
+        "description": "The Session's Turns, in order.",
+        "properties": {
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/SessionTurnsSchema.01118bb.SessionTurnSchema"
+            },
+            "title": "Turns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "turns"
+        ],
+        "title": "SessionTurnsSchema",
+        "type": "object"
+      },
+      "SessionTurnsSchema.01118bb.SessionTurnSchema": {
+        "description": "A Turn of the Session: what was sent, and by whom.",
+        "properties": {
+          "at": {
+            "description": "When it was sent",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The handle of the Turn's author; null for the server's own",
+            "title": "Author"
+          },
+          "message": {
+            "description": "What was sent: the server's own message, such as a work item's brief or its continuation, or a person's words as the agent read them",
+            "title": "Message",
+            "type": "string"
+          },
+          "turn": {
+            "description": "The Turn's number in its Session, from 1",
+            "title": "Turn",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn",
+          "at",
+          "author",
+          "message"
+        ],
+        "title": "SessionTurnSchema",
+        "type": "object"
+      },
       "SetProgressRequestSchema.ce33d8b": {
         "additionalProperties": false,
         "description": "The work item's list of steps, to replace the one standing.",
@@ -14115,6 +14173,64 @@
           }
         ],
         "summary": "Open a view of the Session's live frames on the caller's SSE connection.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/sessions/{session_id}/turns": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_sessions_{session_id}_turns",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTurnsSchema.01118bb"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The Session's Turns in order, each with what was sent and its author.",
         "tags": [],
         "x-required-role": "editor"
       }
