@@ -102,7 +102,7 @@ function ReadOnlyOverlay({ projectId, project, read: { data, error }, showing, p
           </>
         )
       }
-      discuss={!failed && data && <DiscussButton quote={quoteOfFile(path, title)} testId="overlay.discuss" />}
+      acts={!failed && data && <DiscussButton quote={quoteOfFile(path, title)} testId="overlay.discuss" />}
       foot={null}
       onClose={close}
     >

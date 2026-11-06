@@ -288,7 +288,7 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
       <span className="line-acts">
         {!phone && ended && <JobMark job={job} />}
         {!phone && item.form !== 'wait' && <Open item={item} />}
-        {done.undo && <Undo item={item} />}
+        {done.undo && <Undo itemId={item.id} testId="timeline.line.undo" />}
         {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       </span>
       <LineAttachments item={item} />
@@ -427,9 +427,9 @@ function useOpenLine(item: TimelineItem) {
   };
 }
 
-/** Undo, whoever answered, until a session has taken the answer (F14.1). */
-function Undo({ item }: { item: TimelineItem }) {
-  const { mark, pending } = useUndo(item.id);
+/** Undo, whoever answered, until a session has taken the answer (F14.1): in a done line, and in an opened document's head (F28.10). */
+export function Undo({ itemId, testId }: { itemId: string; testId: string }) {
+  const { mark, pending } = useUndo(itemId);
   return (
     <button
       type="button"
@@ -438,7 +438,7 @@ function Undo({ item }: { item: TimelineItem }) {
       disabled={pending}
       title="Undo, until a session has taken it"
       aria-label="Undo"
-      data-testid="timeline.line.undo"
+      data-testid={testId}
     >
       <Undo2 className="icon" aria-hidden="true" />
     </button>

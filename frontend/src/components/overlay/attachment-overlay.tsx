@@ -41,7 +41,7 @@ export function ItemAttachmentOverlay({ projectId, itemId, attachmentId }: { pro
     <Overlay
       showing={`attachment ${attachmentId}`}
       titles={item && attachment && <AttachmentTitles item={item} attachment={attachment} />}
-      discuss={attachment && <DiscussButton quote={quoteOfAttachment(attachment)} testId="overlay.discuss" />}
+      acts={attachment && <DiscussButton quote={quoteOfAttachment(attachment)} testId="overlay.discuss" />}
       foot={null}
       onClose={close}
     >
@@ -60,7 +60,7 @@ export function ProjectAttachmentOverlay({ projectId, attachmentId }: { projectI
     <Overlay
       showing={`attachment ${attachmentId}`}
       titles={hung && <AttachmentTitles item={hung.item} attachment={hung.attachment} />}
-      discuss={hung && <DiscussButton quote={quoteOfAttachment(hung.attachment)} testId="overlay.discuss" />}
+      acts={hung && <DiscussButton quote={quoteOfAttachment(hung.attachment)} testId="overlay.discuss" />}
       foot={null}
       onClose={close}
     >

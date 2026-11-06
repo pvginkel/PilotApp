@@ -29,7 +29,11 @@
     border-bottom: 1px solid hsl(var(--border));
   }
   .sheet-head > .btn-sm { flex: none; margin-block: calc((var(--title-line) - var(--h)) / 2); }
+  /* Pilot's job on what it shows (job.tsx) among them, its title cut short before the head's gives
+     way. */
+  .sheet-head > .pilots-slot > .btn-sm { align-self: flex-start; margin-block: calc((var(--title-line) - var(--h)) / 2); }
   .sheet-head .titles { flex: 1; min-width: 0; }
+  .sheet-head:has(> .pilots-slot) .titles { min-width: 12ch; }
   .sheet-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: var(--title-line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sheet-head .sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .sheet-head .sub .segbar { align-self: center; }
@@ -185,9 +189,14 @@
      the left and the top, at the top however tall its head. */
   @media (max-width: 900px) {
     .sheet-body .column { padding: 16px 16px 32px; }
-    .sheet-head { padding: 8px 12px 8px 8px; gap: 6px; }
+    .sheet-head { flex-wrap: wrap; padding: 8px 12px 8px 8px; gap: 6px; }
     .sheet-head .view-back { --h: 36px; flex: none; }
     .sheet-head .view-back .icon { width: 20px; height: 20px; }
+    /* Pilot's job while it is queued or runs, or failed or stopped with its Retry, takes a row of its
+       own under the head's top line, its dot level with the title's left edge: past the arrow and
+       the gap, less the button's border and padding. */
+    .sheet-head > .pilots-slot { display: flex; order: 9; flex-basis: 100%; gap: 4px; min-width: 0; margin: -2px 0 0 34px; }
+    .sheet-head > .pilots-slot > .btn-sm { margin-block: 0; }
     .sheet-foot { padding: 10px 16px; }
     /* The strip's button under its words, at the right. */
     .pilot-strip { flex-wrap: wrap; padding: 8px 14px 8px 16px; }

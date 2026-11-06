@@ -6,7 +6,7 @@ import { blockParts, settledParts } from './timeline-page';
 /**
  * A document opened (F28): off a phone in its tab in its project's timeline's place, on a phone a
  * view, opened at the document's own address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
- * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, the sections
+ * *Done* and *Edited <time>*, and its buttons: Pilot's job on the item, its Undo and Discuss; its body with the summary, the prose and the blocks, the sections
  * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
  * foot; off a phone the session log's popover's cross, and no tab, view or popover draws a maximize or a backdrop; over the text, the box of Pilot's questions to a
  * registered document's writer and the reply (F52.2), which its own address opens it at. A document that is Pilot's has the strip under its head,
@@ -45,6 +45,13 @@ export class OverlayPage {
   readonly close: Locator;
   /** The head's Discuss (F39.1). */
   readonly discuss: Locator;
+  /**
+   * Pilot's job on the document's item in its head (F28.10), in whichever form it stands, as
+   * `TimelinePage.item(id).job` has it, `data-form` and `data-state` on its root.
+   */
+  readonly job: { root: Locator; pulse: Locator; retry: Locator };
+  /** The head's Undo, while the record offers it (F14.1). */
+  readonly undo: Locator;
   readonly body: Locator;
   readonly summary: Locator;
   readonly document: Locator;
@@ -106,6 +113,12 @@ export class OverlayPage {
     this.maximize = this.root.getByTestId('overlay.maximize');
     this.close = this.root.getByTestId('overlay.close');
     this.discuss = this.head.getByTestId('overlay.discuss');
+    this.job = {
+      root: this.head.getByTestId('overlay.job'),
+      pulse: this.head.getByTestId('overlay.job.pulse'),
+      retry: this.head.getByTestId('overlay.job.retry'),
+    };
+    this.undo = this.head.getByTestId('overlay.undo');
     this.body = this.root.getByTestId('overlay.body');
     this.summary = this.root.getByTestId('overlay.summary');
     this.document = this.root.getByTestId('overlay.document');

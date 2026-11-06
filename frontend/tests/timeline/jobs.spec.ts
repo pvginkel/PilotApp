@@ -8,13 +8,18 @@
  * its head after the time. Each opens the job's session log, which still opens at its address
  * reached cold. On a phone a running job's button takes a row under the line's title, the ended
  * mark is left to the item's view, and the menu of a line with nothing behind it offers the job
- * beside Discuss (F13.7, F13.9).
+ * beside Discuss (F13.7, F13.9). An opened document's head carries the job and the item's Undo
+ * before Discuss, and a worker's run's session log's head the job after its turn (F28.10): off a
+ * phone the job's log lies over the tab showing, or takes the log's place; on a phone a running
+ * job takes a row under the view's top line, and its log is a view pushed over the one it opens
+ * from.
  */
 
 import type { Locator, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique, makeUniqueToken } from '../support/helpers';
 import type { Projects } from '../support/projects';
+import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 
 const QUESTION = '```question id=Q1\n```\n';
@@ -23,6 +28,7 @@ const NEXT = 'Deciding what is next';
 const PHONE = { width: 390, height: 844 };
 
 const box = async (locator: Locator) => (await locator.boundingBox())!;
+const middle = (at: { y: number; height: number }) => at.y + at.height / 2;
 /** The mouse off every line, on the top bar. */
 const away = (page: Page) => page.mouse.move(1, 1);
 
@@ -309,5 +315,241 @@ test.describe('Pilot’s job on a phone', () => {
     await expect(page).toHaveURL(sessionLogAddress(project, run));
     await expect(sessionLog.item).toHaveText(title);
     await expect(item.wait.menu).toHaveCount(0);
+  });
+});
+
+/** A document of Pilot's, nothing in it to answer. */
+const ROUTE = { kind: 'document', title: 'The route', text: 'We take the high road over the pass.\n', by_pilot: true } as const;
+
+/** A document of Pilot's, sent, which places Pilot's job on it. */
+async function sentDocument(projects: Projects, project: string): Promise<string> {
+  const document = await projects.place(project, ROUTE);
+  await projects.send(document);
+  return document;
+}
+
+/** A worker's run started in the project, once it runs, and its environment. */
+async function runningWork(projects: Projects, project: string): Promise<{ work: string; environment: string }> {
+  const work = await projects.startWork(project, { title: 'Surveying the camp', brief: 'Survey the camp.', cwd: '/work/Example' });
+  await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+  const { id: environment } = await projects.environment(project, work);
+  return { work, environment };
+}
+
+test.describe('Pilot’s job in what opens', () => {
+  test('stands in an opened document’s tab’s head before the item’s Undo and Discuss, level with the title’s line; its session log lies over the tab, in the same place and of the same size as over the timeline, and closing it shows the document again; the head’s Undo withdraws the job', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    sessionLog,
+    docTabs,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Opened job'), members: [me.handle!], paused: true });
+    const document = await sentDocument(projects, project);
+    const jobId = await jobIn(projects, project);
+    await timeline.open(project);
+    const item = timeline.item(document);
+    await item.lineTitle.click();
+    await expect(overlay.title).toHaveText('The route');
+    // Over the timeline, the tab line showing as it does over the tab.
+    await docTabs.first.click();
+    await item.job.root.click();
+    await expect(sessionLog.item).toHaveText(NEXT);
+    const overTimeline = await box(sessionLog.overlay);
+    await sessionLog.close.click();
+
+    await docTabs.document(document).show.click();
+    await expect(page).toHaveURL(documentAddress(project, document));
+    await expect(overlay.title).toHaveText('The route');
+    const job = overlay.job;
+    await expect(job.root).toHaveAttribute('data-form', 'running');
+    await expect(job.root).toHaveAttribute('data-state', 'held');
+    await expect(job.root).toHaveText(NEXT);
+    await expect(job.pulse).toBeVisible();
+    await expect(overlay.undo).toHaveAccessibleName('Undo');
+    const [title, button, undo, discuss] = await Promise.all([box(overlay.title), box(job.root), box(overlay.undo), box(overlay.discuss)]);
+    expect(button.x).toBeGreaterThan(title.x + title.width);
+    expect(undo.x).toBeGreaterThanOrEqual(button.x + button.width);
+    expect(discuss.x).toBeGreaterThanOrEqual(undo.x + undo.width - 10);
+    for (const each of [button, undo]) expect(Math.abs(middle(each) - middle(title))).toBeLessThanOrEqual(1);
+
+    await job.root.click();
+    await expect(page).toHaveURL(sessionLogAddress(project, jobId));
+    await expect(sessionLog.item).toHaveText(NEXT);
+    await expect(sessionLog.cue).toHaveText('Paused');
+    const tab = page.locator('[data-testid="overlay"][role="tabpanel"]');
+    await expect(tab.getByTestId('overlay.title')).toHaveText('The route');
+    expect(await box(sessionLog.overlay)).toEqual(overTimeline);
+    await sessionLog.close.click();
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(documentAddress(project, document));
+    await expect(overlay.title).toHaveText('The route');
+
+    await overlay.undo.click();
+    await expect(overlay.doneChip).toHaveCount(0);
+    await expect(overlay.send).toBeVisible();
+    await expect(job.root).toHaveCount(0);
+    await expect(overlay.undo).toHaveCount(0);
+    expect((await projects.item(project, document)).job).toBeNull();
+  });
+
+  test('follows the job live in an opened document’s head: running, failed with Retry, a Retry’s job in its place, then its ended mark, opening its session log', async ({
+    page,
+    people,
+    projects,
+    chats,
+    controller,
+    overlay,
+    sessionLog,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Head job'), members: [me.handle!] });
+    const started = await chats.opening(project);
+    const document = await projects.place(project, ROUTE);
+    await overlay.open(project, document);
+    await deploymentSse.ensureConnected();
+    const job = overlay.job;
+    await expect(job.root).toHaveCount(0);
+
+    await projects.send(document);
+    const session = await started();
+    const failedId = await jobIn(projects, project);
+    await expect(job.root).toHaveAttribute('data-form', 'running');
+    await expect(job.root).toHaveAttribute('href', sessionLogAddress(project, failedId));
+
+    await controller.finish(chats.store, session, 'error', 'The model is overloaded.');
+    await expect(job.root).toHaveAttribute('data-form', 'failed');
+    await expect(job.root).toHaveText(`${NEXT} · Failed`);
+    await expect(job.root).toHaveCSS('color', await destructive(page));
+    await expect(job.pulse).toHaveCount(0);
+    await expect(job.retry).toHaveText('Retry');
+
+    const restarted = await chats.opening(project);
+    await job.retry.click();
+    const again = await restarted();
+    const retryId = await jobIn(projects, project, [failedId]);
+    await expect(job.root).toHaveAttribute('href', sessionLogAddress(project, retryId));
+    await expect(job.root).toHaveAttribute('data-form', 'running');
+    await expect(job.retry).toHaveCount(0);
+
+    await controller.finish(chats.store, again, 'success', 'Nothing is next.');
+    await expect(job.root).toHaveAttribute('data-form', 'ended');
+    await expect(job.root).toHaveAccessibleName(`Pilot’s job: ${NEXT}`);
+    await expect(job.root.locator('svg')).toHaveCount(1);
+    await job.root.click();
+    await expect(page).toHaveURL(sessionLogAddress(project, retryId));
+    await expect(sessionLog.tail).toHaveAttribute('data-mark', 'ended');
+  });
+
+  test('stands in a worker’s run’s session log’s head after its turn, before the cross and level with the title, live; its own log, which carries none, takes the popover’s place', async ({
+    page,
+    people,
+    projects,
+    chats,
+    controller,
+    sessionLog,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Log head job'), members: [me.handle!] });
+    const started = await chats.opening(project);
+    const { work, environment } = await runningWork(projects, project);
+    await sessionLog.open(project, work);
+    await deploymentSse.ensureConnected();
+    const job = sessionLog.job;
+    await expect(job.root).toHaveCount(0);
+
+    await controller.finish(environment, 'claude-1');
+    const session = await started();
+    const jobId = await jobIn(projects, project);
+    await expect(job.root).toHaveAttribute('data-form', 'running');
+    await expect(job.root).toHaveText(NEXT);
+    await expect(job.pulse).toBeVisible();
+    const [title, button, close, place] = await Promise.all([box(sessionLog.title), box(job.root), box(sessionLog.close), box(sessionLog.overlay)]);
+    expect(close.x).toBeGreaterThanOrEqual(button.x + button.width);
+    expect(Math.abs(middle(button) - middle(title))).toBeLessThanOrEqual(1);
+
+    await job.root.click();
+    await expect(page).toHaveURL(sessionLogAddress(project, jobId));
+    await expect(sessionLog.item).toHaveText(NEXT);
+    await expect(job.root).toHaveCount(0);
+    expect(await box(sessionLog.overlay)).toEqual(place);
+    await controller.finish(chats.store, session, 'success', 'Nothing is next.');
+    await expect(sessionLog.tail).toHaveAttribute('data-mark', 'ended');
+
+    await sessionLog.open(project, work);
+    await expect(job.root).toHaveAttribute('data-form', 'ended');
+    await expect(job.root).toHaveAttribute('href', sessionLogAddress(project, jobId));
+  });
+});
+
+test.describe('Pilot’s job in what opens on a phone', () => {
+  test.use({ viewport: PHONE, hasTouch: true });
+
+  test('running, takes a row of its own under a document view’s top line, its dot level with the title, Undo and Discuss staying on the top line; its log a view pushed over the document’s, Back showing the document again', async ({
+    page,
+    people,
+    projects,
+    overlay,
+    sessionLog,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Phone head'), members: [me.handle!], paused: true });
+    const document = await sentDocument(projects, project);
+    const jobId = await jobIn(projects, project);
+    await overlay.open(project, document);
+    const job = overlay.job;
+
+    await expect(job.root).toHaveAttribute('data-form', 'running');
+    const [back, title, sub, button, dot, undo, discuss] = await Promise.all(
+      [overlay.back, overlay.title, overlay.sub, job.root, job.pulse, overlay.undo, overlay.discuss].map(box),
+    );
+    expect(button.y).toBeGreaterThanOrEqual(Math.max(back.y + back.height, sub.y + sub.height) - 1);
+    expect(Math.abs(dot.x - title.x)).toBeLessThanOrEqual(1);
+    for (const each of [undo, discuss]) expect(each.y + each.height).toBeLessThanOrEqual(button.y);
+
+    await job.root.tap();
+    await expect(page).toHaveURL(sessionLogAddress(project, jobId));
+    await expect(sessionLog.item).toHaveText(NEXT);
+    await overlay.back.tap();
+    await expect(page).toHaveURL(documentAddress(project, document));
+    await expect(overlay.title).toHaveText('The route');
+    await expect(job.root).toHaveAttribute('data-form', 'running');
+  });
+
+  test('running, takes a row of its own under a worker’s run’s log view’s top line; its log a view pushed over the run’s, Back showing the run’s again', async ({
+    page,
+    people,
+    projects,
+    chats,
+    controller,
+    overlay,
+    sessionLog,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Phone log job'), members: [me.handle!] });
+    const started = await chats.opening(project);
+    const { work, environment } = await runningWork(projects, project);
+    await controller.finish(environment, 'claude-1');
+    await started();
+    const jobId = await jobIn(projects, project);
+    await sessionLog.open(project, work);
+    const job = sessionLog.job;
+
+    await expect(job.root).toHaveAttribute('data-form', 'running');
+    const [title, sub, button, dot] = await Promise.all([sessionLog.title, sessionLog.sub, job.root, job.pulse].map(box));
+    expect(button.y).toBeGreaterThanOrEqual(sub.y + sub.height - 1);
+    expect(Math.abs(dot.x - title.x)).toBeLessThanOrEqual(1);
+
+    await job.root.tap();
+    await expect(page).toHaveURL(sessionLogAddress(project, jobId));
+    await expect(sessionLog.item).toHaveText(NEXT);
+    await overlay.back.tap();
+    await expect(page).toHaveURL(sessionLogAddress(project, work));
+    await expect(sessionLog.item).toHaveText('Surveying the camp');
   });
 });

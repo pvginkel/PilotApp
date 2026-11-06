@@ -7,7 +7,9 @@
  * Keep in its block's place (F5.6), then Pilot's dots while it writes
  * (F28.3), and over the text, where Pilot asked a registered document's writer about its blocks,
  * the box of the questions and the writer's reply (F52.2), which an asked block's mark goes to, as
- * the box's address opens the document at it. *Edited* and the dots tell of the text as it
+ * the box's address opens the document at it. Its head's buttons are Pilot's job on the item, its
+ * Undo while it lasts and Discuss (F28.10): the job opens its session log, off a phone the popover
+ * over the tab, which closing shows again, on a phone a view pushed over the document's. *Edited* and the dots tell of the text as it
  * stands, so a document read as Done fixed it has neither; its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
  * Reviewed on an open review, or *Send answers* on an open document, which closes its tab or its
  * view (F28.4), after the Cancel of a document a run of Pilot's put to the person while the run holds a
@@ -39,7 +41,9 @@ import { ArchiveAnswers } from '@/components/timeline/archive-question';
 import { Attachments } from '@/components/timeline/attachments';
 import { DocumentParts, SegmentBar, SendAnswers, UnsentChip } from '@/components/timeline/document';
 import { isUnsent } from '@/components/timeline/document-state';
+import { Undo } from '@/components/timeline/item';
 import { Edited } from '@/components/timeline/item-head';
+import { JobOn } from '@/components/timeline/job';
 import { LockedContext } from '@/components/timeline/locked';
 import { ToClarificationContext } from '@/components/timeline/to-clarification';
 import { PilotWriting } from '@/components/timeline/writing';
@@ -81,7 +85,7 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
       <Overlay
         showing={`attachment ${attachment}`}
         titles={headed && shown && <AttachmentTitles item={headed} attachment={shown} document={{ projectId, documentId }} />}
-        discuss={shown && <DiscussButton quote={quoteOfAttachment(shown)} testId="overlay.discuss" />}
+        acts={shown && <DiscussButton quote={quoteOfAttachment(shown)} testId="overlay.discuss" />}
         foot={null}
         onClose={close}
       >
@@ -94,7 +98,7 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
       showing={documentId}
       at={block === null ? null : { item: documentId, block }}
       titles={headed && <Titles item={headed} project={project} />}
-      discuss={headed && <DiscussButton quote={quoteOfItem(headed)} testId="overlay.discuss" />}
+      acts={headed && <Acts item={headed} />}
       strip={headed?.pilots_work && <PilotStrip itemId={headed.id} pilots={headed.pilots_work} read={item !== undefined} />}
       foot={headed && footOf(headed, handle, close)}
       onClose={close}
@@ -108,6 +112,17 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
         item && <Body item={item} box={clarification} />
       )}
     </Overlay>
+  );
+}
+
+/** The head's buttons: Pilot's job on the item in whichever form it stands, its Undo while the record offers it, Discuss (F28.10). */
+function Acts({ item }: { item: ItemDocument }) {
+  return (
+    <>
+      {item.job !== null && <JobOn job={item.job} testId="overlay.job" />}
+      {item.done?.undo && <Undo itemId={item.id} testId="overlay.undo" />}
+      <DiscussButton quote={quoteOfItem(item)} testId="overlay.discuss" />
+    </>
   );
 }
 

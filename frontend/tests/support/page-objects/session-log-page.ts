@@ -5,7 +5,8 @@ import { waitTestEvent } from '../helpers';
 /**
  * A work item's session log in the overlay (F69), at its own address: off a phone its popover over
  * the tab showing, a dialog, on a phone a view. Its head with "Session log", the session's id its
- * tooltip, the item's title and the environment's link, on a phone Discuss, off one the cross; its
+ * tooltip, the item's title and the environment's link, a worker's run's Pilot's job after its
+ * turn, on a phone Discuss, off one the cross; its
  * body with a reply per turn — text, a run of calls, a sub-agent's card, the phantom, a failure, the
  * server's word on a file the session registered, a call's effects in its place and an effect whose
  * call no record shows in its own — each ended one closing on its time, and before it what the
@@ -20,6 +21,8 @@ export class SessionLogPage {
   readonly sub: Locator;
   readonly item: Locator;
   readonly environment: Locator;
+  /** A worker's run's: Pilot's job after its turn in its head (F59.1), `data-form` and `data-state` on its root. */
+  readonly job: { root: Locator; pulse: Locator; retry: Locator };
   readonly close: Locator;
   readonly body: Locator;
   readonly log: Locator;
@@ -54,6 +57,11 @@ export class SessionLogPage {
     this.sub = this.overlay.getByTestId('overlay.sub');
     this.item = this.overlay.getByTestId('session-log.item');
     this.environment = this.overlay.getByTestId('session-log.environment');
+    this.job = {
+      root: this.head.getByTestId('overlay.job'),
+      pulse: this.head.getByTestId('overlay.job.pulse'),
+      retry: this.head.getByTestId('overlay.job.retry'),
+    };
     this.close = this.overlay.getByTestId('overlay.close');
     this.body = this.overlay.getByTestId('overlay.body');
     this.log = this.overlay.getByTestId('session-log');

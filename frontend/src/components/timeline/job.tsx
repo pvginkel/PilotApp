@@ -7,8 +7,9 @@
  * button. Each opens the job's session log, whose tail says what these forms have no room for: why
  * it is held, the stop's cause, the error. A done line draws the ended mark first among its actions
  * and the other forms at its end beside the time, on a phone in a row under its title (F13.7,
- * F13.8); an open card's head draws every form after its time; a phone's menu of a line with
- * nothing behind it offers the job as a row (F13.9).
+ * F13.8); an open card's head draws every form after its time, an opened document's head and a
+ * worker's run's session log's among its buttons (F28.10); a phone's menu of a line with nothing
+ * behind it offers the job as a row (F13.9).
  */
 
 import { useRef } from 'react';
@@ -25,13 +26,19 @@ import { jobForm, jobHaltLabel } from '@/lib/utils/status-labels';
 
 type Job = NonNullable<TimelineItem['job']>;
 
-/** The job in an open card's head, after its time, in whichever form it stands. */
-export function JobOn({ job }: { job: Job }) {
-  return jobForm(job.work) === 'ended' ? <JobMark job={job} /> : <JobButton job={job} />;
+interface JobProps {
+  job: Job;
+  /** The test id of its button, its dot's and its Retry's under it: the timeline's by default. */
+  testId?: string;
+}
+
+/** The job in a head, in whichever form it stands. */
+export function JobOn({ job, testId }: JobProps) {
+  return jobForm(job.work) === 'ended' ? <JobMark job={job} testId={testId} /> : <JobButton job={job} testId={testId} />;
 }
 
 /** The job's button while it is queued or runs, or once it failed or stopped, and then its Retry. */
-export function JobButton({ job }: { job: Job }) {
+export function JobButton({ job, testId = 'timeline.job' }: JobProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const replace = useTabReplace();
   const button = useRef<HTMLAnchorElement>(null);
@@ -46,11 +53,11 @@ export function JobButton({ job }: { job: Job }) {
         replace={replace}
         className={cn('btn btn-ghost btn-sm pilots-btn job-btn', halted !== null && 'halted')}
         title={`Pilot’s job on this ${halted ?? 'is under way'}: open its session log`}
-        data-testid="timeline.job"
+        data-testid={testId}
         data-form={form}
         data-state={job.work.state}
       >
-        {halted === null && <span className="pulse" title="Pilot’s job on this is under way" data-testid="timeline.job.pulse" />}
+        {halted === null && <span className="pulse" title="Pilot’s job on this is under way" data-testid={`${testId}.pulse`} />}
         <Avatar who="pilot" size="xs" />
         <span className="job-title">{job.title}</span>
         {halted !== null && (
@@ -60,13 +67,13 @@ export function JobButton({ job }: { job: Job }) {
           </>
         )}
       </Link>
-      {halted !== null && offersRetry(job.work) && <Retry job={job} onLanded={() => button.current?.focus()} />}
+      {halted !== null && offersRetry(job.work) && <Retry job={job} testId={`${testId}.retry`} onLanded={() => button.current?.focus()} />}
     </span>
   );
 }
 
 /** The ended job's mark, an icon button among a line's actions or in a head. */
-export function JobMark({ job }: { job: Job }) {
+export function JobMark({ job, testId = 'timeline.job' }: JobProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const replace = useTabReplace();
   return (
@@ -77,7 +84,7 @@ export function JobMark({ job }: { job: Job }) {
       className="btn btn-ghost btn-sm btn-icon job-mark"
       title={`Pilot’s job on this: ${job.title}. Open its session log`}
       aria-label={`Pilot’s job: ${job.title}`}
-      data-testid="timeline.job"
+      data-testid={testId}
       data-form="ended"
       data-state={job.work.state}
     >
@@ -109,7 +116,7 @@ export function JobMenuRow({ job, onOpen }: { job: Job; onOpen: () => void }) {
  * keyboard, the focus goes to the job's button once Retry, gone with the retried job, has left it
  * nowhere.
  */
-function Retry({ job, onLanded }: { job: Job; onLanded: () => void }) {
+function Retry({ job, testId, onLanded }: { job: Job; testId: string; onLanded: () => void }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { act, pending } = useRetry(job.id);
   const archived = useArchived(projectId);
@@ -127,7 +134,7 @@ function Retry({ job, onLanded }: { job: Job; onLanded: () => void }) {
           if (work !== null && pressed && (focused === null || focused === document.body || focused === self.current)) onLanded();
         });
       }}
-      data-testid="timeline.job.retry"
+      data-testid={testId}
     >
       <RotateCw className="icon" aria-hidden="true" />
       Retry

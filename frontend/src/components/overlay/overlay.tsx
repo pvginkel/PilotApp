@@ -15,7 +15,8 @@
  * it shows afresh. A segment in it goes to
  * its block in its body, which flashes (F33), and opened at a block it goes there once its body
  * draws it; either opens the block's collapsed section (F31.5). Its head carries Discuss, quoting
- * what it shows (F39.1), its buttons level with its title's first line; a strip under its head,
+ * what it shows (F39.1), after Pilot's job on it and its Undo where it has them (F28.10), its
+ * buttons level with its title's first line; a strip under its head,
  * where what it shows has one, says what Pilot does on it (F28.9). On a phone it is a view pushed
  * over the tabs (F98.4): the whole screen over the head and the tabs, with no animation, no
  * backdrop, no maximize and no cross, an arrow back at the left of its head where the head's drawer
@@ -44,8 +45,8 @@ interface OverlayProps {
   at?: { item: string; block: string } | null;
   /** Its head's titles: the title and the line under it. */
   titles: ReactNode;
-  /** Its head's Discuss, once what it shows is read. */
-  discuss?: ReactNode;
+  /** Its head's buttons, once what it shows is read: Pilot's job on it, its Undo, Discuss. */
+  acts?: ReactNode;
   /** Under its head: what Pilot does on a document that is Pilot's. */
   strip?: ReactNode;
   foot: ReactNode;
@@ -62,7 +63,7 @@ export function Overlay({
   showing,
   at = null,
   titles,
-  discuss = null,
+  acts = null,
   strip = null,
   foot,
   onClose,
@@ -212,7 +213,7 @@ export function Overlay({
               <div id={titlesId} className="titles">
                 {titles}
               </div>
-              {discuss}
+              {acts}
               {pop && (
                 <button
                   type="button"

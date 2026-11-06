@@ -291,6 +291,9 @@ test.describe('A registered document', () => {
     await expect(overlay.strip.link).toHaveCount(0);
     await expect(overlay.strip.stop).toHaveText('Stop and take over');
     await expect(overlay.strip.stop).toBeEnabled();
+    // The pass in its head too, over the strip (F28.10).
+    await expect(overlay.job.root).toHaveAttribute('data-form', 'running');
+    await expect(overlay.job.root).toHaveAttribute('href', sessionLogAddress(project, job));
     const dome = overlay.blockAt('D1').option('Dome');
     await expect(overlay.blockAt('D1').options).toHaveCount(2);
     await expect(dome).toBeDisabled();
@@ -315,6 +318,8 @@ test.describe('A registered document', () => {
     await expect(overlay.strip.root).toHaveCount(0);
     await expect(dome).toBeEnabled();
     await expect(overlay.send).toBeVisible();
+    await expect(overlay.job.root).toHaveAttribute('data-form', 'stopped');
+    await expect(overlay.job.retry).toBeVisible();
     for (const document of [kit, pitch]) {
       const stopped = timeline.item(document).job;
       await expect(stopped.root).toHaveAttribute('data-form', 'stopped');
