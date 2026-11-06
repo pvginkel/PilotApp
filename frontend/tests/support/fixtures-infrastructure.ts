@@ -336,13 +336,12 @@ export const infrastructureFixtures = base.extend<InfrastructureFixtures, Intern
         const backendPromise = (async () => {
           try {
             const backendHandle = await startBackend(workerInfo.workerIndex, {
+              logs: backendLogs,
               ...(workerDatabase ? { databaseUrl: databaseUrl(workerDatabase) } : {}),
               streamLogs: backendStreamLogs,
               port: backendPort,
               frontendVersionUrl: `http://127.0.0.1:${frontendPort}/version.json`,
             });
-            backendLogs.attachStream(backendHandle.process.stdout, 'stdout');
-            backendLogs.attachStream(backendHandle.process.stderr, 'stderr');
             backendLogs.log(`Backend listening on ${backendHandle.url}`);
             return backendHandle;
           } catch (error) {
@@ -362,12 +361,11 @@ export const infrastructureFixtures = base.extend<InfrastructureFixtures, Intern
             const frontendHandle = await startFrontend({
               workerIndex: workerInfo.workerIndex,
               backendUrl: backendHandle.url,
+              logs: frontendLogs,
               excludePorts: [backendHandle.port],
               port: frontendPort,
               streamLogs: frontendStreamLogs,
             });
-            frontendLogs.attachStream(frontendHandle.process.stdout, 'stdout');
-            frontendLogs.attachStream(frontendHandle.process.stderr, 'stderr');
             frontendLogs.log(`Frontend listening on ${frontendHandle.url}`);
             return { backendHandle, frontendHandle };
           } catch (error) {

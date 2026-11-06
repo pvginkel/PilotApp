@@ -6,6 +6,7 @@ import getPort from 'get-port';
 import type { Readable } from 'node:stream';
 import split2 from 'split2';
 import { loadAppBackendEnv } from '../backend-env-extensions';
+import type { ServiceLogCollector } from './backend-logs';
 
 const BACKEND_READY_PATH = '/health/readyz';
 const FRONTEND_READY_PATH = '/';
@@ -28,6 +29,7 @@ export type FrontendServerHandle = ServerHandle;
 export async function startBackend(
   workerIndex: number,
   options: {
+    logs: ServiceLogCollector;
     databaseUrl?: string;
     streamLogs?: boolean;
     port?: number;
@@ -59,6 +61,7 @@ export async function startBackend(
     serviceLabel: 'backend',
     scriptPath,
     args,
+    logs: options.logs,
     readinessPath: BACKEND_READY_PATH,
     startupTimeoutMs: BACKEND_STARTUP_TIMEOUT_MS,
     streamLogs: options.streamLogs === true,
@@ -80,6 +83,7 @@ export async function startBackend(
 export async function startFrontend(options: {
   workerIndex: number;
   backendUrl: string;
+  logs: ServiceLogCollector;
   excludePorts?: number[];
   streamLogs?: boolean;
   port?: number;
@@ -110,6 +114,7 @@ export async function startFrontend(options: {
     serviceLabel: 'frontend',
     scriptPath,
     args,
+    logs: options.logs,
     readinessPath: FRONTEND_READY_PATH,
     startupTimeoutMs: FRONTEND_STARTUP_TIMEOUT_MS,
     streamLogs: options.streamLogs === true,
@@ -142,6 +147,7 @@ type StartServiceOptions = {
   scriptPath: string;
   args: string[];
   env: NodeJS.ProcessEnv;
+  logs: ServiceLogCollector;
   readinessPath: string;
   startupTimeoutMs: number;
   streamLogs: boolean;
@@ -168,6 +174,9 @@ async function startService(options: StartServiceOptions): Promise<ServerHandle>
   }) as ChildProcessWithoutNullStreams;
 
   registerForCleanup(child);
+  // From the spawn on, so that a start that fails keeps what the service said.
+  options.logs.attachStream(child.stdout, 'stdout');
+  options.logs.attachStream(child.stderr, 'stderr');
   const startupStart = performance.now();
 
   if (options.streamLogs) {
@@ -180,6 +189,7 @@ async function startService(options: StartServiceOptions): Promise<ServerHandle>
     readinessUrl,
     serviceLabel: options.serviceLabel,
     startupTimeoutMs: options.startupTimeoutMs,
+    logs: options.logs,
   });
 
   const startupMs = Math.round(performance.now() - startupStart);
@@ -209,20 +219,25 @@ async function waitForStartup({
   readinessUrl,
   serviceLabel,
   startupTimeoutMs,
+  logs,
 }: {
   workerIndex: number;
   process: ChildProcessWithoutNullStreams;
   readinessUrl: string;
   serviceLabel: ServiceLabel;
   startupTimeoutMs: number;
+  logs: ServiceLogCollector;
 }) {
   const start = performance.now();
+  // A start that fails says why: the service's output so far, after the error's own line.
+  const output = () => `\n${logs.getBufferedLines().join('\n')}`;
 
   const exitPromise = new Promise<never>((_, reject) => {
-    process.once('exit', (code, signal) => {
+    // 'close', not 'exit': it comes once the service's output is read to its end.
+    process.once('close', (code, signal) => {
       reject(
         new Error(
-          `${formatPrefix(workerIndex, serviceLabel)} process exited before ready (code=${code}, signal=${signal})`
+          `${formatPrefix(workerIndex, serviceLabel)} process exited before ready (code=${code}, signal=${signal})${output()}`
         )
       );
     });
@@ -267,7 +282,7 @@ async function waitForStartup({
       ? ` (last response: ${lastStatus} ${lastBody.slice(0, 500)})`
       : '';
     throw new Error(
-      `${formatPrefix(workerIndex, serviceLabel)} Timed out waiting for readiness at ${readinessUrl}${detail}`
+      `${formatPrefix(workerIndex, serviceLabel)} Timed out waiting for readiness at ${readinessUrl}${detail}${output()}`
     );
   };
 
