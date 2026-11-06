@@ -10,6 +10,8 @@
  * it; Back takes it off. A view's address reached cold — a notification's link, a link from another
  * app, a typed address — lies over the project's Timeline, an entry of the Timeline put under it,
  * so that Back lands there. The panel the desktop keeps per project is neither read nor changed.
+ * A view keeps its scroll while another lies over it, as long as the page (R22): Back finds it
+ * where it was left, and a view opened afresh, or reloaded, starts at its top.
  */
 
 import { createContext, useLayoutEffect, useRef, useState } from 'react';
@@ -39,6 +41,10 @@ export interface PhoneView {
   back: () => void;
   /** The address of the view under it, none where it lies on a tab. */
   under: string | null;
+  /** Its scroll as it was left, 0 for a view not shown before. */
+  scroll: number;
+  /** Keeps its scroll as it scrolls. */
+  keep: (top: number) => void;
 }
 
 /** The view showing on a phone; none off one. */
@@ -52,7 +58,13 @@ interface PhoneScreen {
   views: readonly string[];
   /** Takes the view on top off. */
   back: () => void;
+  /** The view on top's scroll as it was left, and its keep. */
+  scroll: number;
+  keep: (top: number) => void;
 }
+
+/** Each view's scroll, by the key of its entry in the browser's history. */
+const scrolls = new Map<string, number>();
 
 /** What an entry shows on a phone: the tab under the views, and the views. */
 interface Shown {
@@ -143,5 +155,14 @@ export function usePhoneTab(projectId: string, draft: boolean, overlaid: boolean
     history.push(href, own);
   });
 
-  return { tab, show, views, back: () => router.history.back() };
+  // The history keys every entry, the page's first included.
+  const entry = shown.location.state.__TSR_key!;
+  return {
+    tab,
+    show,
+    views,
+    back: () => router.history.back(),
+    scroll: scrolls.get(entry) ?? 0,
+    keep: (top) => void scrolls.set(entry, top),
+  };
 }

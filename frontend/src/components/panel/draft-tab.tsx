@@ -17,7 +17,7 @@ import { PilotWriting } from '@/components/timeline/writing';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useProjectDraft } from '@/hooks/use-document';
 import { useDraftPlace } from '@/hooks/use-draft-place';
-import { hungAt } from '@/hooks/use-timeline';
+import { hungAt, pathOfLink } from '@/hooks/use-timeline';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
 
 export function DraftTab({ projectId }: { projectId: string }) {
@@ -96,7 +96,7 @@ function DraftLink({ href, children }: DocumentLinkProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const replace = useTabReplace();
-  const hung = data === undefined ? undefined : hungAt(data, pathOf(href));
+  const hung = data === undefined ? undefined : hungAt(data, pathOfLink(href));
   if (hung === undefined) return <>{children}</>;
   return (
     <Link
@@ -108,15 +108,4 @@ function DraftLink({ href, children }: DocumentLinkProps) {
       {children}
     </Link>
   );
-}
-
-/** The path a link names in the project's folder: as written, less a leading `./`, its escapes decoded. */
-function pathOf(href: string): string {
-  const path = href.replace(/^\.\//, '');
-  try {
-    return decodeURI(path);
-  } catch {
-    // An escape of no UTF-8: the path as written, which names no file.
-    return path;
-  }
 }

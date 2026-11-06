@@ -11,7 +11,8 @@
  * view on top of it; an item's address is the item alone (F99), a view too, and never the timeline
  * gone to the item. Discuss and *In the chat* anywhere on it show the Chat tab, a draft's its
  * Chat, and an ask of the draft gone to the Draft tab at it, every view taken off first. The tab
- * and the views are the entry's in the browser's history (`use-phone-tab.ts`).
+ * and the views are the entry's in the browser's history, and a view keeps its scroll while another
+ * lies over it (`use-phone-tab.ts`).
  */
 
 import type { ReactNode } from 'react';
@@ -45,7 +46,7 @@ interface PhoneProjectProps {
 
 export function PhoneProject({ projectId, project, overlaid, children }: PhoneProjectProps) {
   const draft = project?.state === 'draft';
-  const { tab, show, views, back } = usePhoneTab(projectId, draft, overlaid);
+  const { tab, show, views, back, scroll, keep } = usePhoneTab(projectId, draft, overlaid);
   const documents = usePanelDocuments(projectId);
   const navigate = useNavigate();
   const chatTab = draft ? 'timeline' : 'chat';
@@ -94,7 +95,7 @@ export function PhoneProject({ projectId, project, overlaid, children }: PhonePr
                 <PhoneTabs projectId={projectId} draft={draft} tab={tab} count={documents.count} onTab={show} />
               </div>
             )}
-            <PhoneViewContext.Provider value={{ back, under: views.at(-2) ?? null }}>{children}</PhoneViewContext.Provider>
+            <PhoneViewContext.Provider value={{ back, under: views.at(-2) ?? null, scroll, keep }}>{children}</PhoneViewContext.Provider>
           </div>
         </DraftBlockContext.Provider>
       </InChatContext.Provider>

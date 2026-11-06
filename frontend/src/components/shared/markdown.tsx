@@ -5,7 +5,10 @@
  * quotes (F39.3), except in code, where it shows as written, and a streamed text's new deltas fade
  * in (the chat's decision 1; delta-fade.ts). A heading's words stand alone, inline, as the heading
  * shows them. A text that links only to the documents it names by path, as a draft does (F47.3),
- * draws each link through its own component, and links nothing else.
+ * draws each link through its own component, and links nothing else. A text that opens the
+ * project's attached material, as the project document and the handbook do (F29.3), draws each link
+ * to a path in the project's `attachments/` through its own component, and every other link as the
+ * rest of the record's words.
  */
 
 import { memo, useMemo, type ComponentType, type ReactNode } from 'react';
@@ -16,6 +19,7 @@ import { rehypeDeltas, type DeltaMarks } from '@/components/chat/delta-fade';
 import { QuoteChip } from '@/components/chat/quote-chip';
 import { NestedLink } from '@/components/shared/linked-text';
 import { useLinker } from '@/components/shared/links-context';
+import { linksMaterial } from '@/hooks/use-timeline';
 import { parseQuoteHref, QUOTE_SCHEME, quotesToLinks } from '@/lib/chat/quotes';
 import type { Linker } from '@/lib/links';
 import { cn } from '@/lib/utils';
@@ -52,17 +56,25 @@ function rehypeLinks(link: Linker) {
   };
 }
 
-const components: Components = {
-  a: ({ href, title, className, children }) => {
-    const quote = href === undefined ? null : parseQuoteHref(href);
-    if (quote) return <QuoteChip quote={{ ...quote, label: String(children) }} label={children} />;
-    return (
-      <a href={href} title={title} className={className} target="_blank" rel="noreferrer">
-        {children}
-      </a>
-    );
-  },
-};
+interface LinkProps {
+  href?: string;
+  title?: string;
+  className?: string;
+  children?: ReactNode;
+}
+
+/** A link of the record's words: a quote tag's chip, any other link opening in a new tab. */
+function RecordLink({ href, title, className, children }: LinkProps) {
+  const quote = href === undefined ? null : parseQuoteHref(href);
+  if (quote) return <QuoteChip quote={{ ...quote, label: String(children) }} label={children} />;
+  return (
+    <a href={href} title={title} className={className} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  );
+}
+
+const components: Components = { a: RecordLink };
 
 const urlTransform = (url: string) => (url.startsWith(QUOTE_SCHEME) ? url : defaultUrlTransform(url));
 
@@ -109,9 +121,17 @@ interface MarkdownProps {
   deltas?: DeltaMarks;
   /** Draws each link, the text linking nothing else: no ticket id, repo or environment. */
   documentLink?: ComponentType<DocumentLinkProps>;
+  /** Draws each link to the project's attached material, a path in its folder's `attachments/` (F74). */
+  materialLink?: ComponentType<DocumentLinkProps>;
 }
 
-export const Markdown = memo(function Markdown({ text, className, deltas, documentLink: DocumentLink }: MarkdownProps) {
+export const Markdown = memo(function Markdown({
+  text,
+  className,
+  deltas,
+  documentLink: DocumentLink,
+  materialLink: MaterialLink,
+}: MarkdownProps) {
   const link = useLinker();
   const quoted = useMemo(() => quotesToLinks(text), [text]);
   // The deltas split the text by its source positions, which the links' pieces do not keep.
@@ -121,20 +141,31 @@ export const Markdown = memo(function Markdown({ text, className, deltas, docume
     if (DocumentLink === undefined) plugins.push([rehypeLinks, link]);
     return plugins;
   }, [deltas, link, quoted, DocumentLink]);
-  const drawn = useMemo(
-    (): Components =>
-      DocumentLink === undefined
-        ? components
-        : {
-            a: ({ href, children }) => {
-              const quote = href === undefined ? null : parseQuoteHref(href);
-              if (quote) return <QuoteChip quote={{ ...quote, label: String(children) }} label={children} />;
-              // A link's address is never unset: the Markdown that makes the link gives it one.
-              return <DocumentLink href={href!}>{children}</DocumentLink>;
-            },
-          },
-    [DocumentLink],
-  );
+  const drawn = useMemo((): Components => {
+    if (DocumentLink !== undefined) {
+      return {
+        a: ({ href, children }) => {
+          const quote = href === undefined ? null : parseQuoteHref(href);
+          if (quote) return <QuoteChip quote={{ ...quote, label: String(children) }} label={children} />;
+          // A link's address is never unset: the Markdown that makes the link gives it one.
+          return <DocumentLink href={href!}>{children}</DocumentLink>;
+        },
+      };
+    }
+    if (MaterialLink !== undefined) {
+      return {
+        a: ({ href, title, className, children }) =>
+          href !== undefined && linksMaterial(href) ? (
+            <MaterialLink href={href}>{children}</MaterialLink>
+          ) : (
+            <RecordLink href={href} title={title} className={className}>
+              {children}
+            </RecordLink>
+          ),
+      };
+    }
+    return components;
+  }, [DocumentLink, MaterialLink]);
   return (
     <div className={cn('prose', className)}>
       <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={drawn} urlTransform={urlTransform}>

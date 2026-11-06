@@ -9,7 +9,9 @@
  * composer, the session log's Discuss included. Back is the browser's: a view is an entry of its
  * own, and Back, the arrow or Esc takes it off and shows what lay under it, the tab it was opened
  * from; a reload keeps the tab and the views; a view's address reached cold lies over the
- * project's Timeline, so that Back lands there.
+ * project's Timeline, so that Back lands there. A view keeps its scroll while another lies over it,
+ * so that Back from an attachment shows its document where it was read; one opened afresh, or
+ * reloaded, starts at its top.
  */
 
 import type { Page } from '@playwright/test';
@@ -168,6 +170,57 @@ test.describe('Views on a phone', () => {
     await expect(timeline.item(sent).root).toHaveAttribute('data-state', 'done');
     await page.goForward();
     await expect(page).toHaveURL(documentAddress(id, sent));
+  });
+
+  test('a view keeps its scroll while another lies over it: Back from an attachment shows its document where it was read; one opened afresh, or reloaded, starts at its top', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Scrolled'), members: [me.handle!] });
+    const paragraphs = Array.from({ length: 60 }, (_, index) => `Paragraph ${index + 1} of the trip.`).join('\n\n');
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: `${TRIP}\n${paragraphs}\n` });
+    const [notes] = await projects.attach(trip, [NOTES]);
+    await timeline.open(id);
+    // The chip stands under the summary: a click that scrolls it into view would move the document.
+    const toNotes = () => overlay.attachmentChip(notes).dispatchEvent('click');
+    const scrolledDown = async () => {
+      await expect(overlay.document).toContainText('Paragraph 60 of the trip.');
+      await overlay.body.evaluate((body) => body.scrollTo({ top: body.scrollHeight }));
+      await expect.poll(() => overlay.scrollTop()).toBeGreaterThan(0);
+      return overlay.scrollTop();
+    };
+
+    await timeline.item(trip).card.open.tap();
+    const read = await scrolledDown();
+    await toNotes();
+    await expect(page).toHaveURL(documentAttachmentAddress(id, trip, notes));
+    await expect(overlay.title).toHaveText('Tent notes');
+    expect(await overlay.scrollTop()).toBe(0);
+    await overlay.back.tap();
+    await expect(page).toHaveURL(documentAddress(id, trip));
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    await expect.poll(() => overlay.scrollTop()).toBe(read);
+    // Forward is the attachment again, and Back the document where it was read.
+    await page.goForward();
+    await expect(overlay.title).toHaveText('Tent notes');
+    await page.goBack();
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    await expect.poll(() => overlay.scrollTop()).toBe(read);
+
+    await overlay.back.tap();
+    await expect(overlay.root).toHaveCount(0);
+    await timeline.item(trip).card.open.tap();
+    await expect(overlay.document).toContainText('Paragraph 60 of the trip.');
+    expect(await overlay.scrollTop()).toBe(0);
+
+    await scrolledDown();
+    await page.reload();
+    await expect(overlay.document).toContainText('Paragraph 60 of the trip.');
+    expect(await overlay.scrollTop()).toBe(0);
   });
 
   test('a view’s address reached cold lies over the Timeline, so that Back lands there; its attachment’s document link opens the document’s view, which lies under nothing', async ({

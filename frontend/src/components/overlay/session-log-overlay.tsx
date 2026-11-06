@@ -66,6 +66,7 @@ export function SessionLogOverlay({ projectId, sessionId }: SessionLogOverlayPro
       foot={null}
       onClose={close}
       bodyRef={body}
+      ownScroll
     >
       {failed ? (
         <DidNotLoad what="The session log" />

@@ -12,16 +12,31 @@
  * down comes back up. On a phone the Documents tab lists the handbook under the project document,
  * by its title, and neither the head nor the project's menu has it; it opens as a view, the whole
  * screen over the head and its drawer's button, with no maximize or cross (F98.4), its arrow back
- * taking it off, and switching projects closes it (F1.6).
+ * taking it off, and switching projects closes it (F1.6). A link in either to the project's
+ * attached material, by its path in the project's folder, opens the attachment where it hangs, the
+ * draft's material on the opening, in a tab of its own, adding no entry, closing it showing the tab
+ * before; on a phone a view pushed over the document's, Back showing the document where it was
+ * read (F29.3). Any other link opens in a new browser tab, and one naming no attachment is its
+ * words alone.
  */
 
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
+import { attachmentAddress } from '../support/page-objects/timeline-page';
+import type { AttachedFile, Projects } from '../support/projects';
 
 const HANDBOOK = '# Handbook\n\nHow the trip is planned.\n\n- We **always** pack light.\n- The van is booked a week ahead.\n';
 const NOTE = { id: 'one', summary: 'Summary one', content: 'Content one' };
+const MAP: AttachedFile = { title: 'Camp map', filename: 'camp-map.md', content_type: 'text/markdown', content: '# The camp\n\nBy the lake.\n' };
+const LIST: AttachedFile = { title: 'Packing list', filename: 'packing-list.md', content_type: 'text/markdown', content: '# Packing list\n\nThe stove.\n' };
+
+/** The batch an attachment of the project came in, as its timeline reads it. */
+async function batchOf(projects: Projects, projectId: string, attachmentId: string): Promise<number> {
+  const { items } = await projects.timeline(projectId);
+  return items.flatMap((item) => item.attachments).find((attachment) => attachment.id === attachmentId)!.batch;
+}
 
 test.describe('The handbook', () => {
   test('its row in the side panel’s Documents, by its title right under the project document, opens it at its address in its tab: rendered, read only, no foot', async ({
@@ -429,8 +444,127 @@ test.describe('A stream that comes back up', () => {
   }
 });
 
+test.describe('A link to the project’s attached material', () => {
+  test('in the project document opens the attachment where it hangs in a tab of its own, adding no entry, closing it showing the project document’s, the draft’s material on the opening; any other link opens in a new browser tab, a ticket id linked still, and one naming no attachment is its words alone', async ({
+    page,
+    backendUrl,
+    links,
+    people,
+    projects,
+    overlay,
+    docTabs,
+  }) => {
+    await links.set({ ticket_url_template: `${backendUrl}/tickets/{id}` });
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Linked'), members: [me.handle!] });
+    const camp = await projects.place(id, { kind: 'notice', title: 'The camp', text: 'What we saw.\n' });
+    const opening = (await projects.timeline(id)).items.find((item) => item.kind === 'opening')!.id;
+    const [map] = await projects.attach(camp, [MAP]);
+    // The draft's material, which Create project hangs on the opening.
+    const [list] = await projects.attach(opening, [LIST]);
+    const [mapBatch, listBatch] = [await batchOf(projects, id, map), await batchOf(projects, id, list)];
+    await projects.saveProjectDocument(
+      id,
+      'draft',
+      `# Linked\n\nThe camp is on [the map](attachments/${mapBatch}/camp-map.md), what we take on [the list](./attachments/${listBatch}/packing-list.md), the rest on [the site](https://example.com/site), [the old map](attachments/${mapBatch}/old-map.md) and in RB-12.\n`,
+    );
+    await projects.endTurn(id);
+    await overlay.openProjectDocument(id, 'draft');
+
+    await expect(overlay.document).toHaveText('The camp is on the map, what we take on the list, the rest on the site, the old map and in RB-12.');
+    await expect(overlay.document.getByRole('link')).toHaveText(['the map', 'the list', 'the site', 'RB-12']);
+    await expect(overlay.materialLinks).toHaveText(['the map', 'the list']);
+    await expect(overlay.materialLinks.first()).not.toHaveAttribute('target');
+    const site = overlay.document.getByRole('link', { name: 'the site' });
+    await expect(site).toHaveAttribute('href', 'https://example.com/site');
+    await expect(site).toHaveAttribute('target', '_blank');
+    const ticket = overlay.document.getByRole('link', { name: 'RB-12' });
+    await expect(ticket).toHaveAttribute('href', `${backendUrl}/tickets/RB-12`);
+    await expect(ticket).toHaveAttribute('target', '_blank');
+
+    const entries = await page.evaluate(() => history.length);
+    await overlay.materialLinks.filter({ hasText: 'the map' }).click();
+    await expect(page).toHaveURL(attachmentAddress(id, camp, map));
+    await expect(overlay.title).toHaveText('Camp map');
+    await expect(overlay.sub).toHaveText('Attachment of “The camp”');
+    await expect(overlay.attachment.prose).toContainText('By the lake.');
+    await expect(docTabs.attachment(map).show).toHaveAttribute('aria-selected', 'true');
+    expect(await docTabs.keys()).toEqual(['project-document', `attachment ${map}`]);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+
+    await docTabs.attachment(map).close.click();
+    await expect(page).toHaveURL(projectDocumentAddress(id));
+    await expect(docTabs.tab('project-document').show).toHaveAttribute('aria-selected', 'true');
+    await expect(overlay.role).toHaveText('Project document');
+
+    await overlay.materialLinks.filter({ hasText: 'the list' }).click();
+    await expect(page).toHaveURL(attachmentAddress(id, opening, list));
+    await expect(overlay.title).toHaveText('Packing list');
+    await expect(overlay.attachment.prose).toContainText('The stove.');
+    expect(await docTabs.keys()).toEqual(['project-document', `attachment ${list}`]);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+  });
+
+  test('in the handbook opens the attachment in a tab of its own, closing it showing the handbook’s', async ({ page, people, projects, overlay, docTabs }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Linked'), members: [me.handle!] });
+    const camp = await projects.place(id, { kind: 'notice', title: 'The camp', text: 'What we saw.\n' });
+    const [map] = await projects.attach(camp, [MAP]);
+    await projects.saveProjectDocument(id, 'handbook', `# How we travel\n\nWe camp where [the map](attachments/${await batchOf(projects, id, map)}/camp-map.md) says.\n`);
+    await projects.endTurn(id);
+    await overlay.openProjectDocument(id, 'handbook');
+
+    await overlay.materialLinks.click();
+    await expect(page).toHaveURL(attachmentAddress(id, camp, map));
+    await expect(overlay.title).toHaveText('Camp map');
+    expect(await docTabs.keys()).toEqual(['handbook', `attachment ${map}`]);
+    await docTabs.attachment(map).close.click();
+    await expect(page).toHaveURL(handbookAddress(id));
+    await expect(overlay.title).toHaveText('How we travel');
+  });
+});
+
 test.describe('On a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('the handbook’s link to the project’s attached material opens the attachment as a view pushed over the handbook’s; Back shows the handbook where it was read, after the five minutes its read is kept unread too', async ({
+    page,
+    people,
+    projects,
+    overlay,
+    phoneTabs,
+  }) => {
+    await page.clock.install();
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Linked'), members: [me.handle!] });
+    const camp = await projects.place(id, { kind: 'notice', title: 'The camp', text: 'What we saw.\n' });
+    const [map] = await projects.attach(camp, [MAP]);
+    const paragraphs = Array.from({ length: 60 }, (_, index) => `Paragraph ${index + 1} of the handbook.`).join('\n\n');
+    const batch = await batchOf(projects, id, map);
+    await projects.saveProjectDocument(id, 'handbook', `# How we travel\n\n${paragraphs}\n\nWe camp where [the map](attachments/${batch}/camp-map.md) says.\n`);
+    await projects.endTurn(id);
+    await overlay.openProjectDocument(id, 'handbook');
+    await expect(overlay.document).toContainText('Paragraph 60 of the handbook.');
+    await overlay.body.evaluate((body) => body.scrollTo({ top: body.scrollHeight }));
+    await expect.poll(() => overlay.scrollTop()).toBeGreaterThan(0);
+    const read = await overlay.scrollTop();
+
+    await overlay.materialLinks.tap();
+    await expect(page).toHaveURL(attachmentAddress(id, camp, map));
+    await expect(overlay.title).toHaveText('Camp map');
+    await expect(overlay.back).toBeVisible();
+    expect(await overlay.scrollTop()).toBe(0);
+
+    // Past the five minutes a query no one reads is kept for.
+    await page.clock.fastForward('06:00');
+    await overlay.back.tap();
+    await expect(page).toHaveURL(handbookAddress(id));
+    await expect(overlay.document).toContainText('Paragraph 60 of the handbook.');
+    await expect.poll(() => overlay.scrollTop()).toBe(read);
+    await overlay.back.tap();
+    await expect(overlay.root).toHaveCount(0);
+    await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
+  });
 
   test('the Documents tab lists the handbook by its title right under the project document, opening it as a view, the whole screen with no maximize or cross; neither the head nor the project’s menu has it, nor a draft’s Documents', async ({
     page,

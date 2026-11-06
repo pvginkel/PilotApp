@@ -63,12 +63,29 @@ function hungIn(timeline: Timeline): Hung[] {
 /** An attachment of the timeline's read by its id. */
 export const hungById = (timeline: Timeline, id: string): Hung | undefined => hungIn(timeline).find(({ attachment }) => attachment.id === id);
 
+/** The folder of the project's attached material in its folder (F74). */
+const ATTACHMENTS = 'attachments';
+
 /** An attachment of the timeline's read by its path in the project's folder, `attachments/<batch>/<filename>`. */
 export function hungAt(timeline: Timeline, path: string): Hung | undefined {
   const [root, batch, ...filename] = path.split('/');
-  if (root !== 'attachments') return undefined;
+  if (root !== ATTACHMENTS) return undefined;
   return hungIn(timeline).find(({ attachment }) => attachment.batch === Number(batch) && attachment.filename === filename.join('/'));
 }
+
+/** The path a link names in the project's folder: as written, less a leading `./`, its escapes decoded. */
+export function pathOfLink(href: string): string {
+  const path = href.replace(/^\.\//, '');
+  try {
+    return decodeURI(path);
+  } catch {
+    // An escape of no UTF-8: the path as written, which names no file.
+    return path;
+  }
+}
+
+/** Whether a link names a path in the project's attached material, `attachments/…`. */
+export const linksMaterial = (href: string) => pathOfLink(href).startsWith(`${ATTACHMENTS}/`);
 
 /**
  * Whether the record counts the block answered: an answer, a deferral included, or an action's Done;

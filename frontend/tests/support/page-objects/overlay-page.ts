@@ -15,7 +15,8 @@ import { blockParts, settledParts } from './timeline-page';
  * person while it holds a block of another document has the Cancel in its foot. Showing an attachment (F28.5), its head is its title
  * over "Attachment of “<item>”", its document a link there; its body the attachment by its type.
  * On a phone it is a view (F98.4): Back is its arrow, with no maximize, cross or backdrop. Showing the handbook or the project document (F129.4, F37.4), its head is the title over
- * the project and what it is; its body the prose and Pilot's dots, or *Empty*. Showing the item
+ * the project and what it is; its body the prose, its links to the project's attached material
+ * among it, and Pilot's dots, or *Empty*. Showing the item
  * alone on a phone (F99), its head is the project's name over the item's step; its body the item as
  * the timeline draws it (`TimelinePage.item(id, overlay.alone)`).
  */
@@ -29,6 +30,8 @@ export class OverlayPage {
   readonly back: Locator;
   /** An attachment's document in its head, the link to it. */
   readonly documentLink: Locator;
+  /** The project document's or the handbook's links to the project's attached material (F29.3). */
+  readonly materialLinks: Locator;
   readonly project: Locator;
   /** What a read-only document of the project is: Handbook, Project document. */
   readonly role: Locator;
@@ -91,6 +94,7 @@ export class OverlayPage {
     this.sub = this.root.getByTestId('overlay.sub');
     this.back = this.root.getByTestId('overlay.back');
     this.documentLink = this.root.getByTestId('overlay.document-link');
+    this.materialLinks = this.root.getByTestId('overlay.material-link');
     this.project = this.root.getByTestId('overlay.project');
     this.role = this.root.getByTestId('overlay.role');
     this.step = this.root.getByTestId('overlay.step');
