@@ -12,8 +12,8 @@
  * tab. A draft's first tab is its definition chat. Each project's line, its tab showing and the
  * order the tabs showed in are kept in the browser (F133): after a reload the line is as it was
  * left, the project's own address shows its timeline beside it, and its row in the list, the
- * drawer's too, brings back the tab it was left on, at the tab's address in the entry's place
- * (F1.6).
+ * drawer's too, brings back the tab it was left on, at the tab's address in the entry's place, but
+ * the row of the project on screen, which goes to the project's own address (F1.6).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -578,6 +578,31 @@ test.describe('Each project’s line kept in the browser', () => {
     await projectList.tab(first).click();
     await expect(page).toHaveURL(documentAddress(one, a));
     await expect(overlay.title).toHaveText('Alpha');
+  });
+
+  test('the row of the project on screen, a document’s tab showing, goes to the project’s own address, its timeline showing', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    timeline,
+    overlay,
+    docTabs,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('On screen');
+    const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    const a = await projects.place(id, { kind: 'document', title: 'Alpha', text: card('Alpha') });
+    await timeline.open(id);
+    await timeline.item(a).card.open.click();
+    await expect(page).toHaveURL(documentAddress(id, a));
+    await expect(overlay.title).toHaveText('Alpha');
+
+    await projectList.tab(name).click();
+    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
+    await expect(overlay.root).toHaveCount(0);
+    await expect(timeline.item(a).root).toBeVisible();
   });
 
   test('on a phone, a project’s row opens it on its Timeline tab, whatever tab the desktop left it on', async ({
