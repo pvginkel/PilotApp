@@ -71,7 +71,7 @@ SUPERVISOR_LOGGER = "app.services.supervisor"
 DECISION = "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n"
 QUESTION = "```question id=Q1\n```\n"
 
-SPACING = 0.3
+SPACING = 1.0
 """A person's window between two sends in one project, in the tests of it."""
 
 
