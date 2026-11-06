@@ -103,12 +103,14 @@ export function Overlay({
     sheet.current!.style.setProperty('--gutter', `${element.offsetWidth - element.clientWidth}px`);
   }, [left, inTab]);
   // What its body draws may come after the body mounts, its read gone from the cache: the scroll is
-  // set back once the body holds it, unless the reader scrolls first.
+  // set back once, as its column first draws, unless it scrolls first. The browser holds it to
+  // what the body reaches.
   useLayoutEffect(() => {
     if (left.top === 0) return;
     const element = sheet.current!.querySelector<HTMLElement>(':scope > .sheet-body')!;
+    const column = element.firstElementChild!;
     const setBack = () => {
-      if (element.scrollHeight - element.clientHeight < left.top) return false;
+      if (!draws(column)) return false;
       element.scrollTop = left.top;
       return true;
     };
@@ -120,7 +122,7 @@ export function Overlay({
       observer.disconnect();
       element.removeEventListener('scroll', stop);
     };
-    observer.observe(element.firstElementChild!);
+    observer.observe(column);
     element.addEventListener('scroll', stop);
     return stop;
   }, [left]);
@@ -227,6 +229,12 @@ export function Overlay({
 function focusLost(): boolean {
   const active = document.activeElement;
   return active === null || active === document.body || active.closest('[inert]') !== null;
+}
+
+/** The column holds something drawn: its height is more than its padding's. */
+function draws(column: Element): boolean {
+  const style = getComputedStyle(column);
+  return column.clientHeight > parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
 }
 
 /** What it shows where a read of it fails (F113). */

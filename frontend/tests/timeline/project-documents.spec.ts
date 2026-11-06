@@ -566,6 +566,44 @@ test.describe('On a phone', () => {
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
   });
 
+  test('Back from the attachment shows the handbook at its end where it reads shorter than where it was read, after the five minutes its read is kept unread', async ({
+    page,
+    people,
+    projects,
+    overlay,
+  }) => {
+    await page.clock.install();
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Linked'), members: [me.handle!] });
+    const camp = await projects.place(id, { kind: 'notice', title: 'The camp', text: 'What we saw.\n' });
+    const [map] = await projects.attach(camp, [MAP]);
+    const batch = await batchOf(projects, id, map);
+    const handbook = (count: number) =>
+      `# How we travel\n\n${Array.from({ length: count }, (_, index) => `Paragraph ${index + 1} of the handbook.`).join('\n\n')}\n\nWe camp where [the map](attachments/${batch}/camp-map.md) says.\n`;
+    await projects.saveProjectDocument(id, 'handbook', handbook(60));
+    await projects.endTurn(id);
+    await overlay.openProjectDocument(id, 'handbook');
+    await expect(overlay.document).toContainText('Paragraph 60 of the handbook.');
+    await overlay.body.evaluate((body) => body.scrollTo({ top: body.scrollHeight }));
+    await expect.poll(() => overlay.scrollTop()).toBeGreaterThan(0);
+    const read = await overlay.scrollTop();
+
+    await overlay.materialLinks.tap();
+    await expect(overlay.title).toHaveText('Camp map');
+    await projects.saveProjectDocument(id, 'handbook', handbook(30));
+    await projects.endTurn(id);
+    // Past the five minutes a query no one reads is kept for.
+    await page.clock.fastForward('06:00');
+    await overlay.back.tap();
+    await expect(page).toHaveURL(handbookAddress(id));
+    await expect(overlay.document).toContainText('Paragraph 30 of the handbook.');
+    await expect(overlay.document).not.toContainText('Paragraph 31 of the handbook.');
+    const end = await overlay.body.evaluate((body) => body.scrollHeight - body.clientHeight);
+    expect(end).toBeGreaterThan(0);
+    expect(end).toBeLessThan(read);
+    await expect.poll(() => overlay.scrollTop()).toBe(end);
+  });
+
   test('the Documents tab lists the handbook by its title right under the project document, opening it as a view, the whole screen with no maximize or cross; neither the head nor the project’s menu has it, nor a draft’s Documents', async ({
     page,
     people,

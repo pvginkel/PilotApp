@@ -268,6 +268,40 @@ test.describe('Documents in tabs', () => {
     expect(await overlay.scrollTop()).toBe(0);
   });
 
+  test('a tab read to its end, shown again where its body reaches less far, shows its end, and stays there as its text grows', async ({
+    page,
+    people,
+    projects,
+    overlay,
+    docTabs,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 520 });
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Reach'), members: [me.handle!] });
+    const paragraphs = (count: number) => Array.from({ length: count }, (_, index) => `Paragraph ${index + 1} of the handbook.`).join('\n\n');
+    await projects.saveProjectDocument(id, 'handbook', `# How we travel\n\n${paragraphs(40)}\n`);
+    await projects.endTurn(id);
+    await overlay.openProjectDocument(id, 'handbook');
+    await expect(overlay.document).toContainText('Paragraph 40 of the handbook.');
+    await overlay.body.evaluate((body) => body.scrollTo({ top: body.scrollHeight }));
+    await expect.poll(() => overlay.scrollTop()).toBeGreaterThan(0);
+    const read = await overlay.scrollTop();
+    const end = () => overlay.body.evaluate((body) => body.scrollHeight - body.clientHeight);
+
+    await docTabs.first.click();
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await docTabs.tab('handbook').show.click();
+    await expect(overlay.title).toHaveText('How we travel');
+    expect(await end()).toBeLessThan(read);
+    expect(await overlay.scrollTop()).toBe(await end());
+
+    const shown = await overlay.scrollTop();
+    await projects.saveProjectDocument(id, 'handbook', `# How we travel\n\n${paragraphs(60)}\n`);
+    await expect(overlay.document).toContainText('Paragraph 60 of the handbook.');
+    await expect(overlay.writing).toBeVisible();
+    expect(await overlay.scrollTop()).toBe(shown);
+  });
+
   test('an attachment’s tab keeps its scroll while another shows for longer than what its body reads is kept unread, at its item’s address and at its document’s', async ({
     page,
     people,
