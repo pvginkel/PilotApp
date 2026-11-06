@@ -14,7 +14,7 @@ import pytest
 from dependency_injector import providers
 from flask import Flask
 from psycopg.errors import LockNotAvailable
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy import text as sql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as DbSession
@@ -1406,6 +1406,42 @@ class TestRecordServiceOffersUndo:
         session.flush()
 
         assert container.record_service().offers_undo(work) is False
+
+    def test_items_of_one_kind_read_the_kind_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        # The timeline asks it of every done item of a project.
+        items = []
+        for title in ("Which tent?", "Which stove?"):
+            item, document = _bear(
+                session,
+                container,
+                project,
+                project_session,
+                "decision",
+                title,
+                DECISION,
+            )
+            container.record_service().answer(document, "D1", person, "Tunnel")
+            items.append(item)
+        records = container.record_service()
+        statements: list[str] = []
+
+        def executed(conn: object, cursor: object, statement: str, *_: object) -> None:
+            statements.append(statement)
+
+        event.listen(session.get_bind(), "before_cursor_execute", executed)
+        try:
+            assert [records.offers_undo(item) for item in items] == [True, True]
+        finally:
+            event.remove(session.get_bind(), "before_cursor_execute", executed)
+
+        assert sum("FROM item_kinds" in each for each in statements) == 1
 
 
 class TestRecordServiceDone:

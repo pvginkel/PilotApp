@@ -163,6 +163,7 @@ class RecordService:
         self.view_service = view_service
         self.continuations = continuations
         self.jobs = jobs
+        self._forms: dict[str, str] = {}
 
     def answer(
         self,
@@ -291,7 +292,7 @@ class RecordService:
         under that lock, and the Undo never both take effect.
         """
         operation = f"undo item {item.id}"
-        if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
+        if self._form(item.kind_code) != PROSE:
             raise InvalidOperationException(
                 operation, f"a {item.kind_code} item offers no undo"
             )
@@ -352,10 +353,7 @@ class RecordService:
 
     def offers_undo(self, item: Item) -> bool:
         """Whether `undo` takes the item now, as it stands."""
-        return (
-            self.db.get_one(ItemKind, item.kind_code).form == PROSE
-            and self._undo_refusal(item) is None
-        )
+        return self._form(item.kind_code) == PROSE and self._undo_refusal(item) is None
 
     def done(
         self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP
@@ -368,7 +366,7 @@ class RecordService:
         it settled whole, every block answered (decision 42), and on a
         registered document of one block, which takes its block's kind, once
         that block is answered, deferred, or claimed and done."""
-        if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
+        if self._form(item.kind_code) != PROSE:
             raise InvalidOperationException(
                 f"mark item {item.id} done",
                 f"a {item.kind_code} item is not done by Done",
@@ -807,7 +805,7 @@ class RecordService:
     def _mark_by_kind(
         self, item: Item, user: User, kind: str, mark: str, via: AnswerChannel
     ) -> None:
-        if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
+        if self._form(item.kind_code) != PROSE:
             raise InvalidOperationException(
                 f"mark item {item.id} {mark}",
                 f"a {item.kind_code} item is not marked {mark}",
@@ -824,6 +822,15 @@ class RecordService:
             )
         _not_done(item, operation)
         self._mark(project, item, document, MARKED, user, _now(), via=via)
+
+    def _form(self, kind_code: str) -> str:
+        """The form of the item kind, read once per service. The session
+        keeps a loaded ItemKind only while something holds it, so a read
+        per item, as the timeline's `offers_undo` makes, would query the
+        kind again for each."""
+        if kind_code not in self._forms:
+            self._forms[kind_code] = self.db.get_one(ItemKind, kind_code).form
+        return self._forms[kind_code]
 
     def _undo_refusal(self, item: Item) -> str | None:
         """Why a prose item takes no undo now, or none."""
