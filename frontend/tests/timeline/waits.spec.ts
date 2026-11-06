@@ -249,6 +249,7 @@ test.describe('A wait done', () => {
     await expect(item.lineTitle).toHaveText('The rollout card is done');
     await expect(item.lineTime).toHaveText(new RegExp(`^${CLOCK}$`));
     await expect(item.wait.note).toHaveText(NOTE);
+    await item.line.hover();
     await expect(item.lineDiscuss).toBeVisible();
     await expect(item.open).toHaveCount(0);
     await expect(item.undo).toHaveCount(0);

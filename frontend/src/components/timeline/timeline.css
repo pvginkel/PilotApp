@@ -496,6 +496,9 @@
   .line .kind-icon.no { color: hsl(var(--destructive-text)); }
   .line .title, .line .said-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .line .title { flex: 1; }
+  /* The title opens what is behind the line, underlined under the mouse. */
+  .line a.title { color: inherit; text-decoration: none; }
+  .line a.title:hover { text-decoration: underline; text-decoration-color: hsl(var(--muted-foreground) / 0.6); text-underline-offset: 3px; }
   /* The answer wraps to a line of its own, under the title and on to the row's end. */
   .line .said {
     display: flex;
@@ -556,6 +559,19 @@
   .quiet .line .btn { margin-block: -3px; font-size: var(--text-xs); opacity: 0.7; }
   .quiet .line .btn:hover, .quiet .line .btn:focus-visible { opacity: 1; }
 
+  /* A done line's actions (F13.8) show only while the mouse is on the line or the focus in it,
+     taking no room until then, and always on a screen with no hover wider than a phone; a phone's
+     line keeps Undo alone (F13.9). Shown, a button's 28px overhangs the text's row, a line's or a
+     quiet one's, so they add no height. The attachments' indicator after them touches them while
+     they show. */
+  .line-acts { display: contents; }
+  .line .line-acts .btn { margin-block: -4px; }
+  .line .line-acts:not(:empty) + :is(.btn-icon, .menu-anchor) { margin-left: -10px; }
+  @media (hover: hover) and (min-width: 901px) {
+    .line:not(:hover):not(:focus-within) .line-acts { display: none; }
+    .line:not(:hover):not(:focus-within) .line-acts + :is(.btn-icon, .menu-anchor) { margin-left: 0; }
+  }
+
   /* ---- Work: a running session, updated in place ---------------------------------------- */
 
   .work-live { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
@@ -609,6 +625,7 @@
     /* A tap on a done line opens its view, or the menu of a line with nothing behind it, its
        actions in a row under the line (F13.9). */
     .item.collapsed .line { cursor: pointer; }
+    .line a.title:hover { text-decoration: none; }
     .line-menu { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 12px 6px 34px; }
     .line-menu .btn { font-weight: 400; }
   }

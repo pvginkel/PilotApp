@@ -6,8 +6,8 @@
  * shows as it stands. A block's address shows its item alone at the block, or a card's document
  * at it; a quote's chip and a claimed action's link push the item alone over the tab they stand
  * on. A done line shows Undo alone among its actions, and a tap on it opens its view, whose head
- * carries Discuss; Undo undoes and opens nothing. Off a phone the line and the address are as they
- * were.
+ * carries Discuss, its title the way in from the keyboard; Undo undoes and opens nothing. Off a
+ * phone the line keeps its actions under the mouse, and the address is as it was.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -266,6 +266,41 @@ test.describe('A done line on a phone', () => {
     await expect(page).toHaveURL(`/projects/${id}`);
   });
 
+  test('has its title as its way in from the keyboard and a screen reader, a link named by the title that opens its document’s view; a work item’s its session log’s', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    sessionLog,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Keys'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which shelter?', text: DECISION });
+    const work = await projects.startWork(id, { title: 'Surveying the stylesheets', brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    await projects.answer(decision, 'D1', 'Tunnel');
+    await projects.transition(id, 'finished');
+    await timeline.open(id);
+    const item = timeline.item(decision);
+
+    const link = item.line.getByRole('link', { name: 'Which shelter?' });
+    await expect(link).toHaveAttribute('href', documentAddress(id, decision));
+    await item.lineTitle.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(documentAddress(id, decision));
+    await expect(overlay.discuss).toBeVisible();
+    await overlay.back.tap();
+    await expect(overlay.root).toHaveCount(0);
+
+    const line = timeline.item(work);
+    await expect(line.root).toHaveAttribute('data-state', 'done');
+    await expect(line.line.getByRole('link', { name: 'Surveying the stylesheets' })).toHaveAttribute('href', sessionLogAddress(id, work));
+    await line.lineTitle.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(sessionLogAddress(id, work));
+    await expect(sessionLog.discuss).toBeVisible();
+  });
+
   test('a work item’s opens its session log as a view, whose head carries Discuss', async ({ page, people, projects, timeline, sessionLog }) => {
     const me = await people.signIn();
     const id = await projects.make({ name: makeUnique('Logged'), members: [me.handle!] });
@@ -283,7 +318,7 @@ test.describe('A done line on a phone', () => {
 });
 
 test.describe('Off a phone', () => {
-  test('a done line keeps Open and Discuss, and a click on it opens nothing; an item’s address goes to the item in the timeline', async ({
+  test('a done line keeps Open and Discuss under the mouse, and a click on it off its title opens nothing; an item’s address goes to the item in the timeline', async ({
     page,
     people,
     projects,
@@ -299,9 +334,10 @@ test.describe('Off a phone', () => {
 
     await expect(overlay.root).toHaveCount(0);
     await expect(item.root).toBeInViewport();
+    await item.line.hover();
     await expect(item.open).toBeVisible();
     await expect(item.lineDiscuss).toBeVisible();
-    await item.lineTitle.click();
+    await item.said.click();
     await expect(page).toHaveURL(addressOf(id, decision));
     await expect(overlay.root).toHaveCount(0);
   });

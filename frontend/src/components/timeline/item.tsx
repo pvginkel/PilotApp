@@ -9,14 +9,15 @@
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
  * work item open is its session's (work.tsx, F26). An item Pilot is working on is one line in its
- * place, its kind's icon a dashed circle, what Pilot does on it its button (F13.7, F12.1, F24.1). Done, an item is its line (F13.1, F13.2), with
- * Open (F13.3), its attachments' indicator (F13.6), Undo while the record offers it (F14.1) and
- * Discuss (F13.4), and *In the chat* after a one-ask item's answer given in the chat (F42.3); a
- * work item's is quieter, its Open the session log (F13.5, F26.6), and a job's an Undo withdrew
- * says so (F14.1). A wait open is its own (wait.tsx, F27); done, its line has nothing behind it, no
- * Open and no Undo, and the note Pilot closed it with under its title (F27.4). On a phone the line
- * has Undo alone among its actions, and a tap on it opens what Open opens, as a view whose head
- * carries Discuss, or, on a line with nothing behind it, a menu of its actions under it (F13.9).
+ * place, its kind's icon a dashed circle, what Pilot does on it its button (F13.7, F12.1, F24.1). Done, an item is its line (F13.1, F13.2), its
+ * title opening what is behind it, with its attachments' indicator (F13.6) and *In the chat* after a
+ * one-ask item's answer given in the chat (F42.3), and its actions under the mouse (F13.8): Open
+ * (F13.3), Undo while the record offers it (F14.1) and Discuss (F13.4); a work item's is quieter,
+ * its Open the session log (F13.5, F26.6), and a job's an Undo withdrew says so (F14.1). A wait open
+ * is its own (wait.tsx, F27); done, its line has nothing behind it, no Open and no Undo, and the note
+ * Pilot closed it with under its title (F27.4). On a phone the line has Undo alone among its actions,
+ * and a tap on it opens what its title opens, as a view whose head carries Discuss, or, on a line
+ * with nothing behind it, a menu of its actions under it (F13.9).
  */
 
 import { useCallback, useState, type AnimationEvent, type MouseEvent, type ReactNode } from 'react';
@@ -203,14 +204,16 @@ function inChatOf(item: TimelineItem) {
 }
 
 /**
- * The same line for every kind: its icon, its title, Open where something is behind it, its
- * attachments' indicator, Undo while the record offers it, Discuss, and when it was done; under the
- * title the person's answer to a one-ask item with its note, the other person's after their
- * avatar, and *In the chat* after it, kept whole, where it was given in the chat; under a job's
- * title that an Undo withdrew it (F14.1); under a wait's the note Pilot closed it with (F27.4). A
- * confirmation's Yes leads it with a green check, its No with a red cross (F22.5). It does not
- * expand. On a phone Open and Discuss leave it, and a tap on it anywhere but on a control of its
- * own opens what Open opens, or a wait's menu (F13.9).
+ * The same line for every kind: its icon, its title, a link to what is behind it where something
+ * is, its actions, its attachments' indicator and when it was done; under the title the person's
+ * answer to a one-ask item with its note, the other person's after their avatar, and *In the chat*
+ * after it, kept whole, where it was given in the chat; under a job's title that an Undo withdrew
+ * it (F14.1); under a wait's the note Pilot closed it with (F27.4). A confirmation's Yes leads it
+ * with a green check, its No with a red cross (F22.5). It does not expand. Its actions, Open where
+ * something is behind it, Undo while the record offers it and Discuss, show while the mouse is on
+ * it or the focus in it, and always where nothing hovers (timeline.css, F13.8). On a phone Open and
+ * Discuss leave it, and a tap on it anywhere but on a control of its own opens what its title
+ * opens, or a wait's menu (F13.9).
  */
 function DoneLine({ item }: { item: TimelineItem }) {
   const phone = usePhone();
@@ -269,13 +272,21 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
   return (
     <div className="line" onClick={onTap} data-testid="timeline.line">
       <LineLead item={item} />
-      <span className="title" title={title} data-testid="timeline.line.title">
-        <LinkedText text={title} />
+      {item.form === 'wait' ? (
+        <span className="title" title={title} data-testid="timeline.line.title">
+          <LinkedText text={title} />
+        </span>
+      ) : (
+        <Behind item={item} className="title" title={title} testId="timeline.line.title">
+          <LinkedText text={title} nested />
+        </Behind>
+      )}
+      <span className="line-acts">
+        {!phone && item.form !== 'wait' && <Open item={item} />}
+        {done.undo && <Undo item={item} />}
+        {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       </span>
-      {!phone && item.form !== 'wait' && <Open item={item} />}
       <LineAttachments item={item} />
-      {done.undo && <Undo item={item} />}
-      {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       <Time at={done.at} format="clock" testId="timeline.line.time" />
       {(said || place) && (
         <span className="said" data-testid="timeline.line.said">
@@ -356,43 +367,52 @@ function LineLead({ item }: { item: TimelineItem }) {
 }
 
 /**
- * Open: the item's document in the overlay, as it was done (F13.3), at the document's address; a
- * work item's session log, at its session's (F26.6).
+ * Open: what is behind the line (F13.3, F26.6).
  */
 function Open({ item }: { item: TimelineItem }) {
+  const work = item.kind === 'work';
+  return (
+    <Behind
+      item={item}
+      className="btn btn-ghost btn-sm btn-icon"
+      title={work ? 'Open the session log' : 'Open the document'}
+      label="Open"
+      testId="timeline.line.open"
+    >
+      {work ? <ScrollText className="icon" aria-hidden="true" /> : <FileText className="icon" aria-hidden="true" />}
+    </Behind>
+  );
+}
+
+interface BehindProps {
+  item: TimelineItem;
+  className: string;
+  title: string;
+  label?: string;
+  testId: string;
+  children: ReactNode;
+}
+
+/**
+ * A link to what is behind a done line: the item's document, as it was done, at the document's
+ * address (F13.3); a work item's session log, at its session's (F26.6).
+ */
+function Behind({ item, className, title, label, testId, children }: BehindProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const replace = useTabReplace();
-  if (item.kind === 'work') {
-    return (
-      <Link
-        to="/projects/$projectId/sessions/$sessionId"
-        params={{ projectId, sessionId: item.id }}
-        replace={replace}
-        className="btn btn-ghost btn-sm btn-icon"
-        title="Open the session log"
-        aria-label="Open"
-        data-testid="timeline.line.open"
-      >
-        <ScrollText className="icon" aria-hidden="true" />
-      </Link>
-    );
-  }
-  return (
-    <Link
-      to="/projects/$projectId/documents/$documentId"
-      params={{ projectId, documentId: item.id }}
-      replace={replace}
-      className="btn btn-ghost btn-sm btn-icon"
-      title="Open the document"
-      aria-label="Open"
-      data-testid="timeline.line.open"
-    >
-      <FileText className="icon" aria-hidden="true" />
+  const shared = { replace, className, title, 'aria-label': label, 'data-testid': testId };
+  return item.kind === 'work' ? (
+    <Link to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId: item.id }} {...shared}>
+      {children}
+    </Link>
+  ) : (
+    <Link to="/projects/$projectId/documents/$documentId" params={{ projectId, documentId: item.id }} {...shared}>
+      {children}
     </Link>
   );
 }
 
-/** A tap on the line, on a phone: what Open opens, unless the tap is on a control of its own (F13.9). */
+/** A tap on the line, on a phone: what its title opens, unless the tap is on a control of its own (F13.9). */
 function useOpenLine(item: TimelineItem) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const navigate = useNavigate();

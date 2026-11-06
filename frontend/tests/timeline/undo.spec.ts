@@ -56,6 +56,7 @@ test.describe('Undo', () => {
     await expect(item.undo).toHaveAttribute('aria-label', 'Undo');
     await expect(item.undo.locator('svg')).toHaveClass(/\blucide-undo2\b/);
 
+    await item.line.hover();
     await item.undo.click();
     await expect(item.root).toHaveAttribute('data-state', 'open');
     await expect(item.block.answerField).toHaveValue('');
@@ -77,6 +78,7 @@ test.describe('Undo', () => {
     await expect(timeline.item(notice).root).toHaveAttribute('data-state', 'done');
 
     for (const marked of [action, notice]) {
+      await timeline.item(marked).line.hover();
       await timeline.item(marked).undo.click();
       await expect(timeline.item(marked).root).toHaveAttribute('data-state', 'open');
     }
@@ -95,6 +97,7 @@ test.describe('Undo', () => {
     const item = timeline.item(decision);
 
     await expect(item.said.locator('.avatar')).toHaveAttribute('title', 'Ben Example');
+    await item.line.hover();
     await item.undo.click();
     await expect(item.root).toHaveAttribute('data-state', 'open');
     await expect(item.block.options).toHaveCount(2);
@@ -120,6 +123,7 @@ test.describe('Undo', () => {
     const line = timeline.item(job.id);
     await expect(line.work.line).toHaveAttribute('data-state', 'held');
     await expect(line.work.cue).toHaveText('Paused');
+    await item.line.hover();
     await expect(item.undo).toBeVisible();
 
     await item.undo.click();

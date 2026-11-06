@@ -409,6 +409,7 @@ test.describe('The setup', () => {
     await expect(setup.root).toHaveAttribute('data-state', 'done');
     await expect(setup.root).toHaveClass(/quiet/);
     await expect(setup.lineTitle).toHaveText(SETUP);
+    await setup.line.hover();
     await setup.open.click();
     await expect(page).toHaveURL(`/projects/${id}/sessions/${setupId}`);
   });

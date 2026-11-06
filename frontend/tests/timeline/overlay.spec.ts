@@ -284,10 +284,11 @@ test.describe('A done line’s Open', () => {
     const { body, done } = await itemOf(projects, id, notes);
     expect(body!.at(-1)).toMatchObject({ type: 'prose', markdown: expect.stringContaining('A lantern too.') });
     await timeline.open(id);
-    const { open } = timeline.item(notes);
+    const { line, open } = timeline.item(notes);
 
     await expect(open).toHaveAttribute('aria-label', 'Open');
     await expect(open).toHaveAttribute('href', documentAddress(id, notes));
+    await line.hover();
     await open.click();
     await expect(page).toHaveURL(documentAddress(id, notes));
     await expect(overlay.title).toHaveText('Packing notes');
@@ -311,7 +312,7 @@ test.describe('A done line’s Open', () => {
     await projects.save(notes, '---\ntitle: Packing notes\n---\n\nWe leave on Friday.\n\nA lantern too.\n');
     expect(await itemOf(projects, id, notes)).toMatchObject({ writing: true, done: { cause: 'marked' } });
     await timeline.open(id);
-    await timeline.item(notes).open.click();
+    await timeline.item(notes).lineTitle.click();
 
     await expect(overlay.document).toHaveText('We leave on Friday.');
     await expect(overlay.writing).toHaveCount(0);
@@ -335,7 +336,7 @@ test.describe('A done line’s Open', () => {
     const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
     await projects.answer(decision, 'D1', 'Tunnel');
     await timeline.open(id);
-    await timeline.item(decision).open.click();
+    await timeline.item(decision).lineTitle.click();
     const block = overlay.blockAt('D1');
 
     await expect(overlay.document.locator('.prose')).toHaveText('Which tent for the trip?');
@@ -365,7 +366,7 @@ test.describe('A done line’s Open', () => {
     const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: PILOTS_DECISION });
     await projects.transition(id, 'finished');
     await timeline.open(id);
-    await timeline.item(decision).open.click();
+    await timeline.item(decision).lineTitle.click();
     const block = overlay.blockAt('D1');
 
     expect((await itemOf(projects, id, decision)).done).toMatchObject({ cause: 'finished' });
@@ -387,7 +388,7 @@ test.describe('A done line’s Open', () => {
     const settled = await projects.place(id, { kind: 'document', title: 'Settled', text: `${DEFERRED_TENT}\n${PILOTS_PITCH}` });
     await projects.doneByPilot(settled);
     await timeline.open(id);
-    await timeline.item(settled).open.click();
+    await timeline.item(settled).lineTitle.click();
 
     const { done } = await itemOf(projects, id, settled);
     await expect(overlay.done).toHaveText(`Done · ${stamp(done!.at)} · Pilot`);

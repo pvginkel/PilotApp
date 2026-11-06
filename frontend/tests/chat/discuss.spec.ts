@@ -112,6 +112,7 @@ test.describe('Discuss', () => {
     await expect(chat.quote).toHaveAttribute('data-quote', `block ${packing}/D1`);
     await expect(chat.quoteLabel).toHaveText('Which stove? · Packing');
 
+    await timeline.item(notice).line.hover();
     await timeline.item(notice).lineDiscuss.click();
     await expect(chat.quote).toHaveAttribute('data-quote', `item ${notice}`);
     await expect(chat.quoteLabel).toHaveText('Storm tonight');

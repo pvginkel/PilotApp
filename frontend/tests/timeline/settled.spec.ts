@@ -296,7 +296,7 @@ test.describe('A section Pilot settled in the overlay', () => {
     await projects.doneByPilot(trip);
     await timeline.open(id);
 
-    await timeline.item(trip).open.click();
+    await timeline.item(trip).lineTitle.click();
     await expect(page).toHaveURL(`/projects/${id}/documents/${trip}`);
     await expect(overlay.doneChip).toHaveText('Done');
     await expect(overlay.settled).toHaveCount(1);

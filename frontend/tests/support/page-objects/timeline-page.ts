@@ -3,8 +3,9 @@ import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
 
 /**
- * A project's timeline (F8): its rows, the opening, its items open and as done lines with Open and
- * Undo, an open item's block (F31) or a confirmation's card (F22), *In the chat* in a block's head
+ * A project's timeline (F8): its rows, the opening, its items open and as done lines, their title
+ * a link to what is behind them and Open, Undo and Discuss under the mouse (F13.8), an open item's
+ * block (F31) or a confirmation's card (F22), *In the chat* in a block's head
  * and a done line (F42.3), an inline document's blocks,
  * segments and *Send answers* with its dialog (F24.1, F33, F32.5), a larger document's or a
  * review's card (F24.2, F25), a registered document's read awaited or failed and that Pilot asked
@@ -110,12 +111,14 @@ export class TimelinePage {
       read: root.getByTestId('timeline.item.read'),
       line: root.getByTestId('timeline.line'),
       lineKind: root.getByTestId('timeline.line.kind'),
+      /** A done line's title, the link to what is behind it where something is. */
       lineTitle: root.getByTestId('timeline.line.title'),
       lineTime: root.getByTestId('timeline.line.time'),
       said: root.getByTestId('timeline.line.said'),
       /** A work item's line: how it closed, where its time does not say it. */
       closed: root.getByTestId('timeline.line.closed'),
       note: root.getByTestId('timeline.line.note'),
+      /** A line's Undo, Open and Discuss; a done line's show off a phone only while the mouse is on its `line` or the focus in it (F13.8). */
       undo: root.getByTestId('timeline.line.undo'),
       open: root.getByTestId('timeline.line.open'),
       lineDiscuss: root.getByTestId('timeline.line.discuss'),

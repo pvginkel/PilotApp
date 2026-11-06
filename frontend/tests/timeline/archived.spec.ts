@@ -48,6 +48,7 @@ test.describe('An archived project’s timeline', () => {
     ];
     await timeline.open(id);
     await deploymentSse.ensureConnected();
+    await answered.line.hover();
     await expect(answered.undo).toBeVisible();
 
     await projects.transition(id, 'archived');
@@ -61,6 +62,7 @@ test.describe('An archived project’s timeline', () => {
     // The question's Send waits for words; the rest take a click at once.
     await question.block.answerField.fill('North');
     for (const close of closes) await expect(close).toBeEnabled();
+    await answered.line.hover();
     await expect(answered.undo).toBeVisible();
   });
 });

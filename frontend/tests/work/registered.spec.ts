@@ -388,11 +388,13 @@ test.describe('A registered document', () => {
     await surveyItem.card.reviewed.click();
     await expect(surveyItem.root).toHaveAttribute('data-state', 'done');
     await expect.poll(() => controller.fileText(environment, SURVEY_PATH)).toBe(SURVEY);
+    await surveyItem.line.hover();
     await surveyItem.undo.click();
     await expect(surveyItem.root).toHaveAttribute('data-state', 'open');
     await controller.putFile(environment, SURVEY_PATH, SURVEY_EDITED);
     await surveyItem.card.reviewed.click();
     await expect(surveyItem.root).toHaveAttribute('data-state', 'done');
+    await surveyItem.line.hover();
     await expect(surveyItem.undo).toBeVisible();
 
     await pitchItem.block.answerField.fill('The lake');

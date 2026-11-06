@@ -370,6 +370,7 @@ test.describe('A done work item', () => {
     await expect(item.undo).toHaveCount(0);
     await expect(item.open).toHaveAttribute('href', sessionLogAddress(project, work));
 
+    await item.line.hover();
     await item.open.click();
     await expect(page).toHaveURL(sessionLogAddress(project, work));
     await expect(sessionLog.tail).toHaveText(`The turn ended · ${clock(done!.at)}`);
