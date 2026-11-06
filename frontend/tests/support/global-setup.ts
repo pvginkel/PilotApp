@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadAppGlobalSetup } from './global-setup-extensions';
 import { databaseUrl, openRun, RUN_PREFIX_VARIABLE } from './helpers/pg-admin';
 
 async function globalSetup() {
@@ -18,6 +19,8 @@ async function globalSetup() {
   console.log('🔧 Setting up Playwright tests...');
   console.log('Service management: Per-worker (Playwright managed)');
 
+  // Before the seed, so that a run the app's setup ends has created nothing.
+  await loadAppGlobalSetup();
   await initializeSeedDatabase();
   console.log('⏭️  Worker fixtures will boot backend and frontend on demand');
 }

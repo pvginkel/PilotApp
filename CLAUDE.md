@@ -88,12 +88,13 @@ template-owned file to add app behaviour; use the extension points instead:
 | Sidecars CI must wait for | `backend/scripts/wait-for-services.py` (the suite runner calls it) |
 | Vite plugins | `loadAppPlugins()` in `frontend/vite-plugin-extensions.ts` |
 | Settings of the Playwright backends | `loadAppBackendEnv()` in `frontend/tests/support/backend-env-extensions.ts` |
+| Steps of the Playwright run's setup | `loadAppGlobalSetup()` in `frontend/tests/support/global-setup-extensions.ts` |
 
 Template-owned code is improved in this repo, not in the template repos (D018): what the template
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Eleven stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twelve stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -122,7 +123,10 @@ in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the b
 the template gives an app no place for a backend setting under Playwright: this app's points each
 backend's controller at the fake it serves itself, and its chats at a store environment in that
 fake, and its notification bridge at the bridge's fake it serves too, and holds its waits' batcher
-off for a day; `run-suite`'s Playwright worker count,
+off for a day; the Playwright run's own setup, which `frontend/tests/support/global-setup.ts`
+runs from `loadAppGlobalSetup()` in the app-owned `frontend/tests/support/global-setup-extensions.ts`
+in the runner's process, before it seeds the run's database, where the template gives an app no
+place for a step of a run's setup; `run-suite`'s Playwright worker count,
 which `tools/suite_runner/local.py` reads from `PLAYWRIGHT_WORKERS` when no `--workers` is given,
 where the library's `modernApp.test` fixes run-suite's flags and so left CI on the Playwright
 config's count; the completion of `useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which
