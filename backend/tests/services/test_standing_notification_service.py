@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Environment, Item, Project, ProjectMember, User, Work
-from app.models.reference import NotificationPriority, SessionState
+from app.models.reference import SessionState
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from app.services.standing_notification_service import StandingNotification
@@ -169,30 +169,85 @@ def _bear(
     )
 
 
+def _decision(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    environment: Environment,
+    title: str = "Which tent?",
+) -> Item:
+    """A decision the project's session adds, which waits on its members."""
+    return _bear(
+        container,
+        project,
+        _run(session, project, environment),
+        "decision",
+        title,
+        DECISION,
+    )
+
+
 @pytest.mark.usefixtures("person")
 class TestWhoShouldSeeOne:
-    def test_a_member_holding_a_token_sees_the_projects_standing(
-        self, container: ServiceContainer, session: DbSession, person: User
+    def test_a_member_holding_a_token_sees_what_waits_on_them(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
     ) -> None:
         project = _make(container)
         _token(container, session, person)
+        tent = _decision(container, session, project, environment)
 
         assert _should_see(container, session, project) == {
             "ada": StandingNotification(
                 sequence_id=str(project.id),
-                priority=NotificationPriority.MIN,
                 title="Camp",
-                message="Not started",
-                url=_timeline(container, project),
+                message="Which tent?",
+                url=f"{_timeline(container, project)}/items/{tent.id}",
             )
         }
 
+    def test_with_nothing_waiting_on_the_member_they_see_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        # A plan step in progress, a notice, a wait and a running work item
+        # wait on no one (F23.2, F27.5): none of them makes a notification.
+        project = _make(
+            container,
+            tasks=[{"id": "t1", "title": "Pitch the tent", "status": "in_progress"}],
+            paused=True,
+        )
+        _token(container, session, person)
+        _bear(
+            container,
+            project,
+            _run(session, project, environment),
+            "notice",
+            "Opens in May",
+            "The site opens in May.\n",
+        )
+        _wait(session, project, environment, "The site opens")
+        _work(session, project, environment, SessionState.RUNNING)
+
+        assert _should_see(container, session, project) == {"ada": None}
+
     def test_a_member_without_a_token_sees_none(
-        self, container: ServiceContainer, session: DbSession, person: User
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
     ) -> None:
         ben = _ben(container)
         project = _make(container, members=["ada", "ben"])
         _token(container, session, ben)
+        _decision(container, session, project, environment)
 
         seen = _should_see(container, session, project)
 
@@ -200,19 +255,31 @@ class TestWhoShouldSeeOne:
         assert seen["ben"] is not None
 
     def test_an_archived_project_shows_none(
-        self, container: ServiceContainer, session: DbSession, person: User
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
     ) -> None:
-        project = _make(container, archived=True)
+        project = _make(container)
         _token(container, session, person)
+        _decision(container, session, project, environment)
+        project.archived = True
+        session.flush()
 
         assert _should_see(container, session, project) == {"ada": None}
 
     def test_a_closed_membership_shows_none(
-        self, container: ServiceContainer, session: DbSession, person: User
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
     ) -> None:
         ben = _ben(container)
         project = _make(container, members=["ada", "ben"])
         _token(container, session, person, ben)
+        _decision(container, session, project, environment)
         session.scalars(
             select(ProjectMember).where(ProjectMember.user_id == ben.id)
         ).one().left_at = datetime.now(UTC)
@@ -228,25 +295,42 @@ class TestWhoShouldSeeOne:
     ) -> None:
         project = _make(container, state="draft", name=None)
         _token(container, session, person)
+        assert _should_see(container, session, project) == {"ada": None}
+
+        container.test_data_service().item(
+            project.id, "question", "Where?", QUESTION, by_pilot=True
+        )
 
         seen = _seen(container, session, project)
 
-        assert (seen.title, seen.message) == ("New project", "Draft")
+        assert (seen.title, seen.message) == ("New project", "Where?")
 
-    def test_a_finished_project_holds_one(
+    def test_a_finished_projects_archive_question_waits_on_its_members(
         self, container: ServiceContainer, session: DbSession, person: User
     ) -> None:
+        # F5.6: the nudge to archive; "Finished" is not said.
         project = _make(container, state="finished")
         _token(container, session, person)
+        question = container.document_service().bear_archive_question(project)
 
-        assert _seen(container, session, project).message == "Finished"
+        assert _seen(container, session, project) == StandingNotification(
+            sequence_id=str(project.id),
+            title="Camp",
+            message="Archive the project?",
+            url=f"{_timeline(container, project)}/items/{question.id}",
+        )
 
     def test_only_the_memberships_asked_for_are_answered(
-        self, container: ServiceContainer, session: DbSession, person: User
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
     ) -> None:
         ben = _ben(container)
         project = _make(container, members=["ada", "ben"])
         _token(container, session, person, ben)
+        _decision(container, session, project, environment)
         ada = session.scalars(
             select(ProjectMember).where(ProjectMember.user_id == person.id)
         ).one()
@@ -257,32 +341,8 @@ class TestWhoShouldSeeOne:
 
 
 @pytest.mark.usefixtures("person")
-class TestPriority:
-    def test_min_while_nothing_waits_on_the_member(
-        self,
-        container: ServiceContainer,
-        session: DbSession,
-        environment: Environment,
-        person: User,
-    ) -> None:
-        # A notice, a wait and a running work item wait on no one (F23.2,
-        # F27.5).
-        project = _make(container)
-        _token(container, session, person)
-        _bear(
-            container,
-            project,
-            _run(session, project, environment),
-            "notice",
-            "Opens in May",
-            "The site opens in May.\n",
-        )
-        _wait(session, project, environment, "The site opens")
-        _work(session, project, environment, SessionState.RUNNING)
-
-        assert _seen(container, session, project).priority is NotificationPriority.MIN
-
-    def test_default_while_an_item_waits_on_the_member(
+class TestWhatWaits:
+    def test_an_urgent_notice_and_a_stopped_work_item_wait_on_the_member(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -292,35 +352,20 @@ class TestPriority:
         project = _make(container)
         _token(container, session, person)
         _work(session, project, environment, SessionState.STOPPED)
+        assert _seen(container, session, project).message == "Build the camp"
 
-        assert (
-            _seen(container, session, project).priority is NotificationPriority.DEFAULT
-        )
-
-    def test_high_while_an_urgent_one_does_an_urgent_notice_included(
-        self,
-        container: ServiceContainer,
-        session: DbSession,
-        environment: Environment,
-        person: User,
-    ) -> None:
-        project = _make(container)
-        _token(container, session, person)
-        run = _run(session, project, environment)
-        _bear(container, project, run, "decision", "Which tent?", DECISION)
         _bear(
             container,
             project,
-            run,
+            _run(session, project, environment),
             "notice",
             "Storm",
             "A storm comes.\n",
             urgent="true",
         )
+        assert _seen(container, session, project).message == "Storm, +1"
 
-        assert _seen(container, session, project).priority is NotificationPriority.HIGH
-
-    def test_an_item_for_one_member_waits_on_them_alone(
+    def test_an_item_for_one_member_waits_on_them_alone_and_is_not_counted_for_another(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -330,70 +375,27 @@ class TestPriority:
         ben = _ben(container)
         project = _make(container, members=["ada", "ben"])
         _token(container, session, person, ben)
+        run = _run(session, project, environment)
         _bear(
             container,
             project,
-            _run(session, project, environment),
+            run,
             "question",
             "Your boots?",
             QUESTION,
-            urgent="true",
             **{"for": "ben"},
         )
 
         seen = _should_see(container, session, project)
 
-        assert seen["ada"] is not None and seen["ben"] is not None
-        assert (seen["ada"].priority, seen["ada"].message) == (
-            NotificationPriority.MIN,
-            "Not started · 1 waiting on ben",
-        )
-        assert (seen["ben"].priority, seen["ben"].message) == (
-            NotificationPriority.HIGH,
-            "Not started · Question waiting: Your boots?",
-        )
+        assert seen["ada"] is None
+        assert seen["ben"] is not None and seen["ben"].message == "Your boots?"
 
-    def test_a_pause_changes_the_text_and_not_the_priority(
-        self,
-        container: ServiceContainer,
-        session: DbSession,
-        environment: Environment,
-        person: User,
-    ) -> None:
-        # F141.6: a paused project with an item waiting still waits on you.
-        project = _make(container, paused=True)
-        _token(container, session, person)
-        _bear(
-            container,
-            project,
-            _run(session, project, environment),
-            "decision",
-            "Which tent?",
-            DECISION,
-        )
+        _bear(container, project, run, "decision", "Which tent?", DECISION)
+        seen = _should_see(container, session, project)
 
-        seen = _seen(container, session, project)
-
-        assert (seen.priority, seen.message) == (
-            NotificationPriority.DEFAULT,
-            "Not started · Paused · Decision waiting: Which tent?",
-        )
-
-    def test_a_finished_projects_archive_question_waits_on_its_members(
-        self, container: ServiceContainer, session: DbSession, person: User
-    ) -> None:
-        # F5.6: the nudge to archive.
-        project = _make(container, state="finished")
-        _token(container, session, person)
-        question = container.document_service().bear_archive_question(project)
-
-        assert _seen(container, session, project) == StandingNotification(
-            sequence_id=str(project.id),
-            priority=NotificationPriority.DEFAULT,
-            title="Camp",
-            message="Finished · Archive question waiting: Archive the project?",
-            url=f"{_timeline(container, project)}/items/{question.id}",
-        )
+        assert seen["ada"] is not None and seen["ada"].message == "Which tent?"
+        assert seen["ben"] is not None and seen["ben"].message == "Which tent?, +1"
 
     def test_a_document_whose_claims_a_running_work_item_holds_waits_on_no_one(
         self,
@@ -421,116 +423,51 @@ class TestPriority:
         )
         session.flush()
 
-        assert _seen(container, session, project).priority is NotificationPriority.MIN
+        assert _should_see(container, session, project) == {"ada": None}
 
         session.get_one(models.Session, doing.id).state_code = SessionState.FAILED
         session.flush()
 
-        assert (
-            _seen(container, session, project).priority is NotificationPriority.DEFAULT
-        )
+        assert _seen(container, session, project).message == "Build the camp, +1"
 
 
 @pytest.mark.usefixtures("person")
 class TestMessage:
-    @pytest.mark.parametrize(
-        ("statuses", "reading"),
-        [
-            (["pending", "pending"], "Not started"),
-            (["done", "pending"], "1 of 2 done"),
-            (["done", "done"], "All steps done"),
-            (["done", "in_progress", "pending"], "Pack the stove"),
-            (["in_progress", "in_progress"], "Pitch the tent, …"),
-        ],
-    )
-    def test_an_open_projects_status_line_is_its_step_reading(
+    def test_the_latest_ask_first_and_a_count_of_the_others(
         self,
         container: ServiceContainer,
         session: DbSession,
+        environment: Environment,
         person: User,
-        statuses: list[str],
-        reading: str,
     ) -> None:
-        titles = ["Pitch the tent", "Pack the stove", "Light the fire"]
         project = _make(
             container,
-            tasks=[
-                {"id": f"t{index}", "title": titles[index], "status": status}
-                for index, status in enumerate(statuses)
-            ],
+            tasks=[{"id": "t1", "title": "Pitch the tent", "status": "in_progress"}],
         )
-        _token(container, session, person)
-
-        assert _seen(container, session, project).message == reading
-
-    def test_what_runs(
-        self,
-        container: ServiceContainer,
-        session: DbSession,
-        environment: Environment,
-        person: User,
-    ) -> None:
-        project = _make(container)
-        _token(container, session, person)
-        _work(session, project, environment, SessionState.RUNNING)
-        assert (
-            _seen(container, session, project).message
-            == "Not started · Running: Build the camp"
-        )
-
-        _work(session, project, environment, SessionState.RUNNING, "Pack up")
-        assert _seen(container, session, project).message == "Not started · 2 running"
-
-    def test_what_waits_on_the_member_and_on_others(
-        self,
-        container: ServiceContainer,
-        session: DbSession,
-        environment: Environment,
-        person: User,
-    ) -> None:
-        ben = _ben(container)
-        project = _make(container, members=["ada", "ben"])
         _token(container, session, person)
         run = _run(session, project, environment)
-        _bear(container, project, run, "decision", "Which tent?", DECISION)
-        assert (
-            _seen(container, session, project).message
-            == "Not started · Decision waiting: Which tent?"
-        )
-
-        _bear(container, project, run, "question", "Where?", QUESTION)
-        _work(session, project, environment, SessionState.FAILED)
-        for title in ("Your boots?", "Your hat?"):
-            _bear(
-                container, project, run, "question", title, QUESTION, **{"for": "ben"}
-            )
-        assert ben.handle == "ben"
-        assert (
-            _seen(container, session, project).message
-            == "Not started · 3 waiting · 2 waiting on ben"
-        )
-
-    def test_the_open_waits(
-        self,
-        container: ServiceContainer,
-        session: DbSession,
-        environment: Environment,
-        person: User,
-    ) -> None:
-        project = _make(container)
-        _token(container, session, person)
         _wait(session, project, environment, "The site opens")
-        assert (
-            _seen(container, session, project).message
-            == "Not started · Waiting for: The site opens"
-        )
+        _work(session, project, environment, SessionState.RUNNING)
+        for title in ("Where?", "Which stove?", "Which tent?"):
+            _bear(container, project, run, "question", title, QUESTION)
 
-        _wait(session, project, environment, None)
-        assert (
-            _seen(container, session, project).message == "Not started · 2 waits open"
-        )
+        # No plan step, no status line, nothing running and no open wait.
+        assert _seen(container, session, project).message == "Which tent?, +2"
 
-    def test_untitled_items_read_by_their_kind(
+    def test_a_pause_changes_nothing(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container, paused=True)
+        _token(container, session, person)
+        _decision(container, session, project, environment)
+
+        assert _seen(container, session, project).message == "Which tent?"
+
+    def test_an_untitled_item_reads_by_its_kind(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -539,30 +476,27 @@ class TestMessage:
     ) -> None:
         project = _make(container)
         _token(container, session, person)
-        _wait(session, project, environment, None)
-        _work(session, project, environment, SessionState.RUNNING, None)
+        _decision(container, session, project, environment)
         _work(session, project, environment, SessionState.STOPPED, None)
 
-        assert (
-            _seen(container, session, project).message
-            == "Not started · Running · Work waiting · Timed wait open"
-        )
+        assert _seen(container, session, project).message == "Work, +1"
 
     def test_the_records_texts_read_as_their_words_in_the_markdown(
-        self, container: ServiceContainer, session: DbSession, person: User
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
     ) -> None:
-        project = _make(
-            container,
-            name="Camp *2026*",
-            tasks=[
-                {
-                    "id": "ci",
-                    "title": "1. Set up `ci` & [deploy]_now_, 2) ship",
-                    "status": "in_progress",
-                }
-            ],
-        )
+        project = _make(container, name="Camp *2026*")
         _token(container, session, person)
+        _work(
+            session,
+            project,
+            environment,
+            SessionState.STOPPED,
+            "1. Set up `ci` & [deploy]_now_, 2) ship",
+        )
 
         seen = _seen(container, session, project)
 
@@ -570,14 +504,15 @@ class TestMessage:
         assert seen.message == r"1\. Set up \`ci\` \& \[deploy\]\_now\_, 2\) ship"
 
     def test_the_fields_stay_within_the_bridges_limits(
-        self, container: ServiceContainer, session: DbSession, person: User
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
     ) -> None:
-        project = _make(
-            container,
-            name="N" * 300,
-            tasks=[{"id": "long", "title": "\\" * 5000, "status": "in_progress"}],
-        )
+        project = _make(container, name="N" * 300)
         _token(container, session, person)
+        _work(session, project, environment, SessionState.STOPPED, "\\" * 5000)
 
         seen = _seen(container, session, project)
 
@@ -608,8 +543,6 @@ class TestUrl:
             QUESTION,
             **{"for": "ben"},
         )
-        assert _seen(container, session, project).url == _timeline(container, project)
-
         decision = _bear(container, project, run, "decision", "Which tent?", DECISION)
         assert (
             _seen(container, session, project).url

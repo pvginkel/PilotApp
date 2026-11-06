@@ -85,11 +85,8 @@ NOTIFICATION_LOCK = 224
 """The first key of a member's turn (`advisory_turn`); the second is drawn
 from the person's and the project's ids."""
 
-_BRIDGE_PRIORITY: dict[NotificationPriority, BridgePriority] = {
-    NotificationPriority.MIN: "min",
-    NotificationPriority.DEFAULT: "default",
-    NotificationPriority.HIGH: "high",
-}
+_PRIORITY: BridgePriority = "high"
+"""F94.1's one priority, every submit's."""
 
 NOTIFICATION_RECONCILES_TOTAL = Counter(
     "pilot_notification_reconciles_total",
@@ -430,7 +427,7 @@ class NotificationReconcileService:
                     due.notification.sequence_id,
                     message=due.notification.message,
                     title=due.notification.title,
-                    priority=_BRIDGE_PRIORITY[due.notification.priority],
+                    priority=_PRIORITY,
                     url=due.notification.url,
                 )
         except NotificationBridgeFailure as failure:
@@ -494,7 +491,7 @@ class NotificationReconcileService:
                 membership.notification_sent_at = now
         if due.notification is not None:
             holder = next(m for m in memberships if m.id == due.holder_id)
-            holder.notification_priority_code = due.notification.priority
+            holder.notification_priority_code = NotificationPriority.HIGH
             holder.notification_text = due.notification.message
             holder.notification_url = due.notification.url
             holder.notification_sent_at = now
@@ -546,15 +543,15 @@ def _standing() -> ColumnElement[bool]:
 def _shows(
     membership: ProjectMember | None, notification: StandingNotification | None
 ) -> bool:
-    """Whether what `membership` last sent is `notification`: none for no
-    membership standing and none to see. The title is in no column."""
+    """Whether what `membership` last sent is `notification`, by its text and
+    its `url` (F94.4): none for no membership standing and none to see. The
+    title is in no column."""
     if membership is None or notification is None:
         return membership is None and notification is None
-    return (
-        membership.notification_priority_code,
-        membership.notification_text,
-        membership.notification_url,
-    ) == (notification.priority, notification.message, notification.url)
+    return (membership.notification_text, membership.notification_url) == (
+        notification.message,
+        notification.url,
+    )
 
 
 def _unsent(membership: ProjectMember) -> None:

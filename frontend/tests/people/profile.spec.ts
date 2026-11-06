@@ -10,6 +10,7 @@ import { makeUnique, waitTestEvent } from '../support/helpers';
 import type { FormTestEvent } from '@/lib/test/test-events';
 
 const ONE_SHOT = 'Pilot will notify you here';
+const QUESTION = '```question id=Q1\n```\n';
 
 test.describe('The profile page', () => {
   test('opens from Profile in the profile menu: the handle shown, not editable', async ({ page, people, shell, profile }) => {
@@ -155,10 +156,11 @@ test.describe("The profile page's notification token", () => {
     await expect(profile.tokenState).toHaveText('No token is set.');
   });
 
-  test("a set token's standing notification reaches the bridge for a project the person is a member of, and Clear dismisses it", async ({ people, projects, shell, profile, bridge, deploymentSse }) => {
+  test("a set token's standing notification reaches the bridge for a project where something waits on the person, and Clear dismisses it", async ({ people, projects, shell, profile, bridge, deploymentSse }) => {
     const me = await people.signIn();
     const name = makeUnique('Tent');
-    const projectId = await projects.make({ members: [me.handle!], name });
+    const projectId = await projects.makeWithSession({ members: [me.handle!], name });
+    const question = await projects.place(projectId, { kind: 'question', title: 'Which lake?', text: QUESTION });
     const phone = await bridge.register();
     await shell.open('/profile');
     await deploymentSse.ensureConnected();
@@ -167,8 +169,11 @@ test.describe("The profile page's notification token", () => {
 
     await expect.poll(async () => (await bridge.shown(phone.name))[projectId]).toMatchObject({
       sequence_id: projectId,
+      priority: 'high',
       title: name,
-      url: expect.stringMatching(new RegExp(`/projects/${projectId}$`)),
+      message: 'Which lake?',
+      url: expect.stringMatching(new RegExp(`/projects/${projectId}/items/${question}$`)),
+      alerted: true,
     });
 
     await profile.clearToken();

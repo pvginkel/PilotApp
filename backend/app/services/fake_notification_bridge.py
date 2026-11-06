@@ -9,9 +9,9 @@ and takes the bridge's bodies with the bridge's limits, status codes and
 reasons (pvginkel/Notifications: the README, and
 `bridge/src/notification_bridge/api.py`, whose parse this ports). A
 registration shows, per sequence id, what its last submit carried and whether
-that submit alerted, by the bridge's priority rule (README § Priorities); it
-keeps the one-shots it took, and every call it took, in order, but for a call
-answered with a channel's error, which it keeps nothing of.
+that submit alerted, by ntfy's rule (README § Priorities); it keeps the
+one-shots it took, and every call it took, in order, but for a call answered
+with a channel's error, which it keeps nothing of.
 
 A test drives it through its verbs, the public methods below: in process under
 pytest, and over HTTP as `POST /fake/<verb>`, the verb's name hyphenated and
@@ -19,9 +19,12 @@ its keyword arguments the JSON body.
 
 Simplifications of the real bridge: a registration has one channel, `ntfy`; a
 channel a test makes fail answers its error in the `200` and changes nothing
-the registration shows; a submit alerts when it shows a notification anew or
-raises its priority, to `default` or above, as Telegram notifies and ntfy's
-scale sounds; nothing is forgotten after 90 days; `/metrics` is not served.
+the registration shows; a submit under a sequence id alerts only when it shows
+the notification anew, the first after none stood or after a dismiss, at
+`default` or above, and every later one updates it in place silently, at any
+priority, as ntfy's Android app does while the notification shows in its
+drawer, which no one swipes; a one-shot alerts at `default` or above; nothing
+is forgotten after 90 days; `/metrics` is not served.
 """
 
 from __future__ import annotations
@@ -265,10 +268,7 @@ class FakeNotificationBridge:
                 notification = _notification(submission, _alerts(submission.priority))
                 registration.one_shots.append(notification)
             else:
-                shown = registration.shown.get(submission.sequence_id)
-                anew = shown is None or _rank(submission.priority) > _rank(
-                    shown.priority
-                )
+                anew = submission.sequence_id not in registration.shown
                 notification = _notification(
                     submission, anew and _alerts(submission.priority)
                 )
@@ -333,10 +333,6 @@ class FakeNotificationBridge:
             raise FakeNotificationBridgeProblem(
                 409, "another registration holds that token"
             )
-
-
-def _rank(priority: BridgePriority) -> int:
-    return _PRIORITIES.index(priority)
 
 
 def _alerts(priority: BridgePriority) -> bool:

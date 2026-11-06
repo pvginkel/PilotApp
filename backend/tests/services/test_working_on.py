@@ -20,10 +20,7 @@ from app.models import (
     Turn,
     User,
 )
-from app.models.reference import (
-    NotificationPriority,
-    SessionState,
-)
+from app.models.reference import SessionState
 from app.schemas.projects import ProjectStatus
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
@@ -687,9 +684,9 @@ class TestWhatWaits:
 
     def _waits(
         self, camp: Camp, person: User
-    ) -> tuple[Badge | None, ProjectStatus | None, NotificationPriority]:
-        """The badge, the project's status and the priority of the standing
-        notification, as Ada reads them."""
+    ) -> tuple[Badge | None, ProjectStatus | None, bool]:
+        """The badge, the project's status and whether the standing
+        notification stands, as Ada reads them."""
         badge = camp.container.timeline_service().badges(person, [camp.project.id])
         status = next(
             tab.status
@@ -705,8 +702,7 @@ class TestWhatWaits:
         seen = camp.container.standing_notification_service().should_see(
             camp.project, [membership]
         )[membership.id]
-        assert seen is not None
-        return badge.get(camp.project.id), status, seen.priority
+        return badge.get(camp.project.id), status, seen is not None
 
     def test_a_document_under_its_pass_waits_once_the_pass_ends(
         self, camp: Camp, person: User, engine_events: list[EngineEvent]
@@ -722,7 +718,7 @@ class TestWhatWaits:
         assert self._waits(camp, person) == (
             None,
             ProjectStatus.IDLE,
-            NotificationPriority.MIN,
+            False,
         )
 
         clear_after_commit_callbacks()
@@ -733,7 +729,7 @@ class TestWhatWaits:
         assert self._waits(camp, person) == (
             Badge(1, False),
             ProjectStatus.WAITING_ON_YOU,
-            NotificationPriority.DEFAULT,
+            True,
         )
 
     def test_a_document_read_waits_on_no_one_until_its_runs_last_read_and_pass(
@@ -750,7 +746,7 @@ class TestWhatWaits:
         documents.publish_read(
             camp.session.get_one(Document, first.id), QUESTION, run.id
         )
-        idle = (None, ProjectStatus.IDLE, NotificationPriority.MIN)
+        idle = (None, ProjectStatus.IDLE, False)
 
         assert self._waits(camp, person) == idle
 
@@ -766,7 +762,7 @@ class TestWhatWaits:
         assert self._waits(camp, person) == (
             Badge(2, False),
             ProjectStatus.WAITING_ON_YOU,
-            NotificationPriority.DEFAULT,
+            True,
         )
 
     def test_a_document_held_by_a_queued_work_item_waits_once_it_fails(
@@ -785,7 +781,7 @@ class TestWhatWaits:
         assert self._waits(camp, person) == (
             None,
             ProjectStatus.IDLE,
-            NotificationPriority.MIN,
+            False,
         )
 
         doing.state_code = SessionState.FAILED
@@ -795,7 +791,7 @@ class TestWhatWaits:
         assert self._waits(camp, person) == (
             Badge(2, False),
             ProjectStatus.WAITING_ON_YOU,
-            NotificationPriority.DEFAULT,
+            True,
         )
 
 

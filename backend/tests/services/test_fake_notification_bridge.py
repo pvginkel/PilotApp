@@ -311,44 +311,26 @@ class TestFakeNotificationBridgeRegistrations:
 
         assert _alerted(fake, "s") is alerted
 
-    @pytest.mark.parametrize("later", ["high", "default", "min"])
-    def test_the_same_or_a_lower_priority_updates_in_place_silently(
-        self, fake: FakeNotificationBridge, later: str
+    @pytest.mark.parametrize(
+        ("earlier", "later"),
+        [
+            ("high", "high"),
+            ("high", "min"),
+            ("min", "default"),
+            ("default", "high"),
+            ("high", "max"),
+        ],
+    )
+    def test_a_later_submit_updates_in_place_silently_at_any_priority(
+        self, fake: FakeNotificationBridge, earlier: str, later: str
     ) -> None:
-        _submit(fake, sequence_id="s", priority="high", message="first")
+        _submit(fake, sequence_id="s", priority=earlier, message="first")
 
         _submit(fake, sequence_id="s", priority=later, message="second")
 
         assert fake.shown("ada")["s"] == FakeNotification(
             "s", later, None, "second", None, False
         )
-
-    @pytest.mark.parametrize(
-        ("earlier", "later", "alerted"),
-        [
-            ("min", "default", True),
-            ("default", "high", True),
-            ("min", "low", False),
-        ],
-    )
-    def test_a_higher_priority_rises_and_alerts_at_default_or_above(
-        self, fake: FakeNotificationBridge, earlier: str, later: str, alerted: bool
-    ) -> None:
-        _submit(fake, sequence_id="s", priority=earlier, message="m")
-
-        _submit(fake, sequence_id="s", priority=later, message="m")
-
-        assert _alerted(fake, "s") is alerted
-
-    def test_a_sequence_that_went_down_can_rise_again(
-        self, fake: FakeNotificationBridge
-    ) -> None:
-        _submit(fake, sequence_id="s", priority="high", message="m")
-        _submit(fake, sequence_id="s", priority="min", message="m")
-
-        _submit(fake, sequence_id="s", priority="default", message="m")
-
-        assert _alerted(fake, "s") is True
 
     def test_a_dismiss_frees_the_sequence_id(
         self, fake: FakeNotificationBridge
@@ -410,7 +392,7 @@ class TestFakeNotificationBridgeRegistrations:
 
         assert fake.calls("ada") == [
             FakeCall("submit", "s", False),
-            FakeCall("submit", "s", True),
+            FakeCall("submit", "s", False),
             FakeCall("submit", None, True),
             FakeCall("dismiss", "s", False),
         ]
