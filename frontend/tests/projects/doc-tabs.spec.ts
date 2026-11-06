@@ -264,7 +264,7 @@ test.describe('Documents in tabs', () => {
     expect(await overlay.scrollTop()).toBe(0);
   });
 
-  test('an attachment’s tab keeps its scroll while another shows for longer than its text is kept unread', async ({
+  test('an attachment’s tab keeps its scroll while another shows for longer than what its body reads is kept unread, at its item’s address and at its document’s', async ({
     page,
     people,
     projects,
@@ -277,13 +277,24 @@ test.describe('Documents in tabs', () => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Kept'), members: [me.handle!] });
     const notice = await projects.place(id, { kind: 'notice', title: 'The camp', text: 'What we saw.\n' });
-    const paragraphs = Array.from({ length: 80 }, (_, index) => `Paragraph ${index + 1} of the map.`).join('\n\n');
-    const [map] = await projects.attach(notice, [{ ...NOTES, title: 'Camp map', filename: 'camp-map.md', content: `${paragraphs}\n` }]);
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: card('The trip') });
+    const paragraphs = (of: string) => `${Array.from({ length: 80 }, (_, index) => `Paragraph ${index + 1} of the ${of}.`).join('\n\n')}\n`;
+    const [map] = await projects.attach(notice, [{ ...NOTES, title: 'Camp map', filename: 'camp-map.md', content: paragraphs('map') }]);
+    const [route] = await projects.attach(trip, [{ ...NOTES, title: 'Route notes', filename: 'route-notes.md', content: paragraphs('route') }]);
     await timeline.open(id);
     await timeline.item(notice).attachment(map).click();
     await expect(overlay.attachment.root).toContainText('Paragraph 80 of the map.');
     await overlay.body.evaluate((body) => body.scrollTo({ top: 300 }));
     await expect.poll(() => overlay.scrollTop()).toBe(300);
+    // At its document's address, with the document's own tab closed.
+    await docTabs.first.click();
+    await timeline.item(trip).card.open.click();
+    await overlay.attachmentChip(route).click();
+    await expect(page).toHaveURL(documentAttachmentAddress(id, trip, route));
+    await expect(overlay.attachment.root).toContainText('Paragraph 80 of the route.');
+    await overlay.body.evaluate((body) => body.scrollTo({ top: 200 }));
+    await expect.poll(() => overlay.scrollTop()).toBe(200);
+    await docTabs.document(trip).close.click();
 
     // Past the five minutes a query no one reads is kept for.
     await docTabs.first.click();
@@ -291,6 +302,9 @@ test.describe('Documents in tabs', () => {
     await docTabs.attachment(map).show.click();
     await expect(overlay.attachment.root).toContainText('Paragraph 80 of the map.');
     expect(await overlay.scrollTop()).toBe(300);
+    await docTabs.attachment(route).show.click();
+    await expect(overlay.attachment.root).toContainText('Paragraph 80 of the route.');
+    expect(await overlay.scrollTop()).toBe(200);
   });
 
   test('an attachment is a tab of its own, “Attachment of <item>” in its head, its document a link there that shows the document’s tab', async ({

@@ -21,6 +21,8 @@ export interface DocTab {
   kind: DocTabKind;
   /** The item's or the attachment's id; none for the handbook and the project document. */
   id: string | null;
+  /** An attachment's at its document's address: the document, whose read its body waits on. */
+  documentId?: string;
   href: string;
 }
 
@@ -108,11 +110,12 @@ export function useDocTabs(projectId: string, showing: DocTab | null): TabLine {
   const on = fresh ? key : (line.seen[0] ?? TIMELINE);
   const kind = showing?.kind;
   const id = showing?.id ?? null;
+  const documentId = showing?.documentId;
   const href = showing?.href;
 
   useLayoutEffect(() => {
     const now = lineOf(projectId);
-    const tab = kind === undefined ? null : { key, kind, id, href: href! };
+    const tab = kind === undefined ? null : { key, kind, id, documentId, href: href! };
     const open = tab === null || now.tabs.some((each) => each.key === key);
     write(projectId, {
       // An attachment reached at another of its addresses shows its tab at that one.
@@ -120,7 +123,7 @@ export function useDocTabs(projectId: string, showing: DocTab | null): TabLine {
       seen: [key, ...now.seen.filter((each) => each !== key)],
       synced: key,
     });
-  }, [projectId, key, kind, id, href]);
+  }, [projectId, key, kind, id, documentId, href]);
 
   const show = (tab: DocTab | null) =>
     void (tab === null

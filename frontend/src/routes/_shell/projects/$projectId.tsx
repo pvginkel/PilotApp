@@ -115,7 +115,7 @@ function Project() {
     opened !== null && opened.attachment === null
       ? documentTab(opened.documentId)
       : attachmentId !== undefined
-        ? { key: `attachment ${attachmentId}`, kind: 'attachment', id: attachmentId, href: pathname }
+        ? { key: `attachment ${attachmentId}`, kind: 'attachment', id: attachmentId, documentId, href: pathname }
         : handbook
           ? { key: 'handbook', kind: 'handbook', id: null, href: pathname }
           : projectDocument

@@ -123,11 +123,22 @@ function DocumentTab(props: TabProps) {
 
 function AttachmentTab(props: TabProps) {
   const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: props.projectId } });
-  // Fetching nothing, it keeps the text its body reads cached while another tab shows: the tab's
-  // scroll is set back once, as its body mounts.
+  // Fetching nothing, it keeps the text its body reads cached while another tab shows, and at its
+  // document's address `KeptDocument` the document: the tab's scroll is set back once, as its body
+  // mounts.
   useQuery({ ...attachmentTextQuery(props.tab.id!), enabled: false });
   const hung = data && hungById(data, props.tab.id!);
-  return <TabFace {...props} title={hung?.attachment.title ?? 'Attachment'} icon={Paperclip} />;
+  return (
+    <>
+      {props.tab.documentId !== undefined && <KeptDocument id={props.tab.documentId} />}
+      <TabFace {...props} title={hung?.attachment.title ?? 'Attachment'} icon={Paperclip} />
+    </>
+  );
+}
+
+function KeptDocument({ id }: { id: string }) {
+  useGetItemsDocumentByItemId({ path: { item_id: id } }, { enabled: false });
+  return null;
 }
 
 function HandbookTab(props: TabProps) {
