@@ -49,7 +49,26 @@ from tests.support.fake_notification_bridge import (
     bridge_client_of,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
+from tests.support.suite_lock import HeldLock, hold_suite_lock
 from tests.support.supervisor import Supervise
+
+# The run's test suite lock, held while the run's config references it.
+_SUITE_LOCK = pytest.StashKey[HeldLock | None]()
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """A run on xdist's workers, as ``kc project test`` runs the suite, takes
+    the test suite lock (tests/support/suite_lock.py) and holds it until the
+    run ends. A run on one process takes none."""
+    config = session.config
+    # xdist's own test of a distributed run, whose workers carry `workerinput`.
+    # It starts them in its own pytest_sessionstart, which runs last.
+    if (
+        not hasattr(config, "workerinput")
+        and config.getoption("dist", "no") != "no"
+        and not config.getoption("collectonly")
+    ):
+        config.stash[_SUITE_LOCK] = hold_suite_lock()
 
 
 @pytest.fixture(scope="session")
