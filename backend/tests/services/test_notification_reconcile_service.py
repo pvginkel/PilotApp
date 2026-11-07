@@ -53,7 +53,7 @@ from app.services.web_push import WEB_PUSH_SENDS_TOTAL, WebPushService
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_push_service import ServedFakePushService
-from tests.support.locks import in_thread, lock_waits, pool_capacity
+from tests.support.locks import in_thread, lock_waits, pool_capacity, turn_holders
 from tests.support.supervisor import (
     WAIT_SECONDS,
     LogWaiter,
@@ -1502,6 +1502,31 @@ class TestNotificationReconcileServiceTwoProcesses:
 
 
 class TestNotificationReconcileServiceConnections:
+    def test_across_the_push_its_lock_is_a_transactions_that_holds_no_table(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """Across the push, a transaction holds the member's lock, as a
+        pooler in transaction mode keeps it, and no lock on a row or a
+        table."""
+        project_id = _project(container)
+        _ask(container, project_id)
+        built = _service(container, supervise, web_push_service)
+        holders: list[tuple[str, list[str]]] = []
+        fake_push_service.on_push = lambda: holders.extend(
+            turn_holders(container, NOTIFICATION_LOCK)
+        )
+
+        _reconcile(built, project_id)
+
+        assert holders == [("idle in transaction", [])]
+        assert _pushes(fake_push_service, browsers["ada"])
+        assert _seen(container, project_id)
+
     def test_more_turns_at_once_than_the_pool_holds_each_complete(
         self,
         container: ServiceContainer,

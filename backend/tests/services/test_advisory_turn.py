@@ -1,19 +1,20 @@
 """A turn under an advisory lock of two keys (F94.4, F142.3): of two turns of
-the same keys, the second waits for the first, across connections, and a
-turn's transactions run on the one connection that holds its lock. On a
-database of its own: a turn's lock is held by a connection of its own."""
+the same keys, the second waits for the first, across connections; the lock
+is the turn's transaction's, and what a block let go holds no lock past it.
+On a database of its own: a turn's lock is held by a connection of its own."""
 
 import pytest
 from flask import Flask
 from sqlalchemy import func, select, text
 
-from app.services.advisory_turn import advisory_turn, turn_key
+from app.services.advisory_turn import advisory_turn, let_go, turn_key
 from app.services.container import ServiceContainer
 from tests.support.locks import (
     holding_connections,
     in_thread,
     lock_waits,
     pool_capacity,
+    turn_holders,
 )
 from tests.support.supervisor import wait_until
 
@@ -25,40 +26,19 @@ def _take(
         taken.append(f"{first}:{second}")
 
 
-def _holders(container: ServiceContainer) -> list[int]:
-    """The backends holding the advisory lock (7, 11), read on a connection
-    of their own."""
+def _rows(container: ServiceContainer) -> list[int]:
     with container.session_maker()() as db:
-        return list(
-            db.scalars(
-                text(
-                    "SELECT pid FROM pg_locks WHERE locktype = 'advisory'"
-                    " AND classid = 7 AND objid = 11 AND objsubid = 2 AND granted"
-                )
-            )
-        )
+        return list(db.scalars(text("SELECT n FROM turn_rows ORDER BY n")))
 
 
-def _backends(container: ServiceContainer) -> set[int]:
-    """The backends of the app's database, each a connection open."""
+@pytest.fixture
+def rows(committed_app: Flask) -> ServiceContainer:
+    """The committed app's container, its database with a table `turn_rows`."""
+    container: ServiceContainer = committed_app.container
     with container.session_maker()() as db:
-        return set(
-            db.scalars(
-                text(
-                    "SELECT pid FROM pg_stat_activity"
-                    " WHERE datname = current_database()"
-                )
-            )
-        )
-
-
-def _state(container: ServiceContainer, pid: int) -> str:
-    """The backend's state, `idle` or `idle in transaction` among them."""
-    with container.session_maker()() as db:
-        state: str = db.scalar(
-            text("SELECT state FROM pg_stat_activity WHERE pid = :pid"), {"pid": pid}
-        )
-        return state
+        db.execute(text("CREATE TABLE turn_rows (n integer)"))
+        db.commit()
+    return container
 
 
 class TestAdvisoryTurn:
@@ -101,63 +81,71 @@ class TestAdvisoryTurn:
 
         assert taken == ["7:11"]
 
-    def test_its_transactions_run_on_the_connection_holding_its_lock(
+    def test_its_lock_is_its_transactions_let_go_when_the_transaction_ends(
         self, committed_app: Flask
     ) -> None:
+        """A transaction holds the lock, and nothing past its end: what a
+        pooler in transaction mode, which hands each transaction whichever
+        server connection is free, keeps."""
         container: ServiceContainer = committed_app.container
 
-        with advisory_turn(container.session_maker(), 7, 11) as turn:
-            with turn.transaction() as db:
-                first = db.scalar(select(func.pg_backend_pid()))
-            between = _state(container, first)
-            with turn.transaction() as db:
-                second = db.scalar(select(func.pg_backend_pid()))
-            holders = _holders(container)
+        with advisory_turn(container.session_maker(), 7, 11) as db:
+            held = turn_holders(container, 7)
+            db.commit()
+            after = turn_holders(container, 7)
 
-        assert first == second
-        assert holders == [first]
-        assert between == "idle"
+        assert held == [("idle in transaction", [])]
+        assert after == []
 
-    def test_the_lock_is_let_go_and_its_connection_kept_by_the_pool(
-        self, committed_app: Flask
+    def test_its_work_is_committed_when_the_block_ends_and_undone_when_it_raises(
+        self, rows: ServiceContainer
     ) -> None:
-        container: ServiceContainer = committed_app.container
+        with advisory_turn(rows.session_maker(), 7, 11) as db:
+            db.execute(text("INSERT INTO turn_rows VALUES (1)"))
+        with (
+            pytest.raises(RuntimeError),
+            advisory_turn(rows.session_maker(), 7, 11) as db,
+        ):
+            db.execute(text("INSERT INTO turn_rows VALUES (2)"))
+            raise RuntimeError("the block failed")
 
-        with advisory_turn(container.session_maker(), 7, 11) as turn:
-            with turn.transaction() as db:
-                pid = db.scalar(select(func.pg_backend_pid()))
+        assert _rows(rows) == [1]
+        assert turn_holders(rows, 7) == []
 
-        assert pid in _backends(container)
-        assert _holders(container) == []
-
-    def test_a_transaction_that_raises_is_rolled_back_and_the_next_runs(
-        self, committed_app: Flask
-    ) -> None:
-        container: ServiceContainer = committed_app.container
-
-        with advisory_turn(container.session_maker(), 7, 11) as turn:
-            with turn.transaction() as db:
-                db.execute(text("CREATE TEMPORARY TABLE turn_rows (n integer)"))
-            with pytest.raises(RuntimeError), turn.transaction() as db:
-                db.execute(text("INSERT INTO turn_rows VALUES (1)"))
-                raise RuntimeError("the transaction failed")
-            with turn.transaction() as db:
-                db.execute(text("INSERT INTO turn_rows VALUES (2)"))
-                rows = list(db.scalars(text("SELECT n FROM turn_rows")))
-                db.execute(text("DROP TABLE turn_rows"))
-
-        assert rows == [2]
-
-    def test_with_every_other_connection_of_the_pool_held_its_transactions_run(
+    def test_with_every_other_connection_of_the_pool_held_its_work_runs(
         self, committed_app: Flask
     ) -> None:
         container: ServiceContainer = committed_app.container
 
         with holding_connections(container, pool_capacity(container) - 1):
-            with advisory_turn(container.session_maker(), 7, 11) as turn:
-                for _ in range(2):
-                    with turn.transaction() as db:
-                        assert db.scalar(select(1)) == 1
+            with advisory_turn(container.session_maker(), 7, 11) as db:
+                assert db.scalar(select(1)) == 1
+
+
+class TestLetGo:
+    def test_what_its_block_read_and_wrote_goes_and_the_turns_lock_stays(
+        self, rows: ServiceContainer
+    ) -> None:
+        with advisory_turn(rows.session_maker(), 7, 11) as db:
+            pid = db.scalar(select(func.pg_backend_pid()))
+            with let_go(db):
+                db.execute(text("INSERT INTO turn_rows VALUES (1)"))
+                assert db.scalar(select(func.pg_backend_pid())) == pid
+                inside = turn_holders(rows, 7)
+            after = turn_holders(rows, 7)
+
+        assert inside == [("idle in transaction", ["turn_rows"])]
+        assert after == [("idle in transaction", [])]
+        assert _rows(rows) == []
+
+    def test_it_rolls_back_when_its_block_raises(self, rows: ServiceContainer) -> None:
+        with advisory_turn(rows.session_maker(), 7, 11) as db:
+            with pytest.raises(RuntimeError), let_go(db):
+                db.execute(text("INSERT INTO turn_rows VALUES (1)"))
+                raise RuntimeError("the block failed")
+            db.execute(text("INSERT INTO turn_rows VALUES (2)"))
+
+        assert _rows(rows) == [2]
 
 
 class TestTurnKey:

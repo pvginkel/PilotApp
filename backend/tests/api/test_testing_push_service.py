@@ -2,7 +2,6 @@
 
 import threading
 from collections.abc import Generator
-from functools import partial
 
 import pytest
 from dependency_injector import providers
@@ -12,9 +11,7 @@ from werkzeug.serving import make_server
 
 from app.app_config import AppSettings
 from app.config import Settings, Stage
-from app.database import scoped_session
 from app.models import User
-from app.services.container import ServiceContainer
 from app.services.fake_push_service import FakePush, FakePushService
 from app.services.push_subscription_service import PushSubscriptionService
 from app.services.web_push import Push, VapidKey, WebPushService
@@ -65,7 +62,6 @@ class TestTestingPushServiceApi:
     def test_the_backend_pushes_to_a_browser_through_the_mount(
         self,
         session: Session,
-        container: ServiceContainer,
         person: User,
         web_push_service: WebPushService,
         mounted: FakePushService,
@@ -79,9 +75,7 @@ class TestTestingPushServiceApi:
         )
         push = Push("Garden sensors", "Pick the board", "project-1", backend_url, True)
 
-        assert web_push_service.push(
-            person.id, push, partial(scoped_session, container)
-        )
+        assert web_push_service.push(person.id, push, session)
 
         assert mounted.pushes(browser.endpoint) == [
             FakePush(

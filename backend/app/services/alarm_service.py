@@ -33,9 +33,10 @@ going offline is written by a loop of the job `alarm-seen`, off the thread
 that committed it.
 
 A person's pushes take turns under an advisory lock, so that two processes
-during a roll alert them once: the read, the push outside any transaction,
-and the write, each transaction on the turn's one connection
-(`Turn.transaction`), so that the turn never waits on the pool for another.
+during a roll alert them once: the read, the push and the write in the turn's
+one transaction (`advisory_turn`), so that it never waits on the pool for
+another connection, the read let go before the push (`let_go`), so that
+across it no row or table is locked.
 """
 
 import itertools
@@ -54,7 +55,7 @@ from app.database import scoped_session
 from app.models import PushSubscription, User
 from app.models.reference import UserKind
 from app.schemas.conditions import ConditionCode
-from app.services.advisory_turn import Turn, advisory_turn, turn_key
+from app.services.advisory_turn import advisory_turn, let_go, turn_key
 from app.services.app_page_service import AppPageService, PresenceEvent, WentOffline
 from app.services.condition_service import ConditionService
 from app.services.supervisor import LoopHandle, Supervisor
@@ -231,8 +232,8 @@ class AlarmService:
 
     def _alarm(self, person_id: uuid.UUID, due: _Due) -> None:
         latest = due[0][1]
-        with self._turn(person_id) as turn:
-            with turn.transaction() as db:
+        with self._turn(person_id) as db:
+            with let_go(db):
                 person = db.get_one(User, person_id)
                 seen = person.alarm_seen_at
                 if (
@@ -250,12 +251,11 @@ class AlarmService:
                     url=self._url,
                     renotify=True,
                 ),
-                turn.transaction,
+                db,
             )
-            with turn.transaction() as db:
-                _seen(db, person_id, latest)
+            _seen(db, person_id, latest)
 
-    def _turn(self, person_id: uuid.UUID) -> AbstractContextManager[Turn]:
+    def _turn(self, person_id: uuid.UUID) -> AbstractContextManager[Session]:
         """The person's turn to be alarmed, until the block ends."""
         return advisory_turn(
             self._container.session_maker(), ALARM_LOCK, turn_key(person_id.bytes)

@@ -2,63 +2,59 @@
 processes alike: a member's pushes, a person's alarms, the store's reset
 (F94.4, F142.3; design 2 §7.2).
 
-A turn holds one pooled connection, the one its lock is on, and its
-transactions run on it (`Turn.transaction`), so that a turn that opens no
-other session never waits on the pool while it holds a connection."""
+A turn is one transaction, on the one connection its session holds, and the
+lock is that transaction's (`pg_advisory_xact_lock`): the stages reach
+PostgreSQL through a pooler in transaction mode, which hands each transaction
+whichever server connection is free, so a lock held past its transaction
+holds nothing there. A turn whose work runs in its session never waits on the
+pool while it holds a connection."""
 
 import hashlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import Connection, Integer, cast, func, literal, select
-from sqlalchemy.orm import Session, sessionmaker
-
-
-class Turn:
-    """A turn's connection, which holds its lock."""
-
-    def __init__(
-        self, session_maker: sessionmaker[Session], connection: Connection
-    ) -> None:
-        self._session_maker = session_maker
-        self._connection = connection
-
-    @contextmanager
-    def transaction(self) -> Iterator[Session]:
-        """A transaction of its own on the turn's connection: committed when
-        the block ends, rolled back when it raises. Between two, the
-        connection holds no transaction open, the lock alone."""
-        db = self._session_maker(bind=self._connection)
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+from sqlalchemy import Integer, cast, func, literal, select
+from sqlalchemy.orm import Session
 
 
 @contextmanager
 def advisory_turn(
-    session_maker: sessionmaker[Session], first: int, second: int
-) -> Iterator[Turn]:
-    """Hold the advisory lock `(first, second)` until the block ends, on a
-    connection of its own, which holds no transaction open between the
-    turn's; a turn of the same two keys waits for it. The lock is let go
-    before the connection goes back to the pool. The slot's lock takes one
-    key (`start_gate.SLOT_LOCK`), so no turn meets it."""
-    keys = (cast(literal(first), Integer), cast(literal(second), Integer))
-    with session_maker() as unbound:
-        engine = unbound.get_bind().engine
-    with engine.connect() as connection:
-        connection.execute(select(func.pg_advisory_lock(*keys)))
-        connection.commit()
-        try:
-            yield Turn(session_maker, connection)
-        finally:
-            connection.execute(select(func.pg_advisory_unlock(*keys)))
-            connection.commit()
+    open_session: Callable[[], Session], first: int, second: int
+) -> Iterator[Session]:
+    """Hold the advisory lock `(first, second)` until the block ends, in the
+    transaction of a session of its own, the one yielded: committed when the
+    block ends, rolled back when it raises, the lock let go with it. A turn
+    of the same two keys waits for it. The slot's lock takes one key
+    (`start_gate.SLOT_LOCK`), so no turn meets it."""
+    db = open_session()
+    try:
+        db.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    cast(literal(first), Integer), cast(literal(second), Integer)
+                )
+            )
+        )
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@contextmanager
+def let_go(db: Session) -> Iterator[None]:
+    """A savepoint of `db`'s transaction, rolled back when the block ends:
+    the locks the block took on a row or a table go with it, and whatever it
+    wrote. Across a call out, a turn's transaction then holds its lock
+    alone."""
+    savepoint = db.begin_nested()
+    try:
+        yield
+    finally:
+        savepoint.rollback()
 
 
 def turn_key(*parts: bytes) -> int:

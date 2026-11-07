@@ -16,8 +16,6 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import Callable
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import cast
@@ -34,6 +32,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import PushSubscription
+from app.services.advisory_turn import let_go
 from app.utils.base64url import b64, unb64
 
 logger = logging.getLogger(__name__)
@@ -146,11 +145,6 @@ class _Target:
     auth: str
 
 
-type OpenTransaction = Callable[[], AbstractContextManager[Session]]
-"""Opens a transaction of its own, committed when its block ends: a turn's,
-on its connection (`Turn.transaction`)."""
-
-
 class WebPushService:
     """Pushes to a person's browsers, signed with the stage's key; with no key,
     the deployment pushes nothing."""
@@ -171,23 +165,19 @@ class WebPushService:
         None where the deployment pushes nothing."""
         return None if self._key is None else self._key.public_key
 
-    def push(
-        self,
-        user_id: uuid.UUID,
-        push: Push,
-        transaction: OpenTransaction,
-    ) -> bool:
+    def push(self, user_id: uuid.UUID, push: Push, db: Session) -> bool:
         """Push `push` to every subscription of the person's, one after the
         other; delete each one its push service answered gone. Whether any of
         them took it: False with none, or with no key.
 
-        The read of the subscriptions and the delete are transactions of
-        their own, each opened by `transaction`, a turn's on its connection
-        (`Turn.transaction`); none is open across the push services' calls.
+        In `db`'s transaction, a turn's (`advisory_turn`): the read of the
+        subscriptions let go before the push services' calls (`let_go`), so
+        that across them it holds no lock on a row or a table, and the delete
+        after them, committed with it.
         """
         if self._key is None:
             return False
-        with transaction() as db:
+        with let_go(db):
             targets = [
                 _Target(row.id, row.endpoint, row.p256dh, row.auth)
                 for row in db.scalars(
@@ -205,15 +195,14 @@ class WebPushService:
             target.id for target, outcome in outcomes if outcome is PushOutcome.GONE
         ]
         if gone:
-            with transaction() as db:
-                # By the person too: a row another person's write took over
-                # since the read is theirs now.
-                db.execute(
-                    delete(PushSubscription).where(
-                        PushSubscription.id.in_(gone),
-                        PushSubscription.user_id == user_id,
-                    )
+            # By the person too: a row another person's write took over since
+            # the read is theirs now.
+            db.execute(
+                delete(PushSubscription).where(
+                    PushSubscription.id.in_(gone),
+                    PushSubscription.user_id == user_id,
                 )
+            )
         return any(outcome is PushOutcome.SENT for _, outcome in outcomes)
 
     def _send(

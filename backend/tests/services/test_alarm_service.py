@@ -26,6 +26,7 @@ from app.models.reference import UserKind
 from app.schemas.conditions import ConditionCode
 from app.services.alarm_service import (
     ALARM_JOB,
+    ALARM_LOCK,
     ALARM_SEEN_JOB,
     ALARM_TAG,
     AlarmService,
@@ -46,6 +47,7 @@ from tests.support.locks import (
     in_thread,
     lock_waits,
     pool_capacity,
+    turn_holders,
 )
 from tests.support.store_updates import hold, lift
 from tests.support.supervisor import (
@@ -906,6 +908,30 @@ class TestAlarmServiceTwoProcesses:
 
 
 class TestAlarmServiceConnections:
+    def test_across_the_push_its_lock_is_a_transactions_that_holds_no_table(
+        self,
+        container: ServiceContainer,
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        browsers: dict[str, FakeSubscription],
+        supervise: Supervise,
+    ) -> None:
+        """Across the push, a transaction holds the person's lock, as a
+        pooler in transaction mode keeps it, and no lock on a row or a
+        table."""
+        built = _service(container, supervise, web_push_service)
+        holding = {ConditionCode.WEEK_HALT: _now()}
+        holders: list[tuple[str, list[str]]] = []
+        fake_push_service.on_push = lambda: holders.extend(
+            turn_holders(container, ALARM_LOCK)
+        )
+
+        _reconcile(built.service, holding)
+
+        assert holders == [("idle in transaction", [])]
+        assert _pushes(fake_push_service, browsers["ada"]) == [_alarm(container, WEEK)]
+        assert _pushes(fake_push_service, browsers["ben"]) == [_alarm(container, WEEK)]
+
     def test_a_turn_alarms_on_the_one_connection_the_pool_has_left(
         self,
         container: ServiceContainer,

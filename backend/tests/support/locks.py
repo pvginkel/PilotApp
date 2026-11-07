@@ -1,5 +1,6 @@
 """What a test on a committed database waits on: a transaction run in a
-thread of its own, the connections waiting on a lock, and the app's pool."""
+thread of its own, the connections waiting on a lock, a turn's holder, and
+the app's pool."""
 
 import threading
 from collections.abc import Callable, Iterator
@@ -55,6 +56,29 @@ def lock_waits(container: ServiceContainer) -> int:
             )
         )
         return waits
+
+
+def turn_holders(
+    container: ServiceContainer, first: int
+) -> list[tuple[str, list[str]]]:
+    """Each backend holding a turn's lock of the first key `first`: its state,
+    `idle in transaction` while a transaction of its holds the lock, and the
+    tables it holds a lock on, read on a connection of its own."""
+    with container.session_maker()() as db:
+        return [
+            (state, list(tables))
+            for state, tables in db.execute(
+                text(
+                    "SELECT a.state, ARRAY(SELECT r.relation::regclass::text"
+                    " FROM pg_locks r WHERE r.pid = l.pid"
+                    " AND r.locktype = 'relation' ORDER BY 1)"
+                    " FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid"
+                    " WHERE l.locktype = 'advisory' AND l.classid = :first"
+                    " AND l.objsubid = 2 AND l.granted"
+                ),
+                {"first": first},
+            )
+        ]
 
 
 def pool_capacity(container: ServiceContainer) -> int:
