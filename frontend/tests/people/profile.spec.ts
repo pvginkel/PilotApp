@@ -31,7 +31,7 @@ test.describe('The profile page', () => {
     await expect(profile.avatar).toHaveText('AE');
     await expect(profile.avatar).toHaveAttribute('data-colour', String(((me.avatar_slot! - 1) % 6) + 1));
     await expect(profile.handle).toHaveText(me.handle!);
-    // Nothing on the page is typed into: the token's field is gone.
+    // Nothing on the page is typed into.
     await expect(profile.root.locator('input, textarea, select, [contenteditable]')).toHaveCount(0);
   });
 
