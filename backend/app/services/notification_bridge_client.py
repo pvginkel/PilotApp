@@ -127,10 +127,12 @@ class NotificationBridgeClient:
         priority: BridgePriority = "default",
         url: str | None = None,
     ) -> None:
-        """Show the notification of `sequence_id`, or update the one shown: in
-        place and silently at the same or a lower priority, re-shown and
-        alerting at a higher one. The `url` is not kept: each submit carries
-        the one the notification links to."""
+        """Show the notification of `sequence_id`, or update the one shown.
+        On ntfy the update replaces it in place at any priority, and the
+        phone alerts only once the notification no longer shows in the
+        drawer; on Telegram it is in place and silent at the same or a lower
+        priority, sent again and alerting at a higher one. The `url` is not
+        kept: each submit carries the one the notification links to."""
         self._call(
             BridgeCall.SUBMIT,
             "/v1/submit",
