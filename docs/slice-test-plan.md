@@ -81,13 +81,17 @@ cexec go sh -c 'cd sidecar && go test -race ./...'
 ```
 
 A Playwright run takes the test suite lock first: one run at a time across the project's
-environments, which share one node (`frontend/tests/support/test-suite-lock.ts`). It waits for the
-lock without a bound, saying whose run holds it, so a run can take its suite's time and another's:
-size the command's timeout for both, up to the Bash tool's hour. `kc project test` prints nothing
-while it waits, nor when a timeout kills it; the newest `/tmp/kc/project/test-*.log` has the
-waiting line from the start. With
-`PLAYWRIGHT_SUITE_LOCK_WAIT` seconds set, a run that gives up exits with 75 having run no test:
-that is no failure of the slice, and the suite runs again once the other run is done.
+environments, which share one node (`frontend/tests/support/test-suite-lock.ts`). A backend run on
+xdist's workers, as `kc project test` runs it, takes the same lock before its workers start and
+holds it until it ends (`backend/tests/support/suite_lock.py`, D152); a run on one process, the
+count's above or a targeted `uv run pytest`, takes none. So `kc project test` takes the lock twice,
+once per suite. Each run waits for it without a bound, saying whose run holds it, so a run can take
+its suite's time and another's: size the command's timeout for both, up to the Bash tool's hour.
+`kc project test` prints nothing while it waits, nor when a timeout kills it; the newest
+`/tmp/kc/project/test-*.log` has the waiting line from the start. With
+`PLAYWRIGHT_SUITE_LOCK_WAIT`, or the backend's `PYTEST_SUITE_LOCK_WAIT`, seconds set, a run that
+gives up exits with 75 having run no test: that is no failure of the slice, and the suite runs again
+once the other run is done.
 
 Then the same verbs from the root of every other repo the slice touched, each where it declares
 them: `../PilotDeploy`, whose `test` reads `../PilotApp/docs/architecture/architecture.yaml` and so

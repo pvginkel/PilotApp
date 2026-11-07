@@ -172,11 +172,13 @@ and moves nothing else ([`work.md`](work.md)).
 `useProjectEvents` (`frontend/src/hooks/use-project-events.ts`), called by the shell, reads again,
 on the event, the project lists and the named project's head, timeline, handbook, project document
 and chats ([`chats.md`](chats.md)), and every document read of an item of it
-([`documents.md`](documents.md)), events that arrive together once after them, a first read still
-under way cancelled and made again, since it may predate the event; and on every rise of
+([`documents.md`](documents.md)), events that arrive together once after them; and on every rise of
 the stream's `isConnected`, the first included, every one of those reads, which covers an event sent
-from a process that does not hold the browser's stream. A person's own write reads every query again
-as well. Each `work_moved`'s status it writes into the timeline as read, with no read.
+from a process that does not hold the browser's stream. A read the event finds under way, which may
+predate it, is left to land, and its query is read again once it has: a read made over it would
+cancel it, and events closer together than a read takes would then let none land, nor end what
+awaits the query's read, as Create project's success does ([`projects.md`](projects.md)). A
+person's own write reads every query again as well. Each `work_moved`'s status it writes into the timeline as read, with no read.
 
 ## The timeline
 

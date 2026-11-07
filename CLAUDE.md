@@ -94,7 +94,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twelve stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Fourteen stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -127,7 +127,14 @@ off for a day; the Playwright run's own setup, which `frontend/tests/support/glo
 runs from `loadAppGlobalSetup()` in the app-owned `frontend/tests/support/global-setup-extensions.ts`
 in the runner's process, before it seeds the run's database, where the template gives an app no
 place for a step of a run's setup: this app's takes the test suite lock, one run at a time across
-the project's environments, held until the runner ends; `run-suite`'s Playwright worker count,
+the project's environments, held until the runner ends; a Playwright test's budget, 60 s in
+`frontend/playwright.config.ts`, where the template leaves Playwright's 30 s, which the longest
+specs outrun on a node other environments load; a worker's service start in
+`frontend/tests/support/process/servers.ts` and `frontend/tests/support/fixtures-infrastructure.ts`,
+which attaches the service's output to the worker's log from the spawn on and puts it in a failed
+start's error, where the template attached it once the service was ready, so that a start that
+failed said nothing of why (`tests/infrastructure/server-start.spec.ts` pins it); `run-suite`'s
+Playwright worker count,
 which `tools/suite_runner/local.py` reads from `PLAYWRIGHT_WORKERS` when no `--workers` is given,
 where the library's `modernApp.test` fixes run-suite's flags and so left CI on the Playwright
 config's count; the completion of `useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which
