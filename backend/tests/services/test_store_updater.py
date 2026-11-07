@@ -255,6 +255,13 @@ def _run(updater: StoreUpdater, handle: LoopHandle | None = None) -> None:
     clear_after_commit_callbacks()
 
 
+def _tick(updater: StoreUpdater, container: ServiceContainer) -> None:
+    """The timer's tick, as the supervisor runs it: in a transaction, whose
+    after-commit callbacks run at its end."""
+    with scoped_session(container) as db:
+        updater.run_timer(db)
+
+
 def _asked(updater: StoreUpdater, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Each loop its supervisor is asked for from now on."""
     asked: list[str] = []
@@ -749,15 +756,22 @@ class TestTimer:
     ) -> None:
         told = _tells(container)
 
-        updater.run_timer(session)
+        _tick(updater, container)
         assert told == []
         update = hold(session)
+        # A tick rolled back tells nothing, and leaves it to the next.
         updater.run_timer(session)
-        updater.run_timer(session)
+        clear_after_commit_callbacks()
+        assert told == []
+        with scoped_session(container) as db:
+            updater.run_timer(db)
+            assert told == []
+        assert told == [None]
+        _tick(updater, container)
         assert told == [None]
         lift(session, update)
-        updater.run_timer(session)
-        updater.run_timer(session)
+        _tick(updater, container)
+        _tick(updater, container)
         assert told == [None, None]
 
     def test_it_runs_the_sequence_while_an_update_stands_not_waiting_for_the_sync(

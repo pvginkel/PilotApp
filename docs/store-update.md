@@ -77,8 +77,8 @@ commit:
   since <time>. No chat answers and no job of Pilot's starts until it is done; work items go on."
   ([`ui.md`](ui.md)). It alarms nobody ([`notifications.md`](notifications.md)).
 
-The make tells no one. The timer tells the conditions when the unlifted update is not the one this
-process last told of, and the lift tells them at its commit. So the gold bar shows the update
+The make tells no one. The timer tells the conditions at its tick's commit when the unlifted update
+is not the one this process last told of, and the lift tells them at its commit. So the gold bar shows the update
 within a tick.
 
 ## The sequence

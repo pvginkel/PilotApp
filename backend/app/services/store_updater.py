@@ -41,8 +41,8 @@ outage costs a restart of the sequence and never a phase: a second process
 meets the columns the first wrote, and a reset cut before `reset_at` is made
 again. The command that makes an update and asks its lift tells no one: the
 timer tells the conditions when the unlifted update is not the one this
-process last told of, made or lifted elsewhere, and the lift tells them at its
-commit.
+process last told of, made or lifted elsewhere, at the tick's commit, and the
+lift tells them at its commit.
 """
 
 import logging
@@ -51,6 +51,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from enum import Enum, auto
+from functools import partial
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Exists, Select, exists, select
@@ -169,10 +170,11 @@ class StoreUpdater:
         logger.info("The store's update %s: its tree reconciled", update.id)
 
     def run_timer(self, db: Session) -> None:
-        """The tick: the conditions told when the unlifted update turned, and
-        the sequence run while one stands not waiting for the sync."""
+        """The tick: the conditions told at its commit when the unlifted
+        update turned, and the sequence run while one stands not waiting for
+        the sync."""
         update = unlifted(db)
-        self._turned(None if update is None else update.id)
+        after_commit(partial(self._turned, None if update is None else update.id))
         self._take_up(update)
 
     def run(self, handle: LoopHandle) -> None:
@@ -338,7 +340,9 @@ class StoreUpdater:
 
     def _turned(self, update_id: int | None) -> None:
         """The conditions told when the unlifted update is not the one this
-        process last told of."""
+        process last told of. The tick calls it once it commits: the
+        conditions read on a session of their own, which the tick's
+        connection, held until then, would wait for beside it."""
         with self._lock:
             if update_id == self._told:
                 return
