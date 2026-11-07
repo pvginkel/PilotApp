@@ -50,11 +50,14 @@ from tests.support.fake_push_service import (
     web_push_of,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
+from tests.support.pool_guard import PoolGuard
 from tests.support.suite_lock import HeldLock, hold_suite_lock
 from tests.support.supervisor import Supervise
 
 # The run's test suite lock, held while the run's config references it.
 _SUITE_LOCK = pytest.StashKey[HeldLock | None]()
+
+_POOL_GUARD = PoolGuard()
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -70,6 +73,28 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         and not config.getoption("collectonly")
     ):
         config.stash[_SUITE_LOCK] = hold_suite_lock()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def pool_guard_installed() -> Generator[None]:
+    """The pool guard (tests/support/pool_guard.py) on every pool, for the
+    run."""
+    _POOL_GUARD.install()
+    try:
+        yield
+    finally:
+        _POOL_GUARD.uninstall()
+
+
+@pytest.fixture(autouse=True)
+def pool_guard(pool_guard_installed: None) -> Generator[None]:
+    """Fails the test where a thread checked out a second connection of a
+    pool while it held one: in the test, its fixtures, or a thread a test
+    before it left running, whose stacks say so."""
+    yield
+    nestings = _POOL_GUARD.drain()
+    if nestings:
+        pytest.fail("\n\n".join(n.describe() for n in nestings), pytrace=False)
 
 
 @pytest.fixture(scope="session")
