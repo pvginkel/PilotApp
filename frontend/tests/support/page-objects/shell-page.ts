@@ -5,11 +5,15 @@ import { waitForUiState } from '../helpers';
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
 /**
- * The frame every screen sits in: the top bar, its gold badges, the week's halt's popover and its
- * profile menu, the gold bar, the side column, on a phone the drawer with its head and its button,
- * the keys list.
+ * The frame every screen sits in: the offer of the browser's notifications, the top bar, its gold
+ * badges, the week's halt's popover and its profile menu, the gold bar, the side column, on a phone
+ * the drawer with its head and its button, the keys list.
  */
 export class ShellPage {
+  /** The offer of the browser's notifications, across the page's top, and its two buttons. */
+  readonly offer: Locator;
+  readonly offerOn: Locator;
+  readonly offerNotNow: Locator;
   readonly topBar: Locator;
   readonly brand: Locator;
   readonly drawerToggle: Locator;
@@ -36,6 +40,9 @@ export class ShellPage {
   readonly keysBackdrop: Locator;
 
   constructor(private readonly page: Page) {
+    this.offer = page.getByTestId('shell.notifications-offer');
+    this.offerOn = page.getByTestId('shell.notifications-offer.on');
+    this.offerNotNow = page.getByTestId('shell.notifications-offer.not-now');
     this.topBar = page.getByTestId('app-shell.topbar');
     this.brand = this.topBar.locator('.brand');
     this.drawerToggle = page.getByTestId('shell.drawer-toggle');

@@ -191,6 +191,10 @@
   :root[data-theme="dark"] .gold-btn { background: hsl(0 0% 100% / 0.06); }
   :root[data-theme="dark"] .gold-btn:hover:not(:disabled) { background: hsl(0 0% 100% / 0.14); }
 
+  /* The offer of the browser's notifications (F146.2): a gold line of its own across the full width
+     of the page's top, over the top bar or the phone's conditions. */
+  .notifications-offer { flex: none; }
+
   /* ---- The keys list -------------------------------------------------------------------- */
 
   dl.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: var(--text-base); }

@@ -11,7 +11,8 @@
  * the side panel beside it, `chat` its Chat tab,
  * `phoneTabs` a phone's tabs at the bottom and the page over them,
  * `chats` puts a project's chats in the store's fake environment and sends their messages,
- * `bridge` adds registrations to the worker's fake notification bridge and reads what they show,
+ * `browserPush` gives the spec's browser its notifications permission and a push subscription from
+ * the worker's fake push service,
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
  * `waits` adds the brain's waits, fires them, places their runs and closes them.
  * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
@@ -19,11 +20,11 @@
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
+import { BrowserPush } from './browser-push';
 import { Chats } from './chats';
 import { Conditions, Controller } from './controller';
 import { infrastructureFixtures } from './fixtures-infrastructure';
 import { Links } from './links';
-import { NotificationBridge } from './notification-bridge';
 import { ChatPage } from './page-objects/chat-page';
 import { DocTabsPage } from './page-objects/doc-tabs-page';
 import { HandleStepPage } from './page-objects/handle-step-page';
@@ -60,7 +61,7 @@ interface DomainFixtures {
   chat: ChatPage;
   definitionChat: ChatPage;
   chats: Chats;
-  bridge: NotificationBridge;
+  browserPush: BrowserPush;
   storeUpdate: StoreUpdate;
   waits: Waits;
 }
@@ -155,10 +156,8 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
     await use(chats);
     await chats.dispose();
   },
-  bridge: async ({ page, backendUrl }, use) => {
-    const bridge = new NotificationBridge(page, backendUrl);
-    await use(bridge);
-    await bridge.restore();
+  browserPush: async ({ page, backendUrl }, use) => {
+    await use(new BrowserPush(page, backendUrl));
   },
   storeUpdate: async ({ page, backendUrl, conditions, chats }, use) => {
     const storeUpdate = new StoreUpdate(page, backendUrl, conditions, chats);

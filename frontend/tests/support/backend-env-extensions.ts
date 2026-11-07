@@ -5,6 +5,8 @@
  * This file is never overwritten by template updates.
  */
 
+import { generateKeyPairSync } from 'node:crypto';
+
 // Invented: the bearer the backend's client sends its own fake, which checks it.
 export const FAKE_CONTROLLER_TOKEN = 'playwright-fake-controller';
 
@@ -32,10 +34,14 @@ export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
     PROJECT_PARALLELISM_MAX: '3',
     STORE_ENVIRONMENT_ID: STORE_ENVIRONMENT,
     WAIT_QUIET_WINDOW_SECONDS: String(NO_BATCH_SECONDS),
-    // The backend's notification bridge is its own fake, mounted under
-    // /api/testing/notification-bridge in testing mode
-    // (backend/app/api/testing_notification_bridge.py); tests/support/notification-bridge.ts drives it.
-    NOTIFICATION_BRIDGE_URL: `${backendUrl}/api/testing/notification-bridge`,
+    // The backend's VAPID key, minted for it, as no key is committed. It pushes to subscriptions its
+    // own fake push service issues, mounted under /api/testing/push-service in testing mode
+    // (backend/app/api/testing_push_service.py); tests/support/browser-push.ts takes them.
+    VAPID_PRIVATE_KEY: generateKeyPairSync('ec', {
+      namedCurve: 'P-256',
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    }).privateKey,
     // The five-hour halt stops every running work item (tests/work/hard-stop.spec.ts); the week's
     // keeps its default, the cooperative stop.
     FIVE_HOUR_HALT: 'hard_stop',

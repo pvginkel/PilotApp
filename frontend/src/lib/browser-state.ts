@@ -71,6 +71,13 @@ interface BrowserState {
   panelWidths: PanelWidths;
   /** Each project's tab line, by the project's id, while a tab of it is open (F1.6, F28.8). */
   lines: Record<string, KeptLine>;
+  /**
+   * The gold bar's offer of this browser's notifications answered (F146.2): its Turn on or its Not
+   * now tapped, or the profile page's switch having turned them on.
+   */
+  notificationsOffered: boolean;
+  /** The handle of the person this browser's push subscription was written for, while it stands (F146). */
+  subscribedFor: string | null;
 }
 
 const STORAGE_KEY = 'pilot';
@@ -87,6 +94,8 @@ function load(): BrowserState {
     panels: loadPanels(saved.panels),
     panelWidths: loadPanelWidths(saved.panelWidths),
     lines: loadLines(saved.lines),
+    notificationsOffered: saved.notificationsOffered === true,
+    subscribedFor: typeof saved.subscribedFor === 'string' ? saved.subscribedFor : null,
   };
 }
 

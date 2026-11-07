@@ -2,7 +2,8 @@
  * The profile menu (F126), opened from the signed-in person's avatar: off a phone in the top bar,
  * on a phone in the drawer's head. The template's user dropdown in the mockup's avatar, as
  * FieldnotesApp has it: the name, the theme, Profile and Sign out, under the template's test ids,
- * which its sign-in specs look for. At the handle step it has no Profile.
+ * which its sign-in specs look for. At the handle step it has no Profile. A person's Sign out
+ * removes this browser's subscription first (F146.3); at the handle step there is none.
  */
 
 import { useNavigate } from '@tanstack/react-router';
@@ -10,6 +11,7 @@ import { LogOut, UserRound } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
 import { Menu, MenuItem } from '@/components/shared/menu';
 import { useAuthContext } from '@/contexts/auth-context';
+import { useSignOut } from '@/hooks/use-device-notifications';
 import { isPerson, type Self } from '@/hooks/use-self';
 import { THEMES, type Theme } from '@/lib/browser-state';
 import { useTheme } from '@/lib/theme';
@@ -18,6 +20,7 @@ const THEME_LABELS: Record<Theme, string> = { system: 'System', light: 'Light', 
 
 export function ProfileMenu({ self }: { self: Self }) {
   const { logout } = useAuthContext();
+  const signOut = useSignOut();
   const navigate = useNavigate();
   const [theme, chooseTheme] = useTheme();
   const name = self.name ?? 'Unknown User';
@@ -65,7 +68,7 @@ export function ProfileMenu({ self }: { self: Self }) {
           Profile
         </MenuItem>
       )}
-      <MenuItem icon={LogOut} onSelect={logout} testId="app-shell.topbar.user.logout">
+      <MenuItem icon={LogOut} onSelect={isPerson(self) ? signOut : logout} testId="app-shell.topbar.user.logout">
         Sign out
       </MenuItem>
     </Menu>
