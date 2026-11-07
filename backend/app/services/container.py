@@ -33,6 +33,7 @@ from app.services.effect_service import EffectService
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import FakeController
 from app.services.fake_notification_bridge import FakeNotificationBridge
+from app.services.fake_push_service import FakePushService
 from app.services.fleet_consumer import FleetConsumer
 from app.services.frontend_version_service import FrontendVersionService
 from app.services.halt_file_service import HaltFileService
@@ -56,6 +57,7 @@ from app.services.pilot_store_service import PilotStoreService
 from app.services.pilot_work_service import PilotWorkService
 from app.services.project_event_service import ProjectEventService
 from app.services.project_service import ProjectService
+from app.services.push_subscription_service import PushSubscriptionService
 from app.services.quota_overrule_service import QuotaOverruleService
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import RelayWatchdog
@@ -84,6 +86,7 @@ from app.services.usage_service import UsageService
 from app.services.wait_batcher import WaitBatcher
 from app.services.wait_service import WaitService
 from app.services.wait_timer import WaitTimer
+from app.services.web_push import WebPushService
 from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
@@ -127,6 +130,17 @@ def start_notification_bridge_client(container: "ServiceContainer") -> None:
         raise ConfigurationError("NOTIFICATION_BRIDGE_URL must be set in production")
     if bridge_url is not None:
         container.notification_bridge_client()
+
+
+def require_vapid_key(container: "ServiceContainer") -> None:
+    """Production refuses to start without the stage's VAPID key, which signs
+    every push (F94, F142). The CLI never gets here, as
+    `start_controller_client` says."""
+    if (
+        container.config().is_production
+        and container.app_config().vapid_private_key is None
+    ):
+        raise ConfigurationError("VAPID_PRIVATE_KEY must be set in production")
 
 
 def require_pilot_server(container: "ServiceContainer") -> None:
@@ -209,6 +223,16 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
     register_for_background_startup(lambda c: start_notification_bridge_client(c))
 
+    # Web push to a person's browsers, under the stage's key (F94, F142); its
+    # check, too, starts no thread.
+    web_push_service = providers.Singleton(
+        WebPushService,
+        container=__self__,
+        private_key=app_config.provided.vapid_private_key,
+        contact=config.provided.baseurl,
+    )
+    register_for_background_startup(lambda c: require_vapid_key(c))
+
     # The controller's fake, served under /api/testing/controller in testing mode
     fake_controller = providers.Singleton(
         FakeController, token=app_config.provided.controller_token
@@ -217,6 +241,10 @@ class ServiceContainer(containers.DeclarativeContainer):
     # The notification bridge's fake, served under
     # /api/testing/notification-bridge in testing mode
     fake_notification_bridge = providers.Singleton(FakeNotificationBridge)
+
+    # The fake push service, served under /api/testing/push-service in testing
+    # mode
+    fake_push_service = providers.Singleton(FakePushService)
 
     # The supervisor: the long-lived jobs' threads (design 2 §7). Built by its
     # starter so that it hears STARTUP; jobs register on it before then.
@@ -537,6 +565,10 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # The signed-in person on the record (F137), and what links in text (F93)
     people_service = providers.Factory(PeopleService, db=db_session)
+    # A browser's subscription, written and deleted by its person (F146)
+    push_subscription_service = providers.Factory(
+        PushSubscriptionService, db=db_session
+    )
     # A person's overrule of the week's usage halt (F135.2)
     quota_overrule_service = providers.Factory(
         QuotaOverruleService,

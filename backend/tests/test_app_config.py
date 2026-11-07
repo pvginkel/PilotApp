@@ -5,9 +5,12 @@ import re
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from pydantic import ValidationError
 
 from app.app_config import AppEnvironment, AppSettings, HaltSetting
+from tests.support.fake_push_service import mint_vapid_key
 
 
 class TestAppSettings:
@@ -129,6 +132,38 @@ class TestAppSettings:
             AppSettings.load(
                 AppEnvironment(NOTIFICATION_BRIDGE_URL="bridge.example:8090")
             )
+
+    def test_load_reads_the_vapid_key_from_the_environment(self) -> None:
+        pem = mint_vapid_key()
+
+        settings = AppSettings.load(AppEnvironment(VAPID_PRIVATE_KEY=pem))
+
+        assert settings.vapid_private_key == pem
+
+    def test_an_empty_vapid_key_is_no_key(self) -> None:
+        settings = AppSettings.load(AppEnvironment(VAPID_PRIVATE_KEY=""))
+
+        assert settings.vapid_private_key is None
+
+    def test_a_vapid_key_that_is_no_pem_is_refused(self) -> None:
+        with pytest.raises(
+            ValidationError, match="VAPID_PRIVATE_KEY must be an unencrypted"
+        ):
+            AppSettings.load(AppEnvironment(VAPID_PRIVATE_KEY="not a key"))
+
+    def test_a_vapid_key_on_another_curve_is_refused(self) -> None:
+        pem = (
+            ec.generate_private_key(ec.SECP384R1())
+            .private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            .decode()
+        )
+
+        with pytest.raises(ValidationError, match="VAPID_PRIVATE_KEY must be a P-256"):
+            AppSettings.load(AppEnvironment(VAPID_PRIVATE_KEY=pem))
 
     def test_the_scheduler_ticks_every_ten_seconds_by_default(self) -> None:
         assert (
@@ -419,6 +454,7 @@ class TestAppSettings:
             "controller_token": "***",
             "controller_ca_file": "None",
             "notification_bridge_url": "None",
+            "vapid_private_key": "***",
             "mcp_server_url": "None",
             "outage_alarm_after_seconds": repr(300.0),
             "scheduler_tick_seconds": repr(10.0),
@@ -522,6 +558,7 @@ class TestAppSettings:
             "controller_token": "***",
             "controller_ca_file": repr(None),
             "notification_bridge_url": repr(None),
+            "vapid_private_key": "***",
             "mcp_server_url": repr(None),
             "outage_alarm_after_seconds": repr(300.0),
             "scheduler_tick_seconds": repr(10.0),

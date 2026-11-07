@@ -42,6 +42,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         from app.api.quota_overrules import quota_overrules_bp
         from app.api.sessions import sessions_bp
         from app.api.testing_record import testing_record_bp
+        from app.api.web_push import web_push_bp
 
         api_bp.register_blueprint(attachments_bp)
         api_bp.register_blueprint(chats_bp)
@@ -53,6 +54,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         api_bp.register_blueprint(quota_overrules_bp)
         api_bp.register_blueprint(sessions_bp)
         api_bp.register_blueprint(testing_record_bp)
+        api_bp.register_blueprint(web_push_bp)
 
 
 def register_error_handlers(app: Flask) -> None:
@@ -72,6 +74,7 @@ def register_root_blueprints(app: Flask) -> None:
     from app.api.testing_controller import testing_controller_bp
     from app.api.testing_links import testing_links_bp
     from app.api.testing_notification_bridge import testing_notification_bridge_bp
+    from app.api.testing_push_service import testing_push_service_bp
     from app.api.testing_sync import testing_sync_bp
     from app.api.tracker_events import tracker_events_bp
 
@@ -83,6 +86,7 @@ def register_root_blueprints(app: Flask) -> None:
     app.register_blueprint(testing_links_bp)
     app.register_blueprint(testing_controller_bp)
     app.register_blueprint(testing_notification_bridge_bp)
+    app.register_blueprint(testing_push_service_bp)
 
 
 def register_cli_commands(cli: click.Group) -> None:

@@ -6336,6 +6336,67 @@
         "title": "ProjectTabSchema",
         "type": "object"
       },
+      "PushEndpointQuerySchema.efd40b8": {
+        "description": "The browser's subscription to delete, by its endpoint.",
+        "properties": {
+          "endpoint": {
+            "description": "The endpoint of the browser's subscription",
+            "examples": [
+              "https://push.example.com/send/c9e2…"
+            ],
+            "title": "Endpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "title": "PushEndpointQuerySchema",
+        "type": "object"
+      },
+      "PushSubscriptionSchema.efd40b8": {
+        "description": "A browser's subscription, as its `PushSubscription.toJSON()` gives it;\nits `expirationTime` is not read.",
+        "properties": {
+          "endpoint": {
+            "description": "The push service's URL for the browser, unique to it",
+            "examples": [
+              "https://push.example.com/send/c9e2…"
+            ],
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/PushSubscriptionSchema.efd40b8.PushSubscriptionKeysSchema"
+          }
+        },
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "title": "PushSubscriptionSchema",
+        "type": "object"
+      },
+      "PushSubscriptionSchema.efd40b8.PushSubscriptionKeysSchema": {
+        "description": "A browser's keys, as its PushSubscription gives them.",
+        "properties": {
+          "auth": {
+            "description": "The browser's 16-octet authentication secret, in base64url",
+            "title": "Auth",
+            "type": "string"
+          },
+          "p256dh": {
+            "description": "The browser's P-256 public key, uncompressed, in base64url",
+            "title": "P256Dh",
+            "type": "string"
+          }
+        },
+        "required": [
+          "p256dh",
+          "auth"
+        ],
+        "title": "PushSubscriptionKeysSchema",
+        "type": "object"
+      },
       "QuotaOverruleRequestSchema.72d99af": {
         "description": "The overrule the signed-in person makes.",
         "properties": {
@@ -10313,6 +10374,28 @@
         "title": "ValidationErrorElement",
         "type": "object"
       },
+      "WebPushSetupSchema.efd40b8": {
+        "description": "What a browser needs to turn its notifications on.",
+        "properties": {
+          "public_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stage's VAPID public key, base64url, the applicationServerKey a browser subscribes with; null where the deployment sends no notifications",
+            "title": "Public Key"
+          }
+        },
+        "required": [
+          "public_key"
+        ],
+        "title": "WebPushSetupSchema",
+        "type": "object"
+      },
       "WorkSchema.1fdd8ae": {
         "description": "A work item's Session, as its line and its head show it (F26, F12).",
         "properties": {
@@ -12344,6 +12427,149 @@
           }
         ],
         "summary": "Save the signed-in person's notification token, a first one or another in its place (F134, F134.1).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/people/self/push-subscriptions": {
+      "delete": {
+        "description": "Returns:     204: The person holds no subscription of the endpoint     400: The endpoint is missing, or no http(s) address     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle",
+        "operationId": "delete__api_people_self_push-subscriptions",
+        "parameters": [
+          {
+            "description": "The endpoint of the browser's subscription",
+            "in": "query",
+            "name": "endpoint",
+            "required": true,
+            "schema": {
+              "description": "The endpoint of the browser's subscription",
+              "examples": [
+                "https://push.example.com/send/c9e2…"
+              ],
+              "title": "Endpoint",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Turn the signed-in person's notifications off in a browser, or sign it out: their subscription of the endpoint deleted (F146.1, F146.3; DB 311). Another person's of it stays; one they do not hold is nothing to delete.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "post": {
+        "description": "Returns:     204: The browser's subscription is the person's     400: The subscription is not a browser's: an endpoint that is no         http(s) address, or keys that are not a P-256 key and a 16-octet         secret in base64url     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle",
+        "operationId": "post__api_people_self_push-subscriptions",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushSubscriptionSchema.efd40b8"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Turn the signed-in person's notifications on in a browser: its subscription, written for them (F146.1, F146.2; DB 311). An endpoint another person held is theirs from now on.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -16559,6 +16785,33 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/push-service/{path}": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_push-service_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The fake push service's answer to its route at `path`.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/sse/force-callback-error": {
       "post": {
         "description": "Single-shot: the connect after it behaves normally again. The stream answers the refusal with an in-stream ``rejected`` event, which drives the frontend's refresh-and-reconnect path.\n\nQuery Parameters:     status: 401 or 403 (the schema refuses anything else with 400)\n\nReturns:     204: Hook armed",
@@ -17198,6 +17451,63 @@
           }
         ],
         "summary": "Return the deployment stage, and whether the UI may show internal detail.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/web-push": {
+      "get": {
+        "description": "Returns:     200: The stage's public key, or none     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "get__api_web-push",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebPushSetupSchema.efd40b8"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the stage's public key, which a browser subscribes with; none where the deployment sends no notifications.",
         "tags": [],
         "x-required-role": "editor"
       }

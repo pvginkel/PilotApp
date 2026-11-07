@@ -1,6 +1,7 @@
 """The signed-in person: who they are on the record, the handle they choose
-at their first sign-in (F137), and on their profile their notification token
-and alarms switch (F134, F142.1)."""
+at their first sign-in (F137), on their profile their notification token and
+alarms switch (F134, F142.1), and a browser's notifications, its subscription
+turned on and off there (F146)."""
 
 from typing import Any
 
@@ -17,6 +18,7 @@ from app.schemas.people import (
     SelfResponseSchema,
 )
 from app.schemas.task_schema import TaskStartResponse
+from app.schemas.web_push import PushEndpointQuerySchema, PushSubscriptionSchema
 from app.services.container import ServiceContainer
 from app.services.notification_settings_service import (
     SAVE_OPERATION,
@@ -29,6 +31,7 @@ from app.services.people_service import (
     self_response,
     token_name,
 )
+from app.services.push_subscription_service import PushSubscriptionService
 from app.utils.spectree_config import api
 
 people_bp = Blueprint("people", __name__, url_prefix="/people")
@@ -175,6 +178,84 @@ def clear_notification_token(
     person = people_service.require_person(caller(), "clear your notification token")
     notification_settings_service.clear(person)
     return self_response(person).model_dump()
+
+
+@people_bp.route("/self/push-subscriptions", methods=["POST"])
+@api.validate(
+    json=PushSubscriptionSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def subscribe_browser(
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+    push_subscription_service: PushSubscriptionService = Provide[
+        ServiceContainer.push_subscription_service
+    ],
+) -> Any:
+    """Turn the signed-in person's notifications on in a browser: its
+    subscription, written for them (F146.1, F146.2; DB 311). An endpoint
+    another person held is theirs from now on.
+
+    Returns:
+        204: The browser's subscription is the person's
+        400: The subscription is not a browser's: an endpoint that is no
+            http(s) address, or keys that are not a P-256 key and a 16-octet
+            secret in base64url
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The caller has not chosen a handle
+    """
+    body = PushSubscriptionSchema.model_validate(request.get_json())
+    person = people_service.require_person(
+        caller(), "turn your notifications on in this browser"
+    )
+    push_subscription_service.subscribe(
+        person, body.endpoint, body.keys.p256dh, body.keys.auth
+    )
+    return "", 204
+
+
+@people_bp.route("/self/push-subscriptions", methods=["DELETE"])
+@api.validate(
+    query=PushEndpointQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def unsubscribe_browser(
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+    push_subscription_service: PushSubscriptionService = Provide[
+        ServiceContainer.push_subscription_service
+    ],
+) -> Any:
+    """Turn the signed-in person's notifications off in a browser, or sign it
+    out: their subscription of the endpoint deleted (F146.1, F146.3; DB 311).
+    Another person's of it stays; one they do not hold is nothing to delete.
+
+    Returns:
+        204: The person holds no subscription of the endpoint
+        400: The endpoint is missing, or no http(s) address
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The caller has not chosen a handle
+    """
+    query = PushEndpointQuerySchema.model_validate(request.args.to_dict())
+    person = people_service.require_person(
+        caller(), "turn your notifications off in this browser"
+    )
+    push_subscription_service.unsubscribe(person, query.endpoint)
+    return "", 204
 
 
 @people_bp.route("/self/alarms", methods=["PUT"])

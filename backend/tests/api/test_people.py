@@ -2,31 +2,42 @@
 their profile the notification token and the alarms switch (F134, F134.1,
 F142.1; DB decision 17)."""
 
+import secrets
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import scoped_session
-from app.models import Project, ProjectMember, User
+from app.models import Project, ProjectMember, PushSubscription, User
 from app.models.reference import UserKind
 from app.services.container import ServiceContainer
 from app.services.notification_settings_service import ONE_SHOT_MESSAGE
+from app.services.web_push import point
+from app.utils.base64url import b64
 from tests.support.fake_notification_bridge import (
     ServedFakeNotificationBridge,
     bridge_client_of,
 )
 from tests.support.supervisor import wait_until
 
+# A browser's keys in the form the Push API gives them: a P-256 point and a
+# 16-octet secret, base64url, minted for the module.
+BROWSER_P256DH = b64(point(ec.generate_private_key(ec.SECP256R1()).public_key()))
+BROWSER_AUTH = b64(secrets.token_bytes(16))
+
 SELF = "/api/people/self"
 HANDLE = "/api/people/self/handle"
 TOKEN = "/api/people/self/notification-token"
 ALARMS = "/api/people/self/alarms"
+SUBSCRIPTIONS = "/api/people/self/push-subscriptions"
+PHONE = "https://push.example.com/send/phone-of-ada"
 ADA_TOKEN = "token-of-ada"
 
 
@@ -623,3 +634,183 @@ class TestSwitchAlarms:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.put(ALARMS, json={"alarms": False}).status_code == 401
+
+
+def _subscription(endpoint: str = PHONE, **keys: object) -> dict[str, object]:
+    return {
+        "endpoint": endpoint,
+        "expirationTime": None,
+        "keys": {"p256dh": BROWSER_P256DH, "auth": BROWSER_AUTH, **keys},
+    }
+
+
+def _subscriptions(session: Session) -> list[tuple[str, str]]:
+    session.expire_all()
+    return [
+        (endpoint, handle)
+        for endpoint, handle in session.execute(
+            select(PushSubscription.endpoint, User.handle)
+            .join(User, User.id == PushSubscription.user_id)
+            .order_by(PushSubscription.endpoint)
+        )
+    ]
+
+
+class TestSubscribeBrowser:
+    def test_the_browsers_subscription_is_written_for_the_person(
+        self, client: FlaskClient, session: Session, person: User
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+
+        response = client.post(SUBSCRIPTIONS, json=_subscription())
+
+        assert response.status_code == 204
+        row = session.scalars(select(PushSubscription)).one()
+        assert (row.endpoint, row.user_id, row.p256dh, row.auth) == (
+            PHONE,
+            person.id,
+            BROWSER_P256DH,
+            BROWSER_AUTH,
+        )
+
+    def test_an_endpoint_another_person_held_becomes_the_callers(
+        self, client: FlaskClient, session: Session, person: User
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+        assert client.post(SUBSCRIPTIONS, json=_subscription()).status_code == 204
+        _sign_in(client)
+        assert client.post(HANDLE, json={"handle": "ben"}).status_code == 201
+
+        response = client.post(SUBSCRIPTIONS, json=_subscription())
+
+        assert response.status_code == 204
+        assert _subscriptions(session) == [(PHONE, "ben")]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({}, id="missing"),
+            pytest.param({"endpoint": PHONE}, id="no-keys"),
+            pytest.param(_subscription("push.example.com/send/x"), id="relative"),
+            pytest.param(_subscription("ftp://push.example.com/x"), id="not-http"),
+            pytest.param(_subscription(p256dh="not-a-key"), id="p256dh-garbage"),
+            pytest.param(
+                _subscription(p256dh=b64(b"\x04" + b"\x00" * 64)),
+                id="p256dh-off-the-curve",
+            ),
+            pytest.param(_subscription(auth=b64(b"short")), id="auth-short"),
+            pytest.param(_subscription(auth="!!"), id="auth-garbage"),
+            pytest.param(_subscription(auth=None), id="auth-null"),
+        ],
+    )
+    def test_a_body_that_is_no_browsers_subscription_is_refused(
+        self, client: FlaskClient, session: Session, person: User, body: object
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+
+        assert client.post(SUBSCRIPTIONS, json=body).status_code == 400
+        assert _subscriptions(session) == []
+
+    def test_before_the_handle_it_is_refused(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        _sign_in(client)
+
+        response = client.post(SUBSCRIPTIONS, json=_subscription())
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot turn your notifications on in this browser because you have "
+            "not chosen your handle yet"
+        )
+        assert _subscriptions(session) == []
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, person: User
+    ) -> None:
+        _sign_in(client, subject="subject-ada", roles=())
+
+        assert client.post(SUBSCRIPTIONS, json=_subscription()).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.post(SUBSCRIPTIONS, json=_subscription()).status_code == 401
+
+
+class TestUnsubscribeBrowser:
+    def test_the_persons_subscription_of_the_endpoint_is_deleted(
+        self, client: FlaskClient, session: Session, person: User
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+        other = "https://push.example.org/wpush/desktop-of-ada"
+        client.post(SUBSCRIPTIONS, json=_subscription())
+        client.post(SUBSCRIPTIONS, json=_subscription(other))
+
+        response = client.delete(SUBSCRIPTIONS, query_string={"endpoint": PHONE})
+
+        assert response.status_code == 204
+        assert _subscriptions(session) == [(other, "ada")]
+
+    def test_another_persons_subscription_of_the_endpoint_stays(
+        self, client: FlaskClient, session: Session, person: User
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+        client.post(SUBSCRIPTIONS, json=_subscription())
+        _sign_in(client)
+        assert client.post(HANDLE, json={"handle": "ben"}).status_code == 201
+
+        response = client.delete(SUBSCRIPTIONS, query_string={"endpoint": PHONE})
+
+        assert response.status_code == 204
+        assert _subscriptions(session) == [(PHONE, "ada")]
+
+    def test_an_endpoint_the_person_does_not_hold_is_nothing_to_delete(
+        self, client: FlaskClient, person: User
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+
+        response = client.delete(SUBSCRIPTIONS, query_string={"endpoint": PHONE})
+
+        assert response.status_code == 204
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            pytest.param({}, id="missing"),
+            pytest.param({"endpoint": "push.example.com/x"}, id="relative"),
+        ],
+    )
+    def test_a_query_with_no_endpoint_is_refused(
+        self, client: FlaskClient, person: User, query: dict[str, str]
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+
+        assert client.delete(SUBSCRIPTIONS, query_string=query).status_code == 400
+
+    def test_before_the_handle_it_is_refused(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        response = client.delete(SUBSCRIPTIONS, query_string={"endpoint": PHONE})
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot turn your notifications off in this browser because you have "
+            "not chosen your handle yet"
+        )
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, person: User
+    ) -> None:
+        _sign_in(client, subject="subject-ada", roles=())
+
+        response = client.delete(SUBSCRIPTIONS, query_string={"endpoint": PHONE})
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.delete(SUBSCRIPTIONS, query_string={"endpoint": PHONE})
+
+        assert response.status_code == 401

@@ -35,6 +35,7 @@ from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
 from app.services.notification_bridge_client import NotificationBridgeClient
 from app.services.supervisor import Supervisor
+from app.services.web_push import WebPushService
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 
@@ -47,6 +48,11 @@ from tests.support.fake_controller import (
 from tests.support.fake_notification_bridge import (
     ServedFakeNotificationBridge,
     bridge_client_of,
+)
+from tests.support.fake_push_service import (
+    ServedFakePushService,
+    mint_vapid_key,
+    web_push_of,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
 from tests.support.suite_lock import HeldLock, hold_suite_lock
@@ -258,6 +264,30 @@ def notification_bridge_client(
     """The real client, talking to ``fake_notification_bridge``: the
     container's client for the test."""
     return bridge_client_of(container, fake_notification_bridge)
+
+
+@pytest.fixture
+def fake_push_service() -> Generator[ServedFakePushService]:
+    """The push service's fake, served over HTTP with no subscription; the
+    test subscribes its browsers there."""
+    fake = ServedFakePushService()
+    try:
+        yield fake
+    finally:
+        fake.close()
+
+
+@pytest.fixture
+def vapid_key() -> str:
+    """A stage's VAPID key, minted for the test."""
+    return mint_vapid_key()
+
+
+@pytest.fixture
+def web_push_service(container: ServiceContainer, vapid_key: str) -> WebPushService:
+    """The real web push service under ``vapid_key``: the container's for the
+    test."""
+    return web_push_of(container, vapid_key)
 
 
 @pytest.fixture

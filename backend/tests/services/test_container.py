@@ -52,6 +52,7 @@ from app.services.chat_close_service import ChatCloseService
 from app.services.container import (
     ServiceContainer,
     require_pilot_server,
+    require_vapid_key,
     start_controller_client,
     start_notification_bridge_client,
 )
@@ -74,6 +75,7 @@ from app.services.usage_halts import UsageWatcher
 from app.services.wait_batcher import WaitBatcher
 from app.services.wait_service import ReportedTransition
 from app.services.wait_timer import WaitTimer
+from app.services.web_push import VapidKey
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
     _create_test_app,
@@ -248,6 +250,42 @@ class TestStartNotificationBridgeClient:
         start_notification_bridge_client(container)
 
         assert "notification_bridge" not in _checks(app, container)
+
+
+class TestRequireVapidKey:
+    def test_production_refuses_to_start_without_the_key(
+        self, test_settings: Settings
+    ) -> None:
+        container = _container(
+            test_settings.model_copy(update={"flask_env": "production"}),
+            AppSettings(),
+        )
+
+        with pytest.raises(ConfigurationError, match="VAPID_PRIVATE_KEY must be set"):
+            require_vapid_key(container)
+
+    def test_production_with_the_key_starts_and_offers_its_public_key(
+        self, test_settings: Settings, vapid_key: str
+    ) -> None:
+        container = _container(
+            test_settings.model_copy(update={"flask_env": "production"}),
+            AppSettings(vapid_private_key=vapid_key),
+        )
+
+        require_vapid_key(container)
+
+        assert container.web_push_service().public_key == (
+            VapidKey(vapid_key).public_key
+        )
+
+    def test_outside_production_the_app_runs_without_one_and_pushes_nothing(
+        self, test_settings: Settings
+    ) -> None:
+        container = _container(test_settings, AppSettings())
+
+        require_vapid_key(container)
+
+        assert container.web_push_service().public_key is None
 
 
 class TestRequirePilotServer:

@@ -9,6 +9,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Self
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -111,6 +113,14 @@ class AppEnvironment(BaseSettings):
         description=(
             "The notification bridge's base URL, through which Pilot notifies each "
             "person; empty runs the app with no bridge"
+        ),
+    )
+    VAPID_PRIVATE_KEY: str = Field(
+        default="",
+        description=(
+            "The stage's VAPID private key, P-256 in PEM, which signs every web "
+            "push and whose public key browsers subscribe with; empty pushes "
+            "nothing"
         ),
     )
     MCP_SERVER_URL: str = Field(
@@ -333,6 +343,27 @@ class AppSettings(BaseModel):
             raise ValueError("NOTIFICATION_BRIDGE_URL must be an http(s) address")
         return url
 
+    vapid_private_key: Annotated[str | None, Sensitive] = None
+    """The stage's VAPID private key, P-256 in PEM (F94, F142; RFC 8292); None
+    pushes nothing, and production refuses to start so."""
+
+    @field_validator("vapid_private_key")
+    @classmethod
+    def _is_a_p256_key(cls, pem: str | None) -> str | None:
+        if pem is None:
+            return None
+        try:
+            key = serialization.load_pem_private_key(pem.encode(), password=None)
+        except (ValueError, TypeError) as error:
+            raise ValueError(
+                "VAPID_PRIVATE_KEY must be an unencrypted private key in PEM"
+            ) from error
+        if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(
+            key.curve, ec.SECP256R1
+        ):
+            raise ValueError("VAPID_PRIVATE_KEY must be a P-256 key")
+        return pem
+
     mcp_server_url: str | None = None
     """Pilot's MCP server's endpoint as a session reaches it, which every
     headless create Pilot makes hands the session (TD §4.5); None hands it
@@ -445,6 +476,7 @@ class AppSettings(BaseModel):
                 Path(env.CONTROLLER_CA_FILE) if env.CONTROLLER_CA_FILE else None
             ),
             notification_bridge_url=env.NOTIFICATION_BRIDGE_URL or None,
+            vapid_private_key=env.VAPID_PRIVATE_KEY or None,
             mcp_server_url=env.MCP_SERVER_URL or None,
             outage_alarm_after_seconds=env.OUTAGE_ALARM_AFTER_SECONDS,
             scheduler_tick_seconds=env.SCHEDULER_TICK_SECONDS,
