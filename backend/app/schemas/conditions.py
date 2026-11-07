@@ -1,5 +1,5 @@
 """Schemas for the conditions that hold all work, which the gold bar shows (UC
-*The gold bar*; F125, F135.7, F144.4; DB Condition)."""
+*The gold bar*; F125, F135.7, F144.4; DB decisions 66, 68, 70)."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -10,9 +10,10 @@ from app.models.reference import OverruleKind
 
 
 class ConditionCode(StrEnum):
-    """Condition's codes (DB §2.4; decisions 66, 68): the controller
-    unreachable (design 2 §13.4), Pilot updating its store (F144.4), the
-    week's usage halt and the five-hour one (F135.1, F135.4)."""
+    """The conditions' codes, derived at every reconcile and never stored
+    (DB decisions 66, 68, 70): the controller unreachable (design 2 §13.4),
+    Pilot updating its store (F144.4), the week's usage halt and the
+    five-hour one (F135.1, F135.4)."""
 
     OUTAGE = "outage"
     STORE_UPDATE = "store_update"

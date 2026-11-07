@@ -1062,7 +1062,7 @@
         "type": "object"
       },
       "ConditionsSchema.6c014b4.ConditionCode": {
-        "description": "Condition's codes (DB §2.4; decisions 66, 68): the controller\nunreachable (design 2 §13.4), Pilot updating its store (F144.4), the\nweek's usage halt and the five-hour one (F135.1, F135.4).",
+        "description": "The conditions' codes, derived at every reconcile and never stored\n(DB decisions 66, 68, 70): the controller unreachable (design 2 §13.4),\nPilot updating its store (F144.4), the week's usage halt and the\nfive-hour one (F135.1, F135.4).",
         "enum": [
           "outage",
           "store_update",
