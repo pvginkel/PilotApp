@@ -625,6 +625,45 @@
         "title": "ApiErrorDetailsSchema",
         "type": "object"
       },
+      "AppPageBeatSchema.69f3c04": {
+        "description": "A page's beat: the project it shows.",
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The project the page shows: its timeline, one of its documents or one of its tabs; null on any other page, the project list or the profile page",
+            "title": "Project Id"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "AppPageBeatSchema",
+        "type": "object"
+      },
+      "AppPageSchema.69f3c04": {
+        "description": "A page, as its first beat wrote it.",
+        "properties": {
+          "id": {
+            "description": "The page's id, which it names in every beat after and in its away",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "AppPageSchema",
+        "type": "object"
+      },
       "AttachFileRequestSchema.ce33d8b": {
         "additionalProperties": false,
         "description": "Material a worker wrote, to copy into the record.",
@@ -12208,6 +12247,255 @@
           }
         ],
         "summary": "Turn the signed-in person's alarms switch (F142.1).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/people/self/app-pages": {
+      "post": {
+        "description": "Returns:     201: The page, whose id it names in its beats after and its away     400: The body has no project id, or one that is no uuid     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle",
+        "operationId": "post__api_people_self_app-pages",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppPageBeatSchema.69f3c04"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppPageSchema.69f3c04"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "A page's first beat: the page written for the signed-in person, showing the project or none, and its id minted.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/people/self/app-pages/{page_id}": {
+      "put": {
+        "description": "Returns:     204: The page beat     400: The body has no project id, or one that is no uuid     401: No one is signed in     403: The caller lacks the editor role     404: The page has ended, by its away or its beat's ninety seconds,         or is no page of the caller's: it beats afresh, a first beat. Or         no project has the id     409: The caller has not chosen a handle",
+        "operationId": "put__api_people_self_app-pages_{page_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppPageBeatSchema.69f3c04"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "A page's beat after its first: when it beat, and the project it shows or none.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/people/self/app-pages/{page_id}/away": {
+      "post": {
+        "description": "Returns:     204: The caller has no such page     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle",
+        "operationId": "post__api_people_self_app-pages_{page_id}_away",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "A page's away, as it hides or goes idle: the page deleted. A POST whose body is not read, so that a beacon carries it. A page that has ended, or is another person's, is nothing to delete.",
         "tags": [],
         "x-required-role": "editor"
       }

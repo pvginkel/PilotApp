@@ -3,6 +3,7 @@
 Import all models here so Alembic can detect them for migration auto-generation.
 """
 
+from app.models.app_page import AppPage
 from app.models.attachment import Attachment, ItemAttachment
 from app.models.block import Block, BlockOption
 from app.models.chat import Chat, ChatRead

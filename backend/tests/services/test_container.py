@@ -21,6 +21,7 @@ from app.database import scoped_session
 from app.engine.bus import ProjectChanged
 from app.exceptions import ConfigurationError
 from app.models import (
+    AppPage,
     Chat,
     Environment,
     Item,
@@ -48,6 +49,7 @@ from app.services.alarm_service import (
     ALARM_SEQUENCE_ID,
     AlarmService,
 )
+from app.services.app_page_service import EXPIRY_SECONDS, AppPageService
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import (
     ServiceContainer,
@@ -889,6 +891,44 @@ class TestWaitTimerWiring:
             )
         finally:
             coordinator.shutdown()
+
+
+class TestAppPageExpiryWiring:
+    def test_the_timer_runs_from_startup_with_no_controller_and_expires_an_old_page(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(AppSettings(scheduler_tick_seconds=0.05))
+        beat_at = datetime.now(UTC) - timedelta(seconds=EXPIRY_SECONDS + 1)
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add(person)
+            db.flush()
+            db.add(AppPage(user_id=person.id, beat_at=beat_at))
+        service = container.app_page_service()
+        assert isinstance(service, AppPageService)
+        assert service is container.app_page_service()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            wait_until(
+                lambda: _app_page_count(container) == 0,
+                "the old page expired by its timer",
+            )
+        finally:
+            coordinator.shutdown()
+
+
+def _app_page_count(container: ServiceContainer) -> int:
+    with scoped_session(container) as db:
+        return len(db.scalars(select(AppPage.id)).all())
 
 
 def _firing_causes(container: ServiceContainer, wait_id: uuid.UUID) -> list[str]:

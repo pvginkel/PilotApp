@@ -18,6 +18,7 @@ from app.engine.tree import TreeService
 from app.engine.views import ViewService
 from app.exceptions import ConfigurationError
 from app.services.alarm_service import AlarmService
+from app.services.app_page_service import AppPageService
 from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
 from app.services.brief_service import BriefService
@@ -569,6 +570,11 @@ class ServiceContainer(containers.DeclarativeContainer):
     push_subscription_service = providers.Factory(
         PushSubscriptionService, db=db_session
     )
+    # A person's pages of Pilot, their beats, aways and expiry, and whether
+    # the person is online (F147); its timer registers on the supervisor, when
+    # built, before STARTUP.
+    app_page_service = providers.Singleton(AppPageService, supervisor=supervisor)
+    register_for_background_startup(lambda c: c.app_page_service())
     # A person's overrule of the week's usage halt (F135.2)
     quota_overrule_service = providers.Factory(
         QuotaOverruleService,
