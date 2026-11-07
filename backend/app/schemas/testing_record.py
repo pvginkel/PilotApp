@@ -181,6 +181,21 @@ class InventedItemSchema(BaseModel):
     id: uuid.UUID = Field(description="The item's id")
 
 
+class InventedSightingsQuerySchema(BaseModel):
+    """Whose sightings in the project are read."""
+
+    handle: str = Field(description="The person's handle", examples=["ada"])
+
+
+class InventedSightingsSchema(BaseModel):
+    """What a person's open membership of a project was shown (DB Item
+    Sighting)."""
+
+    item_ids: list[uuid.UUID] = Field(
+        description="The items they were shown, in the order of their ids"
+    )
+
+
 def _tool_use_id() -> Any:
     return Field(
         default=None,

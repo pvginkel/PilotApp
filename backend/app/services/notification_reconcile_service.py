@@ -1,81 +1,79 @@
-"""The standing notifications' reconcile (F94.3, F94.4; DB decision 51; design
-2 §7.2): what each member should see of a project, derived from the record
-(`StandingNotificationService`), compared with what their membership last
-sent, and submitted or dismissed through the bridge when it differs.
+"""A member's notification of a project (F94, F147; DB 157, 224 to 226, 307
+to 315; DB decision 74): a push to every browser of theirs, under the
+project's id, while they are offline, alerting for an item that waits on them
+they have not been shown, and silent once one they were shown stopped waiting
+with another still waiting. What they were shown is their membership's Item
+Sightings.
 
-A project's reconcile is a loop of the job `notification`, keyed by the
-project's id. The engine bus's `ProjectChanged` asks for it once its commit is
-in: a commit that touches the project's items, a work item's state, its
-membership or its transitions. `WorkMoved` alone is not heard: it moves a work
-item's line, which no notification shows, and a move of its state carries
-`ProjectChanged` (`work_status.work_moved`). The retry timer asks for it while
-a membership of the project is owed and its retry is due, and STARTUP's
-reconcile for every project with a membership whose notification stands, is
-owed or should stand, so that a change no after-commit reconcile reached is
-found then.
+The reconcile of one member reads what waits on them
+(`StandingNotificationService`) and what they were shown, in their turn:
 
-Of one person in one project the phone shows one notification, under the
-project's id, whichever of their memberships sent it; the latest of them takes
-what goes out. Their sends take turns under an advisory lock held on a
-connection of its own, from before the record is read until what went out is
-written, so that the phone ends on the latest state with two processes running.
-The read and the write are transactions of their own: across the bridge's
-call no row or table is locked, and no request or commit waits on it. The
-write is dropped when the person's token changed during the call: the set or
-clear that changed it says what the record holds since.
+- with the project archived, their membership closed or nothing waiting on
+  them, their sightings are deleted and nothing is pushed, since nothing is
+  dismissed by push: so Archive and Leave forget what they were shown;
+- while a page of theirs shows the project (`AppPageService`), every item that
+  waits on them is shown, nothing pushed;
+- online with no page on it, nothing is pushed and their sightings stand;
+- offline with a browser subscribed, an item that waits with no sighting
+  alerts; else a sighting of an item that no longer waits updates silently;
+  else nothing is pushed.
 
-A person's sends in one project go out at most once in `spacing_seconds`, two
-by default (F94.4; DB decision 70). The window runs from their last try, sent
-or owed, as their memberships' `notification_sent_at` and
-`notification_owed_at` record it, so that it holds across the two processes of
-a roll. A send due inside it is compared again at its end, the run waiting
-with no turn and no database connection held, and what goes out then is the
-latest state: a burst of commits comes to one send per window.
+A push some browser of theirs took (`WebPushService.push`) shows them every
+item it named or counted, and the sightings of the others are deleted; one
+that none took shows them nothing, and their next reconcile pushes anew.
+Nothing is retried: a push service's failure is logged and counted where the
+push is sent.
 
-A send the bridge refuses or does not answer is owed, `notification_owed_at`
-the time of the try, and so is one still due when the loop is told to stop,
-from the stop: the project's next reconcile sends the current state again, the
-timer's once `retry_seconds` have passed. The log says so when a membership
-turns owed and when its owed send goes out, not at each retry.
+The loop `notification:<project id>` reconciles each member of the project.
+The engine bus's `ProjectChanged` asks for it once its commit is in: a commit
+that touches the project's items, a work item's state, its membership or its
+transitions. `WorkMoved` alone is not heard: it moves a work item's line,
+which no notification shows, and a move of its state carries `ProjectChanged`
+(`work_status.work_moved`). STARTUP's reconcile asks for it for every project
+with an open membership of the project unarchived, or with a sighting, so
+that a change no after-commit reconcile reached is found then. The loop
+`notification-person:<person id>` reconciles one person in each of their
+projects, asked for by their pages: one coming to show a project or ceasing
+to, and their going offline, which sends what was held while they were
+online.
 
-A token's set (`submit_all`) has the person's current state submitted through
-it whatever went before (F94.3, DB 224). A token's clear (`dismiss_all`) is
-best effort (F134): what stood reads as dismissed at once, nothing owed, and
-each dismiss is tried once, off the request, through the token in hand, by a
-loop of the job `notification-clear`; what the bridge does not take stays on
-the phone. A submit through the token in flight when the clear commits is
-followed by a dismiss of its own.
+A member's pushes in one project go out at most once in `spacing_seconds`,
+two by default (F94.4; DB 226), from their last push, taken or not, as their
+memberships' `notification_sent_at` record it, so that it holds across the two
+processes of a roll. A push due inside it is compared again at its end, the
+run waiting with no turn and no database connection held: a burst of commits
+comes to one push per window, of the latest state. A run told to stop pushes
+nothing more; what it held stays unshown in the record, for the member's next
+reconcile.
+
+A member's turn is an advisory lock held on a connection of its own, from
+before the record is read until what the push came to is written, so that two
+processes push them once. The read and the write are transactions of their
+own: across the push services' calls no row or table is locked, and no request
+or commit waits on them.
 """
 
-import itertools
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING
 
-from prometheus_client import Counter
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.database import scoped_session
 from app.engine.bus import EngineBus, EngineEvent, ProjectChanged
-from app.models import Project, ProjectMember, User
+from app.models import ItemSighting, Project, ProjectMember, PushSubscription
 from app.services.advisory_turn import advisory_turn, turn_key
-from app.services.notification_bridge_client import (
-    BridgeOutcome,
-    BridgePriority,
-    NotificationBridgeClient,
-    NotificationBridgeFailure,
-)
-from app.services.notification_token_cipher import NotificationTokenCipher
+from app.services.app_page_service import AppPageService, PresenceEvent
 from app.services.standing_notification_service import StandingNotification
 from app.services.supervisor import LoopHandle, Supervisor
-from app.utils.after_commit import after_commit
+from app.services.web_push import WebPushService
 
 if TYPE_CHECKING:
     from app.services.container import ServiceContainer
@@ -83,123 +81,82 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 NOTIFICATION_JOB = "notification"
-NOTIFICATION_CLEAR_JOB = "notification-clear"
-NOTIFICATION_RETRY_TIMER = "notification-retry"
-
-NOTIFICATION_RETRY_SECONDS = 60.0
-"""The least time between two of the retry timer's tries of an owed send."""
+NOTIFICATION_PERSON_JOB = "notification-person"
 
 NOTIFICATION_SPACING_SECONDS = 2.0
-"""The least time between two of a person's sends in one project (F94.4)."""
+"""The least time between two of a member's pushes in one project (F94.4)."""
 
 NOTIFICATION_LOCK = 224
 """The first key of a member's turn (`advisory_turn`); the second is drawn
 from the person's and the project's ids."""
 
-_PRIORITY: BridgePriority = "high"
-"""F94.1's one priority, every submit's."""
-
-NOTIFICATION_RECONCILES_TOTAL = Counter(
-    "pilot_notification_reconciles_total",
-    "Compares of what a member should see of a project with what their "
-    "membership last sent, by outcome: unchanged, sent, owed (the send failed), "
-    "superseded (the person's token changed during the send) or deferred (their "
-    "last send in the project is not two seconds old yet, and they are compared "
-    "again once it is)",
-    ["outcome"],
-)
-NOTIFICATION_CLEAR_DISMISSES_TOTAL = Counter(
-    "pilot_notification_clear_dismisses_total",
-    "Dismisses tried once through a token just cleared, by outcome: sent, "
-    "refused or unanswered; one not sent stays on the phone",
-    ["outcome"],
-)
+type _Member = tuple[uuid.UUID, uuid.UUID]
+"""A project's id and a person's, a member to reconcile."""
 
 
 @dataclass(frozen=True)
 class _Due:
-    """A member's send the compare found wanting, and what it read."""
+    """A member's push the compare found wanting, and what it read."""
 
-    project_id: uuid.UUID
-    person_id: uuid.UUID
-    handle: str
     membership_ids: tuple[int, ...]
+    """Every membership of the person's in the project."""
     holder_id: int
-    """The latest membership, which takes a submit."""
-    notification: StandingNotification | None
-    """What to submit; none to dismiss."""
-    owed: bool
-    last_try: datetime | None
-    """When the person's last send in the project was tried, sent or owed;
-    none before their first."""
-    sealed: str
-    """The person's token as the record held it, sealed."""
-    token: str
-
-    @property
-    def call(self) -> str:
-        return "dismiss" if self.notification is None else "submit"
+    """The open membership, whose push it is."""
+    notification: StandingNotification
+    alert: bool
+    last_push: datetime | None
+    """When the person's last push in the project went out; none before
+    their first."""
 
 
 class NotificationReconcileService:
-    """Keeps each member's standing notifications as the record says they
-    stand."""
+    """Pushes each member a project's notification as what waits on them and
+    what they were shown say."""
 
     def __init__(
         self,
         container: "ServiceContainer",
         supervisor: Supervisor,
         engine_bus: EngineBus,
-        notification_token_cipher: NotificationTokenCipher,
-        bridge_configured: bool,
-        retry_seconds: float = NOTIFICATION_RETRY_SECONDS,
+        app_page_service: AppPageService,
+        web_push_service: WebPushService,
         spacing_seconds: float = NOTIFICATION_SPACING_SECONDS,
     ) -> None:
         """Register the `notification` job, whose reconcile runs at STARTUP,
-        the `notification-clear` job and the retry timer, and hear the
-        engine's bus; with no bridge configured, none of them, and nothing is
-        sent.
+        and the `notification-person` job, and hear the engine's bus and the
+        pages; where the deployment pushes nothing, none of them.
 
         Args:
             container: Gives each transaction its database session, and the
-                bridge's client
-            supervisor: Runs the reconciles and the clears' dismisses
+                notification each member should see
+            supervisor: Runs the reconciles
             engine_bus: Tells of each commit that moves what a project's
                 screens show
-            notification_token_cipher: Opens the token a send goes through
-            bridge_configured: False sends nothing
-            retry_seconds: The least time between two of the retry timer's
-                tries of an owed send
-            spacing_seconds: The least time between two of a person's sends
+            app_page_service: Says whether a person is online and what their
+                pages show, and tells of each turn of it
+            web_push_service: Pushes to a person's browsers; with no key,
+                nothing is pushed
+            spacing_seconds: The least time between two of a member's pushes
                 in one project
         """
         self._container = container
         self._supervisor = supervisor
-        self._cipher = notification_token_cipher
-        self._configured = bridge_configured
-        self._retry_after = timedelta(seconds=retry_seconds)
+        self._pages = app_page_service
+        self._web_push = web_push_service
         self._spacing = timedelta(seconds=spacing_seconds)
-        self._clears = itertools.count(1)
-        if not bridge_configured:
+        if web_push_service.public_key is None:
             return
         supervisor.register_job(
             NOTIFICATION_JOB, needs_controller=False, reconcile=self._reconcile_all
         )
-        supervisor.register_job(NOTIFICATION_CLEAR_JOB, needs_controller=False)
-        supervisor.register_timer(
-            NOTIFICATION_RETRY_TIMER, self.retry, needs_controller=False
-        )
+        supervisor.register_job(NOTIFICATION_PERSON_JOB, needs_controller=False)
         engine_bus.subscribe(self._heard)
+        app_page_service.subscribe(self._heard_pages)
 
     def reconcile(self, project_id: uuid.UUID, handle: LoopHandle) -> None:
-        """The loop `notification:<project id>`'s run: for each person with a
-        membership of the project that is open, stands or is owed, in their
-        turn, what they should see compared with what was last sent, and
-        submitted or dismissed when it differs or is owed. A person whose last
-        send is not yet `spacing_seconds` old is compared again once it is,
-        the run waiting with no turn and no database connection held. Returns
-        once each is, or when the loop is told to stop, what is due of those
-        it had still to compare left owed."""
+        """The loop `notification:<project id>`'s run: each person with a
+        membership of the project open or with a sighting, reconciled in
+        their turn (`_reconcile_members`)."""
         with scoped_session(self._container) as db:
             people = db.scalars(
                 select(ProjectMember.user_id)
@@ -207,152 +164,75 @@ class NotificationReconcileService:
                 .distinct()
                 .order_by(ProjectMember.user_id)
             ).all()
-        while people:
-            spaced: list[tuple[uuid.UUID, datetime]] = []
-            for at, person_id in enumerate(people):
+        self._reconcile_members([(project_id, person) for person in people], handle)
+
+    def reconcile_person(self, person_id: uuid.UUID, handle: LoopHandle) -> None:
+        """The loop `notification-person:<person id>`'s run: the person in
+        each project with a membership of theirs open or with a sighting,
+        reconciled in their turn (`_reconcile_members`)."""
+        with scoped_session(self._container) as db:
+            projects = db.scalars(
+                select(ProjectMember.project_id)
+                .where(ProjectMember.user_id == person_id, _looked_at())
+                .distinct()
+                .order_by(ProjectMember.project_id)
+            ).all()
+        self._reconcile_members([(project, person_id) for project in projects], handle)
+
+    def _reconcile_members(
+        self, members: Sequence[_Member], handle: LoopHandle
+    ) -> None:
+        """Each of `members` compared, and pushed when due. One whose last
+        push in the project is not yet `spacing_seconds` old is compared
+        again once it is, the run waiting with no turn and no database
+        connection held. Returns once each is, or when the loop is told to
+        stop, pushing nothing more."""
+        while members:
+            spaced: list[tuple[_Member, datetime]] = []
+            for member in members:
                 if handle.stopping:
-                    self._leave_owed(
-                        project_id, [*(person for person, _ in spaced), *people[at:]]
-                    )
                     return
-                after = self._reconcile_member(project_id, person_id)
+                after = self._reconcile_member(*member)
                 if after is not None:
-                    spaced.append((person_id, after))
+                    spaced.append((member, after))
             if not spaced:
                 return
-            people = [person_id for person_id, _ in spaced]
+            members = [member for member, _ in spaced]
             wake = min(at for _, at in spaced)
             if handle.wait(max((wake - datetime.now(UTC)).total_seconds(), 0.0)):
-                self._leave_owed(project_id, people)
-                return
-
-    def dismiss_cleared(
-        self,
-        person_id: uuid.UUID,
-        token: str,
-        project_ids: Sequence[uuid.UUID],
-        handle: LoopHandle,
-    ) -> None:
-        """A loop `notification-clear:<n>`'s run, once the clear of the
-        person's `token` committed: each project's notification dismissed
-        through it, in the member's turn, tried once, unless the person holds
-        `token` again, whose set submits afresh. Returns once each is, or when
-        the loop is told to stop."""
-        for project_id in project_ids:
-            if handle.stopping:
-                return
-            with self._turn(person_id, project_id):
-                with scoped_session(self._container) as db:
-                    person = db.get_one(User, person_id)
-                    again = self._cipher.open(person) == token
-                    name = person.handle
-                if again:
+                for project_id, person_id in members:
                     logger.info(
-                        "%s holds the token they cleared again: project %s's "
-                        "notification is not dismissed",
-                        name,
+                        "The push of project %s's notification to %s is left to "
+                        "their next reconcile: the run stopped inside its window",
                         project_id,
+                        person_id,
                     )
-                    continue
-                self._dismiss_once(token, project_id, name)
-
-    def retry(self, db: Session) -> None:
-        """The retry timer's run (F94.4): the reconcile of each project with a
-        membership owed whose last try is `retry_seconds` old or more; one
-        running already is left to finish."""
-        due = db.scalars(
-            select(ProjectMember.project_id)
-            .where(
-                ProjectMember.notification_owed_at
-                <= datetime.now(UTC) - self._retry_after
-            )
-            .distinct()
-            .order_by(ProjectMember.project_id)
-        ).all()
-        for project_id in due:
-            self._start(project_id, again=False)
-
-    def submit_all(self, db: Session, person: User) -> None:
-        """In the transaction that set `person`'s token, a first one or
-        another in its place: what each of their open memberships of an
-        unarchived project last sent reads as nothing, so that once the
-        transaction commits each submits its current state through the token
-        (F94.3, DB 224). Nothing goes through a token it replaced."""
-        for membership in db.scalars(
-            select(ProjectMember)
-            .join(Project, Project.id == ProjectMember.project_id)
-            .where(
-                ProjectMember.user_id == person.id,
-                ProjectMember.left_at.is_(None),
-                Project.archived.is_(False),
-            )
-            .order_by(ProjectMember.id)
-            .with_for_update(of=ProjectMember, key_share=True)
-            .execution_options(populate_existing=True)
-        ):
-            _unsent(membership)
-        if not self._configured:
-            return
-        for project_id in db.scalars(
-            select(ProjectMember.project_id)
-            .where(ProjectMember.user_id == person.id, _looked_at())
-            .distinct()
-            .order_by(ProjectMember.project_id)
-        ):
-            after_commit(partial(self._start, project_id))
-
-    def dismiss_all(self, db: Session, person: User, token: str) -> None:
-        """In the transaction that cleared `person`'s token, `token` the one
-        cleared: each notification of theirs that stands, an owed one
-        included, reads as dismissed from the commit on, with nothing owed;
-        once the transaction commits each is dismissed through `token`, tried
-        once, off the request (F94.3, F134). What the bridge does not take is
-        logged, counted, and stays on the phone."""
-        # The person's row first: a send's write-back holding it has committed
-        # before what stands is read (`_take`).
-        db.execute(
-            select(User.id).where(User.id == person.id).with_for_update(key_share=True)
-        )
-        memberships = db.scalars(
-            select(ProjectMember)
-            .where(
-                ProjectMember.user_id == person.id,
-                or_(_standing(), ProjectMember.notification_owed_at.is_not(None)),
-            )
-            .order_by(ProjectMember.id)
-            .with_for_update(key_share=True)
-            .execution_options(populate_existing=True)
-        ).all()
-        for membership in memberships:
-            _unsent(membership)
-            membership.notification_owed_at = None
-        project_ids = tuple(
-            sorted({membership.project_id for membership in memberships})
-        )
-        if self._configured and project_ids:
-            after_commit(partial(self._start_clear, person.id, token, project_ids))
+                return
 
     def _heard(self, event: EngineEvent) -> None:
         if isinstance(event, ProjectChanged):
             self._start(event.project_id)
 
+    def _heard_pages(self, event: PresenceEvent) -> None:
+        # Again: a turn after the run's read is reconciled by a run after it.
+        self._supervisor.start_loop(
+            NOTIFICATION_PERSON_JOB,
+            partial(self.reconcile_person, event.user_id),
+            key=str(event.user_id),
+            again=True,
+        )
+
     def _reconcile_all(self, db: Session) -> None:
-        """At STARTUP: the reconcile of every project with a membership whose
-        notification stands, is owed, or should stand, archived projects' and
-        closed memberships' among them (design 2 §7.2; DB decision 51)."""
+        """At STARTUP: the reconcile of every project with an open membership
+        of the project unarchived, or with a sighting, archived projects' and
+        closed memberships' among them."""
         projects = db.scalars(
             select(ProjectMember.project_id)
             .join(Project, Project.id == ProjectMember.project_id)
-            .join(User, User.id == ProjectMember.user_id)
             .where(
                 or_(
-                    _standing(),
-                    ProjectMember.notification_owed_at.is_not(None),
-                    and_(
-                        ProjectMember.left_at.is_(None),
-                        Project.archived.is_(False),
-                        User.notification_token.is_not(None),
-                    ),
+                    and_(ProjectMember.left_at.is_(None), Project.archived.is_(False)),
+                    _sighted(),
                 )
             )
             .distinct()
@@ -361,291 +241,142 @@ class NotificationReconcileService:
         for project_id in projects:
             self._start(project_id)
 
-    def _start(self, project_id: uuid.UUID, *, again: bool = True) -> None:
+    def _start(self, project_id: uuid.UUID) -> None:
         # Again: a commit after the run's last read is reconciled by a run
         # after it.
         self._supervisor.start_loop(
             NOTIFICATION_JOB,
             partial(self.reconcile, project_id),
             key=str(project_id),
-            again=again,
-        )
-
-    def _start_clear(
-        self, person_id: uuid.UUID, token: str, project_ids: tuple[uuid.UUID, ...]
-    ) -> None:
-        self._supervisor.start_loop(
-            NOTIFICATION_CLEAR_JOB,
-            partial(self.dismiss_cleared, person_id, token, project_ids),
-            key=next(self._clears),
+            again=True,
         )
 
     def _reconcile_member(
         self, project_id: uuid.UUID, person_id: uuid.UUID
     ) -> datetime | None:
-        """The person's compare and send, in their turn; with their last send
-        not yet `spacing_seconds` old, nothing sent, and the time it is."""
+        """The member's compare and push, in their turn; with their last push
+        not yet `spacing_seconds` old, nothing pushed, and the time it is."""
         with self._turn(person_id, project_id):
             with scoped_session(self._container) as db:
-                due = self._due(db, project_id, person_id)
+                due = self._compare(db, project_id, person_id)
             if due is None:
-                NOTIFICATION_RECONCILES_TOTAL.labels(outcome="unchanged").inc()
                 return None
-            if due.last_try is not None:
-                after = due.last_try + self._spacing
+            if due.last_push is not None:
+                after = due.last_push + self._spacing
                 if after > datetime.now(UTC):
-                    NOTIFICATION_RECONCILES_TOTAL.labels(outcome="deferred").inc()
                     return after
-            failure = self._send(due)
+            took = self._web_push.push(
+                person_id, due.notification.push(alert=due.alert)
+            )
             with scoped_session(self._container) as db:
-                cleared = self._take(db, due, failure)
-            if cleared:
-                self._dismiss_once(due.token, project_id, due.handle)
+                db.execute(
+                    update(ProjectMember)
+                    .where(ProjectMember.id == due.holder_id)
+                    .values(notification_sent_at=datetime.now(UTC))
+                )
+                if took:
+                    _show(db, due.membership_ids, due.holder_id, due.notification.items)
         return None
 
-    def _leave_owed(self, project_id: uuid.UUID, people: Sequence[uuid.UUID]) -> None:
-        """Each person's send that is due and not yet owed, owed from now,
-        in their turn, with nothing sent."""
-        for person_id in people:
-            with self._turn(person_id, project_id):
-                with scoped_session(self._container) as db:
-                    # The person's row first, as `_take` locks it: a clear
-                    # committed first is read, and one after waits for this
-                    # write.
-                    db.execute(
-                        select(User.id)
-                        .where(User.id == person_id)
-                        .with_for_update(read=True)
-                    )
-                    due = self._due(db, project_id, person_id)
-                    if due is None or due.owed:
-                        continue
-                    now = datetime.now(UTC)
-                    for membership in db.scalars(
-                        select(ProjectMember)
-                        .where(ProjectMember.id.in_(due.membership_ids))
-                        .order_by(ProjectMember.id)
-                        .with_for_update(key_share=True)
-                    ):
-                        membership.notification_owed_at = now
-                logger.info(
-                    "The %s of project %s's notification to %s is owed: the run "
-                    "stopped before it went out",
-                    due.call,
-                    project_id,
-                    due.handle,
-                )
+    def _compare(
+        self, db: Session, project_id: uuid.UUID, person_id: uuid.UUID
+    ) -> _Due | None:
+        """In `db`'s transaction, what the member was shown brought in line
+        where nothing is to be pushed; the push due, if one is."""
+        memberships = db.scalars(
+            select(ProjectMember)
+            .where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == person_id,
+            )
+            .order_by(ProjectMember.joined_at, ProjectMember.id)
+        ).all()
+        membership_ids = tuple(membership.id for membership in memberships)
+        holder = next((m for m in memberships if m.left_at is None), None)
+        notification = (
+            None
+            if holder is None
+            else self._container.standing_notification_service().should_see(
+                db.get_one(Project, project_id), [holder]
+            )[holder.id]
+        )
+        if holder is None or notification is None:
+            _show(db, membership_ids, None, frozenset())
+            return None
+        if self._pages.shows(db, person_id, project_id):
+            _show(db, membership_ids, holder.id, notification.items)
+            return None
+        # A closed membership's sightings go whatever is pushed: Leave forgets.
+        _show(db, membership_ids, holder.id, None)
+        if self._pages.online(db, person_id):
+            return None
+        seen = set(
+            db.scalars(
+                select(ItemSighting.item_id).where(ItemSighting.member_id == holder.id)
+            )
+        )
+        alert = not notification.items <= seen
+        if not alert and seen <= notification.items:
+            return None
+        if not db.scalar(select(exists().where(PushSubscription.user_id == person_id))):
+            return None
+        return _Due(
+            membership_ids=membership_ids,
+            holder_id=holder.id,
+            notification=notification,
+            alert=alert,
+            last_push=max(
+                (m.notification_sent_at for m in memberships if m.notification_sent_at),
+                default=None,
+            ),
+        )
 
     def _turn(
         self, person_id: uuid.UUID, project_id: uuid.UUID
     ) -> AbstractContextManager[None]:
-        """The member's turn to send, until the block ends."""
+        """The member's turn to be pushed, until the block ends."""
         return advisory_turn(
             self._container.session_maker(),
             NOTIFICATION_LOCK,
             turn_key(person_id.bytes, project_id.bytes),
         )
 
-    def _due(
-        self, db: Session, project_id: uuid.UUID, person_id: uuid.UUID
-    ) -> _Due | None:
-        """The member's send, unless what they should see is what was last
-        sent and nothing is owed."""
-        # The person first: a clear committed after this read has read what
-        # stood as dismissed by the memberships' read.
-        person = db.get_one(User, person_id)
-        memberships = db.scalars(
-            select(ProjectMember)
-            .where(
-                ProjectMember.project_id == project_id,
-                ProjectMember.user_id == person_id,
-                _looked_at(),
-            )
-            .order_by(ProjectMember.joined_at, ProjectMember.id)
-        ).all()
-        if not memberships:
-            return None
-        holder = memberships[-1]
-        notification = self._container.standing_notification_service().should_see(
-            db.get_one(Project, project_id), [holder]
-        )[holder.id]
-        shown = next(
-            (m for m in reversed(memberships) if m.notification_text is not None),
-            None,
-        )
-        owed = any(m.notification_owed_at is not None for m in memberships)
-        if not owed and _shows(shown, notification):
-            return None
-        # A closed membership's last dismiss counts too: a rejoin's first
-        # submit waits for it.
-        last_try: datetime | None = db.scalar(
-            select(
-                func.max(
-                    func.greatest(
-                        ProjectMember.notification_sent_at,
-                        ProjectMember.notification_owed_at,
-                    )
-                )
-            ).where(
-                ProjectMember.project_id == project_id,
-                ProjectMember.user_id == person_id,
-            )
-        )
-        token = self._cipher.open(person)
-        # Nothing of a person's with no token stands or is owed: the clear
-        # that dropped it read it all dismissed (`dismiss_all`).
-        assert token is not None and person.notification_token is not None
-        return _Due(
-            project_id=project_id,
-            person_id=person_id,
-            handle=person.handle,
-            membership_ids=tuple(m.id for m in memberships),
-            holder_id=holder.id,
-            notification=notification,
-            owed=owed,
-            last_try=last_try,
-            sealed=person.notification_token,
-            token=token,
-        )
 
-    def _send(self, due: _Due) -> NotificationBridgeFailure | None:
-        """The submit or dismiss sent, or the bridge's failure to take it."""
-        try:
-            if due.notification is None:
-                self._client().dismiss(due.token, str(due.project_id))
-            else:
-                self._client().submit(
-                    due.token,
-                    due.notification.sequence_id,
-                    message=due.notification.message,
-                    title=due.notification.title,
-                    priority=_PRIORITY,
-                    url=due.notification.url,
-                )
-        except NotificationBridgeFailure as failure:
-            return failure
-        return None
-
-    def _take(
-        self, db: Session, due: _Due, failure: NotificationBridgeFailure | None
-    ) -> bool:
-        """What the send came to, written under the memberships' rows unless
-        the person's token changed meanwhile. Whether their token was cleared
-        during a submit that may have reached the phone, which its own
-        dismiss then follows."""
-        # The person's row locked before the memberships', as the token's set
-        # and clear take it: a clear committed first is read here, and one
-        # after waits for this write, which its read of what stands then sees.
-        sealed = db.scalar(
-            select(User.notification_token)
-            .where(User.id == due.person_id)
-            .with_for_update(read=True)
-        )
-        if sealed != due.sealed:
-            NOTIFICATION_RECONCILES_TOTAL.labels(outcome="superseded").inc()
-            logger.info(
-                "The token of %s changed during the %s of project %s's "
-                "notification; what came of it is not recorded",
-                due.handle,
-                due.call,
-                due.project_id,
-            )
-            return (
-                sealed is None
-                and due.notification is not None
-                and (failure is None or failure.outcome is BridgeOutcome.UNANSWERED)
-            )
-        memberships = db.scalars(
-            select(ProjectMember)
-            .where(ProjectMember.id.in_(due.membership_ids))
-            .order_by(ProjectMember.id)
-            .with_for_update(key_share=True)
-            .execution_options(populate_existing=True)
-        ).all()
-        now = datetime.now(UTC)
-        if failure is not None:
-            for membership in memberships:
-                membership.notification_owed_at = now
-            NOTIFICATION_RECONCILES_TOTAL.labels(outcome="owed").inc()
-            logger.log(
-                logging.DEBUG if due.owed else logging.WARNING,
-                "The %s of project %s's notification to %s is owed: %s",
-                due.call,
-                due.project_id,
-                due.handle,
-                failure,
-            )
-            return False
-        for membership in memberships:
-            _unsent(membership)
-            membership.notification_owed_at = None
-            if due.notification is None:
-                membership.notification_sent_at = now
-        if due.notification is not None:
-            holder = next(m for m in memberships if m.id == due.holder_id)
-            holder.notification_text = due.notification.message
-            holder.notification_url = due.notification.url
-            holder.notification_sent_at = now
-        NOTIFICATION_RECONCILES_TOTAL.labels(outcome="sent").inc()
-        if due.owed:
-            logger.info(
-                "The owed %s of project %s's notification to %s went out",
-                due.call,
-                due.project_id,
-                due.handle,
-            )
-        return False
-
-    def _dismiss_once(self, token: str, project_id: uuid.UUID, name: str) -> None:
-        """A cleared token's dismiss of the project's notification, tried
-        once: what the bridge does not take stays on the phone."""
-        try:
-            self._client().dismiss(token, str(project_id))
-        except NotificationBridgeFailure as failure:
-            NOTIFICATION_CLEAR_DISMISSES_TOTAL.labels(outcome=failure.outcome).inc()
-            logger.warning(
-                "The dismiss of project %s's notification to %s after their "
-                "token's clear failed, and it stays on the phone: %s",
-                project_id,
-                name,
-                failure,
-            )
-            return
-        NOTIFICATION_CLEAR_DISMISSES_TOTAL.labels(outcome=BridgeOutcome.SENT).inc()
-
-    def _client(self) -> NotificationBridgeClient:
-        return self._container.notification_bridge_client()
+def _sighted() -> ColumnElement[bool]:
+    return exists().where(ItemSighting.member_id == ProjectMember.id)
 
 
 def _looked_at() -> ColumnElement[bool]:
-    """A membership whose notification stands, is owed, or may be due: an
-    open one."""
-    return or_(
-        ProjectMember.left_at.is_(None),
-        _standing(),
-        ProjectMember.notification_owed_at.is_not(None),
+    """A membership that may be pushed, an open one, or that has sightings to
+    forget."""
+    return or_(ProjectMember.left_at.is_(None), _sighted())
+
+
+def _show(
+    db: Session,
+    membership_ids: Collection[int],
+    holder_id: int | None,
+    items: frozenset[uuid.UUID] | None,
+) -> None:
+    """The person's sightings in the project, on any of `membership_ids`,
+    made those of `items` on `holder_id`: every other deleted, and each of
+    `items` it lacks written. With `items` none, the holder's stand as they
+    are, and the other memberships' are deleted."""
+    others = [member for member in membership_ids if member != holder_id]
+    if others:
+        db.execute(delete(ItemSighting).where(ItemSighting.member_id.in_(others)))
+    if holder_id is None or items is None:
+        return
+    db.execute(
+        delete(ItemSighting).where(
+            ItemSighting.member_id == holder_id, ItemSighting.item_id.not_in(items)
+        )
     )
-
-
-def _standing() -> ColumnElement[bool]:
-    return ProjectMember.notification_text.is_not(None)
-
-
-def _shows(
-    membership: ProjectMember | None, notification: StandingNotification | None
-) -> bool:
-    """Whether what `membership` last sent is `notification`, by its text and
-    its `url` (F94.4): none for no membership standing and none to see. The
-    title is in no column."""
-    if membership is None or notification is None:
-        return membership is None and notification is None
-    return (membership.notification_text, membership.notification_url) == (
-        notification.message,
-        notification.url,
+    seen = set(
+        db.scalars(
+            select(ItemSighting.item_id).where(ItemSighting.member_id == holder_id)
+        )
     )
-
-
-def _unsent(membership: ProjectMember) -> None:
-    """Nothing standing from `membership`."""
-    membership.notification_text = None
-    membership.notification_url = None
+    db.add_all(
+        ItemSighting(member_id=holder_id, item_id=item) for item in sorted(items - seen)
+    )

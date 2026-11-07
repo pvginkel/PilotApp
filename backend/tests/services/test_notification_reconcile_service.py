@@ -1,15 +1,18 @@
-"""The standing notifications' reconcile (F94.3, F94.4; DB decision 51; V02,
-V05, V06, V08, V16, V18, V19): what each member should see of a project
-compared with what their membership last sent, and submitted or dismissed
-through the fake bridge when it differs.
+"""A member's notification of a project (F94, F147; DB 157, 224 to 226, 307
+to 315; DB decision 74; V09 to V12, V14): a push to every browser of theirs,
+under the project's id, while they are offline, alerting for an item that
+waits on them they have not been shown and silent once one they were shown
+stopped waiting, on the fake push service.
 
 Every test is on a database of its own: a member's turn is an advisory lock on
 a connection of its own, which reads committed rows alone. A loop's run is
 called as its loop calls it; the loops themselves run where a test fires
 STARTUP."""
 
+import threading
 import uuid
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
@@ -22,7 +25,7 @@ from sqlalchemy.pool import QueuePool
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineBus, ProjectChanged, WorkMoved
-from app.models import Project, ProjectMember, User
+from app.models import AppPage, ItemSighting, Project, ProjectMember, User
 from app.models.reference import (
     ProgressState,
     SessionState,
@@ -32,28 +35,26 @@ from app.models.reference import (
 from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.advisory_turn import turn_key
+from app.services.app_page_service import EXPIRY_SECONDS, AppPageService
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
-from app.services.fake_notification_bridge import FakeCall, FakeNotification
-from app.services.notification_bridge_client import BridgePriority
+from app.services.fake_push_service import FakePush, FakeSubscription
 from app.services.notification_reconcile_service import (
-    NOTIFICATION_CLEAR_DISMISSES_TOTAL,
-    NOTIFICATION_CLEAR_JOB,
     NOTIFICATION_JOB,
     NOTIFICATION_LOCK,
-    NOTIFICATION_RECONCILES_TOTAL,
+    NOTIFICATION_PERSON_JOB,
     NotificationReconcileService,
 )
 from app.services.pilot_work_service import Worker
+from app.services.push_subscription_service import PushSubscriptionService
 from app.services.supervisor import LoopHandle, Supervisor
+from app.services.web_push import WEB_PUSH_SENDS_TOTAL, WebPushService
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
-from tests.support.fake_notification_bridge import (
-    WatchedFakeNotificationBridge,
-    bridge_client_of,
-)
+from tests.support.fake_push_service import ServedFakePushService
 from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import (
+    WAIT_SECONDS,
     LogWaiter,
     RoundsHandle,
     Supervise,
@@ -62,8 +63,6 @@ from tests.support.supervisor import (
     wait_until,
 )
 
-ADA_TOKEN = "token-of-ada"
-BEN_TOKEN = "token-of-ben"
 ENV = "env-a"
 LOGGER = "app.services.notification_reconcile_service"
 SUPERVISOR_LOGGER = "app.services.supervisor"
@@ -72,7 +71,15 @@ DECISION = "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n"
 QUESTION = "```question id=Q1\n```\n"
 
 SPACING = 1.0
-"""A person's window between two sends in one project, in the tests of it."""
+"""A member's window between two pushes in one project, in the tests of it."""
+
+
+@dataclass(frozen=True)
+class _Built:
+    service: NotificationReconcileService
+    supervisor: Supervisor
+    coordinator: LifecycleCoordinator
+    pages: AppPageService
 
 
 @pytest.fixture(autouse=True)
@@ -84,29 +91,28 @@ def _no_callbacks() -> Iterator[None]:
 
 @pytest.fixture
 def container(committed_app: Flask) -> ServiceContainer:
-    """The committed app's container, with Ada, Ben and an environment."""
+    """The committed app's container, with Ada, Ben, Cal and an environment."""
     container: ServiceContainer = committed_app.container
     with scoped_session(container):
         data = container.test_data_service()
         data.person("ada", "Ada Example")
         data.person("ben", "Ben Example")
+        data.person("cal", "Cal Example")
         data.environment(ENV, "Env-A")
     return container
 
 
 @pytest.fixture
-def bridge(container: ServiceContainer) -> Iterator[WatchedFakeNotificationBridge]:
-    """The fake bridge, the container's client on it, with a registration for
-    Ada and one for Ben."""
-    fake = WatchedFakeNotificationBridge()
-    try:
-        bridge_client_of(container, fake)
-        fake.add_registration("ada", ADA_TOKEN)
-        fake.add_registration("ben", BEN_TOKEN)
-        yield fake
-        assert fake.failures == []
-    finally:
-        fake.close()
+def browsers(
+    container: ServiceContainer,
+    fake_push_service: ServedFakePushService,
+    web_push_service: WebPushService,
+) -> dict[str, FakeSubscription]:
+    """A browser of Ada's and one of Ben's, each subscribed; Cal has none."""
+    return {
+        handle: _subscribe(container, fake_push_service, web_push_service, handle)
+        for handle in ("ada", "ben")
+    }
 
 
 @pytest.fixture
@@ -118,31 +124,37 @@ def log() -> Iterator[LogWaiter]:
 def _service(
     container: ServiceContainer,
     supervise: Supervise,
+    web_push_service: WebPushService,
     *,
     engine_bus: EngineBus | None = None,
-    retry_seconds: float = 60.0,
     spacing_seconds: float | None = 0.0,
-    configured: bool = True,
-) -> tuple[NotificationReconcileService, Supervisor, LifecycleCoordinator]:
-    """The reconcile on a supervisor of its own, hearing `engine_bus`: a bus
-    of its own unless one is given. No window between a person's sends unless
-    `spacing_seconds` gives one; none for the service's own."""
+) -> _Built:
+    """The reconcile on a supervisor of its own, hearing `engine_bus`, a bus
+    of its own unless one is given, and the pages on the same supervisor. No
+    window between a member's pushes unless `spacing_seconds` gives one; none
+    for the service's own."""
     supervisor, coordinator = supervise(container)
+    pages = AppPageService(supervisor)
     spacing = {} if spacing_seconds is None else {"spacing_seconds": spacing_seconds}
     service = NotificationReconcileService(
         container=container,
         supervisor=supervisor,
         engine_bus=EngineBus() if engine_bus is None else engine_bus,
-        notification_token_cipher=container.notification_token_cipher(),
-        bridge_configured=configured,
-        retry_seconds=retry_seconds,
+        app_page_service=pages,
+        web_push_service=web_push_service,
         **spacing,
     )
-    return service, supervisor, coordinator
+    return _Built(service, supervisor, coordinator, pages)
 
 
-def _reconcile(service: NotificationReconcileService, project_id: uuid.UUID) -> None:
-    service.reconcile(project_id, LoopHandle("test"))
+def _reconcile(built: _Built, project_id: uuid.UUID) -> None:
+    built.service.reconcile(project_id, LoopHandle("test"))
+
+
+def _reconcile_person(
+    container: ServiceContainer, built: _Built, handle: str = "ada"
+) -> None:
+    built.service.reconcile_person(_person_id(container, handle), LoopHandle("test"))
 
 
 def _person(container: ServiceContainer, handle: str) -> User:
@@ -151,9 +163,32 @@ def _person(container: ServiceContainer, handle: str) -> User:
     )
 
 
+def _person_id(container: ServiceContainer, handle: str) -> uuid.UUID:
+    with scoped_session(container):
+        return _person(container, handle).id
+
+
 def _auth(person: User) -> AuthContext:
     assert person.subject is not None
     return AuthContext(subject=person.subject, email=None, name=None, roles=set())
+
+
+def _subscribe(
+    container: ServiceContainer,
+    fake: ServedFakePushService,
+    web_push_service: WebPushService,
+    handle: str,
+) -> FakeSubscription:
+    """A browser of the person's, subscribed as their switch subscribes it."""
+    browser = fake.browser(web_push_service.public_key or "")
+    with scoped_session(container):
+        PushSubscriptionService(container.db_session()).subscribe(
+            _person(container, handle),
+            browser.endpoint,
+            browser.keys.p256dh,
+            browser.keys.auth,
+        )
+    return browser
 
 
 def _project(
@@ -172,14 +207,6 @@ def _project(
             )
             .id
         )
-
-
-def _give_token(container: ServiceContainer, handle: str, token: str) -> None:
-    """The token on the record, as it was before this reconcile's time."""
-    with scoped_session(container):
-        _person(
-            container, handle
-        ).notification_token = container.notification_token_cipher().seal(token)
 
 
 def _bear(
@@ -226,9 +253,13 @@ def _answer(
         )
 
 
-def _running_work(container: ServiceContainer, project_id: uuid.UUID) -> Worker:
-    """A work item of the project, its session's turn running in the
-    environment, committed: its worker."""
+def _work(
+    container: ServiceContainer,
+    project_id: uuid.UUID,
+    state: SessionState = SessionState.RUNNING,
+) -> Worker:
+    """A work item of the project, its session in `state` in the environment,
+    committed: its worker."""
     with scoped_session(container) as db:
         run = models.Session(
             project_id=project_id,
@@ -236,7 +267,7 @@ def _running_work(container: ServiceContainer, project_id: uuid.UUID) -> Worker:
             kind_code="work",
             cwd="/work/Camp",
             token_hash=uuid.uuid4().hex * 2,
-            state_code=SessionState.RUNNING,
+            state_code=state,
         )
         db.add(run)
         db.flush()
@@ -244,6 +275,13 @@ def _running_work(container: ServiceContainer, project_id: uuid.UUID) -> Worker:
             db.get_one(Project, project_id), run, "Building the camp"
         )
         return Worker(run.id, project_id, ENV, run.id)
+
+
+def _set_state(
+    container: ServiceContainer, worker: Worker, state: SessionState
+) -> None:
+    with scoped_session(container) as db:
+        db.get_one(models.Session, worker.session_id).state_code = state
 
 
 def _leave(container: ServiceContainer, handle: str, project_id: uuid.UUID) -> None:
@@ -265,29 +303,51 @@ def _transition(
         )
 
 
-def _clear(
-    container: ServiceContainer, service: NotificationReconcileService, handle: str
-) -> None:
-    """The person's token cleared, as their profile's Clear clears it."""
-    with scoped_session(container):
-        person = _person(container, handle)
-        token = container.notification_token_cipher().open(person)
-        assert token is not None
-        person.notification_token = None
-        service.dismiss_all(container.db_session(), person, token)
-
-
-def _set(
+def _page(
     container: ServiceContainer,
-    service: NotificationReconcileService,
+    handle: str = "ada",
+    project_id: uuid.UUID | None = None,
+    *,
+    beat_at: datetime | None = None,
+) -> uuid.UUID:
+    """A page of the person's on `project_id`, or on none, its beat `beat_at`,
+    now by default, committed with nothing told; its id."""
+    with scoped_session(container) as db:
+        page = AppPage(
+            user_id=_person(container, handle).id,
+            project_id=project_id,
+            beat_at=beat_at or datetime.now(UTC),
+        )
+        db.add(page)
+        db.flush()
+        return page.id
+
+
+def _gone(container: ServiceContainer, page_id: uuid.UUID) -> None:
+    """The page deleted, with nothing told."""
+    with scoped_session(container) as db:
+        db.delete(db.get_one(AppPage, page_id))
+
+
+def _begin(
+    container: ServiceContainer,
+    built: _Built,
     handle: str,
-    token: str,
-) -> None:
-    """The person's token set, as their profile's Save sets it."""
+    project_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """A page's first beat, as its person's browser sends it, committed."""
     with scoped_session(container):
-        person = _person(container, handle)
-        person.notification_token = container.notification_token_cipher().seal(token)
-        service.submit_all(container.db_session(), person)
+        return built.pages.begin(
+            container.db_session(), _person(container, handle), project_id
+        )
+
+
+def _away(
+    container: ServiceContainer, built: _Built, handle: str, page_id: uuid.UUID
+) -> None:
+    """The page's away, as its person's browser sends it, committed."""
+    with scoped_session(container):
+        built.pages.away(container.db_session(), _person(container, handle), page_id)
 
 
 def _memberships(
@@ -306,38 +366,55 @@ def _memberships(
         return list(memberships)
 
 
-def _last_sent(
+def _seen(
     container: ServiceContainer, project_id: uuid.UUID, handle: str = "ada"
-) -> tuple[str | None, str | None]:
-    """The text and `url` the person's latest membership last sent; none
-    while none stands."""
-    membership = _memberships(container, project_id, handle)[-1]
-    return membership.notification_text, membership.notification_url
+) -> set[uuid.UUID]:
+    """The items the person's memberships of the project were shown."""
+    with scoped_session(container) as db:
+        return set(
+            db.scalars(
+                select(ItemSighting.item_id)
+                .join(ProjectMember, ProjectMember.id == ItemSighting.member_id)
+                .join(User, User.id == ProjectMember.user_id)
+                .where(ProjectMember.project_id == project_id, User.handle == handle)
+            )
+        )
 
 
-def _owed(container: ServiceContainer, project_id: uuid.UUID) -> bool:
-    return any(
-        membership.notification_owed_at is not None
-        for membership in _memberships(container, project_id)
-    )
+def _sent_at(
+    container: ServiceContainer, project_id: uuid.UUID, handle: str = "ada"
+) -> datetime | None:
+    return _memberships(container, project_id, handle)[-1].notification_sent_at
 
 
 def _timeline(container: ServiceContainer, project_id: uuid.UUID) -> str:
     return f"{container.config().baseurl}/projects/{project_id}"
 
 
-def _shown(
-    bridge: WatchedFakeNotificationBridge, project_id: uuid.UUID, name: str = "ada"
-) -> FakeNotification:
-    return bridge.shown(name)[str(project_id)]
+def _push(
+    container: ServiceContainer,
+    project_id: uuid.UUID,
+    body: str,
+    item_id: uuid.UUID | None = None,
+    *,
+    alert: bool = True,
+) -> FakePush:
+    """The project's push carrying `body`, as the browser decrypts it: its
+    `url` the item's, else the timeline."""
+    timeline = _timeline(container, project_id)
+    return FakePush(
+        title="Camp",
+        body=body,
+        tag=str(project_id),
+        url=timeline if item_id is None else f"{timeline}/items/{item_id}",
+        renotify=alert,
+        urgency="high" if alert else "normal",
+        ttl=86400,
+    )
 
 
-def _sent_at(
-    container: ServiceContainer, project_id: uuid.UUID, handle: str = "ada"
-) -> datetime:
-    sent_at = _memberships(container, project_id, handle)[-1].notification_sent_at
-    assert sent_at is not None
-    return sent_at
+def _pushes(fake: ServedFakePushService, browser: FakeSubscription) -> list[FakePush]:
+    return fake.pushes(browser.endpoint)
 
 
 def _checked_out(container: ServiceContainer) -> int:
@@ -347,12 +424,10 @@ def _checked_out(container: ServiceContainer) -> int:
     return pool.checkedout()
 
 
-def _turn_free(
-    container: ServiceContainer, project_id: uuid.UUID, handle: str = "ada"
-) -> bool:
-    """Whether the person's turn in the project is free: taken and let go at
-    once, on a session of its own."""
-    person_id = _memberships(container, project_id, handle)[0].user_id
+def _turn_free(container: ServiceContainer, project_id: uuid.UUID) -> bool:
+    """Whether Ada's turn in the project is free: taken and let go at once,
+    on a session of its own."""
+    person_id = _memberships(container, project_id)[0].user_id
     with container.session_maker()() as db:
         free: bool = db.scalar(
             select(
@@ -379,193 +454,192 @@ class _Window(RoundsHandle):
         return super().wait(seconds)
 
 
-def _reconciles(outcome: str) -> float:
-    return metric_value(NOTIFICATION_RECONCILES_TOTAL, outcome=outcome)
-
-
-def _clear_dismisses(outcome: str) -> float:
-    return metric_value(NOTIFICATION_CLEAR_DISMISSES_TOTAL, outcome=outcome)
+def _started(built: _Built, log: LogWaiter, *project_ids: uuid.UUID) -> None:
+    """STARTUP fired, and the reconciles it asked for of `project_ids`
+    ended."""
+    built.coordinator.fire_startup()
+    for project_id in project_ids:
+        log.wait_for(rf"Loop {NOTIFICATION_JOB}:{project_id} ended")
 
 
 class TestNotificationReconcileServiceReconcile:
-    def test_nothing_waiting_sends_nothing_and_an_ask_is_submitted_at_high(
+    def test_an_item_waiting_unshown_alerts_every_member_with_a_browser(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
-        project_id = _project(container, ("ada", "ben"))
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise)
-        unchanged = _reconciles("unchanged")
+        project_id = _project(container, ("ada", "ben", "cal"))
+        built = _service(container, supervise, web_push_service)
 
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        assert bridge.calls("ada") == []
-        assert _last_sent(container, project_id) == (None, None)
-        assert _reconciles("unchanged") == unchanged + 2
+        assert _pushes(fake_push_service, browsers["ada"]) == []
 
         tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
-        sent, unchanged = _reconciles("sent"), _reconciles("unchanged")
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        assert bridge.shown("ada") == {
-            str(project_id): FakeNotification(
-                sequence_id=str(project_id),
-                priority="high",
-                title="Camp",
-                message="Which tent?",
-                url=f"{_timeline(container, project_id)}/items/{tent}",
-                alerted=True,
-            )
-        }
-        assert bridge.calls("ben") == []
-        [membership] = _memberships(container, project_id)
-        assert (
-            membership.notification_text,
-            membership.notification_url,
-            membership.notification_owed_at,
-        ) == (
-            "Which tent?",
-            f"{_timeline(container, project_id)}/items/{tent}",
-            None,
-        )
-        assert membership.notification_sent_at is not None
-        assert _reconciles("sent") == sent + 1
-        # Ben, a member with no token: nothing to see, nothing sent.
-        assert _reconciles("unchanged") == unchanged + 1
+        alert = _push(container, project_id, "Which tent?", tent)
+        assert _pushes(fake_push_service, browsers["ada"]) == [alert]
+        assert _pushes(fake_push_service, browsers["ben"]) == [alert]
+        assert _seen(container, project_id) == {tent}
+        assert _sent_at(container, project_id) is not None
+        # Cal, a member with no browser: nothing pushed, nothing shown.
+        assert _seen(container, project_id, "cal") == set()
+        assert _sent_at(container, project_id, "cal") is None
 
-    def test_what_was_last_sent_is_not_sent_again(
+    def test_what_they_were_shown_is_not_pushed_again(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
-        sent_at = _memberships(container, project_id)[0].notification_sent_at
-        unchanged = _reconciles("unchanged")
+        _ask(container, project_id)
+        built = _service(container, supervise, web_push_service)
+        _reconcile(built, project_id)
+        sent_at = _sent_at(container, project_id)
 
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        assert bridge.calls("ada") == [FakeCall("submit", str(project_id), True)]
-        assert _memberships(container, project_id)[0].notification_sent_at == sent_at
-        assert _reconciles("unchanged") == unchanged + 1
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
+        assert _sent_at(container, project_id) == sent_at
 
-    def test_the_first_ask_alerts_and_every_later_change_updates_it_silently(
+    def test_each_item_come_to_wait_alerts_naming_the_latest(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise)
-
+        built = _service(container, supervise, web_push_service)
         tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
         site = _bear(container, project_id, "decision", "Which site?", DECISION)
-        _reconcile(service, project_id)
-        shown = _shown(bridge, project_id)
-        assert (shown.priority, shown.message, shown.url, shown.alerted) == (
-            "high",
-            "Which site?, +1",
-            _timeline(container, project_id),
-            False,
-        )
-
-        # An urgent ask arriving while one stands is silent too.
+        _reconcile(built, project_id)
         storm = _bear(
             container, project_id, "decision", "Storm shelter?", DECISION, urgent="true"
         )
-        _reconcile(service, project_id)
-        shown = _shown(bridge, project_id)
-        assert (shown.priority, shown.message, shown.alerted) == (
-            "high",
-            "Storm shelter?, +2",
-            False,
-        )
 
-        # The member's own answers update it, silently.
-        _answer(container, "ada", tent, "Dome")
-        _answer(container, "ada", site, "Dome")
-        _reconcile(service, project_id)
-        shown = _shown(bridge, project_id)
-        assert (shown.priority, shown.message, shown.url, shown.alerted) == (
-            "high",
-            "Storm shelter?",
-            f"{_timeline(container, project_id)}/items/{storm}",
-            False,
-        )
-        assert [call.alerted for call in bridge.calls("ada")] == [
-            True,
-            False,
-            False,
-            False,
+        _reconcile(built, project_id)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == [
+            _push(container, project_id, "Which tent?", tent),
+            _push(container, project_id, "Which site?, +1"),
+            _push(container, project_id, "Storm shelter?, +2"),
         ]
-        assert _last_sent(container, project_id) == ("Storm shelter?", shown.url)
+        assert _seen(container, project_id) == {tent, site, storm}
 
-    def test_answering_the_last_ask_dismisses_and_the_next_alerts_anew(
+    def test_one_they_were_shown_stopping_with_another_waiting_updates_silently(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise)
+        built = _service(container, supervise, web_push_service)
         tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
-        _reconcile(service, project_id)
+        site = _bear(container, project_id, "decision", "Which site?", DECISION)
+        _reconcile(built, project_id)
 
+        # The member's own answer updates it, silently.
         _answer(container, "ada", tent, "Dome")
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        assert bridge.shown("ada") == {}
-        assert _last_sent(container, project_id) == (None, None)
-
-        _bear(container, project_id, "decision", "Which site?", DECISION)
-        _reconcile(service, project_id)
-
-        assert bridge.calls("ada") == [
-            FakeCall("submit", str(project_id), True),
-            FakeCall("dismiss", str(project_id), False),
-            FakeCall("submit", str(project_id), True),
+        assert _pushes(fake_push_service, browsers["ada"]) == [
+            _push(container, project_id, "Which site?, +1"),
+            _push(container, project_id, "Which site?", site, alert=False),
         ]
-        assert _shown(bridge, project_id).message == "Which site?"
+        assert _seen(container, project_id) == {site}
 
-    def test_a_change_that_leaves_the_text_and_url_sends_nothing(
+    def test_the_last_answered_pushes_nothing_and_the_next_alerts_anew(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
-        """A work item starting to run, a plan step, a change of an item the
-        ", +<n>" counts and an item for another member touch nothing the
-        member sees."""
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        _reconcile(built, project_id)
+
+        _answer(container, "ada", tent, "Dome")
+        _reconcile(built, project_id)
+
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
+        assert _seen(container, project_id) == set()
+
+        site = _bear(container, project_id, "decision", "Which site?", DECISION)
+        _reconcile(built, project_id)
+
+        assert _pushes(fake_push_service, browsers["ada"])[1:] == [
+            _push(container, project_id, "Which site?", site)
+        ]
+
+    def test_an_item_that_stops_waiting_and_comes_to_wait_again_alerts_again(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """A work item stopped waits; retried and running, it waits on no
+        one; stopped again, it waits again."""
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        worker = _work(container, project_id, SessionState.STOPPED)
+        _reconcile(built, project_id)
+
+        _set_state(container, worker, SessionState.RUNNING)
+        _reconcile(built, project_id)
+        _set_state(container, worker, SessionState.STOPPED)
+        _reconcile(built, project_id)
+
+        alert = _push(container, project_id, "Building the camp", worker.session_id)
+        assert _pushes(fake_push_service, browsers["ada"]) == [alert, alert]
+
+    def test_a_change_of_the_plan_or_of_what_the_text_reads_pushes_nothing(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """A work item starting to run, a plan step, a retitle of the item
+        the text names and an item for another member change nothing of what
+        waits on the member (D145)."""
         project_id = _project(
             container,
             ("ada", "ben"),
             tasks=[{"id": "t1", "title": "Pitch the tent", "status": "pending"}],
         )
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise)
-        site = _bear(container, project_id, "decision", "Which site?", DECISION)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        _reconcile(service, project_id)
-        calls = bridge.calls("ada")
+        built = _service(container, supervise, web_push_service)
+        _bear(container, project_id, "decision", "Which site?", DECISION)
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        _reconcile(built, project_id)
+        pushed = _pushes(fake_push_service, browsers["ada"])
 
-        _running_work(container, project_id)
-        _reconcile(service, project_id)
+        _work(container, project_id)
+        _reconcile(built, project_id)
         with scoped_session(container) as db:
             db.scalars(
                 select(models.PlanTask).where(models.PlanTask.project_id == project_id)
             ).one().status_code = TaskStatus.IN_PROGRESS
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
         with scoped_session(container) as db:
-            db.get_one(models.Item, site).title = "Which campsite?"
+            db.get_one(models.Item, tent).title = "Which tent, now?"
         _bear(
             container,
             project_id,
@@ -574,23 +648,23 @@ class TestNotificationReconcileServiceReconcile:
             QUESTION,
             **{"for": "ben"},
         )
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        assert bridge.calls("ada") == calls
-        assert _shown(bridge, project_id).message == "Which tent?, +1"
+        assert _pushes(fake_push_service, browsers["ada"]) == pushed
+        assert pushed == [_push(container, project_id, "Which tent?, +1")]
 
     def test_an_item_for_one_member_is_theirs_alone(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container, ("ada", "ben"))
-        _give_token(container, "ada", ADA_TOKEN)
-        _give_token(container, "ben", BEN_TOKEN)
-        service, _, _ = _service(container, supervise)
+        built = _service(container, supervise, web_push_service)
 
-        _bear(
+        boots = _bear(
             container,
             project_id,
             "question",
@@ -599,374 +673,446 @@ class TestNotificationReconcileServiceReconcile:
             urgent="true",
             **{"for": "ben"},
         )
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        ben = _shown(bridge, project_id, "ben")
-        assert (ben.priority, ben.message, ben.alerted) == ("high", "Your boots?", True)
-        assert bridge.calls("ada") == []
+        assert _pushes(fake_push_service, browsers["ben"]) == [
+            _push(container, project_id, "Your boots?", boots)
+        ]
+        assert _pushes(fake_push_service, browsers["ada"]) == []
+        assert _seen(container, project_id) == set()
 
-    def test_leave_dismisses_and_a_rejoin_submits_afresh(
+    def test_leave_pushes_nothing_and_forgets_and_a_rejoin_alerts_anew(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container, ("ada", "ben"))
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
-        submitted_at = _memberships(container, project_id)[0].notification_sent_at
-        assert submitted_at is not None
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        built = _service(container, supervise, web_push_service)
+        _reconcile(built, project_id)
+        pushed_at = _sent_at(container, project_id)
 
         _leave(container, "ada", project_id)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        assert bridge.shown("ada") == {}
-        [closed] = _memberships(container, project_id)
-        assert _last_sent(container, project_id) == (None, None)
-        assert closed.notification_sent_at is not None
-        assert closed.notification_sent_at > submitted_at
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
+        assert _seen(container, project_id) == set()
+        assert _sent_at(container, project_id) == pushed_at
 
         _join(container, "ada", project_id)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        assert _shown(bridge, project_id).message == "Which tent?"
-        assert bridge.calls("ada") == [
-            FakeCall("submit", str(project_id), True),
-            FakeCall("dismiss", str(project_id), False),
-            FakeCall("submit", str(project_id), True),
-        ]
+        alert = _push(container, project_id, "Which tent?", tent)
+        assert _pushes(fake_push_service, browsers["ada"]) == [alert, alert]
         closed, rejoined = _memberships(container, project_id)
-        assert closed.notification_text is None
-        assert rejoined.notification_text == "Which tent?"
+        assert _seen(container, project_id) == {tent}
+        assert (closed.notification_sent_at, rejoined.notification_sent_at) == (
+            pushed_at,
+            _sent_at(container, project_id),
+        )
 
-    def test_archive_dismisses_and_bring_back_submits(
+    def test_archive_pushes_nothing_and_forgets_and_bring_back_alerts_anew(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container, environment_id=None)
-        _give_token(container, "ada", ADA_TOKEN)
-        _ask(container, project_id)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
+        tent = _ask(container, project_id)
+        built = _service(container, supervise, web_push_service)
+        _reconcile(built, project_id)
 
         _transition(container, project_id, TransitionKind.ARCHIVED)
-        _reconcile(service, project_id)
-        assert bridge.shown("ada") == {}
-        assert _last_sent(container, project_id) == (None, None)
+        _reconcile(built, project_id)
+
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
+        assert _seen(container, project_id) == set()
 
         _transition(container, project_id, TransitionKind.BROUGHT_BACK)
-        _reconcile(service, project_id)
-        assert _shown(bridge, project_id).message == "Which tent?"
-        assert _last_sent(container, project_id)[0] is not None
+        _reconcile(built, project_id)
 
-    def test_a_draft_and_a_finished_project_hold_theirs_while_something_waits(
+        alert = _push(container, project_id, "Which tent?", tent)
+        assert _pushes(fake_push_service, browsers["ada"]) == [alert, alert]
+
+    def test_a_draft_and_a_finished_project_push_while_something_waits(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         draft = _project(container, environment_id=None, state="draft")
         finished = _project(container, environment_id=None, state="finished")
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, draft)
-        _reconcile(service, finished)
-        assert bridge.calls("ada") == []
+        built = _service(container, supervise, web_push_service)
+        _reconcile(built, draft)
+        _reconcile(built, finished)
+        assert _pushes(fake_push_service, browsers["ada"]) == []
 
         _ask(container, draft, "Where?")
         _ask(container, finished)
-        _reconcile(service, draft)
-        _reconcile(service, finished)
+        _reconcile(built, draft)
+        _reconcile(built, finished)
 
-        assert _shown(bridge, draft).message == "Where?"
-        assert _shown(bridge, finished).message == "Which tent?"
+        assert [
+            (push.tag, push.body)
+            for push in _pushes(fake_push_service, browsers["ada"])
+        ] == [(str(draft), "Where?"), (str(finished), "Which tent?")]
 
 
-class TestNotificationReconcileServiceOwed:
-    def test_a_send_the_bridge_does_not_answer_is_owed_and_logged_once(
+class TestNotificationReconcileServicePages:
+    def test_a_page_on_the_project_shows_every_item_waiting_and_pushes_nothing(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
-        log: LogWaiter,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-        owed = _reconciles("owed")
-        bridge.unreachable()
+        built = _service(container, supervise, web_push_service)
+        page = _page(container, project_id=project_id)
+        tent = _ask(container, project_id)
+        site = _ask(container, project_id, "Which site?")
 
-        _reconcile(service, project_id)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
 
-        assert _owed(container, project_id)
-        assert _last_sent(container, project_id) == (None, None)
-        assert _reconciles("owed") == owed + 2
-        failures = [
-            record
-            for record in log.records
-            if record.getMessage().startswith(
-                f"The submit of project {project_id}'s notification to ada is owed"
-            )
+        assert _seen(container, project_id) == {tent, site}
+
+        # Once the page is gone, what it showed is not pushed.
+        _gone(container, page)
+        _reconcile(built, project_id)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == []
+
+    def test_a_page_on_the_project_forgets_what_no_longer_waits(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        site = _bear(container, project_id, "decision", "Which site?", DECISION)
+        _reconcile(built, project_id)
+        _page(container, project_id=project_id)
+
+        _answer(container, "ada", tent, "Dome")
+        _reconcile(built, project_id)
+
+        assert _seen(container, project_id) == {site}
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
+
+    def test_online_with_no_page_on_it_nothing_is_pushed_and_what_was_shown_stands(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        camp = _project(container)
+        lake = _project(container, environment_id=None)
+        built = _service(container, supervise, web_push_service)
+        tent = _bear(container, camp, "decision", "Which tent?", DECISION)
+        _reconcile(built, camp)
+        _page(container, project_id=lake)
+
+        _bear(container, camp, "decision", "Which site?", DECISION)
+        _reconcile(built, camp)
+        _answer(container, "ada", tent, "Dome")
+        _reconcile(built, camp)
+
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
+        assert _seen(container, camp) == {tent}
+
+    def test_a_page_whose_beat_is_ninety_seconds_old_counts_for_nothing(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        _page(
+            container,
+            project_id=project_id,
+            beat_at=datetime.now(UTC) - timedelta(seconds=EXPIRY_SECONDS),
+        )
+        tent = _ask(container, project_id)
+
+        _reconcile(built, project_id)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == [
+            _push(container, project_id, "Which tent?", tent)
         ]
-        assert len(failures) == 1
-        assert failures[0].levelname == "WARNING"
 
-        bridge.unreachable(on=False)
-        _reconcile(service, project_id)
 
-        assert not _owed(container, project_id)
-        assert _last_sent(container, project_id)[0] is not None
-        log.wait_for(
-            rf"The owed submit of project {project_id}'s notification to ada went out"
-        )
-
-    def test_a_refused_token_is_owed(
+class TestNotificationReconcileServiceOffline:
+    def test_going_offline_pushes_what_was_held_and_nothing_for_a_project_open(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """F147: Camp was open while its ask came; Lake's came while she was
+        online on Camp."""
+        camp = _project(container)
+        lake = _project(container, environment_id=None)
+        built = _service(container, supervise, web_push_service)
+        page = _page(container, project_id=camp)
+        tent = _ask(container, camp)
+        shore = _ask(container, lake, "Which shore?")
+        _reconcile(built, camp)
+        _reconcile(built, lake)
+        assert _pushes(fake_push_service, browsers["ada"]) == []
+
+        _gone(container, page)
+        _reconcile_person(container, built)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == [
+            _push(container, lake, "Which shore?", shore)
+        ]
+        assert (_seen(container, camp), _seen(container, lake)) == ({tent}, {shore})
+
+    def test_going_offline_pushes_a_held_update_silently(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        site = _bear(container, project_id, "decision", "Which site?", DECISION)
+        _reconcile(built, project_id)
+        page = _page(container)
+        _answer(container, "ada", tent, "Dome")
+        _reconcile(built, project_id)
+
+        _gone(container, page)
+        _reconcile_person(container, built)
+
+        assert _pushes(fake_push_service, browsers["ada"])[1:] == [
+            _push(container, project_id, "Which site?", site, alert=False)
+        ]
+
+    def test_a_pages_away_that_takes_them_offline_pushes_what_was_held(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-        bridge.rotate_token("ada", "a-rotated-token")
+        built = _service(container, supervise, web_push_service)
+        _started(built, log, project_id)
+        page = _begin(container, built, "ada", None)
+        tent = _ask(container, project_id)
+        _reconcile(built, project_id)
+        assert _pushes(fake_push_service, browsers["ada"]) == []
 
-        _reconcile(service, project_id)
+        _away(container, built, "ada", page)
 
-        assert _owed(container, project_id)
-        log.wait_for(rf"The submit of project {project_id}'s .* is owed: .*401.*")
-
-    def test_an_owed_send_is_sent_again_with_nothing_else_changed(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-    ) -> None:
-        project_id = _project(container, ("ada", "ben"))
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
-        bridge.unreachable()
-        _leave(container, "ada", project_id)
-        _reconcile(service, project_id)
-        assert _owed(container, project_id)
-        assert _last_sent(container, project_id)[0] is not None
-
-        bridge.unreachable(on=False)
-        _reconcile(service, project_id)
-
-        assert bridge.shown("ada") == {}
-        assert not _owed(container, project_id)
-        assert _last_sent(container, project_id) == (None, None)
-
-    def test_a_rejoin_takes_the_place_of_an_owed_dismiss(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-    ) -> None:
-        project_id = _project(container, ("ada", "ben"))
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
-        bridge.unreachable()
-        _leave(container, "ada", project_id)
-        _reconcile(service, project_id)
-        bridge.unreachable(on=False)
-
-        _join(container, "ada", project_id)
-        _reconcile(service, project_id)
-
-        assert _shown(bridge, project_id).message == "Which tent?"
-        assert [call.call for call in bridge.calls("ada")] == ["submit", "submit"]
-        closed, rejoined = _memberships(container, project_id)
-        assert (closed.notification_text, closed.notification_owed_at) == (None, None)
-        assert (rejoined.notification_text, rejoined.notification_owed_at) == (
-            "Which tent?",
-            None,
+        wait_until(
+            lambda: (
+                _pushes(fake_push_service, browsers["ada"])
+                == [_push(container, project_id, "Which tent?", tent)]
+            ),
+            "the held push pushed",
         )
 
-
-class TestNotificationReconcileServiceRetry:
-    def test_the_timer_asks_for_the_projects_owed_past_their_retry(
+    def test_a_page_coming_to_show_the_project_shows_what_waits_there(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+        log: LogWaiter,
+    ) -> None:
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        tent = _ask(container, project_id)
+        _page(container)
+        _started(built, log, project_id)
+
+        _begin(container, built, "ada", project_id)
+
+        wait_until(lambda: _seen(container, project_id) == {tent}, "the ask shown")
+        assert _pushes(fake_push_service, browsers["ada"]) == []
+
+    def test_each_turn_of_the_persons_pages_asks_for_their_reconcile(
+        self,
+        container: ServiceContainer,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
-        due, recent, settled = (
-            _project(container, environment_id=None) for _ in range(3)
-        )
-        now = datetime.now(UTC)
-        with scoped_session(container) as db:
-            for project_id, owed_at in (
-                (due, now - timedelta(seconds=61)),
-                (recent, now),
-                (settled, None),
-            ):
-                db.scalars(
-                    select(ProjectMember).where(ProjectMember.project_id == project_id)
-                ).one().notification_owed_at = owed_at
-        service, supervisor, _ = _service(container, supervise, retry_seconds=60)
+        """A page coming to show the project, and its away, which ends its
+        showing and takes her offline; coming online is told nothing."""
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        person_id = _person_id(container, "ada")
 
         with patch.object(
-            supervisor, "start_loop", wraps=supervisor.start_loop
+            built.supervisor, "start_loop", wraps=built.supervisor.start_loop
         ) as start:
-            with scoped_session(container) as db:
-                service.retry(db)
+            listing = _begin(container, built, "ada", None)
+            page = _begin(container, built, "ada", project_id)
+            _away(container, built, "ada", page)
+            _away(container, built, "ada", listing)
 
         assert [(call.args[0], call.kwargs) for call in start.call_args_list] == [
-            (NOTIFICATION_JOB, {"key": str(due), "again": False})
-        ]
+            (NOTIFICATION_PERSON_JOB, {"key": str(person_id), "again": True})
+        ] * 3
 
-    def test_an_owed_send_goes_out_on_the_timer_once_the_bridge_answers(
+
+class TestNotificationReconcileServiceFailures:
+    def test_a_push_no_browser_took_shows_nothing_and_the_next_change_alerts_anew(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
-        log: LogWaiter,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        _, _, coordinator = _service(container, supervise, retry_seconds=0)
-        bridge.unreachable()
+        built = _service(container, supervise, web_push_service)
+        fake_push_service.fail(browsers["ada"].endpoint, "error")
+        unanswered = metric_value(WEB_PUSH_SENDS_TOTAL, outcome="unanswered")
+        _ask(container, project_id)
 
-        coordinator.fire_startup()
-        log.wait_for(rf"The submit of project {project_id}'s notification .* owed: .*")
-        bridge.unreachable(on=False)
+        _reconcile(built, project_id)
 
-        log.wait_for(
-            rf"The owed submit of project {project_id}'s notification to ada went out"
+        assert _seen(container, project_id) == set()
+        assert _sent_at(container, project_id) is not None
+        assert (
+            metric_value(WEB_PUSH_SENDS_TOTAL, outcome="unanswered") == unanswered + 1
         )
-        assert _shown(bridge, project_id).message == "Which tent?"
+
+        fake_push_service.fail(browsers["ada"].endpoint, None)
+        _ask(container, project_id, "Which site?")
+        _reconcile(built, project_id)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == [
+            _push(container, project_id, "Which site?, +1")
+        ]
+        assert len(_seen(container, project_id)) == 2
+
+    def test_a_push_one_browser_of_theirs_took_shows_them_the_items(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        phone = _subscribe(container, fake_push_service, web_push_service, "ada")
+        fake_push_service.fail(phone.endpoint, "refused")
+        tent = _ask(container, project_id)
+
+        _reconcile(built, project_id)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == [
+            _push(container, project_id, "Which tent?", tent)
+        ]
+        assert _seen(container, project_id) == {tent}
+
+    def test_it_registers_no_timer(
+        self,
+        container: ServiceContainer,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """Nothing is retried (V14)."""
+        supervisor, _ = supervise(container)
+        pages = AppPageService(supervisor)
+
+        with patch.object(supervisor, "register_timer") as register_timer:
+            NotificationReconcileService(
+                container=container,
+                supervisor=supervisor,
+                engine_bus=EngineBus(),
+                app_page_service=pages,
+                web_push_service=web_push_service,
+            )
+
+        register_timer.assert_not_called()
 
 
 class TestNotificationReconcileServiceStartup:
-    def test_startup_reconciles_what_stands_is_owed_or_should_stand(
+    def test_startup_reconciles_every_project_that_may_push_or_forget(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
-        unsent = _project(container)
+        unpushed = _project(container)
         archived = _project(container, environment_id=None)
         left = _project(container, ("ada", "ben"), environment_id=None)
-        untouched = _project(container, ("ben",), environment_id=None)
-        tent = _bear(container, unsent, "decision", "Which tent?", DECISION)
+        untouched = _project(container, environment_id=None)
+        tent = _bear(container, unpushed, "decision", "Which tent?", DECISION)
         for project_id in (archived, left, untouched):
             _ask(container, project_id)
-        _give_token(container, "ada", ADA_TOKEN)
-        earlier, _, _ = _service(container, supervise)
+        earlier = _service(container, supervise, web_push_service)
         _reconcile(earlier, archived)
         _reconcile(earlier, left)
         # Committed, and the process stopped before their reconciles.
         _transition(container, archived, TransitionKind.ARCHIVED)
         _leave(container, "ada", left)
-        _, _, coordinator = _service(container, supervise)
+        _transition(container, untouched, TransitionKind.ARCHIVED)
+        later = _service(container, supervise, web_push_service)
 
-        coordinator.fire_startup()
+        _started(later, log, unpushed, archived, left)
 
-        for project_id in (unsent, archived, left):
-            log.wait_for(rf"Loop {NOTIFICATION_JOB}:{project_id} ended")
-        assert bridge.shown("ada") == {
-            str(unsent): FakeNotification(
-                sequence_id=str(unsent),
-                priority="high",
-                title="Camp",
-                message="Which tent?",
-                url=f"{_timeline(container, unsent)}/items/{tent}",
-                alerted=True,
-            )
-        }
-        assert log.matching(rf"Loop {NOTIFICATION_JOB}:{untouched} .*") == []
-
-    def test_at_the_deploy_what_waits_on_no_one_is_dismissed_and_the_rest_rewritten(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-        log: LogWaiter,
-    ) -> None:
-        """V12: the notifications the ladder left standing, at `min` with
-        nothing waiting and at `default` with an ask, as the release before
-        this one sent them and revision 0028 keeps them: their text and `url`,
-        their priority dropped."""
-        idle = _project(container, environment_id=None)
-        asking = _project(container, environment_id=None)
-        tent = _ask(container, asking)
-        _give_token(container, "ada", ADA_TOKEN)
-        client = container.notification_bridge_client()
-        stood: list[tuple[uuid.UUID, BridgePriority, str]] = [
-            (idle, "min", "Not started"),
-            (asking, "default", "Not started · Decision waiting: Which tent?"),
+        assert [push.tag for push in _pushes(fake_push_service, browsers["ada"])] == [
+            str(archived),
+            str(left),
+            str(unpushed),
         ]
-        for project_id, priority, text in stood:
-            url = _timeline(container, project_id)
-            client.submit(
-                ADA_TOKEN,
-                str(project_id),
-                message=text,
-                title="Camp",
-                priority=priority,
-                url=url,
-            )
-            with scoped_session(container) as db:
-                membership = db.scalars(
-                    select(ProjectMember).where(ProjectMember.project_id == project_id)
-                ).one()
-                membership.notification_text = text
-                membership.notification_url = url
-                membership.notification_sent_at = datetime.now(UTC)
-        _, _, coordinator = _service(container, supervise)
-
-        coordinator.fire_startup()
-
-        for project_id in (idle, asking):
-            log.wait_for(rf"Loop {NOTIFICATION_JOB}:{project_id} ended")
-        assert bridge.shown("ada") == {
-            str(asking): FakeNotification(
-                sequence_id=str(asking),
-                priority="high",
-                title="Camp",
-                message="Which tent?",
-                url=f"{_timeline(container, asking)}/items/{tent}",
-                alerted=False,
-            )
-        }
-        assert _last_sent(container, idle) == (None, None)
-        assert _last_sent(container, asking) == (
-            "Which tent?",
-            f"{_timeline(container, asking)}/items/{tent}",
-        )
+        assert _seen(container, unpushed) == {tent}
+        assert _seen(container, archived) == _seen(container, left) == set()
+        assert log.matching(rf"Loop {NOTIFICATION_JOB}:{untouched} .*") == []
 
 
 class TestNotificationReconcileServiceSpacing:
-    def test_a_persons_sends_are_two_seconds_apart(
+    def test_a_members_pushes_are_two_seconds_apart(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
-        """V05: the window the service keeps of its own runs two seconds from
-        the person's last send."""
+        """V11: the window the service keeps of its own runs two seconds from
+        the member's last push."""
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise, spacing_seconds=None)
+        built = _service(container, supervise, web_push_service, spacing_seconds=None)
         _ask(container, project_id)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
         last = _sent_at(container, project_id)
+        assert last is not None
         _ask(container, project_id, "Which site?")
         entered: list[datetime] = []
 
@@ -976,7 +1122,7 @@ class TestNotificationReconcileServiceSpacing:
 
         handle = _Window(stop)
         before = datetime.now(UTC)
-        service.reconcile(project_id, handle)
+        built.service.reconcile(project_id, handle)
 
         window_end = last + timedelta(seconds=2)
         [asked] = handle.asked
@@ -985,239 +1131,256 @@ class TestNotificationReconcileServiceSpacing:
             <= asked
             <= (window_end - before).total_seconds()
         )
-        assert len(bridge.calls("ada")) == 1
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
 
     def test_a_change_inside_the_window_goes_out_at_its_end_the_latest_state(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
-        """V05: two changes inside the window come to one send at its end,
+        """V11: two changes inside the window come to one push at its end,
         the latest; the wait holds no turn and no database connection."""
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        built = _service(
+            container, supervise, web_push_service, spacing_seconds=SPACING
+        )
         _ask(container, project_id)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
         first = _sent_at(container, project_id)
+        assert first is not None
         _ask(container, project_id, "Which site?")
-        deferred = _reconciles("deferred")
         during: list[tuple[int, int, bool]] = []
 
         def in_the_window(waits: int) -> None:
             during.append(
                 (
                     _checked_out(container),
-                    len(bridge.calls("ada")),
+                    len(_pushes(fake_push_service, browsers["ada"])),
                     _turn_free(container, project_id),
                 )
             )
             if waits == 1:
                 _ask(container, project_id, "Which stove?")
 
-        service.reconcile(project_id, _Window(in_the_window))
+        built.service.reconcile(project_id, _Window(in_the_window))
 
         assert during[0] == (0, 1, True)
-        assert [call.alerted for call in bridge.calls("ada")] == [True, False]
-        assert _shown(bridge, project_id).message == "Which stove?, +2"
-        assert _sent_at(container, project_id) - first >= timedelta(seconds=SPACING)
-        assert _reconciles("deferred") >= deferred + 1
+        assert [
+            (push.body, push.renotify)
+            for push in _pushes(fake_push_service, browsers["ada"])
+        ] == [("Which tent?", True), ("Which stove?, +2", True)]
+        last = _sent_at(container, project_id)
+        assert last is not None and last - first >= timedelta(seconds=SPACING)
 
-    def test_a_change_undone_inside_the_window_sends_nothing(
+    def test_a_change_undone_inside_the_window_pushes_nothing(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        built = _service(
+            container, supervise, web_push_service, spacing_seconds=SPACING
+        )
         _ask(container, project_id)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
         site = _bear(container, project_id, "decision", "Which site?", DECISION)
-        unchanged = _reconciles("unchanged")
 
         def answer(waits: int) -> None:
             if waits == 1:
                 _answer(container, "ada", site, "Dome")
 
-        service.reconcile(project_id, _Window(answer))
+        built.service.reconcile(project_id, _Window(answer))
 
-        assert bridge.calls("ada") == [FakeCall("submit", str(project_id), True)]
-        assert _shown(bridge, project_id).message == "Which tent?"
-        assert _reconciles("unchanged") == unchanged + 1
+        assert [push.body for push in _pushes(fake_push_service, browsers["ada"])] == [
+            "Which tent?"
+        ]
 
     def test_a_window_is_one_persons_in_one_project(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
-        """V05: Ada's window in Camp holds neither Ben's send in it nor hers in
-        another project."""
+        """V11: Ada's window in Camp holds neither Ben's push in it nor hers
+        in another project."""
         camp = _project(container, ("ada", "ben"))
         lake = _project(container, environment_id=None)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        ada = _subscribe(container, fake_push_service, web_push_service, "ada")
+        built = _service(
+            container, supervise, web_push_service, spacing_seconds=SPACING
+        )
         _ask(container, camp)
-        _reconcile(service, camp)
-        _give_token(container, "ben", BEN_TOKEN)
+        _reconcile(built, camp)
+        ben = _subscribe(container, fake_push_service, web_push_service, "ben")
         _ask(container, camp, "Which site?")
         _ask(container, lake, "Which lake?")
         during: list[tuple[int, int]] = []
 
         def in_the_window(waits: int) -> None:
             if waits == 1:
-                _reconcile(service, lake)
-                during.append((len(bridge.calls("ada")), len(bridge.calls("ben"))))
+                _reconcile(built, lake)
+                during.append(
+                    (
+                        len(_pushes(fake_push_service, ada)),
+                        len(_pushes(fake_push_service, ben)),
+                    )
+                )
 
-        service.reconcile(camp, _Window(in_the_window))
+        built.service.reconcile(camp, _Window(in_the_window))
 
         assert during == [(2, 1)]
-        assert _shown(bridge, lake).message == "Which lake?"
-        assert _shown(bridge, camp, "ben").message == "Which site?, +1"
-        assert _shown(bridge, camp).message == "Which site?, +1"
-        assert len(bridge.calls("ada")) == 3
+        assert [(push.tag, push.body) for push in _pushes(fake_push_service, ada)] == [
+            (str(camp), "Which tent?"),
+            (str(lake), "Which lake?"),
+            (str(camp), "Which site?, +1"),
+        ]
+        assert [push.body for push in _pushes(fake_push_service, ben)] == [
+            "Which site?, +1"
+        ]
 
-    def test_a_rejoin_waits_for_the_window_of_the_dismiss_its_leave_sent(
+    def test_a_rejoin_waits_for_the_window_of_the_push_before_its_leave(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container, ("ada", "ben"))
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        built = _service(
+            container, supervise, web_push_service, spacing_seconds=SPACING
+        )
         _ask(container, project_id)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
         _leave(container, "ada", project_id)
-        _reconcile(service, project_id)
+        _reconcile(built, project_id)
         _join(container, "ada", project_id)
-        calls: list[int] = []
+        pushed: list[int] = []
 
         def in_the_window(waits: int) -> None:
-            calls.append(len(bridge.calls("ada")))
+            pushed.append(len(_pushes(fake_push_service, browsers["ada"])))
 
-        handle = _Window(in_the_window)
-        service.reconcile(project_id, handle)
+        built.service.reconcile(project_id, _Window(in_the_window))
 
-        assert [call.call for call in bridge.calls("ada")] == [
-            "submit",
-            "dismiss",
-            "submit",
-        ]
-        assert calls[0] == 2
-        assert _shown(bridge, project_id).message == "Which tent?"
+        assert pushed[0] == 1
+        assert [push.body for push in _pushes(fake_push_service, browsers["ada"])] == [
+            "Which tent?"
+        ] * 2
 
-    def test_a_stop_during_the_wait_leaves_the_send_owed_for_the_process_that_runs_on(
+    def test_a_stop_during_the_wait_pushes_nothing_and_leaves_it_to_the_next_run(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
-        """V05: a roll's old process drained inside the window sends nothing
-        and leaves the send owed; the new one's retry timer sends the latest
-        state."""
+        """V11: a roll's old process drained inside the window pushes
+        nothing; what it held is unshown in the record, which the new one's
+        next reconcile of the member pushes."""
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        old, _, _ = _service(container, supervise, spacing_seconds=SPACING)
-        new, new_supervisor, _ = _service(
-            container, supervise, retry_seconds=0, spacing_seconds=SPACING
-        )
+        old = _service(container, supervise, web_push_service, spacing_seconds=SPACING)
+        new = _service(container, supervise, web_push_service)
         _ask(container, project_id)
         _reconcile(old, project_id)
         _ask(container, project_id, "Which site?")
         handle = _Window(lambda waits: handle._request_stop())
 
-        old.reconcile(project_id, handle)
+        old.service.reconcile(project_id, handle)
 
         assert len(handle.asked) == 1
-        assert len(bridge.calls("ada")) == 1
-        assert _owed(container, project_id)
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
         log.wait_for(
-            rf"The submit of project {project_id}'s notification to ada is owed: "
-            "the run stopped before it went out"
+            rf"The push of project {project_id}'s notification to "
+            rf"{_person_id(container, 'ada')} is left to their next reconcile: the "
+            "run stopped inside its window"
         )
-        with patch.object(
-            new_supervisor, "start_loop", wraps=new_supervisor.start_loop
-        ) as start:
-            with scoped_session(container) as db:
-                new.retry(db)
-        assert [(call.args[0], call.kwargs) for call in start.call_args_list] == [
-            (NOTIFICATION_JOB, {"key": str(project_id), "again": False})
-        ]
+
         _reconcile(new, project_id)
 
-        assert [call.alerted for call in bridge.calls("ada")] == [True, False]
-        assert _shown(bridge, project_id).message == "Which site?, +1"
-        assert not _owed(container, project_id)
+        assert [
+            (push.body, push.renotify)
+            for push in _pushes(fake_push_service, browsers["ada"])
+        ][1:] == [("Which site?, +1", True)]
 
-    def test_a_stop_before_a_persons_compare_leaves_their_send_owed(
+    def test_a_stop_before_a_persons_compare_pushes_nothing(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        built = _service(container, supervise, web_push_service)
         _ask(container, project_id)
         handle = LoopHandle("test")
         handle._request_stop()
 
-        service.reconcile(project_id, handle)
+        built.service.reconcile(project_id, handle)
 
-        assert bridge.calls("ada") == []
-        assert _owed(container, project_id)
-        assert _last_sent(container, project_id) == (None, None)
+        assert _pushes(fake_push_service, browsers["ada"]) == []
+        assert _seen(container, project_id) == set()
 
-    def test_two_processes_keep_one_window_and_send_once_at_its_end(
+    def test_two_processes_keep_one_window_and_push_once_at_its_end(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
-        """V05: the new process, which sent nothing yet, keeps the window of
-        the old one's send, and of the two reconciles inside it one sends."""
+        """V11: the new process, which pushed nothing yet, keeps the window
+        of the old one's push, and of the two reconciles inside it one
+        pushes."""
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        old, _, _ = _service(container, supervise, spacing_seconds=SPACING)
-        new, _, _ = _service(container, supervise, spacing_seconds=SPACING)
+        old = _service(container, supervise, web_push_service, spacing_seconds=SPACING)
+        new = _service(container, supervise, web_push_service, spacing_seconds=SPACING)
         _ask(container, project_id)
         _reconcile(old, project_id)
         first = _sent_at(container, project_id)
+        assert first is not None
         _ask(container, project_id, "Which site?")
         during: list[int] = []
 
         def old_reconciles_too(waits: int) -> None:
-            during.append(len(bridge.calls("ada")))
+            during.append(len(_pushes(fake_push_service, browsers["ada"])))
             if waits == 1:
                 _ask(container, project_id, "Which stove?")
                 _reconcile(old, project_id)
 
-        new.reconcile(project_id, _Window(old_reconciles_too))
+        new.service.reconcile(project_id, _Window(old_reconciles_too))
 
         assert during[0] == 1
-        assert [call.call for call in bridge.calls("ada")] == ["submit"] * 2
-        assert _shown(bridge, project_id).message == "Which stove?, +2"
-        assert _sent_at(container, project_id) - first >= timedelta(seconds=SPACING)
+        assert [push.body for push in _pushes(fake_push_service, browsers["ada"])] == [
+            "Which tent?",
+            "Which stove?, +2",
+        ]
+        last = _sent_at(container, project_id)
+        assert last is not None and last - first >= timedelta(seconds=SPACING)
 
 
 class TestNotificationReconcileServiceBus:
     def test_a_project_changed_asks_for_its_reconcile_and_a_work_moved_alone_not(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         bus = EngineBus()
-        _, supervisor, _ = _service(container, supervise, engine_bus=bus)
+        built = _service(container, supervise, web_push_service, engine_bus=bus)
         project_id, work_id = uuid.uuid4(), uuid.uuid4()
 
         with patch.object(
-            supervisor, "start_loop", wraps=supervisor.start_loop
+            built.supervisor, "start_loop", wraps=built.supervisor.start_loop
         ) as start:
             with scoped_session(container):
                 bus.emit(WorkMoved(project_id, work_id))
@@ -1231,48 +1394,51 @@ class TestNotificationReconcileServiceBus:
     def test_a_commit_is_reconciled_off_its_thread(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        _, _, coordinator = _service(
-            container, supervise, engine_bus=container.engine_bus()
+        built = _service(
+            container, supervise, web_push_service, engine_bus=container.engine_bus()
         )
-        coordinator.fire_startup()
-        log.wait_for(rf"Loop {NOTIFICATION_JOB}:{project_id} ended")
-        bridge.unreachable(answer="stall")
+        _started(built, log, project_id)
+        released = threading.Event()
+        fake_push_service.on_push = lambda: released.wait(WAIT_SECONDS)
 
-        # The commit returns while the bridge holds the reconcile's call.
+        # The commit returns while the push service holds the reconcile's push.
         item_id = _bear(container, project_id, "decision", "Which tent?", DECISION)
 
         log.wait_for(rf"Loop {NOTIFICATION_JOB}:{project_id} started", 2)
-        bridge.unreachable(on=False)
+        released.set()
         log.wait_for(rf"Loop {NOTIFICATION_JOB}:{project_id} ended", 2)
-        assert _shown(bridge, project_id).url.endswith(f"/items/{item_id}")
+        [push] = _pushes(fake_push_service, browsers["ada"])
+        assert push.url.endswith(f"/items/{item_id}")
 
 
 class TestNotificationReconcileServiceProgress:
-    def test_a_change_of_a_work_items_steps_sends_nothing(
+    def test_a_change_of_a_work_items_steps_pushes_nothing(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         """F145.4, R7: the notification never names a work item's progress,
-        so a change of it, heard on the bus and reconciled after, sends
-        nothing. A question waits on Ada, so that her notification stands."""
+        so a change of it, heard on the bus and reconciled after, pushes
+        nothing. A question waits on Ada, so that something is pushed."""
         project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
         _bear(container, project_id, "question", "Your boots?", QUESTION)
-        worker = _running_work(container, project_id)
-        service, _, _ = _service(
-            container, supervise, engine_bus=container.engine_bus()
+        worker = _work(container, project_id)
+        built = _service(
+            container, supervise, web_push_service, engine_bus=container.engine_bus()
         )
-        _reconcile(service, project_id)
-        standing = bridge.calls("ada")
-        assert standing != []
+        _reconcile(built, project_id)
+        pushed = _pushes(fake_push_service, browsers["ada"])
+        assert pushed != []
         lists = [
             [
                 ProgressStepRequestSchema(
@@ -1294,338 +1460,41 @@ class TestNotificationReconcileServiceProgress:
         for steps in lists:
             with scoped_session(container):
                 container.pilot_work_service().set_progress(worker, steps)
-            _reconcile(service, project_id)
+            _reconcile(built, project_id)
 
-        assert bridge.calls("ada") == standing
+        assert _pushes(fake_push_service, browsers["ada"]) == pushed
 
 
-class TestNotificationReconcileServiceSubmitAll:
-    def test_a_token_set_submits_the_current_state_whatever_was_last_sent(
+class TestNotificationReconcileServiceTwoProcesses:
+    def test_two_processes_take_turns_and_push_the_member_once_each_change(
         self,
         container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
         project_id = _project(container)
-        archived = _project(container, environment_id=None)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        _ask(container, archived)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
-        _reconcile(service, archived)
-        _transition(container, archived, TransitionKind.ARCHIVED)
-        bridge.rotate_token("ada", "token-of-ada-rotated")
-
-        _set(container, service, "ada", "token-of-ada-rotated")
-
-        assert _last_sent(container, project_id) == (None, None)
-        # An archived project's is left to its reconcile, through the token.
-        assert _last_sent(container, archived)[0] is not None
-        _reconcile(service, project_id)
-        _reconcile(service, archived)
-        assert [call.call for call in bridge.calls("ada")] == [
-            "submit",
-            "submit",
-            "submit",
-            "dismiss",
-        ]
-        assert set(bridge.shown("ada")) == {str(project_id)}
-        assert _last_sent(container, project_id)[0] is not None
-
-    def test_its_reconciles_are_asked_for_once_it_commits(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-        log: LogWaiter,
-    ) -> None:
-        project_id = _project(container)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, coordinator = _service(container, supervise)
-        coordinator.fire_startup()
-
-        _set(container, service, "ada", ADA_TOKEN)
-
-        log.wait_for(rf"Loop {NOTIFICATION_JOB}:{project_id} ended")
-        assert _shown(bridge, project_id).message == "Which tent?"
-
-
-class TestNotificationReconcileServiceDismissAll:
-    def test_a_clear_reads_dismissed_at_once_and_is_dismissed_once_off_the_request(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-        log: LogWaiter,
-    ) -> None:
-        standing = _project(container, environment_id=None)
-        owed = _project(container, environment_id=None)
-        _ask(container, standing)
-        _ask(container, owed)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, coordinator = _service(container, supervise)
-        _reconcile(service, standing)
-        bridge.unreachable()
-        _reconcile(service, owed)
-        bridge.unreachable(on=False)
-        sent = _clear_dismisses("sent")
-
-        _clear(container, service, "ada")
-
-        for project_id in (standing, owed):
-            assert _last_sent(container, project_id) == (None, None)
-            assert not _owed(container, project_id)
-        coordinator.fire_startup()
-        log.wait_for(rf"Loop {NOTIFICATION_CLEAR_JOB}:1 ended")
-        assert bridge.shown("ada") == {}
-        assert sorted(call.sequence_id or "" for call in bridge.calls("ada")[1:]) == (
-            sorted([str(standing), str(owed)])
-        )
-        assert _clear_dismisses("sent") == sent + 2
-
-    def test_a_dismiss_the_bridge_does_not_take_is_logged_counted_and_not_owed(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-        log: LogWaiter,
-    ) -> None:
-        project_id = _project(container, environment_id=None)
+        old = _service(container, supervise, web_push_service)
+        new = _service(container, supervise, web_push_service)
         _ask(container, project_id)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
-        unanswered = _clear_dismisses("unanswered")
-        bridge.unreachable()
-        _clear(container, service, "ada")
-
-        service.dismiss_cleared(
-            _memberships(container, project_id)[0].user_id,
-            ADA_TOKEN,
-            (project_id,),
-            LoopHandle("clear"),
-        )
-
-        log.wait_for(
-            rf"The dismiss of project {project_id}'s notification to ada after their"
-            r" token's clear failed, and it stays on the phone: .*"
-        )
-        assert _clear_dismisses("unanswered") == unanswered + 1
-        assert not _owed(container, project_id)
-        bridge.unreachable(on=False)
-        assert set(bridge.shown("ada")) == {str(project_id)}
-
-    def test_the_same_token_set_again_is_not_dismissed(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-        log: LogWaiter,
-    ) -> None:
-        project_id = _project(container, environment_id=None)
-        _ask(container, project_id)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
-        _clear(container, service, "ada")
-        _set(container, service, "ada", ADA_TOKEN)
-        _reconcile(service, project_id)
-
-        service.dismiss_cleared(
-            _memberships(container, project_id)[0].user_id,
-            ADA_TOKEN,
-            (project_id,),
-            LoopHandle("clear"),
-        )
-
-        assert [call.call for call in bridge.calls("ada")] == ["submit", "submit"]
-        assert set(bridge.shown("ada")) == {str(project_id)}
-        log.wait_for(
-            "ada holds the token they cleared again: project"
-            rf" {project_id}'s notification is not dismissed"
-        )
-
-    def test_with_no_bridge_the_record_alone_moves(
-        self, container: ServiceContainer, supervise: Supervise
-    ) -> None:
-        project_id = _project(container, environment_id=None)
-        _give_token(container, "ada", ADA_TOKEN)
-        with scoped_session(container) as db:
-            membership = db.scalars(
-                select(ProjectMember).where(ProjectMember.project_id == project_id)
-            ).one()
-            membership.notification_text = "Which tent?"
-            membership.notification_url = _timeline(container, project_id)
-            membership.notification_sent_at = datetime.now(UTC)
-        service, supervisor, _ = _service(container, supervise, configured=False)
-
-        with patch.object(
-            supervisor, "start_loop", wraps=supervisor.start_loop
-        ) as start:
-            _clear(container, service, "ada")
-            _set(container, service, "ada", ADA_TOKEN)
-
-        start.assert_not_called()
-        assert _last_sent(container, project_id) == (None, None)
-
-
-class TestNotificationReconcileServiceInFlight:
-    def test_a_clear_during_a_first_submit_is_followed_by_its_dismiss(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-    ) -> None:
-        project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-        superseded, sent = _reconciles("superseded"), _clear_dismisses("sent")
-        bridge.on_submit = lambda: _clear(container, service, "ada")
-
-        _reconcile(service, project_id)
-
-        assert bridge.calls("ada") == [
-            FakeCall("submit", str(project_id), True),
-            FakeCall("dismiss", str(project_id), False),
-        ]
-        assert bridge.shown("ada") == {}
-        assert _last_sent(container, project_id) == (None, None)
-        assert not _owed(container, project_id)
-        assert _reconciles("superseded") == superseded + 1
-        assert _clear_dismisses("sent") == sent + 1
-
-    def test_a_clears_dismiss_waits_for_a_submit_in_flight(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-    ) -> None:
-        project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-        _reconcile(service, project_id)
-        _bear(container, project_id, "decision", "Which site?", DECISION)
-        person_id = _memberships(container, project_id)[0].user_id
-        clears = []
-
-        def clear() -> None:
-            _clear(container, service, "ada")
-            clears.append(
-                in_thread(
-                    lambda: service.dismiss_cleared(
-                        person_id, ADA_TOKEN, (project_id,), LoopHandle("clear")
-                    )
-                )
-            )
-            wait_until(lambda: lock_waits(container) == 1, "the dismiss waiting")
-
-        bridge.on_submit = clear
-
-        _reconcile(service, project_id)
-        clears[0].result()
-
-        assert [call.call for call in bridge.calls("ada")] == [
-            "submit",
-            "submit",
-            "dismiss",
-            "dismiss",
-        ]
-        assert bridge.shown("ada") == {}
-        assert _last_sent(container, project_id) == (None, None)
-
-    @pytest.mark.parametrize("answered", [True, False])
-    def test_a_clear_committing_during_the_write_back_reads_what_it_wrote(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-        log: LogWaiter,
-        answered: bool,
-    ) -> None:
-        project_id = _project(container, environment_id=None)
-        _ask(container, project_id)
-        _give_token(container, "ada", ADA_TOKEN)
-        service, _, coordinator = _service(container, supervise)
-        if not answered:
-            bridge.unreachable()
-        take = service._take
-        clears = []
-
-        def take_then_clear(*args: Any) -> bool:
-            cleared: bool = take(*args)
-            container.db_session().flush()
-            clears.append(in_thread(lambda: _clear(container, service, "ada")))
-            wait_until(
-                lambda: not clears[0].thread.is_alive() or lock_waits(container) == 1,
-                "the clear committed or waiting",
-            )
-            return cleared
-
-        with patch.object(service, "_take", side_effect=take_then_clear):
-            _reconcile(service, project_id)
-        clears[0].result()
-
-        assert _last_sent(container, project_id) == (None, None)
-        assert not _owed(container, project_id)
-        _reconcile(service, project_id)
-        bridge.unreachable(on=False)
-        coordinator.fire_startup()
-        log.wait_for(rf"Loop {NOTIFICATION_CLEAR_JOB}:1 ended")
-        assert bridge.shown("ada") == {}
-        assert [call.call for call in bridge.calls("ada")][-1] == "dismiss"
-
-    def test_a_replace_during_a_submit_is_resubmitted_through_the_new_token(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-    ) -> None:
-        project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
-        service, _, _ = _service(container, supervise)
-
-        def replace() -> None:
-            bridge.rotate_token("ada", "token-of-ada-rotated")
-            _set(container, service, "ada", "token-of-ada-rotated")
-
-        bridge.on_submit = replace
-
-        _reconcile(service, project_id)
-        assert _last_sent(container, project_id) == (None, None)
-        _reconcile(service, project_id)
-
-        assert [call.call for call in bridge.calls("ada")] == ["submit", "submit"]
-        assert _last_sent(container, project_id)[0] is not None
-
-    def test_two_processes_take_turns_and_the_phone_ends_on_the_latest_state(
-        self,
-        container: ServiceContainer,
-        bridge: WatchedFakeNotificationBridge,
-        supervise: Supervise,
-    ) -> None:
-        project_id = _project(container)
-        _give_token(container, "ada", ADA_TOKEN)
-        old, _, _ = _service(container, supervise)
-        new, _, _ = _service(container, supervise)
-        _bear(container, project_id, "decision", "Which tent?", DECISION)
         _reconcile(old, project_id)
-        _bear(container, project_id, "decision", "Which site?", DECISION)
+        _ask(container, project_id, "Which site?")
         turns = []
 
         def change_and_reconcile_in_the_other() -> None:
-            _bear(container, project_id, "decision", "Which stove?", DECISION)
+            _ask(container, project_id, "Which stove?")
             turns.append(in_thread(lambda: _reconcile(new, project_id)))
             wait_until(lambda: lock_waits(container) == 1, "the other's turn waiting")
 
-        bridge.on_submit = change_and_reconcile_in_the_other
+        fake_push_service.on_push = change_and_reconcile_in_the_other
 
         _reconcile(old, project_id)
         turns[0].result()
 
-        assert [call.call for call in bridge.calls("ada")] == ["submit"] * 3
-        assert _shown(bridge, project_id).message == "Which stove?, +2"
-        assert _last_sent(container, project_id)[0] == "Which stove?, +2"
+        assert [push.body for push in _pushes(fake_push_service, browsers["ada"])] == [
+            "Which tent?",
+            "Which site?, +1",
+            "Which stove?, +2",
+        ]
+        assert len(_seen(container, project_id)) == 3

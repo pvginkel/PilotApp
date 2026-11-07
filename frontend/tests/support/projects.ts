@@ -33,6 +33,7 @@ type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.Proje
 type ProjectHead = components['schemas']['ProjectHeadSchema.e86ccd6'];
 type TransitionKind = components['schemas']['TransitionRequestSchema.e86ccd6']['kind'];
 type ItemSpec = components['schemas']['InventedItemCreateSchema.6d6b324'];
+type Sightings = components['schemas']['InventedSightingsSchema.6d6b324'];
 type Save = components['schemas']['InventedSaveSchema.6d6b324'];
 type InventedFile = components['schemas']['InventedAttachmentsCreateSchema.6d6b324.InventedFileSchema'];
 /** A file to attach, its bytes as they are. */
@@ -106,6 +107,16 @@ export class Projects {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/items`, { data: spec });
     expect(response.status(), await response.text()).toBe(201);
     return ((await response.json()) as { id: string }).id;
+  }
+
+  /**
+   * The items the person's membership of the project was shown, in the order of their ids: what the
+   * notification's reconcile wrote, off the request that showed them.
+   */
+  async sightings(projectId: string, handle: string): Promise<string[]> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/testing/projects/${projectId}/sightings`, { params: { handle } });
+    expect(response.status(), await response.text()).toBe(200);
+    return ((await response.json()) as Sightings).item_ids;
   }
 
   /** A save of the item's text by the project's session: held for a fault, or published. */

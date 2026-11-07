@@ -44,6 +44,7 @@ from app.models import (
     Document,
     Environment,
     Item,
+    ItemSighting,
     PlanNote,
     PlanTask,
     ProgressStep,
@@ -741,6 +742,34 @@ class TestDataService:
             else self._session_of(project, f"add an item to project {project.id}")
         )
         return self.document_service.bear_item(project, kind, title, session, text)
+
+    def sightings(self, project_id: uuid.UUID, handle: str) -> list[uuid.UUID]:
+        """The items the person's open membership of the project was shown,
+        in the order of their ids.
+
+        Raises:
+            RecordNotFoundException: No person has the handle, or none of
+                theirs is an open membership of the project.
+        """
+        person = self._invented_member(handle)
+        member_id = self.db.scalar(
+            select(ProjectMember.id).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == person.id,
+                ProjectMember.left_at.is_(None),
+            )
+        )
+        if member_id is None:
+            raise RecordNotFoundException(
+                "Project membership", f"{handle} in {project_id}"
+            )
+        return list(
+            self.db.scalars(
+                select(ItemSighting.item_id)
+                .where(ItemSighting.member_id == member_id)
+                .order_by(ItemSighting.item_id)
+            )
+        )
 
     def save(self, item_id: uuid.UUID, text: str) -> Ingested:
         """An agent's save of the item's file by the project's session in its

@@ -2119,6 +2119,43 @@
         "title": "InventedFaultSchema",
         "type": "object"
       },
+      "InventedSightingsQuerySchema.6d6b324": {
+        "description": "Whose sightings in the project are read.",
+        "properties": {
+          "handle": {
+            "description": "The person's handle",
+            "examples": [
+              "ada"
+            ],
+            "title": "Handle",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle"
+        ],
+        "title": "InventedSightingsQuerySchema",
+        "type": "object"
+      },
+      "InventedSightingsSchema.6d6b324": {
+        "description": "What a person's open membership of a project was shown (DB Item\nSighting).",
+        "properties": {
+          "item_ids": {
+            "description": "The items they were shown, in the order of their ids",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Item Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "item_ids"
+        ],
+        "title": "InventedSightingsSchema",
+        "type": "object"
+      },
       "InventedStoreUpdateCreateSchema.6d6b324": {
         "description": "A store's update made, as `update-store` makes one, or the unlifted\none's lift asked, as its `--lift` does.",
         "properties": {
@@ -12579,7 +12616,7 @@
     },
     "/api/people/self/notification-token": {
       "delete": {
-        "description": "Each of their standing notifications is dismissed through the token cleared, tried once, after the answer; what the bridge does not take stays on the phone.\n\nReturns:     200: The person, with no token set     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle, or the app's key does not         open their token",
+        "description": "Returns:     200: The person, with no token set     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle, or the app's key does not         open their token",
         "operationId": "delete__api_people_self_notification-token",
         "parameters": [],
         "responses": {
@@ -16852,6 +16889,78 @@
           }
         ],
         "summary": "Add a prose item to the project's timeline, by the project's session, or by a job of Pilot's own, as Pilot adds one: its kind, urgency, person, step and blocks, Pilot's answers and deferrals among them, are what its text says.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/sightings": {
+      "get": {
+        "description": "Returns:     200: The items' ids     400: No handle is given, or the stage is prd     404: No person has the handle, or they are no member of the project",
+        "operationId": "get__api_testing_projects_{project_id}_sightings",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The person's handle",
+            "in": "query",
+            "name": "handle",
+            "required": true,
+            "schema": {
+              "description": "The person's handle",
+              "examples": [
+                "ada"
+              ],
+              "title": "Handle",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedSightingsSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "What the person's open membership of the project was shown (DB Item Sighting): written by the notification's reconcile, off the request, after the commit or the page's beat that showed it, so that a spec waits on it before acting on it.",
         "tags": [],
         "x-required-role": "editor"
       }

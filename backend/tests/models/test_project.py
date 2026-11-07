@@ -138,100 +138,33 @@ class TestProjectMember:
         ).all()
         assert sorted(memberships, key=lambda left_at: left_at is None) == [left, None]
 
-    def test_a_standing_notification_is_written(
+    def test_when_the_last_push_went_out_is_kept(
         self, session: Session, project: Project, person: User
     ) -> None:
-        sent = datetime(2026, 10, 14, 15, 5, tzinfo=UTC)
+        pushed = datetime(2026, 10, 14, 15, 5, tzinfo=UTC)
         member = ProjectMember(
             project_id=project.id,
             user_id=person.id,
-            joined_at=sent,
-            notification_text="Pick the name, +1",
-            notification_url=f"https://pilot.example.com/projects/{project.id}",
-            notification_sent_at=sent,
+            joined_at=pushed,
+            notification_sent_at=pushed,
         )
         session.add(member)
         session.flush()
         session.refresh(member)
 
-        assert member.notification_text == "Pick the name, +1"
-        assert member.notification_owed_at is None
+        assert member.notification_sent_at == pushed
 
-    def test_a_dismissed_notification_keeps_when_it_went_out(
+    def test_a_new_membership_has_pushed_nothing(
         self, session: Session, project: Project, person: User
     ) -> None:
-        dismissed = datetime(2026, 10, 12, 11, 52, tzinfo=UTC)
         member = ProjectMember(
-            project_id=project.id,
-            user_id=person.id,
-            joined_at=dismissed,
-            left_at=dismissed,
-            notification_sent_at=dismissed,
+            project_id=project.id, user_id=person.id, joined_at=datetime.now(UTC)
         )
         session.add(member)
         session.flush()
         session.refresh(member)
 
-        assert (member.notification_text, member.notification_sent_at) == (
-            None,
-            dismissed,
-        )
-
-    def test_a_submit_never_sent_is_owed(
-        self, session: Session, project: Project, person: User
-    ) -> None:
-        owed = datetime(2026, 10, 14, 15, 5, tzinfo=UTC)
-        member = ProjectMember(
-            project_id=project.id,
-            user_id=person.id,
-            joined_at=owed,
-            notification_owed_at=owed,
-        )
-        session.add(member)
-        session.flush()
-
-        assert (member.notification_sent_at, member.notification_owed_at) == (
-            None,
-            owed,
-        )
-
-    # Each leaves one of the two out of a standing notification.
-    @pytest.mark.parametrize("missing", ["notification_text", "notification_url"])
-    def test_a_standing_notification_has_its_text_and_url(
-        self, session: Session, project: Project, person: User, missing: str
-    ) -> None:
-        sent = datetime(2026, 10, 14, 15, 5, tzinfo=UTC)
-        values: dict[str, object] = {
-            "notification_text": "Pick the name",
-            "notification_url": f"https://pilot.example.com/projects/{project.id}",
-        }
-        del values[missing]
-        session.add(
-            ProjectMember(
-                project_id=project.id,
-                user_id=person.id,
-                joined_at=sent,
-                notification_sent_at=sent,
-                **values,
-            )
-        )
-
-        assert violated_constraint(session) == "ck_project_members_notification"
-
-    def test_a_standing_notification_was_sent(
-        self, session: Session, project: Project, person: User
-    ) -> None:
-        session.add(
-            ProjectMember(
-                project_id=project.id,
-                user_id=person.id,
-                joined_at=datetime(2026, 10, 14, 15, 5, tzinfo=UTC),
-                notification_text="Pick the name",
-                notification_url=f"https://pilot.example.com/projects/{project.id}",
-            )
-        )
-
-        assert violated_constraint(session) == "ck_project_members_notification_sent"
+        assert member.notification_sent_at is None
 
 
 class TestProjectTransition:

@@ -676,7 +676,7 @@ class TestACancel:
 
 class TestWhatWaits:
     """`waiting()` leaves out every item that is Pilot's, so that the badge,
-    the project's status and the standing notification follow it, live
+    the project's status and the project's notification follow it, live
     (F94.5, F1.4; DB 225)."""
 
     ADA = AuthContext(
@@ -686,8 +686,8 @@ class TestWhatWaits:
     def _waits(
         self, camp: Camp, person: User
     ) -> tuple[Badge | None, ProjectStatus | None, bool]:
-        """The badge, the project's status and whether the standing
-        notification stands, as Ada reads them."""
+        """The badge, the project's status and whether Ada should see the
+        project's notification."""
         badge = camp.container.timeline_service().badges(person, [camp.project.id])
         status = next(
             tab.status
@@ -708,9 +708,6 @@ class TestWhatWaits:
     def test_a_document_under_its_pass_waits_once_the_pass_ends(
         self, camp: Camp, person: User, engine_events: list[EngineEvent]
     ) -> None:
-        person.notification_token = camp.container.notification_token_cipher().seal(
-            "token-of-ada"
-        )
         run = camp.worker()
         camp.registered(run, QUESTION)
         camp.ended(run)
@@ -736,9 +733,6 @@ class TestWhatWaits:
     def test_a_document_read_waits_on_no_one_until_its_runs_last_read_and_pass(
         self, camp: Camp, person: User
     ) -> None:
-        person.notification_token = camp.container.notification_token_cipher().seal(
-            "token-of-ada"
-        )
         run = camp.worker()
         first = camp.registered(run, read=False)
         second = camp.registered(run, read=False)
@@ -769,9 +763,6 @@ class TestWhatWaits:
     def test_a_document_held_by_a_queued_work_item_waits_once_it_fails(
         self, camp: Camp, person: User
     ) -> None:
-        person.notification_token = camp.container.notification_token_cipher().seal(
-            "token-of-ada"
-        )
         writer = camp.worker()
         cut_over = camp.registered(writer, CLAIMED)
         camp.ended(writer)

@@ -26,6 +26,17 @@ interface SubscriptionJson {
   keys: { p256dh: string; auth: string };
 }
 
+/** A push the browser's push service took, as the fake keeps it: its payload and its headers. */
+export interface TakenPush {
+  title: string;
+  body: string;
+  tag: string;
+  url: string;
+  renotify: boolean;
+  urgency: string;
+  ttl: number;
+}
+
 const SUBSCRIBE = '__playwrightPushSubscribe';
 const PERMISSION = 'playwright.push.permission';
 const PROMPTS = 'playwright.push.prompts';
@@ -95,6 +106,17 @@ export class BrowserPush {
   /** How often the page asked the permission. */
   async prompts(): Promise<number> {
     return Number((await this.page.evaluate((key) => localStorage.getItem(key), PROMPTS)) ?? '0');
+  }
+
+  /** Every push the fake push service took for the browser's subscription, in order. */
+  async pushes(): Promise<TakenPush[]> {
+    const subscription = await this.subscription();
+    expect(subscription, 'the browser holds no subscription').not.toBeNull();
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/push-service/fake/pushes`, {
+      data: { endpoint: subscription!.endpoint },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as TakenPush[];
   }
 
   /** The subscription the browser holds, or none. */

@@ -3,7 +3,9 @@
 standing, with members, a plan, their opening and open items, the items a
 project's session adds, an agent's saves of them and of the project's draft
 and handbook, the files it attaches, a draft's on no item, Pilot's Done, and
-the end of its turn; and a work item placed by repository, started in an
+the end of its turn; a read of what a member was shown, which the
+notification's reconcile writes off the request; and a work item placed by
+repository, started in an
 environment of Pilot's own the stage's own controller creates, named for the
 claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
@@ -59,6 +61,8 @@ from app.schemas.testing_record import (
     InventedRegistrationCreateSchema,
     InventedSaveCreateSchema,
     InventedSaveSchema,
+    InventedSightingsQuerySchema,
+    InventedSightingsSchema,
     InventedStoreUpdateCreateSchema,
     InventedStoreUpdateSchema,
     InventedWaitCloseSchema,
@@ -217,6 +221,36 @@ def create_item(
         project_id, data.kind, data.title, data.text, by_pilot=data.by_pilot
     )
     return InventedItemSchema(id=item.id).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/sightings", methods=["GET"])
+@api.validate(
+    query=InventedSightingsQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=InventedSightingsSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def read_sightings(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """What the person's open membership of the project was shown (DB Item
+    Sighting): written by the notification's reconcile, off the request,
+    after the commit or the page's beat that showed it, so that a spec waits
+    on it before acting on it.
+
+    Returns:
+        200: The items' ids
+        400: No handle is given, or the stage is prd
+        404: No person has the handle, or they are no member of the project
+    """
+    query = InventedSightingsQuerySchema.model_validate(request.args.to_dict())
+    return InventedSightingsSchema(
+        item_ids=test_data_service.sightings(project_id, query.handle)
+    ).model_dump(mode="json")
 
 
 @testing_record_bp.route("/projects/<uuid:project_id>/work", methods=["POST"])

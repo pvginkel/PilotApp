@@ -164,10 +164,6 @@ def clear_notification_token(
 ) -> Any:
     """Clear the signed-in person's notification token, at once (F134).
 
-    Each of their standing notifications is dismissed through the token
-    cleared, tried once, after the answer; what the bridge does not take
-    stays on the phone.
-
     Returns:
         200: The person, with no token set
         401: No one is signed in

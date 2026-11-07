@@ -72,10 +72,10 @@ class Project(db.Model):  # type: ignore[name-defined]
 class ProjectMember(db.Model):  # type: ignore[name-defined]
     """One User's membership of one Project, from joining until leaving.
 
-    The `notification_` columns are what was last sent to the member's phone
-    for the Project, overwritten by the next submit or dismiss that goes out
-    (DB decisions 51, 70): the text and `url` while one stands, none after a
-    dismiss.
+    `notification_sent_at` is when the last push to the member for the
+    Project went out, overwritten by the next, which the two seconds between
+    their pushes read (DB 226; DB decisions 51, 74). What they were shown is
+    their Item Sightings.
     """
 
     __tablename__ = "project_members"
@@ -89,21 +89,6 @@ class ProjectMember(db.Model):  # type: ignore[name-defined]
             unique=True,
             postgresql_where=text("left_at IS NULL"),
         ),
-        CheckConstraint(
-            "(notification_text IS NULL) = (notification_url IS NULL)",
-            name="ck_project_members_notification",
-        ),
-        # A standing notification is one a submit that went out left.
-        CheckConstraint(
-            "notification_text IS NULL OR notification_sent_at IS NOT NULL",
-            name="ck_project_members_notification_sent",
-        ),
-        # The notification's retry reads the owed ones (DB §7.6).
-        Index(
-            "ix_project_members_notification_owed_at",
-            "notification_owed_at",
-            postgresql_where=text("notification_owed_at IS NOT NULL"),
-        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -111,12 +96,7 @@ class ProjectMember(db.Model):  # type: ignore[name-defined]
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    notification_text: Mapped[str | None] = mapped_column(Text)
-    notification_url: Mapped[str | None] = mapped_column(Text)
     notification_sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
-    notification_owed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
 

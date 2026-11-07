@@ -1,5 +1,5 @@
-"""The standing notification each member of a project should see (F94.1,
-F94.2, F94.5; DB 224 to 226)."""
+"""The notification each member of a project should see (F94.1, F94.2,
+F94.5; DB 224 to 226; D145): the asks that wait on them alone, plain."""
 
 import uuid
 from datetime import UTC, datetime
@@ -15,6 +15,7 @@ from app.models.reference import SessionState
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from app.services.standing_notification_service import StandingNotification
+from app.services.web_push import Push
 
 DECISION = """```decision id=D1
 options:
@@ -46,13 +47,6 @@ def _make(container: ServiceContainer, **spec: Any) -> Project:
 
 def _ben(container: ServiceContainer) -> User:
     return container.test_data_service().person("ben", "Ben Example")
-
-
-def _token(container: ServiceContainer, session: DbSession, *people: User) -> None:
-    cipher = container.notification_token_cipher()
-    for person in people:
-        person.notification_token = cipher.seal(f"token-of-{person.handle}")
-    session.flush()
 
 
 def _should_see(
@@ -189,7 +183,7 @@ def _decision(
 
 @pytest.mark.usefixtures("person")
 class TestWhoShouldSeeOne:
-    def test_a_member_holding_a_token_sees_what_waits_on_them(
+    def test_a_member_sees_what_waits_on_them(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -197,15 +191,15 @@ class TestWhoShouldSeeOne:
         person: User,
     ) -> None:
         project = _make(container)
-        _token(container, session, person)
         tent = _decision(container, session, project, environment)
 
         assert _should_see(container, session, project) == {
             "ada": StandingNotification(
-                sequence_id=str(project.id),
+                tag=str(project.id),
                 title="Camp",
-                message="Which tent?",
+                body="Which tent?",
                 url=f"{_timeline(container, project)}/items/{tent.id}",
+                items=frozenset({tent.id}),
             )
         }
 
@@ -223,7 +217,6 @@ class TestWhoShouldSeeOne:
             tasks=[{"id": "t1", "title": "Pitch the tent", "status": "in_progress"}],
             paused=True,
         )
-        _token(container, session, person)
         _bear(
             container,
             project,
@@ -237,22 +230,23 @@ class TestWhoShouldSeeOne:
 
         assert _should_see(container, session, project) == {"ada": None}
 
-    def test_a_member_without_a_token_sees_none(
+    def test_every_open_member_sees_it_whatever_their_browsers(
         self,
         container: ServiceContainer,
         session: DbSession,
         environment: Environment,
         person: User,
     ) -> None:
-        ben = _ben(container)
+        """Ben has no browser subscribed: whether a push reaches one is the
+        reconcile's."""
+        _ben(container)
         project = _make(container, members=["ada", "ben"])
-        _token(container, session, ben)
-        _decision(container, session, project, environment)
+        tent = _decision(container, session, project, environment)
 
         seen = _should_see(container, session, project)
 
-        assert seen["ada"] is None
-        assert seen["ben"] is not None
+        assert seen["ada"] is not None and seen["ada"].items == {tent.id}
+        assert seen["ben"] == seen["ada"]
 
     def test_an_archived_project_shows_none(
         self,
@@ -262,7 +256,6 @@ class TestWhoShouldSeeOne:
         person: User,
     ) -> None:
         project = _make(container)
-        _token(container, session, person)
         _decision(container, session, project, environment)
         project.archived = True
         session.flush()
@@ -278,7 +271,6 @@ class TestWhoShouldSeeOne:
     ) -> None:
         ben = _ben(container)
         project = _make(container, members=["ada", "ben"])
-        _token(container, session, person, ben)
         _decision(container, session, project, environment)
         session.scalars(
             select(ProjectMember).where(ProjectMember.user_id == ben.id)
@@ -294,7 +286,6 @@ class TestWhoShouldSeeOne:
         self, container: ServiceContainer, session: DbSession, person: User
     ) -> None:
         project = _make(container, state="draft", name=None)
-        _token(container, session, person)
         assert _should_see(container, session, project) == {"ada": None}
 
         container.test_data_service().item(
@@ -303,21 +294,21 @@ class TestWhoShouldSeeOne:
 
         seen = _seen(container, session, project)
 
-        assert (seen.title, seen.message) == ("New project", "Where?")
+        assert (seen.title, seen.body) == ("New project", "Where?")
 
     def test_a_finished_projects_archive_question_waits_on_its_members(
         self, container: ServiceContainer, session: DbSession, person: User
     ) -> None:
         # F5.6: the nudge to archive; "Finished" is not said.
         project = _make(container, state="finished")
-        _token(container, session, person)
         question = container.document_service().bear_archive_question(project)
 
         assert _seen(container, session, project) == StandingNotification(
-            sequence_id=str(project.id),
+            tag=str(project.id),
             title="Camp",
-            message="Archive the project?",
+            body="Archive the project?",
             url=f"{_timeline(container, project)}/items/{question.id}",
+            items=frozenset({question.id}),
         )
 
     def test_only_the_memberships_asked_for_are_answered(
@@ -327,9 +318,8 @@ class TestWhoShouldSeeOne:
         environment: Environment,
         person: User,
     ) -> None:
-        ben = _ben(container)
+        _ben(container)
         project = _make(container, members=["ada", "ben"])
-        _token(container, session, person, ben)
         _decision(container, session, project, environment)
         ada = session.scalars(
             select(ProjectMember).where(ProjectMember.user_id == person.id)
@@ -350,9 +340,8 @@ class TestWhatWaits:
         person: User,
     ) -> None:
         project = _make(container)
-        _token(container, session, person)
         _work(session, project, environment, SessionState.STOPPED)
-        assert _seen(container, session, project).message == "Build the camp"
+        assert _seen(container, session, project).body == "Build the camp"
 
         _bear(
             container,
@@ -363,7 +352,7 @@ class TestWhatWaits:
             "A storm comes.\n",
             urgent="true",
         )
-        assert _seen(container, session, project).message == "Storm, +1"
+        assert _seen(container, session, project).body == "Storm, +1"
 
     def test_an_item_for_one_member_waits_on_them_alone_and_is_not_counted_for_another(
         self,
@@ -372,9 +361,8 @@ class TestWhatWaits:
         environment: Environment,
         person: User,
     ) -> None:
-        ben = _ben(container)
+        _ben(container)
         project = _make(container, members=["ada", "ben"])
-        _token(container, session, person, ben)
         run = _run(session, project, environment)
         _bear(
             container,
@@ -389,13 +377,13 @@ class TestWhatWaits:
         seen = _should_see(container, session, project)
 
         assert seen["ada"] is None
-        assert seen["ben"] is not None and seen["ben"].message == "Your boots?"
+        assert seen["ben"] is not None and seen["ben"].body == "Your boots?"
 
         _bear(container, project, run, "decision", "Which tent?", DECISION)
         seen = _should_see(container, session, project)
 
-        assert seen["ada"] is not None and seen["ada"].message == "Which tent?"
-        assert seen["ben"] is not None and seen["ben"].message == "Which tent?, +1"
+        assert seen["ada"] is not None and seen["ada"].body == "Which tent?"
+        assert seen["ben"] is not None and seen["ben"].body == "Which tent?, +1"
 
     def test_a_document_whose_claims_a_running_work_item_holds_waits_on_no_one(
         self,
@@ -407,7 +395,6 @@ class TestWhatWaits:
         """Pilot's while every open block is held (DB 225, 296); once the
         work item doing them failed, the person's (F94.5)."""
         project = _make(container)
-        _token(container, session, person)
         run = _run(session, project, environment)
         documents = container.document_service()
         item = documents.register(project, run, "/work/Camp/docs/claimed.md").item
@@ -428,7 +415,7 @@ class TestWhatWaits:
         session.get_one(models.Session, doing.id).state_code = SessionState.FAILED
         session.flush()
 
-        assert _seen(container, session, project).message == "Build the camp, +1"
+        assert _seen(container, session, project).body == "Build the camp, +1"
 
 
 @pytest.mark.usefixtures("person")
@@ -444,7 +431,6 @@ class TestMessage:
             container,
             tasks=[{"id": "t1", "title": "Pitch the tent", "status": "in_progress"}],
         )
-        _token(container, session, person)
         run = _run(session, project, environment)
         _wait(session, project, environment, "The site opens")
         _work(session, project, environment, SessionState.RUNNING)
@@ -452,7 +438,7 @@ class TestMessage:
             _bear(container, project, run, "question", title, QUESTION)
 
         # No plan step, no status line, nothing running and no open wait.
-        assert _seen(container, session, project).message == "Which tent?, +2"
+        assert _seen(container, session, project).body == "Which tent?, +2"
 
     def test_a_pause_changes_nothing(
         self,
@@ -462,10 +448,9 @@ class TestMessage:
         person: User,
     ) -> None:
         project = _make(container, paused=True)
-        _token(container, session, person)
         _decision(container, session, project, environment)
 
-        assert _seen(container, session, project).message == "Which tent?"
+        assert _seen(container, session, project).body == "Which tent?"
 
     def test_an_untitled_item_reads_by_its_kind(
         self,
@@ -475,21 +460,20 @@ class TestMessage:
         person: User,
     ) -> None:
         project = _make(container)
-        _token(container, session, person)
         _decision(container, session, project, environment)
         _work(session, project, environment, SessionState.STOPPED, None)
 
-        assert _seen(container, session, project).message == "Work, +1"
+        assert _seen(container, session, project).body == "Work, +1"
 
-    def test_the_records_texts_read_as_their_words_in_the_markdown(
+    def test_the_records_texts_read_as_they_are_written(
         self,
         container: ServiceContainer,
         session: DbSession,
         environment: Environment,
         person: User,
     ) -> None:
+        """Plain text, with no Markdown escape (V12)."""
         project = _make(container, name="Camp *2026*")
-        _token(container, session, person)
         _work(
             session,
             project,
@@ -501,24 +485,24 @@ class TestMessage:
         seen = _seen(container, session, project)
 
         assert seen.title == "Camp *2026*"
-        assert seen.message == r"1\. Set up \`ci\` \& \[deploy\]\_now\_, 2\) ship"
+        assert seen.body == "1. Set up `ci` & [deploy]_now_, 2) ship"
 
-    def test_the_fields_stay_within_the_bridges_limits(
+    def test_a_long_title_is_cut_and_the_text_left_to_the_push(
         self,
         container: ServiceContainer,
         session: DbSession,
         environment: Environment,
         person: User,
     ) -> None:
+        """The push's payload cuts its body to fit (`Push.payload`), which
+        the title's cut leaves room for."""
         project = _make(container, name="N" * 300)
-        _token(container, session, person)
-        _work(session, project, environment, SessionState.STOPPED, "\\" * 5000)
+        _work(session, project, environment, SessionState.STOPPED, "x" * 5000)
 
         seen = _seen(container, session, project)
 
         assert seen.title == "N" * 249 + "…"
-        # The cut ends on whole escapes, so no backslash escapes the "…".
-        assert seen.message == "\\" * 4094 + "…"
+        assert seen.body == "x" * 5000
 
 
 @pytest.mark.usefixtures("person")
@@ -532,7 +516,6 @@ class TestUrl:
     ) -> None:
         _ben(container)
         project = _make(container, members=["ada", "ben"])
-        _token(container, session, person)
         run = _run(session, project, environment)
         _bear(
             container,
@@ -551,3 +534,23 @@ class TestUrl:
 
         _bear(container, project, run, "question", "Where?", QUESTION)
         assert _seen(container, session, project).url == _timeline(container, project)
+
+
+class TestPush:
+    def test_an_alert_renotifies_and_an_update_does_not(self) -> None:
+        notification = StandingNotification(
+            tag="the-project",
+            title="Camp",
+            body="Which tent?, +1",
+            url="https://pilot.example.com/projects/the-project",
+            items=frozenset({uuid.uuid4(), uuid.uuid4()}),
+        )
+
+        assert notification.push(alert=True) == Push(
+            title="Camp",
+            body="Which tent?, +1",
+            tag="the-project",
+            url="https://pilot.example.com/projects/the-project",
+            renotify=True,
+        )
+        assert notification.push(alert=False).renotify is False

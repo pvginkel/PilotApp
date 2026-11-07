@@ -616,23 +616,21 @@ class ServiceContainer(containers.DeclarativeContainer):
         usage_halts=usage_halts,
         wait_service=wait_service,
     )
-    # The standing notification each member of a project should see (F94.1,
-    # F94.2), its link on the stage's public address
+    # The notification each member of a project should see (F94.1, F94.2),
+    # its link on the stage's public address
     standing_notification_service = providers.Factory(
         StandingNotificationService, db=db_session, base_url=config.provided.baseurl
     )
-    # Their reconcile with what each membership last sent, and its retry (F94.3,
-    # F94.4); its jobs and timer register on the supervisor, and it hears the
-    # engine's bus, when built, before STARTUP.
+    # Its push to a member offline, on what they have been shown (F94.3,
+    # F94.4, F147); its jobs register on the supervisor, and it hears the
+    # engine's bus and the pages, when built, before STARTUP.
     notification_reconcile_service = providers.Singleton(
         NotificationReconcileService,
         container=__self__,
         supervisor=supervisor,
         engine_bus=engine_bus,
-        notification_token_cipher=notification_token_cipher,
-        bridge_configured=providers.Callable(
-            lambda url: url is not None, app_config.provided.notification_bridge_url
-        ),
+        app_page_service=app_page_service,
+        web_push_service=web_push_service,
     )
     register_for_background_startup(lambda c: c.notification_reconcile_service())
     # An attachment's bytes, streamed (F28.5, F36)
@@ -686,7 +684,6 @@ class ServiceContainer(containers.DeclarativeContainer):
         db=db_session,
         container=__self__,
         notification_token_cipher=notification_token_cipher,
-        notification_reconcile_service=notification_reconcile_service,
         task_service=task_service,
         bridge_configured=providers.Callable(
             lambda url: url is not None, app_config.provided.notification_bridge_url

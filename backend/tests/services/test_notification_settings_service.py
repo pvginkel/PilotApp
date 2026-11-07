@@ -3,34 +3,29 @@ V07, V12, V16, V18, V19): the token's save after its one-shot, as a task, its
 replace and its clear, and the alarms switch, through the fake bridge.
 
 Every test is on a database of its own: a save's task stores in a session of
-its own, on another thread. Where a test follows what goes out after a save or
-a clear, the reconcile runs on a supervisor of its own, the container's."""
+its own, on another thread."""
 
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 import pytest
-from dependency_injector import providers
 from flask import Flask
 from sqlalchemy import select
 
 from app.database import scoped_session
-from app.engine.bus import EngineBus
 from app.exceptions import InvalidOperationException, ValidationException
 from app.models import User
 from app.schemas.task_schema import TaskInfo, TaskStartResponse, TaskStatus
-from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from app.services.fake_notification_bridge import FakeCall
-from app.services.notification_reconcile_service import NotificationReconcileService
 from app.services.notification_settings_service import ONE_SHOT_MESSAGE, SaveTokenTask
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_notification_bridge import (
     WatchedFakeNotificationBridge,
     bridge_client_of,
 )
-from tests.support.supervisor import Supervise, wait_until
+from tests.support.supervisor import wait_until
 
 ADA_TOKEN = "token-of-ada"
 NEW_TOKEN = "token-of-adas-new-phone"
@@ -79,32 +74,6 @@ def bridge(container: ServiceContainer) -> Iterator[WatchedFakeNotificationBridg
         assert fake.failures == []
     finally:
         fake.close()
-
-
-@pytest.fixture
-def sends(
-    container: ServiceContainer,
-    bridge: WatchedFakeNotificationBridge,
-    supervise: Supervise,
-) -> None:
-    """The container's reconcile on a supervisor of its own, STARTUP fired,
-    so that what a commit asks for goes out, with no window between a
-    person's sends."""
-    supervisor, coordinator = supervise(container)
-    cipher = container.notification_token_cipher()
-    container.notification_reconcile_service.override(
-        providers.Object(
-            NotificationReconcileService(
-                container=container,
-                supervisor=supervisor,
-                engine_bus=EngineBus(),
-                notification_token_cipher=cipher,
-                bridge_configured=True,
-                spacing_seconds=0.0,
-            )
-        )
-    )
-    coordinator.fire_startup()
 
 
 @dataclass
@@ -157,26 +126,6 @@ def _give_token(container: ServiceContainer, token: str) -> None:
 def _alarms(container: ServiceContainer) -> bool:
     with scoped_session(container):
         return _person(container).alarms
-
-
-def _project(container: ServiceContainer) -> str:
-    """Ada's project, a decision waiting on her; its id, the notification's
-    sequence id."""
-    with scoped_session(container):
-        data = container.test_data_service()
-        project = data.project(
-            InventedProjectCreateSchema.model_validate(
-                {"members": ["ada"], "name": "Camp"}
-            )
-        )
-        data.item(
-            project.id,
-            "decision",
-            "Which tent?",
-            "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n",
-            by_pilot=True,
-        )
-        return str(project.id)
 
 
 def _start_save(container: ServiceContainer, token: str) -> TaskStartResponse:
@@ -337,36 +286,19 @@ class TestStartSave:
         )
         assert _sealed(container) is None
 
-    @pytest.mark.usefixtures("sends")
-    def test_a_saved_token_has_the_persons_projects_submitted_through_it(
+    def test_a_replace_sends_its_one_shot_through_the_new_token_and_stores_it(
         self, container: ServiceContainer, bridge: WatchedFakeNotificationBridge
     ) -> None:
-        project_id = _project(container)
-
         _save(container, ADA_TOKEN)
-
-        wait_until(
-            lambda: set(bridge.shown("ada")) == {project_id},
-            "the project's notification shown",
-        )
-
-    @pytest.mark.usefixtures("sends")
-    def test_a_replace_resubmits_through_the_new_token(
-        self, container: ServiceContainer, bridge: WatchedFakeNotificationBridge
-    ) -> None:
-        project_id = _project(container)
-        _save(container, ADA_TOKEN)
-        wait_until(lambda: len(bridge.shown("ada")) == 1, "shown")
         bridge.rotate_token("ada", NEW_TOKEN)
 
         task = _save(container, NEW_TOKEN)
 
         assert task.status == TaskStatus.COMPLETED
         assert _held(container) == NEW_TOKEN
-        wait_until(lambda: len(bridge.calls("ada")) == 4, "resubmitted")
-        assert bridge.calls("ada")[2:] == [
+        assert bridge.calls("ada") == [
             FakeCall("submit", None, True),
-            FakeCall("submit", project_id, False),
+            FakeCall("submit", None, True),
         ]
 
 
@@ -436,20 +368,15 @@ class TestSaveSuperseded:
 
 
 class TestClear:
-    @pytest.mark.usefixtures("sends")
-    def test_none_is_set_at_once_and_what_stands_is_dismissed_through_the_token(
+    def test_none_is_set_at_once(
         self, container: ServiceContainer, bridge: WatchedFakeNotificationBridge
     ) -> None:
-        _project(container)
         _save(container, ADA_TOKEN)
-        wait_until(lambda: len(bridge.shown("ada")) == 1, "shown")
-        bridge.unreachable(answer="stall")
 
         _clear(container)
 
         assert _sealed(container) is None
-        bridge.unreachable(on=False)
-        wait_until(lambda: bridge.shown("ada") == {}, "dismissed")
+        assert bridge.calls("ada") == [FakeCall("submit", None, True)]
 
     def test_a_person_with_no_token_has_nothing_to_clear(
         self, container: ServiceContainer

@@ -4,7 +4,6 @@ F142.1; DB decision 17)."""
 
 import secrets
 from collections.abc import Iterator
-from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -15,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import scoped_session
-from app.models import Project, ProjectMember, PushSubscription, User
+from app.models import PushSubscription, User
 from app.models.reference import UserKind
 from app.services.container import ServiceContainer
 from app.services.notification_settings_service import ONE_SHOT_MESSAGE
@@ -477,34 +476,16 @@ class TestSaveNotificationTokenTask:
         assert bridged.get(SELF).get_json()["notification_token_set"] is False
 
 
-def _standing_membership(
-    session: Session, project: Project, person: User
-) -> ProjectMember:
-    sent = datetime(2026, 10, 30, 9, 0, tzinfo=UTC)
-    member = ProjectMember(
-        project_id=project.id,
-        user_id=person.id,
-        joined_at=sent,
-        notification_text="Which tent?",
-        notification_url=f"https://pilot.example.com/projects/{project.id}",
-        notification_sent_at=sent,
-    )
-    session.add(member)
-    session.flush()
-    return member
-
-
 class TestClearNotificationToken:
-    def test_the_token_is_gone_at_once_and_what_stands_reads_dismissed(
+    def test_the_token_is_gone_at_once(
         self,
         client: FlaskClient,
         container: ServiceContainer,
         person: User,
-        project: Project,
         session: Session,
     ) -> None:
         person.notification_token = _seal(container, ADA_TOKEN)
-        member = _standing_membership(session, project, person)
+        session.flush()
         _sign_in(client, subject="subject-ada", name="Ada Example")
 
         response = client.delete(TOKEN)
@@ -512,13 +493,7 @@ class TestClearNotificationToken:
         assert response.status_code == 200
         assert response.get_json()["notification_token_set"] is False
         session.refresh(person)
-        session.refresh(member)
         assert person.notification_token is None
-        assert (
-            member.notification_text,
-            member.notification_url,
-            member.notification_owed_at,
-        ) == (None, None, None)
 
     def test_with_no_token_there_is_nothing_to_clear(
         self, client: FlaskClient, person: User

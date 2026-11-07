@@ -13,11 +13,11 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Project, ProjectMember, User
-from tests.support.database import violated_constraint
+from app.models import Project, User
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _SENT = datetime(2026, 11, 5, 9, 30, tzinfo=UTC)
@@ -27,8 +27,8 @@ _SENT = datetime(2026, 11, 5, 9, 30, tzinfo=UTC)
 def _at_0028(session: Session, person: User, project: Project) -> None:
     """The schema as revision 0028 leaves it, the person and the project
     written first: 0029 taken down, whose downgrade puts back what 0028
-    added. No User is read through the model after, whose columns are the
-    head's."""
+    added. No User, and no Project Member's notification, is read or
+    written through the model after, whose columns are the head's."""
     _run(session, "downgrade", "0029")
 
 
@@ -120,9 +120,14 @@ class TestNotificationsForWhatWaits:
         _run(session, "upgrade")
 
         rows = {
-            member.id: member
-            for member in session.scalars(
-                select(ProjectMember).where(ProjectMember.project_id == project.id)
+            row.id: row
+            for row in session.execute(
+                text(
+                    "SELECT id, notification_text, notification_url,"
+                    " notification_sent_at, notification_owed_at"
+                    " FROM project_members WHERE project_id = :project"
+                ),
+                {"project": project.id},
             )
         }
         assert (rows[idle].notification_text, rows[idle].notification_owed_at) == (
@@ -178,32 +183,45 @@ class TestNotificationsForWhatWaits:
         project_id, person_id = project.id, person.id
         _run(session, "downgrade")
         _run(session, "upgrade")
-        session.add(
-            ProjectMember(
-                project_id=project_id,
-                user_id=person_id,
-                joined_at=_SENT,
-                notification_url=f"https://pilot.example.com/projects/{project_id}",
-                notification_sent_at=_SENT,
-            )
-        )
 
-        assert violated_constraint(session) == "ck_project_members_notification"
+        with pytest.raises(IntegrityError) as raised:
+            session.execute(
+                text(
+                    "INSERT INTO project_members (project_id, user_id, joined_at,"
+                    " notification_url, notification_sent_at)"
+                    " VALUES (:project, :person, :sent, :url, :sent)"
+                ),
+                {
+                    "project": project_id,
+                    "person": person_id,
+                    "sent": _SENT,
+                    "url": f"https://pilot.example.com/projects/{project_id}",
+                },
+            )
+
+        assert raised.value.orig.diag.constraint_name == (
+            "ck_project_members_notification"
+        )
 
     def test_the_downgrade_puts_a_standing_notification_at_high(
         self, session: Session, project: Project, person: User
     ) -> None:
         """And drops what the alarm notification last sent, the alarms table
         empty."""
-        member = ProjectMember(
-            project_id=project.id,
-            user_id=person.id,
-            joined_at=_SENT,
-            notification_text="Which tent?",
-            notification_url=f"https://pilot.example.com/projects/{project.id}",
-            notification_sent_at=_SENT,
+        member_id = session.scalar(
+            text(
+                "INSERT INTO project_members (project_id, user_id, joined_at,"
+                " notification_text, notification_url, notification_sent_at)"
+                " VALUES (:project, :person, :sent, 'Which tent?', :url, :sent)"
+                " RETURNING id"
+            ),
+            {
+                "project": project.id,
+                "person": person.id,
+                "sent": _SENT,
+                "url": f"https://pilot.example.com/projects/{project.id}",
+            },
         )
-        session.add(member)
         session.execute(
             text(
                 "UPDATE users SET alarm_text = 'The week''s usage halt',"
@@ -220,7 +238,7 @@ class TestNotificationsForWhatWaits:
                 "SELECT notification_priority_code::text, notification_text"
                 " FROM project_members WHERE id = :id"
             ),
-            {"id": member.id},
+            {"id": member_id},
         ).one() == ("high", "Which tent?")
         assert session.scalar(text("SELECT count(*) FROM alarms")) == 0
         assert _types(session) == {"notification_priority", "condition"}

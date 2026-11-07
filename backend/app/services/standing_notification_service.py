@@ -1,12 +1,9 @@
-"""The standing notification each member of a project should see (F94.1,
-F94.2, F94.5; DB 224 to 226), derived from the record: what the reconcile
-compares with what the membership last sent.
-
-Every field stays within the bridge's limits (its README § Submit), so the
-bridge refuses no derivation.
+"""The notification each member of a project should see (F94.1, F94.2, F94.5;
+DB 224 to 226; D145), derived from the record: the items that wait on them,
+and the text, title and `url` a push of it carries, which the reconcile
+compares with what they were shown (`NotificationReconcileService`).
 """
 
-import re
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -14,32 +11,45 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Item, ItemKind, Project, ProjectMember, User
+from app.models import Item, ItemKind, Project, ProjectMember
 from app.services.timeline_service import waiting
+from app.services.web_push import Push
 
 _UNTITLED = "New project"
 """A draft's title before its draft names it, as its tab reads it."""
 
 _MAX_TITLE = 250
-_MAX_MESSAGE = 4096
+"""The most of a title: a push's payload is cut in its body alone
+(`Push.payload`), which the title leaves room for."""
 _CUT = "…"
-
-_MARKDOWN = re.compile(r"([\\`*_\[\]<>#+\-.!|~&)])")
-"""The characters by which a text could open or close a Markdown construct in
-the message, each escaped by a backslash (CommonMark §2.4)."""
 
 
 @dataclass(frozen=True)
 class StandingNotification:
-    """A project's standing notification as one member should see it."""
+    """A project's notification as one member should see it."""
 
-    sequence_id: str
-    """The project's id."""
+    tag: str
+    """The project's id, under which a device shows it."""
     title: str
-    """The project's name, plain text."""
-    message: str
-    """What waits on the member, Markdown that reads as its words."""
+    """The project's name."""
+    body: str
+    """The items that wait on the member: the latest placed, by its title or
+    its kind's name, then ", +<n>" counting the others; plain text."""
     url: str
+    items: frozenset[uuid.UUID]
+    """Every item that waits on the member, each named or counted in the
+    text."""
+
+    def push(self, *, alert: bool) -> Push:
+        """The notification as a push: renotifying when it alerts, else
+        replacing what shows under its `tag` silently."""
+        return Push(
+            title=self.title,
+            body=self.body,
+            tag=self.tag,
+            url=self.url,
+            renotify=alert,
+        )
 
 
 @dataclass(frozen=True)
@@ -59,29 +69,18 @@ class StandingNotificationService:
         self, project: Project, memberships: Collection[ProjectMember]
     ) -> dict[int, StandingNotification | None]:
         """What each of `memberships`, every one of `project`, should see, by
-        the membership's id: none, to be dismissed, unless the project is
-        unarchived, the membership open, its person holds a token (DB 224)
-        and an item waits on them (F94.1); a draft and a finished project are
-        unarchived (F94)."""
-        users = {
-            user.id: user
-            for user in self.db.scalars(
-                select(User).where(
-                    User.id.in_([membership.user_id for membership in memberships])
-                )
-            )
-        }
+        the membership's id: none unless the project is unarchived, the
+        membership open and an item waits on its person (DB 224); a draft and
+        a finished project are unarchived (F94)."""
         receiving = {
             membership.id
             for membership in memberships
-            if not project.archived
-            and membership.left_at is None
-            and users[membership.user_id].notification_token is not None
+            if not project.archived and membership.left_at is None
         }
         items = self._waiting(project) if receiving else []
         return {
             membership.id: (
-                self._notification(project, items, users[membership.user_id])
+                self._notification(project, items, membership.user_id)
                 if membership.id in receiving
                 else None
             )
@@ -89,29 +88,27 @@ class StandingNotificationService:
         }
 
     def _notification(
-        self, project: Project, items: list[_Waiting], person: User
+        self, project: Project, items: list[_Waiting], person_id: uuid.UUID
     ) -> StandingNotification | None:
-        """F94.1's text and F94.2's `url`, as `person` reads them, or none
+        """F94.1's text and F94.2's `url`, as the person reads them, or none
         while nothing waits on them: an item `for` nobody or for them waits on
-        them, one `for` another is not theirs (DB 225). The text is the
-        latest of theirs, ", +<n>" after it counting the others."""
+        them, one `for` another is not theirs (DB 225)."""
         mine = [
             item
             for item in items
-            if item.for_user_id is None or item.for_user_id == person.id
+            if item.for_user_id is None or item.for_user_id == person_id
         ]
         if not mine:
             return None
         latest = mine[0]
-        ask = latest.kind if latest.title is None else _plain(latest.title)
+        ask = latest.kind if latest.title is None else latest.title
         timeline = f"{self.base_url}/projects/{project.id}"
         return StandingNotification(
-            sequence_id=str(project.id),
+            tag=str(project.id),
             title=_cut(project.name or _UNTITLED, _MAX_TITLE),
-            message=_cut_markdown(
-                ask if len(mine) == 1 else f"{ask}, +{len(mine) - 1}", _MAX_MESSAGE
-            ),
+            body=ask if len(mine) == 1 else f"{ask}, +{len(mine) - 1}",
             url=f"{timeline}/items/{latest.id}" if len(mine) == 1 else timeline,
+            items=frozenset(item.id for item in mine),
         )
 
     def _waiting(self, project: Project) -> list[_Waiting]:
@@ -127,22 +124,6 @@ class StandingNotificationService:
         ]
 
 
-def _plain(text: str) -> str:
-    """`text` as Markdown that reads as its words."""
-    return _MARKDOWN.sub(r"\\\1", text)
-
-
 def _cut(text: str, limit: int) -> str:
     """`text`, cut to `limit` characters and ending in "…" when longer."""
     return text if len(text) <= limit else text[: limit - len(_CUT)] + _CUT
-
-
-def _cut_markdown(text: str, limit: int) -> str:
-    """Markdown `text` cut as `_cut` cuts it, never inside a backslash's
-    escape."""
-    if len(text) <= limit:
-        return text
-    kept = text[: limit - len(_CUT)]
-    if (len(kept) - len(kept.rstrip("\\"))) % 2:
-        kept = kept[:-1]
-    return kept + _CUT

@@ -33,8 +33,10 @@ from app.models import (
     Environment,
     Item,
     ItemAttachment,
+    ItemSighting,
     ProgressStep,
     Project,
+    ProjectMember,
     ResearchAssignment,
     StoreUpdate,
     Turn,
@@ -90,6 +92,10 @@ def _count(session: Session, model: Any) -> int:
 
 def _items_path(project_id: uuid.UUID | str) -> str:
     return f"{PROJECTS}/{project_id}/items"
+
+
+def _sightings_path(project_id: uuid.UUID | str) -> str:
+    return f"{PROJECTS}/{project_id}/sightings"
 
 
 def _saves_path(item_id: uuid.UUID | str) -> str:
@@ -791,6 +797,56 @@ class TestCreateItem:
 
 
 @pytest.mark.usefixtures("person")
+class TestReadSightings:
+    def test_what_the_persons_open_membership_was_shown(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        project_id = _make(client)
+        response = client.post(
+            _items_path(project_id),
+            json={
+                "kind": "decision",
+                "title": "Which tent?",
+                "text": DECISION,
+                "by_pilot": True,
+            },
+        )
+        item_id = response.get_json()["id"]
+        member = session.scalars(
+            select(ProjectMember).where(
+                ProjectMember.project_id == uuid.UUID(project_id)
+            )
+        ).one()
+
+        assert client.get(
+            _sightings_path(project_id), query_string={"handle": "ada"}
+        ).get_json() == {"item_ids": []}
+
+        session.add(ItemSighting(member_id=member.id, item_id=uuid.UUID(item_id)))
+        session.flush()
+        response = client.get(
+            _sightings_path(project_id), query_string={"handle": "ada"}
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"item_ids": [item_id]}
+
+    @pytest.mark.parametrize("handle", ["nobody", "ben"])
+    def test_a_person_no_member_of_the_project_is_not_found(
+        self, client: FlaskClient, ben: User, handle: str
+    ) -> None:
+        response = client.get(
+            _sightings_path(_make(client)), query_string={"handle": handle}
+        )
+
+        assert response.status_code == 404
+
+    def test_without_a_handle_it_is_refused(self, client: FlaskClient) -> None:
+        response = client.get(_sightings_path(_make(client)))
+
+        assert response.status_code == 400
+
+
 class TestCreateSave:
     def test_a_save_with_a_fault_is_held_and_the_item_a_concept(
         self, client: FlaskClient, environment: Environment

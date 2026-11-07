@@ -59,7 +59,6 @@ from app.services.environment_service import EnvironmentService
 from app.services.fleet_consumer import FleetConsumer
 from app.services.halt_file_service import HALT_FILE, HaltFileService
 from app.services.notification_reconcile_service import (
-    NOTIFICATION_RETRY_TIMER,
     NotificationReconcileService,
 )
 from app.services.pilot_server import token_hash
@@ -83,7 +82,6 @@ from tests.conftest_infrastructure import (
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
 from tests.support.fake_notification_bridge import (
     ServedFakeNotificationBridge,
-    bridge_client_of,
 )
 from tests.support.fake_push_service import ServedFakePushService
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
@@ -1199,29 +1197,22 @@ class TestSessionStartWiring:
 
 
 class TestNotificationReconcileWiring:
-    def test_with_a_bridge_it_reconciles_a_commit_and_retries_from_startup(
+    def test_with_a_key_a_commit_pushes_an_offline_members_browser(
         self,
         committed_app: Flask,
-        fake_notification_bridge: ServedFakeNotificationBridge,
+        fake_push_service: ServedFakePushService,
+        vapid_key: str,
     ) -> None:
         container = committed_app.container
-        container.app_config.override(
-            AppSettings(
-                notification_bridge_url=fake_notification_bridge.url,
-                scheduler_tick_seconds=0.05,
-            )
-        )
-        bridge_client_of(container, fake_notification_bridge)
-        fake_notification_bridge.add_registration("ada", "token-of-ada")
+        container.app_config.override(AppSettings(vapid_private_key=vapid_key))
+        browser = fake_push_service.browser(VapidKey(vapid_key).public_key)
         service = container.notification_reconcile_service()
         assert isinstance(service, NotificationReconcileService)
         assert service is container.notification_reconcile_service()
-        ticks = _retry_ticks()
         coordinator = container.lifecycle_coordinator()
 
         coordinator.fire_startup()
         try:
-            wait_until(lambda: _retry_ticks() >= ticks + 2, "two retry ticks")
             with scoped_session(container) as db:
                 person = User(
                     kind_code=UserKind.PERSON,
@@ -1229,12 +1220,12 @@ class TestNotificationReconcileWiring:
                     handle="ada",
                     name="Ada Example",
                     avatar_slot=1,
-                    notification_token=container.notification_token_cipher().seal(
-                        "token-of-ada"
-                    ),
                 )
                 db.add(person)
                 db.flush()
+                PushSubscriptionService(db).subscribe(
+                    person, browser.endpoint, browser.keys.p256dh, browser.keys.auth
+                )
                 project = Project(
                     created_by_user_id=person.id,
                     state_code=ProjectState.OPEN,
@@ -1249,8 +1240,7 @@ class TestNotificationReconcileWiring:
                         joined_at=datetime.now(UTC),
                     )
                 )
-                # A stopped work item waits on Ada, so that her notification
-                # stands.
+                # A stopped work item waits on Ada.
                 db.add(Environment(id="env-a", name="A", exempt=False))
                 run = AgentSession(
                     project_id=project.id,
@@ -1284,25 +1274,34 @@ class TestNotificationReconcileWiring:
                 container.engine_bus().emit(ProjectChanged(project.id))
                 project_id = str(project.id)
             wait_until(
-                lambda: project_id in fake_notification_bridge.shown("ada"),
-                "the project's notification shown",
+                lambda: (
+                    [push.tag for push in fake_push_service.pushes(browser.endpoint)]
+                    == [project_id]
+                ),
+                "the project's notification pushed",
             )
         finally:
             coordinator.shutdown()
 
-    def test_with_no_bridge_it_registers_nothing(self, committed_app: Flask) -> None:
+    def test_with_no_key_it_registers_and_hears_nothing(
+        self, committed_app: Flask
+    ) -> None:
         container = committed_app.container
         container.app_config.override(AppSettings())
         supervisor = container.supervisor()
+        bus = container.engine_bus()
+        pages = container.app_page_service()
 
         with (
             patch.object(supervisor, "register_job") as register_job,
-            patch.object(supervisor, "register_timer") as register_timer,
+            patch.object(bus, "subscribe") as hear_bus,
+            patch.object(pages, "subscribe") as hear_pages,
         ):
             container.notification_reconcile_service()
 
         register_job.assert_not_called()
-        register_timer.assert_not_called()
+        hear_bus.assert_not_called()
+        hear_pages.assert_not_called()
 
 
 class TestAlarmWiring:
@@ -1384,10 +1383,6 @@ def _alarm_ticks() -> float:
 
 def _watchdog_ticks() -> float:
     return metric_value(TIMER_RUNS_TOTAL, timer=WATCHDOG_TIMER, outcome="ok")
-
-
-def _retry_ticks() -> float:
-    return metric_value(TIMER_RUNS_TOTAL, timer=NOTIFICATION_RETRY_TIMER, outcome="ok")
 
 
 def _state(container: ServiceContainer, run_id: uuid.UUID) -> SessionState:
