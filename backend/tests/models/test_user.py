@@ -1,5 +1,5 @@
 """User: Pilot's row, written by the revisions, and what a row must hold,
-what Pilot last sent of a person's alarm notification among it."""
+when a person was last shown the conditions that alarm among it."""
 
 from datetime import UTC, datetime
 
@@ -11,7 +11,7 @@ from app.models import User
 from app.models.reference import UserKind
 from tests.support.database import violated_constraint
 
-_SENT = datetime(2026, 10, 12, 14, 2, tzinfo=UTC)
+_SEEN = datetime(2026, 10, 12, 14, 2, tzinfo=UTC)
 
 
 def _person(**overrides: object) -> User:
@@ -119,63 +119,27 @@ class TestUser:
 
 
 class TestUserAlarm:
-    def test_a_standing_alarm_notification_is_written(
+    def test_a_person_has_been_shown_no_condition_at_first(
         self, session: Session, person: User
     ) -> None:
-        person.alarm_text = "The controller has been unreachable, +1"
-        person.alarm_sent_at = _SENT
+        session.refresh(person)
+
+        assert person.alarm_seen_at is None
+
+    def test_when_they_were_last_shown_the_conditions_is_written(
+        self, session: Session, person: User
+    ) -> None:
+        person.alarm_seen_at = _SEEN
         session.flush()
         session.refresh(person)
 
-        assert (person.alarm_text, person.alarm_sent_at, person.alarm_owed_at) == (
-            "The controller has been unreachable, +1",
-            _SENT,
-            None,
-        )
+        assert person.alarm_seen_at == _SEEN
 
-    def test_a_dismissed_one_keeps_when_it_went_out(
-        self, session: Session, person: User
-    ) -> None:
-        person.alarm_sent_at = _SENT
-        session.flush()
-        session.refresh(person)
-
-        assert (person.alarm_text, person.alarm_sent_at) == (None, _SENT)
-
-    def test_a_standing_one_was_sent(self, session: Session, person: User) -> None:
-        person.alarm_text = "The week's usage halt"
-
-        assert violated_constraint(session) == "ck_users_alarm_sent"
-
-    def test_a_first_submit_that_failed_is_owed(
-        self, session: Session, person: User
-    ) -> None:
-        person.alarm_owed_at = _SENT
-        session.flush()
-        session.refresh(person)
-
-        assert (person.alarm_text, person.alarm_sent_at, person.alarm_owed_at) == (
-            None,
-            None,
-            _SENT,
-        )
-
-    # A standing one, a dismissed one and an owed one (DB 238).
-    @pytest.mark.parametrize(
-        "columns",
-        [
-            {"alarm_text": "The week's usage halt", "alarm_sent_at": _SENT},
-            {"alarm_sent_at": _SENT},
-            {"alarm_owed_at": _SENT},
-        ],
-    )
-    def test_pilot_is_sent_none(
-        self, session: Session, columns: dict[str, object]
-    ) -> None:
+    def test_pilot_is_shown_none(self, session: Session) -> None:
+        """Pilot has no alarm (DB 238)."""
         pilot = session.scalars(
             select(User).where(User.kind_code == UserKind.AGENT)
         ).one()
-        for column, value in columns.items():
-            setattr(pilot, column, value)
+        pilot.alarm_seen_at = _SEEN
 
         assert violated_constraint(session) == "ck_users_agent"

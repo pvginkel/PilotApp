@@ -44,11 +44,7 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
-from app.services.alarm_service import (
-    ALARM_RETRY_TIMER,
-    ALARM_SEQUENCE_ID,
-    AlarmService,
-)
+from app.services.alarm_service import ALARM_DUE_TIMER, ALARM_TAG, AlarmService
 from app.services.app_page_service import EXPIRY_SECONDS, AppPageService
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import (
@@ -67,6 +63,7 @@ from app.services.notification_reconcile_service import (
     NotificationReconcileService,
 )
 from app.services.pilot_server import token_hash
+from app.services.push_subscription_service import PushSubscriptionService
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
 from app.services.session_start_service import NUDGE, SessionStartService
@@ -88,6 +85,7 @@ from tests.support.fake_notification_bridge import (
     ServedFakeNotificationBridge,
     bridge_client_of,
 )
+from tests.support.fake_push_service import ServedFakePushService
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
 from tests.support.supervisor import listening, metric_value, wait_until
 from tests.support.tls import invent_ca
@@ -1308,33 +1306,33 @@ class TestNotificationReconcileWiring:
 
 
 class TestAlarmWiring:
-    def test_with_a_bridge_the_outage_reaches_the_phone_after_its_time(
+    def test_with_a_key_the_outage_alarms_an_offline_persons_browser_after_its_time(
         self,
         committed_app: Flask,
-        fake_notification_bridge: ServedFakeNotificationBridge,
+        fake_push_service: ServedFakePushService,
+        vapid_key: str,
     ) -> None:
         container = committed_app.container
         container.app_config.override(
             AppSettings(
-                notification_bridge_url=fake_notification_bridge.url,
+                vapid_private_key=vapid_key,
                 scheduler_tick_seconds=0.05,
                 outage_alarm_after_seconds=0.2,
             )
         )
-        bridge_client_of(container, fake_notification_bridge)
-        fake_notification_bridge.add_registration("ada", "token-of-ada")
+        browser = fake_push_service.browser(VapidKey(vapid_key).public_key)
         with scoped_session(container) as db:
-            db.add(
-                User(
-                    kind_code=UserKind.PERSON,
-                    subject="subject-ada",
-                    handle="ada",
-                    name="Ada Example",
-                    avatar_slot=1,
-                    notification_token=container.notification_token_cipher().seal(
-                        "token-of-ada"
-                    ),
-                )
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add(person)
+            db.flush()
+            PushSubscriptionService(db).subscribe(
+                person, browser.endpoint, browser.keys.p256dh, browser.keys.auth
             )
         service = container.alarm_service()
         assert isinstance(service, AlarmService)
@@ -1345,40 +1343,43 @@ class TestAlarmWiring:
 
         coordinator.fire_startup()
         try:
-            wait_until(lambda: _alarm_ticks() >= ticks + 2, "two retry ticks")
+            wait_until(lambda: _alarm_ticks() >= ticks + 2, "two due ticks")
             outage.call_unanswered()
             wait_until(
-                lambda: ALARM_SEQUENCE_ID in fake_notification_bridge.shown("ada"),
-                "the outage's alarm shown",
-            )
-            outage.probe_answered()
-            wait_until(
-                lambda: fake_notification_bridge.shown("ada") == {},
-                "the outage's alarm dismissed",
+                lambda: (
+                    [push.tag for push in fake_push_service.pushes(browser.endpoint)]
+                    == [ALARM_TAG]
+                ),
+                "the outage's alarm pushed",
             )
         finally:
             coordinator.shutdown()
 
-    def test_with_no_bridge_it_registers_nothing(self, committed_app: Flask) -> None:
+    def test_with_no_key_it_registers_and_hears_nothing(
+        self, committed_app: Flask
+    ) -> None:
         container = committed_app.container
         container.app_config.override(AppSettings())
         supervisor = container.supervisor()
         conditions = container.condition_service()
+        pages = container.app_page_service()
 
         with (
             patch.object(supervisor, "register_job") as register_job,
             patch.object(supervisor, "register_timer") as register_timer,
-            patch.object(conditions, "subscribe") as subscribe,
+            patch.object(conditions, "subscribe") as hear_conditions,
+            patch.object(pages, "subscribe") as hear_pages,
         ):
             container.alarm_service()
 
         register_job.assert_not_called()
         register_timer.assert_not_called()
-        subscribe.assert_not_called()
+        hear_conditions.assert_not_called()
+        hear_pages.assert_not_called()
 
 
 def _alarm_ticks() -> float:
-    return metric_value(TIMER_RUNS_TOTAL, timer=ALARM_RETRY_TIMER, outcome="ok")
+    return metric_value(TIMER_RUNS_TOTAL, timer=ALARM_DUE_TIMER, outcome="ok")
 
 
 def _watchdog_ticks() -> float:

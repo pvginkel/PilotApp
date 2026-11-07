@@ -164,9 +164,9 @@ def clear_notification_token(
 ) -> Any:
     """Clear the signed-in person's notification token, at once (F134).
 
-    Each of their standing notifications and alarms is dismissed through the
-    token cleared, tried once, after the answer; what the bridge does not
-    take stays on the phone.
+    Each of their standing notifications is dismissed through the token
+    cleared, tried once, after the answer; what the bridge does not take
+    stays on the phone.
 
     Returns:
         200: The person, with no token set
@@ -278,9 +278,9 @@ def switch_alarms(
 ) -> Any:
     """Turn the signed-in person's alarms switch (F142.1).
 
-    Off dismisses their alarm notification and on submits it while a
-    condition that alarms is due, the outage once it has held its time (five
-    minutes by default) or the week's usage halt, after the answer.
+    Off pushes them no alarm, and on alarms on the next condition that comes
+    to hold: the outage once it has held its time (five minutes by default),
+    or the week's usage halt.
 
     Returns:
         200: The person, with the switch as turned

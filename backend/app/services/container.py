@@ -664,18 +664,17 @@ class ServiceContainer(containers.DeclarativeContainer):
         sse_connection_manager=sse_connection_manager,
     )
     register_for_background_startup(lambda c: c.condition_service())
-    # The alarms, one notification per person while a condition that alarms
-    # is due (F142); its jobs and timer register on the supervisor, and it
-    # hears the conditions service, when built, before STARTUP.
+    # The alarms, a push to a person offline when a condition that alarms has
+    # begun since they were last shown the conditions (F142); its jobs and
+    # timer register on the supervisor, and it hears the conditions and the
+    # pages, when built, before STARTUP.
     alarm_service = providers.Singleton(
         AlarmService,
         container=__self__,
         supervisor=supervisor,
         condition_service=condition_service,
-        notification_token_cipher=notification_token_cipher,
-        bridge_configured=providers.Callable(
-            lambda url: url is not None, app_config.provided.notification_bridge_url
-        ),
+        app_page_service=app_page_service,
+        web_push_service=web_push_service,
         base_url=config.provided.baseurl,
         outage_after_seconds=app_config.provided.outage_alarm_after_seconds,
     )
@@ -688,7 +687,6 @@ class ServiceContainer(containers.DeclarativeContainer):
         container=__self__,
         notification_token_cipher=notification_token_cipher,
         notification_reconcile_service=notification_reconcile_service,
-        alarm_service=alarm_service,
         task_service=task_service,
         bridge_configured=providers.Callable(
             lambda url: url is not None, app_config.provided.notification_bridge_url

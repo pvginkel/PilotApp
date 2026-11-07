@@ -5,15 +5,14 @@ decision 17), and their alarms switch (F142.1).
 A save sends the one-shot "Pilot will notify you here" through the token
 first, in a task, since the bridge can take about a minute to answer: a token
 the bridge refuses or does not answer is not saved, and the task fails with the
-bridge's reason. One the bridge took is sealed onto the person's row, and what
-they should see goes out through it once that commits, their projects'
-notifications (`NotificationReconcileService`) and their alarms
-(`AlarmService`). A replace is the same save, and sends nothing through the
-token it replaces (the A3 ruling).
+bridge's reason. One the bridge took is sealed onto the person's row, and
+their projects' notifications go out through it once that commits
+(`NotificationReconcileService`). A replace is the same save, and sends
+nothing through the token it replaces (the A3 ruling).
 
 A clear and the switch answer at once: the clear's dismisses are tried once,
-off the request, through the token it cleared (the A2 ruling), and the
-switch's submits and dismisses are the alarms' reconcile's.
+off the request, through the token it cleared (the A2 ruling), and the switch
+is read by the alarms' next reconcile (`AlarmService`).
 """
 
 import re
@@ -28,7 +27,6 @@ from app.database import scoped_session
 from app.exceptions import InvalidOperationException, ValidationException
 from app.models import User
 from app.schemas.task_schema import TaskStartResponse
-from app.services.alarm_service import AlarmService
 from app.services.base_task import BaseTask, ProgressHandle
 from app.services.notification_reconcile_service import NotificationReconcileService
 from app.services.notification_token_cipher import NotificationTokenCipher
@@ -58,7 +56,6 @@ class NotificationSettingsService:
         container: "ServiceContainer",
         notification_token_cipher: NotificationTokenCipher,
         notification_reconcile_service: NotificationReconcileService,
-        alarm_service: AlarmService,
         task_service: TaskService,
         bridge_configured: bool,
     ) -> None:
@@ -72,7 +69,6 @@ class NotificationSettingsService:
                 cleared one to dismiss through
             notification_reconcile_service: Submits and dismisses the
                 person's projects' notifications
-            alarm_service: Submits and dismisses the person's alarms
             task_service: Runs a save
             bridge_configured: False saves no token
         """
@@ -80,7 +76,6 @@ class NotificationSettingsService:
         self._container = container
         self._cipher = notification_token_cipher
         self._reconciles = notification_reconcile_service
-        self._alarms = alarm_service
         self._tasks = task_service
         self._configured = bridge_configured
 
@@ -113,10 +108,10 @@ class NotificationSettingsService:
 
     def save(self, person_id: uuid.UUID, token: str, held: str | None) -> User:
         """In a save's transaction, the bridge having taken the one-shot
-        through `token`: `token` sealed as the person's, and what they should
-        see submitted through it once the transaction commits, their
-        projects' notifications and their alarms (F94.3, F142.1). `held` is
-        the ciphertext the person's row held when the save began.
+        through `token`: `token` sealed as the person's, and their projects'
+        notifications submitted through it once the transaction commits
+        (F94.3). `held` is the ciphertext the person's row held when the save
+        began.
 
         Raises:
             InvalidOperationException: the person's token was cleared or set
@@ -131,13 +126,12 @@ class NotificationSettingsService:
             )
         person.notification_token = self._cipher.seal(token)
         self._reconciles.submit_all(self._db, person)
-        self._alarms.submit_all(self._db, person)
         return person
 
     def clear(self, person: User) -> None:
         """Clear `person`'s token: none is set from the commit on, and each of
-        their notifications and alarms that stands, an owed one included,
-        reads as dismissed; once the transaction commits each is dismissed
+        their notifications that stands, an owed one included, reads as
+        dismissed; once the transaction commits each is dismissed
         through the token cleared, tried once, off the request (F134, the A2
         ruling). A person with no token has nothing to clear.
 
@@ -151,15 +145,11 @@ class NotificationSettingsService:
             return
         person.notification_token = None
         self._reconciles.dismiss_all(self._db, person, token)
-        self._alarms.dismiss_all(self._db, person, token)
 
     def switch_alarms(self, person: User, on: bool) -> None:
-        """Turn `person`'s alarms switch: once the transaction commits, off
-        dismisses their alarm notification and on submits it while a
-        condition that alarms is due, the outage once it has held its time or
-        the week's usage halt, off the request (F142.1)."""
+        """Turn `person`'s alarms switch: off pushes them no alarm, and on
+        alarms on the next condition that comes to hold (F142.1)."""
         person.alarms = on
-        self._alarms.switched()
 
     def _locked(self, person_id: uuid.UUID) -> User:
         """The person's row, read afresh under a lock held to the commit,

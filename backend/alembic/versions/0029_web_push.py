@@ -1,9 +1,12 @@
 """Web push in place of the notification bridge.
 
 Slice 038 (DB decision 74): Push Subscription, one browser's registration with
-its push service, through which a person's notifications are pushed to it; and
+its push service, through which a person's notifications are pushed to it;
 App Page, a page of Pilot its person is active in, whose beat says they are
-online.
+online; and a person's alarms on when they were last shown the conditions
+(`alarm_seen_at`), none until their first alarm push or going offline, in
+place of what their alarm notification last sent through the bridge, which
+nothing dismisses.
 
 Revision ID: 0029
 Revises: 0028
@@ -21,6 +24,18 @@ revision: str = "0029"
 down_revision: str | None = "0028"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+_USERS_AGENT = (
+    "kind_code <> 'agent' OR (subject IS NULL AND email IS NULL"
+    " AND notification_token IS NULL AND avatar_slot IS NULL"
+    " AND alarm_seen_at IS NULL)"
+)
+_USERS_AGENT_0028 = (
+    "kind_code <> 'agent' OR (subject IS NULL AND email IS NULL"
+    " AND notification_token IS NULL AND avatar_slot IS NULL"
+    " AND alarm_text IS NULL AND alarm_sent_at IS NULL"
+    " AND alarm_owed_at IS NULL)"
+)
 
 
 def upgrade() -> None:
@@ -55,12 +70,44 @@ def upgrade() -> None:
     )
     op.create_index("ix_app_pages_user_id", "app_pages", ["user_id"])
     op.create_index("ix_app_pages_beat_at", "app_pages", ["beat_at"])
+    op.drop_index("ix_users_alarm_owed_at", table_name="users")
+    op.drop_constraint("ck_users_alarm_sent", "users")
+    op.drop_constraint("ck_users_agent", "users")
+    for column in ("alarm_owed_at", "alarm_sent_at", "alarm_text"):
+        op.drop_column("users", column)
+    op.add_column(
+        "users", sa.Column("alarm_seen_at", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.create_check_constraint("ck_users_agent", "users", _USERS_AGENT)
 
 
 def downgrade() -> None:
-    """Downgrade database schema: the browsers' subscriptions and the pages
-    dropped, which revision 0028's notifications, through the bridge, never
-    read."""
+    """Downgrade database schema: when each person was last shown the
+    conditions dropped, their alarm notification standing nowhere, which
+    revision 0028's reconcile submits through their token while a condition is
+    due; the browsers' subscriptions and the pages dropped, which its
+    notifications, through the bridge, never read."""
+    op.drop_constraint("ck_users_agent", "users")
+    op.drop_column("users", "alarm_seen_at")
+    op.add_column("users", sa.Column("alarm_text", sa.Text(), nullable=True))
+    op.add_column(
+        "users", sa.Column("alarm_sent_at", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.add_column(
+        "users", sa.Column("alarm_owed_at", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.create_check_constraint("ck_users_agent", "users", _USERS_AGENT_0028)
+    op.create_check_constraint(
+        "ck_users_alarm_sent",
+        "users",
+        "alarm_text IS NULL OR alarm_sent_at IS NOT NULL",
+    )
+    op.create_index(
+        "ix_users_alarm_owed_at",
+        "users",
+        ["alarm_owed_at"],
+        postgresql_where=sa.text("alarm_owed_at IS NOT NULL"),
+    )
     op.drop_index("ix_app_pages_beat_at", table_name="app_pages")
     op.drop_index("ix_app_pages_user_id", table_name="app_pages")
     op.drop_table("app_pages")

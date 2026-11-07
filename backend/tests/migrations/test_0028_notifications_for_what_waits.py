@@ -1,12 +1,14 @@
 """Revision 0028: a membership's notification standing while its text is set,
 its priority dropped, and a person's alarms one notification on the User, the
 alarms table dropped (DB decision 70), over rows as revision 0027 leaves them:
-the revision's downgrade builds 0027's schema in the test's transaction."""
+revision 0029's downgrade, then this one's, build 0027's schema in the test's
+transaction."""
 
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -21,13 +23,22 @@ _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _SENT = datetime(2026, 11, 5, 9, 30, tzinfo=UTC)
 
 
-def _run(db: Session, step: str) -> None:
-    """Revision 0028's `step`, `upgrade` or `downgrade`, on the test's
+@pytest.fixture(autouse=True)
+def _at_0028(session: Session, person: User, project: Project) -> None:
+    """The schema as revision 0028 leaves it, the person and the project
+    written first: 0029 taken down, whose downgrade puts back what 0028
+    added. No User is read through the model after, whose columns are the
+    head's."""
+    _run(session, "downgrade", "0029")
+
+
+def _run(db: Session, step: str, number: str = "0028") -> None:
+    """Revision `number`'s `step`, `upgrade` or `downgrade`, on the test's
     transaction; what the session holds is read again after an upgrade, and
     is not to be read after a downgrade, whose columns the models lack."""
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
-    revision = ScriptDirectory.from_config(config).get_revision("0028")
+    revision = ScriptDirectory.from_config(config).get_revision(number)
     assert revision is not None
     with Operations.context(MigrationContext.configure(db.connection())):
         getattr(revision.module, step)()
@@ -152,25 +163,27 @@ class TestNotificationsForWhatWaits:
 
         assert not inspect(session.connection()).has_table("alarms")
         assert _types(session) == set()
-        refreshed = session.get_one(User, person_id)
-        assert (
-            refreshed.alarm_text,
-            refreshed.alarm_sent_at,
-            refreshed.alarm_owed_at,
-        ) == (None, None, None)
+        assert session.execute(
+            text(
+                "SELECT alarm_text, alarm_sent_at, alarm_owed_at FROM users"
+                " WHERE id = :id"
+            ),
+            {"id": person_id},
+        ).one() == (None, None, None)
 
     def test_a_standing_notification_needs_its_text_after(
         self, session: Session, project: Project, person: User
     ) -> None:
         """The checks stand on the text in place of the priority."""
+        project_id, person_id = project.id, person.id
         _run(session, "downgrade")
         _run(session, "upgrade")
         session.add(
             ProjectMember(
-                project_id=project.id,
-                user_id=person.id,
+                project_id=project_id,
+                user_id=person_id,
                 joined_at=_SENT,
-                notification_url=f"https://pilot.example.com/projects/{project.id}",
+                notification_url=f"https://pilot.example.com/projects/{project_id}",
                 notification_sent_at=_SENT,
             )
         )
@@ -191,8 +204,13 @@ class TestNotificationsForWhatWaits:
             notification_sent_at=_SENT,
         )
         session.add(member)
-        person.alarm_text = "The week's usage halt"
-        person.alarm_sent_at = _SENT
+        session.execute(
+            text(
+                "UPDATE users SET alarm_text = 'The week''s usage halt',"
+                " alarm_sent_at = :sent WHERE id = :id"
+            ),
+            {"sent": _SENT, "id": person.id},
+        )
         session.flush()
 
         _run(session, "downgrade")

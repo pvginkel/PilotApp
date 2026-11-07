@@ -3,9 +3,8 @@ V07, V12, V16, V18, V19): the token's save after its one-shot, as a task, its
 replace and its clear, and the alarms switch, through the fake bridge.
 
 Every test is on a database of its own: a save's task stores in a session of
-its own, on another thread. Where a test follows what goes out after a save, a
-clear or the switch, the reconcile and the alarms run on a supervisor of their
-own, the container's, with the outage holding and its alarm due at once."""
+its own, on another thread. Where a test follows what goes out after a save or
+a clear, the reconcile runs on a supervisor of its own, the container's."""
 
 import uuid
 from collections.abc import Callable, Iterator
@@ -22,10 +21,7 @@ from app.exceptions import InvalidOperationException, ValidationException
 from app.models import User
 from app.schemas.task_schema import TaskInfo, TaskStartResponse, TaskStatus
 from app.schemas.testing_record import InventedProjectCreateSchema
-from app.services.alarm_service import ALARM_SEQUENCE_ID, AlarmService
-from app.services.condition_service import ConditionService
 from app.services.container import ServiceContainer
-from app.services.controller_outage import ControllerOutage
 from app.services.fake_notification_bridge import FakeCall
 from app.services.notification_reconcile_service import NotificationReconcileService
 from app.services.notification_settings_service import ONE_SHOT_MESSAGE, SaveTokenTask
@@ -91,12 +87,10 @@ def sends(
     bridge: WatchedFakeNotificationBridge,
     supervise: Supervise,
 ) -> None:
-    """The container's reconcile and alarms on a supervisor of their own,
-    STARTUP fired, so that what a commit asks for goes out, with no window
-    between a person's sends; the outage holds, and its alarm is due at
-    once."""
+    """The container's reconcile on a supervisor of its own, STARTUP fired,
+    so that what a commit asks for goes out, with no window between a
+    person's sends."""
     supervisor, coordinator = supervise(container)
-    outage = ControllerOutage()
     cipher = container.notification_token_cipher()
     container.notification_reconcile_service.override(
         providers.Object(
@@ -110,25 +104,6 @@ def sends(
             )
         )
     )
-    container.alarm_service.override(
-        providers.Object(
-            AlarmService(
-                container=container,
-                supervisor=supervisor,
-                condition_service=ConditionService(
-                    container,
-                    outage,
-                    container.usage_halts(),
-                    container.sse_connection_manager(),
-                ),
-                notification_token_cipher=cipher,
-                bridge_configured=True,
-                base_url=container.config().baseurl,
-                outage_after_seconds=0,
-            )
-        )
-    )
-    outage.call_unanswered()
     coordinator.fire_startup()
 
 
@@ -363,7 +338,7 @@ class TestStartSave:
         assert _sealed(container) is None
 
     @pytest.mark.usefixtures("sends")
-    def test_a_saved_token_has_the_persons_projects_and_alarms_submitted_through_it(
+    def test_a_saved_token_has_the_persons_projects_submitted_through_it(
         self, container: ServiceContainer, bridge: WatchedFakeNotificationBridge
     ) -> None:
         project_id = _project(container)
@@ -371,8 +346,8 @@ class TestStartSave:
         _save(container, ADA_TOKEN)
 
         wait_until(
-            lambda: set(bridge.shown("ada")) == {project_id, ALARM_SEQUENCE_ID},
-            "the project's notification and the outage's alarm shown",
+            lambda: set(bridge.shown("ada")) == {project_id},
+            "the project's notification shown",
         )
 
     @pytest.mark.usefixtures("sends")
@@ -381,23 +356,18 @@ class TestStartSave:
     ) -> None:
         project_id = _project(container)
         _save(container, ADA_TOKEN)
-        wait_until(lambda: len(bridge.shown("ada")) == 2, "both shown")
+        wait_until(lambda: len(bridge.shown("ada")) == 1, "shown")
         bridge.rotate_token("ada", NEW_TOKEN)
 
         task = _save(container, NEW_TOKEN)
 
         assert task.status == TaskStatus.COMPLETED
         assert _held(container) == NEW_TOKEN
-        wait_until(lambda: len(bridge.calls("ada")) == 6, "both resubmitted")
-        one_shot, *resubmits = bridge.calls("ada")[3:]
-        assert one_shot == FakeCall("submit", None, True)
-        assert sorted(resubmits, key=lambda call: str(call.sequence_id)) == sorted(
-            [
-                FakeCall("submit", project_id, False),
-                FakeCall("submit", ALARM_SEQUENCE_ID, False),
-            ],
-            key=lambda call: str(call.sequence_id),
-        )
+        wait_until(lambda: len(bridge.calls("ada")) == 4, "resubmitted")
+        assert bridge.calls("ada")[2:] == [
+            FakeCall("submit", None, True),
+            FakeCall("submit", project_id, False),
+        ]
 
 
 class TestSaveTokenTask:
@@ -472,14 +442,14 @@ class TestClear:
     ) -> None:
         _project(container)
         _save(container, ADA_TOKEN)
-        wait_until(lambda: len(bridge.shown("ada")) == 2, "both shown")
+        wait_until(lambda: len(bridge.shown("ada")) == 1, "shown")
         bridge.unreachable(answer="stall")
 
         _clear(container)
 
         assert _sealed(container) is None
         bridge.unreachable(on=False)
-        wait_until(lambda: bridge.shown("ada") == {}, "both dismissed")
+        wait_until(lambda: bridge.shown("ada") == {}, "dismissed")
 
     def test_a_person_with_no_token_has_nothing_to_clear(
         self, container: ServiceContainer
@@ -511,19 +481,3 @@ class TestSwitchAlarms:
 
         _switch(container, True)
         assert _alarms(container) is True
-
-    @pytest.mark.usefixtures("sends")
-    def test_off_dismisses_the_persons_alarms_and_on_submits_them(
-        self, container: ServiceContainer, bridge: WatchedFakeNotificationBridge
-    ) -> None:
-        _save(container, ADA_TOKEN)
-        wait_until(lambda: len(bridge.shown("ada")) == 1, "the outage's alarm shown")
-
-        _switch(container, False)
-        wait_until(lambda: bridge.shown("ada") == {}, "the outage's alarm dismissed")
-
-        _switch(container, True)
-        wait_until(
-            lambda: set(bridge.shown("ada")) == {ALARM_SEQUENCE_ID},
-            "the outage's alarm shown again",
-        )

@@ -494,12 +494,6 @@ def _standing_membership(
     return member
 
 
-def _standing_alarm(session: Session, person: User) -> None:
-    person.alarm_text = "The week's usage halt"
-    person.alarm_sent_at = datetime(2026, 10, 30, 9, 0, tzinfo=UTC)
-    session.flush()
-
-
 class TestClearNotificationToken:
     def test_the_token_is_gone_at_once_and_what_stands_reads_dismissed(
         self,
@@ -511,7 +505,6 @@ class TestClearNotificationToken:
     ) -> None:
         person.notification_token = _seal(container, ADA_TOKEN)
         member = _standing_membership(session, project, person)
-        _standing_alarm(session, person)
         _sign_in(client, subject="subject-ada", name="Ada Example")
 
         response = client.delete(TOKEN)
@@ -526,7 +519,6 @@ class TestClearNotificationToken:
             member.notification_url,
             member.notification_owed_at,
         ) == (None, None, None)
-        assert (person.alarm_text, person.alarm_owed_at) == (None, None)
 
     def test_with_no_token_there_is_nothing_to_clear(
         self, client: FlaskClient, person: User

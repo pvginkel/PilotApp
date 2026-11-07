@@ -46,8 +46,9 @@ class SelfResponseSchema(BaseModel):
     )
     alarms: bool | None = Field(
         description=(
-            "The alarms switch (F142.1): on, the alarms of the conditions that hold "
-            "reach the person's phone; on by default; null until the handle is chosen"
+            "The alarms switch (F142.1): on, the conditions that alarm are pushed "
+            "to the person's browsers while they are offline; on by default; null "
+            "until the handle is chosen"
         ),
         examples=[True, None],
     )
@@ -82,8 +83,8 @@ class AlarmsSwitchSchema(BaseModel):
 
     alarms: bool = Field(
         description=(
-            "On: the alarms of the conditions that hold are submitted to the "
-            "person's phone; off: those standing are dismissed"
+            "On: a condition that comes to hold alarms the person's browsers "
+            "while they are offline; off: no alarm is pushed to them"
         ),
         examples=[False],
     )
