@@ -57,11 +57,12 @@ person's message starts the brain's session in the store, sandboxed and briefed,
 messages after it until it closes, after 55 quiet minutes or at Create project, Finish, Reopen and
 Archive, and acts on the record through its own tools, each call's effect shown where it ran, an
 answer given there reached from its block by *In the chat*, its chats projected for it as `chat.md`
-([`docs/chats.md`](docs/chats.md)); and the phone's notifications through the estate's bridge, under
-the token each person pastes on their profile: one standing notification per member and project
-while something in it waits on them, naming the latest, and one per person, the alarms, while the
-controller is unreachable or the week's usage halt holds the work, beside the profile's switch that
-turns the alarms off
+([`docs/chats.md`](docs/chats.md)); and the notifications through web push, on each browser where a
+person turns them on, from their profile page or the gold bar's offer, and never while they are in
+Pilot: one per member and project for what waits on them that they have not been shown, naming the
+latest, and one per person, the alarms, when the controller has been unreachable for five minutes
+or the week's usage halt holds the work, beside the profile's switch that turns the alarms off, the app closing
+each on the device where it opens what it is about
 ([`docs/notifications.md`](docs/notifications.md)); and the subscription's usage limits, on work
 items alone: KubeCoder's reading of the week's and the five-hour share, the halts at their limits,
 each as its setting says, holding new work, asking running work to stop through a halt file, or

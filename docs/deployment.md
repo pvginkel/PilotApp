@@ -26,7 +26,7 @@ number):
 | KubeCoder | `https://kubecoder-dev.home` | `https://kubecoder.home` |
 | Store environment | `pvginkel-pilotprojects-d75970` | `pvginkel-pilotprojects-8b0225` |
 | The store's `pilot-sync` | `:dev-latest` | `:prd-latest` |
-| OpenBao leaves | `eso/prd/pilot/dev/{oidc,kubecoder,sync}` | `eso/prd/pilot/prd/{oidc,kubecoder,sync}` |
+| OpenBao leaves | `eso/prd/pilot/dev/{oidc,kubecoder,sync,vapid}` | `eso/prd/pilot/prd/{oidc,kubecoder,sync,vapid}` |
 | Database | `pilot_dev_db` | `pilot_prd_db` |
 
 ## How a change gets to dev
@@ -166,17 +166,11 @@ objects into each stage's namespace:
   limits read the subscription's usage as its own controller serves it on the fleet stream, and run
   on the backend's default limits and halt settings, which the chart does not set
   ([`usage.md`](usage.md)).
-  The backend notifies each person through the notification bridge
-  ([`notifications.md`](notifications.md)) at `notificationBridge.url` in the values, as
-  `NOTIFICATION_BRIDGE_URL`, required, so that a stage without it fails its render:
-  `http://notification-bridge.notifications-prd.svc:8090` on both stages, the bridge's in-cluster
-  Service on the prd cluster, where both run. `migrate` gets none; the backend refuses to start
-  without it. The people's bridge registrations are made for production, and the dev stage has one
-  of its own, the operator's, `pilot-app-dev-pvginkel`, for testing the notifications on pilot-dev
-  (D110, which overrules D090); a made-up token saved on pilot-dev is refused. The bridge knows a
-  registration by its token alone, so a person's production token saved there is taken too, and
-  pilot-dev's notifications and alarms then reach their phone, its alarms under the same sequence
-  id as production's.
+  The backend notifies each person through web push ([`notifications.md`](notifications.md)),
+  calling each browser's push service straight from the pod, under the stage's VAPID key (below).
+  A browser turns its notifications on at one stage's site and is subscribed with that stage's key,
+  in that stage's database, so pilot-dev pushes only the browsers turned on at
+  `https://pilot-dev.home`.
 - **Service `pilot`**, port 80 to the UI, its annotation `nginx.webathome.org/server-name` the
   stage's host. Production's `nginx.webathome.org/is-public: "true"` has the estate's front door
   serve it as a public site, over HTTPS with a Let's Encrypt certificate. Dev's `is-public: "false"`
@@ -274,10 +268,17 @@ reads its own OpenBao leaves, under `eso/prd/pilot/<stage>/`, through the `openb
   as `PILOT_SYNC_TOKEN`.
 - **Flask's `SECRET_KEY` and the drain endpoint's `DRAIN_AUTH_KEY`** are generated in each
   namespace, once, by External Secrets `Password` generators, into the Secrets `pilot-secret-key`
-  and `pilot-drain-auth`. `SECRET_KEY` also seals the notification tokens people paste on their
-  profile ([`notifications.md`](notifications.md)), and a new key opens none of them: recreating
-  `pilot-secret-key` stops every person's notifications and alarms until they paste their token
-  again, and their Clear is refused until then.
+  and `pilot-drain-auth`.
+- **The stage's VAPID key**, which signs every web push, is the stage's `vapid` leaf
+  (`private_key`), a P-256 key in PKCS#8 PEM minted for that stage. It is not the operator's to
+  write: it is placed through Ansible's tooling, as a new random secret at a known OpenBao path is.
+  The ExternalSecret `pilot-vapid` brings it into the namespace as the leaf holds it, through no
+  template, for the backend's `VAPID_PRIVATE_KEY`, and no other container gets it. It is never
+  generated in the cluster (D153): every browser's subscription is bound to the stage's public key,
+  so a new key ends all of them, and each person turns their notifications on again. The read is
+  required, as the Keycloak client's and the controller token's are, since a production backend
+  refuses to start without the key: a pod rolled before the Secret is synced waits for it while the
+  old one serves.
 - **YouTrack's webhook token** is production's alone, since the dev stage gets no tracker events.
   It is not the operator's to write: production's `youtrack-webhook-token` leaf (`token`) is a copy
   of the YouTrack instance's one shared webhook token that SecretRotator keeps, and the
@@ -285,9 +286,9 @@ reads its own OpenBao leaves, under `eso/prd/pilot/<stage>/`, through the `openb
   `YOUTRACK_WEBHOOK_TOKEN` (D129, [`waits.md`](waits.md)).
 - **The database password** is Terraform's (above).
 
-A secret a later feature needs comes the same way: a value from outside the cluster is an OpenBao
-leaf per stage that the operator writes, read through `externalSecrets` in each
-`config/<stage>/values.yaml`; one nothing outside the pod reads is a generator.
+A secret a later feature needs comes the same way: a value from outside the cluster, or one that
+must outlive the namespace's Secret, is an OpenBao leaf per stage, read through `externalSecrets`
+in each `config/<stage>/values.yaml`; one nothing outside the pod depends on is a generator.
 
 ## Sign-in
 

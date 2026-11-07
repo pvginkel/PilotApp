@@ -11,9 +11,9 @@ behind it (`backend/app/engine/`), the sync of the store's tree, the server's jo
 controller, Pilot's MCP server with the worker's round trip, the project's chat in the side panel,
 with the brain's tools, a new project: the plus, its definition chat and draft, Create project and
 its setup, Pilot's jobs after a worker's turn and an item of its own done, the pass's claims and its
-questions to the writer, the switch's dialog and the archive question, and the phone's
-notifications through the bridge, a project's and the alarms, with the profile's token and switch,
-and the usage limits: the halts, the overrule, the halt file, the hard stop, the nudge and each
+questions to the writer, the switch's dialog and the archive question, and the notifications
+through web push, a project's and the alarms, with a browser's switch, the offer and the online
+status, and the usage limits: the halts, the overrule, the halt file, the hard stop, the nudge and each
 turn's tokens, and the store's update: its command, its hold, its sequence and its retry, and the
 phone's layout: its drawer, its tabs at the bottom and its views, and the waits: their firings by
 YouTrack's posts, the due time and a request, and the run per batch, and an ask Pilot is working
@@ -122,8 +122,8 @@ the template gives an app no place for a plugin; the Playwright backends' own se
 in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
 the template gives an app no place for a backend setting under Playwright: this app's points each
 backend's controller at the fake it serves itself, and its chats at a store environment in that
-fake, and its notification bridge at the bridge's fake it serves too, and holds its waits' batcher
-off for a day; the Playwright run's own setup, which `frontend/tests/support/global-setup.ts`
+fake, and gives each backend a VAPID key of its own, minted at its start, and holds its waits'
+batcher off for a day; the Playwright run's own setup, which `frontend/tests/support/global-setup.ts`
 runs from `loadAppGlobalSetup()` in the app-owned `frontend/tests/support/global-setup-extensions.ts`
 in the runner's process, before it seeds the run's database, where the template gives an app no
 place for a step of a run's setup: this app's takes the test suite lock, one run at a time across
@@ -244,9 +244,10 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   the clarification run, its write-back and the run's continuation; a project's chat and a draft's
   definition chat, its start in the store, its brief, its Stop, its close, `chat.md`, and its Chat
   tab, composer, Discuss and *In the chat*.
-- [`docs/notifications.md`](docs/notifications.md): the phone's notifications through the bridge, a
-  project's per member while something waits on them and the alarms, one per person, their
-  reconcile, spacing and retry, the profile's token and alarms switch, and the bridge's fake.
+- [`docs/notifications.md`](docs/notifications.md): the notifications through web push, a browser's
+  subscription, its switch, the offer and sign-out, the service worker, the online status and the
+  closing on the device, a project's per member for what they have not been shown and the alarms,
+  their reconcile, spacing and turn, and the fake push service.
 - [`docs/usage.md`](docs/usage.md): the usage limits: the reading, the week's and the five-hour
   halts and their settings, the overrule, the halt file, the hard stop, a run halted at its turn's
   end, the nudge, the quota wall, and each turn's tokens and cost.

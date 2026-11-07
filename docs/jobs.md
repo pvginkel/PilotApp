@@ -5,7 +5,7 @@ The backend's long-lived work runs as threads of its own process, under the supe
 consumer, a relay per session with a turn in flight, an interrupt per turn stopped under it, a start
 per session coming up, the release of the held ones, the usage halts' hard stop and the nudges, the
 halt file's writes and deletes, the reads and the write-backs of the documents a work item's run
-registered, the store's update, the standing notifications' and the alarms' sends, and the timers.
+registered, the store's update, the notifications' and the alarms' pushes, and the timers.
 Every job resumes from rows, so nothing drains to completion: a roll or a crash costs a restart of
 the job, never its work.
 
@@ -32,23 +32,23 @@ the job, never its work.
 | `controller-probe` | a timer | while the controller is unreachable, asks whether it answers ([`controller.md`](controller.md)) |
 | `nudges` | a timer | asks for `start:nudges` while a nudge owed is held by nothing, or a wall decided missed still owes one ([`usage.md`](usage.md)) |
 | `store-update` | a timer | tells the conditions when the unlifted store's update turned, and runs the job `store-update` while one stands not waiting for the sync ([`store-update.md`](store-update.md)) |
-| `notification:<project id>` | a loop of the job `notification` | brings each member's standing notification of the project to what the record says ([`notifications.md`](notifications.md)) |
-| `notification-clear:<n>` | a loop of the job `notification-clear` | dismisses, once each, a person's project notifications through the token they just cleared ([`notifications.md`](notifications.md)) |
-| `alarm` | a job with one loop | brings every person's alarms' notification to the conditions that alarm ([`notifications.md`](notifications.md)) |
-| `alarm-clear:<n>` | a loop of the job `alarm-clear` | dismisses, once, a person's alarms' notification through the token they just cleared ([`notifications.md`](notifications.md)) |
-| `notification-retry` | a timer | asks for the reconcile of each project with a notification owed past its retry ([`notifications.md`](notifications.md)) |
-| `alarm-retry` | a timer | asks for the alarms' reconcile when the message due has turned, or while a send is owed past its retry ([`notifications.md`](notifications.md)) |
+| `notification:<project id>` | a loop of the job `notification` | reconciles each member of the project: pushes their browsers what waits on them that they have not been shown ([`notifications.md`](notifications.md)) |
+| `notification-person:<person id>` | a loop of the job `notification-person` | reconciles one person in each of their projects, once their pages come to show a project, cease to, or go offline ([`notifications.md`](notifications.md)) |
+| `alarm` | a job with one loop | pushes each person the conditions that alarm, begun since they were last shown them ([`notifications.md`](notifications.md)) |
+| `alarm-seen:<n>` | a loop of the job `alarm-seen` | records a person's going offline as their being shown every condition that held then ([`notifications.md`](notifications.md)) |
+| `app-page-expiry` | a timer | deletes the pages of Pilot whose beat is ninety seconds old, and tells what that turns ([`notifications.md`](notifications.md)) |
+| `alarm-due` | a timer | asks for the alarms' reconcile when the conditions due differ from those the last reconcile read ([`notifications.md`](notifications.md)) |
 | `wait-due` | a timer | fires each open timed wait whose due time has passed, once ([`waits.md`](waits.md)) |
 | `wait-batch` | a timer | places the run of each wait whose oldest pending firing is the quiet window old ([`waits.md`](waits.md)) |
 
-Each but the notifications', the alarms' and the timers `usage-halts`, `nudges`, `store-update` and
-`wait-due` needs the controller. With `CONTROLLER_URL` unset (the
+Each but the notifications', the alarms' and the timers `usage-halts`, `nudges`, `store-update`,
+`app-page-expiry` and `wait-due` needs the controller. With `CONTROLLER_URL` unset (the
 backend suite, a dev stack without the credential), none of them starts, and the log says so once at
 STARTUP: `No controller configured (CONTROLLER_URL unset): the jobs and timers that need one do not
 start (<names>)`. Production refuses to start without `CONTROLLER_URL` and `CONTROLLER_TOKEN`; the
 check is in the server's background start, which the CLI, and so the `migrate` init container, never
-runs. The notifications' and the alarms' need the notification bridge instead: with
-`NOTIFICATION_BRIDGE_URL` unset (the backend suite, the dev stack), none of them is registered, and
+runs. The notifications' and the alarms' need the stage's VAPID key instead: with
+`VAPID_PRIVATE_KEY` unset (the backend suite, the dev stack), none of them is registered, and
 production refuses to start so.
 
 ## Jobs, loops and timers
@@ -81,7 +81,7 @@ a registration after STARTUP raises `InvalidOperationException`.
 - **A timer**: `register_timer(timer, run, *, needs_controller)`. The scheduler runs the timers in
   registration order (`usage-halts`, `halt-file`, `environment-shutdown`, `environment-delete`,
   `chat-close`, `relay-watchdog`, `controller-probe`, `nudges`, `store-update`,
-  `notification-retry`, `alarm-retry`, `wait-due`, then `wait-batch`), the first round at STARTUP,
+  `app-page-expiry`, `alarm-due`, `wait-due`, then `wait-batch`), the first round at STARTUP,
   then each round `SCHEDULER_TICK_SECONDS` after the last ended. Each run has a database session of its
   own; one that raises is logged and counted, and the rest of the round runs.
 
@@ -107,9 +107,11 @@ a held one, the hard stop, a nudge and a send under the Session row's, the shutd
 timers, a start's take and the halt file's write or delete under the Environment row's and the
 chat-close timer under a chat's Session's, skipping one another process holds, and a read's or a
 write-back's take
-under the Project's, the Session's and the Document's rows, re-checked there. A notification's or an
-alarm's sends take turns under an advisory lock of their own, and each write is dropped when the
-person's token changed meanwhile. A usage reading is recorded under a lock of its table, so once,
+under the Project's, the Session's and the Document's rows, re-checked there. A member's pushes in a
+project, and a person's alarms, take turns under an advisory lock of their own, held by the one
+transaction of the turn, so that two processes push them once; a person's pages are written under
+their User row's lock, the expiry skipping one another process holds, so that they go offline once
+([`notifications.md`](notifications.md)). A usage reading is recorded under a lock of its table, so once,
 and an overrule's end is written once, by whichever process's decision gets there first
 ([`usage.md`](usage.md)). The watchdog restarts only this process's relays.
 

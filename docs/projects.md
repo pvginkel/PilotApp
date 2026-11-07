@@ -515,6 +515,10 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   wait by the project's session, deliver a card's change of state past the endpoint's token, run the
   waits' timer's tick, place a wait's run past its quiet window and close a wait as Pilot's `mark`
   does ([`waits.md`](waits.md)).
+- `GET /api/testing/projects/<id>/sightings?handle=<handle>` answers `{item_ids}`, the items the
+  person's open membership of the project was shown, which the notification's reconcile writes off
+  the request that showed them ([`notifications.md`](notifications.md)); no person with the handle,
+  or no open membership of theirs, is a `404`.
 
 A project past the draft, born with its opening, an item placed, a work item placed, an item's save
 posted, Pilot's Done, a wait's firing and attachments hung each raise `project_changed` through the
@@ -524,7 +528,7 @@ project document that changes its text or takes it for the session, and a turn's
 document it lets go. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`, `place`, `save`,
 `saveProjectDocument`, `endTurn`, `doneByPilot`, `attach`, `attachToDraft`, `draft`, `register`,
-`workerAttach`, `askWriter`, `clarify`, `list`, `head`, `transition`, the item writes of
+`workerAttach`, `askWriter`, `clarify`, `list`, `head`, `transition`, `sightings`, the item writes of
 [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
 `projectList` and `projectHead` drive the screens: `projectList.newProject` is the plus and
 `created()` waits for its draft, `projectList.statusIcon(name)` reads a tab's icon, its status and

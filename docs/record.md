@@ -11,23 +11,21 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 - `users`: a person who signs in, or Pilot itself. Pilot is the one row of kind `agent`, with the
   handle `agent` and the name `Pilot`, written by the first revision; it has no `subject`, email,
-  notification token or avatar slot. A person has a `subject` and an `avatar_slot`, each unique. A
+  avatar slot or `alarm_seen_at`. A person has a `subject` and an `avatar_slot`, each unique. A
   handle is lower-case letters, digits and hyphens, unique, and `agent` is no person's. A person's
   row is made when they choose their handle, at their first sign-in, with the lowest free slot
-  counting from 1 ([`sign-in.md`](sign-in.md)). A person's `notification_token`, none until they
-  set one, is sealed with the app's key, and their `alarms` switch is on by default. What their
-  alarms' notification last sent is on the row: `alarm_text` while it stands, set only with
-  `alarm_sent_at`, and `alarm_owed_at` while a send is owed; Pilot's row holds none of them
+  counting from 1 ([`sign-in.md`](sign-in.md)). A person's `alarms` switch is on by default, and
+  their `alarm_seen_at`, none until their first alarm push or going offline, says when they were
+  last shown the conditions that alarm, and only moves forward
   ([`notifications.md`](notifications.md)).
 - `projects`: `number` (an identity, which names a draft's folder), `slug` (none while the project
   is a draft and set once it is not; lower-case letters, digits and hyphens, never starting with
   `draft-`), `name`, the state (`draft`, `open`, `finished`), `archived`, `autopilot`, `paused`,
   and the plan's `ticket` and `repo`.
 - `project_members`: a membership from `joined_at` to `left_at`; one open membership per user and
-  project, and a rejoin is a new row; nothing makes Pilot a member. What its standing notification
-  last sent: `notification_text` and `notification_url`, both set or none, and set only with
-  `notification_sent_at`; `notification_owed_at` while a send is owed
-  ([`notifications.md`](notifications.md)).
+  project, and a rejoin is a new row; nothing makes Pilot a member. `notification_sent_at` is when
+  the last push of the project's notification to the member was tried, taken or not, which the two
+  seconds between their pushes read ([`notifications.md`](notifications.md)).
 - `project_transitions`: each change of a project's state, archived flag, auto pilot switch or
   pause, with when and by whom ([`projects.md`](projects.md)).
 
@@ -221,6 +219,23 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   failure, cleared at the next attempt. At most one is not lifted, its `lifted_at` none
   (`uq_store_updates_unlifted`). No column names the jobs an update stopped: they are read from
   their stop, a job's Session stopped by Pilot while the update stood.
+
+**The notifications** ([`notifications.md`](notifications.md))
+
+- `push_subscriptions`: a browser's subscription with its push service, a person's: `endpoint`,
+  unique, and the browser's keys `p256dh` and `auth`, base64url as the browser gives them, with
+  `created_at`. Written when the person turns notifications on in that browser, an endpoint another
+  person held becoming theirs; deleted when they turn them off or sign out there, or when a push
+  service answers the subscription gone. Pilot has none.
+- `app_pages`: a page of Pilot open in a browser while its person is active in it: `project_id`,
+  the project it shows, or none, and `beat_at`, its last beat. Written at its first beat, which
+  mints its `id`; deleted at its away, or once its beat is ninety seconds old. A person is online
+  while a page of theirs counts, derived and never stored.
+- `item_sightings`: a member's having been shown an item that waits on them, keyed by the
+  membership and the item: named or counted in a push some browser of theirs took, or waiting while
+  a page of theirs showed the project. Written and deleted by the reconcile alone, of the items of
+  the membership's project; deleted once the item no longer waits on the member, and at Archive
+  and Leave.
 
 ## The reference values
 

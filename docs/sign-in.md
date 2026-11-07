@@ -52,10 +52,10 @@ subject, made when they choose their handle. The endpoints are `backend/app/api/
 `PeopleService` (`backend/app/services/people_service.py`).
 
 - **`GET /api/people/self`** answers the signed-in person, `{handle, handle_prefill, name, initials,
-  avatar_slot, notification_token_set, alarms}`, and is the sign-in on the record too, since the
+  avatar_slot, alarms}`, and is the sign-in on the record too, since the
   template's OIDC callback has no hook for the app: for a person with a row it refreshes the email
   (the token's, or none), the last seen time, and the name, which a token without one leaves as it
-  was. Before the row, `handle`, `avatar_slot`, `notification_token_set` and `alarms` are null, and
+  was. Before the row, `handle`, `avatar_slot` and `alarms` are null, and
   `handle_prefill` is what the handle step offers: the name's first word, case-folded, folded to
   ASCII and stripped of everything but lower-case letters, digits and hyphens ("Émile" gives
   `emile`), or empty. `name` and `initials` are null for a token with no name or a blank one. Once
@@ -83,9 +83,9 @@ handle is chosen, the address the person asked for opens.
 
 **The profile page**, `/profile` (`frontend/src/routes/_shell/profile.tsx`), opened from Profile in
 the same menu, shows the person's avatar, their name and their handle, which never changes, and
-under it their notification token and their alarms switch, the page's only fields, with their
-endpoints, on [`notifications.md`](notifications.md). The self read's `notification_token_set`
-says whether a token is set, never the token, and `alarms` where the switch stands.
+under it this browser's notifications switch and their alarms switch, the page's only fields,
+with their endpoints, on [`notifications.md`](notifications.md). The self read's `alarms` says
+where the alarms switch stands; what this browser's switch shows is the browser's own.
 
 ## Without sign-in
 

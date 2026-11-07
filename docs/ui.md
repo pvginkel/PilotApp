@@ -24,14 +24,17 @@ are the template's (`CLAUDE.md` § Template ownership). The app's own:
 
 `src/routes/_shell.tsx` is a layout route that draws one of two frames, by `usePhone()`
 (`src/hooks/use-phone.ts`, the media query `(max-width: 900px)`, every phone rule's width). Off a
-phone, `DeskFrame` (`components/shell/desk-frame.tsx`): the top bar, then, in `.app`'s grid, the
+phone, `DeskFrame` (`components/shell/desk-frame.tsx`): the offer of the browser's notifications
+while it shows, the top bar, then, in `.app`'s grid, the
 side column (`nav.tabs`, the project list) and the centre (`main.centre`) beside it, where the child
 route shows; at the narrow width, 901px to 1199px (`useNarrow()`, `src/hooks/use-narrow.ts`), the
-side column is the drawer over the centre instead (below), the rest as on a wide window. On a phone, `PhoneFrame` (`phone-frame.tsx`): no top bar, the gold bar across the
-page's top, and under it the centre, the side column a drawer over it (below). A screen whose phone
+side column is the drawer over the centre instead (below), the rest as on a wide window. On a phone, `PhoneFrame` (`phone-frame.tsx`): no top bar, the offer
+while it shows, the gold bar across the page's top, and under it the centre, the side column a drawer over it (below). A screen whose phone
 use differs draws a phone component of its own under the same address, as a project's does
 ([`projects.md`](projects.md)). The shell reads the signed-in person through `useSelf()` (`GET
-/api/people/self`); the phone's frame draws nothing until it is read. Until they have a handle, the
+/api/people/self`), and runs `useAppPage`, the page's beat and its closing of the device's
+notifications ([`notifications.md`](notifications.md)); the phone's frame draws nothing until the
+person is read. Until they have a handle, the
 handle step stands in place of the side column and the centre, under the top bar, or on a phone
 under the drawer's head, which opens no drawer there; a screen under the shell reads the person with
 `usePerson()`, whose handle, name and avatar slot are never null.
@@ -39,7 +42,8 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
 - **The top bar** (`components/shell/top-bar.tsx`), off a phone: at the narrow width the drawer's
   toggle first (below); the logo and the name, the gold bar's badges after them, none at the handle step, and the person's avatar, which opens the profile
   menu (`profile-menu.tsx`). The menu holds the person's name, Theme (System, Light, Dark), Profile
-  once the handle is chosen, and Sign out. It keeps the template's `app-shell.topbar.user*` test
+  once the handle is chosen, and Sign out, which for a person deletes this browser's push
+  subscription first ([`notifications.md`](notifications.md)). It keeps the template's `app-shell.topbar.user*` test
   ids, on a phone too, where it opens from the drawer's head, so the template's sign-in specs pass
   against it.
 - **The gold bar** (`components/shell/gold-bar.tsx`) shows each condition that holds all work, and
@@ -51,7 +55,10 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
   and no `title`: it opens a popover (`Popover`, `.gold-pop`) that holds its line and the overrule's
   button, so that a stray click on the top bar spends no quota, and the overrule's click closes it.
   On a phone it is `GoldBar` instead, a `role="status"` region across the page's top, a line per
-  condition, the overrule's button on the week's halt's line. A time is the clock alone for today,
+  condition, the overrule's button on the week's halt's line. The offer of the browser's
+  notifications (`notifications-offer.tsx`, [`notifications.md`](notifications.md)) is a gold line
+  of its own, the gold bar's look, across the full width of the page's top on every browser: over
+  the top bar off a phone, and over `GoldBar` on one. A time is the clock alone for today,
   and dated, "29 Oct, 13:16", for an earlier day, `useToday()` (`src/hooks/use-today.ts`) reading
   the day again each minute so that a page left open past midnight dates it within the minute.
   The conditions and their words (`conditionLine()`, `src/lib/utils/status-labels.ts`), in the
@@ -242,7 +249,7 @@ button beside it, level with its bottom edge), `.chip`, `.popover`, the steps be
 (`.plan-ring`, `.plan-pop`, `.plan-step`), `.menu-pop`, `.dialog`,
 `.empty-state`, `.mention`, `.prose` (its lists with their bullets and numbers, a task list's
 checkboxes), `.fold` and `.link`; `.switch`, a button of role `switch` whose knob moves right while
-it is `aria-checked`, the head's auto pilot switch and the profile's alarms switch; `.icon-cap`, an
+it is `aria-checked`, the head's auto pilot switch and the profile's two switches; `.icon-cap`, an
 icon on its text's capitals in a flex row;
 `.delta-fresh`; `.unread`, the chat's unread dot ([`chats.md`](chats.md)); and `@keyframes pulse`.
 
@@ -350,7 +357,8 @@ and sets `theme-color` to `#568ed2`, a standing edit of the template's `index.ht
 which the phone's frame paints in the page's colour (above). `registerServiceWorker()`
 (`src/lib/service-worker.ts`) registers the worker when the shell's module loads, on any page,
 before sign-in too, wherever the browser offers service workers (a secure context). The worker
-caches nothing. It answers only a navigation the network does not, with one line, "Pilot is
+shows the server's pushes and opens the app at a tap on one
+([`notifications.md`](notifications.md)), and caches nothing. It answers only a navigation the network does not, with one line, "Pilot is
 unreachable. Try again when you are back on the network.", and never a request under `/api/`, where
 sign-in, its callback and sign-out are. The UI's nginx caches the build's hashed `/assets/` for a
 year and has the browser revalidate the root's files — the icons, the logo, the manifest, the worker
@@ -373,13 +381,16 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   `goldBadge(code)` and `goldPopover` read the badges and the week's halt's popover, `goldBar` and
   `goldLine(code)` the phone's lines, `goldText(line)` a line's words without its button, and
   `goldOverrule(line)` its overrule's button; `drawerToggle` is the drawer's button, on a phone
-  and at the narrow width, `drawerHead` the phone's drawer's head and `scrim` the scrim. Every spec's page reduces motion
+  and at the narrow width, `drawerHead` the phone's drawer's head and `scrim` the scrim; `offer`,
+  `offerOn` and `offerNotNow` are the notifications' offer and its two buttons, and `listening()`
+  waits until the page hears its person's input, on which it beats. Every spec's page reduces motion
   (`tests/support/fixtures-infrastructure.ts`), so the drawer opens at once; a spec that measures
   the slide asks for `reducedMotion: 'no-preference'` first.
 - `controller` drives the worker's fake controller, and `conditions` reads what the gold bar reads
   ([`work.md`](work.md)).
-- `bridge` adds registrations to the worker's fake notification bridge and reads what they show
-  ([`notifications.md`](notifications.md)).
+- `browserPush` gives the spec's browser its notifications permission and a subscription from the
+  worker's fake push service, and reads the pushes it took; `device` hands a push to the page's
+  service worker and reads what stands on the device ([`notifications.md`](notifications.md)).
 - `links`: `set({ticket_url_template?, environment_link_base_url?})` sets the link settings for the
   spec, a setting left out unset, and unsets both after it, through `PUT /api/testing/links`, which
   answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an

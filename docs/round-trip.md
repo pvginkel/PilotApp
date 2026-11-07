@@ -55,7 +55,7 @@ otherwise, it is not, so a pass that fails or is stopped hands its documents to 
 Retry of it, once placed, makes them Pilot's again.
 
 A document that is Pilot's waits on nobody: `waiting()` (`backend/app/services/timeline_service.py`)
-leaves it out, and with it the badge, the project's *waiting on you* and the standing notification
+leaves it out, and with it the badge, the project's *waiting on you* and the project's notification
 ([`projects.md`](projects.md), [`notifications.md`](notifications.md)). Its timeline item carries
 what Pilot does on it, `pilots_work`, and is one line ([`timeline.md`](timeline.md)); opened, it is
 read-only under a gold strip, the pass's job in its head ([`documents.md`](documents.md)), and the
