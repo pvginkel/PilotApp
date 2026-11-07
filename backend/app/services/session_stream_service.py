@@ -144,8 +144,9 @@ class SessionStreamService:
             raise StreamNotConnectedException(request_id)
         with hub.lock:
             if hub.cursor is None:
-                with self._open_session() as db:
-                    self._prime(db, hub)
+                # On the request's session: a session of its own would wait on
+                # the pool for a connection beside the one the request holds.
+                self._prime(self._container.db_session(), hub)
 
     def unsubscribe(
         self, session_id: uuid.UUID, request_id: str, view: str, subject: str | None
