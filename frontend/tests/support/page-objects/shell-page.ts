@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
-import { waitForUiState, waitTestEvent } from '../helpers';
+import { waitTestEvent } from '../helpers';
 
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
@@ -88,10 +88,17 @@ export class ShellPage {
     return line.getByTestId('shell.gold-line.overrule');
   }
 
-  /** Opens the app at `path`, once the signed-in person is read. */
+  /**
+   * Opens the app at `path`, once the signed-in person is read: not at the ready StrictMode's first
+   * unmount reports, marked aborted.
+   */
   async open(path = '/'): Promise<void> {
     await this.page.goto(path);
-    await waitForUiState(this.page, 'people.self', 'ready');
+    await waitTestEvent<UiStateTestEvent>(
+      this.page,
+      'ui_state',
+      (event) => event.scope === 'people.self' && event.phase === 'ready' && event.metadata?.status !== 'aborted',
+    );
   }
 
   /**
