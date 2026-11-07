@@ -235,6 +235,13 @@ writes their connection details into the namespace's Secret `pilot-db` (keys `da
 at `postgres-pooler-rw.postgres-pas-prd.svc.cluster.local`. Nothing about the database is made by
 hand.
 
+The pooler is CloudNativePG's PgBouncer, in transaction mode: it hands each transaction whichever
+server connection is free, and it drops the `options` a client sends at connect, so a
+`-c name=value` there never reaches PostgreSQL. What the backend sets, it therefore sets per
+transaction: its engine's `begin` listener (`configure_engine()` in `backend/app/startup.py`) opens
+every transaction with `SET LOCAL jit = off`. No read of the app gains from JIT, and once a plan
+passes `jit_above_cost`, its compile alone took seconds where the query ran in milliseconds.
+
 Production's database also has a read-only login role, `pilot_prd_readonly`, which the backend
 never uses: it reads every table and sequence of `pilot_prd_db`, those a later migration creates
 included, and writes nothing. The same Terraform makes it, in prd alone, with its credentials in

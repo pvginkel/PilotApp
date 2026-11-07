@@ -34,10 +34,7 @@ projects too.
   failed, a job of Pilot's own only until it is retried, and neither while its nudge is owed
   ([`usage.md`](usage.md)); never a wait and never an item for another
   person (before the caller has a handle, every item for someone is another's); `urgent` whether one
-  of them is urgent. The list is read with PostgreSQL's JIT off (`SET LOCAL jit = off` in
-  `ProjectService.tabs`): its badge's and status's queries evaluate `waiting()` over every
-  project, and once the record grows their plan passes `jit_above_cost`, where the JIT compile
-  alone took seconds a query.
+  of them is urgent.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, name, ticket, repo, state,
   archived, autopilot, status, member, members, progress, tasks, notes, running_work, open_items,
   autopilot_may_take, create_refusal}`. A member is `{handle, name, initials, avatar_slot}`, in the

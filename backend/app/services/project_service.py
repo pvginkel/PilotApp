@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pilot_dsl as dsl
-from sqlalchemy import exists, func, or_, select, text
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachService
@@ -254,10 +254,6 @@ class ProjectService:
         """The archived projects, or every other, in the order they were
         created, with what their tabs show to the caller: the project's
         status (F141.1), and the badge counting what waits on them (F1.4)."""
-        # Over every project, the status's and the badge's predicates (`waiting()`)
-        # plan past PostgreSQL's `jit_above_cost` as the record grows, and their
-        # JIT compile alone then takes seconds a read.
-        self.db.execute(text("SET LOCAL jit = off"))
         projects = list(
             self.db.scalars(
                 select(Project)

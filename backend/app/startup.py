@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import click
 from flask import Blueprint, Flask
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine, event
 
 from app.app import App
 from app.database import scoped_session
@@ -25,8 +25,21 @@ from app.services.container import ServiceContainer
 
 
 def configure_engine(engine: Engine) -> None:
-    """Configure the app's engine, before anything opens a connection on it."""
-    pass
+    """Configure the app's engine, before anything opens a connection on it:
+    PostgreSQL's JIT off in every transaction.
+
+    No read of the app gains from JIT, and once a plan passes
+    `jit_above_cost` its compile alone takes seconds where the query runs in
+    milliseconds. It is set per transaction, as the transaction's first
+    statement: the stages reach PostgreSQL through a pooler in transaction
+    mode, which drops a connection's startup `options` and hands each
+    transaction whichever server connection is free, so a setting made once
+    per connection holds nothing there."""
+    event.listen(engine, "begin", _jit_off)
+
+
+def _jit_off(connection: Connection) -> None:
+    connection.exec_driver_sql("SET LOCAL jit = off")
 
 
 def create_container() -> ServiceContainer:

@@ -150,7 +150,8 @@ docstring of `scoped_session` in `backend/app/database.py`, which says that a ne
 same thread hands back the outer session and commits and closes it, where the template's warns only
 of a request's session; and the app's engine, which `create_app()` in `backend/app/__init__.py`
 hands to `configure_engine()` in the app-owned `backend/app/startup.py` before anything connects,
-where the template gives an app no place for a listener on its engine. uv, the migration that keeps the app's loggers,
+where the template gives an app no place for a listener on its engine: this app's turns
+PostgreSQL's JIT off in every transaction. uv, the migration that keeps the app's loggers,
 the masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
 `modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
 `backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.
