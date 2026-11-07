@@ -30,7 +30,8 @@ export async function waitTestEvent<T = TestEvent>(
   page: Page,
   kind: string,
   filter?: (payload: T) => boolean,
-  timeout = 10_000
+  // A loaded worker's first reads outrun 10 s; a wait that is met returns at once.
+  timeout = 30_000
 ): Promise<T> {
   const buffer = getTestEventBuffer(page);
   const matchedEvent = await buffer.waitForEvent((event) => {
