@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
-import { waitForUiState } from '../helpers';
+import type { UiStateTestEvent } from '@/lib/test/test-events';
+import { waitForUiState, waitTestEvent } from '../helpers';
 
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
@@ -91,6 +92,18 @@ export class ShellPage {
   async open(path = '/'): Promise<void> {
     await this.page.goto(path);
     await waitForUiState(this.page, 'people.self', 'ready');
+  }
+
+  /**
+   * Resolves once the page hears its person's input, on which it beats (`shell.app-page`): past the
+   * ready StrictMode's first unmount reports, marked aborted.
+   */
+  async listening(): Promise<void> {
+    await waitTestEvent<UiStateTestEvent>(
+      this.page,
+      'ui_state',
+      (event) => event.scope === 'shell.app-page' && event.phase === 'ready' && event.metadata?.status !== 'aborted',
+    );
   }
 
   /** The colour the page asks the browser to paint its own bar in. */

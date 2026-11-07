@@ -12,7 +12,8 @@
  * `phoneTabs` a phone's tabs at the bottom and the page over them,
  * `chats` puts a project's chats in the store's fake environment and sends their messages,
  * `browserPush` gives the spec's browser its notifications permission and a push subscription from
- * the worker's fake push service,
+ * the worker's fake push service, `device` the page as its device: the pushes its service worker
+ * shows, the notifications standing there and the page's visibility,
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
  * `waits` adds the brain's waits, fires them, places their runs and closes them.
  * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
@@ -23,6 +24,7 @@
 import { BrowserPush } from './browser-push';
 import { Chats } from './chats';
 import { Conditions, Controller } from './controller';
+import { Device } from './device';
 import { infrastructureFixtures } from './fixtures-infrastructure';
 import { Links } from './links';
 import { ChatPage } from './page-objects/chat-page';
@@ -62,6 +64,7 @@ interface DomainFixtures {
   definitionChat: ChatPage;
   chats: Chats;
   browserPush: BrowserPush;
+  device: Device;
   storeUpdate: StoreUpdate;
   waits: Waits;
 }
@@ -158,6 +161,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   browserPush: async ({ page, backendUrl }, use) => {
     await use(new BrowserPush(page, backendUrl));
+  },
+  device: async ({ page }, use) => {
+    await use(new Device(page));
   },
   storeUpdate: async ({ page, backendUrl, conditions, chats }, use) => {
     const storeUpdate = new StoreUpdate(page, backendUrl, conditions, chats);

@@ -5,6 +5,8 @@
  * drawer over the centre (`PhoneFrame`, F98.3). Either drawer is closed by its scrim or by going
  * elsewhere.
  * At a first sign-in the handle step stands in their place (F137): no screen opens before it.
+ * The page closes the notifications of what it shows on its device and beats while its person is
+ * active in it (`use-app-page.ts`).
  * Every text under the side column and the centre links through the link settings read here.
  */
 
@@ -13,6 +15,7 @@ import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router'
 import { DeskFrame } from '@/components/shell/desk-frame';
 import { KeysList } from '@/components/shell/keys-list';
 import { PhoneFrame } from '@/components/shell/phone-frame';
+import { useAppPage } from '@/hooks/use-app-page';
 import { useConditions } from '@/hooks/use-conditions';
 import { useNarrow } from '@/hooks/use-narrow';
 import { usePhone } from '@/hooks/use-phone';
@@ -31,6 +34,7 @@ export const Route = createFileRoute('/_shell')({
 
 function Shell() {
   const { data: self } = useSelf();
+  useAppPage(self);
   const phone = usePhone();
   const narrow = useNarrow();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
