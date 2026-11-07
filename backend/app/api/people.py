@@ -197,8 +197,9 @@ def switch_alarms(
 ) -> Any:
     """Turn the signed-in person's alarms switch (F142.1).
 
-    Off dismisses their standing alarms and on submits those of the
-    conditions that hold, after the answer.
+    Off dismisses their alarm notification and on submits it while a
+    condition that alarms is due, the outage once it has held its time (five
+    minutes by default) or the week's usage halt, after the answer.
 
     Returns:
         200: The person, with the switch as turned

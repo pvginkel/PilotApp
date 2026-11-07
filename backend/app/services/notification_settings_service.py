@@ -155,8 +155,9 @@ class NotificationSettingsService:
 
     def switch_alarms(self, person: User, on: bool) -> None:
         """Turn `person`'s alarms switch: once the transaction commits, off
-        dismisses their standing alarms and on submits those of the
-        conditions that hold, off the request (F142.1)."""
+        dismisses their alarm notification and on submits it while a
+        condition that alarms is due, the outage once it has held its time or
+        the week's usage halt, off the request (F142.1)."""
         person.alarms = on
         self._alarms.switched()
 

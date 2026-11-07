@@ -12054,7 +12054,7 @@
     },
     "/api/people/self/alarms": {
       "put": {
-        "description": "Off dismisses their standing alarms and on submits those of the conditions that hold, after the answer.\n\nReturns:     200: The person, with the switch as turned     400: The switch is not true or false     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle",
+        "description": "Off dismisses their alarm notification and on submits it while a condition that alarms is due, the outage once it has held its time (five minutes by default) or the week's usage halt, after the answer.\n\nReturns:     200: The person, with the switch as turned     400: The switch is not true or false     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle",
         "operationId": "put__api_people_self_alarms",
         "parameters": [],
         "requestBody": {
