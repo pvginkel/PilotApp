@@ -64,7 +64,7 @@ from app.services.session_record_service import read_records
 from app.services.session_scope import project_folder
 from app.services.turn_end_read_service import READ_FAILED
 from app.services.wait_service import CARD_WAIT, REQUESTS
-from app.services.working_on import holds, run_of
+from app.services.working_on import Reading, holds, run_of
 
 CHAT_SKILL = "/chat"
 CREATE_SKILL = "/create"
@@ -613,7 +613,9 @@ class BriefService:
     def _held(self, named: Sequence[tuple[uuid.UUID, str, int, dsl.Block]]) -> set[int]:
         """The ids of the `named` Blocks the reading holds: the others it
         handed back to the person (`working_on.holds`)."""
-        return set(holds(self.db, {document_id for document_id, *_ in named}).held)
+        return set(
+            holds(Reading(self.db), {document_id for document_id, *_ in named}).held
+        )
 
     def _run_line(self, run_id: uuid.UUID) -> str:
         """The work item's line: its title and id, the plan's task it serves,

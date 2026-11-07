@@ -196,7 +196,7 @@ from app.services.store_update_service import unlifted
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.usage_halts import UsageHalts
 from app.services.work_status import work_moved
-from app.services.working_on import flying, handed_back_in
+from app.services.working_on import Reading, flying, handed_back_in
 from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils.after_commit import after_commit
 
@@ -599,7 +599,7 @@ class SessionStartService:
         title = db.get_one(Item, run_id).title
         # A work item is titled at its placement.
         assert title is not None
-        handed_back = handed_back_in(db, run_id)
+        handed_back = handed_back_in(Reading(db), run_id)
         if handed_back:
             blocks = ", ".join(
                 f"{local_id} of {path} ({document_id})"

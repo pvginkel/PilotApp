@@ -28,7 +28,7 @@ from app.models import (
 from app.models.reference import SessionState, UserKind, WorkTrigger
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
-from app.services.working_on import JobsOn, PilotsWork, jobs_on, pilots, pilots_work
+from app.services.working_on import JobsOn, PilotsWork, Reading, jobs_on, pilots_work
 
 AT = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
 
@@ -256,11 +256,14 @@ class Camp:
 
     def reading(self, *documents: Item) -> dict[uuid.UUID, PilotsWork]:
         """What Pilot does on each document that is Pilot's, which are those
-        `pilots()` finds."""
+        `Reading.pilots` finds."""
         ids = [document.id for document in documents]
-        found = pilots_work(self.session, ids)
+        reading = Reading(self.session)
+        found = pilots_work(reading, ids)
         assert set(found) == set(
-            self.session.scalars(select(Item.id).where(Item.id.in_(ids), pilots()))
+            self.session.scalars(
+                select(Item.id).where(Item.id.in_(ids), reading.pilots())
+            )
         )
         return found
 

@@ -5,8 +5,11 @@ is held, and the person's otherwise; a block held through its run until the
 run is done with it, and handed back at once while something of the run
 stands failed or stopped."""
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -30,6 +33,7 @@ from app.services.working_on import (
     Doing,
     JobsOn,
     PilotsWork,
+    Reading,
     TakenBack,
     cancels,
     flying,
@@ -307,14 +311,14 @@ class TestAClaimHeldThroughItsRun:
         )
         job = camp.job_after(doing, SessionState.HELD)
         assert camp.of(cut_over) == PilotsWork(Doing.DOING, doing.id, True, None)
-        assert holds(camp.session, [cut_over.id]).held.keys() == {
+        assert holds(Reading(camp.session), [cut_over.id]).held.keys() == {
             camp.block(cut_over, "A1").id
         }
 
         camp.ended(job)
 
         assert camp.of(cut_over) is None
-        assert holds(camp.session, [cut_over.id]).undone == {
+        assert holds(Reading(camp.session), [cut_over.id]).undone == {
             camp.block(cut_over, "A1").id
         }
 
@@ -347,7 +351,7 @@ class TestAClaimHeldThroughItsRun:
         camp.ended(job)
 
         assert camp.of(cut_over) is None
-        assert holds(camp.session, [cut_over.id]).undone == {
+        assert holds(Reading(camp.session), [cut_over.id]).undone == {
             camp.block(cut_over, "A1").id
         }
 
@@ -381,7 +385,7 @@ class TestAClaimHeldThroughItsRun:
         camp.session.flush()
 
         assert camp.of(cut_over) is None
-        assert holds(camp.session, [cut_over.id]).undone == {
+        assert holds(Reading(camp.session), [cut_over.id]).undone == {
             camp.block(cut_over, "A1").id
         }
 
@@ -413,7 +417,7 @@ class TestAClaimHeldThroughItsRun:
 
         assert camp.of(cut_over) is None
         path = camp.session.get_one(Document, cut_over.id).path
-        assert handed_back_in(camp.session, continuation.id) == [
+        assert handed_back_in(Reading(camp.session), continuation.id) == [
             (cut_over.id, path, "A1")
         ]
         first = camp.session.scalars(
@@ -427,7 +431,7 @@ class TestAClaimHeldThroughItsRun:
         camp.retried(job)
 
         assert camp.of(cut_over) == PilotsWork(Doing.DOING, doing.id, True, None)
-        assert handed_back_in(camp.session, continuation.id) == []
+        assert handed_back_in(Reading(camp.session), continuation.id) == []
 
     def test_a_later_naming_stands(self, camp: Camp) -> None:
         cut_over, doing = self._claimed(camp)
@@ -448,7 +452,7 @@ class TestAClaimHeldThroughItsRun:
         camp.claim(cut_over, "A1", doing)
 
         assert camp.of(cut_over) is None
-        reading = holds(camp.session, [cut_over.id])
+        reading = holds(Reading(camp.session), [cut_over.id])
         assert reading.held == {
             camp.block(cut_over, "A1").id: reading.held[camp.block(cut_over, "A1").id]
         }
@@ -461,7 +465,9 @@ class TestAClaimHeldThroughItsRun:
         camp.ended(camp.job_after(writer))
 
         assert camp.of(cut_over) is None
-        assert holds(camp.session, [cut_over.id]) == holds(camp.session, [])
+        assert holds(Reading(camp.session), [cut_over.id]) == holds(
+            Reading(camp.session), []
+        )
 
 
 class TestAResearch:
@@ -491,7 +497,9 @@ class TestAResearch:
         camp.ended(job)
 
         assert camp.reading(pitch, answer) == {}
-        assert holds(camp.session, [pitch.id]) == holds(camp.session, [])
+        assert holds(Reading(camp.session), [pitch.id]) == holds(
+            Reading(camp.session), []
+        )
 
     def test_one_that_asks_the_person_first_holds_it_until_answered(
         self, camp: Camp
@@ -514,7 +522,9 @@ class TestAResearch:
             "The lake",
         )
 
-        assert holds(camp.session, [pitch.id]) == holds(camp.session, [])
+        assert holds(Reading(camp.session), [pitch.id]) == holds(
+            Reading(camp.session), []
+        )
 
 
 class TestACancel:
@@ -546,7 +556,7 @@ class TestACancel:
         camp.ended(camp.job_after(doing))
 
     def _cancel(self, camp: Camp, document: Item, person: User) -> None:
-        reading = cancels(camp.session, [document.id])[document.id]
+        reading = cancels(Reading(camp.session), [document.id])[document.id]
         camp.container.record_service().cancel(
             camp.project,
             run_documents(camp.session, reading.run_id),
@@ -562,7 +572,9 @@ class TestACancel:
         self._waits(camp, doing)
         taken = (TakenBack(camp.block(cut_over, "A1").id, cut_over.id, False),)
 
-        found = cancels(camp.session, [cut_over.id, asked.id, report.id, doing.id])
+        found = cancels(
+            Reading(camp.session), [cut_over.id, asked.id, report.id, doing.id]
+        )
 
         # The held document is Pilot's, and a work item no document.
         assert found == {
@@ -585,11 +597,11 @@ class TestACancel:
             "cancelled",
         )
         assert camp.of(cut_over) is None
-        assert holds(camp.session, [cut_over.id]).undone == {
+        assert holds(Reading(camp.session), [cut_over.id]).undone == {
             camp.block(cut_over, "A1").id
         }
-        assert cancels(camp.session, [asked.id, report.id]) == {}
-        assert handed_back_in(camp.session, doing.id) == [
+        assert cancels(Reading(camp.session), [asked.id, report.id]) == {}
+        assert handed_back_in(Reading(camp.session), doing.id) == [
             (
                 cut_over.id,
                 camp.session.get_one(Document, cut_over.id).path,
@@ -602,14 +614,16 @@ class TestACancel:
     ) -> None:
         pitch, doing, asked = self._asking(camp, research=True)
         self._waits(camp, doing)
-        assert cancels(camp.session, [asked.id])[asked.id].takes_back == (
+        assert cancels(Reading(camp.session), [asked.id])[asked.id].takes_back == (
             TakenBack(camp.block(pitch, "Q1").id, pitch.id, True),
         )
 
         self._cancel(camp, asked, person)
 
         assert camp.of(pitch) is None
-        assert holds(camp.session, [pitch.id]) == holds(camp.session, [])
+        assert holds(Reading(camp.session), [pitch.id]) == holds(
+            Reading(camp.session), []
+        )
 
     def test_it_is_not_offered_while_something_of_the_run_is_in_flight(
         self, camp: Camp
@@ -622,7 +636,7 @@ class TestACancel:
         camp.ended(pass_)
         camp.clarification(pass_, doing)
 
-        reading = cancels(camp.session, [asked.id, other.id])
+        reading = cancels(Reading(camp.session), [asked.id, other.id])
 
         # The other is Pilot's while its writer is asked.
         assert reading.keys() == {asked.id}
@@ -638,12 +652,12 @@ class TestACancel:
         third = camp.worker(conversation="conversation-3")
         camp.claim(actions, "A1", third)
 
-        reading = cancels(camp.session, [asked.id])[asked.id]
+        reading = cancels(Reading(camp.session), [asked.id])[asked.id]
 
         assert (reading.going_on, reading.pilots_in_run) == (False, True)
         assert not reading.offered
         self._waits(camp, third)
-        assert cancels(camp.session, [asked.id])[asked.id].offered
+        assert cancels(Reading(camp.session), [asked.id])[asked.id].offered
 
     def test_it_is_not_offered_on_a_document_of_a_run_that_holds_nothing(
         self, camp: Camp
@@ -653,7 +667,7 @@ class TestACancel:
         camp.ended(writer)
         camp.ended(camp.job_after(writer))
 
-        reading = cancels(camp.session, [pitch.id])
+        reading = cancels(Reading(camp.session), [pitch.id])
 
         assert reading == {pitch.id: Cancel(writer.id, (), False, False)}
         assert not reading[pitch.id].offered
@@ -671,7 +685,10 @@ class TestACancel:
 
         assert run_documents(camp.session, doing.id) == [second.id, third.id]
         assert run_documents(camp.session, continuation.id) == [second.id, third.id]
-        assert cancels(camp.session, [second.id])[second.id].run_id == continuation.id
+        assert (
+            cancels(Reading(camp.session), [second.id])[second.id].run_id
+            == continuation.id
+        )
 
 
 class TestWhatWaits:
@@ -688,7 +705,9 @@ class TestWhatWaits:
     ) -> tuple[Badge | None, ProjectStatus | None, bool]:
         """The badge, the project's status and whether Ada should see the
         project's notification."""
-        badge = camp.container.timeline_service().badges(person, [camp.project.id])
+        badge = camp.container.timeline_service().badges(
+            person, [camp.project.id], Reading(camp.session)
+        )
         status = next(
             tab.status
             for tab in camp.container.project_service().tabs(self.ADA, archived=False)
@@ -817,7 +836,7 @@ class TestHoldingWork:
         job.state_code = SessionState.FAILED
         retry = camp.retried(job, SessionState.HELD)
 
-        assert holding_work(camp.session, pitch.id) == [retry.id]
+        assert holding_work(Reading(camp.session), pitch.id) == [retry.id]
 
     def test_the_clarification_run_asking_its_writer_then_the_job_after_its_reply(
         self, camp: Camp
@@ -830,12 +849,12 @@ class TestHoldingWork:
         camp.ended(pass_)
         clarifying = camp.clarification(pass_, run)
 
-        assert holding_work(camp.session, pitch.id) == [clarifying.id]
+        assert holding_work(Reading(camp.session), pitch.id) == [clarifying.id]
 
         camp.ended(clarifying)
         after = camp.job_after(clarifying)
 
-        assert holding_work(camp.session, pitch.id) == [after.id]
+        assert holding_work(Reading(camp.session), pitch.id) == [after.id]
 
     def test_what_of_the_run_holding_every_open_block_is_in_flight(
         self, camp: Camp
@@ -847,12 +866,12 @@ class TestHoldingWork:
         doing = camp.worker(conversation="conversation-2")
         camp.claim(cut_over, "A1", doing)
 
-        assert holding_work(camp.session, cut_over.id) == [doing.id]
+        assert holding_work(Reading(camp.session), cut_over.id) == [doing.id]
 
         camp.ended(doing)
         job = camp.job_after(doing)
 
-        assert holding_work(camp.session, cut_over.id) == [job.id]
+        assert holding_work(Reading(camp.session), cut_over.id) == [job.id]
 
     def test_none_while_the_holding_run_waits_on_the_person(self, camp: Camp) -> None:
         writer = camp.worker()
@@ -866,7 +885,7 @@ class TestHoldingWork:
         camp.ended(camp.job_after(doing))
 
         assert camp.of(cut_over) is not None
-        assert holding_work(camp.session, cut_over.id) == []
+        assert holding_work(Reading(camp.session), cut_over.id) == []
 
     def test_none_for_a_held_block_beside_an_open_one(self, camp: Camp) -> None:
         writer = camp.worker()
@@ -875,14 +894,14 @@ class TestHoldingWork:
         camp.ended(camp.job_after(writer))
         camp.claim(cut_over, "A1", camp.worker(conversation="conversation-2"))
 
-        assert holding_work(camp.session, cut_over.id) == []
+        assert holding_work(Reading(camp.session), cut_over.id) == []
 
     def test_none_while_it_awaits_its_read(self, camp: Camp) -> None:
         run = camp.worker()
         pitch = camp.registered(run, read=False)
         camp.ended(run)
 
-        assert holding_work(camp.session, pitch.id) == []
+        assert holding_work(Reading(camp.session), pitch.id) == []
 
 
 class TestJobsOn:
@@ -1021,4 +1040,69 @@ class TestJobsOn:
 
         assert camp.jobs(pitch, camp.line(continuing)) == JobsOn(
             {pitch.id: pass_.id}, {}
+        )
+
+
+class TestReading:
+    """A read takes a reading of its own, which reads every hold from the
+    rows once, however much of what Pilot is working on the read shows (DB
+    decision 71)."""
+
+    ADA = AuthContext(
+        subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
+    )
+
+    def _holds_read(self, camp: Camp, read: Callable[[], object]) -> int:
+        """How often `read` sends the holds query, the statement that
+        carries its own length's bound."""
+        sent: list[str] = []
+
+        def count(
+            _conn: Any,
+            _cursor: Any,
+            statement: str,
+            _parameters: Any,
+            context: Any,
+            _many: bool,
+        ) -> None:
+            if "max_statement_length" in context.execution_options:
+                sent.append(statement)
+
+        connection = camp.session.connection()
+        event.listen(connection, "before_cursor_execute", count)
+        try:
+            read()
+        finally:
+            event.remove(connection, "before_cursor_execute", count)
+        return len(sent)
+
+    def test_the_timeline_and_the_project_list_read_the_holds_once_each(
+        self, camp: Camp
+    ) -> None:
+        writer = camp.worker()
+        held = camp.registered(writer, CLAIMED)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(held, "A1", doing)
+        asked = camp.registered(doing, QUESTION)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        shown: dict[Any, Any] = {}
+
+        def timeline() -> None:
+            for item in (
+                camp.container.timeline_service().timeline(camp.project.id).items
+            ):
+                shown[item.id] = item
+
+        assert self._holds_read(camp, timeline) == 1
+        assert shown[held.id].pilots_work.doing is Doing.WAITING_ON_ANSWER
+        assert shown[asked.id].cancel is not None
+        assert (
+            self._holds_read(
+                camp,
+                lambda: camp.container.project_service().tabs(self.ADA, archived=False),
+            )
+            == 1
         )

@@ -58,6 +58,7 @@ from app.services.container import ServiceContainer
 from app.services.job_service import NEXT_TITLE
 from app.services.session_scope import STORE_REPO
 from app.services.timeline_service import waiting_on
+from app.services.working_on import Reading
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_sidecar import FakeSidecar
 from tests.support.locks import in_thread, lock_waits
@@ -4514,7 +4515,9 @@ class TestRecordServiceItemDoneUndo:
         assert line.done_at == job.stopped_at
         assert records.offers_undo(line) is False
         assert session.scalars(
-            select(Item.id).where(Item.project_id == paused.id, waiting_on(person))
+            select(Item.id).where(
+                Item.project_id == paused.id, waiting_on(person, Reading(session))
+            )
         ).all() == [item.id]
 
     def test_the_items_next_close_places_another_job(

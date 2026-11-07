@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.models import Item, ItemKind, Project, ProjectMember
 from app.services.timeline_service import waiting
 from app.services.web_push import Push
+from app.services.working_on import Reading
 
 _UNTITLED = "New project"
 """A draft's title before its draft names it, as its tab reads it."""
@@ -118,7 +119,7 @@ class StandingNotificationService:
             for row in self.db.execute(
                 select(Item.id, ItemKind.name, Item.title, Item.for_user_id)
                 .join(ItemKind, ItemKind.code == Item.kind_code)
-                .where(Item.project_id == project.id, waiting())
+                .where(Item.project_id == project.id, waiting(Reading(self.db)))
                 .order_by(Item.seq.desc())
             )
         ]

@@ -64,6 +64,7 @@ from app.services.timeline_service import (
     waiting_on_a_member,
 )
 from app.services.work_status import work_moved
+from app.services.working_on import Reading
 from app.utils.after_commit import after_commit
 
 
@@ -279,8 +280,11 @@ class ProjectService:
         progress = {
             project.id: plan_progress(steps.get(project.id, [])) for project in projects
         }
-        activities = self._activities(projects)
-        badges = self.timeline_service.badges(self.people_service.find(auth), ids)
+        reading = Reading(self.db)
+        activities = self._activities(projects, reading)
+        badges = self.timeline_service.badges(
+            self.people_service.find(auth), ids, reading
+        )
         return [
             ProjectTab(
                 project=project,
@@ -360,7 +364,9 @@ class ProjectService:
         return ProjectHead(
             project=project,
             status=project_status(
-                project, self._activities([project]).get(project.id, _QUIET), progress
+                project,
+                self._activities([project], Reading(self.db)).get(project.id, _QUIET),
+                progress,
             ),
             member=project.id in self._memberships(auth, [project.id]),
             members=members,
@@ -771,9 +777,12 @@ class ProjectService:
             after_commit(self.session_start_service.release_held)
             after_commit(self.session_start_service.send_nudges)
 
-    def _activities(self, projects: list[Project]) -> dict[uuid.UUID, Activity]:
+    def _activities(
+        self, projects: list[Project], reading: Reading
+    ) -> dict[uuid.UUID, Activity]:
         """What runs and waits in each open project among `projects`, as its
-        status reads it (DB 228); one where nothing does is left out."""
+        status reads it (DB 228), Pilot's items as `reading` reads them; one
+        where nothing does is left out."""
         ids = [
             project.id
             for project in projects
@@ -797,7 +806,7 @@ class ProjectService:
             for row in self.db.execute(
                 select(
                     Item.project_id,
-                    func.bool_or(waiting_on_a_member()).label("waiting"),
+                    func.bool_or(waiting_on_a_member(reading)).label("waiting"),
                     func.bool_or(ItemKind.form == WAIT).label("wait_open"),
                 )
                 .join(ItemKind, ItemKind.code == Item.kind_code)

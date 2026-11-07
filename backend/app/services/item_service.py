@@ -25,10 +25,9 @@ from app.services.project_service import ProjectService
 from app.services.session_start_service import SessionStartService
 from app.services.wait_service import WaitService
 from app.services.working_on import (
+    Reading,
     cancels,
-    held,
     holding_work,
-    pilots,
     pilots_work,
     run_documents,
 )
@@ -228,7 +227,8 @@ class ItemService:
         if self.db.get(Document, item.id) is None:
             raise RecordNotFoundException("Document", str(item_id))
         project = self._lock_project(item)
-        working = pilots_work(self.db, [item.id]).get(item.id)
+        reading = Reading(self.db)
+        working = pilots_work(reading, [item.id]).get(item.id)
         if working is None:
             raise InvalidOperationException(operation, NOT_PILOTS)
         if working.doing is Doing.AWAITING_RUN:
@@ -240,7 +240,7 @@ class ItemService:
             raise InvalidOperationException(
                 operation, WAITS_ON.format(document=tree_path(project, asked.path))
             )
-        work = holding_work(self.db, item.id)
+        work = holding_work(reading, item.id)
         if not work:
             raise InvalidOperationException(operation, HOLDING_UNREAD)
         self.session_start_service.take_over(self.db, work, person)
@@ -272,19 +272,20 @@ class ItemService:
         project = self._lock_project(item)
         if item.done_at is not None:
             raise InvalidOperationException(operation, "the item is done")
-        if self.db.scalar(select(Item.id).where(Item.id == item.id, pilots())):
+        reading = Reading(self.db)
+        if item.id in reading.found:
             raise InvalidOperationException(operation, PILOTS_ITEM)
-        reading = cancels(self.db, [item.id]).get(item.id)
-        if reading is None:
+        offer = cancels(reading, [item.id]).get(item.id)
+        if offer is None:
             raise InvalidOperationException(operation, NOT_A_RUNS)
-        if not reading.takes_back:
+        if not offer.takes_back:
             raise InvalidOperationException(operation, HOLDS_NOTHING)
-        if reading.going_on:
+        if offer.going_on:
             raise InvalidOperationException(operation, RUN_IN_FLIGHT)
-        if reading.pilots_in_run:
+        if offer.pilots_in_run:
             raise InvalidOperationException(operation, RUN_PILOTS)
         self.record_service.cancel(
-            project, run_documents(self.db, reading.run_id), person, operation
+            project, run_documents(self.db, offer.run_id), person, operation
         )
 
     def _lock_project(self, item: Item) -> Project:
@@ -306,9 +307,12 @@ class ItemService:
         tools are not the app's controls, and the record takes their writes
         as ever."""
         self._lock_project(item)
-        if self.db.scalar(select(Item.id).where(Item.id == item.id, pilots())):
+        reading = Reading(self.db)
+        if item.id in reading.found:
             raise InvalidOperationException(operation, PILOTS_ITEM)
-        query = select(Block.local_id).where(Block.document_id == item.id, held())
+        query = select(Block.local_id).where(
+            Block.document_id == item.id, reading.held()
+        )
         if local_id is not None:
             query = query.where(Block.local_id == local_id)
         held_ids = list(self.db.scalars(query.order_by(Block.position)))

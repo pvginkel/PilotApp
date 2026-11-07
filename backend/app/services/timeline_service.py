@@ -121,11 +121,11 @@ from app.services.store_update_service import stopped_for_update, unlifted
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import REQUESTS, ShownFiring, WaitService
 from app.services.working_on import (
+    Reading,
     TakenBack,
     cancels,
     holds,
     jobs_on,
-    pilots,
     pilots_work,
 )
 
@@ -156,20 +156,20 @@ class Badge:
     urgent: bool
 
 
-def waiting_on(person: User | None) -> ColumnElement[bool]:
+def waiting_on(person: User | None, reading: Reading) -> ColumnElement[bool]:
     """The items waiting on `person` (F94.5, DB 225): F94.5's set, `for`
-    nobody or for them. Before a person has chosen their handle, every `for`
-    item is another's."""
+    nobody or for them, Pilot's as `reading` reads them. Before a person has
+    chosen their handle, every `for` item is another's."""
     addressed: ColumnElement[bool] = Item.for_user_id.is_(None)
     if person is not None:
         addressed = or_(addressed, Item.for_user_id == person.id)
-    return and_(waiting(), addressed)
+    return and_(waiting(reading), addressed)
 
 
-def waiting_on_a_member() -> ColumnElement[bool]:
+def waiting_on_a_member(reading: Reading) -> ColumnElement[bool]:
     """The items waiting on a member of their project (DB 225, 228): F94.5's
-    set, `for` nobody while the project has a member, or for one of its
-    members."""
+    set, Pilot's as `reading` reads them, `for` nobody while the project has
+    a member, or for one of its members."""
     member = (
         select(ProjectMember.id)
         .where(
@@ -179,18 +179,18 @@ def waiting_on_a_member() -> ColumnElement[bool]:
         )
         .correlate(Item)
     )
-    return and_(waiting(), member.exists())
+    return and_(waiting(reading), member.exists())
 
 
-def waiting() -> ColumnElement[bool]:
+def waiting(reading: Reading) -> ColumnElement[bool]:
     """F94.5's set, whoever an item is for: open; a prose item but the
     opening, a notice only when it is urgent (F23.2, F10.3), and none that
-    is Pilot's (DB 225, 296; `working_on.pilots`): a registered document
-    awaiting its read, under its pass or its clarification, or with every
-    open block held; a work item stopped or failed, a job only until it is
-    retried, and neither while its nudge is owed: one a usage halt's hard
-    stop stopped (DB 225, 269), or one whose turn died at the quota wall;
-    never a wait (F27.5)."""
+    is Pilot's as `reading` reads it (DB 225, 296; `Reading.pilots`): a
+    registered document awaiting its read, under its pass or its
+    clarification, or with every open block held; a work item stopped or
+    failed, a job only until it is retried, and neither while its nudge is
+    owed: one a usage halt's hard stop stopped (DB 225, 269), or one whose
+    turn died at the quota wall; never a wait (F27.5)."""
     form = (
         select(ItemKind.form)
         .where(ItemKind.code == Item.kind_code)
@@ -222,7 +222,7 @@ def waiting() -> ColumnElement[bool]:
                 form == PROSE,
                 Item.kind_code != OPENING,
                 or_(Item.kind_code != NOTICE, Item.urgent),
-                ~pilots(),
+                ~reading.pilots(),
             ),
             and_(form == WORK, state.in_(_STOPPED), ~retried, ~owed),
         ),
@@ -518,17 +518,17 @@ class TimelineService:
         self.wait_service = wait_service
 
     def badges(
-        self, person: User | None, project_ids: Iterable[uuid.UUID]
+        self, person: User | None, project_ids: Iterable[uuid.UUID], reading: Reading
     ) -> dict[uuid.UUID, Badge]:
-        """Each project's badge for `person` (F1.4); a project nothing waits
-        on is left out."""
+        """Each project's badge for `person` (F1.4), Pilot's items as
+        `reading` reads them; a project nothing waits on is left out."""
         rows = self.db.execute(
             select(
                 Item.project_id,
                 func.count().label("waiting"),
                 func.bool_or(Item.urgent).label("urgent"),
             )
-            .where(Item.project_id.in_(list(project_ids)), waiting_on(person))
+            .where(Item.project_id.in_(list(project_ids)), waiting_on(person, reading))
             .group_by(Item.project_id)
         ).all()
         return {row.project_id: Badge(row.waiting, row.urgent) for row in rows}
@@ -677,7 +677,7 @@ class TimelineService:
         documents = [item.id for item, document, _ in rows if document is not None]
         asked = writer_asked(self.db, documents)
         clarified = on_documents(self.db, documents)
-        pilots = self._pilots(documents, list(bodies))
+        pilots = self._pilots(Reading(self.db), documents, list(bodies))
         on = jobs_on(self.db, [item.id for item, _, _ in rows])
         job_ids = set(on.shown.values()) | set(on.after_turn.values())
         works = work_status(
@@ -982,17 +982,19 @@ class TimelineService:
         return given
 
     def _pilots(
-        self, document_ids: list[uuid.UUID], body_ids: list[uuid.UUID]
+        self,
+        working_on: Reading,
+        document_ids: list[uuid.UUID],
+        body_ids: list[uuid.UUID],
     ) -> "_Pilots":
         """What Pilot does on each of the documents `document_ids` that is
         Pilot's, and on the held blocks of those of `body_ids`, and the
-        Cancel each of `document_ids` offers, as the reading reads them
-        (`working_on`)."""
-        doing = pilots_work(self.db, document_ids)
-        reading = holds(self.db, body_ids)
+        Cancel each of `document_ids` offers, as `working_on` reads them."""
+        doing = pilots_work(working_on, document_ids)
+        reading = holds(working_on, body_ids)
         offered = {
             item_id: cancel
-            for item_id, cancel in cancels(self.db, document_ids).items()
+            for item_id, cancel in cancels(working_on, document_ids).items()
             if cancel.offered
         }
         taken = [each for cancel in offered.values() for each in cancel.takes_back]

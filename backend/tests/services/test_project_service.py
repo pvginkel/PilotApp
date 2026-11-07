@@ -87,6 +87,7 @@ from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import Badge
+from app.services.working_on import Reading
 from app.utils import after_commit as after_commit_module
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
@@ -1544,7 +1545,12 @@ class TestCreateProjectPaused:
 
         assert _status(container, draft) is ProjectStatus.PAUSED
         assert _ready_after(container, draft) == setup.id
-        assert container.timeline_service().badges(person, [draft.id]) == {}
+        assert (
+            container.timeline_service().badges(
+                person, [draft.id], Reading(container.db_session())
+            )
+            == {}
+        )
 
         container.project_service().transition(ADA, draft.id, TransitionKind.RESUMED)
 

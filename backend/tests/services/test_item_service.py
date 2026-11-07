@@ -29,7 +29,7 @@ from app.services.item_service import (
     WAITS_ON,
 )
 from app.services.timeline_service import waiting
-from app.services.working_on import holds
+from app.services.working_on import Reading, holds
 from tests.support.working_on import Camp
 
 ADA = AuthContext(
@@ -730,7 +730,9 @@ def _claimed(camp: Camp, text: str = CLAIMED) -> tuple[Item, models.Session]:
 
 def _waits(camp: Camp, item: Item) -> bool:
     return (
-        camp.session.scalar(select(Item.id).where(Item.id == item.id, waiting()))
+        camp.session.scalar(
+            select(Item.id).where(Item.id == item.id, waiting(Reading(camp.session)))
+        )
         is not None
     )
 
@@ -791,7 +793,7 @@ class TestItemServiceTakeOver:
             person.id,
         )
         assert camp.of(cut_over) is None
-        assert holds(camp.session, [cut_over.id]).undone == {
+        assert holds(Reading(camp.session), [cut_over.id]).undone == {
             camp.block(cut_over, "A1").id
         }
         items.done_action(ADA, cut_over.id, "A1", "Done by hand.")
@@ -930,7 +932,7 @@ class TestItemServiceCancel:
                 person.id,
             )
         assert camp.of(cut_over) is None
-        assert holds(camp.session, [cut_over.id]).undone == {
+        assert holds(Reading(camp.session), [cut_over.id]).undone == {
             camp.block(cut_over, "A1").id
         }
         assert _waits(camp, cut_over)

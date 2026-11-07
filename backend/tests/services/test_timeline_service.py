@@ -77,6 +77,7 @@ from app.services.start_gate import WorkSlots
 from app.services.timeline_service import Badge, work_status
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import ReportedTransition
+from app.services.working_on import Reading
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.store_updates import hold, lift, stopped_job
 from tests.support.turns import end_turns, turn_in_flight
@@ -4098,7 +4099,9 @@ class TestBadges:
         self, container: ServiceContainer, person: User | None, *projects: Project
     ) -> dict[uuid.UUID, Badge]:
         return container.timeline_service().badges(
-            person, [project.id for project in projects]
+            person,
+            [project.id for project in projects],
+            Reading(container.db_session()),
         )
 
     def test_the_open_prose_items_but_the_opening_wait(
