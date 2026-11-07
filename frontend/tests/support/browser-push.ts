@@ -27,7 +27,7 @@ interface SubscriptionJson {
 }
 
 /** A push the browser's push service took, as the fake keeps it: its payload and its headers. */
-export interface TakenPush {
+interface TakenPush {
   title: string;
   body: string;
   tag: string;

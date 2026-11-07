@@ -847,6 +847,7 @@ class TestReadSightings:
         assert response.status_code == 400
 
 
+@pytest.mark.usefixtures("person")
 class TestCreateSave:
     def test_a_save_with_a_fault_is_held_and_the_item_a_concept(
         self, client: FlaskClient, environment: Environment
