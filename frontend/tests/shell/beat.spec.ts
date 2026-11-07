@@ -93,14 +93,20 @@ test.describe("A page's beat", () => {
     const here = await projects.make({ name: makeUnique('Here'), members: [me.handle!] });
     const thereName = makeUnique('There');
     const there = await projects.make({ name: thereName, members: [me.handle!] });
+    await page.clock.install();
     await projectList.open(here);
     const first = firstBeat(page);
     await shell.listening();
     await input(page);
     const id = await idOf(await first);
+    const tab = projectList.tab(thereName);
+    await expect(tab).toBeVisible();
+    // The page's clock stands still from here, so no beat of its thirty seconds comes.
+    // eslint-disable-next-line no-restricted-properties -- The page's own clock, read to pause it.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
 
     const beat = nextBeat(page, id);
-    await projectList.tab(thereName).click();
+    await tab.click();
     expect((await beat).request().postDataJSON()).toEqual({ project_id: there });
   });
 
