@@ -16,9 +16,11 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import cast
 from urllib.parse import urlsplit
 
 import jwt
@@ -29,13 +31,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from prometheus_client import Counter
 from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
 
-from app.database import scoped_session
 from app.models import PushSubscription
 from app.utils.base64url import b64, unb64
-
-if TYPE_CHECKING:
-    from app.services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
 
@@ -147,21 +146,22 @@ class _Target:
     auth: str
 
 
+type OpenTransaction = Callable[[], AbstractContextManager[Session]]
+"""Opens a transaction of its own, committed when its block ends: a turn's,
+on its connection (`Turn.transaction`)."""
+
+
 class WebPushService:
     """Pushes to a person's browsers, signed with the stage's key; with no key,
     the deployment pushes nothing."""
 
-    def __init__(
-        self, container: "ServiceContainer", private_key: str | None, contact: str
-    ) -> None:
+    def __init__(self, private_key: str | None, contact: str) -> None:
         """
         Args:
-            container: what the reads and deletes open their sessions on
             private_key: the stage's VAPID key, P-256 in PEM; None pushes
                 nothing
             contact: the stage's own address, the claims' `sub`
         """
-        self._container = container
         self._key = None if private_key is None else VapidKey(private_key)
         self._contact = contact
 
@@ -171,18 +171,23 @@ class WebPushService:
         None where the deployment pushes nothing."""
         return None if self._key is None else self._key.public_key
 
-    def push(self, user_id: uuid.UUID, push: Push) -> bool:
+    def push(
+        self,
+        user_id: uuid.UUID,
+        push: Push,
+        transaction: OpenTransaction,
+    ) -> bool:
         """Push `push` to every subscription of the person's, one after the
         other; delete each one its push service answered gone. Whether any of
         them took it: False with none, or with no key.
 
         The read of the subscriptions and the delete are transactions of
-        their own, and none is open across the push services' calls: not for
-        a thread that holds a session (`scoped_session`).
+        their own, each opened by `transaction`, a turn's on its connection
+        (`Turn.transaction`); none is open across the push services' calls.
         """
         if self._key is None:
             return False
-        with scoped_session(self._container) as db:
+        with transaction() as db:
             targets = [
                 _Target(row.id, row.endpoint, row.p256dh, row.auth)
                 for row in db.scalars(
@@ -200,7 +205,7 @@ class WebPushService:
             target.id for target, outcome in outcomes if outcome is PushOutcome.GONE
         ]
         if gone:
-            with scoped_session(self._container) as db:
+            with transaction() as db:
                 # By the person too: a row another person's write took over
                 # since the read is theirs now.
                 db.execute(

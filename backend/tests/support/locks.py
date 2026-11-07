@@ -1,11 +1,12 @@
 """What a test on a committed database waits on: a transaction run in a
-thread of its own, and the connections waiting on a lock."""
+thread of its own, the connections waiting on a lock, and the app's pool."""
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import Engine, text
 
 from app.services.container import ServiceContainer
 from tests.support.supervisor import WAIT_SECONDS
@@ -54,3 +55,20 @@ def lock_waits(container: ServiceContainer) -> int:
             )
         )
         return waits
+
+
+def pool_capacity(container: ServiceContainer) -> int:
+    """The most connections the app's pool hands out at once."""
+    config = container.config()
+    return config.db_pool_size + config.db_pool_max_overflow
+
+
+@contextmanager
+def holding_connections(container: ServiceContainer, count: int) -> Iterator[None]:
+    """`count` of the app's pooled connections checked out, idle, until the
+    block ends."""
+    engine: Engine = container.session_maker().kw["bind"]
+    with ExitStack() as held:
+        for _ in range(count):
+            held.enter_context(engine.connect())
+        yield

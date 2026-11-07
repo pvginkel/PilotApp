@@ -41,7 +41,12 @@ from app.services.web_push import WEB_PUSH_SENDS_TOTAL, PushOutcome, WebPushServ
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_push_service import ServedFakePushService
-from tests.support.locks import in_thread, lock_waits
+from tests.support.locks import (
+    holding_connections,
+    in_thread,
+    lock_waits,
+    pool_capacity,
+)
 from tests.support.store_updates import hold, lift
 from tests.support.supervisor import (
     LogWaiter,
@@ -900,6 +905,27 @@ class TestAlarmServiceTwoProcesses:
         assert _pushes(fake_push_service, browsers["ben"]) == [_alarm(container, WEEK)]
 
 
+class TestAlarmServiceConnections:
+    def test_a_turn_alarms_on_the_one_connection_the_pool_has_left(
+        self,
+        container: ServiceContainer,
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        browsers: dict[str, FakeSubscription],
+        supervise: Supervise,
+    ) -> None:
+        """A person's turn holds one connection at a time: with every other
+        one of the pool held, each person is alarmed."""
+        built = _service(container, supervise, web_push_service)
+        holding = {ConditionCode.WEEK_HALT: _now()}
+
+        with holding_connections(container, pool_capacity(container) - 1):
+            _reconcile(built.service, holding)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == [_alarm(container, WEEK)]
+        assert _pushes(fake_push_service, browsers["ben"]) == [_alarm(container, WEEK)]
+
+
 class TestAlarmServiceNoKey:
     def test_with_no_key_it_registers_and_hears_nothing(
         self, container: ServiceContainer, supervise: Supervise
@@ -924,9 +950,7 @@ class TestAlarmServiceNoKey:
                 supervisor=supervisor,
                 condition_service=conditions,
                 app_page_service=pages,
-                web_push_service=WebPushService(
-                    container, None, container.config().baseurl
-                ),
+                web_push_service=WebPushService(None, container.config().baseurl),
                 base_url=container.config().baseurl,
                 outage_after_seconds=300,
             )

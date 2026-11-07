@@ -48,9 +48,11 @@ reconcile.
 
 A member's turn is an advisory lock held on a connection of its own, from
 before the record is read until what the push came to is written, so that two
-processes push them once. The read and the write are transactions of their
-own: across the push services' calls no row or table is locked, and no request
-or commit waits on them.
+processes push them once. The read, the push's own read and delete, and the
+write are transactions of their own on that connection (`Turn.transaction`),
+so that a turn holds one connection and never waits on the pool for another:
+across the push services' calls no row or table is locked and no transaction
+is open, and no request or commit waits on them.
 """
 
 import logging
@@ -69,7 +71,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.database import scoped_session
 from app.engine.bus import EngineBus, EngineEvent, ProjectChanged
 from app.models import ItemSighting, Project, ProjectMember, PushSubscription
-from app.services.advisory_turn import advisory_turn, turn_key
+from app.services.advisory_turn import Turn, advisory_turn, turn_key
 from app.services.app_page_service import AppPageService, PresenceEvent
 from app.services.standing_notification_service import StandingNotification
 from app.services.supervisor import LoopHandle, Supervisor
@@ -256,8 +258,8 @@ class NotificationReconcileService:
     ) -> datetime | None:
         """The member's compare and push, in their turn; with their last push
         not yet `spacing_seconds` old, nothing pushed, and the time it is."""
-        with self._turn(person_id, project_id):
-            with scoped_session(self._container) as db:
+        with self._turn(person_id, project_id) as turn:
+            with turn.transaction() as db:
                 due = self._compare(db, project_id, person_id)
             if due is None:
                 return None
@@ -266,9 +268,9 @@ class NotificationReconcileService:
                 if after > datetime.now(UTC):
                     return after
             took = self._web_push.push(
-                person_id, due.notification.push(alert=due.alert)
+                person_id, due.notification.push(alert=due.alert), turn.transaction
             )
-            with scoped_session(self._container) as db:
+            with turn.transaction() as db:
                 db.execute(
                     update(ProjectMember)
                     .where(ProjectMember.id == due.holder_id)
@@ -296,7 +298,7 @@ class NotificationReconcileService:
         notification = (
             None
             if holder is None
-            else self._container.standing_notification_service().should_see(
+            else self._container.standing_notification_service(db=db).should_see(
                 db.get_one(Project, project_id), [holder]
             )[holder.id]
         )
@@ -333,7 +335,7 @@ class NotificationReconcileService:
 
     def _turn(
         self, person_id: uuid.UUID, project_id: uuid.UUID
-    ) -> AbstractContextManager[None]:
+    ) -> AbstractContextManager[Turn]:
         """The member's turn to be pushed, until the block ends."""
         return advisory_turn(
             self._container.session_maker(),

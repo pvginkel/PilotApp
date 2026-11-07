@@ -205,7 +205,6 @@ class ServiceContainer(containers.DeclarativeContainer):
     # check, too, starts no thread.
     web_push_service = providers.Singleton(
         WebPushService,
-        container=__self__,
         private_key=app_config.provided.vapid_private_key,
         contact=config.provided.baseurl,
     )

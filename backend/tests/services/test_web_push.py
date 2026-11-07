@@ -5,6 +5,7 @@ service."""
 import json
 import logging
 import time
+from functools import partial
 
 import jwt
 import pytest
@@ -12,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.database import scoped_session
 from app.models import PushSubscription, User
 from app.models.reference import UserKind
 from app.services.container import ServiceContainer
@@ -20,6 +22,7 @@ from app.services.push_subscription_service import PushSubscriptionService
 from app.services.web_push import (
     MAX_PLAINTEXT,
     WEB_PUSH_SENDS_TOTAL,
+    OpenTransaction,
     Push,
     PushOutcome,
     VapidKey,
@@ -67,6 +70,12 @@ RFC_HEADER = (
 RFC_CIPHERTEXT = (
     "8pfeW0KbunFT06SuDKoJH9Ql87S1QUrdirN6GcG7sFz1y1sqLgVi1VhjVkHsUoEsbI_0LpXMuGvnzQ"
 )
+
+
+@pytest.fixture
+def transaction(container: ServiceContainer) -> OpenTransaction:
+    """Each of a push's transactions, on the test's session."""
+    return partial(scoped_session, container)
 
 
 def _payload(push: Push) -> dict[str, object]:
@@ -226,6 +235,7 @@ class TestWebPushService:
         person: User,
         web_push_service: WebPushService,
         fake_push_service: ServedFakePushService,
+        transaction: OpenTransaction,
     ) -> None:
         phone = fake_push_service.browser(web_push_service.public_key or "")
         desktop = fake_push_service.browser(web_push_service.public_key or "")
@@ -233,7 +243,7 @@ class TestWebPushService:
         _subscribe(session, person, desktop)
         sent = _sends(PushOutcome.SENT)
 
-        assert web_push_service.push(person.id, ALERT)
+        assert web_push_service.push(person.id, ALERT, transaction)
 
         assert fake_push_service.pushes(phone.endpoint) == [_pushed(ALERT, "high")]
         assert fake_push_service.pushes(desktop.endpoint) == [_pushed(ALERT, "high")]
@@ -245,12 +255,13 @@ class TestWebPushService:
         person: User,
         web_push_service: WebPushService,
         fake_push_service: ServedFakePushService,
+        transaction: OpenTransaction,
     ) -> None:
         phone = fake_push_service.browser(web_push_service.public_key or "")
         _subscribe(session, person, phone)
         update = Push("Garden sensors", "Pick the board", PROJECT_ID, URL, False)
 
-        assert web_push_service.push(person.id, update)
+        assert web_push_service.push(person.id, update, transaction)
 
         assert fake_push_service.pushes(phone.endpoint) == [_pushed(update, "normal")]
 
@@ -260,21 +271,25 @@ class TestWebPushService:
         person: User,
         web_push_service: WebPushService,
         fake_push_service: ServedFakePushService,
+        transaction: OpenTransaction,
     ) -> None:
         bea = _bea(session)
         hers = fake_push_service.browser(web_push_service.public_key or "")
         _subscribe(session, bea, hers)
 
-        assert not web_push_service.push(person.id, ALERT)
+        assert not web_push_service.push(person.id, ALERT, transaction)
 
         assert fake_push_service.pushes(hers.endpoint) == []
 
     def test_a_person_with_no_subscription_is_pushed_nothing(
-        self, person: User, web_push_service: WebPushService
+        self,
+        person: User,
+        web_push_service: WebPushService,
+        transaction: OpenTransaction,
     ) -> None:
         sent = _sends(PushOutcome.SENT)
 
-        assert not web_push_service.push(person.id, ALERT)
+        assert not web_push_service.push(person.id, ALERT, transaction)
 
         assert _sends(PushOutcome.SENT) == sent
 
@@ -285,13 +300,14 @@ class TestWebPushService:
         person: User,
         vapid_key: str,
         fake_push_service: ServedFakePushService,
+        transaction: OpenTransaction,
     ) -> None:
         phone = fake_push_service.browser(VapidKey(vapid_key).public_key)
         _subscribe(session, person, phone)
-        service = WebPushService(container, None, "http://localhost:3500")
+        service = WebPushService(None, "http://localhost:3500")
 
         assert service.public_key is None
-        assert not service.push(person.id, ALERT)
+        assert not service.push(person.id, ALERT, transaction)
 
         assert fake_push_service.pushes(phone.endpoint) == []
 
@@ -302,6 +318,7 @@ class TestWebPushService:
         web_push_service: WebPushService,
         fake_push_service: ServedFakePushService,
         caplog: pytest.LogCaptureFixture,
+        transaction: OpenTransaction,
     ) -> None:
         phone = fake_push_service.browser(web_push_service.public_key or "")
         desktop = fake_push_service.browser(web_push_service.public_key or "")
@@ -311,7 +328,7 @@ class TestWebPushService:
         gone = _sends(PushOutcome.GONE)
 
         with caplog.at_level(logging.INFO, logger="app.services.web_push"):
-            assert web_push_service.push(person.id, ALERT)
+            assert web_push_service.push(person.id, ALERT, transaction)
 
         assert _holders(session) == {desktop.endpoint: person.id}
         assert fake_push_service.pushes(desktop.endpoint) == [_pushed(ALERT, "high")]
@@ -324,12 +341,13 @@ class TestWebPushService:
         person: User,
         web_push_service: WebPushService,
         fake_push_service: ServedFakePushService,
+        transaction: OpenTransaction,
     ) -> None:
         phone = fake_push_service.browser(web_push_service.public_key or "")
         _subscribe(session, person, phone)
         fake_push_service.reset()
 
-        assert not web_push_service.push(person.id, ALERT)
+        assert not web_push_service.push(person.id, ALERT, transaction)
 
         assert _holders(session) == {}
 
@@ -339,6 +357,7 @@ class TestWebPushService:
         person: User,
         web_push_service: WebPushService,
         fake_push_service: ServedFakePushService,
+        transaction: OpenTransaction,
     ) -> None:
         bea = _bea(session)
         phone = fake_push_service.browser(web_push_service.public_key or "")
@@ -346,7 +365,7 @@ class TestWebPushService:
         fake_push_service.fail(phone.endpoint, "gone")
         fake_push_service.on_push = lambda: _subscribe(session, bea, phone)
 
-        assert not web_push_service.push(person.id, ALERT)
+        assert not web_push_service.push(person.id, ALERT, transaction)
 
         assert _holders(session) == {phone.endpoint: bea.id}
 
@@ -368,6 +387,7 @@ class TestWebPushService:
         failure: str,
         outcome: PushOutcome,
         logged: str,
+        transaction: OpenTransaction,
     ) -> None:
         phone = fake_push_service.browser(web_push_service.public_key or "")
         _subscribe(session, person, phone)
@@ -375,14 +395,14 @@ class TestWebPushService:
         failed = _sends(outcome)
 
         with caplog.at_level(logging.WARNING, logger="app.services.web_push"):
-            assert not web_push_service.push(person.id, ALERT)
+            assert not web_push_service.push(person.id, ALERT, transaction)
 
         assert _sends(outcome) == failed + 1
         assert logged in caplog.text
         assert _holders(session) == {phone.endpoint: person.id}
         fake_push_service.fail(phone.endpoint, None)
         assert fake_push_service.pushes(phone.endpoint) == []
-        assert web_push_service.push(person.id, ALERT)
+        assert web_push_service.push(person.id, ALERT, transaction)
         assert fake_push_service.pushes(phone.endpoint) == [_pushed(ALERT, "high")]
 
     def test_a_push_one_browser_took_went_out(
@@ -391,6 +411,7 @@ class TestWebPushService:
         person: User,
         web_push_service: WebPushService,
         fake_push_service: ServedFakePushService,
+        transaction: OpenTransaction,
     ) -> None:
         phone = fake_push_service.browser(web_push_service.public_key or "")
         desktop = fake_push_service.browser(web_push_service.public_key or "")
@@ -398,7 +419,7 @@ class TestWebPushService:
         _subscribe(session, person, desktop)
         fake_push_service.fail(phone.endpoint, "error")
 
-        assert web_push_service.push(person.id, ALERT)
+        assert web_push_service.push(person.id, ALERT, transaction)
 
     def test_a_browser_subscribed_with_another_key_refuses_the_push(
         self,
@@ -407,12 +428,13 @@ class TestWebPushService:
         person: User,
         vapid_key: str,
         fake_push_service: ServedFakePushService,
+        transaction: OpenTransaction,
     ) -> None:
         phone = fake_push_service.browser(VapidKey(vapid_key).public_key)
         _subscribe(session, person, phone)
         other = web_push_of(container, mint_vapid_key())
         refused = _sends(PushOutcome.REFUSED)
 
-        assert not other.push(person.id, ALERT)
+        assert not other.push(person.id, ALERT, transaction)
 
         assert _sends(PushOutcome.REFUSED) == refused + 1

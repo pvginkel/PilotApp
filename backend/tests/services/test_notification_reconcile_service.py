@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 from unittest.mock import patch
 
@@ -52,7 +53,7 @@ from app.services.web_push import WEB_PUSH_SENDS_TOTAL, WebPushService
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_push_service import ServedFakePushService
-from tests.support.locks import in_thread, lock_waits
+from tests.support.locks import in_thread, lock_waits, pool_capacity
 from tests.support.supervisor import (
     WAIT_SECONDS,
     LogWaiter,
@@ -1498,3 +1499,35 @@ class TestNotificationReconcileServiceTwoProcesses:
             "Which stove?, +2",
         ]
         assert len(_seen(container, project_id)) == 3
+
+
+class TestNotificationReconcileServiceConnections:
+    def test_more_turns_at_once_than_the_pool_holds_each_complete(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """A member's turn holds one connection at a time: with as many turns
+        in their pushes at once as the pool has connections, and one turn
+        more waiting on the pool, each completes."""
+        capacity = pool_capacity(container)
+        projects = [_project(container) for _ in range(capacity + 1)]
+        for project_id in projects:
+            _ask(container, project_id)
+        built = _service(container, supervise, web_push_service)
+        held = fake_push_service.hold(capacity)
+
+        turns = [
+            in_thread(partial(_reconcile, built, project_id)) for project_id in projects
+        ]
+        for turn in turns:
+            turn.result()
+
+        assert held.is_set()
+        assert sorted(
+            push.tag for push in _pushes(fake_push_service, browsers["ada"])
+        ) == sorted(str(project_id) for project_id in projects)
+        assert all(_seen(container, project_id) for project_id in projects)

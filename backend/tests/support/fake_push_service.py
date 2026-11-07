@@ -13,6 +13,7 @@ from werkzeug.wrappers import Request, Response
 from app.services.container import ServiceContainer
 from app.services.fake_push_service import FakePushService, FakeSubscription
 from app.services.web_push import WebPushService
+from tests.support.supervisor import WAIT_SECONDS
 
 
 def mint_vapid_key() -> str:
@@ -36,6 +37,10 @@ class ServedFakePushService(FakePushService):
     def __init__(self) -> None:
         super().__init__()
         self.on_push: Callable[[], None] | None = None
+        self._holding = threading.Lock()
+        self._hold_until = 0
+        self._held = 0
+        self._all_held = threading.Event()
         self._server = make_server("127.0.0.1", 0, self, threaded=True)
         self.url = f"http://127.0.0.1:{self._server.server_port}"
         self._thread = threading.Thread(
@@ -50,6 +55,17 @@ class ServedFakePushService(FakePushService):
         this server's."""
         return self.subscribe(application_server_key, origin=self.url)
 
+    def hold(self, pushes: int) -> threading.Event:
+        """Hold each push from now on in flight, after it took it and before
+        it answers it, until `pushes` of them are held at once, or for
+        WAIT_SECONDS; each after those is answered at once. The event is set
+        once they were held at once."""
+        with self._holding:
+            self._hold_until = pushes
+            self._held = 0
+            self._all_held.clear()
+        return self._all_held
+
     def close(self) -> None:
         self._server.shutdown()
         self._server.server_close()
@@ -57,17 +73,28 @@ class ServedFakePushService(FakePushService):
 
     def _respond(self, request: Request) -> Response:
         response = super()._respond(request)
+        if not request.path.startswith("/push/"):
+            return response
+        self._hold()
         hook = self.on_push
-        if hook is not None and request.path.startswith("/push/"):
+        if hook is not None:
             self.on_push = None
             hook()
         return response
+
+    def _hold(self) -> None:
+        with self._holding:
+            if self._hold_until == 0:
+                return
+            self._held += 1
+            if self._held >= self._hold_until:
+                self._all_held.set()
+        self._all_held.wait(WAIT_SECONDS)
 
 
 def web_push_of(container: ServiceContainer, private_key: str) -> WebPushService:
     """The real web push service under ``private_key``, made ``container``'s."""
     service = WebPushService(
-        container=container,
         private_key=private_key,
         contact=container.config().baseurl,
     )
