@@ -15,7 +15,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   handle is lower-case letters, digits and hyphens, unique, and `agent` is no person's. A person's
   row is made when they choose their handle, at their first sign-in, with the lowest free slot
   counting from 1 ([`sign-in.md`](sign-in.md)). A person's `notification_token`, none until they
-  set one, is sealed with the app's key, and their `alarms` switch is on by default
+  set one, is sealed with the app's key, and their `alarms` switch is on by default. What their
+  alarms' notification last sent is on the row: `alarm_text` while it stands, set only with
+  `alarm_sent_at`, and `alarm_owed_at` while a send is owed; Pilot's row holds none of them
   ([`notifications.md`](notifications.md)).
 - `projects`: `number` (an identity, which names a draft's folder), `slug` (none while the project
   is a draft and set once it is not; lower-case letters, digits and hyphens, never starting with
@@ -23,12 +25,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   and the plan's `ticket` and `repo`.
 - `project_members`: a membership from `joined_at` to `left_at`; one open membership per user and
   project, and a rejoin is a new row; nothing makes Pilot a member. What its standing notification
-  last sent: `notification_priority_code`, `notification_text` and `notification_url`, all three
-  set or none, and set only with `notification_sent_at`; `notification_owed_at` while a send is
-  owed ([`notifications.md`](notifications.md)).
-- `alarms`: a person's alarm for one condition, one per person and condition: `standing`, true only
-  with `sent_at`, and `owed_at`. Its key onto `users` carries the user's kind, which must be
-  `person`, so Pilot holds none ([`notifications.md`](notifications.md)).
+  last sent: `notification_text` and `notification_url`, both set or none, and set only with
+  `notification_sent_at`; `notification_owed_at` while a send is owed
+  ([`notifications.md`](notifications.md)).
 - `project_transitions`: each change of a project's state, archived flag, auto pilot switch or
   pause, with when and by whom ([`projects.md`](projects.md)).
 
@@ -225,9 +224,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 ## The reference values
 
-Twenty-three are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and four
-are tables with rows, because each value carries a fact. The revisions write the rows; a value is
-added by a revision and nowhere else.
+Twenty-one are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and
+four are tables with rows, because each value carries a fact. The revisions write the rows; a value
+is added by a revision and nowhere else.
 
 | Table | Rows |
 |---|---|

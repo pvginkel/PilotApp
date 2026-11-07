@@ -176,7 +176,7 @@ objects into each stage's namespace:
   (D110, which overrules D090); a made-up token saved on pilot-dev is refused. The bridge knows a
   registration by its token alone, so a person's production token saved there is taken too, and
   pilot-dev's notifications and alarms then reach their phone, its alarms under the same sequence
-  ids as production's.
+  id as production's.
 - **Service `pilot`**, port 80 to the UI, its annotation `nginx.webathome.org/server-name` the
   stage's host. Production's `nginx.webathome.org/is-public: "true"` has the estate's front door
   serve it as a public site, over HTTPS with a Let's Encrypt certificate. Dev's `is-public: "false"`

@@ -245,8 +245,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   definition chat, its start in the store, its brief, its Stop, its close, `chat.md`, and its Chat
   tab, composer, Discuss and *In the chat*.
 - [`docs/notifications.md`](docs/notifications.md): the phone's notifications through the bridge, a
-  project's per member and the alarms per condition, their reconcile and retry, the profile's
-  token and alarms switch, and the bridge's fake.
+  project's per member while something waits on them and the alarms, one per person, their
+  reconcile, spacing and retry, the profile's token and alarms switch, and the bridge's fake.
 - [`docs/usage.md`](docs/usage.md): the usage limits: the reading, the week's and the five-hour
   halts and their settings, the overrule, the halt file, the hard stop, a run halted at its turn's
   end, the nudge, the quota wall, and each turn's tokens and cost.

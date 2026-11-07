@@ -58,9 +58,10 @@ messages after it until it closes, after 55 quiet minutes or at Create project, 
 Archive, and acts on the record through its own tools, each call's effect shown where it ran, an
 answer given there reached from its block by *In the chat*, its chats projected for it as `chat.md`
 ([`docs/chats.md`](docs/chats.md)); and the phone's notifications through the estate's bridge, under
-the token each person pastes on their profile: one standing notification per member and project,
-which reads its state and rises when something comes to wait on them, and an alarm per condition
-that holds all work, beside the profile's switch that turns the alarms off
+the token each person pastes on their profile: one standing notification per member and project
+while something in it waits on them, naming the latest, and one per person, the alarms, while the
+controller is unreachable or the week's usage halt holds the work, beside the profile's switch that
+turns the alarms off
 ([`docs/notifications.md`](docs/notifications.md)); and the subscription's usage limits, on work
 items alone: KubeCoder's reading of the week's and the five-hour share, the halts at their limits,
 each as its setting says, holding new work, asking running work to stop through a halt file, or

@@ -3,8 +3,8 @@
 Pilot reaches a person's phone through the notification bridge, the estate's service
 (`pvginkel/Notifications`), under the bearer token of that person's own registration, which they
 paste on their profile. Two kinds of notification stand there: one per project they are a member
-of, which reads the project's state and rises when something comes to wait on them, and one per
-app-wide condition that holds all work, the alarms. Each is a standing notification: the bridge
+of, while something in it waits on them, and one per person, the alarms, while the controller is
+unreachable or the week's usage halt holds all work. Each is a standing notification: the bridge
 shows one per sequence id and updates it in place, and Pilot keeps in the record what it last sent,
 so that the phone ends on what the record says.
 
@@ -19,9 +19,11 @@ waits on its one-shot as a task.
 the `Authorization` header:
 
 - `submit(token, sequence_id, *, message, title, priority, url)`, `POST /v1/submit`, shows the
-  sequence id's notification, or updates the one shown: in place and silently at the same or a
-  lower priority, shown again and alerting at a higher one. The bridge keeps no `url`, so every
-  submit carries it.
+  sequence id's notification, or updates the one shown in place. Pilot submits every one at
+  `high`: the phone alerts on the first submit after none stood or a dismiss, and on ntfy on a
+  later one too once the notification was swiped from the drawer; an update of one that shows is
+  silent, on Telegram as well, where only a rise of priority alerts. The bridge keeps no `url`, so
+  every submit carries it.
 - `dismiss(token, sequence_id)`, `POST /v1/dismiss`, takes it down.
 - `send_one_shot(token, *, message, …)` is a submit with no sequence id, which nothing updates or
   dismisses.
@@ -59,10 +61,10 @@ each refuses a caller with no handle with `409` ([`sign-in.md`](sign-in.md)):
   through the bridge because external service failed: the bridge refused it with 401: unknown
   bearer token", and nothing is stored. Once the bridge took it, the task locks the person's row and
   stores the token, sealed. It fails instead when their token was cleared or set to another since
-  the save began, so a clear or another save made meanwhile stands. Once that commits, their
-  projects' notifications and their alarms are submitted through it. A cancelled task stores
-  nothing. The task's result is the person, as the self read answers, and its events go to the
-  caller's connections alone.
+  the save began, so a clear or another save made meanwhile stands. Once that commits, what should
+  stand of their projects' notifications and their alarms is submitted through it. A cancelled
+  task stores nothing. The task's result is the person, as the self read answers, and its events
+  go to the caller's connections alone.
 - **A replace** is a rotation of the same registration (D094): it sends nothing through the token
   it replaces, and the reconciles submit everything again through the new one. A token pasted over
   another registration's leaves what that registration's phone shows until it is swiped away.
@@ -73,7 +75,8 @@ each refuses a caller with no handle with `409` ([`sign-in.md`](sign-in.md)):
   stays on the phone until swiped away. A person with no token has nothing to clear, and one whose
   token the app's key does not open is answered `409`.
 - **`PUT /alarms`** `{alarms}` turns the alarms switch and answers `200` with the person. Once it
-  commits, off dismisses their standing alarms and on submits those due.
+  commits, off dismisses their alarms' notification, and on submits it while a condition that
+  alarms is due.
 
 The self read carries `notification_token_set`, whether a token is set, and `alarms`, the switch,
 which is on by default.
@@ -87,41 +90,29 @@ handle:
   `useSSETask`. While the task runs, the field, Save and Clear are disabled and the task's progress
   text shows. A failed task's error shows under the field, which typing clears. A refused request,
   a `400` or a `409`, is a toast.
-- *Alarms* is a switch, "Send me alarms", which always shows and is disabled while no token is set.
-  Its `.switch` style is a shared piece ([`ui.md`](ui.md)).
+- *Alarms* is a switch, "Send me alarms", which always shows and is disabled while no token is set,
+  with a line under it naming what alarms: KubeCoder out of reach for five minutes, or the week's
+  usage limit halting the work. Its `.switch` style is a shared piece ([`ui.md`](ui.md)).
 
 ## A project's notification
 
 What each member should see is derived from the record by the server, never written by the brain
 (`StandingNotificationService`, `backend/app/services/standing_notification_service.py`). A member
-sees one while the project is unarchived, a draft or a finished one included, their membership is
-open and they hold a token. Otherwise they see none, and what stands is dismissed.
+sees one while an item waits on them, the project is unarchived, a draft or a finished one
+included, their membership is open and they hold a token. Otherwise they see none, and what stands
+is dismissed. Nothing else of the project shows: no status line, no running work item, no pause.
 
+- **What waits on the member** is the badge's set, `waiting()` in
+  `backend/app/services/timeline_service.py` ([`projects.md`](projects.md)), but for an item `for`
+  another person, which is neither named nor counted. An item `for` nobody waits on every member.
 - **The sequence id** is the project's id.
-- **The priority** is `high` while an urgent item waits on the member, `default` while any item
-  does, and `min` otherwise. The items that wait are the badge's set, `waiting()` in
-  `backend/app/services/timeline_service.py` ([`projects.md`](projects.md)). An item `for` one
-  person waits on that person alone, and counts in the others' message.
+- **The priority** is always `high`.
 - **The title** is the project's name, "New project" for a draft its draft has not named yet, cut
   to 250 characters (D091).
-- **The message** is the project's status line, then what runs and what waits, joined by ` · `
-  (D091):
-  - the status line: "Draft" or "Finished", else the step reading: the first step in progress by
-    name, with ", …" after it when more are, or "Not started", "N of M done" or "All steps done";
-  - "Paused" while the project is paused, in the place of what runs, which is otherwise
-    "Running: <title>" for one running work item, "Running" when it has no title, and "N running"
-    for more;
-  - for the items waiting on the member, "<Kind> waiting: <title>" for one, the kind's name, such
-    as "Decision waiting: Which tent?", or "<Kind> waiting" when the item has no title, and
-    "N waiting" for more;
-  - "N waiting on <handle>" for each other person items wait on, whether or not they are still a
-    member;
-  - for the open waits, "Waiting for: <title>" or "<Kind> open" for one, and "N waits open" for
-    more.
-
-  So a project might read `Not started · Decision waiting: Which tent?`. The texts taken from the
-  record are escaped for Markdown with a backslash. The message is cut to 4096 characters, ending
-  in "…", and never inside an escape.
+- **The message** names the latest placed of the items that wait on the member, by its title, or by
+  its kind's name, such as "Decision", when it has none, followed by ", +<n>" counting the others
+  when more wait (D145): `Which tent?, +2`. A title is escaped for Markdown with a backslash. The
+  message is cut to 4096 characters, ending in "…", and never inside an escape.
 - **The `url`** is absolute, on the stage's `BASEURL` (D091): `<BASEURL>/projects/<id>/items/<item
   id>`, the item's permalink, when exactly one item waits on the member, and the project's
   timeline, `<BASEURL>/projects/<id>`, otherwise ([`timeline.md`](timeline.md)).
@@ -145,12 +136,13 @@ membership last sent, and submits or dismisses when the two differ or a send is 
   stand, so that a change no reconcile reached, the server stopping in between, is found then;
 - once a token's save commits, for each of the person's projects.
 
-What a membership last sent is its `notification_priority_code`, `notification_text` and
-`notification_url`, all three set or none, with `notification_sent_at`. The compare reads the
-three. The title is in no column, so a rename alone sends nothing until something the compare
-reads changes too. A dismiss leaves the three none and `notification_sent_at` its time. Of one
-person in one project the phone shows one notification, whichever of their memberships sent it,
-since a rejoin is a new membership; the latest of them takes what goes out.
+What a membership last sent is its `notification_text` and `notification_url`, both set or none,
+with `notification_sent_at`; its notification stands while the text is set. The compare reads the
+two, so a change that leaves the message and the `url` as they were sends nothing, an older item's
+new title among them. The title is in no column, so a rename alone sends nothing until something
+the compare reads changes too. A dismiss leaves the two none and `notification_sent_at` its time.
+Of one person in one project the phone shows one notification, whichever of their memberships sent
+it, since a rejoin is a new membership; the latest of them takes what goes out.
 
 **A member's turn.** One person's sends in one project take turns under a two-key
 transaction-level advisory lock, `(224, <a 32-bit key drawn from the person's and the project's
@@ -164,8 +156,22 @@ their row's lock (`FOR SHARE`) and then locks the memberships' rows. The write i
 it says what the record holds. A submit that a clear overtook, and that the bridge did not refuse,
 is followed by a dismiss of its own through the token in hand.
 
+**The spacing.** A person's sends in one project go out at most once in two seconds
+(`NOTIFICATION_SPACING_SECONDS`), the window running from their last try there, sent or owed: the
+latest `notification_sent_at` or `notification_owed_at` of their memberships of the project, a
+closed one's included, so that the window holds across a roll's two processes and a rejoin's first
+submit waits out its leave's dismiss. A send due inside the window counts as `deferred` and is
+compared again at the window's end, the run waiting with no turn and no database session held; what
+goes out then is the latest state, so a burst of commits comes to one send, and a change undone
+inside the window to none. The window is the person's own in one project: no other member's send
+there is measured against it, nor theirs in another project, though a change that comes while the
+run waits is reconciled by the run after it. The dismisses after a token's clear, below, take no
+window and count as no try.
+
 **Owed.** A send the bridge refuses or does not answer sets `notification_owed_at` to the time of
-the try. The project's next reconcile sends whatever it compares again, and the retry timer's once
+the try, and a send still due when the loop is told to stop, in the window's wait or before the
+person's compare, is left owed from the stop with nothing sent, for the retry of whichever process
+runs on. The project's next reconcile sends whatever it compares again, and the retry timer's once
 60 s have passed. The log warns when a membership turns owed and says when its owed send went out;
 the tries between log at debug.
 
@@ -178,50 +184,51 @@ unless the person holds that same token again, whose save submits afresh.
 
 ## The alarms
 
-`AlarmService` (`backend/app/services/alarm_service.py`) keeps a standing notification per person
-and app-wide condition, for every person who holds a token and whose alarms switch is on. Pilot
-holds none. The conditions that hold are the conditions service's, which the gold bar shows
-([`controller.md`](controller.md), [`ui.md`](ui.md)), taken by their codes, so that each condition
-it tells of has its alarm (D089): the outage, the store's update
-([`store-update.md`](store-update.md)), and the week's and the five-hour usage halts
-([`usage.md`](usage.md)).
+`AlarmService` (`backend/app/services/alarm_service.py`) keeps one standing notification per
+person, their alarms, for every person who holds a token and whose alarms switch is on, while a
+condition that alarms is due. Pilot holds none. The conditions that hold are the conditions
+service's, which the gold bar shows ([`controller.md`](controller.md), [`ui.md`](ui.md)), taken by
+their codes (D089). Two of them alarm: the outage, due once it has held
+`OUTAGE_ALARM_AFTER_SECONDS` from its `since`, so that a shorter blip buzzes nobody, and the week's
+usage halt ([`usage.md`](usage.md)), due at once. The five-hour halt and the store's update
+([`store-update.md`](store-update.md)) show on the gold bar alone. The outage is each process's
+own, and off at a start.
 
-| Condition | Title | Message | Priority |
-|---|---|---|---|
-| `outage` | The controller has been unreachable | Nothing starts until it answers. | `high` |
-| `store_update` | Pilot is updating its store | No chat answers and no job starts until it is done. | `default` |
-| `week_halt` | The week's usage halt | Work items are halted until a reading puts the week's share back under its limit, or someone overrules the halt. | `high` |
-| `five_hour_halt` | The five-hour usage halt | Work items are halted until a reading puts the five-hour window's share back under its limit. | `default` |
+- **The sequence id** is `alarms` (`ALARM_SEQUENCE_ID`), every person's.
+- **The priority** is `high`, **the title** "Pilot", and **the `url`** the app, `<BASEURL>/`.
+- **The message** names the conditions due by their titles, "The controller has been unreachable"
+  and "The week's usage halt", the latest begun first, the outage first of two begun at once: the
+  first alone, or followed by ", +<n>" counting the others, so `The week's usage halt, +1`.
 
-An alarm's sequence id is its condition's code, and its `url` is the app, `<BASEURL>/`. A condition
-that holds is due at once, and the outage once it has held `OUTAGE_ALARM_AFTER_SECONDS` from its
-`since`, so that a shorter blip buzzes nobody. The outage is each process's own, and off at a start.
+Nothing dismisses a notification under a sequence id Pilot does not send, a condition's code among
+them: it stays on the phone until swiped away (D146).
 
 The reconcile is the one loop, `alarm`, of the job `alarm`. For each person who holds a token with
-the switch on and each condition due, and for every alarm standing or owed, it compares whether
-the alarm should stand with whether it stands, and submits or dismisses when the two differ or a
+the switch on while a condition is due, and each whose alarms stand or are owed, it compares the
+message they should see with the one last sent, and submits or dismisses when the two differ or a
 send is owed. It runs:
 
 - at each turn of a condition: the conditions service's `tell()` calls its listeners first, the
   alarms among them;
 - at STARTUP, so that an outage alarm a stopped process left standing is dismissed;
-- at the timer `alarm-retry`, when the alarms due differ from those the last reconcile read, as the
-  outage's do once it has held its time, or while an alarm is owed whose last try is 60 s old or
-  more. It does not run on every tick while a condition holds, so a process whose outage outlives a
-  roll does not submit again what the new process's STARTUP dismissed;
+- at the timer `alarm-retry`, when the message due differs from the one the last reconcile read,
+  as the outage's does once it has held its time, or while a send is owed whose last try is 60 s
+  old or more. It does not run on every tick while a condition holds, so a process whose outage
+  outlives a roll does not submit again what the new process's STARTUP dismissed;
 - once a token's save or the switch's turn commits.
 
-An `alarms` row is a person's alarm for one condition: `standing`, `sent_at` and `owed_at`, one per
-person and condition. It is born at its first send's write. A first submit that failed leaves it
-not standing and owed. Its sends take turns as a member's do, under `(238, <a key drawn from the
-person's id and the condition's code>)`, in the same three steps, the write reading the token under
-the person's row and dropped when it changed. A token's save reads each of the person's alarms that
-should stand as not standing, so that the reconcile submits it through the new token; one whose
-condition has ceased stays standing, for its dismiss. A clear reads every alarm of theirs standing
-or owed as dismissed, with nothing owed, and a loop `alarm-clear:<n>` of the job `alarm-clear`
-dismisses each through the token cleared, once. The switch turned off has the reconcile dismiss the
-person's standing alarms, owed while the bridge does not take them; turned on, it submits those
-due.
+What a person's alarms last sent is on their row: `alarm_text` while they stand, set only with
+`alarm_sent_at`, and `alarm_owed_at` while a send is owed. The title, the `url` and the priority are
+fixed, and none is stored. A dismiss leaves the text none and `alarm_sent_at` its time, and a first
+submit that failed leaves it none and the send owed. The sends take turns as a member's do, under
+`(238, <a key drawn from the person's id>)`, in the same three steps, the write locking the
+person's row and dropped when their token changed, and take no spacing. A token's save reads the
+person's alarms as not standing while a condition is due and their switch is on, so that the
+reconcile submits them through the new token; with none due, what stands stays, for its dismiss. A
+clear reads them as dismissed, with nothing owed, and a loop `alarm-clear:<n>` of the job
+`alarm-clear` dismisses what stood through the token cleared, once. The switch turned off has the
+reconcile dismiss the person's alarms, owed while the bridge does not take the dismiss; turned on,
+it submits them while a condition is due.
 
 ## Settings and metrics
 
@@ -242,7 +249,8 @@ The metrics, on the backend's `/metrics`:
   `one_shot`, by how it ended, `sent`, `refused` or `unanswered`.
 - `pilot_notification_reconciles_total{outcome}` and `pilot_alarm_reconciles_total{outcome}`: each
   compare, `unchanged`, `sent`, `owed` (the send failed) or `superseded` (the person's token changed
-  during the send).
+  during the send), and a project's `deferred` too (the person's last send in the project is not
+  two seconds old).
 - `pilot_notification_clear_dismisses_total{outcome}` and
   `pilot_alarm_clear_dismisses_total{outcome}`: each dismiss tried once through a token just
   cleared, `sent`, `refused` or `unanswered`.
@@ -257,8 +265,11 @@ limits, status codes and reasons. A registration shows, per sequence id, what it
 carried and whether that submit alerted, and keeps its one-shots and every call it took, in order.
 Where it is simpler than the bridge: a registration has one channel, `ntfy`; a channel a test makes
 fail answers its error in the `200`, changes nothing shown, and its call is kept in neither the
-calls nor the one-shots; a submit alerts when it shows a notification anew or raises its priority,
-to `default` or above; nothing is forgotten after 90 days; and it serves no `/metrics`.
+calls nor the one-shots; a submit under a sequence id alerts only when it shows the notification
+anew, the first after none stood or a dismiss, at `default` or above, and after that updates it in
+place silently at any priority, as ntfy's app does while the notification is in the drawer, where
+nobody swipes it; a one-shot alerts at `default` or above; nothing is forgotten after 90 days; and
+it serves no `/metrics`.
 
 A test drives it through its verbs: `add_registration(name, token)`, `rotate_token(name, token)`,
 which keeps what shows, `channel_error(name, error=None)`, `unreachable(on=True, answer)`, under

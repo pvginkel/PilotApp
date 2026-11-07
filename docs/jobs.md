@@ -34,10 +34,10 @@ the job, never its work.
 | `store-update` | a timer | tells the conditions when the unlifted store's update turned, and runs the job `store-update` while one stands not waiting for the sync ([`store-update.md`](store-update.md)) |
 | `notification:<project id>` | a loop of the job `notification` | brings each member's standing notification of the project to what the record says ([`notifications.md`](notifications.md)) |
 | `notification-clear:<n>` | a loop of the job `notification-clear` | dismisses, once each, a person's project notifications through the token they just cleared ([`notifications.md`](notifications.md)) |
-| `alarm` | a job with one loop | brings every person's alarms to the conditions that hold ([`notifications.md`](notifications.md)) |
-| `alarm-clear:<n>` | a loop of the job `alarm-clear` | dismisses, once each, a person's alarms through the token they just cleared ([`notifications.md`](notifications.md)) |
+| `alarm` | a job with one loop | brings every person's alarms' notification to the conditions that alarm ([`notifications.md`](notifications.md)) |
+| `alarm-clear:<n>` | a loop of the job `alarm-clear` | dismisses, once, a person's alarms' notification through the token they just cleared ([`notifications.md`](notifications.md)) |
 | `notification-retry` | a timer | asks for the reconcile of each project with a notification owed past its retry ([`notifications.md`](notifications.md)) |
-| `alarm-retry` | a timer | asks for the alarms' reconcile when the alarms due have turned, or while one is owed past its retry ([`notifications.md`](notifications.md)) |
+| `alarm-retry` | a timer | asks for the alarms' reconcile when the message due has turned, or while a send is owed past its retry ([`notifications.md`](notifications.md)) |
 | `wait-due` | a timer | fires each open timed wait whose due time has passed, once ([`waits.md`](waits.md)) |
 | `wait-batch` | a timer | places the run of each wait whose oldest pending firing is the quiet window old ([`waits.md`](waits.md)) |
 

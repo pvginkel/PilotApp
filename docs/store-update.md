@@ -75,8 +75,7 @@ commit:
 - **The gold bar** shows the condition `store_update` from `made_at`, after the outage and before
   the halts: the badge "Pilot is updating since <time>", the line "Pilot is updating its store
   since <time>. No chat answers and no job of Pilot's starts until it is done; work items go on."
-  ([`ui.md`](ui.md)). Its alarm is due at once, at `default` priority
-  ([`notifications.md`](notifications.md)).
+  ([`ui.md`](ui.md)). It alarms nobody ([`notifications.md`](notifications.md)).
 
 The make tells no one. The timer tells the conditions when the unlifted update is not the one this
 process last told of, and the lift tells them at its commit. So the gold bar shows the update

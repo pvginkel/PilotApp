@@ -97,7 +97,8 @@ lifted: held work items go on`, and an overrule's end `Quota overrule <id> (<kin
 Each halt that holds is a condition of the conditions service, `week_halt` and `five_hour_halt`,
 after the outage and the store's update ([`store-update.md`](store-update.md)), the week's first, with its `since`, its `share`, the reading's `taken_at` and
 whether it is `stale`, and the week's with the overrule it offers (`GET /api/conditions`,
-[`ui.md`](ui.md)); the alarms take them by their codes ([`notifications.md`](notifications.md)).
+[`ui.md`](ui.md)); the week's halt alarms too, and the five-hour halt shows on the gold bar alone
+([`notifications.md`](notifications.md)).
 A halt's line gives the reading's age, "as of <time>", only while the reading is stale (D102): the
 frame goes out only when something but `takenAt` changes, so a fresh reading's `takenAt` is its
 figures' last change, and the reading itself is current to within the poll.
@@ -241,7 +242,7 @@ signals tell it (D098, `quota_wall.py`):
 The relay marks the Session `failed`, as any work item's turn ended in error is, with its
 `nudge_owed_at` its end from the moment its stream shows the wall, so the wait for the deciding
 reading holds across a restart. A Session `failed` with its nudge owed is not at its end (D099): it
-waits on nobody, out of the project's badge, waiting-on-you and the notification's priority; a job
+waits on nobody, out of the project's badge, waiting-on-you and the standing notification; a job
 offers no Retry, which is refused "it waits for its nudge at the quota wall"
 ([`work.md`](work.md)); and a pass puts no question to the writer, its clarification run placed
 only when the run its nudge continues ends ([`round-trip.md`](round-trip.md)). Its nudge goes once
