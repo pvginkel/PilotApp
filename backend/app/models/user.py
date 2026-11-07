@@ -13,9 +13,7 @@ from app.models.reference import USER_KIND, UserKind
 class User(db.Model):  # type: ignore[name-defined]
     """A person who signs in, or Pilot itself: the one row of kind `agent`.
 
-    Pilot's row is the first revision's. `notification_token` holds the
-    ciphertext, encrypted with the app's `SECRET_KEY` (DB decision 17), which
-    `NotificationTokenCipher` seals and opens. A condition that alarms, begun
+    Pilot's row is the first revision's. A condition that alarms, begun
     after `alarm_seen_at`, is one the person has not been shown (DB 238): the
     alarm push that names it, or their going offline, moves it forward.
     """
@@ -30,8 +28,7 @@ class User(db.Model):  # type: ignore[name-defined]
         ),
         CheckConstraint(
             "kind_code <> 'agent' OR (subject IS NULL AND email IS NULL"
-            " AND notification_token IS NULL AND avatar_slot IS NULL"
-            " AND alarm_seen_at IS NULL)",
+            " AND avatar_slot IS NULL AND alarm_seen_at IS NULL)",
             name="ck_users_agent",
         ),
         CheckConstraint(
@@ -46,7 +43,6 @@ class User(db.Model):  # type: ignore[name-defined]
     handle: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     email: Mapped[str | None] = mapped_column(Text)
-    notification_token: Mapped[str | None] = mapped_column(Text)
     alarms: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     alarm_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     avatar_slot: Mapped[int | None] = mapped_column(Integer, unique=True)

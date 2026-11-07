@@ -33,7 +33,6 @@ from app.services.draft_service import DraftService
 from app.services.effect_service import EffectService
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import FakeController
-from app.services.fake_notification_bridge import FakeNotificationBridge
 from app.services.fake_push_service import FakePushService
 from app.services.fleet_consumer import FleetConsumer
 from app.services.frontend_version_service import FrontendVersionService
@@ -43,14 +42,12 @@ from app.services.item_service import ItemService
 from app.services.job_service import JobService
 from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
-from app.services.notification_bridge_client import NotificationBridgeClient
 from app.services.notification_reconcile_service import (
     NotificationReconcileService,
 )
 from app.services.notification_settings_service import (
     NotificationSettingsService,
 )
-from app.services.notification_token_cipher import NotificationTokenCipher
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
 from app.services.pilot_server import PilotServer
@@ -120,17 +117,6 @@ def start_controller_client(container: "ServiceContainer") -> None:
         )
     if app_config.controller_url is not None:
         container.controller_client()
-
-
-def start_notification_bridge_client(container: "ServiceContainer") -> None:
-    """Build the notification bridge's client, which registers its readiness
-    check, when a bridge is configured. Production refuses to start without
-    one. The CLI never gets here, as `start_controller_client` says."""
-    bridge_url = container.app_config().notification_bridge_url
-    if container.config().is_production and bridge_url is None:
-        raise ConfigurationError("NOTIFICATION_BRIDGE_URL must be set in production")
-    if bridge_url is not None:
-        container.notification_bridge_client()
 
 
 def require_vapid_key(container: "ServiceContainer") -> None:
@@ -215,15 +201,6 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
     register_for_background_startup(lambda c: require_pilot_server(c))
 
-    # The notification bridge's client (F94, F142); its starter, too, starts no
-    # thread.
-    notification_bridge_client = providers.Singleton(
-        NotificationBridgeClient,
-        base_url=app_config.provided.notification_bridge_url,
-        health_service=health_service,
-    )
-    register_for_background_startup(lambda c: start_notification_bridge_client(c))
-
     # Web push to a person's browsers, under the stage's key (F94, F142); its
     # check, too, starts no thread.
     web_push_service = providers.Singleton(
@@ -238,10 +215,6 @@ class ServiceContainer(containers.DeclarativeContainer):
     fake_controller = providers.Singleton(
         FakeController, token=app_config.provided.controller_token
     )
-
-    # The notification bridge's fake, served under
-    # /api/testing/notification-bridge in testing mode
-    fake_notification_bridge = providers.Singleton(FakeNotificationBridge)
 
     # The fake push service, served under /api/testing/push-service in testing
     # mode
@@ -587,11 +560,6 @@ class ServiceContainer(containers.DeclarativeContainer):
     store_update_service = providers.Factory(StoreUpdateService, db=db_session)
     link_service = providers.Factory(LinkService, db=db_session)
 
-    # The person's bridge token, sealed at rest and opened to send (DB decision 17)
-    notification_token_cipher = providers.Singleton(
-        NotificationTokenCipher, secret_key=config.provided.secret_key
-    )
-
     # The brain's waits, fixed at add and closed by its `done` (F27), and a
     # person's request of one (F27.3); the job service, built at the call,
     # withdraws a closed wait's run held before its brief.
@@ -677,18 +645,8 @@ class ServiceContainer(containers.DeclarativeContainer):
         outage_after_seconds=app_config.provided.outage_alarm_after_seconds,
     )
     register_for_background_startup(lambda c: c.alarm_service())
-    # A person's notification token, saved after its one-shot as a task, and
-    # their alarms switch, on their profile (F134, F142.1)
-    notification_settings_service = providers.Factory(
-        NotificationSettingsService,
-        db=db_session,
-        container=__self__,
-        notification_token_cipher=notification_token_cipher,
-        task_service=task_service,
-        bridge_configured=providers.Callable(
-            lambda url: url is not None, app_config.provided.notification_bridge_url
-        ),
-    )
+    # A person's alarms switch, on their profile (F142.1)
+    notification_settings_service = providers.Factory(NotificationSettingsService)
     brief_service = providers.Factory(
         BriefService, db=db_session, plan_service=plan_service
     )

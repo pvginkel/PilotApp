@@ -1,9 +1,9 @@
 """Revision 0029: web push in place of the bridge (DB decision 74): Push
 Subscription and App Page added, a member's Item Sightings in place of what
-their membership's notification last sent, and a person's alarms on when they
+their membership's notification last sent, a person's alarms on when they
 were last shown the conditions in place of what their alarm notification last
-sent, over rows as revision 0028 leaves them: the revision's downgrade builds
-0028's schema in the test's transaction."""
+sent, and their bridge token dropped, over rows as revision 0028 leaves them:
+the revision's downgrade builds 0028's schema in the test's transaction."""
 
 import uuid
 from datetime import UTC, datetime
@@ -265,6 +265,51 @@ class TestAlarmSeenAt:
             session,
             "UPDATE users SET alarm_sent_at = :sent WHERE kind_code = 'agent'",
             {"sent": _SENT},
+        )
+
+        assert constraint == "ck_users_agent"
+
+
+class TestNotificationToken:
+    def test_the_upgrade_drops_every_persons_token(
+        self, session: Session, person: User
+    ) -> None:
+        """Nothing sends through a token any more, and the person stays."""
+        person_id, handle = person.id, person.handle
+        _run(session, "downgrade")
+        session.execute(
+            text("UPDATE users SET notification_token = 'sealed' WHERE id = :id"),
+            {"id": person_id},
+        )
+
+        _run(session, "upgrade")
+
+        assert "notification_token" not in _user_columns(session)
+        assert session.get_one(User, person_id).handle == handle
+
+    def test_the_downgrade_holds_no_persons_token(
+        self, session: Session, person: User
+    ) -> None:
+        person_id = person.id
+
+        _run(session, "downgrade")
+
+        assert "notification_token" in _user_columns(session)
+        assert (
+            session.execute(
+                text("SELECT notification_token FROM users WHERE id = :id"),
+                {"id": person_id},
+            ).scalar_one()
+            is None
+        )
+
+    def test_after_the_downgrade_pilot_holds_no_token(self, session: Session) -> None:
+        _run(session, "downgrade")
+
+        constraint = _refused(
+            session,
+            "UPDATE users SET notification_token = 'sealed' WHERE kind_code = 'agent'",
+            {},
         )
 
         assert constraint == "ck_users_agent"

@@ -45,15 +45,13 @@ def handle_prefill(name: str | None) -> str:
 
 
 def self_response(person: User) -> SelfResponseSchema:
-    """`person` as the self read answers: whether a notification token is
-    set, never the token (DB decision 17)."""
+    """`person` as the self read answers."""
     return SelfResponseSchema(
         handle=person.handle,
         handle_prefill=None,
         name=person.name,
         initials=initials(person.name),
         avatar_slot=person.avatar_slot,
-        notification_token_set=person.notification_token is not None,
         alarms=person.alarms,
     )
 

@@ -767,12 +767,10 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    `grep` for the lines a check wants, never whole, and no line of a signed-in request is printed.
 
 3. **The backend's readiness, on the pod's IP, its controller and its fleet stream.** `200` with
-   `"status": "ok"`: `checks.database` `ok` (connected, no migration pending),
+   `"status": "ok"`: `checks.database` `ok` (connected, no migration pending) and
    `checks.controller` `ok` (the controller's `/readyz` answers, verified against the homelab root
-   the chart mounts) and `checks.notification_bridge` `ok` (the notification bridge's `/healthz`
-   answers, [`notifications.md`](notifications.md)). Neither of the last two is critical: a
-   controller or a bridge that does not answer reads `"status": "degraded"`, still `200`, and is a
-   finding here. The controller is
+   the chart mounts). The controller's check is not critical: a controller that does not answer
+   reads `"status": "degraded"`, still `200`, and is a finding here. The controller is
    `kubecoder-dev`'s, never the operator's fleet:
 
    ```bash
@@ -797,10 +795,10 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    cexec iac kubectl -n pilot-dev logs $POD -c backend | grep -E 'Fleet stream connected|Loop fleet'
    ```
 
-4. **The secrets.** Five ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc`,
-   `pilot-kubecoder` and `pilot-sync` (from `openbao-prd`, `eso/prd/pilot/dev/oidc`,
-   `eso/prd/pilot/dev/kubecoder` and `eso/prd/pilot/dev/sync`) and the generated `pilot-secret-key`
-   and `pilot-drain-auth`:
+4. **The secrets.** Six ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc`,
+   `pilot-kubecoder`, `pilot-sync` and `pilot-vapid` (from `openbao-prd`, `eso/prd/pilot/dev/oidc`,
+   `eso/prd/pilot/dev/kubecoder`, `eso/prd/pilot/dev/sync` and `eso/prd/pilot/dev/vapid`) and the
+   generated `pilot-secret-key` and `pilot-drain-auth`:
 
    ```bash
    cexec iac kubectl -n pilot-dev get externalsecrets
@@ -808,8 +806,8 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    ```
 
    The Secrets themselves are unreadable here: the running backend (step 3's database connection and
-   fleet stream, step 6's sign-in, the store's sync calls answered with no `401`) is what shows they
-   reached it.
+   fleet stream, step 6's sign-in, the store's sync calls answered with no `401`, a public key from
+   `GET /api/web-push`) is what shows they reached it.
 
 5. **The site and its certificate.** `200`, curl exit `0`, against the homelab root alone; the
    certificate the homelab CA's (issuer `homelab-ca Intermediate CA`), for `pilot-dev.home`; the

@@ -1,5 +1,4 @@
-"""A fake push service, for the suites (TEST-1), in the notification bridge's
-fake's place: no suite reaches a real one.
+"""A fake push service, for the suites (TEST-1): no suite reaches a real one.
 
 A WSGI application the real `WebPushService` reaches by a subscription's
 endpoint: served on a thread under pytest (`tests/support/fake_push_service.py`),

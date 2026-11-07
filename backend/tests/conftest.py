@@ -33,7 +33,6 @@ from app.models.reference import DocumentRole, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
-from app.services.notification_bridge_client import NotificationBridgeClient
 from app.services.supervisor import Supervisor
 from app.services.web_push import WebPushService
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -44,10 +43,6 @@ from tests.conftest_infrastructure import *  # noqa: F403
 from tests.support.fake_controller import (
     ServedFakeController,
     client_of,
-)
-from tests.support.fake_notification_bridge import (
-    ServedFakeNotificationBridge,
-    bridge_client_of,
 )
 from tests.support.fake_push_service import (
     ServedFakePushService,
@@ -244,26 +239,6 @@ def committed_controller_client(
     """The real client, talking to ``fake_controller``: ``committed_app``'s
     container's client."""
     return client_of(committed_app.container, fake_controller)
-
-
-@pytest.fixture
-def fake_notification_bridge() -> Generator[ServedFakeNotificationBridge]:
-    """The notification bridge's fake, served over HTTP with no registration;
-    the test drives it through its verbs."""
-    fake = ServedFakeNotificationBridge()
-    try:
-        yield fake
-    finally:
-        fake.close()
-
-
-@pytest.fixture
-def notification_bridge_client(
-    container: ServiceContainer, fake_notification_bridge: ServedFakeNotificationBridge
-) -> NotificationBridgeClient:
-    """The real client, talking to ``fake_notification_bridge``: the
-    container's client for the test."""
-    return bridge_client_of(container, fake_notification_bridge)
 
 
 @pytest.fixture

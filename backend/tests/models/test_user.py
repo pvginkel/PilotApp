@@ -37,7 +37,6 @@ class TestUser:
         assert (pilot.handle, pilot.name) == ("agent", "Pilot")
         assert pilot.subject is None
         assert pilot.email is None
-        assert pilot.notification_token is None
         assert pilot.avatar_slot is None
         assert pilot.created_at is not None
 

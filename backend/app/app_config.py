@@ -108,13 +108,6 @@ class AppEnvironment(BaseSettings):
             "empty leaves it to requests' own trust"
         ),
     )
-    NOTIFICATION_BRIDGE_URL: str = Field(
-        default="",
-        description=(
-            "The notification bridge's base URL, through which Pilot notifies each "
-            "person; empty runs the app with no bridge"
-        ),
-    )
     VAPID_PRIVATE_KEY: str = Field(
         default="",
         description=(
@@ -332,17 +325,6 @@ class AppSettings(BaseModel):
     """The CAs that verify the controller's certificate, PEM; None leaves it to
     requests' own trust."""
 
-    notification_bridge_url: str | None = None
-    """The notification bridge's base URL (F94, F142); None runs the app with
-    no bridge, and production refuses to start so."""
-
-    @field_validator("notification_bridge_url")
-    @classmethod
-    def _is_a_bridge_address(cls, url: str | None) -> str | None:
-        if url is not None and not url.startswith(("https://", "http://")):
-            raise ValueError("NOTIFICATION_BRIDGE_URL must be an http(s) address")
-        return url
-
     vapid_private_key: Annotated[str | None, Sensitive] = None
     """The stage's VAPID private key, P-256 in PEM (F94, F142; RFC 8292); None
     pushes nothing, and production refuses to start so."""
@@ -475,7 +457,6 @@ class AppSettings(BaseModel):
             controller_ca_file=(
                 Path(env.CONTROLLER_CA_FILE) if env.CONTROLLER_CA_FILE else None
             ),
-            notification_bridge_url=env.NOTIFICATION_BRIDGE_URL or None,
             vapid_private_key=env.VAPID_PRIVATE_KEY or None,
             mcp_server_url=env.MCP_SERVER_URL or None,
             outage_alarm_after_seconds=env.OUTAGE_ALARM_AFTER_SECONDS,

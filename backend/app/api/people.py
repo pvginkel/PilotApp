@@ -1,7 +1,7 @@
 """The signed-in person: who they are on the record, the handle they choose
-at their first sign-in (F137), on their profile their notification token and
-alarms switch (F134, F142.1), and a browser's notifications, its subscription
-turned on and off there (F146)."""
+at their first sign-in (F137), on their profile their alarms switch (F142.1),
+and a browser's notifications, its subscription turned on and off there
+(F146)."""
 
 from typing import Any
 
@@ -14,16 +14,11 @@ from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.people import (
     AlarmsSwitchSchema,
     HandleChoiceSchema,
-    NotificationTokenSchema,
     SelfResponseSchema,
 )
-from app.schemas.task_schema import TaskStartResponse
 from app.schemas.web_push import PushEndpointQuerySchema, PushSubscriptionSchema
 from app.services.container import ServiceContainer
-from app.services.notification_settings_service import (
-    SAVE_OPERATION,
-    NotificationSettingsService,
-)
+from app.services.notification_settings_service import NotificationSettingsService
 from app.services.people_service import (
     PeopleService,
     handle_prefill,
@@ -71,7 +66,6 @@ def get_self(
         name=name,
         initials=None if name is None else initials(name),
         avatar_slot=None,
-        notification_token_set=None,
         alarms=None,
     ).model_dump()
 
@@ -103,77 +97,6 @@ def choose_handle(
     choice = HandleChoiceSchema.model_validate(request.get_json())
     person = people_service.choose_handle(caller(), choice.handle)
     return self_response(person).model_dump(), 201
-
-
-@people_bp.route("/self/notification-token", methods=["PUT"])
-@api.validate(
-    json=NotificationTokenSchema,
-    resp=SpectreeResponse(
-        HTTP_202=TaskStartResponse,
-        HTTP_400=ApiErrorResponseSchema,
-        HTTP_401=ApiErrorResponseSchema,
-        HTTP_403=ApiErrorResponseSchema,
-        HTTP_409=ApiErrorResponseSchema,
-    ),
-)
-@inject
-def save_notification_token(
-    people_service: PeopleService = Provide[ServiceContainer.people_service],
-    notification_settings_service: NotificationSettingsService = Provide[
-        ServiceContainer.notification_settings_service
-    ],
-) -> Any:
-    """Save the signed-in person's notification token, a first one or another
-    in its place (F134, F134.1).
-
-    A task sends the one-shot "Pilot will notify you here" through the token,
-    and stores it once the bridge took it; its result is the person. A token
-    the bridge refuses or does not answer fails the task with the bridge's
-    reason, and is not stored.
-
-    Returns:
-        202: The save's task
-        400: The token is not visible ASCII
-        401: No one is signed in
-        403: The caller lacks the editor role
-        409: The caller has not chosen a handle, or no notification bridge is
-            configured
-    """
-    auth = caller()
-    body = NotificationTokenSchema.model_validate(request.get_json())
-    person = people_service.require_person(auth, SAVE_OPERATION)
-    started = notification_settings_service.start_save(person, body.token, auth.subject)
-    return started.model_dump(mode="json"), 202
-
-
-@people_bp.route("/self/notification-token", methods=["DELETE"])
-@api.validate(
-    resp=SpectreeResponse(
-        HTTP_200=SelfResponseSchema,
-        HTTP_401=ApiErrorResponseSchema,
-        HTTP_403=ApiErrorResponseSchema,
-        HTTP_409=ApiErrorResponseSchema,
-    )
-)
-@inject
-def clear_notification_token(
-    people_service: PeopleService = Provide[ServiceContainer.people_service],
-    notification_settings_service: NotificationSettingsService = Provide[
-        ServiceContainer.notification_settings_service
-    ],
-) -> Any:
-    """Clear the signed-in person's notification token, at once (F134).
-
-    Returns:
-        200: The person, with no token set
-        401: No one is signed in
-        403: The caller lacks the editor role
-        409: The caller has not chosen a handle, or the app's key does not
-            open their token
-    """
-    person = people_service.require_person(caller(), "clear your notification token")
-    notification_settings_service.clear(person)
-    return self_response(person).model_dump()
 
 
 @people_bp.route("/self/push-subscriptions", methods=["POST"])

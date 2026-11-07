@@ -8,7 +8,8 @@ them, none until their first push or page of the project, in place of what
 their membership's notification last sent through the bridge; and a person's
 alarms on when they were last shown the conditions (`alarm_seen_at`), none
 until their first alarm push or going offline, in place of what their alarm
-notification last sent. Nothing dismisses what the bridge left standing.
+notification last sent; and each person's bridge token dropped, which nothing
+sends through. Nothing dismisses what the bridge left standing.
 
 Revision ID: 0029
 Revises: 0028
@@ -29,8 +30,7 @@ depends_on: str | Sequence[str] | None = None
 
 _USERS_AGENT = (
     "kind_code <> 'agent' OR (subject IS NULL AND email IS NULL"
-    " AND notification_token IS NULL AND avatar_slot IS NULL"
-    " AND alarm_seen_at IS NULL)"
+    " AND avatar_slot IS NULL AND alarm_seen_at IS NULL)"
 )
 _USERS_AGENT_0028 = (
     "kind_code <> 'agent' OR (subject IS NULL AND email IS NULL"
@@ -75,7 +75,12 @@ def upgrade() -> None:
     op.drop_index("ix_users_alarm_owed_at", table_name="users")
     op.drop_constraint("ck_users_alarm_sent", "users")
     op.drop_constraint("ck_users_agent", "users")
-    for column in ("alarm_owed_at", "alarm_sent_at", "alarm_text"):
+    for column in (
+        "alarm_owed_at",
+        "alarm_sent_at",
+        "alarm_text",
+        "notification_token",
+    ):
         op.drop_column("users", column)
     op.add_column(
         "users", sa.Column("alarm_seen_at", sa.DateTime(timezone=True), nullable=True)
@@ -101,10 +106,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade database schema: what each member was shown dropped, their
     notification standing nowhere, and when each person was last shown the
-    conditions dropped, their alarm notification standing nowhere, which
-    revision 0028's reconcile submits through their token while something
-    waits on them or a condition is due; the browsers' subscriptions and the
-    pages dropped, which its notifications, through the bridge, never read."""
+    conditions dropped, their alarm notification standing nowhere; no person's
+    token is held, so revision 0028's reconcile submits nothing for a person
+    until they save one again; the browsers' subscriptions and the pages
+    dropped, which its notifications, through the bridge, never read."""
     op.drop_table("item_sightings")
     op.add_column(
         "project_members", sa.Column("notification_text", sa.Text(), nullable=True)
@@ -134,6 +139,7 @@ def downgrade() -> None:
     )
     op.drop_constraint("ck_users_agent", "users")
     op.drop_column("users", "alarm_seen_at")
+    op.add_column("users", sa.Column("notification_token", sa.Text(), nullable=True))
     op.add_column("users", sa.Column("alarm_text", sa.Text(), nullable=True))
     op.add_column(
         "users", sa.Column("alarm_sent_at", sa.DateTime(timezone=True), nullable=True)

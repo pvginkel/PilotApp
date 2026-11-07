@@ -113,26 +113,6 @@ class TestAppSettings:
         assert settings.controller_token == ""
         assert settings.controller_ca_file is None
 
-    def test_load_reads_the_notification_bridge_from_the_environment(self) -> None:
-        settings = AppSettings.load(
-            AppEnvironment(NOTIFICATION_BRIDGE_URL="http://bridge.example:8090")
-        )
-
-        assert settings.notification_bridge_url == "http://bridge.example:8090"
-
-    def test_an_empty_notification_bridge_url_is_no_bridge(self) -> None:
-        settings = AppSettings.load(AppEnvironment(NOTIFICATION_BRIDGE_URL=""))
-
-        assert settings.notification_bridge_url is None
-
-    def test_a_notification_bridge_that_is_no_http_address_is_refused(self) -> None:
-        with pytest.raises(
-            ValidationError, match="NOTIFICATION_BRIDGE_URL must be an http"
-        ):
-            AppSettings.load(
-                AppEnvironment(NOTIFICATION_BRIDGE_URL="bridge.example:8090")
-            )
-
     def test_load_reads_the_vapid_key_from_the_environment(self) -> None:
         pem = mint_vapid_key()
 
@@ -453,7 +433,6 @@ class TestAppSettings:
             "controller_url": "None",
             "controller_token": "***",
             "controller_ca_file": "None",
-            "notification_bridge_url": "None",
             "vapid_private_key": "***",
             "mcp_server_url": "None",
             "outage_alarm_after_seconds": repr(300.0),
@@ -557,7 +536,6 @@ class TestAppSettings:
             "controller_url": "None",
             "controller_token": "***",
             "controller_ca_file": repr(None),
-            "notification_bridge_url": repr(None),
             "vapid_private_key": "***",
             "mcp_server_url": repr(None),
             "outage_alarm_after_seconds": repr(300.0),

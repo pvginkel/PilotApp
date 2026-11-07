@@ -1,30 +1,20 @@
 """/api/people/self: the signed-in person, the handle step (F137), and on
-their profile the notification token and the alarms switch (F134, F134.1,
-F142.1; DB decision 17)."""
+their profile the alarms switch and a browser's subscription (F142.1,
+F146)."""
 
 import secrets
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
-from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.database import scoped_session
 from app.models import PushSubscription, User
 from app.models.reference import UserKind
-from app.services.container import ServiceContainer
-from app.services.notification_settings_service import ONE_SHOT_MESSAGE
 from app.services.web_push import point
 from app.utils.base64url import b64
-from tests.support.fake_notification_bridge import (
-    ServedFakeNotificationBridge,
-    bridge_client_of,
-)
-from tests.support.supervisor import wait_until
 
 # A browser's keys in the form the Push API gives them: a P-256 point and a
 # 16-octet secret, base64url, minted for the module.
@@ -33,11 +23,9 @@ BROWSER_AUTH = b64(secrets.token_bytes(16))
 
 SELF = "/api/people/self"
 HANDLE = "/api/people/self/handle"
-TOKEN = "/api/people/self/notification-token"
 ALARMS = "/api/people/self/alarms"
 SUBSCRIPTIONS = "/api/people/self/push-subscriptions"
 PHONE = "https://push.example.com/send/phone-of-ada"
-ADA_TOKEN = "token-of-ada"
 
 
 def _sign_in(
@@ -83,7 +71,6 @@ class TestGetSelf:
             "name": "Ben Example",
             "initials": "BE",
             "avatar_slot": None,
-            "notification_token_set": None,
             "alarms": None,
         }
         assert _people(session) == 0
@@ -99,7 +86,6 @@ class TestGetSelf:
             "name": None,
             "initials": None,
             "avatar_slot": None,
-            "notification_token_set": None,
             "alarms": None,
         }
 
@@ -113,7 +99,6 @@ class TestGetSelf:
             "name": "Local Admin",
             "initials": "LA",
             "avatar_slot": None,
-            "notification_token_set": None,
             "alarms": None,
         }
 
@@ -129,9 +114,17 @@ class TestGetSelf:
             "name": "Ada Example",
             "initials": "AE",
             "avatar_slot": 1,
-            "notification_token_set": False,
             "alarms": True,
         }
+
+    def test_a_person_reads_their_alarms_switch_as_turned(
+        self, client: FlaskClient, person: User, session: Session
+    ) -> None:
+        person.alarms = False
+        session.flush()
+        _sign_in(client, subject="subject-ada", name="Ada Example")
+
+        assert client.get(SELF).get_json()["alarms"] is False
 
     def test_a_later_sign_in_refreshes_the_row(
         self, client: FlaskClient, person: User
@@ -180,7 +173,6 @@ class TestChooseHandle:
             "name": "Ben Example",
             "initials": "BE",
             "avatar_slot": 1,
-            "notification_token_set": False,
             "alarms": True,
         }
         person = _row(session, "subject-ben")
@@ -285,263 +277,6 @@ class TestChooseHandle:
     ) -> None:
         assert oidc_client.post(HANDLE, json={"handle": "ben"}).status_code == 401
         assert _people(session) == 0
-
-
-def _seal(container: ServiceContainer, token: str) -> str:
-    return container.notification_token_cipher().seal(token)
-
-
-class TestGetSelfNotificationSettings:
-    def test_a_saved_token_reads_as_set_and_is_never_answered(
-        self,
-        client: FlaskClient,
-        container: ServiceContainer,
-        person: User,
-        session: Session,
-    ) -> None:
-        person.notification_token = _seal(container, ADA_TOKEN)
-        person.alarms = False
-        session.flush()
-        _sign_in(client, subject="subject-ada", name="Ada Example")
-
-        response = client.get(SELF)
-
-        assert response.get_json()["notification_token_set"] is True
-        assert response.get_json()["alarms"] is False
-        assert ADA_TOKEN not in response.get_data(as_text=True)
-        assert person.notification_token not in response.get_data(as_text=True)
-
-
-class TestSaveNotificationToken:
-    """The answers a save gives at once, before any task; the session app
-    has no bridge."""
-
-    @pytest.mark.parametrize(
-        "token",
-        [
-            pytest.param("", id="empty"),
-            pytest.param("token of ada", id="space"),
-            pytest.param("token-of-ada\r\nX-Injected: 1", id="line-break"),
-            pytest.param("token-of-ada\u200b", id="zero-width-space"),
-        ],
-    )
-    def test_a_token_that_is_not_visible_ascii_is_refused(
-        self, client: FlaskClient, person: User, token: str
-    ) -> None:
-        _sign_in(client, subject="subject-ada")
-
-        response = client.put(TOKEN, json={"token": token})
-
-        assert response.status_code == 400
-        assert _error(response) == (
-            "Cannot save your notification token because a token holds only "
-            "visible ASCII characters, with no spaces or line breaks"
-        )
-        assert person.notification_token is None
-
-    @pytest.mark.parametrize(
-        "body",
-        [
-            pytest.param({}, id="missing"),
-            pytest.param({"token": None}, id="null"),
-            pytest.param({"token": 7}, id="not-a-string"),
-        ],
-    )
-    def test_a_request_without_a_token_is_refused(
-        self, client: FlaskClient, person: User, body: dict[str, Any]
-    ) -> None:
-        _sign_in(client, subject="subject-ada")
-
-        assert client.put(TOKEN, json=body).status_code == 400
-        assert person.notification_token is None
-
-    def test_with_no_bridge_it_is_refused(
-        self, client: FlaskClient, person: User
-    ) -> None:
-        _sign_in(client, subject="subject-ada")
-
-        response = client.put(TOKEN, json={"token": ADA_TOKEN})
-
-        assert response.status_code == 409
-        assert _error(response) == (
-            "Cannot save your notification token because no notification bridge "
-            "is configured"
-        )
-        assert person.notification_token is None
-
-    def test_before_the_handle_it_is_refused(self, client: FlaskClient) -> None:
-        _sign_in(client)
-
-        response = client.put(TOKEN, json={"token": ADA_TOKEN})
-
-        assert response.status_code == 409
-        assert _error(response) == (
-            "Cannot save your notification token because you have not chosen "
-            "your handle yet"
-        )
-
-    def test_without_editor_it_is_refused(
-        self, client: FlaskClient, person: User
-    ) -> None:
-        _sign_in(client, subject="subject-ada", roles=())
-
-        assert client.put(TOKEN, json={"token": ADA_TOKEN}).status_code == 403
-
-    def test_without_a_token_it_is_unauthenticated(
-        self, oidc_client: FlaskClient
-    ) -> None:
-        assert oidc_client.put(TOKEN, json={"token": ADA_TOKEN}).status_code == 401
-
-
-@pytest.fixture
-def bridged(
-    committed_app: Flask, fake_notification_bridge: ServedFakeNotificationBridge
-) -> Iterator[FlaskClient]:
-    """A client of an app on a database of its own, whose bridge is the fake,
-    which has Ada's registration; signed in as Ada, who chose her handle."""
-    container = committed_app.container
-    bridge_client_of(container, fake_notification_bridge)
-    container.app_config.override(
-        container.app_config().model_copy(
-            update={"notification_bridge_url": fake_notification_bridge.url}
-        )
-    )
-    fake_notification_bridge.add_registration("ada", ADA_TOKEN)
-    with committed_app.test_client() as client:
-        _sign_in(client, subject="subject-ada", name="Ada Example")
-        assert client.post(HANDLE, json={"handle": "ada"}).status_code == 201
-        yield client
-
-
-def _finished(client: FlaskClient, task_id: str) -> dict[str, Any]:
-    """The save's task, as its caller reads it, once it completed or failed."""
-
-    def status() -> dict[str, Any]:
-        response = client.get(f"/api/tasks/{task_id}/status")
-        assert response.status_code == 200
-        return response.get_json()
-
-    wait_until(
-        lambda: status()["status"] in ("completed", "failed"),
-        "the save's task finished",
-    )
-    return status()
-
-
-def _held(app: Flask) -> str | None:
-    """Ada's token, as committed, opened."""
-    container: ServiceContainer = app.container
-    with scoped_session(container) as db:
-        person = db.scalars(select(User).where(User.handle == "ada")).one()
-        return container.notification_token_cipher().open(person)
-
-
-class TestSaveNotificationTokenTask:
-    def test_the_save_is_a_task_of_the_callers_that_stores_the_token_after_its_one_shot(
-        self,
-        committed_app: Flask,
-        bridged: FlaskClient,
-        fake_notification_bridge: ServedFakeNotificationBridge,
-    ) -> None:
-        response = bridged.put(TOKEN, json={"token": ADA_TOKEN})
-
-        assert response.status_code == 202
-        assert set(response.get_json()) == {"task_id", "status"}
-        assert response.get_json()["status"] == "pending"
-        task = _finished(bridged, response.get_json()["task_id"])
-        assert task["status"] == "completed"
-        assert task["subject"] == "subject-ada"
-        assert task["result"]["notification_token_set"] is True
-        assert ADA_TOKEN not in str(task)
-        assert [shot.message for shot in fake_notification_bridge.one_shots("ada")] == [
-            ONE_SHOT_MESSAGE
-        ]
-        assert _held(committed_app) == ADA_TOKEN
-        assert bridged.get(SELF).get_json()["notification_token_set"] is True
-
-    def test_a_token_the_bridge_refuses_fails_the_save_with_its_reason(
-        self,
-        committed_app: Flask,
-        bridged: FlaskClient,
-        fake_notification_bridge: ServedFakeNotificationBridge,
-    ) -> None:
-        response = bridged.put(TOKEN, json={"token": "token-of-nobody"})
-
-        task = _finished(bridged, response.get_json()["task_id"])
-        assert task["status"] == "failed"
-        assert task["error"].endswith(
-            "the bridge refused it with 401: unknown bearer token"
-        )
-        assert _held(committed_app) is None
-        assert bridged.get(SELF).get_json()["notification_token_set"] is False
-
-
-class TestClearNotificationToken:
-    def test_the_token_is_gone_at_once(
-        self,
-        client: FlaskClient,
-        container: ServiceContainer,
-        person: User,
-        session: Session,
-    ) -> None:
-        person.notification_token = _seal(container, ADA_TOKEN)
-        session.flush()
-        _sign_in(client, subject="subject-ada", name="Ada Example")
-
-        response = client.delete(TOKEN)
-
-        assert response.status_code == 200
-        assert response.get_json()["notification_token_set"] is False
-        session.refresh(person)
-        assert person.notification_token is None
-
-    def test_with_no_token_there_is_nothing_to_clear(
-        self, client: FlaskClient, person: User
-    ) -> None:
-        _sign_in(client, subject="subject-ada")
-
-        response = client.delete(TOKEN)
-
-        assert response.status_code == 200
-        assert response.get_json()["notification_token_set"] is False
-
-    def test_before_the_handle_it_is_refused(self, client: FlaskClient) -> None:
-        _sign_in(client)
-
-        response = client.delete(TOKEN)
-
-        assert response.status_code == 409
-        assert _error(response) == (
-            "Cannot clear your notification token because you have not chosen "
-            "your handle yet"
-        )
-
-    def test_a_token_the_apps_key_does_not_open_is_refused(
-        self, client: FlaskClient, person: User, session: Session
-    ) -> None:
-        person.notification_token = "not-a-ciphertext"
-        session.flush()
-        _sign_in(client, subject="subject-ada")
-
-        response = client.delete(TOKEN)
-
-        assert response.status_code == 409
-        assert _error(response) == (
-            "Cannot open the notification token of user ada because the app's "
-            "SECRET_KEY does not open its ciphertext"
-        )
-
-    def test_without_editor_it_is_refused(
-        self, client: FlaskClient, person: User
-    ) -> None:
-        _sign_in(client, subject="subject-ada", roles=())
-
-        assert client.delete(TOKEN).status_code == 403
-
-    def test_without_a_token_it_is_unauthenticated(
-        self, oidc_client: FlaskClient
-    ) -> None:
-        assert oidc_client.delete(TOKEN).status_code == 401
 
 
 class TestSwitchAlarms:
