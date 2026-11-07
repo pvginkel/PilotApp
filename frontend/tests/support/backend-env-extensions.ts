@@ -45,5 +45,8 @@ export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
     // The five-hour halt stops every running work item (tests/work/hard-stop.spec.ts); the week's
     // keeps its default, the cooperative stop.
     FIVE_HOUR_HALT: 'hard_stop',
+    // The pool guard on the backend's pool (backend/app/utils/pool_guard.py): fixtures.ts takes its
+    // nestings after each test, under /api/testing/pool-guard, and fails the test on any.
+    POOL_GUARD: 'true',
   };
 }

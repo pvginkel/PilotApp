@@ -256,6 +256,13 @@ class AppEnvironment(BaseSettings):
             "placed, later firings joining it (F136.4)"
         ),
     )
+    POOL_GUARD: bool = Field(
+        default=False,
+        description=(
+            "Testing mode alone: the pool guard on the app's pools, its "
+            "nestings taken at /api/testing/pool-guard (Playwright's backends)"
+        ),
+    )
 
 
 class AppSettings(BaseModel):
@@ -432,6 +439,11 @@ class AppSettings(BaseModel):
     """How long after a wait's first pending firing the batcher places its run,
     counted on the scheduler's tick (F136.4)."""
 
+    pool_guard: bool = False
+    """The pool guard on the app's pools (app/utils/pool_guard.py), its
+    nestings taken at /api/testing/pool-guard: Playwright's backends, in
+    testing mode alone."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -484,4 +496,5 @@ class AppSettings(BaseModel):
             ),
             cache_expiration_ttl_seconds=env.CACHE_EXPIRATION_TTL,
             wait_quiet_window_seconds=env.WAIT_QUIET_WINDOW_SECONDS,
+            pool_guard=env.POOL_GUARD,
         )

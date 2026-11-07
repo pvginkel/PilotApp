@@ -87,6 +87,7 @@ from app.services.wait_timer import WaitTimer
 from app.services.web_push import WebPushService
 from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
+from app.utils.pool_guard import PoolGuard
 from app.utils.temp_file_manager import TempFileManager
 
 # Background service startup registry. Services register lambdas here
@@ -98,6 +99,21 @@ _background_starters: list[Callable[[Any], None]] = []
 def register_for_background_startup(fn: Callable[[Any], None]) -> None:
     """Register a callable to be invoked during background service startup."""
     _background_starters.append(fn)
+
+
+def install_pool_guard(container: "ServiceContainer") -> None:
+    """Install the pool guard under POOL_GUARD, which testing mode alone
+    takes, on a stage other than prd, as the testing endpoints do. Its
+    starter is the first, so that the guard holds every checkout of the
+    services' threads."""
+    if not container.app_config().pool_guard:
+        return
+    config = container.config()
+    if not config.is_testing or config.stage == "prd":
+        raise ConfigurationError(
+            "POOL_GUARD requires FLASK_ENV=testing and a STAGE other than prd"
+        )
+    container.pool_guard().install()
 
 
 def start_controller_client(container: "ServiceContainer") -> None:
@@ -153,6 +169,11 @@ class ServiceContainer(containers.DeclarativeContainer):
     app_config = providers.Dependency(instance_of=AppSettings)
     session_maker = providers.Dependency(instance_of=sessionmaker)
     db_session = providers.ContextLocalSingleton(session_maker.provided.call())
+
+    # The pool guard on every nesting of the process (app/utils/pool_guard.py),
+    # its nestings taken under /api/testing/pool-guard in testing mode
+    pool_guard = providers.Singleton(PoolGuard, watched=None)
+    register_for_background_startup(lambda c: install_pool_guard(c))
 
     # Testing service - test sessions and content generation
     testing_service = providers.Factory(TestingService)

@@ -17,10 +17,13 @@
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
  * `waits` adds the brain's waits, fires them, places their runs and closes them.
  * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
- * server serve the app once before the worker's first test.
+ * server serve the app once before the worker's first test. `poolGuard` fails a test where a thread of
+ * the worker's backend checked out a second connection of its pool while it held one.
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
+import { expect } from '@playwright/test';
+
 import { BrowserPush } from './browser-push';
 import { Chats } from './chats';
 import { Conditions, Controller } from './controller';
@@ -67,6 +70,7 @@ interface DomainFixtures {
   device: Device;
   storeUpdate: StoreUpdate;
   waits: Waits;
+  poolGuard: void;
 }
 
 interface DomainWorkerFixtures {
@@ -173,6 +177,24 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   waits: async ({ page, backendUrl }, use) => {
     await use(new Waits(page, backendUrl));
   },
+  // The nestings the backend's pool guard kept (backend/app/utils/pool_guard.py), taken once the
+  // test and the fixtures it used are done: the test's, its fixtures', or those of a thread a test
+  // before it left running, whose stacks say so.
+  poolGuard: [
+    async ({ playwright, backendUrl }, use) => {
+      await use();
+      const request = await playwright.request.newContext({ baseURL: backendUrl });
+      try {
+        const response = await request.post('/api/testing/pool-guard/take');
+        expect(response.ok(), await response.text()).toBe(true);
+        const { nestings } = (await response.json()) as { nestings: string[] };
+        expect(nestings, nestings.join('\n\n')).toEqual([]);
+      } finally {
+        await request.dispose();
+      }
+    },
+    { auto: true },
+  ],
 });
 
 export type { InfrastructureFixtures } from './fixtures-infrastructure';

@@ -95,12 +95,15 @@ once the other run is done.
 
 A backend test errors at its teardown where a thread checked out a second connection of a pool
 while it held one, the two checkouts' stacks parting in the app's code
-(`backend/tests/support/pool_guard.py`). As many such threads at once as the pool holds wait on
-each other until its timeout, which the Playwright suite shows only as random 10 s reds. The error
-names the function that holds the one while it takes the other: its transaction ends before the
-other's opens, or, where it cannot fill the pool, the function is exempt in the guard's module with
-its reason. The guard sees the tests on `committed_app`, whose sessions are real; on `session`,
-every caller shares the test's one connection.
+(`backend/app/utils/pool_guard.py`). As many such threads at once as the pool holds wait on each
+other until its timeout, which the Playwright suite shows only as random 10 s reds. The error names
+the function that holds the one while it takes the other: its transaction ends before the other's
+opens, or, where it cannot fill the pool, the function is exempt in the guard's module with its
+reason. The guard sees the tests on `committed_app`, whose sessions are real; on `session`, every
+caller shares the test's one connection. A Playwright test fails the same way, on a nesting
+anywhere in its worker's backend, which runs the guard under `POOL_GUARD`: a request's included,
+which the backend suite cannot see. The test's own or one a test before it left running, as the
+stacks say.
 
 Then the same verbs from the root of every other repo the slice touched, each where it declares
 them: `../PilotDeploy`, whose `test` reads `../PilotApp/docs/architecture/architecture.yaml` and so

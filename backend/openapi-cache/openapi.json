@@ -16175,6 +16175,22 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/pool-guard/take": {
+      "post": {
+        "description": "Refused where the guard is not installed, so that a backend without POOL_GUARD fails the spec rather than passing it unwatched.",
+        "operationId": "post__api_testing_pool-guard_take",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The nestings since the last take, each told with both its stacks, the guard keeping none.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/projects": {
       "post": {
         "description": "Returns:     201: The project's id and its folder in the store's tree     400: A finished project with auto pilot on, a member named twice,         open items without an environment, or a plan with a fault     404: A member is no person, or no environment has the id     409: The name makes a draft text with a fault",

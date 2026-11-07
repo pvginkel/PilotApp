@@ -89,12 +89,14 @@ def register_root_blueprints(app: Flask) -> None:
     OIDC gate: the store sidecar's sync routes, under the store's bearer; the
     tracker-events endpoint, under the tracker's token; the tool routes of the
     worker's and the brain's sessions, under each session's bearer, outside
-    `/api/`; and the testing endpoints refused outside testing mode."""
+    `/api/`; and the testing endpoints refused outside testing mode, the pool
+    guard's nestings among them."""
     from app.api.pilot_store import pilot_store_bp
     from app.api.pilot_work import pilot_work_bp
     from app.api.sync import sync_bp
     from app.api.testing_controller import testing_controller_bp
     from app.api.testing_links import testing_links_bp
+    from app.api.testing_pool_guard import testing_pool_guard_bp
     from app.api.testing_push_service import testing_push_service_bp
     from app.api.testing_sync import testing_sync_bp
     from app.api.tracker_events import tracker_events_bp
@@ -107,6 +109,7 @@ def register_root_blueprints(app: Flask) -> None:
     app.register_blueprint(testing_links_bp)
     app.register_blueprint(testing_controller_bp)
     app.register_blueprint(testing_push_service_bp)
+    app.register_blueprint(testing_pool_guard_bp)
 
 
 def register_cli_commands(cli: click.Group) -> None:

@@ -37,6 +37,7 @@ from app.services.supervisor import Supervisor
 from app.services.web_push import WebPushService
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
+from app.utils.pool_guard import PoolGuard
 
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
@@ -50,7 +51,6 @@ from tests.support.fake_push_service import (
     web_push_of,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
-from tests.support.pool_guard import PoolGuard
 from tests.support.suite_lock import HeldLock, hold_suite_lock
 from tests.support.supervisor import Supervise
 
@@ -77,7 +77,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def pool_guard_installed() -> Generator[None]:
-    """The pool guard (tests/support/pool_guard.py) on every pool, for the
+    """The pool guard (app/utils/pool_guard.py) on every pool, for the
     run."""
     _POOL_GUARD.install()
     try:

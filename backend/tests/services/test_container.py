@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app import create_app
 from app.app_config import AppSettings, HaltSetting
-from app.config import Settings
+from app.config import Settings, Stage
 from app.database import scoped_session
 from app.engine.bus import ProjectChanged
 from app.exceptions import ConfigurationError
@@ -49,6 +49,7 @@ from app.services.app_page_service import EXPIRY_SECONDS, AppPageService
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import (
     ServiceContainer,
+    install_pool_guard,
     require_pilot_server,
     require_vapid_key,
     start_controller_client,
@@ -200,6 +201,42 @@ class TestStartControllerClient:
         )
 
         _dispose_app(production)
+
+
+class TestInstallPoolGuard:
+    def test_under_pool_guard_it_installs_the_guard(
+        self, test_settings: Settings
+    ) -> None:
+        container = _container(test_settings, AppSettings(pool_guard=True))
+
+        install_pool_guard(container)
+        try:
+            assert container.pool_guard().installed
+        finally:
+            container.pool_guard().uninstall()
+
+    def test_unset_it_installs_none(self, test_settings: Settings) -> None:
+        container = _container(test_settings, AppSettings())
+
+        install_pool_guard(container)
+
+        assert not container.pool_guard().installed
+
+    @pytest.mark.parametrize(
+        "update",
+        [{"flask_env": "development"}, {"stage": Stage("prd")}],
+        ids=["outside-testing-mode", "testing-on-prd"],
+    )
+    def test_outside_testing_mode_the_server_does_not_start(
+        self, test_settings: Settings, update: dict[str, object]
+    ) -> None:
+        container = _container(
+            test_settings.model_copy(update=update), AppSettings(pool_guard=True)
+        )
+
+        with pytest.raises(ConfigurationError, match="POOL_GUARD requires"):
+            install_pool_guard(container)
+        assert not container.pool_guard().installed
 
 
 class TestRequireVapidKey:

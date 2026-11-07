@@ -379,6 +379,16 @@ class TestAppSettings:
 
         assert settings.wait_quiet_window_seconds == 12
 
+    def test_the_pool_guard_is_off_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.pool_guard is False
+
+    def test_load_reads_the_pool_guard_from_the_environment(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None, POOL_GUARD=True))
+
+        assert settings.pool_guard is True
+
     @pytest.mark.parametrize(
         "name",
         ["CHAT_CLOSE_TIMEOUT", "CACHE_EXPIRATION_TTL", "WAIT_QUIET_WINDOW_SECONDS"],
@@ -452,6 +462,7 @@ class TestAppSettings:
             "chat_close_timeout_seconds": repr(3300.0),
             "cache_expiration_ttl_seconds": repr(3300.0),
             "wait_quiet_window_seconds": repr(5.0),
+            "pool_guard": "False",
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -555,4 +566,5 @@ class TestAppSettings:
             "chat_close_timeout_seconds": repr(3300.0),
             "cache_expiration_ttl_seconds": repr(3300.0),
             "wait_quiet_window_seconds": repr(5.0),
+            "pool_guard": "False",
         }

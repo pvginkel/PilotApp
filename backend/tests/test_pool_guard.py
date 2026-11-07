@@ -1,7 +1,7 @@
-"""The pool guard (tests/support/pool_guard.py), watching this file's code on
-the session app's pool: a thread's second checkout while it holds one is a
+"""The pool guard (app/utils/pool_guard.py), watching this file's code on the
+session app's pool: a thread's second checkout while it holds one is a
 nesting, with both stacks, where the two part in the watched code and in no
-function exempt."""
+function exempt; a backend's guard, watching all, takes every nesting."""
 
 from collections.abc import Iterator
 
@@ -10,8 +10,8 @@ from flask import Flask
 from sqlalchemy import Engine
 
 from app.extensions import db
+from app.utils.pool_guard import PoolGuard
 from tests.support.locks import in_thread
-from tests.support.pool_guard import PoolGuard
 
 _HERE = "tests/test_pool_guard.py"
 
@@ -84,6 +84,18 @@ class TestPoolGuard:
             guard.uninstall()
 
         assert guard.drain() == []
+
+    def test_to_a_backends_guard_a_nesting_anywhere_is_one(
+        self, engine: Engine
+    ) -> None:
+        guard = PoolGuard(watched=None)
+        guard.install()
+        try:
+            _nest(engine)
+        finally:
+            guard.uninstall()
+
+        assert len(guard.drain()) == 1
 
     def test_a_nesting_in_an_exempt_function_is_none(self, engine: Engine) -> None:
         guard = _guard(_nest="invented")
