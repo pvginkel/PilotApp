@@ -84,6 +84,7 @@ template-owned file to add app behaviour; use the extension points instead:
 | New screens | a route under `frontend/src/routes/_shell/`; tokens in `frontend/src/styles/app-theme.css` ([`docs/ui.md`](docs/ui.md)) |
 | Side effects after a request's commit | `after_commit()` from `backend/app/utils/after_commit.py` |
 | CLI commands, post-migration logic | `backend/app/startup.py` |
+| Listeners on the app's engine | `configure_engine()` in `backend/app/startup.py` |
 | Test fixtures | `backend/tests/conftest.py`, `frontend/tests/support/fixtures.ts` |
 | Sidecars CI must wait for | `backend/scripts/wait-for-services.py` (the suite runner calls it) |
 | Vite plugins | `loadAppPlugins()` in `frontend/vite-plugin-extensions.ts` |
@@ -94,7 +95,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Fourteen stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Fifteen stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -144,10 +145,12 @@ failed every task whose result is a plain model, as the backend's `TaskService` 
 app's height, `h-dvh` on the root layout of `frontend/src/routes/__root.tsx` and on the auth gate's
 screens in `frontend/src/components/auth/auth-gate.tsx`, where the template's `h-screen`, `100vh`,
 which a phone's Chrome measures with its URL bar hidden, cut off the app's foot by the bar's
-height, the app scrolling inside itself so that the bar never hides; and the
+height, the app scrolling inside itself so that the bar never hides; the
 docstring of `scoped_session` in `backend/app/database.py`, which says that a nested call on the
 same thread hands back the outer session and commits and closes it, where the template's warns only
-of a request's session. uv, the migration that keeps the app's loggers,
+of a request's session; and the app's engine, which `create_app()` in `backend/app/__init__.py`
+hands to `configure_engine()` in the app-owned `backend/app/startup.py` before anything connects,
+where the template gives an app no place for a listener on its engine. uv, the migration that keeps the app's loggers,
 the masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
 `modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
 `backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.

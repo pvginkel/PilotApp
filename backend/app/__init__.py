@@ -26,6 +26,7 @@ def create_app(
 
     This factory follows a hook-based pattern where app-specific behavior
     is injected through functions in app/startup.py:
+    - configure_engine(): takes the app's engine, for its event listeners
     - create_container(): builds the DI container with app-specific providers
     - register_blueprints(): registers domain resource blueprints on /api
     - register_error_handlers(): registers app-specific error handlers
@@ -69,6 +70,11 @@ def create_app(
             from app.utils.pool_diagnostics import setup_pool_logging
 
             setup_pool_logging(db.engine)
+
+        # --- Hook 0: the app's engine, before anything opens a connection ---
+        from app.startup import configure_engine
+
+        configure_engine(db.engine)
 
     # Initialize SpecTree for OpenAPI docs
     from app.utils.spectree_config import configure_spectree

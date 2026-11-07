@@ -1,6 +1,7 @@
 """App-specific startup hooks.
 
 Hook points called by create_app():
+  - configure_engine()
   - create_container()
   - register_blueprints()
   - register_error_handlers()
@@ -16,10 +17,16 @@ from __future__ import annotations
 
 import click
 from flask import Blueprint, Flask
+from sqlalchemy import Engine
 
 from app.app import App
 from app.database import scoped_session
 from app.services.container import ServiceContainer
+
+
+def configure_engine(engine: Engine) -> None:
+    """Configure the app's engine, before anything opens a connection on it."""
+    pass
 
 
 def create_container() -> ServiceContainer:
