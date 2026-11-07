@@ -3,14 +3,14 @@
 import logging
 import re
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import MetaData, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session
 
 from alembic import command
@@ -120,13 +120,16 @@ def _get_alembic_config() -> Config:
     return config
 
 
-def get_current_revision() -> str | None:
-    """Get current database revision from Alembic version table.
+def get_current_revision(connection: Connection | None = None) -> str | None:
+    """Get current database revision from Alembic version table, on
+    `connection` where the caller holds one, else on a connection of its own.
 
     Optimized version that catches missing table exception instead of checking existence first.
     """
     try:
-        with db.engine.connect() as conn:
+        with (
+            db.engine.connect() if connection is None else nullcontext(connection)
+        ) as conn:
             result = conn.execute(
                 text("SELECT version_num FROM alembic_version LIMIT 1")
             )
@@ -149,8 +152,9 @@ def get_pending_migrations() -> list[str]:
         config.attributes["connection"] = connection
         script = ScriptDirectory.from_config(config)
 
-        # Get current revision (optimized to use single query)
-        current_rev = get_current_revision()
+        # Get current revision (optimized to use single query), on the
+        # connection held: one of its own would wait on the pool beside it
+        current_rev = get_current_revision(connection)
 
         # Get head revision from script directory (no DB query, just reads migration files)
         head_rev = script.get_current_head()
