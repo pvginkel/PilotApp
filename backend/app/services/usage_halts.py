@@ -448,6 +448,9 @@ class UsageWatcher:
             effects.append(self._container.session_start_service().send_nudges)
         if turned or spent is not None or (recorded and holding):
             effects.append(self._container.condition_service().tell)
+        # The reads end first: the effects open sessions of their own, which
+        # this one's connection, held, would wait for beside it.
+        db.commit()
         for effect in effects:
             # An effect that fails keeps the turn from no other.
             try:
