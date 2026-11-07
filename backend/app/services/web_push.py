@@ -237,13 +237,15 @@ class WebPushService:
             )
         except requests.RequestException as error:
             outcome = PushOutcome.UNANSWERED
+            # The error's class alone: requests puts the endpoint's path in a
+            # connection error's text, and the log names the host alone.
             logger.warning(
                 "The push service %s did not answer a push to subscription %s "
                 "of user %s: %s",
                 service,
                 target.id,
                 user_id,
-                error,
+                type(error).__name__,
             )
         else:
             outcome = _outcome(response.status_code)
