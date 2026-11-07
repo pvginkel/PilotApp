@@ -8,9 +8,12 @@ import sys
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from tests import conftest
 from tests.support import suite_lock
 from tests.support.locks import in_thread
 from tests.support.suite_lock import (
@@ -253,3 +256,17 @@ class TestHoldSuiteLock:
         monkeypatch.delenv("KUBECODER_ENVIRONMENT_ID")
 
         assert hold_suite_lock() is None
+
+    def test_is_taken_by_no_run_on_one_process(self, lock_file: Path) -> None:
+        # A targeted `uv run pytest tests/...`, as conftest's hook reads its
+        # config.
+        config = SimpleNamespace(
+            stash=pytest.Stash(),
+            getoption={"dist": "no", "collectonly": False}.get,
+        )
+        conftest.pytest_sessionstart(
+            cast(pytest.Session, SimpleNamespace(config=config))
+        )
+
+        assert len(config.stash) == 0
+        assert not _is_locked(lock_file)
