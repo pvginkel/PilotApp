@@ -39,6 +39,10 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+                // The frontend shows the commit it was built from, and neither the suite's tree
+                // (modernApp.test leaves out .git) nor the image's build context holds .git to
+                // read it from (vite-build-commit.ts).
+                sh 'git rev-parse HEAD > frontend/git-rev'
             }
         }
 
@@ -110,9 +114,6 @@ pipeline {
 
         stage('Build pilot-ui image') {
             steps {
-                // The frontend shows the commit it was built from, and its build context holds no
-                // .git to read it from.
-                sh 'git rev-parse HEAD > frontend/git-rev'
                 // frontend/openapi-cache links to ../backend/openapi-cache, outside the build
                 // context, where the link would dangle in the image.
                 sh '''

@@ -4,6 +4,7 @@
  */
 
 import { execSync } from 'child_process';
+import fs from 'fs';
 import { test, expect } from '../support/fixtures';
 
 test.describe('The top bar', () => {
@@ -63,8 +64,10 @@ test.describe('The profile menu', () => {
     await shell.open();
 
     await shell.user.click();
-    // The dev server embeds the work tree's HEAD as it starts (vite-build-commit.ts).
-    const commit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    // The commit the dev server embeds as it starts (vite-build-commit.ts): CI's tree has no .git,
+    // and the Jenkinsfile writes it to git-rev.
+    const written = new URL('../../git-rev', import.meta.url);
+    const commit = (fs.existsSync(written) ? fs.readFileSync(written, 'utf8') : execSync('git rev-parse HEAD', { encoding: 'utf8' })).trim();
     await expect(shell.profileVersion).toHaveText(commit.slice(0, 7));
     const items = await shell.profileMenu.evaluate((menu) => Array.from(menu.children, (child) => child.getAttribute('data-testid')));
     expect(items.at(-1)).toBe('shell.profile.version');

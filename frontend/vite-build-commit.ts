@@ -3,7 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import type { Plugin } from 'vite'
 
-// The image's build context holds no .git: the Jenkinsfile writes the commit here before the build.
+// CI's trees, the suite's and the image's build context, hold no .git: the Jenkinsfile writes the
+// commit here at checkout.
 const GIT_REV = path.resolve(__dirname, 'git-rev')
 
 /**

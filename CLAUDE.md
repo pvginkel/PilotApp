@@ -101,7 +101,9 @@ in one commit, where the template's tags `<n>` and `latest` and pins production 
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
 which the template, rendering no `sidecar/`, has no place for (D008), and which copies the
 backend's OpenAPI cache into the `pilot-ui` build context, where `frontend/openapi-cache` is a
-symlink to `backend/openapi-cache`; the page head of
+symlink to `backend/openapi-cache`, and which writes the commit to `frontend/git-rev` at checkout,
+where the template wrote it for the image alone, so that the suite's tree, which holds no `.git`,
+has it too; the page head of
 `frontend/index.html`, which links the PWA's `/manifest.json`, sets `theme-color`, and gives the
 viewport `interactive-widget=resizes-content`, so that a phone's keyboard shrinks the app rather
 than panning it, which no app-owned file can; the cache rule of `frontend/nginx.conf`, which keeps the year-long immutable
