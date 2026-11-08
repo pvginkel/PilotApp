@@ -1056,7 +1056,8 @@ class TestRun:
             None,
         )
         assert fake.sessions(env_id) == []
-        assert _server(session, run.id) == []
+        # Nothing of its start: the stop's record alone.
+        assert _server(session, run.id) == [(1, {"type": STOPPED_UNSENT})]
 
 
 FREE = "example-example-free"
@@ -1537,7 +1538,8 @@ class TestRunTakes:
 
         run = _read(session, work.id)
         assert (run.state_code, run.environment_id) == (SessionState.STOPPED, FREE)
-        assert _server(session, run.id) == []
+        # Nothing of its start: the stop's record alone.
+        assert _server(session, run.id) == [(1, {"type": STOPPED_UNSENT})]
         assert fake.sessions(FREE) == []
         # Nothing of it is reset, and the Stop claimed it, its reset still to
         # make: nothing runs there, so the timer stops it.
