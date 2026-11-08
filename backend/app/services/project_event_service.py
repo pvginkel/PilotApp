@@ -1,7 +1,9 @@
 """A project's live events on the browsers' SSE connections (F80.2; design 2
 §6.2): once a change to what its timeline, head or tab shows commits, every
-person's connections hear of it, as one event naming the project; and once a
-work item's status moves, as one event carrying it, read after the commit.
+person's connections hear of it, as one event naming the project, and the
+page whose write committed it where its request named one (`X-Sender`); and
+once a work item's status moves, as one event carrying it, read after the
+commit.
 
 Every person sees every project (F105), so the event names every person by
 their subject (SSE-2). A person is a user who has chosen a handle; before
@@ -21,12 +23,14 @@ from app.models import User
 from app.models.reference import UserKind
 from app.services.sse_connection_manager import SSEConnectionManager, Target
 from app.services.timeline_service import work_status
+from app.utils.sender import current_sender
 
 if TYPE_CHECKING:
     from app.services.container import ServiceContainer
 
 EVENT_NAME = "project_changed"
-"""The SSE event a project's change travels as, `{"project_id": <id>}`."""
+"""The SSE event a project's change travels as, `{"project_id": <id>}`, with
+`"sender": <page>` where the request that committed it named its page."""
 
 WORK_EVENT_NAME = "work_moved"
 """The SSE event a work item's moved status travels as, `{"project_id": <id>,
@@ -54,6 +58,11 @@ class ProjectEventService:
             return
         name = EVENT_NAME
         payload: dict[str, Any] = {"project_id": str(event.project_id)}
+        # Within a request the bus delivers before the response is written,
+        # at its teardown's commit or a block's of its own: the page that
+        # sent it reads every query again after this.
+        if isinstance(event, ProjectChanged) and (sender := current_sender()):
+            payload["sender"] = sender
         with self._open_session() as db:
             if isinstance(event, WorkMoved):
                 work = work_status(

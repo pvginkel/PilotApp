@@ -10,6 +10,8 @@
  * whose stream the sending process holds, so each time the stream comes up everything they show is
  * read again (design 2 §6.2). Nothing waits for the stream: the screens are read without it
  * (SSE-4). A read under way when the event arrives is left to land, and read again once it has.
+ * An event a page's write committed names that page, which reads nothing on it: the write's own
+ * hook reads every query again once it is answered, so a click reads each query once.
  *
  * The server's `work_moved` carries a work item's session as it moves (F26.2, F80.2): it replaces
  * the item's in its project's timeline as read, with no read of its own, and so in the session log
@@ -22,19 +24,21 @@ import { useEffect } from 'react';
 import { useQueryClient, type Query, type QueryClient, type QueryFilters } from '@tanstack/react-query';
 import { useSseContext } from '@/contexts/sse-context';
 import type { ItemDocument } from '@/hooks/use-document';
+import { SENDER } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
 
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 type Job = components['schemas']['TimelineSchema.1fdd8ae.JobSchema'];
 
-/** The server's event, `{"project_id": <id>}`. */
+/** The server's event, `{"project_id": <id>}`, with `"sender": <page>` where a page's write committed it. */
 const EVENT = 'project_changed';
 /** The server's event, `{"project_id": <id>, "item_id": <id>, "work": <the item's work>}`. */
 const WORK_EVENT = 'work_moved';
 
 interface ProjectChanged {
   project_id: string;
+  sender?: string;
 }
 
 interface WorkMoved {
@@ -133,7 +137,9 @@ export function useProjectEvents(): void {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const { read, stop } = reader(queryClient);
     const unsubscribe = addEventListener(EVENT, (data) => {
-      pending.add((data as ProjectChanged).project_id);
+      const { project_id, sender } = data as ProjectChanged;
+      if (sender === SENDER) return;
+      pending.add(project_id);
       timer ??= setTimeout(() => {
         timer = undefined;
         readAgain(read, new Set(pending));

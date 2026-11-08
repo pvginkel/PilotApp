@@ -27,6 +27,7 @@ from app.services.container import ServiceContainer
 from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection
 from app.utils.after_commit import clear_after_commit_callbacks
+from app.utils.sender import SENDER_HEADER
 from tests.support.working_on import Camp
 
 ITEMS = "/api/items"
@@ -1016,6 +1017,42 @@ class TestTheLiveEvent:
         assert response.status_code == 204
         assert _heard(second_browser) == [
             {"type": "project_changed", "payload": {"project_id": str(camp.id)}}
+        ]
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "path", "body"),
+        [
+            ("decision", DECISION, "blocks/D1/answer", {"answer": "Dome"}),
+            ("notice", NOTICE, "read", None),
+        ],
+    )
+    def test_a_write_names_the_page_that_sent_it(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+        second_browser: SSEConnection,
+        kind: str,
+        text: str,
+        path: str,
+        body: dict[str, str] | None,
+    ) -> None:
+        item = _bear(container, camp, run, kind, text)
+        _sign_in(client)
+        clear_after_commit_callbacks()
+        _heard(second_browser)
+
+        response = client.post(
+            f"{ITEMS}/{item.id}/{path}", json=body, headers={SENDER_HEADER: "page1"}
+        )
+
+        assert response.status_code == 204
+        assert _heard(second_browser) == [
+            {
+                "type": "project_changed",
+                "payload": {"project_id": str(camp.id), "sender": "page1"},
+            }
         ]
 
     def test_undo_is_heard_in_another_browser(

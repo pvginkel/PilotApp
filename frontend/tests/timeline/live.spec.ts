@@ -2,17 +2,25 @@
  * The screens kept live (F80.2): the server's `project_changed` reads again what the screens show
  * of the project it names — its timeline, its head and the tabs' badges — leaving a read under way
  * to land first, and a stream that comes back up reads them all again, covering whatever it missed
- * while it was down.
+ * while it was down. The page whose write the event is reads nothing on it: its write reads every
+ * query again, once.
  */
 
 import type { Request } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { createDeploymentSseHelper } from '../support/helpers/deployment-sse';
-import { slowNetwork } from '../support/network';
+import { PageFetches, slowNetwork } from '../support/network';
 import { ProjectHeadPage } from '../support/page-objects/project-head-page';
+import type { TimelinePage } from '../support/page-objects/timeline-page';
 
 const QUESTION = '```question id=Q1\n```\n';
+const DECISION = '```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n';
+
+const WRITES: { what: string; kind: 'decision' | 'notice'; text: string; act: (item: ReturnType<TimelinePage['item']>) => Promise<void> }[] = [
+  { what: 'An option picked', kind: 'decision', text: DECISION, act: (item) => item.block.option('Tunnel').click() },
+  { what: 'A notice marked Read', kind: 'notice', text: 'A storm comes.\n', act: (item) => item.read.click() },
+];
 
 test.describe('Live updates', () => {
   test('an answer and an item from elsewhere reach the open timeline and the tab’s badge without a reload', async ({
@@ -75,6 +83,47 @@ test.describe('Live updates', () => {
     expect(most).toBe(1);
     await restore();
   });
+
+  for (const write of WRITES) {
+    test(`${write.what} reads each query the page shows once, the timeline built once`, async ({
+      page,
+      people,
+      projects,
+      timeline,
+      deploymentSse,
+      testEvents,
+    }) => {
+      const me = await people.signIn();
+      const id = await projects.makeWithSession({ name: makeUnique('Once'), members: [me.handle!] });
+      const placed = await projects.place(id, { kind: write.kind, title: 'Which tent?', text: write.text });
+      await timeline.open(id);
+      await deploymentSse.ensureConnected();
+      const item = timeline.item(placed);
+      await expect(item.root).toBeVisible();
+
+      // Each query's reads, by its address, from the click on.
+      const reads = new Map<string, number>();
+      page.on('request', (request) => {
+        const url = new URL(request.url());
+        if (request.resourceType() !== 'fetch' || request.method() !== 'GET' || !url.pathname.startsWith('/api/')) return;
+        reads.set(url.pathname + url.search, (reads.get(url.pathname + url.search) ?? 0) + 1);
+      });
+      const fetches = new PageFetches(page);
+      await write.act(item);
+
+      await expect(item.root).toHaveAttribute('data-state', 'done');
+      await testEvents.waitForEvent(
+        (event) => event.kind === 'sse' && event.streamId === 'project_changed' && (event.data as { project_id: string }).project_id === id,
+      );
+      // The page's own handling of the event has run, and every read it started, and any read owed
+      // over one under way, has landed.
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      await fetches.landed();
+      await fetches.landed();
+      expect(reads.get(`/api/projects/${id}/timeline`)).toBe(1);
+      expect([...reads].filter(([, count]) => count > 1)).toEqual([]);
+    });
+  }
 
   test('a second tab follows the head the first one changes', async ({ context, people, projects, projectHead }) => {
     const me = await people.signIn();

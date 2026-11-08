@@ -11,6 +11,7 @@ from queue import Empty
 from typing import Any
 
 import pytest
+from flask import Flask
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -24,6 +25,7 @@ from app.services.pilot_work_service import Worker
 from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.utils.after_commit import clear_after_commit_callbacks
+from app.utils.sender import SENDER_HEADER
 from tests.support.working_on import Camp
 
 DECISION = """---
@@ -242,6 +244,32 @@ class TestProjectEventService:
             container.engine_bus().emit(ProjectChanged(other.id))
 
         assert frames(tab) == [changed(project.id), changed(other.id)]
+
+    def test_a_change_a_pages_request_commits_names_the_page_and_a_move_does_not(
+        self,
+        app: Flask,
+        container: ServiceContainer,
+        connect: Connect,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        container.record_service().place_work(project, project_session, "Camp")
+        clear_after_commit_callbacks()
+        tab = connect("ada-1", person.subject)
+
+        with app.test_request_context(headers={SENDER_HEADER: "page1"}):
+            container.engine_bus().emit(ProjectChanged(project.id))
+            container.engine_bus().emit(WorkMoved(project.id, project_session.id))
+
+        heard = frames(tab)
+        assert heard[0] == {
+            "type": "project_changed",
+            "payload": {"project_id": str(project.id), "sender": "page1"},
+        }
+        assert heard[1]["type"] == "work_moved"
+        assert "sender" not in heard[1]["payload"]
+        assert len(heard) == 2
 
     def test_a_work_items_move_carries_its_status_as_it_reads_once_committed(
         self,
