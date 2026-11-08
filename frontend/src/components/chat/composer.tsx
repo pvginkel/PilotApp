@@ -147,6 +147,7 @@ export function ComposerBox({ home, field, text, onChange, onSend, sendable, wai
             disabled={disabled}
             readOnly={waiting}
             lines={LINES}
+            survivesReload
             testId="chat.composer.field"
           />
           {stop !== null ? (

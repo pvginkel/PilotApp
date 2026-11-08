@@ -127,6 +127,7 @@ function ActionControls({ field, block, disabled, onAnswer, onDone }: ActionCont
         label="What to paste back"
         placeholder="What to paste back, if anything"
         disabled={disabled}
+        survivesReload
         testId="timeline.block.paste"
       />
       <div className="item-actions">

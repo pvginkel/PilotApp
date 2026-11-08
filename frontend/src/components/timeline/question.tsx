@@ -57,6 +57,7 @@ function QuestionField({ field, block, initial, disabled, onAnswer }: QuestionFi
         label="Your answer"
         placeholder={block.default === null ? 'Your answer' : `Default: ${block.default}`}
         disabled={disabled}
+        survivesReload
         testId="timeline.block.field"
       />
       <button

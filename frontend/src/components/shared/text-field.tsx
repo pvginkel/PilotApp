@@ -26,6 +26,8 @@ interface TextFieldProps {
   autoFocus?: boolean;
   /** The lines it grows to before it scrolls. */
   lines?: number;
+  /** Its words stand in it again after a reload, so a reload on a new version need not wait for them. */
+  survivesReload?: boolean;
   className?: string;
   testId: string;
   ref?: Ref<HTMLTextAreaElement>;
@@ -42,6 +44,7 @@ export function TextField({
   readOnly,
   autoFocus,
   lines = LINES,
+  survivesReload = false,
   className,
   testId,
   ref,
@@ -109,6 +112,7 @@ export function TextField({
       disabled={disabled}
       readOnly={readOnly}
       autoFocus={autoFocus}
+      data-survives-reload={survivesReload || undefined}
       data-testid={testId}
     />
   );

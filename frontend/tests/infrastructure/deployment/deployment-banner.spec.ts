@@ -5,8 +5,12 @@
 import { test, expect } from '../../support/fixtures';
 import { makeUnique } from '../../support/helpers';
 import { extractSseData, waitForSseEvent } from '../../support/helpers/test-events';
+import { NEW_VERSION } from '../../../src/lib/config/new-version';
 
 test.describe('Deployment banner streaming', () => {
+// The app's setting (src/lib/config/new-version.ts): under `reload` no banner shows.
+test.skip(NEW_VERSION !== 'banner', 'the app reloads itself on a new version');
+
 test('surfaces backend-driven deployment updates', async ({
   page,
   frontendUrl,
