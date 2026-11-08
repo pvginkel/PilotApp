@@ -872,6 +872,30 @@ class TestChatView:
         assert "Earlier." in first.text
         assert read == [closed.id, running.id, running.id]
 
+    def test_the_containers_view_services_share_one_read_of_a_closed_chat(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Each request and transaction builds a ViewService of its own; the
+        # container hands every one the same ClosedChats.
+        closed = open_chat(session, project, opened_at=_at(9))
+        _writer(session, container, closed).message(person, "Earlier.")
+        close_chat(session, closed, _at(9, 30), CloseCause.TIMEOUT)
+        one, other = container.view_service(), container.view_service()
+        read = _reads(monkeypatch)
+
+        first = one.chat(project)
+        again = other.chat(project)
+
+        assert one is not other
+        assert again == first
+        assert "Earlier." in first.text
+        assert read == [closed.id]
+
     def test_a_record_a_closed_chat_takes_after_its_render_shows_in_the_next(
         self,
         session: DbSession,
