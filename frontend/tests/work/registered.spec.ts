@@ -191,6 +191,10 @@ test.describe('A registered document', () => {
     await expect(item.pilots.root).toHaveAttribute('href', sessionLogAddress(project, job));
     await expect(item.pilots.pulse).toBeVisible();
     await expect(item.lineTitle).toHaveAttribute('href', documentAddress(project, survey));
+    // Open, as Discuss, takes no room until the mouse is on the line, the focus the pilots link took let go.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.mouse.move(1, 1);
+    await expect(item.open).toBeHidden();
     await item.line.hover();
     await expect(item.open).toBeVisible();
     // The line's one button is the pass's: no job's beside it, and the pass no line of its own (F59.1, R26).
