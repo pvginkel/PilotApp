@@ -126,8 +126,16 @@ function generateHooks(spec) {
   const hooksContent = `// Generated TanStack Query hooks - do not edit manually
 import { ${Array.from(imports).join(', ')} } from '@tanstack/react-query';
 import { toApiError } from '@/lib/api/api-error';
+import { makeUniqueToken } from '@/lib/utils/random';
 import { api } from './client';
 import type { paths, components } from './types';
+
+/**
+ * This page, named in the \`X-Sender\` header of every write a mutation hook sends. A hook's success
+ * reads every query again; a caller's \`onSuccess\` replaces that read, and reads every query again
+ * itself where the server's live events leave a page's own write to it.
+ */
+export const SENDER = makeUniqueToken(32);
 
 // Type aliases for better developer experience
 ${typeAliases.join('\n')}
@@ -214,7 +222,7 @@ function generateMutationHook(path, method, operation, operationId, summary, spe
 
   let variablesType = 'void';
   let pathWithParams = `'${path}' as const`;
-  let mutationArgs = '';
+  const argParts = [];
 
   if (hasPathParams || hasBody || hasQueryParams) {
     const parts = [];
@@ -245,7 +253,6 @@ function generateMutationHook(path, method, operation, operationId, summary, spe
     }
 
     // Build mutation arguments
-    const argParts = [];
     if (hasPathParams || hasQueryParams) {
       const paramParts = [];
       if (hasPathParams) paramParts.push('path: variables.path');
@@ -255,8 +262,9 @@ function generateMutationHook(path, method, operation, operationId, summary, spe
     if (hasBody) {
       argParts.push('body: variables.body');
     }
-    mutationArgs = argParts.length > 0 ? `, { ${argParts.join(', ')} }` : '';
   }
+  argParts.push(`headers: { 'X-Sender': SENDER }`);
+  const mutationArgs = `, { ${argParts.join(', ')} }`;
 
   const responseType = getFriendlyType(spec, path, method, 'response', typeMap);
 

@@ -95,7 +95,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Sixteen stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Seventeen stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -142,6 +142,10 @@ config's count; the completion of `useSSETask` in `frontend/src/hooks/use-sse-ta
 takes a `task_completed` as the task's result unless the result says it failed, with `success` false
 or an `error_message`, where the template's took one without `success: true` as failed, and so
 failed every task whose result is a plain model, as the backend's `TaskService` sends one; the
+generated mutation hooks of `frontend/scripts/generate-api.js`, which name the page in each write's
+`X-Sender` header, `SENDER`, exported from the generated hooks, where the template's named none, so
+that a page leaves the `project_changed` its own write committed to the read of every query that
+write's hook makes, and a click reads each query once; the
 app's height, `h-dvh` on the root layout of `frontend/src/routes/__root.tsx` and on the auth gate's
 screens in `frontend/src/components/auth/auth-gate.tsx`, where the template's `h-screen`, `100vh`,
 which a phone's Chrome measures with its URL bar hidden, cut off the app's foot by the bar's
