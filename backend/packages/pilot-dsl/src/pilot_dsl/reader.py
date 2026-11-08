@@ -8,6 +8,8 @@ the string written: `answer: Yes` matches the option `- Yes`, and `at` and
 """
 
 import re
+import threading
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
@@ -131,8 +133,66 @@ class _Heading:
     text: str
 
 
+_KEPT = 8_000_000
+"""How many characters the texts whose readings are kept hold at most."""
+
+
+@dataclass
+class _Reading:
+    """What is read of one text: its parse, and its body and its count once
+    first asked for. Every caller and thread that reads the text is handed
+    the same values, so nothing assigns into them, the `lines` of a block
+    or a front matter included."""
+
+    document: ParsedDocument
+    body: tuple[Prose | Block, ...] | None = None
+    words: int | None = None
+
+
+class _Readings:
+    """The readings of the texts read last, keyed on the text, which alone
+    decides a reading; safe across threads. The texts kept hold `limit`
+    characters at most, the one read least recently dropped first, and one
+    longer than `limit` is not kept."""
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._lock = threading.Lock()
+        self._kept: OrderedDict[str, _Reading] = OrderedDict()
+        self._characters = 0
+
+    def of(self, text: str) -> _Reading:
+        with self._lock:
+            reading = self._kept.get(text)
+            if reading is not None:
+                self._kept.move_to_end(text)
+                return reading
+        # Parsed outside the lock, so that no thread waits on another's
+        # parse; of two that parse the same text, the first one kept wins.
+        reading = _Reading(_parse(text))
+        if len(text) > self._limit:
+            return reading
+        with self._lock:
+            kept = self._kept.setdefault(text, reading)
+            if kept is reading:
+                self._characters += len(text)
+                while self._characters > self._limit:
+                    dropped, _ = self._kept.popitem(last=False)
+                    self._characters -= len(dropped)
+        return kept
+
+
+_readings = _Readings(_KEPT)
+
+
 def parse(text: str) -> ParsedDocument:
-    """Read a document's text, with the faults it holds on its own."""
+    """Read a document's text, with the faults it holds on its own. A text
+    is parsed once while its reading is kept, and every call is handed the
+    same document."""
+    return _readings.of(text).document
+
+
+def _parse(text: str) -> ParsedDocument:
     lines = [line.removesuffix("\r") for line in text.split("\n")]
     if lines[-1] == "":
         lines.pop()
@@ -226,7 +286,13 @@ def body(text: str) -> tuple[Prose | Block, ...]:
     with the block whose section holds it; one with nothing in it is left
     out. A section's parts and its block stand together, its heading the
     first line of its first part."""
-    document = parse(text)
+    reading = _readings.of(text)
+    if reading.body is None:
+        reading.body = _body(text, reading.document)
+    return reading.body
+
+
+def _body(text: str, document: ParsedDocument) -> tuple[Prose | Block, ...]:
     lines = [line.removesuffix("\r") for line in text.split("\n")]
     if lines[-1] == "":
         lines.pop()
@@ -270,12 +336,19 @@ def words(text: str) -> int:
     own count (F24.1), whatever a display collapses, and the same before and
     after any answer, Done or Undo. A word is a run of characters between
     whitespace."""
+    reading = _readings.of(text)
+    if reading.words is None:
+        reading.words = _words(text, reading.document)
+    return reading.words
+
+
+def _words(text: str, document: ParsedDocument) -> int:
     lines = text.split("\n")
     close = _front_matter_close(lines)
     first = 0 if close is None else close + 1
     answers = {
         number
-        for block in parse(text).blocks
+        for block in document.blocks
         for key, span in block.lines.items()
         if key in ANSWER_KEYS
         for number in range(span.first, span.last + 1)

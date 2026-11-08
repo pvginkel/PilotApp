@@ -4,10 +4,10 @@ draft or its handbook (F37.4, F129.4); and the items waiting on a person,
 which a tab's badge counts (F1.4, F94.5)."""
 
 import uuid
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from functools import cache
+from functools import cache, partial
 from pathlib import PurePosixPath
 from typing import Any, cast
 
@@ -20,13 +20,13 @@ from app.engine.claims import standing
 from app.engine.documents import OPENING, PROSE, awaits_read
 from app.engine.paths import tree_path
 from app.engine.record import MARKED, NOTICE, SETTLED, TURN_ENDED, RecordService
+from app.engine.references import Reason, References
 from app.exceptions import RecordNotFoundException
 from app.models import (
     Attachment,
     Block,
     Chat,
     ClaimAssignment,
-    ConfirmationReason,
     Document,
     DocumentVersion,
     Effect,
@@ -533,6 +533,7 @@ class TimelineService:
         work_slots: WorkSlots,
         usage_halts: UsageHalts,
         wait_service: WaitService,
+        references: References,
     ) -> None:
         self.db = db
         self.record_service = record_service
@@ -540,6 +541,7 @@ class TimelineService:
         self.work_slots = work_slots
         self.usage_halts = usage_halts
         self.wait_service = wait_service
+        self.references = references
 
     def badges(
         self, person: User | None, project_ids: Iterable[uuid.UUID], reading: Reading
@@ -908,10 +910,7 @@ class TimelineService:
                     )
                 ).all()
             ),
-            reasons={
-                reason.code: reason
-                for reason in self.db.scalars(select(ConfirmationReason))
-            },
+            reason=partial(self.references.reason, self.db),
         )
 
     def _chat_places(
@@ -1295,7 +1294,7 @@ class _Reader:
     asked: frozenset[tuple[uuid.UUID, str]]
     pilots: _Pilots
     tasks: dict[str, str]
-    reasons: dict[str, ConfirmationReason]
+    reason: Callable[[str], Reason]
 
     def user(self, key: uuid.UUID | str | None) -> UserSchema | None:
         if key is None:
@@ -1313,7 +1312,7 @@ class _Reader:
         return BlockPartSchema(type="block", block=self._block(document_id, part))
 
     def _block(self, document_id: uuid.UUID, block: dsl.Block) -> BlockSchema:
-        because = None if block.because is None else self.reasons[block.because]
+        because = None if block.because is None else self.reason(block.because)
         return BlockSchema(
             id=block.local_id,
             kind=BlockKind(block.kind.value),

@@ -1408,7 +1408,7 @@ class TestRecordServiceOffersUndo:
 
         assert container.record_service().offers_undo(work) is False
 
-    def test_items_of_one_kind_and_cause_read_each_once(
+    def test_a_kind_and_a_cause_are_read_once_per_process(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1430,7 +1430,7 @@ class TestRecordServiceOffersUndo:
             )
             container.record_service().answer(document, "D1", person, "Tunnel")
             items.append(item)
-        records = container.record_service()
+        container.references.reset()
         statements: list[str] = []
 
         def executed(conn: object, cursor: object, statement: str, *_: object) -> None:
@@ -1438,7 +1438,10 @@ class TestRecordServiceOffersUndo:
 
         event.listen(session.get_bind(), "before_cursor_execute", executed)
         try:
-            assert [records.offers_undo(item) for item in items] == [True, True]
+            # A record service of each request's own.
+            for _ in range(2):
+                records = container.record_service()
+                assert [records.offers_undo(item) for item in items] == [True, True]
         finally:
             event.remove(session.get_bind(), "before_cursor_execute", executed)
 

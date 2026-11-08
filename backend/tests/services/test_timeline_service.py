@@ -81,6 +81,7 @@ from app.services.usage_halts import UsageHalts
 from app.services.wait_service import ReportedTransition
 from app.services.working_on import Reading
 from tests.support.chats import ChatWriter, open_chat
+from tests.support.parses import parses
 from tests.support.statements import sent
 from tests.support.store_updates import hold, lift, stopped_job
 from tests.support.turns import end_turns, turn_in_flight
@@ -740,6 +741,79 @@ class TestTimeline:
         assert [
             again for again in second if not any(again is built for built in first)
         ] == []
+
+    def test_a_read_parses_each_text_once_and_a_second_read_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        _bear(container, project, run, "decision", "Book the site", CONFIRMATION)
+        item = _bear(container, project, run, "notice", "Opens in May", "")
+        documents = container.document_service()
+        _save(container, session, project, item, environment, run, NOTICE)
+        documents.turn_ended(run)
+        _save(container, session, project, item, environment, run, NOTICE_LATER)
+        documents.turn_ended(run)
+        (born,) = _versions(session, item, VersionCause.BORN)
+        parsed = parses(monkeypatch)
+
+        def reads() -> None:
+            container.timeline_service().timeline(project.id)
+            container.timeline_service().item_document(item.id)
+
+        reads()
+        first = list(parsed)
+        parsed.clear()
+        reads()
+
+        # The notice's first version, born with no body, is `_edited`'s.
+        assert born.text in first
+        assert len(first) == len(set(first)) >= 3
+        assert parsed == []
+
+    def test_a_second_read_reads_no_reference_row(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(
+            container,
+            tasks=[{"id": "build", "title": "Build the camp", "status": "pending"}],
+        )
+        run = _run(session, project, environment)
+        _bear(container, project, run, "decision", "Book the site", CONFIRMATION)
+        decision = _bear(container, project, run, "decision", "Which tent?", DECISION)
+        container.record_service().answer(
+            _document(session, decision), "D1", person, "Tunnel"
+        )
+        project_id = project.id
+        container.references.reset()
+
+        def read() -> list[str]:
+            # A row the session holds loaded is read from no statement.
+            session.expunge_all()
+            with sent(session) as each:
+                container.timeline_service().timeline(project_id)
+            return [
+                looked_up[1]
+                for text in each.texts
+                if (
+                    looked_up := re.match(
+                        r"SELECT (item_kinds|done_causes|confirmation_reasons)\.", text
+                    )
+                )
+            ]
+
+        first, second = read(), read()
+
+        assert sorted(first) == ["confirmation_reasons", "done_causes", "item_kinds"]
+        assert second == []
 
     def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
         with pytest.raises(RecordNotFoundException):

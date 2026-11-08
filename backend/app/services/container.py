@@ -14,6 +14,7 @@ from app.engine.documents import DocumentService
 from app.engine.ingest import IngestService
 from app.engine.plan import PlanService
 from app.engine.record import RecordService
+from app.engine.references import References
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
 from app.exceptions import ConfigurationError
@@ -216,6 +217,10 @@ class ServiceContainer(containers.DeclarativeContainer):
     # The controller unreachable, as this process last met it (design 2
     # §13.4): every call of the client's, and the fleet stream, turn it.
     controller_outage = providers.Singleton(ControllerOutage)
+
+    # The reference rows the reads look up, kept for the process's life, as
+    # app/engine/references.py keeps them
+    references = providers.Singleton(References)
 
     # The slot, the gate's fourth condition (design 2 §13.5): the start raises
     # its event at a work item's start, the relay and the start at its end.
@@ -504,6 +509,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         view_service=view_service,
         continuations=session_start_service.provider,
         jobs=providers.Callable(lambda container: container.job_service, __self__),
+        references=references,
     )
     ingest_service = providers.Factory(
         IngestService,
@@ -625,6 +631,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         work_slots=work_slots,
         usage_halts=usage_halts,
         wait_service=wait_service,
+        references=references,
     )
     # The notification each member of a project should see (F94.1, F94.2),
     # its link on the stage's public address

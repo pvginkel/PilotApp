@@ -2,6 +2,7 @@
 
 import ast
 import json
+import threading
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from pilot_dsl import (
     Section,
     Span,
     parse,
+    reader,
     slug_problem,
     validate,
 )
@@ -275,7 +277,15 @@ class TestPurity:
             name
             for name in imported
             if name.split(".")[0]
-            not in {"re", "collections", "dataclasses", "datetime", "enum", "yaml"}
+            not in {
+                "re",
+                "collections",
+                "dataclasses",
+                "datetime",
+                "enum",
+                "threading",
+                "yaml",
+            }
             and not name.startswith("pilot_dsl")
         }
         assert foreign == set()
@@ -940,6 +950,105 @@ class TestWords:
 
     def test_an_empty_text_and_a_front_matter_alone_have_none(self) -> None:
         assert (dsl.words(""), dsl.words("---\ntitle: Tent\n---\n")) == (0, 0)
+
+
+def _parsed(monkeypatch: pytest.MonkeyPatch, limit: int = reader._KEPT) -> list[str]:
+    """Each text parsed from here on, with no reading kept from before."""
+    texts: list[str] = []
+    parse = reader._parse
+
+    def counted(text: str) -> ParsedDocument:
+        texts.append(text)
+        return parse(text)
+
+    monkeypatch.setattr(reader, "_parse", counted)
+    monkeypatch.setattr(reader, "_readings", reader._Readings(limit))
+    return texts
+
+
+class TestReadings:
+    """A text read once while its reading is kept."""
+
+    TEXT = (
+        "---\ntitle: Camp\n---\n# Camp\n\nWhich stove?\n\n"
+        "```decision id=D1\noptions:\n  - Gas\n  - Wood\nanswer: Gas\nby: ada\n```\n"
+    )
+
+    def test_a_text_is_parsed_once_for_its_parse_its_body_and_its_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        parsed = _parsed(monkeypatch)
+
+        document, parts, count = (
+            parse(self.TEXT),
+            dsl.body(self.TEXT),
+            dsl.words(self.TEXT),
+        )
+        again = (parse(self.TEXT), dsl.body(self.TEXT), dsl.words(self.TEXT))
+
+        assert parsed == [self.TEXT]
+        assert again[0] is document and again[1] is parts and again[2] == count
+        assert parts[-1] is document.blocks[0]
+
+    def test_what_is_read_is_what_a_text_read_alone_gives(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        alone = (parse(self.TEXT), dsl.body(self.TEXT), dsl.words(self.TEXT))
+        _parsed(monkeypatch)
+        dsl.words(self.TEXT)
+
+        assert (parse(self.TEXT), dsl.body(self.TEXT), dsl.words(self.TEXT)) == alone
+
+    def test_past_the_limit_the_text_read_least_recently_is_parsed_again(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        parsed = _parsed(monkeypatch, limit=12)
+        tent, stove, boots = "Tent.\n", "Stove\n", "Boots\n"
+
+        first = parse(tent)
+        parse(stove)
+        assert parse(tent) is first
+        parse(boots)
+        parse(tent)
+        parse(stove)
+
+        assert parsed == [tent, stove, boots, stove]
+
+    def test_a_text_longer_than_the_limit_is_parsed_at_every_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        parsed = _parsed(monkeypatch, limit=5)
+        parse("Short\n")
+        parse("Tent.")
+
+        assert parse("Short\n") == parse("Short\n")
+        assert parse("Tent.") is parse("Tent.")
+        assert parsed == ["Short\n", "Tent.", "Short\n", "Short\n"]
+
+    def test_threads_reading_one_text_at_once_are_handed_one_reading(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        both = threading.Barrier(2)
+        parse = reader._parse
+
+        def together(text: str) -> ParsedDocument:
+            both.wait(timeout=10)
+            return parse(text)
+
+        monkeypatch.setattr(reader, "_parse", together)
+        monkeypatch.setattr(reader, "_readings", reader._Readings(reader._KEPT))
+        read: list[ParsedDocument] = []
+        threads = [
+            threading.Thread(target=lambda: read.append(dsl.parse(self.TEXT)))
+            for _ in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert len(read) == 2 and read[0] is read[1]
+        assert dsl.parse(self.TEXT) is read[0]
 
 
 class TestSection:
