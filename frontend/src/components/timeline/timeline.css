@@ -113,9 +113,15 @@
   .item-head .wait-request + .item-discuss { margin-left: -8px; }
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
+  /* The "for" chip stands in the head's line, its icon a phone's alone. */
+  .for-line { display: contents; }
+  .chip.for .icon { display: none; }
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
-  /* A work item's env chip: the environment's name, its icon only on a phone. */
-  .chip.env .icon { display: none; }
+  /* A work item's env chip: the environment's name; on a phone its icon alone, a button whose
+     popover drops from its left edge and wraps short of the screen's. */
+  .chip.env .env-anchor { display: none; }
+  .env-icon { display: inline-flex; align-items: baseline; color: inherit; cursor: pointer; }
+  .popover.env-pop { left: 0; right: auto; width: max-content; max-width: min(320px, calc(100vw - 160px)); padding: 6px 12px; font-size: var(--text-sm); overflow-wrap: anywhere; }
   .item-title { margin: 6px 0 4px; font-size: var(--text-lg); font-weight: 600; line-height: 1.4; }
   .item-sub { margin: 0 0 6px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
@@ -645,20 +651,31 @@
     .line-menu .btn { font-weight: 400; }
   }
   /* A narrow block head wraps what does not fit, and Answered and In the chat keep their icons
-     alone, their words left to a screen reader (F98.3); so do an item head's Urgent and its env
-     chip, its environment's name its link's tooltip, and Edited shows a pencil for its word. */
+     alone, their words left to a screen reader (F98.3); so do an item head's Urgent, and Edited
+     shows a pencil for its word. */
   @media (max-width: 600px) {
     .block-head { flex-wrap: wrap; }
     /* An item head's parts 4px apart, and Urgent its triangle bare, so that a document's head with
-       Urgent, Edited and its asks' count holds one line at 390px in the scale's sm. */
-    .item-head { column-gap: 4px; }
+       Urgent, Edited and its asks' count holds one line at 390px in the scale's sm. Discuss stands
+       at the end of its first line however the rest wraps, in room kept for it; a wait's request
+       still touches it. The "for" chip takes a line of its own under the rest, led by its icon. */
+    .item-head { position: relative; column-gap: 4px; padding-right: 32px; }
+    .item-head .item-discuss { position: absolute; top: 0; right: 0; }
+    .item-head .wait-request { margin-right: -4px; }
+    .item-head .for-line { display: block; order: 1; flex-basis: 100%; }
+    .chip.for .icon { display: inline-block; }
     .item-head .kind, .item-head .edited { gap: 4px; }
     .item-head .chip.urgent { padding: 0; background: none; }
+    /* The running time's dot stands 8px from what comes before it, as off a phone. */
+    .item-head .work-live { margin-left: 4px; }
+    /* The env chip is its icon's button alone, which a screen reader names after the environment. */
+    .item-head .chip.env .chip-label { display: none; }
+    .chip.env .env-anchor { display: inline-flex; }
     /* A work item's line puts the step on a line of its own under the phase, indented to its text
        past the cue's icon and gap, so that each is cut at most once. */
     .work-line:not(.ended) { flex-wrap: wrap; row-gap: 0; }
     .work-line .step { flex-basis: 100%; padding-left: 24px; }
     .block-head .chip-label, .block-head .in-chat-label, .item-head .chip-label, .edited .edited-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    .chip.env .icon, .edited .edited-icon { display: inline-block; }
+    .edited .edited-icon { display: inline-block; }
   }
 }

@@ -6,17 +6,21 @@
  * shows as it stands. A block's address shows its item alone at the block, or a card's document
  * at it; a quote's chip and a claimed action's link push the item alone over the tab they stand
  * on. A done line shows Undo alone among its actions, and a tap on it opens its view, whose head
- * carries Discuss, its title the way in from the keyboard; Undo undoes and opens nothing. Off a
- * phone the line keeps its actions under the mouse, and the address is as it was.
+ * carries Discuss, its title the way in from the keyboard; Undo undoes and opens nothing. An item's
+ * head keeps Discuss at the end of its first line however the rest wraps, and puts "for <user>" on a
+ * line of its own under the rest, led by its icon, on every kind. Off a phone the line keeps its
+ * actions under the mouse, and the address is as it was.
  */
 
 import { randomUUID } from 'node:crypto';
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
-import { makeUnique } from '../support/helpers';
+import { makeUnique, makeUniqueToken } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
 import { projectAddress } from '../support/projects';
+import type { components } from '@/lib/api/generated/types';
 
 const SHELTERS = ['Dome', 'Tunnel', 'Tarp', 'Hammock', 'Bivvy', 'Cabin'];
 const DECISION = `Which shelter do we take?\n\n\`\`\`decision id=D1\noptions:\n${SHELTERS.map((shelter) => `  - ${shelter}`).join('\n')}\n\`\`\`\n`;
@@ -39,6 +43,9 @@ const ROTATING = 'Rotating the CI token';
 const CUT_OVER_PATH = '/work/Example/cut-over.md';
 const CUT_OVER = '# The cut-over\n\n```action id=A1\nanswer: Pilot does it\nby: agent\nat: 2026-10-20T09:00:00Z\n```\n\n```decision id=D1\noptions:\n  - Friday\n  - Monday\n```\n';
 const PHONE = { width: 390, height: 844 };
+
+type ItemKind = components['schemas']['InventedItemCreateSchema.6d6b324']['kind'];
+const box = async (locator: Locator) => (await locator.boundingBox())!;
 
 test.describe('The item alone on a phone', () => {
   test.use({ viewport: PHONE, hasTouch: true });
@@ -217,6 +224,85 @@ test.describe('The item alone on a phone', () => {
     await expect(overlay.root).toHaveCount(0);
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await expect(page).toHaveURL(projectAddress(id));
+  });
+});
+
+test.describe('An item’s head on a phone', () => {
+  test.use({ viewport: PHONE });
+
+  /** Discuss stands at the end of the head's first line, the line the kind's on. */
+  const discussOnFirstLine = async (head: Locator, kind: Locator, discuss: Locator) => {
+    const [headBox, kindBox, discussBox] = await Promise.all([box(head), box(kind), box(discuss)]);
+    expect(discussBox.y).toBeCloseTo(headBox.y, 0);
+    expect(discussBox.x + discussBox.width).toBeCloseTo(headBox.x + headBox.width, 0);
+    expect(Math.abs(discussBox.y + discussBox.height / 2 - (kindBox.y + kindBox.height / 2))).toBeLessThan(2);
+  };
+
+  test('puts “for <user>” on a line of its own under the rest, led by its icon, and keeps Discuss at the end of its first line however the rest wraps, on every kind', async ({
+    people,
+    projects,
+    waits,
+    timeline,
+  }) => {
+    const ben = makeUnique('ben', 8);
+    await people.other(ben, 'Ben Example');
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Heads'), members: [me.handle!, ben] });
+    const front = `---\nfor: ${ben}\nurgent: true\n---\n\n`;
+    const cases: [ItemKind, string][] = [
+      ['decision', `${front}\`\`\`decision id=D1\noptions:\n  - Dome\n  - Tunnel\n\`\`\`\n`],
+      // A reason long enough that the head wraps before it.
+      ['confirmation', `${front}\`\`\`decision id=C1\ntype: confirmation\nproposal: Grant the deploy key\nbecause: standing-grant\n\`\`\`\n`],
+      ['question', `${front}\`\`\`question id=Q1\n\`\`\`\n`],
+      ['action', `${front}Plug it in.\n\n\`\`\`action id=A1\n\`\`\`\n`],
+      ['notice', `${front}Blue and green.\n`],
+      ['review', `${front}Read it through.\n`],
+      ['document', `${front}The camp, in two asks.\n\n\`\`\`action id=A1\n\`\`\`\n\n\`\`\`action id=A2\n\`\`\`\n`],
+      // Long enough to leave a card.
+      ['document', TRIP.replace('---\n', `---\nfor: ${ben}\nurgent: true\n`)],
+    ];
+    const placed: string[] = [];
+    for (const [kind, text] of cases) placed.push(await projects.place(id, { kind, title: `A ${kind} for Ben`, text }));
+    const key = `H${makeUniqueToken(6).toUpperCase()}`;
+    const wait = await waits.add(id, { kind: 'card_wait', title: 'The night shift takes the cards', cards: [`${key}-1`], states: ['Done'] });
+    await timeline.open(id);
+
+    for (const each of placed) {
+      const item = timeline.item(each);
+      await expect(item.forUser).toHaveText('for Ben Example');
+      await expect(item.forUser.locator('svg')).toBeVisible();
+      await expect(item.urgent).toBeVisible();
+      const [head, kind, chip] = await Promise.all([box(item.head), box(item.kind), box(item.forUser)]);
+      expect(chip.y).toBeGreaterThanOrEqual(kind.y + kind.height);
+      expect(chip.x).toBeCloseTo(head.x, 0);
+      await discussOnFirstLine(item.head, item.kind, item.discuss);
+    }
+    const confirmation = timeline.item(placed[1]);
+    const [kind, why] = await Promise.all([box(confirmation.kind), box(confirmation.why)]);
+    expect(why.y).toBeGreaterThanOrEqual(kind.y + kind.height);
+
+    // A wait's request still touches Discuss.
+    const item = timeline.item(wait);
+    await expect(item.forUser).toHaveCount(0);
+    await discussOnFirstLine(item.head, item.kind, item.discuss);
+    const [request, discuss] = await Promise.all([box(item.wait.request), box(item.discuss)]);
+    expect(request.x + request.width).toBeCloseTo(discuss.x, 0);
+  });
+
+  test('of a work item keeps Discuss at the end of its first line, Session log and Stop beside it', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Work head'), members: [me.handle!] });
+    const work = await projects.startWork(id, { title: 'Surveying the stylesheets', brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
+    await timeline.open(id);
+    const item = timeline.item(work);
+
+    await expect(item.work.running).toBeVisible();
+    await discussOnFirstLine(item.head, item.kind, item.discuss);
+    const [log, stop, discuss] = await Promise.all([box(item.work.sessionLog), box(item.work.stop), box(item.discuss)]);
+    expect(stop.y).toBeCloseTo(discuss.y, 0);
+    expect(log.y).toBeCloseTo(discuss.y, 0);
+    expect(discuss.x - (stop.x + stop.width)).toBeCloseTo(4, 0);
   });
 });
 

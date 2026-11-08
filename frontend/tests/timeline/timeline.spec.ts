@@ -203,6 +203,10 @@ test.describe('An open item', () => {
     await expect(timeline.item(urgent).forUser).toHaveCount(0);
     await expect(timeline.item(hers).forUser).toHaveText('for Ben Example');
     await expect(timeline.item(hers).urgent).toHaveCount(0);
+    // Off a phone the chip stands in the head's line, its icon the phone's alone.
+    await expect(timeline.item(hers).forUser.locator('svg')).toBeHidden();
+    const [kind, chip] = await Promise.all([timeline.item(hers).kind.boundingBox(), timeline.item(hers).forUser.boundingBox()]);
+    expect(Math.abs(chip!.y + chip!.height / 2 - (kind!.y + kind!.height / 2))).toBeLessThan(2);
   });
 
   test('draws its prose as GFM, a single `~` striking nothing, its ticket ids linked outside code, every link opening a new tab', async ({

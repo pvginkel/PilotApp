@@ -25,7 +25,7 @@ import { coloursOf, hue } from '../support/contrast';
 import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 import { clarificationAddress, documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { addressOf } from '../support/page-objects/timeline-page';
@@ -137,7 +137,7 @@ async function continued(projects: Projects, project: string, continuation: stri
 }
 
 test.describe('A registered document', () => {
-  test('is Pilot’s line until its run’s end reads it and the pass after it ends: its file’s name, “Awaiting the run” going to the work item, no pulse and no Open, and in the overlay the strip saying nothing of it has been read yet, with no Stop and no close; then its text’s title, Open, and “Pre-ruling” pulsing, opening the pass’s session log, the pass no line of its own and no job’s button beside it; then its kind’s icon on a published card, the ended pass’s mark in its head, live', async ({
+  test('is Pilot’s line until its run’s end reads it and the pass after it ends: its file’s name opening nothing, “Awaiting the run” going to the work item, no pulse and no Open, its Discuss under the mouse as a done line’s, and in the overlay the strip saying nothing of it has been read yet, with no Stop and no close; then its text’s title opening the document, Open under the mouse, and “Pre-ruling” pulsing, opening the pass’s session log, the pass no line of its own and no job’s button beside it; then its kind’s icon on a published card, the ended pass’s mark in its head, live', async ({
     people,
     projects,
     controller,
@@ -168,7 +168,12 @@ test.describe('A registered document', () => {
     await expect(item.pilots.root).toHaveText('Awaiting the run');
     await expect(item.pilots.root).toHaveAttribute('title', `Go to the work item: ${TITLE}`);
     await expect(item.pilots.pulse).toHaveCount(0);
+    // Its actions show as a done line’s, while the mouse is on it (F13.8).
+    await page.mouse.move(1, 1);
     await expect(item.open).toHaveCount(0);
+    await expect(item.lineDiscuss).toBeHidden();
+    await expect(item.lineTitle).not.toHaveAttribute('href');
+    await item.line.hover();
     await expect(item.lineDiscuss).toBeVisible();
     await expect(item.lineTime).toBeVisible();
     await expect(item.card.root).toHaveCount(0);
@@ -185,6 +190,8 @@ test.describe('A registered document', () => {
     await expect(item.pilots.root).toHaveText('Pre-ruling');
     await expect(item.pilots.root).toHaveAttribute('href', sessionLogAddress(project, job));
     await expect(item.pilots.pulse).toBeVisible();
+    await expect(item.lineTitle).toHaveAttribute('href', documentAddress(project, survey));
+    await item.line.hover();
     await expect(item.open).toBeVisible();
     // The line's one button is the pass's: no job's beside it, and the pass no line of its own (F59.1, R26).
     await expect(item.job.root).toHaveCount(0);
@@ -203,6 +210,48 @@ test.describe('A registered document', () => {
     await expect(item.job.root).toHaveAttribute('data-form', 'ended');
     await expect(item.job.root).toHaveAttribute('href', sessionLogAddress(project, job));
     await expect(item.job.root).toBeVisible();
+  });
+
+  test.describe('on a phone', () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+    test('is Pilot’s line as a done line is there: no Open or Discuss on it, a tap on it before its read opening the menu of its Discuss, and once read its document as a view', async ({
+      people,
+      projects,
+      controller,
+      chats,
+      timeline,
+      overlay,
+      deploymentSse,
+      page,
+    }) => {
+      const { project, work, environment } = await running({ people, projects });
+      const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
+      await timeline.open(project);
+      await deploymentSse.ensureConnected();
+      const item = timeline.item(survey);
+
+      await expect(item.root).toHaveAttribute('data-state', 'pilots');
+      await expect(item.lineTitle).toHaveText('survey.md');
+      await expect(item.open).toHaveCount(0);
+      await expect(item.lineDiscuss).toHaveCount(0);
+      await item.lineKind.tap();
+      await expect(item.lineMenu.getByRole('menuitem')).toHaveText(['Discuss']);
+      await expect(page).toHaveURL(projectAddress(project));
+      await item.lineKind.tap();
+      await expect(item.lineMenu).toHaveCount(0);
+
+      const pass = await chats.pass(project);
+      await endTurn(controller, environment);
+      await pass.running();
+      await expect(item.lineTitle).toHaveText('The survey');
+      await expect(item.open).toHaveCount(0);
+      await expect(item.lineDiscuss).toHaveCount(0);
+      await item.lineKind.tap();
+      await expect(page).toHaveURL(documentAddress(project, survey));
+      await expect(overlay.discuss).toBeVisible();
+      await expect(item.lineMenu).toHaveCount(0);
+    });
   });
 
   test('whose writer Pilot asked about a block carries the mark, live, in the block’s head inline, in the item’s head of a one-ask item and a confirmation, and none on a card nor any line under a title; the mark opens the document at the questions', async ({

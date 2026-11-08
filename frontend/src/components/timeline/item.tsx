@@ -9,7 +9,8 @@
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
  * work item open is its session's (work.tsx, F26). An item Pilot is working on is one line in its
- * place, its kind's icon a dashed circle, what Pilot does on it its button (F13.7, F12.1, F24.1). Done, an item is its line (F13.1, F13.2), its
+ * place, its kind's icon a dashed circle, what Pilot does on it its button, its actions as a done
+ * line's (F13.7, F12.1, F24.1). Done, an item is its line (F13.1, F13.2), its
  * title opening what is behind it, with its attachments' indicator (F13.6) and *In the chat* after a
  * one-ask item's answer given in the chat (F42.3), and its actions under the mouse (F13.8): Open
  * (F13.3), Undo while the record offers it (F14.1) and Discuss (F13.4); a work item's is quieter,
@@ -88,7 +89,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
       data-state={done ? 'done' : pilots !== null ? 'pilots' : 'open'}
       data-concept={item.concept}
     >
-      {done ? <DoneLine item={item} /> : pilots !== null ? <PilotsLine item={item} pilots={pilots} /> : <OpenItem item={item} />}
+      {done ? <DoneLine item={item} /> : pilots !== null ? <PilotsItem item={item} pilots={pilots} /> : <OpenItem item={item} />}
     </article>
   );
 }
@@ -222,28 +223,40 @@ function DoneLine({ item }: { item: TimelineItem }) {
   const phone = usePhone();
   const openView = useOpenLine(item);
   if (!phone) return <Line item={item} />;
-  return item.form === 'wait' ? <MenuLine item={item} /> : <Line item={item} onTap={openView} />;
+  return item.form === 'wait' ? (
+    <MenuLine item={item} job={item.job} line={(onTap) => <Line item={item} onTap={onTap} />} />
+  ) : (
+    <Line item={item} onTap={openView} />
+  );
 }
 
 /** Whether a tap on a line fell on a control of its own, which acts alone. */
 const onControl = (event: MouseEvent) => (event.target as Element).closest('a, button, [role="menu"]') !== null;
 
+interface MenuLineProps {
+  item: TimelineItem;
+  /** Pilot's job the line shows, a row of the menu. */
+  job: TimelineItem['job'];
+  line: (onTap: (event: MouseEvent) => void) => ReactNode;
+}
+
 /**
- * A phone's line with nothing behind it, a wait's: a tap on it opens the menu of its actions under
- * it, as the mockup's `lineMenu()` offers them, Pilot's job on it where one shows and Discuss, never
- * Undo, and a tap on it again or anywhere else closes the menu (F13.9).
+ * A phone's line with nothing behind it, a wait's, or one of an item Pilot is working on before its
+ * text is read: a tap on it opens the menu of its actions under it, as the mockup's `lineMenu()`
+ * offers them, Pilot's job on it where one shows and Discuss, never Undo, and a tap on it again or
+ * anywhere else closes the menu (F13.9).
  */
-function MenuLine({ item }: { item: TimelineItem }) {
+function MenuLine({ item, job, line }: MenuLineProps) {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const anchor = useDismiss('menu', open, close);
   const discuss = useDiscuss();
   return (
     <div ref={anchor}>
-      <Line item={item} onTap={(event) => !onControl(event) && setOpen(!open)} />
+      {line((event) => !onControl(event) && setOpen(!open))}
       {open && (
         <div className="line-menu" role="menu" aria-label="The line’s actions" data-testid="timeline.line.menu">
-          {item.job !== null && <JobMenuRow job={item.job} onOpen={close} />}
+          {job !== null && <JobMenuRow job={job} onOpen={close} />}
           <button
             type="button"
             role="menuitem"
@@ -325,22 +338,55 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
 }
 
 /**
- * The line of an item Pilot is working on (F13.7), as a done line is: a dashed circle in the time's
- * grey in its kind's place, the title, the file's name before the read, Open once its text is read,
- * Discuss, what Pilot does on it, and when it was placed. It takes no answer.
+ * An item Pilot is working on, on a phone as a done line is there (F13.9): a tap on its line opens
+ * its document once its text is read, else the menu of its Discuss.
  */
-function PilotsLine({ item, pilots }: { item: TimelineItem; pilots: PilotsWork }) {
+function PilotsItem({ item, pilots }: { item: TimelineItem; pilots: PilotsWork }) {
+  const phone = usePhone();
+  const openView = useOpenLine(item);
+  if (!phone) return <PilotsLine item={item} pilots={pilots} />;
+  return item.body === null ? (
+    <MenuLine item={item} job={null} line={(onTap) => <PilotsLine item={item} pilots={pilots} onTap={onTap} />} />
+  ) : (
+    <PilotsLine item={item} pilots={pilots} onTap={openView} />
+  );
+}
+
+interface PilotsLineProps {
+  item: TimelineItem;
+  pilots: PilotsWork;
+  onTap?: (event: MouseEvent) => void;
+}
+
+/**
+ * The line of an item Pilot is working on (F13.7), as a done line is: a dashed circle in the time's
+ * grey in its kind's place, the title, the file's name before the read, opening the document once
+ * its text is read, its actions under the mouse, Open once its text is read and Discuss (F13.8),
+ * what Pilot does on it, and when it was placed. It takes no answer. On a phone Open and Discuss
+ * leave it.
+ */
+function PilotsLine({ item, pilots, onTap }: PilotsLineProps) {
+  const phone = usePhone();
   const title = titleOf(item);
+  const read = item.body !== null;
   return (
-    <div className="line" data-testid="timeline.line">
+    <div className="line" onClick={onTap} data-testid="timeline.line">
       <span className="kind-icon" title="Pilot is working on it" data-testid="timeline.line.kind">
         <CircleDashed className="icon" aria-hidden="true" />
       </span>
-      <span className="title" title={title} data-testid="timeline.line.title">
-        <LinkedText text={title} />
+      {read ? (
+        <Behind item={item} className="title" title={title} testId="timeline.line.title">
+          <LinkedText text={title} nested />
+        </Behind>
+      ) : (
+        <span className="title" title={title} data-testid="timeline.line.title">
+          <LinkedText text={title} />
+        </span>
+      )}
+      <span className="line-acts">
+        {!phone && read && <Open item={item} />}
+        {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       </span>
-      {item.body !== null && <Open item={item} />}
-      <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />
       <span className="pilots-slot">
         <PilotsButton pilots={pilots} testId="timeline.line.pilots" />
       </span>
@@ -396,8 +442,8 @@ interface BehindProps {
 }
 
 /**
- * A link to what is behind a done line: the item's document, as it was done, at the document's
- * address (F13.3); a work item's session log, at its session's (F26.6).
+ * A link to what is behind a line: the item's document, at the document's address (F13.3); a work
+ * item's session log, at its session's (F26.6).
  */
 function Behind({ item, className, title, label, testId, children }: BehindProps) {
   const { address } = useShownProject();

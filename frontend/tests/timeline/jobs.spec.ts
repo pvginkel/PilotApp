@@ -310,11 +310,11 @@ test.describe('Pilot’s job on a phone', () => {
 
     await expect(item.root).toHaveAttribute('data-state', 'done');
     await item.lineTitle.tap();
-    await expect(item.wait.menu.getByRole('menuitem')).toHaveText([title, 'Discuss']);
-    await item.wait.menuJob.tap();
+    await expect(item.lineMenu.getByRole('menuitem')).toHaveText([title, 'Discuss']);
+    await item.lineMenuJob.tap();
     await expect(page).toHaveURL(sessionLogAddress(project, run));
     await expect(sessionLog.item).toHaveText(title);
-    await expect(item.wait.menu).toHaveCount(0);
+    await expect(item.lineMenu).toHaveCount(0);
   });
 });
 

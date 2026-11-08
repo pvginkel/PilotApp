@@ -8,11 +8,12 @@
  * Discuss, quoting the item (F39.1). A document Pilot changed in a turn after the text it was first
  * shown with says so, *Edited <time>* beside Pilot's mark (F28.7). On a phone Urgent is its
  * triangle and *Edited* a pencil, their words left to a screen reader; the kind never wraps, and
- * the head wraps where its parts still do not fit, so that none leaves the card.
+ * the head wraps where its parts still do not fit, so that none leaves the card, Discuss staying at
+ * the end of its first line; the "for" chip takes a line of its own under it, led by its icon.
  */
 
 import type { ReactNode } from 'react';
-import { Pencil, TriangleAlert } from 'lucide-react';
+import { Pencil, TriangleAlert, UserRound } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { Avatar } from '@/components/shared/avatar';
@@ -111,8 +112,11 @@ export function ItemHead({ item, because = null, mayTake = false, asked = false,
         </span>
       )}
       {item.for_user && (
-        <span className="chip for" data-testid="timeline.item.for">
-          for {item.for_user.name}
+        <span className="for-line">
+          <span className="chip for" data-testid="timeline.item.for">
+            <UserRound className="icon" aria-hidden="true" />
+            for {item.for_user.name}
+          </span>
         </span>
       )}
       {asked && <WriterAsked documentId={item.id} testId="timeline.item.writer-asked" />}

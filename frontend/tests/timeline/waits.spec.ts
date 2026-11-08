@@ -290,21 +290,21 @@ test.describe('A wait’s done line on a phone', () => {
     await expect(item.root).toHaveAttribute('data-state', 'done');
     await expect(item.undo).toHaveCount(0);
     await expect(item.lineDiscuss).toHaveCount(0);
-    await expect(item.wait.menu).toHaveCount(0);
+    await expect(item.lineMenu).toHaveCount(0);
     await item.lineTitle.tap();
-    await expect(item.wait.menu.getByRole('menuitem')).toHaveText(['Discuss']);
+    await expect(item.lineMenu.getByRole('menuitem')).toHaveText(['Discuss']);
     await expect(overlay.root).toHaveCount(0);
     await expect(page).toHaveURL(projectAddress(id));
     await item.lineTitle.tap();
-    await expect(item.wait.menu).toHaveCount(0);
+    await expect(item.lineMenu).toHaveCount(0);
 
     await item.lineTitle.tap();
-    await expect(item.wait.menu).toBeVisible();
+    await expect(item.lineMenu).toBeVisible();
     await timeline.root.tap({ position: { x: 4, y: 4 } });
-    await expect(item.wait.menu).toHaveCount(0);
+    await expect(item.lineMenu).toHaveCount(0);
 
     await item.wait.note.tap();
-    await item.wait.menuDiscuss.tap();
+    await item.lineMenuDiscuss.tap();
     await expect(phoneTabs.tab('chat')).toHaveAttribute('aria-selected', 'true');
     await expect(chat.quote).toHaveAttribute('data-quote', `item ${wait}`);
   });

@@ -1,7 +1,7 @@
 /**
- * A work item on the timeline (F26): open, its head with the env chip opening the environment once
- * its start has one, an icon on a phone, and the running time, "17m", while its turn runs (F26.1,
- * F12), and its one line (F26.2), live as the server moves it (F80.2) — the server's own words
+ * A work item on the timeline (F26): open, its head with the env chip once its start has one, its
+ * name going nowhere, on a phone an icon whose tap shows the name in a popover, and the running
+ * time, "17m", its dot 8px from what stands before it, while its turn runs (F26.1, F12), and its one line (F26.2), live as the server moves it (F80.2) — the server's own words
  * while the session comes up
  * or its environment restarts, the working state and the latest step — a call whose input streams
  * in by its verb alone — why the gate holds its start (F141.5), a slot among it (F143.4),
@@ -79,14 +79,19 @@ test.describe('An open work item', () => {
     const { id: environment, name } = await projects.environment(project, work);
     expect(name).toBe(slugOf(project));
     await expect(item.work.environment).toHaveText(name);
-    await expect(item.work.environment).toHaveAttribute('href', `${KUBECODER}/environments/${environment}/ssh/open`);
-    // Its icon is the phone's alone.
-    await expect(item.work.environment.locator('svg')).toBeHidden();
+    // Words that go nowhere, though environments link in text: the full name their tooltip.
+    await expect(item.work.environment).toHaveAttribute('title', name);
+    await expect(item.work.environment.locator('a, [role="link"]')).toHaveCount(0);
+    // Its icon's button is the phone's alone.
+    await expect(item.work.environmentIcon).toBeHidden();
     await expect(item.work.cue).toHaveText(`Preparing ${name}`);
     await expect(item.work.running).toHaveCount(0);
 
     await controller.setStatus(environment, 'running');
     await expect(item.work.running).toHaveText('0m');
+    // The running time's dot stands 8px from the chip.
+    const [chip, dot] = await Promise.all([item.work.environment.boundingBox(), item.work.running.locator('.pulse').boundingBox()]);
+    expect(dot!.x - (chip!.x + chip!.width)).toBeCloseTo(8, 0);
     await expect(item.work.running).toHaveAccessibleName('Running for 0m');
     await expect(item.work.running).toHaveAttribute('title', 'Running for 0m');
     await expect(item.work.running.locator('.pulse')).toBeVisible();
@@ -280,7 +285,8 @@ test.describe('An open work item', () => {
 test.describe('An open work item on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('shows its env chip as an icon, still the link to the environment, its name its tooltip and its accessible name', async ({
+  test('shows its env chip as its icon alone, a button named after the environment that links nowhere, whose tap shows the full name in a popover under it, closed by a tap outside it, Esc and the icon; the running time’s dot 8px from it', async ({
+    page,
     people,
     projects,
     links,
@@ -289,24 +295,51 @@ test.describe('An open work item on a phone', () => {
     await links.set({ environment_link_base_url: KUBECODER });
     const project = await setUp({ people, projects });
     const work = await startIn(projects, project);
-    const { id: environment, name } = await projects.environment(project, work);
+    const { name } = await projects.environment(project, work);
     await timeline.open(project);
-    const chip = timeline.item(work).work.environment;
+    const item = timeline.item(work);
+    const { environment: chip, environmentIcon: icon, environmentPopover: popover } = item.work;
 
-    await expect(chip.locator('svg')).toBeVisible();
-    await expect(chip).toHaveAccessibleName(name);
-    await expect(chip).toHaveAttribute('title', `Open ${name} in VS Code`);
-    await expect(chip).toHaveAttribute('href', `${KUBECODER}/environments/${environment}/ssh/open`);
-    // The name is drawn nowhere: the chip is as wide as its icon and its padding.
-    expect((await chip.locator('.chip-label').boundingBox())!.width).toBeLessThanOrEqual(1);
-    expect((await chip.boundingBox())!.width).toBeLessThan(20);
+    await expect(icon.locator('svg')).toBeVisible();
+    await expect(icon).toHaveAccessibleName(name);
+    await expect(icon).toHaveAttribute('aria-expanded', 'false');
+    await expect(chip.locator('a, [role="link"]')).toHaveCount(0);
+    // The name is drawn nowhere, the button alone giving it to a screen reader: the chip is its icon in its pill.
+    await expect(chip.locator('.chip-label')).toBeHidden();
+    expect((await chip.boundingBox())!.width).toBeLessThan(30);
     // Its icon sits on the head's text as the kind's does, lowered once and not twice.
-    const middle = async (icon: Locator) => {
-      const box = (await icon.boundingBox())!;
+    const middle = async (svg: Locator) => {
+      const box = (await svg.boundingBox())!;
       return box.y + box.height / 2;
     };
-    const kind = await middle(timeline.item(work).kind.locator('svg'));
-    expect(Math.abs((await middle(chip.locator('svg'))) - kind)).toBeLessThan(1);
+    const kind = await middle(item.kind.locator('svg'));
+    expect(Math.abs((await middle(icon.locator('svg'))) - kind)).toBeLessThan(1);
+    // The running time's dot stands 8px from the chip, as off a phone.
+    const [box, dot] = await Promise.all([chip.boundingBox(), item.work.running.locator('.pulse').boundingBox()]);
+    expect(dot!.x - (box!.x + box!.width)).toBeCloseTo(8, 0);
+
+    await expect(popover).toHaveCount(0);
+    await icon.click();
+    await expect(popover).toHaveText(name);
+    await expect(popover).toHaveAccessibleName(name);
+    await expect(icon).toHaveAttribute('aria-expanded', 'true');
+    // Under the icon, and on the screen.
+    const [under, pop] = await Promise.all([icon.boundingBox(), popover.boundingBox()]);
+    expect(pop!.y).toBeGreaterThan(under!.y + under!.height);
+    expect(pop!.x).toBeGreaterThanOrEqual(0);
+    expect(pop!.x + pop!.width).toBeLessThanOrEqual(390);
+    expect(page.context().pages()).toHaveLength(1);
+
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+    await icon.click();
+    await expect(popover).toBeVisible();
+    await icon.click();
+    await expect(popover).toHaveCount(0);
+    await icon.click();
+    await expect(popover).toBeVisible();
+    await item.kind.click();
+    await expect(popover).toHaveCount(0);
   });
 
   test('puts the latest step on a line of its own under the phase, indented to its text, the phase whole and each cut at most once', async ({

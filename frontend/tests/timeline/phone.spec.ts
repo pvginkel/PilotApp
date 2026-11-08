@@ -4,7 +4,8 @@
  * fit, and Answered keeps its icon alone; an item's head keeps to its card on one line, Urgent its
  * triangle and *Edited* a pencil, their words kept for a screen reader, and the page scrolls no
  * wider than itself; on the narrowest an item's head, a work item's with its Session log and Stop
- * icons too, wraps rather than leave its card. A wide window keeps the line beside the label and
+ * icons too, wraps rather than leave its card, Discuss staying at the end of its first row. A wide
+ * window keeps the line beside the label and
  * every word.
  */
 
@@ -140,16 +141,25 @@ test.describe('On the narrowest phone', () => {
     expect(await head.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
   });
 
-  test('an item’s head wraps what does not fit, none of it leaving the card', async ({ people, projects, timeline }) => {
+  test('an item’s head wraps what does not fit, Discuss staying at the end of its first row, none of it leaving the card', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
     const { document, work } = await crowded(people, projects, timeline);
     const doc = timeline.item(document);
     await expect(doc.edited).toBeVisible();
+    /** Whether the box stands on the kind's row. */
+    const onFirstRow = (box: { y: number; height: number }, kind: { y: number; height: number }) =>
+      Math.abs(box.y + box.height / 2 - (kind.y + kind.height / 2)) < 2;
 
     const card = (await doc.root.boundingBox())!;
+    const head = (await doc.head.boundingBox())!;
     const kind = (await doc.kind.boundingBox())!;
     const discuss = (await doc.discuss.boundingBox())!;
     expect(kind.height).toBeLessThan(30);
-    expect(discuss.y).toBeGreaterThanOrEqual(kind.y + kind.height - 1);
+    expect(head.height).toBeGreaterThan(2 * kind.height - 1);
+    expect(onFirstRow(discuss, kind)).toBe(true);
     expect(discuss.x + discuss.width).toBeLessThanOrEqual(card.x + card.width);
     expect(await doc.head.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
 
@@ -157,10 +167,12 @@ test.describe('On the narrowest phone', () => {
     const running = timeline.item(work);
     await expect(running.work.running).toBeVisible();
     const workCard = (await running.root.boundingBox())!;
+    const workHead = (await running.head.boundingBox())!;
     const workKind = (await running.kind.boundingBox())!;
     const workDiscuss = (await running.discuss.boundingBox())!;
     expect(workKind.height).toBeLessThan(30);
-    expect(workDiscuss.y).toBeGreaterThanOrEqual(workKind.y + workKind.height - 1);
+    expect(workHead.height).toBeGreaterThan(2 * workKind.height - 1);
+    expect(onFirstRow(workDiscuss, workKind)).toBe(true);
     for (const part of [running.work.sessionLog, running.work.stop, running.discuss]) {
       const box = (await part.boundingBox())!;
       expect(box.x + box.width).toBeLessThanOrEqual(workCard.x + workCard.width);

@@ -1,7 +1,8 @@
 /**
  * An open work item on the timeline (F26): a session Pilot started, updated in place as the
- * server's `work_moved` carries it (F80.2). Its head has the env chip, opening the environment in
- * KubeCoder, once its start has one, an icon alone on a phone; the running time, a pulse and
+ * server's `work_moved` carries it (F80.2). Its head has the env chip once its start has one, the
+ * environment's name in words that go nowhere, its full name their tooltip; on a phone its icon
+ * alone, a button that shows the full name in a popover under it; the running time, a pulse and
  * "17m", while its turn runs (F26.1, F12); then Session log and Stop as icons, their names their
  * tooltips, before the head's Discuss (F26.8). Under its title is its one line (F26.2): the
  * server's own words while its session comes up, or comes back while its environment restarts;
@@ -29,7 +30,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { Link } from '@tanstack/react-router';
 import { CircleAlert, Play, RotateCw, ScrollText, Server, Square } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
-import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
+import { LinkedText } from '@/components/shared/linked-text';
+import { Popover } from '@/components/shared/popover';
 import { StepsButton } from '@/components/shared/steps-button';
 import { Time } from '@/components/shared/time';
 import { ItemHead } from '@/components/timeline/item-head';
@@ -73,16 +75,8 @@ export function WorkItem({ item }: { item: TimelineItem }) {
   return (
     <div className="item-body">
       <ItemHead item={item}>
-        {/* A job's environment is the store's once its start takes it. On a phone the chip is its
-            icon, the name left to the link's tooltip and to a screen reader. */}
-        {!work.pilots_own && work.environment !== null && (
-          <span className="chip mono env">
-            <EnvironmentLink environment={work.environment} testId="timeline.work.environment">
-              <Server className="icon" aria-hidden="true" />
-              <span className="chip-label">{work.environment.name}</span>
-            </EnvironmentLink>
-          </span>
-        )}
+        {/* A job's environment is the store's once its start takes it. */}
+        {!work.pilots_own && work.environment !== null && <EnvironmentChip name={work.environment.name} />}
         {work.state === 'running' && work.started_at !== null && <Running since={work.started_at} />}
         <SessionLog item={item} rest={actions === 'log' ? handoff.button : undefined} />
         {actions === 'stop' && (
@@ -121,6 +115,40 @@ export function WorkItem({ item }: { item: TimelineItem }) {
         <Row item={item} actions={actions} handoff={handoff} steps={work.progress} />
       )}
     </div>
+  );
+}
+
+/**
+ * The env chip: the environment's name, its full name its tooltip, going nowhere. On a phone it is
+ * its icon alone, which nothing hovers: a button named after the environment, whose tap shows the
+ * full name in a popover under it, closed by a tap outside it, Esc or the icon (timeline.css).
+ */
+function EnvironmentChip({ name }: { name: string }) {
+  return (
+    <span className="chip mono env" title={name} data-testid="timeline.work.environment">
+      <span className="chip-label">{name}</span>
+      <Popover
+        label={name}
+        anchorClassName="env-anchor"
+        className="env-pop"
+        testId="timeline.work.environment.popover"
+        trigger={({ open, toggle }) => (
+          <button
+            type="button"
+            className="env-icon"
+            onClick={toggle}
+            aria-label={name}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            data-testid="timeline.work.environment.icon"
+          >
+            <Server className="icon" aria-hidden="true" />
+          </button>
+        )}
+      >
+        {name}
+      </Popover>
+    </span>
   );
 }
 

@@ -112,15 +112,22 @@ export class TimelinePage {
       read: root.getByTestId('timeline.item.read'),
       line: root.getByTestId('timeline.line'),
       lineKind: root.getByTestId('timeline.line.kind'),
-      /** A done line's title, the link to what is behind it where something is. */
+      /** A done line's title, or that of an item Pilot is working on, the link to what is behind it where something is. */
       lineTitle: root.getByTestId('timeline.line.title'),
       lineTime: root.getByTestId('timeline.line.time'),
       said: root.getByTestId('timeline.line.said'),
       note: root.getByTestId('timeline.line.note'),
-      /** A line's Undo, Open and Discuss; a done line's show off a phone only while the mouse is on its `line` or the focus in it (F13.8). */
+      /** A line's Undo, Open and Discuss; they show off a phone only while the mouse is on its `line` or the focus in it (F13.8). */
       undo: root.getByTestId('timeline.line.undo'),
       open: root.getByTestId('timeline.line.open'),
       lineDiscuss: root.getByTestId('timeline.line.discuss'),
+      /**
+       * The menu a tap opens on a phone on a line with nothing behind it, a done wait's or that of an
+       * item Pilot is working on before its read: its row of Pilot's job on it, and its Discuss (F13.9).
+       */
+      lineMenu: root.getByTestId('timeline.line.menu'),
+      lineMenuJob: root.getByTestId('timeline.line.menu.job'),
+      lineMenuDiscuss: root.getByTestId('timeline.line.menu.discuss'),
       /** What Pilot does on an item that is Pilot's, its line's button, and its pulsing dot (F13.7). */
       pilots: {
         root: root.getByTestId('timeline.line.pilots'),
@@ -176,7 +183,10 @@ export class TimelinePage {
       settledHead: (blockId: string) => settledHeadParts(root, blockId),
       send: root.getByTestId('timeline.item.send'),
       work: {
+        /** The env chip, its name; on a phone its icon's button and the popover it opens with the name. */
         environment: root.getByTestId('timeline.work.environment'),
+        environmentIcon: root.getByTestId('timeline.work.environment.icon'),
+        environmentPopover: root.getByTestId('timeline.work.environment.popover'),
         running: root.getByTestId('timeline.work.running'),
         line: root.getByTestId('timeline.work.line'),
         cue: root.getByTestId('timeline.work.line').getByTestId('chat.cue'),
@@ -221,10 +231,6 @@ export class TimelinePage {
         firings: root.getByTestId('timeline.wait.firing'),
         /** The note Pilot closed it with, under its done line's title. */
         note: root.getByTestId('timeline.line.wait-note'),
-        /** The menu a tap on its done line opens on a phone, its row of Pilot's job on it, and its Discuss. */
-        menu: root.getByTestId('timeline.line.menu'),
-        menuJob: root.getByTestId('timeline.line.menu.job'),
-        menuDiscuss: root.getByTestId('timeline.line.menu.discuss'),
       },
       card: {
         root: root.getByTestId('timeline.item.card'),

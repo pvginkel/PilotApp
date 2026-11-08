@@ -217,6 +217,7 @@ test.describe('A claimed action', () => {
     await expect(item.pilots.root).toHaveText('Doing it');
     await expect(item.pilots.root).toHaveAttribute('title', `Go to the work item: ${ROTATING}`);
     await expect(item.pilots.pulse).toBeVisible();
+    await item.line.hover();
     await expect(item.open).toBeVisible();
 
     await overlay.open(project, document);
