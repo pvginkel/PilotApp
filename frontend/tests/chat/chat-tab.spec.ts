@@ -582,6 +582,7 @@ test.describe('The Chat tab’s closed chats', () => {
     controller,
     timeline,
     projectList,
+    projectHead,
     panel,
     chat,
     chats,
@@ -607,6 +608,7 @@ test.describe('The Chat tab’s closed chats', () => {
 
     await projectList.tab(other).click();
     await expect(page).toHaveURL(projectAddress(otherId));
+    await expect(projectHead.name).toHaveText(other);
     await projectList.tab(name).click();
     await expect(page).toHaveURL(projectAddress(project));
     await expect(chat.replyEnds).toHaveCount(2);
@@ -626,6 +628,7 @@ test.describe('The Chat tab’s closed chats', () => {
     controller,
     timeline,
     projectList,
+    projectHead,
     panel,
     chat,
     chats,
@@ -645,6 +648,7 @@ test.describe('The Chat tab’s closed chats', () => {
     // change, after which the list it holds is read again once it shows.
     await projectList.tab(other).click();
     await expect(page).toHaveURL(projectAddress(otherId));
+    await expect(projectHead.name).toHaveText(other);
     const heard = page.waitForResponse(
       async (response) =>
         new URL(response.url()).pathname === '/api/projects' &&

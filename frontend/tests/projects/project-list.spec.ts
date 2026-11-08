@@ -157,6 +157,7 @@ test.describe('The groups’ chevrons', () => {
     people,
     projects,
     projectList,
+    projectHead,
   }) => {
     const me = await people.signIn();
     const mine = makeUnique('Mine');
@@ -175,7 +176,9 @@ test.describe('The groups’ chevrons', () => {
     // Opened by the person, it stays open whatever is on screen.
     await others.toggle.click();
     await projectList.tab(other).click();
+    await expect(projectHead.name).toHaveText(other);
     await projectList.tab(mine).click();
+    await expect(projectHead.name).toHaveText(mine);
     await expect(others.toggle).toHaveAttribute('aria-expanded', 'true');
   });
 

@@ -146,8 +146,10 @@ test.describe('Documents in tabs', () => {
     await expect(docTabs.root).toHaveCount(0);
 
     await timeline.item(a).card.open.click();
+    await expect(docTabs.document(a).show).toHaveAttribute('aria-selected', 'true');
     await docTabs.first.click();
     await timeline.item(b).card.open.click();
+    await expect(docTabs.document(b).show).toHaveAttribute('aria-selected', 'true');
     await expect(docTabs.closeAll).toHaveAttribute('aria-label', 'Close all documents');
     await docTabs.closeAll.click();
     await expect(docTabs.root).toHaveCount(0);
@@ -552,14 +554,17 @@ test.describe('Each project’s line kept in the browser', () => {
     const c = await projects.place(other, { kind: 'document', title: 'Charlie', text: card('Charlie') });
     await timeline.open(one);
     await timeline.item(a).card.open.click();
+    await expect(docTabs.document(a).show).toHaveAttribute('aria-selected', 'true');
     await docTabs.first.click();
     await timeline.item(b).card.open.click();
+    await expect(docTabs.document(b).show).toHaveAttribute('aria-selected', 'true');
     await docTabs.document(a).show.click();
 
     await projectList.tab(second).click();
     await expect(page).toHaveURL(projectAddress(other));
     await expect(docTabs.root).toHaveCount(0);
     await timeline.item(c).card.open.click();
+    await expect(docTabs.document(c).show).toHaveAttribute('aria-selected', 'true');
 
     await projectList.tab(first).click();
     await expect(page).toHaveURL(documentAddress(one, a));
@@ -576,6 +581,7 @@ test.describe('Each project’s line kept in the browser', () => {
     await docTabs.first.click();
     await projectList.tab(first).click();
     await expect(page).toHaveURL(documentAddress(one, a));
+    await expect(overlay.title).toHaveText('Alpha');
     await projectList.tab(second).click();
     await expect(page).toHaveURL(projectAddress(other));
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
@@ -620,6 +626,7 @@ test.describe('Each project’s line kept in the browser', () => {
     projectList,
     shell,
     timeline,
+    docTabs,
     phoneTabs,
   }) => {
     const me = await people.signIn();
@@ -629,8 +636,10 @@ test.describe('Each project’s line kept in the browser', () => {
     const a = await projects.place(one, { kind: 'document', title: 'Alpha', text: card('Alpha') });
     await timeline.open(one);
     await timeline.item(a).card.open.click();
+    await expect(docTabs.document(a).show).toHaveAttribute('aria-selected', 'true');
     await projectList.tab(second).click();
     await expect(page).toHaveURL(projectAddress(other));
+    await expect(docTabs.root).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await shell.drawerToggle.click();
@@ -660,10 +669,12 @@ test.describe('Each project’s line at the narrow width', () => {
     const a = await projects.place(one, { kind: 'document', title: 'Alpha', text: card('Alpha') });
     await timeline.open(one);
     await timeline.item(a).card.open.click();
+    await expect(docTabs.document(a).show).toHaveAttribute('aria-selected', 'true');
 
     await shell.drawerToggle.click();
     await projectList.tab(second).click();
     await expect(page).toHaveURL(projectAddress(other));
+    await expect(docTabs.root).toHaveCount(0);
     await shell.drawerToggle.click();
     await projectList.tab(first).click();
     await expect(page).toHaveURL(documentAddress(one, a));
