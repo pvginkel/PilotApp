@@ -224,6 +224,9 @@ test.describe('The Chat tab', () => {
     ]);
     await controller.play(chats.store, session, [text('route', LONG), ...reads]);
     const run = chat.root.getByTestId('chat.run');
+    // The line's running words, held a moment (C1), stand a pixel taller than these: a click while
+    // they change finds the button moving, and Playwright's retry scrolls it to the view's foot.
+    await expect(run.getByRole('button', { expanded: false })).toHaveText('Read 3 files · 3 steps');
     await expect(run).toBeInViewport();
     const fromBottom = () => chat.body.evaluate((body) => body.scrollHeight - body.scrollTop - body.clientHeight);
     await expect.poll(fromBottom).toBeLessThanOrEqual(1);
