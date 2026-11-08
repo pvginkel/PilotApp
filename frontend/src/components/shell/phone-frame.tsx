@@ -5,7 +5,7 @@
  * the top bar's block of colour: Pilot's icon and name, white on the primary, and the avatar,
  * which opens the profile menu (F126). The drawer's button is the screen's own (`DrawerButton`).
  * The browser's own bar takes the page's colour. At a first sign-in the handle step stands under
- * the block of colour, which opens no drawer (F137).
+ * the block of colour, which opens no drawer (F137). The loading bar lies at the page's top.
  */
 
 import type { ReactNode } from 'react';
@@ -14,6 +14,7 @@ import { ProjectColumn } from '@/components/projects/project-column';
 import { LinksProvider } from '@/components/shared/linked-text';
 import { DrawerProvider, type Drawer } from '@/components/shell/drawer';
 import { GoldBar } from '@/components/shell/gold-bar';
+import { LoadingBar } from '@/components/shell/loading-bar';
 import { NotificationsOffer } from '@/components/shell/notifications-offer';
 import { ProfileMenu } from '@/components/shell/profile-menu';
 import type { Condition } from '@/hooks/use-conditions';
@@ -43,6 +44,7 @@ export function PhoneFrame({ self, drawer, conditions, children }: PhoneFramePro
       <LinksProvider>
         <NotificationsOffer handle={self.handle} />
         <div className="app" data-drawer={drawer.open ? 'open' : 'closed'} data-testid="shell.app">
+          <LoadingBar />
           <GoldBar conditions={conditions} />
           <nav className="tabs" aria-label="Projects" data-testid="shell.side">
             <DrawerHead self={self} />

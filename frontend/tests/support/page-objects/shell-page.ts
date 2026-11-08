@@ -29,6 +29,8 @@ export class ShellPage {
   readonly side: Locator;
   readonly scrim: Locator;
   readonly centre: Locator;
+  /** The loading bar, while a wait for the next screen's reads has lasted 200 ms. */
+  readonly loading: Locator;
   readonly user: Locator;
   readonly avatar: Locator;
   readonly userName: Locator;
@@ -56,6 +58,7 @@ export class ShellPage {
     this.side = page.getByTestId('shell.side');
     this.scrim = page.getByTestId('shell.scrim');
     this.centre = page.getByTestId('shell.centre');
+    this.loading = page.getByTestId('shell.loading');
     this.user = page.getByTestId('app-shell.topbar.user');
     this.avatar = this.user.locator('.avatar');
     this.userName = page.getByTestId('app-shell.topbar.user.name');

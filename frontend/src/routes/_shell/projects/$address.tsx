@@ -28,7 +28,9 @@
  * is its own (`PhoneProject`), its tabs at the bottom standing for the panel, whose state it leaves
  * alone, and what the address opens a view pushed over them (F98.4): there an item's address, and
  * a block's whose item is read and no card, opens the item alone (F99) rather than the timeline at
- * it.
+ * it. The router keeps the screen showing until the project's head and its timeline, or a draft's
+ * chats, are read, and what an address under it opens as a document, its document; the project's
+ * tab in the list reads them on hover or touch (`screen-reads.ts`).
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -58,6 +60,7 @@ import { useProjectHead, type ProjectHead as ProjectHeadOf } from '@/hooks/use-p
 import { useTimelineItem, type TimelineItem } from '@/hooks/use-timeline';
 import { rememberInBrowser, type DocTab } from '@/lib/browser-state';
 import type { QuoteRef } from '@/lib/chat/quotes';
+import { readFirst, readProject } from '@/lib/screen-reads';
 
 export const Route = createFileRoute('/_shell/projects/$address')({
   // Off a phone, a project gone to from its row in the list shows the tab it was left on, at the
@@ -67,6 +70,7 @@ export const Route = createFileRoute('/_shell/projects/$address')({
     const tab = !preload && row !== undefined && !isPhone() ? tabLeftOn(row) : null;
     if (tab !== null) throw redirect({ href: tab.href, replace: true });
   },
+  loader: readFirst(({ address }: { address: string }) => readProject(address)),
   component: Project,
 });
 

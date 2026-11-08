@@ -8,9 +8,10 @@
  * The page closes the notifications of what it shows on its device and beats while its person is
  * active in it (`use-app-page.ts`).
  * Every text under the side column and the centre links through the link settings read here.
+ * Once it shows, a route keeps the screen showing while it reads its own (`screen-reads.ts`).
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router';
 import { DeskFrame } from '@/components/shell/desk-frame';
 import { KeysList } from '@/components/shell/keys-list';
@@ -22,6 +23,7 @@ import { usePhone } from '@/hooks/use-phone';
 import { useProjectEvents } from '@/hooks/use-project-events';
 import { useSelf } from '@/hooks/use-self';
 import { useShellKeys } from '@/lib/keys';
+import { screenShown } from '@/lib/screen-reads';
 import { registerServiceWorker } from '@/lib/service-worker';
 import { startTheme } from '@/lib/theme';
 
@@ -34,6 +36,7 @@ export const Route = createFileRoute('/_shell')({
 
 function Shell() {
   const { data: self } = useSelf();
+  useEffect(screenShown, []);
   useAppPage(self);
   const phone = usePhone();
   const narrow = useNarrow();

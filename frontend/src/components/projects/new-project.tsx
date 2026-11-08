@@ -4,7 +4,8 @@
  * focus in its field; over it the draft's head, "New project" and its Draft chip, and beside it the
  * panel's Draft and Documents, both empty; on a phone the tabs at the bottom, a draft's. The first
  * message sent makes the draft (`useStartProject`), which the page then shows at its address,
- * `draft-<number>`, in this entry's place, the focus in its chat's field. Until then the server holds
+ * `draft-<number>`, in this entry's place, the focus in its chat's field, its composer waiting until
+ * the draft's chats are read and the route shows them (`screen-reads.ts`). Until then the server holds
  * nothing of it, so leaving leaves nothing behind; a message the server refuses makes nothing
  * either, its words left in the field. They are kept in the browser until sent (F133).
  */
@@ -93,8 +94,9 @@ function NewComposer() {
   const start = useStartProject();
   const navigate = useNavigate();
   const field = useRef<HTMLTextAreaElement>(null);
+  const [moving, setMoving] = useState(false);
   const words = text.trim();
-  const sendable = !start.pending && words !== '';
+  const sendable = !start.pending && !moving && words !== '';
 
   useEffect(() => field.current!.focus(), []);
 
@@ -107,9 +109,10 @@ function NewComposer() {
       knowAt(draft.address, draft.id);
       // As Discuss asks for it, with nothing quoted: the draft's composer takes the focus once drawn.
       discussIn(draft.id, null);
+      setMoving(true);
       void navigate({ to: '/projects/$address', params: { address: draft.address }, replace: true });
     });
   };
 
-  return <ComposerBox home="feed" field={field} text={text} onChange={change} onSend={send} sendable={sendable} waiting={start.pending} />;
+  return <ComposerBox home="feed" field={field} text={text} onChange={change} onSend={send} sendable={sendable} waiting={start.pending || moving} />;
 }

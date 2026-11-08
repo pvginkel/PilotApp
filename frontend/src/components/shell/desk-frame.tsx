@@ -3,11 +3,13 @@
  * (F146.2), the top bar with the gold bar's badges, the side column with the project list beside
  * the centre. At the narrow width (F98.2) the side column is the phone's drawer over the centre,
  * behind its scrim, opened from the top bar's toggle, under the top bar. At a first sign-in the
- * handle step stands under the top bar in their place (F137).
+ * handle step stands under the top bar in their place (F137). The loading bar lies at the top of
+ * what is under the top bar.
  */
 
 import type { ReactNode } from 'react';
 import { HandleStep } from '@/components/people/handle-step';
+import { LoadingBar } from '@/components/shell/loading-bar';
 import { ProjectColumn } from '@/components/projects/project-column';
 import { LinksProvider } from '@/components/shared/linked-text';
 import type { Drawer } from '@/components/shell/drawer';
@@ -35,6 +37,7 @@ export function DeskFrame({ self, drawer, conditions, children }: DeskFrameProps
         <PersonProvider value={person}>
           <LinksProvider>
             <div className="app" data-drawer={drawer === null ? undefined : drawer.open ? 'open' : 'closed'} data-testid="shell.app">
+              <LoadingBar />
               <nav className="tabs" aria-label="Projects" data-testid="shell.side">
                 <ProjectColumn />
               </nav>

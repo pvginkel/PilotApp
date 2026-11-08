@@ -5,13 +5,14 @@
  * a draft's number is never handed out again, and no slug starts `draft-` or reads as an id. The
  * API and what the browser keeps name a project by its id, which its address resolves to: an id's
  * as it stands, an address a project list's read holds from that list, any other by
- * GET /api/projects/lookup, read once.
+ * GET /api/projects/lookup, read once, by the project route's loader before the screen where a
+ * screen shows (`screen-reads.ts`).
  */
 
 import { createContext, useContext } from 'react';
 import type { Query } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
-import { useGetProjects, useGetProjectsLookup } from '@/lib/api/generated/hooks';
+import { useGetProjects, useGetProjectsLookup, type ProjectListResponseSchema_e86ccd6 } from '@/lib/api/generated/hooks';
 
 /** An id as the API writes it; another spelling of one is looked up, which answers it so. */
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -27,26 +28,31 @@ export function knowAt(address: string, id: string): void {
   known.set(address, id);
 }
 
+/**
+ * The id the page holds for the project at the address, the project lists given as read: an id's
+ * own, one resolved before, a listed project's; undefined where only a lookup says.
+ */
+export function heldAt(address: string, lists: readonly (ProjectListResponseSchema_e86ccd6 | undefined)[]): string | undefined {
+  if (ID.test(address)) return address;
+  return known.get(address) ?? lists.flatMap((list) => list?.projects ?? []).find((each) => each.address === address)?.id;
+}
+
 /** The id of the project at the address; undefined for no address, and until it is known. */
 export function useProjectIdAt(address: string | undefined): string | undefined {
-  const id = address !== undefined && ID.test(address);
-  const kept = address === undefined ? undefined : known.get(address);
   // The lists as the side column reads them, read for this by no one.
   const lists = [
     useGetProjects({ query: { archived: false } }, { enabled: false }).data,
     useGetProjects({ query: { archived: true } }, { enabled: false }).data,
   ];
-  const tab = id ? undefined : lists.flatMap((list) => list?.projects ?? []).find((each) => each.address === address);
+  const held = address === undefined ? undefined : heldAt(address, lists);
   const { data } = useGetProjectsLookup(
     { query: { address } },
     {
       // Read once: an answer is never read again, not on a write's invalidation of every query.
-      enabled: (query: Query<unknown, unknown>) =>
-        address !== undefined && !id && kept === undefined && tab === undefined && query.state.data === undefined,
+      enabled: (query: Query<unknown, unknown>) => address !== undefined && held === undefined && query.state.data === undefined,
     },
   );
-  if (id) return address;
-  const found = kept ?? tab?.id ?? data?.id;
+  const found = held ?? data?.id;
   if (found !== undefined) knowAt(address!, found);
   return found;
 }

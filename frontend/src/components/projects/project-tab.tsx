@@ -4,6 +4,7 @@
  * icon, the pause (F1.3, F141); and the badge counting the items waiting on the person, orange
  * when one of them is urgent (F1.4). The tab of the project on screen, at its own address or an
  * item's under it, is the current page's. An <a> itself, its text links through spans (F91, F93).
+ * Under the mouse or a finger it reads what its project's screen shows first (`screen-reads.ts`).
  */
 
 import { Link } from '@tanstack/react-router';
@@ -24,6 +25,7 @@ export function ProjectTab({ project, archived = false }: { project: Project; ar
       to="/projects/$address"
       params={{ address: project.address }}
       state={onScreen ? undefined : { fromList: project.id }}
+      preload="intent"
       className={cn('tab', project.state === 'finished' && 'finished')}
       data-testid="projects.tab"
     >
