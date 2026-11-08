@@ -984,6 +984,8 @@ class TestAtAddress:
         [
             pytest.param("recipe-box", id="slug"),
             pytest.param("draft-999999", id="draft"),
+            pytest.param("draft-3000000000", id="draft-past-every-number"),
+            pytest.param("draft-" + "9" * 5000, id="draft-past-int"),
             pytest.param("draft-07", id="draft-not-its-name"),
             pytest.param(str(uuid.UUID(int=7)), id="id"),
         ],

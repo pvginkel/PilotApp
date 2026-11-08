@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pilot_dsl as dsl
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import exists, false, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachService
@@ -210,6 +210,10 @@ ID_SLUG_PROBLEM = "reads as a project's id"
 """Why Create project refuses a slug that reads as an id: an address that
 does is one (`ProjectService.at_address`)."""
 
+_NUMBER_MAX = 2**31 - 1
+"""The largest `projects.number`, a PostgreSQL `integer`: a draft's name past
+it is no project's, and comparing the column to it raises."""
+
 _CLOSES = {
     TransitionKind.FINISHED: CloseCause.FINISHED,
     TransitionKind.REOPENED: CloseCause.REOPENED,
@@ -326,7 +330,9 @@ class ProjectService:
         if project_id is not None:
             named = Project.id == project_id
         elif draft is not None:
-            named = Project.number == int(draft["number"])
+            digits = draft["number"]
+            held = len(digits) <= len(str(_NUMBER_MAX)) and int(digits) <= _NUMBER_MAX
+            named = Project.number == int(digits) if held else false()
         else:
             named = Project.slug == address
         project = self.db.scalars(select(Project).where(named)).one_or_none()
