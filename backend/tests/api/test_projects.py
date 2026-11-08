@@ -135,12 +135,20 @@ class TestListProjects:
 
         assert response.status_code == 200
         body = response.get_json()
+        assert [tab["address"] for tab in body["projects"]] == [
+            f"draft-{session.get_one(Project, draft).number}",
+            session.get_one(Project, recipes).slug,
+            session.get_one(Project, finished).slug,
+        ]
+        for tab in body["projects"]:
+            tab["address"] = "<its address>"
         assert datetime.fromisoformat(body["projects"][2]["finished_at"]) == finished_at
         body["projects"][2]["finished_at"] = "<the finish>"
         assert body == {
             "projects": [
                 {
                     "id": str(draft),
+                    "address": "<its address>",
                     "name": None,
                     "ticket": None,
                     "state": "draft",
@@ -152,6 +160,7 @@ class TestListProjects:
                 },
                 {
                     "id": str(recipes),
+                    "address": "<its address>",
                     "name": "Recipe box",
                     "ticket": "RB-12",
                     "state": "open",
@@ -167,6 +176,7 @@ class TestListProjects:
                 },
                 {
                     "id": str(finished),
+                    "address": "<its address>",
                     "name": "Bike log",
                     "ticket": None,
                     "state": "finished",
@@ -255,12 +265,137 @@ class TestListProjects:
         assert oidc_client.get(PROJECTS).status_code == 401
 
 
+LOOKUP = f"{PROJECTS}/lookup"
+
+
+@pytest.mark.usefixtures("person")
+class TestLookupProject:
+    def test_a_slug_finds_its_project(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        recipes = session.get_one(Project, _make(container, name="Recipe box"))
+        _make(container, name="Bike log")
+        _sign_in(client)
+
+        response = client.get(LOOKUP, query_string={"address": recipes.slug})
+
+        assert response.status_code == 200
+        assert response.get_json() == {"id": str(recipes.id), "address": recipes.slug}
+
+    def test_a_drafts_name_finds_it(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        draft = session.get_one(Project, _make(container, state="draft"))
+        _sign_in(client)
+
+        response = client.get(LOOKUP, query_string={"address": f"draft-{draft.number}"})
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "id": str(draft.id),
+            "address": f"draft-{draft.number}",
+        }
+
+    def test_a_drafts_name_after_create_answers_the_slug(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        """A project's number is its draft's name for good: it is never
+        handed out again."""
+        recipes = session.get_one(Project, _make(container, name="Recipe box"))
+        _sign_in(client)
+
+        response = client.get(
+            LOOKUP, query_string={"address": f"draft-{recipes.number}"}
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"id": str(recipes.id), "address": recipes.slug}
+
+    @pytest.mark.parametrize("state", ["open", "draft"])
+    def test_an_id_finds_its_project_and_answers_its_address(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        state: str,
+    ) -> None:
+        project = session.get_one(Project, _make(container, state=state))
+        _sign_in(client)
+
+        response = client.get(LOOKUP, query_string={"address": str(project.id)})
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "id": str(project.id),
+            "address": project.slug or f"draft-{project.number}",
+        }
+
+    def test_an_archived_project_is_found(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        album = session.get_one(
+            Project, _make(container, name="Photo album", archived=True)
+        )
+        _sign_in(client)
+
+        response = client.get(LOOKUP, query_string={"address": album.slug})
+
+        assert response.status_code == 200
+        assert response.get_json()["id"] == str(album.id)
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            pytest.param("recipe-box", id="slug"),
+            pytest.param("draft-999999", id="draft"),
+            pytest.param("draft-07", id="draft-not-its-name"),
+            pytest.param(str(uuid.UUID(int=7)), id="id"),
+        ],
+    )
+    def test_an_address_no_project_is_at_is_not_found(
+        self, client: FlaskClient, container: ServiceContainer, address: str
+    ) -> None:
+        _make(container, name="Bike log")
+        _sign_in(client)
+
+        response = client.get(LOOKUP, query_string={"address": address})
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Project {address} was not found"
+
+    @pytest.mark.parametrize("query", [{}, {"address": ""}])
+    def test_no_address_is_refused(
+        self, client: FlaskClient, query: dict[str, str]
+    ) -> None:
+        _sign_in(client)
+
+        assert client.get(LOOKUP, query_string=query).status_code == 400
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        recipes = session.get_one(Project, _make(container, name="Recipe box"))
+        _sign_in(client, roles=())
+
+        response = client.get(LOOKUP, query_string={"address": recipes.slug})
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.get(LOOKUP, query_string={"address": "recipe-box"})
+
+        assert response.status_code == 401
+
+
 @pytest.mark.usefixtures("person")
 class TestGetProject:
     def test_the_head_of_a_project(
         self,
         client: FlaskClient,
         container: ServiceContainer,
+        session: Session,
         environment: Environment,
     ) -> None:
         container.test_data_service().person("ben", "ben")
@@ -304,6 +439,7 @@ class TestGetProject:
         assert response.status_code == 200
         assert response.get_json() == {
             "id": str(recipes),
+            "address": session.get_one(Project, recipes).slug,
             "name": "Recipe box",
             "ticket": "RB-12",
             "repo": "pvginkel/RecipeBox",
@@ -1490,11 +1626,15 @@ class TestAddTransition:
 
         assert response.status_code == 201, response.get_json()
         body = response.get_json()
-        assert (body["name"], body["state"], body["create_refusal"]) == (
-            "Camp site",
-            "open",
-            "it is no draft",
-        )
+        assert (
+            body["name"],
+            body["address"],
+            body["state"],
+            body["create_refusal"],
+        ) == ("Camp site", "camp-site", "open", "it is no draft")
+        assert client.get(
+            f"{PROJECTS}/lookup", query_string={"address": f"draft-{draft.number}"}
+        ).get_json() == {"id": str(draft.id), "address": "camp-site"}
         assert sorted(fake_sidecar.tree) == [
             "camp-site/attachments/1/project.md",
             "camp-site/chat.md",
@@ -1648,8 +1788,10 @@ class TestCreateProject:
 
         assert response.status_code == 201, response.get_json()
         body = response.get_json()
+        draft = session.get_one(Project, uuid.UUID(body["id"]))
         assert body == {
             "id": body["id"],
+            "address": f"draft-{draft.number}",
             "name": None,
             "ticket": None,
             "repo": None,
@@ -1674,7 +1816,6 @@ class TestCreateProject:
             "autopilot_may_take": 0,
             "create_refusal": "nothing is drafted",
         }
-        draft = session.get_one(Project, uuid.UUID(body["id"]))
         assert fake_sidecar.tree[f"draft-{draft.number}/project.md"] == b""
         tree = container.tree_service()
         assert fake_sidecar.tree == {

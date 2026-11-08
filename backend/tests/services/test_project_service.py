@@ -949,6 +949,56 @@ class TestHead:
         assert raised.value.message == f"Project {unknown} was not found"
 
 
+@pytest.mark.usefixtures("person", "starts")
+class TestAtAddress:
+    """The project an address names (H3): its id, a draft's `draft-<number>`
+    for good, or its slug."""
+
+    def test_a_slug(self, container: ServiceContainer) -> None:
+        recipes = _make(container, name="Recipe box")
+        _make(container, name="Bike log")
+        assert recipes.slug is not None
+
+        assert container.project_service().at_address(recipes.slug) is recipes
+
+    def test_a_drafts_name_before_and_after_create(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+        name = f"draft-{draft.number}"
+        assert container.project_service().at_address(name) is draft
+
+        _create(container, draft.id)
+
+        assert container.project_service().at_address(name) is draft
+        assert container.project_service().at_address("camp-site") is draft
+
+    @pytest.mark.parametrize("state", ["open", "draft"])
+    def test_an_id(self, container: ServiceContainer, state: str) -> None:
+        project = _make(container, name="Camp", state=state)
+
+        assert container.project_service().at_address(str(project.id)) is project
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            pytest.param("recipe-box", id="slug"),
+            pytest.param("draft-999999", id="draft"),
+            pytest.param("draft-07", id="draft-not-its-name"),
+            pytest.param(str(uuid.UUID(int=7)), id="id"),
+        ],
+    )
+    def test_an_address_no_project_is_at(
+        self, container: ServiceContainer, address: str
+    ) -> None:
+        _make(container, name="Bike log")
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.project_service().at_address(address)
+
+        assert raised.value.message == f"Project {address} was not found"
+
+
 @pytest.mark.usefixtures("person")
 class TestCreate:
     def test_the_plus_makes_a_draft_its_creator_a_member_its_draft_born_empty(
@@ -1752,6 +1802,7 @@ class TestCreateProjectRefused:
             ("camp-site", "is taken by another project"),
             ("Camp", "is not lower-case letters, digits and hyphens"),
             ("draft-2", "starts with `draft-`"),
+            ("12345678-1234-5678-1234-567812345678", "reads as a project's id"),
         ],
     )
     def test_while_its_slug_is_no_valid_one(

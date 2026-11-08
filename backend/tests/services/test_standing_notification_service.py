@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.engine.paths import folder
 from app.models import Environment, Item, Project, ProjectMember, User, Work
 from app.models.reference import SessionState
 from app.schemas.testing_record import InventedProjectCreateSchema
@@ -75,7 +76,7 @@ def _seen(
 
 
 def _timeline(container: ServiceContainer, project: Project) -> str:
-    return f"{container.config().baseurl}/projects/{project.id}"
+    return f"{container.config().baseurl}/projects/{folder(project)}"
 
 
 def _run(
@@ -534,6 +535,24 @@ class TestUrl:
 
         _bear(container, project, run, "question", "Where?", QUESTION)
         assert _seen(container, session, project).url == _timeline(container, project)
+
+    @pytest.mark.parametrize("state", ["open", "draft"])
+    def test_the_project_is_named_by_its_address(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        state: str,
+    ) -> None:
+        """Its slug, a draft's `draft-<number>`: the address its pages take."""
+        project = _make(container, state=state)
+        run = _run(session, project, environment)
+        question = _bear(container, project, run, "question", "Where?", QUESTION)
+
+        address = f"draft-{project.number}" if state == "draft" else project.slug
+        assert _seen(container, session, project).url == (
+            f"{container.config().baseurl}/projects/{address}/items/{question.id}"
+        )
 
 
 class TestPush:

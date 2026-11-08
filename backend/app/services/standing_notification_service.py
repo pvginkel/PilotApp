@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.engine.paths import folder
 from app.models import Item, ItemKind, Project, ProjectMember
 from app.services.timeline_service import waiting
 from app.services.web_push import Push
@@ -93,7 +94,8 @@ class StandingNotificationService:
     ) -> StandingNotification | None:
         """F94.1's text and F94.2's `url`, as the person reads them, or none
         while nothing waits on them: an item `for` nobody or for them waits on
-        them, one `for` another is not theirs (DB 225)."""
+        them, one `for` another is not theirs (DB 225). The `url` names the
+        project by its address, the name its pages' URLs take."""
         mine = [
             item
             for item in items
@@ -103,7 +105,7 @@ class StandingNotificationService:
             return None
         latest = mine[0]
         ask = latest.kind if latest.title is None else latest.title
-        timeline = f"{self.base_url}/projects/{project.id}"
+        timeline = f"{self.base_url}/projects/{folder(project)}"
         return StandingNotification(
             tag=str(project.id),
             title=_cut(project.name or _UNTITLED, _MAX_TITLE),

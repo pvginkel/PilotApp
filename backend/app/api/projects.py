@@ -1,9 +1,10 @@
 """The projects as the signed-in person reads them, the project list, the
-archived projects, a project's head, its timeline, its draft and its handbook
-(F1, F2, F3, F8, F37.4, F129.4, D012); a draft made from the plus (F46.1),
-and their answers to its asks in place (F47.4); and what they change of a
-project's standing: its transitions, Create project and its pause among
-them, and their membership (F4.1, F5, F6, F48, F127, F128, F141.2)."""
+archived projects, the project an address names, a project's head, its
+timeline, its draft and its handbook (F1, F2, F3, F8, F37.4, F129.4, D012); a
+draft made from the plus (F46.1), and their answers to its asks in place
+(F47.4); and what they change of a project's standing: its transitions,
+Create project and its pause among them, and their membership (F4.1, F5, F6,
+F48, F127, F128, F141.2)."""
 
 import uuid
 from typing import Any
@@ -13,6 +14,7 @@ from flask import Blueprint, request
 from spectree import Response as SpectreeResponse
 
 from app.api.caller import caller
+from app.engine.paths import folder
 from app.models import PlanNote, User
 from app.models.reference import DocumentRole, TransitionKind
 from app.schemas.common import ApiErrorResponseSchema
@@ -23,9 +25,11 @@ from app.schemas.projects import (
     PlanNoteSchema,
     PlanProgressSchema,
     PlanTaskSchema,
+    ProjectAddressSchema,
     ProjectHeadSchema,
     ProjectListQuerySchema,
     ProjectListResponseSchema,
+    ProjectLookupQuerySchema,
     ProjectTabSchema,
     RunningWorkSchema,
     TransitionRequestSchema,
@@ -69,6 +73,7 @@ def _head(head: ProjectHead) -> dict[str, Any]:
     project = head.project
     return ProjectHeadSchema(
         id=project.id,
+        address=folder(project),
         name=project.name,
         ticket=project.ticket,
         repo=project.repo,
@@ -127,6 +132,7 @@ def list_projects(
         projects=[
             ProjectTabSchema(
                 id=tab.project.id,
+                address=folder(tab.project),
                 name=tab.project.name,
                 ticket=tab.project.ticket,
                 state=tab.project.state_code,
@@ -167,6 +173,39 @@ def create_project(
     auth = caller()
     project = project_service.create(auth)
     return _head(project_service.head(auth, project.id)), 201
+
+
+@projects_bp.route("/lookup", methods=["GET"])
+@api.validate(
+    query=ProjectLookupQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=ProjectAddressSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def lookup_project(
+    project_service: ProjectService = Provide[ServiceContainer.project_service],
+) -> Any:
+    """Find the project an address names, a page's URL: its slug, a draft's
+    `draft-<number>`, still its project's after Create project, or its id;
+    answered with the address its pages take now.
+
+    Returns:
+        200: The project's id and its address
+        400: No address is given
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project is at the address
+    """
+    query = ProjectLookupQuerySchema.model_validate(request.args.to_dict())
+    project = project_service.at_address(query.address)
+    return ProjectAddressSchema(id=project.id, address=folder(project)).model_dump(
+        mode="json"
+    )
 
 
 @projects_bp.route("/<uuid:project_id>", methods=["GET"])

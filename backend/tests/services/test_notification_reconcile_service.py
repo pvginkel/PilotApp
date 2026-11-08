@@ -26,6 +26,7 @@ from sqlalchemy.pool import QueuePool
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineBus, ProjectChanged, WorkMoved
+from app.engine.paths import folder
 from app.models import AppPage, ItemSighting, Project, ProjectMember, User
 from app.models.reference import (
     ProgressState,
@@ -389,7 +390,10 @@ def _sent_at(
 
 
 def _timeline(container: ServiceContainer, project_id: uuid.UUID) -> str:
-    return f"{container.config().baseurl}/projects/{project_id}"
+    """The project's timeline at its address (`StandingNotificationService`)."""
+    with scoped_session(container):
+        project = container.db_session().get_one(Project, project_id)
+        return f"{container.config().baseurl}/projects/{folder(project)}"
 
 
 def _push(

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.engine.attachments import AttachmentStore
 from app.engine.paths import (
     CHAT,
+    DRAFT_FOLDER,
     PLAN,
     REFERENCE,
     TIMELINE,
@@ -22,7 +23,6 @@ from app.exceptions import RecordNotFoundException
 from app.models import Attachment, Document, Item, Project, SaveError
 from app.models.reference import ErrorKind
 
-_DRAFT_FOLDER = re.compile(r"draft-(?P<number>[1-9][0-9]*)")
 _ATTACHMENT = re.compile(r"attachments/(?P<batch>[1-9][0-9]*)/(?P<filename>.+)")
 """An attachment's path; a folder's filename keeps its slashes (DB decision
 39)."""
@@ -256,7 +256,7 @@ class TreeService:
     def project_in(self, folder: str) -> Project | None:
         """The syncing project whose folder is `folder`, a name at the tree's
         root (DB decision 1); none when no syncing project's is."""
-        draft = _DRAFT_FOLDER.fullmatch(folder)
+        draft = DRAFT_FOLDER.fullmatch(folder)
         named = (
             Project.slug == folder
             if draft is None

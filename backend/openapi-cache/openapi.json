@@ -5076,6 +5076,31 @@
         "title": "ProgressStepSchema",
         "type": "object"
       },
+      "ProjectAddressSchema.e86ccd6": {
+        "description": "The project an address names, and the address it is at now: a\n`draft-<number>` or an id looked up is answered with the address its\npages take.",
+        "properties": {
+          "address": {
+            "description": "The project's address, the name its pages' URLs take: its slug once Create project has given it one, else `draft-<number>`, its folder in the store's tree",
+            "examples": [
+              "recipe-box"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
+          "id": {
+            "description": "The project's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "address"
+        ],
+        "title": "ProjectAddressSchema",
+        "type": "object"
+      },
       "ProjectDocumentSchema.1fdd8ae": {
         "description": "The project's draft, `project.md`, or its handbook, `handbook.md`,\nread only, as the overlay draws it (F37.4, F129.4).",
         "properties": {
@@ -5789,6 +5814,14 @@
       "ProjectHeadSchema.e86ccd6": {
         "description": "What a project's head, its popovers and its menu read.",
         "properties": {
+          "address": {
+            "description": "The project's address, the name its pages' URLs take: its slug once Create project has given it one, else `draft-<number>`, its folder in the store's tree",
+            "examples": [
+              "recipe-box"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
           "archived": {
             "description": "Whether the project is archived",
             "title": "Archived",
@@ -5939,6 +5972,7 @@
         },
         "required": [
           "id",
+          "address",
           "name",
           "ticket",
           "repo",
@@ -6304,6 +6338,14 @@
       "ProjectListResponseSchema.e86ccd6.ProjectTabSchema": {
         "description": "What a project's tab in the list shows.",
         "properties": {
+          "address": {
+            "description": "The project's address, the name its pages' URLs take: its slug once Create project has given it one, else `draft-<number>`, its folder in the store's tree",
+            "examples": [
+              "recipe-box"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
           "badge": {
             "$ref": "#/components/schemas/ProjectListResponseSchema.e86ccd6.BadgeSchema"
           },
@@ -6382,6 +6424,7 @@
         },
         "required": [
           "id",
+          "address",
           "name",
           "ticket",
           "state",
@@ -6392,6 +6435,26 @@
           "badge"
         ],
         "title": "ProjectTabSchema",
+        "type": "object"
+      },
+      "ProjectLookupQuerySchema.e86ccd6": {
+        "description": "An address of a project, as a page's URL names it.",
+        "properties": {
+          "address": {
+            "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+            "examples": [
+              "recipe-box",
+              "draft-7"
+            ],
+            "minLength": 1,
+            "title": "Address",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "ProjectLookupQuerySchema",
         "type": "object"
       },
       "PushEndpointQuerySchema.efd40b8": {
@@ -12821,6 +12884,90 @@
           }
         ],
         "summary": "Start a new project, as the signed-in person: a draft, its creator its one member and its draft, `project.md`, empty, whose definition chat starts with the person's first message to it.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/lookup": {
+      "get": {
+        "description": "Returns:     200: The project's id and its address     400: No address is given     401: No one is signed in     403: The caller lacks the editor role     404: No project is at the address",
+        "operationId": "get__api_projects_lookup",
+        "parameters": [
+          {
+            "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+            "in": "query",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+              "examples": [
+                "recipe-box",
+                "draft-7"
+              ],
+              "minLength": 1,
+              "title": "Address",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectAddressSchema.e86ccd6"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Find the project an address names, a page's URL: its slug, a draft's `draft-<number>`, still its project's after Create project, or its id; answered with the address its pages take now.",
         "tags": [],
         "x-required-role": "editor"
       }

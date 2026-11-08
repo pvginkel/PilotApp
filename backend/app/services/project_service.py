@@ -1,8 +1,9 @@
 """The projects as the signed-in person reads them, the project list's tabs
-and a project's head, its status among them (F1, F2, F3, F141.1); a draft
-made from the plus (F46.1, F47.1), and Create project, which opens it (F48);
-and what they change of a project's standing, its transitions and their
-membership (F4.1, F5, F6, F127, F128, F141.2)."""
+and a project's head, its status among them (F1, F2, F3, F141.1), and the
+project an address names; a draft made from the plus (F46.1, F47.1), and
+Create project, which opens it (F48); and what they change of a project's
+standing, its transitions and their membership (F4.1, F5, F6, F127, F128,
+F141.2)."""
 
 import uuid
 from collections.abc import Iterable
@@ -22,6 +23,7 @@ from app.engine.documents import (
     OPENING,
     DocumentService,
 )
+from app.engine.paths import DRAFT_FOLDER
 from app.engine.record import RecordService, autopilot_may_take
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -204,6 +206,10 @@ NOTHING_DRAFTED_REFUSAL = "nothing is drafted"
 
 NO_SLUG_REFUSAL = "the draft names no slug"
 
+ID_SLUG_PROBLEM = "reads as a project's id"
+"""Why Create project refuses a slug that reads as an id: an address that
+does is one (`ProjectService.at_address`)."""
+
 _CLOSES = {
     TransitionKind.FINISHED: CloseCause.FINISHED,
     TransitionKind.REOPENED: CloseCause.REOPENED,
@@ -304,6 +310,29 @@ class ProjectService:
             )
             for project in projects
         ]
+
+    def at_address(self, address: str) -> Project:
+        """The project at `address`, the name its pages' URLs take: its id,
+        else a draft's folder, `draft-<number>`, which goes on naming the
+        project once Create project gives it its slug, else its slug. No slug
+        starts `draft-` (`ck_projects_slug`), and Create project takes none
+        that reads as an id.
+
+        Raises:
+            RecordNotFoundException: no project is at the address.
+        """
+        project_id = _as_id(address)
+        draft = DRAFT_FOLDER.fullmatch(address)
+        if project_id is not None:
+            named = Project.id == project_id
+        elif draft is not None:
+            named = Project.number == int(draft["number"])
+        else:
+            named = Project.slug == address
+        project = self.db.scalars(select(Project).where(named)).one_or_none()
+        if project is None:
+            raise RecordNotFoundException("Project", address)
+        return project
 
     def head(self, auth: AuthContext, project_id: uuid.UUID) -> ProjectHead:
         """The project's head as the caller reads it.
@@ -634,6 +663,8 @@ class ProjectService:
                 )
             ),
         )
+        if problem is None and _as_id(slug) is not None:
+            problem = ID_SLUG_PROBLEM
         if problem is not None:
             return f"the draft's slug `{slug}` {problem}"
         # A person's Turn has their words (`ck_turns_words`).
@@ -908,3 +939,11 @@ def project_name(project: Project) -> str:
 
 def _operation(project: Project, kind: TransitionKind) -> str:
     return f"{_VERBS[kind]} {project_name(project)}"
+
+
+def _as_id(address: str) -> uuid.UUID | None:
+    """The id `address` reads as, none when it reads as no uuid."""
+    try:
+        return uuid.UUID(address)
+    except ValueError:
+        return None

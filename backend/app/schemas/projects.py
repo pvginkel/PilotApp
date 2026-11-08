@@ -1,5 +1,5 @@
-"""Schemas for /api/projects: the project list's tabs, a project's head and
-the changes of its standing."""
+"""Schemas for /api/projects: the project list's tabs, a project's head, the
+project an address names, and the changes of its standing."""
 
 import uuid
 from datetime import datetime
@@ -34,6 +34,13 @@ STATUS_DESCRIPTION = (
 )
 
 
+ADDRESS_DESCRIPTION = (
+    "The project's address, the name its pages' URLs take: its slug once Create "
+    "project has given it one, else `draft-<number>`, its folder in the store's "
+    "tree"
+)
+
+
 class ProjectListQuerySchema(BaseModel):
     """Which of the two lists: the project list, or the archived projects."""
 
@@ -41,6 +48,29 @@ class ProjectListQuerySchema(BaseModel):
         default=False,
         description="True for the archived projects; false for every other",
     )
+
+
+class ProjectLookupQuerySchema(BaseModel):
+    """An address of a project, as a page's URL names it."""
+
+    address: str = Field(
+        min_length=1,
+        description=(
+            "The project's slug, a draft's `draft-<number>`, which goes on naming "
+            "its project once Create project has given it its slug, or the "
+            "project's id; an address that reads as an id is one"
+        ),
+        examples=["recipe-box", "draft-7"],
+    )
+
+
+class ProjectAddressSchema(BaseModel):
+    """The project an address names, and the address it is at now: a
+    `draft-<number>` or an id looked up is answered with the address its
+    pages take."""
+
+    id: uuid.UUID = Field(description="The project's id")
+    address: str = Field(description=ADDRESS_DESCRIPTION, examples=["recipe-box"])
 
 
 class PlanProgressSchema(BaseModel):
@@ -74,6 +104,7 @@ class ProjectTabSchema(BaseModel):
     """What a project's tab in the list shows."""
 
     id: uuid.UUID = Field(description="The project's id")
+    address: str = Field(description=ADDRESS_DESCRIPTION, examples=["recipe-box"])
     name: str | None = Field(
         description="The draft's title; null while the draft has none",
         examples=["Recipe box"],
@@ -147,6 +178,7 @@ class ProjectHeadSchema(BaseModel):
     """What a project's head, its popovers and its menu read."""
 
     id: uuid.UUID = Field(description="The project's id")
+    address: str = Field(description=ADDRESS_DESCRIPTION, examples=["recipe-box"])
     name: str | None = Field(
         description="The draft's title; null while the draft has none",
         examples=["Recipe box"],

@@ -2,6 +2,7 @@
 §5.1, §5.2)."""
 
 import hashlib
+import re
 
 from app.models import Attachment, Project
 
@@ -12,6 +13,9 @@ TIMELINE = "timeline.json"
 CHAT = "chat.md"
 REFERENCE = "reference.json"
 """At the tree's root, beside the projects' folders (DB decision 34)."""
+DRAFT_FOLDER = re.compile(r"draft-(?P<number>[1-9][0-9]*)")
+"""A draft's folder, `draft-<number>`; no slug starts `draft-`
+(`ck_projects_slug`)."""
 
 
 def folder(project: Project) -> str:
