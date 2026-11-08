@@ -279,12 +279,14 @@ class TestAClaimHeldThroughItsRun:
     on 262 and 295), and the run done with it once a turn that asked the
     person nothing has had its job."""
 
-    def _claimed(self, camp: Camp) -> tuple[Item, models.Session]:
+    def _claimed(
+        self, camp: Camp, conversation: str = "conversation-2"
+    ) -> tuple[Item, models.Session]:
         writer = camp.worker()
         cut_over = camp.registered(writer, CLAIMED)
         camp.ended(writer)
         camp.ended(camp.job_after(writer))
-        doing = camp.worker(SessionState.HELD, conversation="conversation-2")
+        doing = camp.worker(SessionState.HELD, conversation=conversation)
         camp.claim(cut_over, "A1", doing)
         return cut_over, doing
 
@@ -433,6 +435,33 @@ class TestAClaimHeldThroughItsRun:
         assert camp.of(cut_over) == PilotsWork(Doing.DOING, doing.id, True, None)
         assert handed_back_in(Reading(camp.session), continuation.id) == []
 
+    def test_a_continuation_is_handed_back_its_own_runs_blocks_alone(
+        self, camp: Camp
+    ) -> None:
+        cut_over, doing = self._claimed(camp)
+        other_cut_over, other = self._claimed(camp, conversation="conversation-3")
+        other.state_code = SessionState.FAILED
+        doing.state_code = SessionState.RUNNING
+        question = camp.registered(doing, QUESTION)
+        camp.ended(doing)
+        camp.job_after(doing, SessionState.FAILED)
+        assert camp.of(other_cut_over) is None
+
+        camp.answered(question, "Q1", "The lake")
+        continuation = camp.continuation(doing)
+
+        path = camp.session.get_one(Document, cut_over.id).path
+        assert handed_back_in(Reading(camp.session), continuation.id) == [
+            (cut_over.id, path, "A1")
+        ]
+        first = camp.session.scalars(
+            select(Turn.message).where(Turn.session_id == continuation.id)
+        ).one()
+        assert first.splitlines()[-1] == (
+            f"Handed back to the operator, so leave these to them: A1 of {path}"
+            f" ({cut_over.id})."
+        )
+
     def test_a_later_naming_stands(self, camp: Camp) -> None:
         cut_over, doing = self._claimed(camp)
         doing.state_code = SessionState.FAILED
@@ -534,7 +563,11 @@ class TestACancel:
     closed `cancelled`, the run holds nothing."""
 
     def _asking(
-        self, camp: Camp, *, research: bool = False
+        self,
+        camp: Camp,
+        *,
+        research: bool = False,
+        conversation: str = "conversation-2",
     ) -> tuple[Item, models.Session, Item]:
         """A document whose one block a work item's run holds, a claimed
         action or a researched question, and the open question that run put
@@ -543,7 +576,7 @@ class TestACancel:
         held = camp.registered(writer, QUESTION if research else CLAIMED)
         camp.ended(writer)
         camp.ended(camp.job_after(writer))
-        doing = camp.worker(conversation="conversation-2")
+        doing = camp.worker(conversation=conversation)
         if research:
             camp.research(held, "Q1", doing)
         else:
@@ -658,6 +691,34 @@ class TestACancel:
         assert not reading.offered
         self._waits(camp, third)
         assert cancels(Reading(camp.session), [asked.id])[asked.id].offered
+
+    def test_each_runs_cancel_reads_its_own_runs_blocks_alone(self, camp: Camp) -> None:
+        # A timeline reads the Cancels of every document it shows at once.
+        cut_over, doing, asked = self._asking(camp)
+        self._waits(camp, doing)
+        other_cut_over, busy, busy_asked = self._asking(
+            camp, conversation="conversation-3"
+        )
+        clarified = camp.registered(busy, QUESTION)
+        camp.ended(busy)
+        pass_ = camp.job_after(busy)
+        camp.ask_writer(pass_, clarified, "Q1")
+        camp.ended(pass_)
+        camp.clarification(pass_, busy)
+
+        found = cancels(Reading(camp.session), [asked.id, busy_asked.id])
+
+        assert found[asked.id] == Cancel(
+            doing.id,
+            (TakenBack(camp.block(cut_over, "A1").id, cut_over.id, False),),
+            False,
+            False,
+        )
+        assert found[asked.id].offered
+        assert found[busy_asked.id].takes_back == (
+            TakenBack(camp.block(other_cut_over, "A1").id, other_cut_over.id, False),
+        )
+        assert found[busy_asked.id].going_on
 
     def test_it_is_not_offered_on_a_document_of_a_run_that_holds_nothing(
         self, camp: Camp
