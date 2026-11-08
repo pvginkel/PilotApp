@@ -2,8 +2,8 @@
  * A decision's options, answered inline (F19): full-width rows, each its label, its one line and
  * Recommended on the recommendation (F19.2); a proposal one row that agrees, tinted as the
  * recommendation (F19.3); and Other last, "Something else", which becomes a console: the growing
- * field with Send and a cross, Esc closing it as the cross does (F17.2, F19.4). An answer in free
- * words is Other's row, chosen, with the words in it, and reopens the console with them; another
+ * field with Send and a cross, Esc closing it as the cross does, and its words once saved (F17.2,
+ * F19.4). An answer in free words is Other's row, chosen, with the words in it, and reopens the console with them; another
  * option chosen, the words stay there, unchosen. The chosen row fills; once the answer no longer
  * changes, the others fade and are disabled. Closed, the chosen row stands alone and opens its
  * block, or, read only, opens nothing.
@@ -19,6 +19,9 @@ import { cn } from '@/lib/utils';
 
 /** A proposal's answer, and the label of a decision's one row where it proposes nothing. */
 const AGREE = 'Agree';
+
+/** What opening a closed block does, on its head's chevron and on a closed decision's row. */
+export const EXPAND = 'Show expansion list';
 
 interface Row {
   /** What choosing it answers. */
@@ -72,7 +75,7 @@ export function DecisionOptions({ field, block, chosen, closed, live, disabled =
           className={cn('option chosen closed', single && 'single', row === undefined && 'other')}
           onClick={onOpen ?? undefined}
           disabled={onOpen === null}
-          title={onOpen === null ? undefined : 'Show every option'}
+          title={onOpen === null ? undefined : EXPAND}
           data-testid="timeline.block.option"
         >
           <RowWords label={row?.label ?? 'Other'} text={row === undefined ? words : row.text} />
@@ -113,7 +116,14 @@ export function DecisionOptions({ field, block, chosen, closed, live, disabled =
           placeholder="Other: in your own words"
           send="Send"
           testId="timeline.block.console"
-          onSend={(words, onSaved) => onAnswer(words, { onSaved })}
+          onSend={(words, onSaved) =>
+            onAnswer(words, {
+              onSaved: () => {
+                onSaved();
+                setTyping(false);
+              },
+            })
+          }
           onClose={() => setTyping(false)}
         />
       ) : (

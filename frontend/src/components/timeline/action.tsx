@@ -33,20 +33,24 @@ interface ActionAnswerProps {
   closed: boolean;
   /** Whether it takes an answer now. */
   live: boolean;
+  /** Its item is done: opened, its controls stand and take nothing (F31.2). */
+  settled: boolean;
   /** An archived project's: the controls stand and take nothing (D012). */
   disabled?: boolean;
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
 }
 
-export function ActionAnswer({ field, block, claimed, saving, closed, live, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
+export function ActionAnswer({ field, block, claimed, saving, closed, live, settled, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
   const said = saidOf(block, saving);
   return (
     <>
       {saving === null && block.claim !== null
         ? claimed && <Claimed block={block} work={block.claim.work} />
         : said !== null && <Said {...said} />}
-      {live && !closed && <ActionControls field={field} block={block} disabled={disabled} onAnswer={onAnswer} onDone={onDone} />}
+      {(live || settled) && !closed && (
+        <ActionControls field={field} block={block} disabled={disabled || !live} onAnswer={onAnswer} onDone={onDone} />
+      )}
     </>
   );
 }

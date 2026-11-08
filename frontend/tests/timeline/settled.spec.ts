@@ -2,10 +2,12 @@
  * A section Pilot settled (F31.5): a block's own section (F30.9) whose answer is Pilot's, settled
  * or deferred, is one line — Pilot's mark, the heading's words, the answer as the closed block
  * shows it, the note a muted line under them, each clipped — in the inline document, the
- * overlay's body and the done view, consecutive lines one list. A click opens the whole section,
- * the block in it read closed; a segment (F33) and the block's address (F97) open it too, a card's
- * block address in the overlay at the block. A person's replacement opens it for good, and Undo
- * leaves it open; the counts, the bar and *Send answers* count it as the answered block it is.
+ * overlay's body and the done view, consecutive lines one list. A click opens the whole section
+ * under its head, Pilot's mark and the heading's words, the block in it read closed; a segment
+ * (F33) and the block's address (F97) open it too, a card's block address in the overlay at the
+ * block; a click on its head folds it back to its line, at its address too (P-148's T6). A person's
+ * replacement opens it for good, and Undo leaves it open; the counts, the bar and *Send answers*
+ * count it as the answered block it is.
  */
 
 import type { Locator } from '@playwright/test';
@@ -133,7 +135,7 @@ test.describe('A section Pilot settled', () => {
     expect(heading).toBeGreaterThan((heading + answer) / 3);
   });
 
-  test('opens to the whole section on a click, its block read closed, and stays open as the timeline is read again', async ({
+  test('opens to the whole section on a click, under its head, its block read closed, and stays open as the timeline is read again', async ({
     people,
     projects,
     timeline,
@@ -144,9 +146,11 @@ test.describe('A section Pilot settled', () => {
     await timeline.open(id);
     const item = timeline.item(trip);
 
+    await expect(item.settledLine('D1').root).toHaveAttribute('aria-expanded', 'false');
     await item.settledLine('D1').root.click();
     expect(await item.document.locator('> *').evaluateAll(classesOf)).toEqual([
       'prose',
+      'settled-head',
       'prose',
       'block answered',
       'settled-lines',
@@ -154,8 +158,15 @@ test.describe('A section Pilot settled', () => {
       'block open',
       'settled-lines',
     ]);
-    await expect(item.document.locator('h2').first()).toHaveText('Which tent?');
-    await expect(item.document).toContainText('The forecast says rain all weekend.');
+    // The head stands in the heading's place: Pilot's mark and its words, the prose under it.
+    const head = item.settledHead('D1');
+    await expect(head.avatar).toHaveAttribute('title', 'Pilot');
+    await expect(head.heading).toHaveText('Which tent?');
+    await expect(head.heading.locator('strong')).toHaveText('tent');
+    await expect(head.root).toHaveAttribute('aria-expanded', 'true');
+    await expect(head.root).toHaveAttribute('title', 'Show only the line');
+    await expect(item.document.locator('h2')).toHaveText(['Book the van']);
+    await expect(item.document.locator('> .prose').nth(1)).toHaveText('The forecast says rain all weekend.');
     const tent = item.blockAt('D1');
     await expect(tent.root).toHaveAttribute('data-closed', 'true');
     await expect(tent.options).toHaveCount(1);
@@ -167,6 +178,54 @@ test.describe('A section Pilot settled', () => {
     await timeline.refocus();
     await expect(tent.root).toBeVisible();
     await expect(item.settledLine('D1').root).toHaveCount(0);
+  });
+
+  test('folds back to its line from its head, and opens again on its line and on a segment', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Fold'), members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
+    await timeline.open(id);
+    const item = timeline.item(trip);
+    const folded = ['prose', 'settled-lines', 'prose', 'block open', 'settled-lines'];
+
+    await item.settledLine('D1').root.click();
+    await expect(item.blockAt('D1').root).toBeVisible();
+    await item.settledHead('D1').root.click();
+    await expect(item.settledHead('D1').root).toHaveCount(0);
+    await expect(item.blockAt('D1').root).toHaveCount(0);
+    expect(await item.document.locator('> *').evaluateAll(classesOf)).toEqual(folded);
+    await expect(item.settledLine('D1').answer).toHaveText('Dome');
+    await expect(item.settledLine('D1').note).toHaveText('Rain is forecast.');
+
+    await item.settledLine('D1').root.click();
+    await expect(item.blockAt('D1').root).toBeVisible();
+    await item.settledHead('D1').root.click();
+    await item.segment('D1').click();
+    await expect(item.blockAt('D1').root).toBeInViewport();
+    await expect(item.settledHead('D1').root).toBeVisible();
+
+    // Folded, it stays so as the timeline is read again.
+    await item.settledHead('D1').root.click();
+    await timeline.refocus();
+    await expect(item.settledLine('D1').root).toBeVisible();
+    await expect(item.blockAt('D1').root).toHaveCount(0);
+  });
+
+  test('opens at its address and folds back there, the address standing', async ({ page, people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Fold at'), members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
+
+    await timeline.openAt(id, trip, 'Q1');
+    const item = timeline.item(trip);
+    await expect(item.blockAt('Q1').root).toBeVisible();
+    await item.settledHead('Q1').root.click();
+    await expect(item.settledLine('Q1').root).toBeVisible();
+    await expect(item.blockAt('Q1').root).toHaveCount(0);
+    await expect(page).toHaveURL(addressOf(id, trip, 'Q1'));
+    await timeline.refocus();
+    await expect(item.settledLine('Q1').root).toBeVisible();
+    await expect(item.blockAt('Q1').root).toHaveCount(0);
   });
 
   test('opens on a segment, which goes to its block and flashes it', async ({ page, people, projects, timeline }) => {
@@ -283,6 +342,7 @@ test.describe('A section Pilot settled in the overlay', () => {
     await expect(bikes.root).toBeInViewport();
     await expect(bikes.deferred).toContainText("Deferred to the project's end");
     await expect(overlay.settledLine('D3').root).toHaveCount(0);
+    await expect(overlay.settledHead('D3').heading).toHaveText('How many bikes?');
 
     await overlay.settledLine('Q1').root.click();
     await expect(overlay.blockAt('Q1').said.locator('.said')).toHaveText('Lake Garda');
@@ -310,6 +370,10 @@ test.describe('A section Pilot settled in the overlay', () => {
     await expect(tent.options).toHaveCount(1);
     await expect(tent.options.locator('.label')).toHaveText('Dome');
     await expect(overlay.settledLines).toHaveCount(1);
+
+    await overlay.settledHead('D1').root.click();
+    await expect(overlay.settledLines).toHaveCount(2);
+    await expect(overlay.blocks).toHaveCount(0);
   });
 });
 

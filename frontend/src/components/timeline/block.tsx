@@ -37,7 +37,7 @@ import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
 import { AutopilotMark } from '@/components/timeline/autopilot-mark';
 import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
-import { DecisionOptions } from '@/components/timeline/decision';
+import { DecisionOptions, EXPAND } from '@/components/timeline/decision';
 import { blockKey, useBlockFlash } from '@/components/timeline/flash';
 import { HeldBody, HeldLine, type Hold } from '@/components/timeline/held';
 import { blockKindOf } from '@/components/timeline/kinds';
@@ -247,6 +247,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
             saving={saving}
             closed={closed}
             live={live}
+            settled={settled}
             disabled={off}
             onAnswer={answer}
             onDone={answering?.done ?? unanswerable}
@@ -317,7 +318,7 @@ interface BlockHeadProps {
 
 function BlockHead({ block, mayTake, asked, undone, answered, closed, onToggle, quote }: BlockHeadProps) {
   const { icon: Icon, label } = blockKindOf(block);
-  const toggle = closed ? 'Show every option' : 'Show only the answer';
+  const toggle = closed ? EXPAND : 'Show only the answer';
   return (
     <div className="block-head" data-testid="timeline.block.head">
       <span className="kind" data-testid="timeline.block.kind">

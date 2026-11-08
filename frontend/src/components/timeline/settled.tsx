@@ -1,10 +1,11 @@
 /**
  * Settled sections, each one line (F31.5), consecutive ones a tight list: Pilot's mark, the
  * heading's words, the answer as the closed block shows it, and the note as a second muted line,
- * each clipped to its line. A click opens the whole section.
+ * each clipped to its line. A click opens the whole section, under its head: Pilot's mark and the
+ * heading's words, whose click folds it back to its line.
  */
 
-import { ChevronDown, StickyNote } from 'lucide-react';
+import { ChevronDown, ChevronUp, StickyNote } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { HeadingWords } from '@/components/shared/markdown';
 import { DEFERRED } from '@/components/timeline/said';
@@ -33,6 +34,7 @@ function SettledLine({ block, onOpen }: { block: Block; onOpen: () => void }) {
       className="settled"
       onClick={onOpen}
       title="Show the whole section"
+      aria-expanded={false}
       data-testid="timeline.settled.line"
       data-section={block.id}
     >
@@ -55,6 +57,31 @@ function SettledLine({ block, onOpen }: { block: Block; onOpen: () => void }) {
         </span>
       )}
     </button>
+  );
+}
+
+/** An opened settled section's head, over its prose and its block; a click folds it back to its line. */
+export function SettledHead({ block, onClose }: { block: Block; onClose: () => void }) {
+  return (
+    <div className="settled-head">
+      <button
+        type="button"
+        className="settled open"
+        onClick={onClose}
+        title="Show only the line"
+        aria-expanded
+        data-testid="timeline.settled.head"
+        data-section={block.id}
+      >
+        <span className="settled-main">
+          <UserAvatar user={block.by!} size="xs" />
+          <span className="heading" data-testid="timeline.settled.heading">
+            <HeadingWords text={block.section!.heading} />
+          </span>
+          <ChevronUp className="icon chevron" aria-hidden="true" />
+        </span>
+      </button>
+    </div>
   );
 }
 

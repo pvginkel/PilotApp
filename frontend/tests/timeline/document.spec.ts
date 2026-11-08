@@ -334,6 +334,10 @@ test.describe('A confirmation block in a document', () => {
     await confirm.noSend.click();
     await expect(confirm.no).toHaveClass(/\bchosen\b/);
     await expect(confirm.note).toHaveText('Wait for the freeze to end.');
+    // The console closes once the reason is saved: the cross takes answers again, and none reopens it.
+    await expect(confirm.no).toBeEnabled();
+    await expect(confirm.no).toHaveAttribute('aria-expanded', 'false');
+    await expect(confirm.root.getByTestId('timeline.confirm.console')).toHaveCount(0);
     await expect(item.unsent).toBeVisible();
     await expect(item.root).toHaveAttribute('data-state', 'open');
     expect(await blockOf(projects, id, release, 'C1')).toMatchObject({

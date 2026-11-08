@@ -297,7 +297,7 @@
   }
   .console:focus-within { box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
   .options .console { flex: none; }
-  .console .field { flex: 1; min-width: 0; height: 36px; border: 0; background: transparent; }
+  .console .field { flex: 1; min-width: 0; height: 36px; border-width: 7px 1px; outline: 0; background: transparent; }
   .console .field:focus { box-shadow: none; }
   .console-btn {
     display: grid;
@@ -403,6 +403,9 @@
     color: hsl(var(--muted-foreground));
   }
   .settled-note .icon { margin-right: 6px; }
+  /* Opened, its head: its mark and the heading's words in the line's place, the chevron at its end. */
+  .inline-doc > .settled-head { margin: 10px -8px 4px; }
+  .settled.open .settled-main { grid-template-columns: auto minmax(0, max-content) 1fr; }
 
   /* A block Pilot's work holds (F31.7): its section one line in a block's box, Pilot's mark leading
      it, the heading giving way first, what Pilot does and the chevron kept whole; the claim's note

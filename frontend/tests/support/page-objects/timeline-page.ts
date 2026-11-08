@@ -169,10 +169,11 @@ export class TimelinePage {
       blockAt: (blockId: string) => blockParts(this.page, root.locator(`[data-testid="timeline.block"][data-block-id="${blockId}"]`)),
       segments: root.getByTestId('timeline.segment'),
       segment: (blockId: string) => root.locator(`[data-testid="timeline.segment"][data-segment="${blockId}"]`),
-      /** The lists of settled sections' lines, and each line by its block's id. */
+      /** The lists of settled sections' lines, each line by its block's id, and an opened one's head. */
       settled: root.getByTestId('timeline.settled'),
       settledLines: root.getByTestId('timeline.settled.line'),
       settledLine: (blockId: string) => settledParts(root, blockId),
+      settledHead: (blockId: string) => settledHeadParts(root, blockId),
       send: root.getByTestId('timeline.item.send'),
       work: {
         environment: root.getByTestId('timeline.work.environment'),
@@ -313,6 +314,12 @@ export function settledParts(within: Locator, blockId: string) {
     answer: root.getByTestId('timeline.settled.answer'),
     note: root.getByTestId('timeline.settled.note'),
   };
+}
+
+/** An opened settled section's head, by its block's id: Pilot's mark and the heading's words, which fold it back. */
+export function settledHeadParts(within: Locator, blockId: string) {
+  const root = within.locator(`[data-testid="timeline.settled.head"][data-section="${blockId}"]`);
+  return { root, avatar: root.locator('.avatar'), heading: root.getByTestId('timeline.settled.heading') };
 }
 
 /**

@@ -3,7 +3,7 @@
  * head with the auto pilot mark while the switch would answer it (F4.4) and its reason line, whose
  * tooltip says the ground (F22.1); the title and the proposal beside a check, Yes, and a cross, No
  * (F22.2); No opening a console for the reason, which may stay
- * empty and is the note (F22.3); the prose folded under Details, which Less folds again (F22.4).
+ * empty and is the note, closing once it is saved (F22.3); the prose folded under Details, which Less folds again (F22.4).
  * The check and the cross, with No's console, are the block's controls inside a document too
  * (F22.7). The answer given, or being saved, stays coloured. On the card the row is the block, and
  * gone to at its address, it flashes (F97). A registered one whose writer Pilot asked about its
@@ -167,7 +167,15 @@ export function ConfirmControls({ field, block, chosen, live, disabled = false, 
           send="Send No"
           blankSends
           testId="timeline.confirm.console"
-          onSend={(reason, onSaved) => onAnswer(NO, { note: reason, onSaved })}
+          onSend={(reason, onSaved) =>
+            onAnswer(NO, {
+              note: reason,
+              onSaved: () => {
+                onSaved();
+                setRefusing(false);
+              },
+            })
+          }
           onClose={() => setRefusing(false)}
         />
       )}

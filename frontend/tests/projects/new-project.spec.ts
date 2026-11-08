@@ -55,6 +55,10 @@ test.describe('The plus', () => {
     await expect(definitionChat.field).toBeEditable();
     await expect(definitionChat.field).toBeFocused();
     await expect(definitionChat.send).toBeDisabled();
+    // One line at rest, sized again as the panel beside it takes its width, with nothing typed.
+    const lines = () =>
+      definitionChat.field.evaluate((field) => Math.round(field.clientHeight / parseFloat(getComputedStyle(field).lineHeight)));
+    await expect.poll(lines).toBe(1);
     await expect(timeline.root).toHaveCount(0);
     await expect(panel.tabs).toHaveText(['Draft', 'Documents']);
     await expect(panel.draftTab).toHaveAttribute('aria-selected', 'true');

@@ -110,6 +110,7 @@
   .sheet-doc.locked .block-controls :is(.option:not(.chosen), .field) { opacity: 0.55; }
   .sheet-doc > .block { margin: 14px 0 26px; }
   .sheet-doc > .settled-lines { margin: 12px -8px 20px; }
+  .sheet-doc > .settled-head { margin: 12px -8px 4px; }
 
   /* An attachment by its type (attachment-overlay.tsx). */
   .attachment-image { display: block; max-width: 100%; height: auto; border: 1px solid hsl(var(--border)); border-radius: var(--radius); }

@@ -162,6 +162,27 @@ test.describe('Other’s console', () => {
     expect((await blockOf(projects, id, decision)).answer).toBe('Neither:\nthe van.');
   });
 
+  test('closes once its words are saved in a document of more than one ask, Other’s row then holding them', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Two asks'), members: [me.handle!] });
+    const text = ['## Which tent?\n', `\`\`\`decision id=D1\n${OPTIONS}\`\`\`\n`, '## Where do we pitch?\n', '```question id=Q1\n```\n'].join('\n');
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text });
+    await timeline.open(id);
+    const item = timeline.item(trip);
+    const block = item.blockAt('D1');
+
+    await block.other.click();
+    await block.field.fill('The van');
+    await block.send.click();
+    // Other's row comes back, taking answers again, once its words are read back.
+    await expect(block.other).toBeEnabled();
+    await expect(block.other).toHaveAttribute('data-chosen', 'true');
+    await expect(block.other.locator('.desc')).toHaveText('The van');
+    await expect(block.console).toHaveCount(0);
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    expect((await projects.block(id, trip)).answer).toBe('The van');
+  });
+
   test('closes on its cross and on Esc in its field, keeping what was typed, after a reload too, until Send sends it', async ({
     page,
     people,
@@ -281,9 +302,12 @@ test.describe('An answer Pilot gave', () => {
     await expect(block.time).toHaveText(clock('2026-10-20T09:00:00Z'));
     await expect(block.who.locator('.avatar')).toHaveAttribute('title', 'Pilot');
     await expect(block.toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(block.toggle).toHaveAttribute('aria-label', 'Show expansion list');
+    await expect(block.toggle).toHaveAttribute('title', 'Show expansion list');
 
-    // Closed: the chosen option alone, its note under it.
+    // Closed: the chosen option alone, its note under it, which opens the block as the chevron does.
     await expect(block.options).toHaveCount(1);
+    await expect(block.options).toHaveAttribute('title', 'Show expansion list');
     await expect(block.options.locator('.label')).toHaveText('Dome');
     await expect(block.options.locator('.desc')).toHaveText('up in five minutes');
     await expect(block.note).toHaveText('The forecast is dry.');
@@ -292,6 +316,7 @@ test.describe('An answer Pilot gave', () => {
 
     await block.toggle.click();
     await expect(block.toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(block.toggle).toHaveAttribute('aria-label', 'Show only the answer');
     await expect(block.options).toHaveCount(2);
     await expect(block.option('Dome')).toHaveAttribute('data-chosen', 'true');
     await expect(block.option('Dome').getByTestId('timeline.block.note')).toHaveText('The forecast is dry.');

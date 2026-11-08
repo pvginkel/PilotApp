@@ -2,7 +2,8 @@
  * An action answered inline (F21): a paste-back field and Done, no Other (F21.1, F17.3); or its
  * options as buttons and Other, which sends the field (F21.2); what was pasted back the note, in the
  * growing field kept in the browser until sent (F115, F110, F133); and its done line, Done or the
- * option with the paste-back as its note (F21.5).
+ * option with the paste-back as its note (F21.5); done, it reads closed, its answer alone, opening
+ * on its chevron to its controls, standing and taking nothing (F31.2).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -150,6 +151,25 @@ test.describe('An action with options', () => {
     expect(await projects.block(id, action)).toMatchObject({ answer: 'Half works', note: 'flicker at 12:03' });
   });
 
+  test('closes Other’s console once its words are saved in a document of more than one ask', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Two asks'), members: [me.handle!] });
+    const text = ['## Try the lamp\n', OPTIONS, '## Where do we pitch?\n', '```question id=Q1\n```\n'].join('\n');
+    const trip = await projects.place(id, { kind: 'document', title: 'The evening', text });
+    await timeline.open(id);
+    const item = timeline.item(trip);
+    const block = item.blockAt('A1');
+
+    await block.other.click();
+    await block.field.fill('Half works');
+    await block.send.click();
+    await expect(block.said.locator('.said')).toHaveText('Half works');
+    await expect(block.other).toBeEnabled();
+    await expect(block.console).toHaveCount(0);
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    expect((await projects.block(id, trip)).answer).toBe('Half works');
+  });
+
   test('closes Other’s console on Esc, keeping the paste-back', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Esc'), members: [me.handle!] });
@@ -225,6 +245,60 @@ test.describe('An action with options', () => {
       } else {
         await expect(said).not.toHaveClass(/\bboxed\b/);
       }
+    }
+  });
+});
+
+test.describe('A done action', () => {
+  test('reads its answer alone, and opens on its chevron to its controls, standing and taking nothing, then closes again', async ({
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Done'), members: [me.handle!] });
+    const optioned = await projects.place(id, { kind: 'action', title: 'Try the lamp', text: OPTIONS });
+    const plain = await projects.place(id, { kind: 'action', title: 'Plug it in', text: ACTION });
+    await projects.answer(optioned, 'A1', 'Works', 'The light is on');
+    await projects.markDone(plain, 'A1', 'Plugged in');
+
+    for (const [action, said, note] of [
+      [optioned, 'Works', 'The light is on'],
+      [plain, 'Done', 'Plugged in'],
+    ] as const) {
+      await timeline.open(id);
+      await timeline.item(action).lineTitle.click();
+      const block = overlay.blockAt('A1');
+      await expect(overlay.doneChip).toHaveText('Done');
+      await expect(block.root).toHaveAttribute('data-closed', 'true');
+      await expect(block.said.locator('.said')).toHaveText(said);
+      await expect(block.note).toHaveText(note);
+      await expect(block.paste).toHaveCount(0);
+      await expect(block.toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(block.toggle).toHaveAttribute('aria-label', 'Show expansion list');
+
+      await block.toggle.click();
+      await expect(block.root).toHaveAttribute('data-closed', 'false');
+      await expect(block.toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(block.toggle).toHaveAttribute('aria-label', 'Show only the answer');
+      await expect(block.said.locator('.said')).toHaveText(said);
+      await expect(block.paste).toBeDisabled();
+      if (action === optioned) {
+        await expect(block.acts).toHaveText(['Works', "Doesn't"]);
+        for (const act of await block.acts.all()) await expect(act).toBeDisabled();
+        await expect(block.other).toBeDisabled();
+        await expect(block.done).toHaveCount(0);
+      } else {
+        await expect(block.done).toBeDisabled();
+        await expect(block.acts).toHaveCount(0);
+      }
+
+      await block.toggle.click();
+      await expect(block.root).toHaveAttribute('data-closed', 'true');
+      await expect(block.paste).toHaveCount(0);
+      await expect(block.acts).toHaveCount(0);
+      await expect(block.done).toHaveCount(0);
     }
   });
 });

@@ -13,6 +13,7 @@ import { HeadingWords, Markdown } from '@/components/shared/markdown';
 import { blockKindOf } from '@/components/timeline/kinds';
 import { Note } from '@/components/timeline/note';
 import { PilotsButton } from '@/components/timeline/pilots';
+import { underHeading } from '@/components/timeline/sections';
 import type { Block, BodyPart } from '@/hooks/use-timeline';
 
 export type Hold = NonNullable<Block['held']>;
@@ -78,10 +79,4 @@ export function HeldBody({ section, controls }: HeldBodyProps) {
       })}
     </div>
   );
-}
-
-/** A section's first part's words under its heading, its first line. */
-function underHeading(markdown: string): string {
-  const end = markdown.indexOf('\n');
-  return end === -1 ? '' : markdown.slice(end + 1);
 }

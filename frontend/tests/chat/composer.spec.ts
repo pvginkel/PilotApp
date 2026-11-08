@@ -12,6 +12,7 @@
  */
 
 import { test, expect } from '../support/fixtures';
+import { windowOf } from '../support/fields';
 import { makeUnique } from '../support/helpers';
 import { slowNetwork } from '../support/network';
 
@@ -30,6 +31,27 @@ const ROUTE = Array.from({ length: 40 }, (_, index) => `Stage ${index + 1}, by t
 const ARCHIVED = 'The project is archived: bring it back to message Pilot.';
 
 test.describe('The Chat tab’s composer', () => {
+  test('shows whole lines once it scrolls past five: its window five lines tall, the line typed past it leaving none cut at its top', async ({
+    people,
+    projects,
+    timeline,
+    chat,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Whole lines'), members: [me.handle!] });
+    const read = chat.read();
+    await timeline.open(project);
+    await read;
+
+    await chat.field.pressSequentially(Array.from({ length: 6 }, () => 'A').join('\n'));
+    const window = await chat.field.evaluate(windowOf);
+    expect(window.height).toBe(5 * window.line);
+    expect(window.top).toBeGreaterThan(0);
+    // The caret's text is brought into view, not its line's leading: the window's top lies within
+    // the leading between two lines of text, cutting none.
+    expect(window.cut).toBeLessThanOrEqual(window.leading);
+  });
+
   test('sends with Ctrl+Enter and with Send, Enter breaking the line; the first message starts the chat in the tab; Send waits while the field is empty, the field while the message is on its way; the field grows to five lines; the focus stays in it', async ({
     page,
     people,

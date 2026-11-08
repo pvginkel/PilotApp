@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
-import { blockParts, settledParts } from './timeline-page';
+import { blockParts, settledHeadParts, settledParts } from './timeline-page';
 import { projectAddress } from '../projects';
 
 /**
@@ -234,6 +234,11 @@ export class OverlayPage {
   /** A settled section's line in the body, by its block's id. */
   settledLine(blockId: string) {
     return settledParts(this.root, blockId);
+  }
+
+  /** An opened settled section's head in the body, by its block's id. */
+  settledHead(blockId: string) {
+    return settledHeadParts(this.root, blockId);
   }
 
   /** The head's segment for a block. */

@@ -36,8 +36,8 @@ import { blockKey, GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
 import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
-import { isSettled, piecesOf, SectionsContext } from '@/components/timeline/sections';
-import { SettledLines } from '@/components/timeline/settled';
+import { isSettled, piecesOf, SectionsContext, underHeading, type Fold } from '@/components/timeline/sections';
+import { SettledHead, SettledLines } from '@/components/timeline/settled';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useReviewed, useSend } from '@/hooks/use-marks';
@@ -191,15 +191,19 @@ export function UnsentChip() {
 /**
  * A document's prose and its blocks in their order, every block answered in place, each section
  * Pilot settled, while not opened, its line in its block's place, consecutive lines one list, and
- * each block Pilot's work holds its section's line, unless the document is Pilot's (F28.9).
+ * opened, under its head in its heading's place; and each block Pilot's work holds its section's
+ * line, unless the document is Pilot's (F28.9).
  */
 export function DocumentParts({ item }: { item: TimelineItem }) {
-  const { opened, open } = useContext(SectionsContext);
+  const { opened, open, close } = useContext(SectionsContext);
   const locked = useContext(LockedContext);
-  const collapsed = (block: BlockData) => isSettled(block) && !opened.has(blockKey(item.id, block.id));
-  const held = (block: BlockData) => !locked && block.held !== null;
+  const foldOf = (block: BlockData): Fold => {
+    if (!locked && block.held !== null) return 'held';
+    if (!isSettled(block)) return null;
+    return opened.has(blockKey(item.id, block.id)) ? 'opened' : 'collapsed';
+  };
   // The API gives every prose item but the opening its text.
-  return piecesOf(item.body!, collapsed, held).map((piece) => {
+  return piecesOf(item.body!, foldOf).map((piece) => {
     if (piece.type === 'settled') {
       return (
         <SettledLines
@@ -209,15 +213,19 @@ export function DocumentParts({ item }: { item: TimelineItem }) {
         />
       );
     }
+    if (piece.type === 'head') {
+      return <SettledHead key={`head ${piece.block.id}`} block={piece.block} onClose={() => close(blockKey(item.id, piece.block.id))} />;
+    }
     if (piece.type === 'held') {
       return <Block key={`block ${piece.block.id}`} item={item} block={piece.block} section={piece.section} />;
     }
-    const { part, index } = piece;
-    return part.type === 'block' ? (
-      <Block key={`block ${part.block.id}`} item={item} block={part.block} />
-    ) : (
-      <Markdown key={`prose ${index}`} text={part.markdown} />
-    );
+    // The same keys whether its section is opened or no settled one, so that a person's answer in
+    // an opened section redraws its block in place.
+    const { part, index, headed } = piece;
+    if (part.type === 'block') return <Block key={`block ${part.block.id}`} item={item} block={part.block} />;
+    if (!headed) return <Markdown key={`prose ${index}`} text={part.markdown} />;
+    const text = underHeading(part.markdown);
+    return text.trim() === '' ? null : <Markdown key={`prose ${index}`} text={text} />;
   });
 }
 

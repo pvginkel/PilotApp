@@ -1,11 +1,12 @@
 /**
  * The text field every answer and message is typed into (F115): one line at rest, growing with
- * what is typed to eight lines, or the chat's five, then scrolling. Enter breaks the line and
- * Ctrl+Enter (Cmd+Enter on a Mac) sends, where the field has one Send (F110). While it has the
- * focus, its parent, the row that holds what sends it, is kept in view.
+ * what is typed to eight lines, or the chat's five, then scrolling, its window whole lines; sized
+ * again when its width changes, as when the window turns or the panel opens beside it. Enter
+ * breaks the line and Ctrl+Enter (Cmd+Enter on a Mac) sends, where the field has one Send (F110).
+ * While it has the focus, its parent, the row that holds what sends it, is kept in view.
  */
 
-import { useImperativeHandle, useLayoutEffect, useRef, type KeyboardEvent, type Ref } from 'react';
+import { useCallback, useImperativeHandle, useLayoutEffect, useRef, type KeyboardEvent, type Ref } from 'react';
 import { cn } from '@/lib/utils';
 
 const LINES = 8;
@@ -48,7 +49,8 @@ export function TextField({
   const field = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(ref, () => field.current!, []);
 
-  useLayoutEffect(() => {
+  // Its height is its text's, up to its lines; read again as its text changes and as its width does.
+  const size = useCallback(() => {
     const element = field.current!;
     const style = getComputedStyle(element);
     const frame = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
@@ -57,8 +59,32 @@ export function TextField({
     const needed = element.scrollHeight + frame;
     element.style.height = `${Math.min(needed, most)}px`;
     element.style.overflowY = needed > most ? 'auto' : 'hidden';
+  }, [lines]);
+
+  useLayoutEffect(() => {
+    size();
+    const element = field.current!;
     if (document.activeElement === element) element.parentElement!.scrollIntoView({ block: 'nearest' });
-  }, [value, lines]);
+  }, [value, size]);
+
+  useLayoutEffect(() => {
+    const element = field.current!;
+    let width = element.offsetWidth;
+    let frame = 0;
+    // Sized in the next frame: a height set inside the observer's callback is a resize it would
+    // have to report in the same frame, which the browser reports as an error instead.
+    const observer = new ResizeObserver(() => {
+      if (element.offsetWidth === width) return;
+      width = element.offsetWidth;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(size);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [size]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing && onSend) {

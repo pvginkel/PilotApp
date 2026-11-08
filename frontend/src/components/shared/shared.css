@@ -84,13 +84,19 @@
   /* ---- Text fields (text-field.tsx) ------------------------------------------------------ */
 
   /* One line at rest, growing as text-field.tsx sets its height, its button beside it in a
-     .field-row, level with its bottom edge; the row keeps some room under it when kept in view. */
+     .field-row, level with its bottom edge; the row keeps some room under it when kept in view.
+     The room above and below its text is a clear border, not padding, which a textarea scrolls
+     with its text: what it scrolls is its lines alone, so that its window, whole lines tall, cuts
+     no line's text however far the caret took it. Its frame is the outline, over the border's edge. */
   .field {
     display: block;
     width: 100%;
     height: 38px;
-    padding: 7px 12px;
-    border: 1px solid hsl(var(--input));
+    padding: 0 11px;
+    border: solid transparent;
+    border-width: 8px 1px;
+    outline: 1px solid hsl(var(--input));
+    outline-offset: -1px;
     border-radius: var(--radius);
     background: hsl(var(--background));
     color: inherit;
@@ -100,7 +106,7 @@
     resize: none;
     overflow-y: hidden;
   }
-  .field:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
+  .field:focus { outline-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
   .field::placeholder { color: hsl(var(--muted-foreground)); }
   .field-row { display: flex; gap: 8px; align-items: flex-end; scroll-margin-bottom: 24px; }
   .field-row .field { flex: 1; min-width: 0; }

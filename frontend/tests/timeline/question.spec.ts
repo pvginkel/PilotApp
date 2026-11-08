@@ -1,11 +1,13 @@
 /**
  * A question answered inline (F20): the growing field (F115), "Your answer" or "Default: …", and
  * Send, Enter breaking the line and Ctrl+Enter sending (F110), what was typed kept in the browser
- * until sent (F133); the answer boxed (F20.2) and saved as given, the item's done (F32.1, F32.3);
+ * until sent (F133), its window whole lines once it scrolls and its height its text's again when
+ * its width changes; the answer boxed (F20.2) and saved as given, the item's done (F32.1, F32.3);
  * and either person answering one meant for the other (F107.1).
  */
 
 import { test, expect } from '../support/fixtures';
+import { windowOf } from '../support/fields';
 import { makeUnique } from '../support/helpers';
 import { slowNetwork } from '../support/network';
 
@@ -127,6 +129,55 @@ test.describe('A question', () => {
     const field = (await block.answerField.boundingBox())!;
     const send = (await block.answerSend.boundingBox())!;
     expect(send.y + send.height).toBeCloseTo(field.y + field.height, 0);
+  });
+
+  test('shows whole lines once it scrolls past eight: its window eight lines tall, the lines typed past it leaving none cut at its top', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Whole lines'), members: [me.handle!] });
+    const question = await projects.place(id, { kind: 'question', title: 'Which lake?', text: QUESTION });
+    await timeline.open(id);
+    const { block } = timeline.item(question);
+
+    await block.answerField.pressSequentially(Array.from({ length: 10 }, () => 'A').join('\n'));
+    const window = await block.answerField.evaluate(windowOf);
+    expect(window.height).toBe(8 * window.line);
+    expect(window.top).toBeGreaterThan(window.line);
+    // The caret's text is brought into view, not its line's leading: the window's top lies within
+    // the leading between two lines of text, cutting none.
+    expect(window.cut).toBeLessThanOrEqual(window.leading);
+  });
+
+  test('sizes its field again when its width changes, as the panel beside it widens, its wrapped lines never cut off', async ({
+    people,
+    projects,
+    timeline,
+    panel,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Narrowed'), members: [me.handle!] });
+    const question = await projects.place(id, { kind: 'question', title: 'Which lake?', text: QUESTION });
+    await timeline.open(id);
+    const { block } = timeline.item(question);
+    const lines = () =>
+      block.answerField.evaluate((field: HTMLTextAreaElement) => ({
+        width: field.offsetWidth,
+        shown: Math.round(field.clientHeight / parseFloat(getComputedStyle(field).lineHeight)),
+        cut: field.scrollHeight - field.clientHeight,
+      }));
+
+    await panel.drag(300);
+    await block.answerField.fill('The lake with the shortest drive of the three, a shop at the gate and room for the van. '.repeat(2).trim());
+    const wide = await lines();
+    expect(wide.cut).toBe(0);
+    await panel.drag(-300);
+    await expect.poll(lines).toMatchObject({ cut: 0 });
+    const narrow = await lines();
+    expect(narrow.width).toBeLessThan(wide.width);
+    expect(narrow.shown).toBeGreaterThan(wide.shown);
   });
 
   test('answered by Pilot reads boxed and closed, and opens to the field holding it, for the person’s answer to replace', async ({
