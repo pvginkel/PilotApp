@@ -206,7 +206,7 @@ test.describe('The project document', () => {
 
   test('reads “The document did not load” where its read fails: an address naming no project', async ({ page, people, overlay }) => {
     await people.signIn();
-    await page.goto(projectDocumentAddress(randomUUID()));
+    await page.goto(`/projects/${randomUUID()}/project-document`);
     await expect(overlay.failed).toHaveText('The document did not load.');
     await expect(overlay.title).toHaveCount(0);
   });

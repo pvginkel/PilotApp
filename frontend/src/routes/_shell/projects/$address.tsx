@@ -32,7 +32,6 @@
  */
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, redirect, useMatches, useNavigate, useRouter } from '@tanstack/react-router';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { ItemAttachmentOverlay, ProjectAttachmentOverlay } from '@/components/overlay/attachment-overlay';
@@ -92,14 +91,13 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
   // At another of its addresses, an id or a created project's `draft-<number>`, the project's own
   // takes its place in the entry, the rest of the path and the entry's state kept: a phone's views.
   // Known at it first, it is the same screen there, never drawn afresh while it is looked up.
-  const queryClient = useQueryClient();
   const named = data?.address;
   useEffect(() => {
     if (named === undefined || named === address) return;
-    knowAt(queryClient, named, projectId);
+    knowAt(named, projectId);
     const { href, state } = router.history.location;
     router.history.replace(href.replace(/^\/projects\/[^/?#]+/, `/projects/${named}`), state);
-  }, [named, address, projectId, queryClient, router]);
+  }, [named, address, projectId, router]);
   // The matches' address: the router takes a new location a render before the matches it draws.
   const at = useMatches({ select: (matches) => matches.at(-1)!.pathname });
   const { sessionId } = shownAt(router, at);

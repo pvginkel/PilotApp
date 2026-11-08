@@ -9,24 +9,28 @@
  */
 
 import { createContext, useContext } from 'react';
-import type { Query, QueryClient } from '@tanstack/react-query';
+import type { Query } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
 import { useGetProjects, useGetProjectsLookup } from '@/lib/api/generated/hooks';
 
 /** An id as the API writes it; another spelling of one is looked up, which answers it so. */
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** The project at the address, as its lookup answers it. */
-const lookupOf = (address: string) => ['getProjectsLookup', { query: { address } }];
+/**
+ * Each address the page has resolved, to its project's id, for as long as the page: a project that
+ * leaves the list it was found in, archived or brought back, stays known at it.
+ */
+const known = new Map<string, string>();
 
-/** That the project `id` is at `address`, as its lookup would answer, so that the page has it without asking. */
-export function knowAt(queryClient: QueryClient, address: string, id: string): void {
-  queryClient.setQueryData(lookupOf(address), { id, address });
+/** That the project `id` is at `address`, so that the page has it without looking it up. */
+export function knowAt(address: string, id: string): void {
+  known.set(address, id);
 }
 
 /** The id of the project at the address; undefined for no address, and until it is known. */
 export function useProjectIdAt(address: string | undefined): string | undefined {
   const id = address !== undefined && ID.test(address);
+  const kept = address === undefined ? undefined : known.get(address);
   // The lists as the side column reads them, read for this by no one.
   const lists = [
     useGetProjects({ query: { archived: false } }, { enabled: false }).data,
@@ -37,10 +41,14 @@ export function useProjectIdAt(address: string | undefined): string | undefined 
     { query: { address } },
     {
       // Read once: an answer is never read again, not on a write's invalidation of every query.
-      enabled: (query: Query<unknown, unknown>) => address !== undefined && !id && tab === undefined && query.state.data === undefined,
+      enabled: (query: Query<unknown, unknown>) =>
+        address !== undefined && !id && kept === undefined && tab === undefined && query.state.data === undefined,
     },
   );
-  return id ? address : (tab?.id ?? data?.id);
+  if (id) return address;
+  const found = kept ?? tab?.id ?? data?.id;
+  if (found !== undefined) knowAt(address!, found);
+  return found;
 }
 
 /** The id of the project on screen, at its address or one under it; undefined elsewhere, and until it is known. */
