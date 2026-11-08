@@ -164,4 +164,68 @@ test.describe('A reply’s step lines', () => {
     await page.clock.runFor(HOLD);
     await expect(head).toHaveText('Read 2 files, ran 2 commands, searched 2 times · 6 steps · 1 failed');
   });
+
+  test('moves on from a wait that ends between a frame’s arrival and its drawing', async ({ page, people, projects, controller, timeline, chat, chats }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Held'), members: [me.handle!] });
+    // The wait's timer, taken while the page asks for it, runs only right after the next session
+    // frame's message has been handled: the frame dispatched, and not yet drawn.
+    await page.addInitScript((hold) => {
+      const probe = window as Window & { takeHold?: boolean; endHoldAfterFrame?: boolean };
+      const setTimer = window.setTimeout.bind(window);
+      const clearTimer = window.clearTimeout.bind(window);
+      let taken: { id: number; end: () => void } | null = null;
+      window.setTimeout = ((end: () => void, ms?: number, ...rest: unknown[]) => {
+        if (!probe.takeHold || ms !== hold) return setTimer(end, ms, ...rest);
+        taken = { id: setTimer(() => {}, 1e9), end };
+        return taken.id;
+      }) as typeof window.setTimeout;
+      window.clearTimeout = ((id?: number) => {
+        if (taken?.id === id) taken = null;
+        clearTimer(id);
+      }) as typeof window.clearTimeout;
+      const onmessage = Object.getOwnPropertyDescriptor(EventSource.prototype, 'onmessage')!;
+      Object.defineProperty(EventSource.prototype, 'onmessage', {
+        ...onmessage,
+        set(this: EventSource, handle: ((event: MessageEvent) => void) | null) {
+          onmessage.set!.call(this, (event: MessageEvent) => {
+            handle?.call(this, event);
+            if (!probe.endHoldAfterFrame || taken === null || (JSON.parse(event.data) as { type: string }).type !== 'session') return;
+            const { end } = taken;
+            taken = null;
+            probe.endHoldAfterFrame = false;
+            end();
+            document.documentElement.dataset.holdEnded = 'after a frame';
+          });
+        },
+      });
+    }, HOLD);
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'What is in the folder?');
+    await controller.play(chats.store, session, [
+      toolUse('read_a', 'Read', { file_path: '/work/Example/a.md' }),
+      toolResult('read_a', 'A.'),
+      toolUse('list_b', 'Bash', { command: 'ls', description: 'List the files' }),
+    ]);
+    const run = chat.root.getByTestId('chat.run');
+    const head = headOf(run);
+    await expect(head).toHaveText('List the files · 2 steps');
+    await head.click();
+    await away(page);
+    const tools = run.getByTestId('chat.tool');
+
+    await page.evaluate(() => ((window as Window & { takeHold?: boolean }).takeHold = true));
+    await controller.play(chats.store, session, [toolResult('list_b', 'a.md'), toolUse('grep_c', 'Grep', { pattern: 'cue' })]);
+    await expect(tools.last()).toHaveText('Searching for “cue”');
+    await expect(head).toHaveText('List the files · 2 steps');
+    await page.evaluate(() => {
+      const probe = window as Window & { takeHold?: boolean; endHoldAfterFrame?: boolean };
+      probe.takeHold = false;
+      probe.endHoldAfterFrame = true;
+    });
+    await controller.play(chats.store, session, [toolResult('grep_c', 'Found.')]);
+    await expect(page.locator('html')).toHaveAttribute('data-hold-ended', 'after a frame');
+    // The wait's end shows the text drawn before that frame, and the next wait the frame's.
+    await expect(head).toHaveText('Read a file, ran a command, searched once · 3 steps');
+  });
 });

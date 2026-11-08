@@ -17,10 +17,12 @@ export function useHeld<T>(value: T, key: string): T {
     latest.current = { value, key };
   });
   const differs = shown.key !== key;
+  // Keyed on the shown text too: `latest` is the last text drawn, so a wait that ends while a newer
+  // text waits to be drawn shows one that differs from it still, and needs a wait of its own.
   useEffect(() => {
     if (!differs) return;
     const timer = window.setTimeout(() => setShown(latest.current), HOLD_MS);
     return () => window.clearTimeout(timer);
-  }, [differs]);
+  }, [differs, shown.key]);
   return differs ? shown.value : value;
 }
