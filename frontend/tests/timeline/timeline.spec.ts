@@ -1,8 +1,10 @@
 /**
  * A project's timeline (F8): its items in their order under their date and step dividers (F9); the
  * opening (F18.1, F18.2); an item's head (F12, F10.1, F107, F114); its prose as GFM, linked, folding
- * when long (F29.1, F12.2); a concept (F78); the done line (F13.1, F13.2); anchored to its end, a
- * new item flashing, and at its end on each project (F8.2, F1.6).
+ * when long (F29.1, F12.2); a concept (F78); the done line (F13.1, F13.2); a step's long name cut
+ * on a phone; a short timeline at its top, no band under its last item; opened at its end, following
+ * what arrives there, a new item flashing, and at its end on each project (F8.2, F1.6); the reader's
+ * own Show more growing downward.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -351,8 +353,50 @@ test.describe('A done line', () => {
   });
 });
 
+test.describe('On a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('cuts a step’s long name at the divider’s end, and the timeline scrolls only down', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const title = 'Build the card that shows every running session of the fleet, its environment and its turn';
+    const id = await projects.makeWithSession({
+      name: makeUnique('Long step'),
+      members: [me.handle!],
+      tasks: [{ id: 'build', title, status: 'in_progress' }],
+    });
+    await projects.place(id, { kind: 'notice', title: 'Built one', text: '---\nstep: build\n---\n\nOne.\n' });
+    await timeline.open(id);
+
+    const name = timeline.root.getByTestId('timeline.divider.step').locator('.name');
+    await expect(name).toHaveText(title);
+    expect(await name.evaluate((element) => [element.scrollWidth > element.clientWidth, getComputedStyle(element).textOverflow])).toEqual([
+      true,
+      'ellipsis',
+    ]);
+    expect(await timeline.root.evaluate((feed) => feed.scrollWidth - feed.clientWidth)).toBeLessThanOrEqual(0);
+  });
+
+  test('leaves no band under the last item at its end: 12 px of the column’s padding', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Foot'), members: [me.handle!] });
+    for (let index = 0; index < 8; index += 1) {
+      await projects.place(id, { kind: 'notice', title: `Notice ${index + 1}`, text: 'A notice that takes\n\na few lines.\n' });
+    }
+    await timeline.open(id);
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+
+    expect(await timeline.root.locator('.feed-inner').evaluate((inner) => getComputedStyle(inner).padding)).toBe('12px');
+    const feed = (await timeline.root.boundingBox())!;
+    const last = (await timeline.items.last().boundingBox())!;
+    // The column's padding and the item's own margin.
+    expect(Math.abs(feed.y + feed.height - (last.y + last.height) - (12 + 8))).toBeLessThan(1.5);
+  });
+});
+
 test.describe('Anchored to its end', () => {
   const NOTICE = 'A notice that takes\n\na few lines\n\nof the timeline.\n';
+  // Long enough to fold, its Show more under it.
+  const LONG = Array.from({ length: 24 }, (_, index) => `Paragraph ${index + 1} of the long notice.`).join('\n\n') + '\n';
 
   async function longProject(projects: Projects, member: string, name: string): Promise<string> {
     const id = await projects.makeWithSession({ name, members: [member] });
@@ -362,15 +406,71 @@ test.describe('Anchored to its end', () => {
     return id;
   }
 
-  test('a short timeline sits at the bottom', async ({ people, projects, timeline }) => {
+  test('a short timeline stands at its top', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Short'), members: [me.handle!] });
     await timeline.open(id);
 
     const feed = (await timeline.root.boundingBox())!;
-    const opening = (await timeline.opening.boundingBox())!;
-    expect(opening.y).toBeGreaterThan(feed.y + feed.height / 2);
-    expect(feed.y + feed.height - (opening.y + opening.height)).toBeLessThan(100);
+    const [first, opening] = await Promise.all([timeline.rows.first().boundingBox(), timeline.opening.boundingBox()]);
+    // The column's padding and the day divider's margin above it.
+    expect(Math.abs(first!.y - feed.y - (20 + 26))).toBeLessThan(1.5);
+    expect(opening!.y + opening!.height).toBeLessThan(feed.y + feed.height / 2);
+  });
+
+  test('leaves no band under the last item at its end: 20 px of the column’s padding', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await longProject(projects, me.handle!, makeUnique('Foot'));
+    await timeline.open(id);
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+
+    expect(await timeline.root.locator('.feed-inner').evaluate((inner) => getComputedStyle(inner).padding)).toBe('20px 24px');
+    const feed = (await timeline.root.boundingBox())!;
+    const last = (await timeline.items.last().boundingBox())!;
+    // The column's padding and the item's own margin.
+    expect(Math.abs(feed.y + feed.height - (last.y + last.height) - (20 + 8))).toBeLessThan(1.5);
+  });
+
+  test('at its end, follows long items arriving to the end of their Show more, three in a row', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await longProject(projects, me.handle!, makeUnique('Long arrivals'));
+    await timeline.open(id);
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+
+    const arrived: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      arrived.push(await projects.place(id, { kind: 'notice', title: `Long ${index + 1}`, text: LONG }));
+    }
+    for (const each of arrived) await expect(timeline.item(each).more).toBeAttached();
+    await expect(timeline.item(arrived[2]).more).toBeInViewport();
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+  });
+
+  test('the reader’s own Show more at its end unfolds downward, and the timeline no longer follows its end', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await longProject(projects, me.handle!, makeUnique('Own'));
+    const long = await projects.place(id, { kind: 'notice', title: 'Long', text: LONG });
+    await timeline.open(id);
+    const item = timeline.item(long);
+    await expect(item.more).toBeInViewport();
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+    const top = await timeline.scrollTop();
+    const head = (await item.head.boundingBox())!;
+
+    await item.more.click();
+    await expect(item.more).toHaveCount(0);
+    await expect.poll(() => timeline.fromEnd()).toBeGreaterThan(100);
+    expect(await timeline.scrollTop()).toBe(top);
+    expect(Math.abs((await item.head.boundingBox())!.y - head.y)).toBeLessThan(1);
+
+    const later = await projects.place(id, { kind: 'notice', title: 'Later', text: NOTICE });
+    await expect(timeline.item(later).root).toBeAttached();
+    expect(await timeline.scrollTop()).toBe(top);
+    await expect(timeline.item(later).root).not.toBeInViewport();
   });
 
   test('opens at its end, follows new items there with a flash, and stays where the reader scrolled', async ({

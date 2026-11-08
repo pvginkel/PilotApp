@@ -2,14 +2,26 @@
  * A URL per item and block (F97): an item's address under its project's, a block's under its
  * item's, by their ids. Opening one scrolls the timeline to it and flashes it: a block's goes to
  * the block, a confirmation's to its card's row, and a done item's to its line; an address the
- * timeline draws nothing for leaves it at its end.
+ * timeline draws nothing for leaves it at its end. One opened in the app, as a chat's quote chip
+ * opens it, on a timeline read before its item came, waits for the read that draws the item.
  */
 
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { slowNetwork } from '../support/network';
 import { addressOf } from '../support/page-objects/timeline-page';
 import { projectAddress, type Projects } from '../support/projects';
+
+// An invented line in `claude`'s shape (backend/tests/fixtures/raw/), naming its conversation.
+const CONVERSATION = '6a1d3f9e-2c4b-4e7a-8f05-b3c9d2e1a746';
+const text = (id: string, words: string) =>
+  JSON.stringify({
+    type: 'assistant',
+    message: { id: `msg_${id}`, content: [{ type: 'text', text: words }] },
+    parent_tool_use_id: null,
+    session_id: CONVERSATION,
+  });
 
 const DECISION = 'Which tent for the trip?\n\n```decision id=D1\noptions:\n  - Dome: up in five minutes\n  - Tunnel\n```\n';
 const CONFIRMATION = 'The tag is cut.\n\n```decision id=C1\ntype: confirmation\nproposal: Push the release\nbecause: auto-pilot-off\n```\n';
@@ -95,6 +107,40 @@ test.describe('An item’s address', () => {
     await expect(timeline.opening).toHaveClass(/\bfresh\b/);
     await expect(timeline.opening).toBeInViewport();
     await expect(timeline.opening).not.toHaveClass(/\bfresh\b/);
+  });
+
+  test('opened from a chat’s quote chip on a timeline read before the item came, waits for the read that draws it, then goes to it', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Late'), members: [me.handle!] });
+    await notices(projects, id);
+    await timeline.open(id);
+    const { session } = await chats.start(id, 'What came in?');
+    await expect(chat.messageTexts).toHaveText(['What came in?']);
+
+    // Every read the page sends now takes five seconds; the chat's records come on its stream.
+    const restore = await slowNetwork(page, 5_000);
+    const late = await projects.place(id, { kind: 'notice', title: 'Late', text: 'It came late.\n' });
+    await notices(projects, id);
+    await controller.play(chats.store, session, [text('late', `See <quoted_item id="${late}">Late</quoted_item id="${late}">.`)]);
+    const chip = chat.texts.getByTestId('chat.quote');
+    await expect(chip).toHaveText('Late');
+    await expect(timeline.item(late).root).toHaveCount(0);
+
+    await chip.click();
+    await expect(page).toHaveURL(addressOf(id, late));
+    const item = timeline.item(late);
+    await expect(item.root).toBeAttached({ timeout: 20_000 });
+    await expect(item.root).toBeInViewport();
+    expect(await timeline.fromEnd()).toBeGreaterThan(100);
+    await restore();
   });
 
   test('that the timeline draws nothing for leaves it at its end', async ({ people, projects, timeline }) => {

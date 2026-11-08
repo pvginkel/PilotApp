@@ -555,6 +555,10 @@ test.describe('Off a phone, the session log’s popover', () => {
   }) => {
     const me = await people.signIn();
     const project = await projects.makeWithSession({ name: makeUnique('Popover'), members: [me.handle!] });
+    // Enough above the items that the timeline, opened at its end, has them under the popover's foot.
+    for (let index = 0; index < 10; index += 1) {
+      await projects.place(project, { kind: 'notice', title: `Notice ${index + 1}`, text: 'A notice that takes\n\na few lines.\n' });
+    }
     const first = await projects.startWork(project, { title: TITLE, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
     const second = await projects.startWork(project, { title: 'Surveying the scripts', brief: 'Survey the scripts.', cwd: '/work/Example' });
     await timeline.open(project);

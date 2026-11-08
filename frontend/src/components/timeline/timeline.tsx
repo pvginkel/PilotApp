@@ -1,8 +1,10 @@
 /**
  * A project's timeline (F8): its prose and work items in their order under their date and step
- * dividers (F9, F9.1), the opening first. It is anchored to the bottom: it opens at its end, a
- * project's own on each project (F1.6), and when items arrive it scrolls to the end unless the
- * reader has scrolled away from it; a new item flashes (F8.2).
+ * dividers (F9, F9.1), the opening first; one shorter than the page stands at its top. It opens at
+ * its end, a project's own on each project (F1.6), and at its end it follows what arrives — an
+ * item, a fold settling — unless the reader has scrolled away from it, or opened something that
+ * took the end out of reach: the reader's own open or close never moves the top of what they read
+ * (use-own-growth.ts). A new item flashes (F8.2).
  *
  * An open urgent item has a banner pinned to the top, whose Show scrolls to the item and flashes
  * it; a finished project's has none (F10.2). While open items are scrolled out above, a chip under
@@ -17,7 +19,10 @@
  *
  * Opened at an item's address, the timeline goes to the item and flashes it; at a block's, to the
  * block, its collapsed section opened (F31.5), or to its item where its line or its card stands for
- * it; an address it draws nothing for leaves it at its end (F97). A segment opens its block's
+ * it; an address it draws nothing for leaves it at its end (F97). An address whose item the
+ * timeline as read lacks — read before the item came, as a chat's quote chip can open it — waits:
+ * the timeline is read again, and the address goes to its item once that read draws it, or leaves
+ * the timeline where it stands once that read has landed without it. A segment opens its block's
  * collapsed section too (F33). Under a tab or the overlay it takes no focus, and keeps its scroll.
  */
 
@@ -32,6 +37,7 @@ import { Item } from '@/components/timeline/item';
 import { Opening } from '@/components/timeline/opening';
 import { rowsOf, type Row } from '@/components/timeline/rows';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
+import { useOwnGrowth } from '@/hooks/use-own-growth';
 import { isLine, titleOf, useTimeline, type TimelineItem } from '@/hooks/use-timeline';
 
 /** How far from the end, in pixels, still reads as at the end. */
@@ -45,6 +51,11 @@ interface Address {
   block: string | null;
 }
 
+/** A read of the timeline an address asked for, by the address's key. */
+interface Ask {
+  key: string;
+}
+
 interface TimelineProps {
   projectId: string;
   address: Address | null;
@@ -53,7 +64,7 @@ interface TimelineProps {
 }
 
 export function Timeline({ projectId, address, inert }: TimelineProps) {
-  const { data } = useTimeline(projectId);
+  const { data, refetch, isFetching } = useTimeline(projectId);
   const items = useMemo(() => data?.items.filter(isLine), [data]);
   const finishedAt = data?.finished_at ?? null;
   const readyAfter = data?.ready_after ?? null;
@@ -64,7 +75,9 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const { fresh, flashed, flash } = useFresh(items);
   const sections = useSections(address === null || address.block === null ? null : blockKey(address.item, address.block));
   const feed = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
   const pins = useRef<HTMLDivElement>(null);
+  const own = useOwnGrowth(feed);
   // The open items scrolled out above the banners, by id, in their order.
   const [above, setAbove] = useState<string[]>([]);
   // At the end until the reader scrolls away from it; it opens there.
@@ -132,6 +145,9 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   // The address last gone to: each is gone to once, when the timeline is read, or when it is opened
   // with the timeline on screen.
   const reached = useRef<string | null>(null);
+  // The read an address asked for, its item lacking from the timeline as read, and the last that landed.
+  const asked = useRef<Ask | null>(null);
+  const [landed, setLanded] = useState<Ask | null>(null);
 
   useLayoutEffect(() => {
     if (atEnd.current) toEnd();
@@ -142,24 +158,44 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   useLayoutEffect(() => {
     if (address === null) {
       reached.current = null;
+      asked.current = null;
       return;
     }
     const key = address.block === null ? address.item : blockKey(address.item, address.block);
     if (data === undefined || reached.current === key) return;
+    if (!data.items.some((item) => item.id === address.item)) {
+      if (asked.current?.key !== key) {
+        const ask = { key };
+        asked.current = ask;
+        // Over a read under way, which may predate the item.
+        void refetch({ cancelRefetch: true }).then(() => setLanded(ask));
+      }
+      if (landed !== asked.current || isFetching) return;
+    }
     reached.current = key;
     goTo(address);
   });
 
   // The timeline's own height changes, as when the head above it is drawn or the window is
-  // resized, and nothing scrolls it: at its end, it stays there.
+  // resized, and nothing scrolls it: at its end, it stays there. Its content grows or shrinks: an
+  // arrival keeps it at its end, and the reader's own open or close leaves it where it stands, no
+  // longer following its end once that is out of reach. A change of the column's width is a reflow.
   useLayoutEffect(() => {
+    const element = feed.current!;
+    const column = inner.current!;
+    let width = column.offsetWidth;
     const observer = new ResizeObserver(() => {
-      if (atEnd.current) toEnd();
+      const reflowed = column.offsetWidth !== width;
+      width = column.offsetWidth;
+      if (own() && !reflowed) {
+        if (element.scrollHeight - element.scrollTop - element.clientHeight >= END_SLACK) atEnd.current = false;
+      } else if (atEnd.current) toEnd();
       countAbove();
     });
-    observer.observe(feed.current!);
+    observer.observe(element);
+    observer.observe(column);
     return () => observer.disconnect();
-  }, []);
+  }, [own]);
 
   return (
     <div ref={feed} className="feed" onScroll={onScroll} inert={inert} data-testid="timeline">
@@ -183,7 +219,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
           </button>
         )}
       </div>
-      <div className="feed-inner">
+      <div ref={inner} className="feed-inner">
         <FlashContext.Provider value={{ fresh, flashed }}>
           <GoToContext.Provider value={goToBlock}>
             <SectionsContext.Provider value={sections}>
@@ -239,7 +275,9 @@ function TimelineRow({ row, fresh, flashed }: TimelineRowProps) {
   if (row.type === 'step') {
     return (
       <div className="divider step" data-testid="timeline.divider.step">
-        <LinkedText text={row.title} />
+        <span className="name">
+          <LinkedText text={row.title} />
+        </span>
       </div>
     );
   }

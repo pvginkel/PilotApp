@@ -1,16 +1,20 @@
 /**
  * Sticky-bottom scroll, after DesignAssistant's chat (portal/src/components/workspace/
  * chat-message-list.tsx, `useStickyBottom`): pins the scroll container to the bottom, and keeps
- * pinning as late layout grows the inner wrapper — a reply streaming in token by token, a tool's
- * result, a card opening. The reader scrolling up stops the pinning until they scroll back down.
+ * pinning as an arrival grows the inner wrapper — a reply streaming in token by token, a tool's
+ * result, a fold settling. The reader scrolling up stops the pinning until they scroll back down.
  *
- * A `ResizeObserver` on the wrapper covers first paint and every later change. Only the reader's
- * own input lets go of the bottom: the wheel or a key moving up, or a scroll while a finger or
- * pointer is down (a drag on the scrollbar, a selection). A scroll event alone is not taken as the
- * reader's: when the content shrinks — a table's columns rebalancing as a reply streams — the
- * browser clamps the view, and the event for that comes a frame later, often after the next delta
- * has grown the content again, when it looks just like a scroll up. DesignAssistant's hook let go
- * there. A scroll down into the bottom picks the pinning up again.
+ * A `ResizeObserver` on the wrapper covers first paint and every later change. The reader's own
+ * open or close of something in it (use-own-growth.ts) is not pinned: the view stays where it
+ * stands, so what they opened grows downward, and it goes on pinning only if the end is still in
+ * reach. A change of the wrapper's width is a reflow, never the reader's own. Only the reader's
+ * own input lets go of the bottom: the wheel or a key moving up, a scroll while a finger or
+ * pointer is down (a drag on the scrollbar, a selection), or an open that takes the end out of
+ * reach. A scroll event alone is not taken as the reader's: when the content shrinks — a table's
+ * columns rebalancing as a reply streams — the browser clamps the view, and the event for that
+ * comes a frame later, often after the next delta has grown the content again, when it looks just
+ * like a scroll up. DesignAssistant's hook let go there. A scroll down into the bottom picks the
+ * pinning up again.
  *
  * It answers whether it pins now, `stuck`. In test mode each pin is the `ui_state`
  * `<scope>.scroll`, `{scrollTop, reason}`, the first `initial`, and each change of pinning
@@ -18,6 +22,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useOwnGrowth } from '@/hooks/use-own-growth';
 import { isTestMode } from '@/lib/config/test-mode';
 import { endUiState } from '@/lib/test/ui-state';
 
@@ -38,6 +43,7 @@ export function useStickyBottom(
   const stickToBottomRef = useRef(true);
   const pinnedRef = useRef(false);
   const [stuckNow, setStuckNow] = useState(true);
+  const own = useOwnGrowth(containerRef);
 
   const setStuck = useCallback(
     (stuck: boolean) => {
@@ -113,8 +119,15 @@ export function useStickyBottom(
     window.addEventListener('touchend', release);
     window.addEventListener('touchcancel', release);
     window.addEventListener('keydown', onKey);
+    let width = wrapper.offsetWidth;
     const observer = new ResizeObserver(() => {
+      const reflowed = wrapper.offsetWidth !== width;
+      width = wrapper.offsetWidth;
       if (!stickToBottomRef.current) return;
+      if (own() && !reflowed) {
+        setStuck(distance() <= STICKY_THRESHOLD_PX);
+        return;
+      }
       pinToBottom(pinnedRef.current ? 'resize' : 'initial');
       pinnedRef.current = true;
     });
@@ -132,7 +145,7 @@ export function useStickyBottom(
       window.removeEventListener('keydown', onKey);
       observer.disconnect();
     };
-  }, [containerRef, wrapperRef, pinToBottom, setStuck]);
+  }, [containerRef, wrapperRef, pinToBottom, setStuck, own]);
 
   return { stick, unstick, stuck: stuckNow };
 }

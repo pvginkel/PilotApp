@@ -9,9 +9,11 @@
  * them as to the sender (decision 13); the list is read again on `project_changed`, which a chat's
  * open and close and each move of its session raise. Nothing stands in it while the list's read is
  * under way, "The chat did not load." while its latest read failed, and with no chat yet what to
- * ask, or in a draft "Tell Pilot what to manage" (F113). Sticky scroll keeps a streaming reply in
- * view while the reader is at the bottom; only their own scrolling lets go, and their message sent
- * from the composer under it, or a quote Discuss put there, goes back to the bottom. Shown at its
+ * ask, or in a draft "Tell Pilot what to manage" (F113). A chat shorter than its column stands at
+ * its top. Sticky scroll keeps a streaming reply in view while the reader is at the bottom; only
+ * their own scrolling lets go, or their own open of a step list or a card that takes the end out of
+ * reach, which grows downward (use-sticky-bottom.ts); their message sent from the composer under
+ * it, or a quote Discuss put there, goes back to the bottom. Shown at its
  * end, and not lying under a tab or the overlay, the chat is seen (F43). *In the chat* takes it to the
  * message that gave an answer (F42.3): the chats before loaded until the one holding it, the
  * pinning let go, the message scrolled into the middle of the view and flashed, and kept in its
@@ -214,7 +216,7 @@ export function ChatColumn({ home, covered, container, wrapper, composer, childr
         <div
           ref={wrapper}
           className={cn(
-            'flex min-h-full flex-col justify-end gap-4',
+            'flex min-h-full flex-col gap-4',
             home === 'feed'
               ? 'mx-auto w-full max-w-(--column) px-6 py-5 text-base/[1.6] [--person-width:75%] max-[900px]:px-3'
               : 'px-3.5 pt-2 pb-4 text-base/[1.6]',

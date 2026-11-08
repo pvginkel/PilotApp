@@ -7,8 +7,9 @@
  * Pilot's reply bare in the column, the server's lines while the session comes up in the cue alone
  * (F40.2), the phantom while a block streams (F40.4), then its time and avatar, "· Stopped" by a
  * stopped turn's and its reason in red and "· Failed" by a failed one's (F44); a date divider over
- * each day's first message. A chat that opens while the tab shows comes in; another person's turn
- * streams to every viewer alike. With no chat open the latest closed one shows above "Chat closed ·
+ * each day's first message. A chat shorter than its column stands at its top; at its end, a step
+ * list the reader opens grows downward, the view where it stood. A chat that opens while the tab
+ * shows comes in; another person's turn streams to every viewer alike. With no chat open the latest closed one shows above "Chat closed ·
  * <time>", and the next message starts a new chat below it; "The chat before · <day>" at the top
  * loads that chat above what is in view and leaves the view where it is (F130.1). Nothing stands in
  * it while its read is under way, and "The chat did not load." where it fails (F113). On a phone it
@@ -35,11 +36,16 @@ const blockStart = () =>
   line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, parent_tool_use_id: null });
 const delta = (words: string) =>
   line({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: words } }, parent_tool_use_id: null });
+const toolUse = (id: string, name: string, input: object) =>
+  line({ type: 'assistant', message: { id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input }] }, parent_tool_use_id: null });
+const toolResult = (id: string, content: string) =>
+  line({ type: 'user', message: { role: 'user', content: [{ tool_use_id: id, type: 'tool_result', content }] }, parent_tool_use_id: null });
 
 const EMPTY = 'Ask Pilot about this project: how a session is going, what an item means, a change to the plan. Discuss on an item quotes it here.';
 
 // A reply long enough to fill the tab's view.
 const LONG = ['The route, stage by stage:', '', ...Array.from({ length: 30 }, (_, index) => `${index + 1}. Stage ${index + 1}, by the lake.`)].join('\n');
+const TENT = ['The dome, pitch by pitch:', '', ...Array.from({ length: 30 }, (_, index) => `${index + 1}. Pitch ${index + 1}, by the lake.`)].join('\n');
 
 test.describe('The Chat tab', () => {
   test('is the panel’s first tab and the one it opens on, says what to ask while the project has no chat, and stays the tab the person picked, kept in the browser', async ({
@@ -121,6 +127,54 @@ test.describe('The Chat tab', () => {
     expect(message.x).toBeGreaterThan(column.x + column.width * 0.09);
     expect(message.x + message.width).toBeGreaterThan(column.x + column.width - 32);
     expect(reply.x).toBeLessThan(column.x + 32);
+  });
+
+  test('stands at the top of its column while it is shorter than that', async ({ people, projects, timeline, chat, chats }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Short chat'), members: [me.handle!] });
+    await timeline.open(project);
+    await chats.start(project, 'Which tent do we take?');
+    await expect(chat.messageTexts).toHaveText(['Which tent do we take?']);
+
+    const [body, first, message] = await Promise.all([chat.body, chat.days.first(), chat.messageTexts.first()].map(async (each) => (await each.boundingBox())!));
+    expect(first.y - body.y).toBeLessThan(24);
+    expect(message.y + message.height).toBeLessThan(body.y + body.height / 2);
+  });
+
+  test('at its end, opens a step list downward: the list’s line and the view stay where they stood, and the end is let go', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Steps'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'Which route do we take?');
+    const reads = ['a', 'b', 'c'].flatMap((name) => [
+      toolUse(`read_${name}`, 'Read', { file_path: `/work/Example/${name}.md` }),
+      toolResult(`read_${name}`, `Stage ${name}.`),
+    ]);
+    await controller.play(chats.store, session, [text('route', LONG), ...reads, text('end', 'The lake route it is.')]);
+    await controller.finish(chats.store, session, 'success', 'The lake route it is.');
+    const run = chat.root.getByTestId('chat.run');
+    await expect(chat.replyEnds).toHaveCount(1);
+    await expect(run).toBeInViewport();
+    const fromBottom = () => chat.body.evaluate((body) => body.scrollHeight - body.scrollTop - body.clientHeight);
+    await expect.poll(fromBottom).toBeLessThanOrEqual(1);
+    const scrollTop = () => chat.body.evaluate((body) => body.scrollTop);
+    const top = await scrollTop();
+    const before = (await run.boundingBox())!;
+
+    const letGo = chat.sticky(false);
+    await run.getByRole('button', { expanded: false }).click();
+    await letGo;
+    await expect(run.getByRole('button', { expanded: true })).toBeVisible();
+    expect(await scrollTop()).toBe(top);
+    expect(Math.abs((await run.boundingBox())!.y - before.y)).toBeLessThan(1);
+    expect(await fromBottom()).toBeGreaterThan(32);
   });
 
   test('shows another person’s message with their name before its time and their avatar, and streams their turn to the viewer as to them', async ({
@@ -259,6 +313,7 @@ test.describe('The Chat tab’s closed chats', () => {
   test.use({ viewport: { width: 1280, height: 600 } });
 
   test('shows a closed chat above “Chat closed · <time>” and the next message’s chat below it; opened again, the latest alone, “The chat before · <day>” loading that chat above what is in view and leaving the view where it is', async ({
+    page,
     people,
     projects,
     controller,
@@ -280,8 +335,10 @@ test.describe('The Chat tab’s closed chats', () => {
     await expect(chat.closed).toHaveText(`Chat closed · ${clock(closed!.closed_at!)}`);
     await projects.transition(project, 'reopened');
     const second = await chats.start(project, 'And the tent?');
-    await controller.play(chats.store, second.session, [text('tent', 'The dome.')]);
-    await controller.finish(chats.store, second.session, 'success', 'The dome.');
+    // Taller than the view: a chat shorter than it stands at the view's top, where no scroll can
+    // hold it while the chat before loads above it.
+    await controller.play(chats.store, second.session, [text('tent', TENT)]);
+    await controller.finish(chats.store, second.session, 'success', TENT);
     await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
     await expect(chat.lines.and(chat.root.getByTestId('chat.closed').or(chat.messages))).toHaveCount(3);
     const [above, line, below] = await Promise.all(
@@ -293,10 +350,15 @@ test.describe('The Chat tab’s closed chats', () => {
 
     // Opened again: the latest chat alone, the one before behind *load more*.
     await timeline.open(project);
-    await expect(chat.texts).toHaveText(['The dome.']);
+    await expect(chat.texts).toHaveCount(1);
+    await expect(chat.texts).toContainText('Pitch 30, by the lake.');
     await expect(chat.messageTexts).toHaveText(['And the tent?']);
     await expect(chat.closed).toHaveCount(0);
     await expect(chat.before).toHaveText(`The chat before · ${dayOf(closed!.opened_at)}`);
+    // Opened at its end: the reader scrolls up to the button.
+    await chat.body.hover();
+    await page.mouse.wheel(0, -100_000);
+    await expect.poll(() => chat.body.evaluate((body) => body.scrollTop)).toBe(0);
     const at = await chat.top(chat.messages.first());
 
     await chat.before.click();
