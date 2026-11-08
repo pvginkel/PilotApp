@@ -39,6 +39,7 @@ const stamp = (at: string) =>
 const SLEEP = '## Where do we sleep?\n\n```decision id=D1\noptions:\n  - Tent\n  - Cabin\n```\n';
 const COUNT = '## How many go?\n\n```question id=Q1\n```\n';
 const VAN = '## Book the van\n\n```action id=A1\n```\n';
+const GEAR = '## Gear\n\n```decision id=D2\noptions:\n  - Dome\n  - Tunnel\n```\n\n```decision id=D3\noptions:\n  - Wool\n  - Down\n```\n';
 const draftText = (title: string, ...asks: string[]) => [`# ${title}\n`, 'A week by the lake.\n', ...asks].join('\n');
 
 const EMPTY = 'Empty. Pilot writes the project here as you talk, and nothing is set up until you press Create project.';
@@ -258,9 +259,18 @@ test.describe('A draft’s ask and its definition chat', () => {
     const me = await people.signIn();
     const { id, folder } = await projects.makeDraft({ members: [me.handle!] });
     const title = makeUnique('Discussed');
-    await projects.saveProjectDocument(id, 'draft', draftText(title, SLEEP));
+    await projects.saveProjectDocument(id, 'draft', draftText(title, SLEEP, GEAR));
     await projects.endTurn(id);
     await projectHead.open(id);
+
+    // Two decisions under one heading are numbered among the draft's decisions.
+    for (const [block, label] of [
+      ['D2', `Decision 2 · ${title}`],
+      ['D3', `Decision 3 · ${title}`],
+    ]) {
+      await panel.draftBlock(block!).discuss.click();
+      await expect(definitionChat.quoteLabel).toHaveText(label!);
+    }
 
     const sleep = panel.draftBlock('D1');
     await expect(sleep.discuss).toHaveAttribute('title', 'Discuss: quote this block into the project’s chat');
