@@ -199,7 +199,7 @@ test.describe('A work item’s session log', () => {
     const [whole, less] = [(await sentText.boundingBox())!, (await sessionLog.sentLess.boundingBox())!];
     expect(Math.abs(whole.y + whole.height - (less.y + less.height))).toBeLessThanOrEqual(1);
     const word = await sentText.evaluate((box) => {
-      const text = [...box.childNodes].filter((node): node is Text => node instanceof Text && node.data.trim() !== '').at(-1)!;
+      const text = Array.from(box.childNodes).filter((node): node is Text => node instanceof Text && node.data.trim() !== '').at(-1)!;
       const range = document.createRange();
       range.setStart(text, text.data.trimEnd().length - 1);
       range.setEnd(text, text.data.trimEnd().length);
