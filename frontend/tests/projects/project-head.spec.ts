@@ -558,7 +558,8 @@ test.describe('A tight head beside the side panel', () => {
 
   /**
    * Every part of the head that shows, left to right in its row, each clear of the next and inside
-   * the head; in one row the step's anchor is its button's width, no blank standing beside it.
+   * the head; in one row the step's anchor is its button's width, no blank standing beside it; in
+   * either the step's button no wider than 350 px.
    */
   async function clear(projectHead: ProjectHeadPage, panel: { root: Locator }): Promise<void> {
     const parts = await projectHead.root.evaluate((head) =>
@@ -583,6 +584,9 @@ test.describe('A tight head beside the side panel', () => {
       return anchor.getBoundingClientRect().width - anchor.querySelector('.btn')!.getBoundingClientRect().width;
     });
     expect(blank).toBeCloseTo(0, 1);
+    // The step's button keeps its 350 px cap (D172) in either row, its anchor filling the second.
+    const step = await projectHead.root.evaluate((element) => element.querySelector('.step-anchor > .btn')?.getBoundingClientRect().width ?? 0);
+    expect(step).toBeLessThanOrEqual(350.01);
   }
 
   /** Whether the head stands in its two rows: the step below the name's row. */
