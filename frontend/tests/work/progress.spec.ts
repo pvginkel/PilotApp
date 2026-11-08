@@ -250,7 +250,14 @@ test.describe('Its popover', () => {
   });
 
   test('at the timeline’s end, opens above its button, within the timeline', async ({ people, projects, timeline, deploymentSse }) => {
-    const { project, work } = await running({ people, projects });
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Progress'), members: [me.handle!] });
+    // Enough above the item that the timeline, opened at its end, has it at the view's foot.
+    for (let index = 0; index < 10; index += 1) {
+      await projects.place(project, { kind: 'notice', title: `Notice ${index + 1}`, text: 'A notice that takes\n\na few lines.\n' });
+    }
+    const work = await projects.startWork(project, { title: 'Running slice 034', brief: 'Run the slice.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     const item = timeline.item(work).work;
