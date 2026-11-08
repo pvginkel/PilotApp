@@ -42,7 +42,10 @@ A push to PilotApp's `main` starts two Jenkins jobs, each triggered by GitHub's 
   stages, as `images.pilot` and `images.pilotUI`: `:dev-<n>` in `config/dev/values.yaml` and
   `:prd-<n>` in `config/prd/values.yaml`, tags that exist only once a promotion has made them
   (below). The pin step edits those lines in place and never creates a key, so the four keys stay
-  in their files. A new build aborts one still running.
+  in their files. A new build aborts one still running. Its `Checkout` stage writes the commit to
+  `frontend/git-rev`, which the suites' tree, which holds no `.git`, and the UI's image read, so
+  that the profile menu names the commit the page is built from ([`ui.md`](ui.md)); production's
+  images being retagged from dev's, its menu names the commit of the build it promoted.
 - **`AaC/PilotApp`** runs `Jenkinsfile.architecture` (below).
 
 The build job and the promotion job (below) sit together in the Jenkins folder `PilotApp`, named
@@ -52,6 +55,19 @@ as KubeCoder's pair is, `KubeCoder/Build-Main` and `KubeCoder/Promote-PRD` (D022
 renders, so a pin commit rolls dev's pod (below). A PilotDeploy commit to `main` that changes the
 chart or the values deploys to dev the same way, and reaches production only when a promotion
 carries it.
+
+**An open page on a new version.** A page hears of a new deployment over its live stream
+(`use-version-sse.ts`, the template's) and does what `NEW_VERSION` in
+`frontend/src/lib/config/new-version.ts` says: `banner`, the template's banner offering a reload,
+or `reload`, Pilot's. Under `reload` the page reloads itself, with no banner, at the first look
+that finds the reload takes nothing being typed in: no field holding words it would put out of
+sight, any field but one marked `data-survives-reload`, as the composer's, a question's and an
+action's paste-back are, and never a console's; no write on its way; and no field with the focus,
+but as the tab comes back into view. It looks at once, every second after, and on
+`visibilitychange`, and while it waits the page reports why, the ui state `deployment.reload`
+`loading`, its `metadata.held` `words`, `write` or `focus`
+(`contexts/deployment-context-provider.tsx`). `tests/shell/new-version.spec.ts` pins it, and the
+template's banner spec skips under `reload`.
 
 ## How a change gets to production
 

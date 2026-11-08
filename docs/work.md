@@ -28,7 +28,7 @@ for the live event:
 - `current_line`: `{state, since, step, agent, text}`, the Session's current line
   ([`sessions.md`](sessions.md)) with every key present, null where it leaves one out, `step`
   `{tool, input}` and `agent` `{type, description}`; null while no turn is in flight;
-- `environment`: `{id, name}`, the env chip and its link, as the Environment's row stands: null
+- `environment`: `{id, name}`, the env chip and the session log's link, as the Environment's row stands: null
   until its start has one; a done item's names the project that took the environment after it, or
   its id while it is free ([`controller.md`](controller.md));
 - `started_at`: the Session's, when the controller confirmed its session or a Resume's turn was
@@ -102,30 +102,38 @@ An open work item, a worker's run or the setup (`WorkItem`,
 follows from ([below](#pilots-own-work)):
 
 - **Its head**, an item's head ([`timeline.md`](timeline.md)), with the env chip once its start has
-  an environment, but for Pilot's own work, the environment's name linked to KubeCoder's Open by its
-  id (`EnvironmentLink`, [`ui.md`](ui.md)), at 600px and below a server icon alone, still the link,
-  the name its tooltip and, in a `.chip-label`, its accessible name; and, while `running` with a
-  `started_at`, the running time, a pulse and the figure alone, kept on one line: "0m", "12m",
-  "1h 5m", past six hours "7h", past two days "2d", counted again every 15 s on the browser's clock.
-  "Running for 1h 5m" is its tooltip and its accessible name (`role="timer"`). Then, with Discuss
-  at the head's end, Session log's icon, in every state, and Stop's, its square red, while
-  `running`, `starting` or `held`: icon buttons with no label, "Session log" and "Stop" their
-  tooltips and their accessible names.
+  an environment, but for Pilot's own work: the environment's name in the mono face, going nowhere,
+  its full name the tooltip (D168); at 600px and below its server icon alone, a button named after
+  the environment, whose tap opens the shared `Popover` under it with the full name, closed by a tap
+  outside it, Esc or the icon. Then, while its run is under way, `starting`, `running`, or `held`
+  with nothing holding it any more, a pulse, from its start, while it says "Preparing
+  <environment>" or "Creating the session": on the timeline the work item's one motion (D167).
+  Beside it, once `running` with a `started_at`, the running time, the figure alone, kept on one
+  line: "0m", "12m", "1h 5m", past six hours "7h", past two days "2d", counted again every 15 s by
+  the wall clock and at once as the page comes back into view (`useNow`), so that a page that
+  lived through a suspend keeps time. "Running for 1h 5m" is its tooltip and its accessible name
+  (`role="timer"`). Then, with Discuss at the head's end, Session log's icon, in every state, and
+  Stop's, its square red, while `running`, `starting` or `held`, or `idle` with its nudge owed
+  (D169): icon buttons with no label, "Session log" and "Stop" their tooltips and their accessible
+  names.
 - **Its title.**
 - **Its one line** (`workLine()`, `frontend/src/lib/utils/status-labels.ts`): a held item's reason,
   "Halted at the week's limit", "Halted at the five-hour limit", "Paused", "Waiting for Pilot's
   update", "Waiting for the controller", "Waiting for a slot · N running", "Waiting for the job before it" or "Waiting for
   the run before it"; an `idle` item whose nudge is owed, what holds the nudge in the same words, or
   "Waiting for its nudge" once nothing does; else its current line
-  in the chat's working cue (`WorkingCue`), the server's own words while it starts ("Preparing
-  <environment>", "Starting <environment>", "Creating the session", the trailing "…" left out) or
-  its environment restarts, "Thinking", "Writing", "Working" or "Waiting for the <type> agent", with
-  the latest step beside it, worded as the chat words a call, or the sub-agent's description; at
-  600px and below the step stands on a line of its own under the phase, indented to its text, so
-  that each line is cut at most once and a phase as short as "Thinking" never is (operator,
-  2026-10-31). A
-  call whose input still streams in is its verb alone ("Editing"), and its target joins it once the
-  call's line gives it; an empty target is not drawn. "Starting" before a start's first line, and "Waiting for
+  in the chat's working cue (`WorkingCue`), standing still in every state, its dancing dots not
+  drawn (`animate={false}`), its icon the state's (D167): the server's own words while it starts
+  ("Preparing <environment>", "Starting <environment>", "Creating the session", the trailing "…" left
+  out) or its environment restarts; the call it runs alone, in the phase's place, worded as the chat
+  words a running call ([`chats.md`](chats.md)), "Reading `…/Example/README.md`", a command's
+  description, "Asking KubeCoder start session · <environment>", or "Working" while it names none;
+  "Thinking" and "Writing" alone; "Waiting for the <type> agent" and, after a " · ", the
+  sub-agent's description, which at 600px and below stands on a line of its own under the cue, the
+  " · " dropped, indented to its text, so that each line is cut at most once and a phase as short as
+  "Thinking" never is (operator, 2026-10-31). The line is in one colour, the cue's, code in the mono
+  face. A call whose input still streams in is its verb alone ("Editing"), and its target joins it
+  once the call's line gives it; an empty target is not drawn. "Starting" before a start's first line, and "Waiting for
   Pilot" for a running one with none; "Stopped · <time>", with the cause of a stop made elsewhere
   ("<environment> was stopped", "… is being deleted", "… is gone", "… is in error"), or, for a
   usage halt's hard stop, "Stopped at the week's limit · <time>", "Stopped at the five-hour limit ·
@@ -141,13 +149,14 @@ follows from ([below](#pilots-own-work)):
   first in the row's place, the progress button going with the row, "Stop the session? Its turn
   ends where it is; Resume sends it on.", with Stop it and Cancel, which takes the focus; Stop's
   icon pressed again puts the focus back on Cancel, and Esc or Cancel puts it back on Stop's icon.
-  The question goes as the item leaves `running`, `starting` and `held`, and the row comes back
-  once it goes.
+  The question goes as the item is offered Stop no more, and the row comes back once it goes.
 
 Stop and Resume (`useStop`, `useResume`, `frontend/src/hooks/use-work-acts.ts`) call
 [`sessions.md`](sessions.md)'s routes and write the answer into the cached timeline, only while the
 item there is still in a state the act was made from (`moveWork`). A refusal is the query client's
-toast in the API's words, and Resume, or the question, stays offered. Once this browser's Stop it or
+toast in the API's words, and Resume, or the question, stays offered; the keyboard focus, which
+the button pressed lost while it was disabled for its act, goes back to it, Resume, Retry or Stop
+it, once it is enabled again, where the focus is then nowhere (`useFocusBack`). Once this browser's Stop it or
 Resume lands and swaps the two, the keyboard focus that was on the button that went goes to the
 other's resting button, Resume after a Stop and Stop's icon after a Resume (`useHandoff`,
 `work.tsx`); a swap another browser's act made, or one after the focus moved elsewhere meanwhile,
@@ -387,7 +396,8 @@ it, until it is retried.
 
 ## The session log
 
-At `/projects/<project>/sessions/<session>`, the item's id, the project's route opens the session
+At `/projects/<project>/sessions/<session>`, under the project's address
+([`projects.md`](projects.md)), the item's id, the project's route opens the session
 log (`SessionLogOverlay`, `frontend/src/components/overlay/session-log-overlay.tsx`, on
 [`documents.md`](documents.md)'s `Overlay`). An open item's Session log, a done work line's Open and
 its title, and a job's button or mark go there, on a phone a tap on the done line
@@ -412,7 +422,9 @@ phone** it is a view pushed over the tabs, or over the view it opened from.
   The popover has no Discuss; the view on a phone has, quoting the work item into the chat
   ([`chats.md`](chats.md)), so that a finished work item is discussed from there (D127).
 - **What each turn was sent**: before a turn's reply stands what the server sent it, as Pilot's
-  message, folded with Show more, "Pilot" and its time under it (`SentMessage`, `.log-sent`): a work
+  message, "Pilot" and its time under it (`SentMessage`, `.log-sent`), cut after 8 lines with Show
+more over the end of the last and, once opened, Show less after its last word, the one pressed
+handing the focus to the other (`Clamp`, `components/shared/clamp.tsx`): a work
   item's brief, a continuation's message, a Resume's `continue`, every turn with no author, in a work
   item's log and a job's alike (D150). A turn sent and not yet answered shows its message alone.
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
@@ -427,9 +439,11 @@ phone** it is a view pushed over the tabs, or over the view it opened from.
   `components/chat/tool-call.tsx`); its click goes to its block's address, else its item's
   ([`timeline.md`](timeline.md)), a draft's ask to the ask in the Draft tab, as a quote's chip does
   ([`ui.md`](ui.md)). An earlier turn ends on its time, with " · Stopped" after an interrupted one
-  and " · Failed" after a failed one.
+  or one stopped before it was sent, and " · Failed" after a failed one.
 - **Its tail**: while the item is held, starts or runs, the working cue: the held reason, what the
-  turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Otherwise
+  turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Its dancing
+  dots run while a turn runs or comes up, and stand still, its icon and words kept, while the gate
+  holds the start and while a nudge is owed. Otherwise
   how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>",
   "Stopped by Pilot at the usage limit · <time>" after a usage halt's hard stop, "Stopped by Pilot
   for its update · <time>" after the store's update's stop, the cause of a stop
@@ -456,7 +470,9 @@ in the Turn in flight, else in the next one. A Turn ends at its `result`, at a f
 at its environment stopped under it, or, where it ended with no record, where a later Turn's records
 begin. A `read-failed` or `write-back-refused` record is written after the run's last Turn ended,
 and stands at that Turn's end; a call or a sub-agent still running then was stopped with it, and
-draws with no spinner. A Stop of a held or a starting item ends its Turn with no record. An
+draws with no spinner. A Stop of a held or a starting item ends its Turn with a `server` record
+`{"type": "stopped-unsent"}`, its last ([`sessions.md`](sessions.md)), and the Turn ends
+" · Stopped", as an interrupted one does. An
 `isError` result shows its text as the failure, or "The turn failed." where it has none. An effect
 stands on the call whose tool-use id it names, whether its record was written before or after the
 call's `assistant` line: one whose call's line has not come yet waits for it, so a streamed log
@@ -464,12 +480,29 @@ shows it on its own first and then on its call, and one whose call no record sho
 tool-use id, is a step of its own in its record's place (`buildChatView`,
 `frontend/src/lib/chat/view.ts`).
 
+**A step line** (`summarizeTool`, `frontend/src/lib/chat/tools.ts`, drawn by `StepWords`) is in one
+colour, its step line's in the chat and the session log and the cue's in a work item's line, a
+failed one red throughout; what it names as code, a command without a description, a path, a glob
+or an environment's name, is set in the mono face, and a search's pattern keeps its quotes. A
+call's line opens on its verb, so that a running one reads as a status alone: "Reading
+`…/chat/tools.ts`", "Asking KubeCoder start session · <environment>", "Using Skill", "Starting
+the Explore agent", and once done "Read …", "Asked …", "Used …". A command's description, the
+model's own sentence, stands alone, without a verb, and so does an agent's, its type after it,
+"Find the chat's cue · Explore agent", its card's head in the chat and the session log too. A run
+of calls is one line in its usual colour, "Ran 3 commands, used a tool, asked KubeCoder 4 times · 8
+steps", its failures "· N failed" after its steps, the one red in it. Each text a run's line
+shows, its words and its count of steps, stands at least 200 ms: once the text differs from the
+one shown, the line waits 200 ms and shows the text as it then is, the wait never starting over,
+so that a call that came and went within it never shows (`useHeld`, `hooks/use-held.ts`); its
+spinner and its failures change at once.
+
 **The chat's view code** is the chat mockup's, shared by the session log and the Chat tab
 ([`chats.md`](chats.md)): `frontend/src/lib/chat/` (the records on the API's record types,
 `claude`'s lines, the stream's state, the view, the tool summaries, the activity, quotes, times and
 the transport), `frontend/src/components/chat/` (a reply's body and cue, the phantom, the steps, a
 tool call, a step line, the delta fade, a quote chip and the working cue, beside the Chat tab's own
-pieces), and the hooks `use-chat-stream`, `use-now`, `use-sticky-bottom` and `use-open-quote`. Its
+pieces), and the hooks `use-chat-stream`, `use-now`, `use-sticky-bottom`, `use-own-growth`, `use-held` and
+`use-open-quote`. Its
 Markdown is the app's one renderer ([`ui.md`](ui.md)).
 
 ## Testing it

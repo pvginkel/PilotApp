@@ -330,7 +330,7 @@ window regains the focus and on `project_changed` ([`timeline.md`](timeline.md))
 **A draft's chat** stands in the timeline's place instead (`home="feed"`), once the head is read and
 says it is a draft. It is the same chat: the chats before it, *In the chat*'s place, the seen mark
 and Stop. Only where it stands changes: its transcript is in the timeline's column, and its composer
-is in that column too, inside a full-width bordered box. Once the project can be created, Create
+lies over its foot in that column, its glass the column's width. Once the project can be created, Create
 project stands after its last message, scrolling with it ([`projects.md`](projects.md)). Beside it,
 the side panel holds the Draft and Documents tabs ([`documents.md`](documents.md)), on a phone among
 the tabs at the bottom, where the definition chat is the Chat tab. Under a document's tab it takes no
@@ -339,9 +339,16 @@ in its place, and the definition chat stands in the panel's Chat tab, above the 
 closed.
 
 - **What it shows.** The project's latest chat: the open one, or with none open the latest closed
-  one. Above it, "The chat before · <day>" loads that chat above what is in view, the line at the
-  top of the view kept in its place until the reader's own wheel, touch, click or key; a chat that
-  opens while the tab shows comes in below. Nothing stands in it while the list's read is under
+  one, standing at the top of the transcript where it is shorter than the view (D164). Above it,
+  "Load previous" (D170) loads the chat before above what is in view, the date divider over its
+  first message giving its day, the line at the top of the view kept in its place until the
+  reader's own wheel, touch, click or key; a latest chat shorter than the view keeps no place, the
+  view stopping at the chat's end. A chat that opens while the tab shows comes in below. How far
+  back it shows is kept in the page by the project for the page's life (`useChatReach`,
+  `hooks/use-chat-reach.ts`): back from another project or from the Documents tab it shows the
+  chats loaded before, after a reload the latest alone; and where a chat has opened since it last
+  showed, it shows the latest alone, waiting, on a list the cache holds while a read of it is under
+  way, for that read before it decides. Nothing stands in it while the list's read is under
   way, and "The chat did not load." while its latest read failed. A project with no chat reads "Ask
   Pilot about this project: how a session is going, what an item means, a change to the plan.
   Discuss on an item quotes it here.", and a draft's "Tell Pilot what to manage", over "A card, a
@@ -355,21 +362,34 @@ closed.
   in, what loads does not. A turn its records leave open ends once the list says Pilot no longer
   answers. Every viewer streams the chats it shows, so another member's message and Pilot's reply to
   it come to them as to the sender.
-- **A person's message** (`person-message.tsx`) stands on the right in the primary's tint, its
-  words as written, ticket ids, repos and environments linked (`LinkedText`, [`ui.md`](ui.md)), not
+- **A person's message** (`person-message.tsx`) stands on the right, a bubble with no frame, its
+  radius `14px 14px 4px`, the tail at its foot, on `--bubble`, the primary's light blue, a step
+  darker than the opening prompt's `--primary-muted` in the light theme and lighter in the dark, so
+  that a person's words stand on the same blue in the chat and on the timeline; its words as written, ticket ids, repos and environments linked (`LinkedText`, [`ui.md`](ui.md)), not
   Markdown; a quote it opens with is a line over it, and one inside it a chip where it stands; under
   it the time and the avatar, another person's name before the time.
 - **Pilot's reply** (`PilotReply`, `pilot-reply.tsx`) is a reply's body as the session log draws
   it, bare in the column, the cue under it while its turn runs; an ended turn closes on Pilot's
-  avatar and its time, " · Stopped" after an interrupted one and " · Failed" after a failed one.
+  avatar and its time, " · Stopped" after an interrupted one or one stopped before it was sent, as
+  a Stop while its chat came up leaves it, and " · Failed" after a failed one. The cue's "Thinking ·
+  N s" counts from the press of Send, by this page's clock where this page sent the message, a new
+  project's first aside, else from the message's record, else from the turn's first record.
 - **It sticks to its end** while it grows (`useStickyBottom`): only the reader's own scrolling up
-  lets go, and their message sent from the composer, or a Discuss, takes it back to the end.
+  lets go, and their message sent from the composer, or a Discuss, takes it back to the end. The
+  reader's own open or close of a step list or a card never moves the top of what they read: at
+  the end, the chat stops following its end once that is out of reach, and follows it again once
+  their close brings it back, as the timeline does ([`timeline.md`](timeline.md)). A view at its
+  end stays there as the composer grows.
 
 On a phone it is the Chat tab among the tabs at the bottom, the same column between the project's
 head and the tabs ([`projects.md`](projects.md)).
 
-**The composer** (`composer.tsx`) stands under the transcript: the growing text field (`TextField`,
-[`ui.md`](ui.md)) to five lines, Enter breaking the line and Ctrl+Enter, Cmd+Enter on a Mac,
+**The composer** (`composer.tsx`) lies over the transcript's foot, clear of its scrollbar, with no
+divider: the transcript scrolls under its frosted glass, three backdrop blurs, each masked to a
+band, over a tint, the glass the composer's box, in a draft the column's width alone (`ChatColumn`,
+`.composer .glass` in `panel.css`). The transcript is padded at its foot by the composer's height
+as measured, `--composer-h`, which a scroll into view keeps clear of too. It holds the growing
+text field (`TextField`, [`ui.md`](ui.md)) to five lines, Enter breaking the line and Ctrl+Enter, Cmd+Enter on a Mac,
 sending, and Send beside it, disabled while the field is empty; the field takes no typing while the
 message is on its way. A message with no chat open starts one, which the tab shows where it opens.
 While Pilot answers in the latest chat (`answering`), Stop stands in Send's place, in every member's
@@ -387,14 +407,17 @@ among a done line's actions, off a phone, shown with them ([`timeline.md`](timel
 and stands in the head of an opened document (the item), an attachment, the handbook, the project
 document (by path), and on a phone a session log's view (its work item), the popover having none. Its
 quote's label is an item's title; a block's "<ask> · <item's title>", a draft's ask's "<ask> ·
-<draft's title>", "New project" while the draft has none; a file's title as read, else "Handbook" or
+<draft's title>", the ask its own section's heading, else its kind, numbered among its document's
+blocks of that kind where it holds more than one, "Decision 2 · Packing", a kind held once
+unnumbered; "New project" while the draft has none; a file's title as read, else "Handbook" or
 "Project document"; an attachment's title, its path as the timeline gives it. A click puts the quote
 in the project's composer (`hooks/use-discuss.ts`) and shows the panel's Chat tab; in a draft it goes
 to the definition chat, the first tab of the tab line, showing it where a document's tab shows. On a phone it shows the Chat tab, a draft's Chat, every view taken off first. The quote
 stands over the field as a chip, with its remove, the field takes the focus once nothing covers it,
 and the transcript goes to its end. The message goes as the quote's tag, a space and the words, and
-the chip goes once the server took it. The quote is kept in the page alone, by the project: a reload
-keeps the words and not the quote.
+the chip goes once the server took it. The quote is kept in the browser beside the words, by the
+project (`chat/<project id>/quote` in `pilot.unsent`, [`ui.md`](ui.md)), until sent or dropped, so
+that a reload keeps both (D171).
 
 **The unread dot** (`useChatDot`) stands on the Chat tab, on a phone the
 Chat tab at the bottom, while the list's `unread` says Pilot replied after the person last saw the
@@ -442,7 +465,8 @@ environment's tree, so a chat's start in the store needs a file under `/work/Pil
 under the project's folder (`put_file`), or its create is `422`.
 
 The browser suites are `frontend/tests/chat/` (`chat-tab.spec.ts`, `composer.spec.ts`,
-`discuss.spec.ts`, `in-chat.spec.ts`), `tests/timeline/quotes.spec.ts` for the chips, and
+`discuss.spec.ts`, `in-chat.spec.ts`, `steps.spec.ts`, a step line's colour, words and hold),
+`tests/timeline/quotes.spec.ts` for the chips, and
 `tests/projects/new-project.spec.ts` and `create-project.spec.ts` for the definition chat. The
 Playwright backends start every chat in the store environment of their own fake, `playwright-store`
 (`STORE_ENVIRONMENT_ID`, `loadAppBackendEnv()`), which the `chats` fixture

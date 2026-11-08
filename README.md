@@ -32,8 +32,9 @@ timeline's place, each project's kept in the browser, beside the side panel, alw
 dragged, with the project's chat and its documents ([`docs/documents.md`](docs/documents.md)); and on a phone no top bar, the head in one line, the
 tabs at the bottom and what opens from them a view pushed over them, the item alone from a
 notification's link among them, Back the browser's ([`docs/projects.md`](docs/projects.md)). A
-project starts from the plus beside the list, as a draft: its definition chat stands in the
-timeline's place while Pilot writes the draft, `project.md`, in the panel's Draft tab, its asks
+project starts from the plus beside the list, its definition chat alone until its first message
+makes the draft, each project then at its own address, its slug once created: the chat stands in
+the timeline's place while Pilot writes the draft, `project.md`, in the panel's Draft tab, its asks
 answered in place, and Create project opens it, hands it to Pilot's setup, the brain's first
 background job, and pauses it, so that its work waits for a person's resume
 ([`docs/projects.md`](docs/projects.md), [`docs/work.md`](docs/work.md)). Beneath the screens are

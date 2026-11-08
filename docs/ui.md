@@ -43,7 +43,12 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
   toggle first (below); the logo and the name, the gold bar's badges after them, none at the handle step, and the person's avatar, which opens the profile
   menu (`profile-menu.tsx`). The menu holds the person's name, Theme (System, Light, Dark), Profile
   once the handle is chosen, and Sign out, which for a person deletes this browser's push
-  subscription first ([`notifications.md`](notifications.md)). It keeps the template's `app-shell.topbar.user*` test
+  subscription first ([`notifications.md`](notifications.md)); at its foot the short hash of the
+  commit the page is built from, in extra-small muted type (`shell.profile.version`). The app's
+  Vite plugin `buildCommit()` (`frontend/vite-build-commit.ts`) embeds it as
+  `import.meta.env.VITE_BUILD_COMMIT` as the dev server or the build starts: from `frontend/git-rev`,
+  which the `Jenkinsfile` writes at checkout, as CI's trees hold no `.git`, else the work tree's
+  `git rev-parse HEAD`; a build that can name neither fails ([`deployment.md`](deployment.md)). It keeps the template's `app-shell.topbar.user*` test
   ids, on a phone too, where it opens from the drawer's head, so the template's sign-in specs pass
   against it.
 - **The gold bar** (`components/shell/gold-bar.tsx`) shows each condition that holds all work, and
@@ -70,8 +75,12 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
     starts until it is done; work items go on."
   - the week's usage halt ([`usage.md`](usage.md)), an octagon-pause icon, its badge "Halted at the
     week's limit": "Work items have been halted at the week's usage limit since <time>. 92% of the
-    week's quota is used. No work item starts until a reading puts it under the limit; chats and
-    Pilot's own jobs go on.", the share followed by ", as of <time>" while the reading is `stale`,
+    week's quota is used. …", its end what the halt does to running work, by the window's halt
+    setting ([`usage.md`](usage.md); `haltDoes()`): under no new work "No work item starts until a
+    reading puts it under the limit; chats and Pilot's own jobs go on.", under the cooperative stop
+    "The running work items are asked to stop at their next step, and none starts until a reading
+    puts it under the limit; …", and under the hard stop "Pilot has stopped every running work item,
+    and none starts until …"; the share followed by ", as of <time>" while the reading is `stale`,
     the age a fresh reading does not have (`usage.md`). Its overrule's button says "Go on to 97%" for the
     allowance and "Run it out" at the second limit, its `title` what it does, "Work items go on
     until 97% of the week's quota is used." or "Work items go on until the week's quota runs
@@ -82,11 +91,12 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
     week's words for the five-hour window, "… of the five-hour window's quota is used …", with no
     overrule.
 
-  **`GET /api/conditions`** answers `{conditions: [{code, since, share, taken_at, stale, offer,
-  target}]}`: `code` `outage`, `store_update`, `week_halt` or `five_hour_halt`, the outage first,
+  **`GET /api/conditions`** answers `{conditions: [{code, since, share, taken_at, stale, setting,
+  offer, target}]}`: `code` `outage`, `store_update`, `week_halt` or `five_hour_halt`, the outage first,
   then the store's update, then the week's halt, then the five-hour halt; `since` when it began, as
   this server met the controller, as the update was made, or as it received the readings; a halt's
-  `share` of its window's quota, its reading's `taken_at` and whether it is `stale`, null for the
+  `share` of its window's quota, its reading's `taken_at`, whether it is `stale` and its `setting`,
+  its window's halt setting, `no_new_work`, `cooperative_stop` or `hard_stop`, each null for the
   outage and the store's update; and the week's halt's `offer`, `allowance` or `run_out`, with the allowance's `target`, a
   fraction, null at the wall and for the other conditions, where the line shows no overrule. At
   each turn of a condition, and as a halt's figures move, the SSE event `conditions_changed`
@@ -143,7 +153,8 @@ background and text.
 the template's included, takes them: `--text-xs` to `--text-2xl` in `app-theme.css`'s `@theme`,
 and a font size in the app's CSS is `var(--text-<step>)`. On a phone, at 900px and below, they are
 13, 14.5, 16, 17.5, 19 and 22px; above it a pixel down, 12, 13.5, 15, 16, 17.5 and 20px. The body
-is base, its line 1.6. Which text takes which step is the mockup's:
+is base, its line 1.6. Which text takes which step is the mockup's, the chat's included, a step
+above the chat mockup's own sizes on a phone (D177):
 
 - **base**: the body, a done line, a document's prose, an answer, an option, a field, a button, a
   menu item, the chat, a dialog's text.
@@ -164,7 +175,9 @@ class that replaced a `text-[Npx]`, which set no line, keeps the body's with it,
 **The avatars.** The palette is `--avatar-1` to `--avatar-6`, each with its `-text`: the primary
 tint, pink, green, amber, violet and teal. A person's avatar slot counts from 1 and slot *n* takes
 colour (*n* − 1) modulo 6, plus 1; `tests/shell/avatars.spec.ts` measures every pair at 4.5:1 or
-better in both themes. Pilot's mark is `--avatar-pilot`, grey, outside the palette. `Avatar`
+better in both themes. Pilot's avatar is outside the palette: its circle `--avatar-pilot`, a grey,
+and its mark's lines the primary, `--avatar-pilot-text` (D118), wherever it shows, the timeline,
+the session log, settled lines and the chat; the spec pins the mark's colour as the primary's. `Avatar`
 (`components/shared/avatar.tsx`) shows a person's initials with their full name as its tooltip, or
 a user icon for a name without initials. It is 38px, `sm` 29px and `xs`, an answer's, 24px, its
 initials 14.5, 12 and 10.2px, and Pilot's mark 13/20 of the circle.
@@ -176,6 +189,30 @@ strip over an opened document Pilot is working on takes the theme's three as the
 its button the gold bar's ([`documents.md`](documents.md)). `tests/shell/gold-bar.spec.ts`
 measures the bar's text at 4.5:1 or better and its hue gold in each theme, and
 `tests/work/registered.spec.ts` the strip's.
+
+**The dividers and the fields' edges** are `--border` and `--input`: in the dark theme 26 % and
+36 % lightness, so that an unfocused field stands apart from a divider, and in the light theme
+both 91 % (`tests/shell/theme.spec.ts`). A focused field's ring is the primary.
+
+## Motion
+
+Under the reduced-motion setting (`prefers-reduced-motion: reduce`), which Remote Desktop reports,
+what moves goes instant (D175), and what says that something runs keeps moving (D176). One
+unlayered block of `app-theme.css` takes every transition to its end at once, the drawer's slide
+and darkening among them, and stands the chat's fades, a streamed text's deltas
+(`.delta-fresh`) among them, and the toast's slide-in on their last frame from the start: their
+duration is 0 s and their forwards fill kept, so that no reply stays hidden, as `animation: none`
+would leave it. An arrival's flash holds its ring for its 1.6 s with no fade, its end still
+clearing it (`timeline.css` redefines `@keyframes fresh` under the setting). A smooth scroll a
+script asks for jumps (`smoothly()`, `src/lib/motion.ts`): the timeline's, the overlay's and the
+clarification box's. The pulses, on a work item, Pilot's jobs and the project list's glyphs, the
+dancing dots, which run by script (`el.animate(…)`) and no style rule reaches, a running step's
+spinner and the loading bar's stretch keep moving: no rule names them.
+
+**The loading bar** (`components/shell/loading-bar.tsx`, `shell.loading`) shows while the router
+keeps a screen showing for what its successor reads ([`projects.md`](projects.md)), once the wait
+has lasted 200 ms: a thin line at the top of what lies under the top bar, on a phone at the page's
+top, a stretch of the primary running along its track.
 
 ## The shared pieces
 
@@ -236,9 +273,17 @@ In `src/components/shared/`:
   and links as the heading shows them, each link nested as `LinkedText`'s are.
 - `Fold({children, testId})`: a text cut at 13.5em, fading out, with Show more; one that fits shows
   whole.
+- `Clamp({lines, children, testId})`: a text cut after its first `lines` lines, Show more over the
+  end of the last, and once opened Show less after its last word; the one pressed hands the focus
+  to the other, and a text that fits shows whole, with neither. The session log's sent message is
+  its one user ([`work.md`](work.md)).
 - `TextField`: the text field every answer and every message to Pilot is typed into, a `textarea`
   one line at rest that grows with its text to eight lines, or its `lines`, the chat's five, and
-  then scrolls; `readOnly` holds it, keeping the focus, while what it sends is on its way. Enter
+  then scrolls, its window whole lines: its room above and below is a clear border outside what it
+  scrolls, its frame its outline. It sizes itself again in the next frame as its width changes, as
+  when the window turns or the panel opens beside it. `survivesReload` marks a field whose words
+  stand in it again after a reload (`data-survives-reload`), which a new version's reload does not
+  wait on ([`deployment.md`](deployment.md)); `readOnly` holds it, keeping the focus, while what it sends is on its way. Enter
   breaks the line; Ctrl+Enter, Cmd+Enter on a Mac, calls its `onSend` where the field has one Send,
   and Esc its `onEscape` where something holds it. While it has the focus, its parent, the row
   holding what sends it, is kept in view.
@@ -335,9 +380,8 @@ from acting.
 
 **`<EnvironmentLink environment={{id, name}} />`** is an environment by its name, linked by its id
 to `<base>/environments/<id>/ssh/open`, "Open <name> in VS Code", while the base is set, and plain
-text, the name its tooltip, while it is unset or not yet read: the env chip's and the session log's.
-Its `children`, where given, show in place of the name: the env chip's icon and the name in a
-`.chip-label`, which a phone leaves to a screen reader ([`work.md`](work.md)).
+text, the name its tooltip, while it is unset or not yet read: the session log's head's. A work
+item's env chip links nowhere (D168, [`work.md`](work.md)).
 
 ## The PWA
 
@@ -382,10 +426,13 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   `goldLine(code)` the phone's lines, `goldText(line)` a line's words without its button, and
   `goldOverrule(line)` its overrule's button; `drawerToggle` is the drawer's button, on a phone
   and at the narrow width, `drawerHead` the phone's drawer's head and `scrim` the scrim; `offer`,
-  `offerOn` and `offerNotNow` are the notifications' offer and its two buttons, and `listening()`
+  `offerOn` and `offerNotNow` are the notifications' offer and its two buttons, `loading` the
+  loading bar, `profileVersion` the profile menu's commit, and `listening()`
   waits until the page hears its person's input, on which it beats. Every spec's page reduces motion
-  (`tests/support/fixtures-infrastructure.ts`), so the drawer opens at once; a spec that measures
-  the slide asks for `reducedMotion: 'no-preference'` first.
+  (`tests/support/fixtures-infrastructure.ts`), so that the app's own rule makes its transitions
+  and fades instant and its smooth scrolls jumps, the drawer opening at once; a flash still runs its
+  1.6 s. A spec that measures the slide or a fade asks for `reducedMotion: 'no-preference'` first,
+  as `tests/shell/motion.spec.ts` does, each of its tests under both settings.
 - `controller` drives the worker's fake controller, and `conditions` reads what the gold bar reads
   ([`work.md`](work.md)).
 - `browserPush` gives the spec's browser its notifications permission and a subscription from the

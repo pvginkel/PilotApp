@@ -21,8 +21,10 @@ projects too.
 
 - **`GET /api/projects`** answers `{projects: [tab]}`, the unarchived projects in the order they
   were created (`Project.number`); with `?archived=true`, the archived ones, in the same shape. A
-  tab is `{id, name, ticket, state, finished_at, status, member, progress, badge}`. `name` is null
-  for a draft without a title. `finished_at` is the latest `finished` transition's time, null unless
+  tab is `{id, address, name, ticket, state, finished_at, status, member, progress, badge}`.
+  `address` is the project's address, the name its pages' URLs take ([below](#the-project-list)):
+  its slug once Create project has given it one, else `draft-<number>`, its folder in the store's
+  tree ([`sync.md`](sync.md)). `name` is null for a draft without a title. `finished_at` is the latest `finished` transition's time, null unless
   the project is finished. `status` is below. `member` is whether the caller has an open membership,
   false before they have a handle. `progress` is `{done, total, in_progress}` over the plan's steps,
   removed steps not counted, `in_progress` the titles of the steps in progress in the plan's order.
@@ -35,7 +37,13 @@ projects too.
   ([`usage.md`](usage.md)); never a wait and never an item for another
   person (before the caller has a handle, every item for someone is another's); `urgent` whether one
   of them is urgent.
-- **`GET /api/projects/<id>`** answers the project's head: `{id, name, ticket, repo, state,
+- **`GET /api/projects/lookup?address=<address>`** answers `{id, address}`, the project an address
+  names and the address its pages take now (`ProjectService.at_address`). An address that reads as
+  an id is one; else a `draft-<number>` names the project by its `number`, which is never handed
+  out again, so that it goes on naming a project Create project has given its slug, and is
+  answered with that slug; else it is a slug. It reads an archived project too. No project at the
+  address is a `404`, "Project <address> was not found", and no address a `400`.
+- **`GET /api/projects/<id>`** answers the project's head: `{id, address, name, ticket, repo, state,
   archived, autopilot, status, member, members, progress, tasks, notes, running_work, open_items,
   autopilot_may_take, create_refusal}`. A member is `{handle, name, initials, avatar_slot}`, in the
   order they joined; a task is a step, `{id, title, status, notes}`, with its open notes; `notes`
@@ -60,12 +68,17 @@ status as it stands. A work item held or starting is not running.
 
 ## Changing them
 
-**`POST /api/projects`**, no body, starts a new project as the caller (`ProjectService.create`) and
-answers `201` with the draft's head, `state` `draft` and `name` null: the caller its one member,
-its draft, `project.md`, born empty ([`engine.md`](engine.md)), and no transition. Once it commits,
-`ManifestChanged` writes its folder, `draft-<number>`, into the store's tree
-([`sync.md`](sync.md)), which its definition chat's start waits for ([`chats.md`](chats.md)). A
-caller who has not chosen a handle is a `409`.
+**`POST /api/projects`** `{words}` starts a new project with the caller's first message to it
+(D174) and answers `201` with the draft's head, `state` `draft` and `name` null: in one
+transaction, the draft (`ProjectService.create`), the caller its one member, its draft,
+`project.md`, born empty ([`engine.md`](engine.md)), and no transition; then the words sent to it
+as any message to a draft with no chat open is, starting its definition chat
+([`chats.md`](chats.md)). The head's `create_refusal` is then "Pilot is writing", the turn in
+flight. Once it commits, `ManifestChanged` writes its folder, `draft-<number>`, into the store's
+tree ([`sync.md`](sync.md)), which the chat's start waits for. It is a `400` with no words, and a
+`409` for a caller who has not chosen a handle, while the store's update is unlifted ("Pilot is
+updating") and with no controller or no store environment configured; a refused message rolls
+the draft back with it, so that it leaves no project behind.
 
 **`POST /api/projects/<id>/transitions`** `{kind, answer_confirmations?}` makes a transition as the
 caller, now, and answers `201` with the head as it then stands. A transition is a
@@ -111,7 +124,9 @@ It is refused with its reason while a Turn of the definition chat is in flight (
 It is refused while nothing is drafted ("nothing is drafted": `project.md` has no title and no body,
 or the definition chat has had no message). It is refused while the draft names no slug ("the draft
 names no slug"), or names one that is not lower-case letters, digits and hyphens, starts `draft-` or
-is another project's ("the draft's slug `<slug>` …", [`block-dsl.md`](block-dsl.md)). And it is
+is another project's ("the draft's slug `<slug>` …", [`block-dsl.md`](block-dsl.md)), or one that
+reads as a project's id ("the draft's slug `<slug>` reads as a project's id"), so that every
+address a project is given names it alone. And it is
 refused with no controller or no store environment configured, which the setup needs. An ask the
 draft leaves open never refuses it: the ask stays open, and unanswerable, in the project document.
 The head's `create_refusal` gives each reason but the last. Two Creates racing to one slug end at
@@ -179,9 +194,15 @@ folder moves from `draft-<number>` to its slug.
 The side column (`project-column.tsx`), on a phone and at the narrow width the drawer
 ([`ui.md`](ui.md)). Its head reads
 "Projects", at the base size, with the plus ("New project") and the overflow menu ("More"), which
-holds *Archived*, at its right, their icons 16px. The plus starts a new project (`POST
-/api/projects`, above) and opens the draft at its address, the focus in its definition chat's
-field. It is disabled while its post is under way.
+holds *Archived*, at its right, their icons 16px. The plus is a link to `/projects/draft-new`, a
+new project's definition chat with nothing behind it on the server (D174; `NewProject`,
+`new-project.tsx`): the draft's head, "New project" and its Draft chip, the chat's empty state and
+its composer, the focus in its field, and beside them the side panel's Draft and Documents, both
+empty; on a phone a draft's tabs. Its words are kept in the browser until sent. Leaving it leaves
+nothing behind. Its first message is the draft's start (`useStartProject`, `POST /api/projects`,
+above), so that a message the server refuses makes nothing, its words left in the field. Sent, the
+new project's composer waits until the route shows the draft's chats (below), and the page shows
+the draft at its address, `draft-<number>`, in the entry's place, the focus in its chat's field.
 
 - **The groups.** The person's projects, the unfinished ones they are a member of, stand under the
   head with no group row; *Other projects* holds the unfinished rest, and *Finished* every finished
@@ -211,7 +232,17 @@ field. It is disabled while its post is under way.
   order, or "None yet", under a back arrow ("Back to the projects") that returns to the list. Which
   view shows is the column's own state, and the browser does not remember it.
 
-A project has its own address, `/projects/<id>`, by its id. The bare address opens the project the
+A project has its own address, `/projects/<address>`: its slug once Create project has given it
+one, a draft's `draft-<number>` (D173). An address names its one project for good: a slug is set
+once, a draft's number is never handed out again, and no slug starts `draft-` or reads as an id.
+Its id opens it too, and so does a created project's `draft-<number>`, a link copied while it was
+a draft; there the project's own address takes their place in the entry once its head is read, the
+rest of the path and the entry's state kept, on the same screen. `/projects/draft-new` is the
+plus's, naming no project. The project's route resolves the address to the project's id
+(`useProjectIdAt`, `hooks/use-project-address.ts`): an id as it stands, else from the project
+lists' reads, else `GET /api/projects/lookup` (above), read once; each resolution is kept for the
+page's life. The API and what the browser keeps name the project by that id, every link by the
+address (`useShownProject()`). The bare address opens the project the
 browser remembers while that project is in the list, else the list's first in the order shown; with
 no project the centre reads "No projects yet" and the address stays `/`. Under it are an item's
 address and a block's ([`timeline.md`](timeline.md)), and a document's, an attachment's, the
@@ -219,10 +250,19 @@ handbook's and the project document's ([`documents.md`](documents.md)), at which
 is current too. Off a phone the project's row in the list brings back the document's tab the
 project was left on, but for the row of the project on screen, which shows its timeline, adding an
 entry; any other arrival at the project's own address, a fresh page's included, shows its timeline
-(D151). The project's route remounts on each project, so whatever it opened (the plan, the notes,
-the menu, a dialog, the session log's popover) is closed on the next one, while its tab line and its
+(D151). The project's screen is drawn afresh on each project, so whatever it opened (the plan, the
+notes, the menu, a dialog, the session log's popover) is closed on the next one, while its tab line and its
 side panel's tab come back as that project left them, and a phone shows its Timeline (below); the drawer closes on any change of
 address ([`ui.md`](ui.md)).
+
+**A switch never blanks the screen** (`readFirst`, `lib/screen-reads.ts`): the project's route
+reads the project's head and its timeline, or a draft's chats, before the router swaps it in, and
+until they are in the router keeps the screen showing, another project's, the profile's or the new
+project's chat, the loading bar telling of a wait past 200 ms ([`ui.md`](ui.md)). Its address
+moves at once. An address gone to while another's reads are under way replaces it, the first never
+shown. A project's tab preloads its route on hover or touch (`preload="intent"`), so that its reads
+may be in by the click. What the cache holds stands, the screen reading it again. The page's first
+screen waits for none, and a read that fails is the screen's to show once swapped in.
 
 The list and the head are read again when the window regains focus, after each of the page's own
 writes, which invalidate every query, on the server's `project_changed` event but the one such a
@@ -240,13 +280,16 @@ it as its last row. A phone's head is its own, in one line (below).
 **A tight head** gives way in one order (D073):
 
 1. The repo goes first.
-2. The name goes next, cut with an ellipsis, down to nothing.
+2. The name goes next, cut with an ellipsis, down to 250px, or its own width where that is less
+   (D172).
 3. The step's name goes next, down to a floor of 28px, or its own width where that is less.
 4. Last, the members fold to the first avatars and a "+N" count, whose tooltip names the rest. One
    avatar always stays.
 
-The ticket, the chips, auto pilot and the icons keep their size. A head whose parts, each at its
-floor, would still run its menu past it in one line stands in its two rows. It is measured in one
+The ticket, the chips, auto pilot and the icons keep their size, and the step button stands no
+wider than 350px. A head whose parts, each at its floor, would still run its menu past it in one
+line stands in its two rows, where the name takes what its row leaves beside its chip, the ticket
+and the switch, with no floor. It is measured in one
 line on every change of the head's width or its parts. So the switch, the menu and the icons stay
 inside the head, and nothing overlaps, down to 1200px beside a 420px side panel.
 
@@ -256,7 +299,10 @@ inside the head, and nothing overlaps, down to 1200px beside a 420px side panel.
   switch. An archived project shows "Archived" after its name and the rest as it was left, the
   switch disabled.
 - **The auto pilot switch** flips at once with a transition by the person, `autopilot_off` or
-  `autopilot_on`, and stays pending until every query is read again. Turned on while the head's
+  `autopilot_on`, and stays pending until every query is read again (`useAutopilotFlip`). A refused
+flip reads the head again: where the project already stands as the flip asked, as after a second
+tap's flip or one from a page left stale, the flip is done and nothing is toasted; any other
+refusal toasts the server's words. Turned on while the head's
   `autopilot_may_take` is above 0, it asks first, in a modal dialog (`autopilot-dialog.tsx`):
   "Answer what auto pilot would take?", the lines "N open confirmations ask only because auto pilot
   is off." ("One open confirmation …" for one), "Yes answers them Yes for you, and Pilot goes
@@ -308,8 +354,9 @@ holds and centred: the button, "Create project", its tooltip "Hand the project t
 up and starts the plan", and the muted line "The project is ready to be created." at the small size,
 the button left of the line, and above it at 900px and below, as on a phone. Pressed, it makes the
 `opened` transition (above) and stays pending until every query is read again, a press meanwhile
-doing nothing. The head then reads the open project's, and the route draws the timeline in the
-definition chat's place. A refusal the head cannot give, no controller or no store environment,
+doing nothing. The head then reads the open project's, the route draws the timeline in the
+definition chat's place, and the address moves to the project's slug, its `draft-<number>` still
+opening it. A refusal the head cannot give, no controller or no store environment,
 comes back as the request's error, the query client's toast.
 
 ## A project on a phone
@@ -527,8 +574,11 @@ wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`
 `saveProjectDocument`, `endTurn`, `doneByPilot`, `attach`, `attachToDraft`, `draft`, `register`,
 `workerAttach`, `askWriter`, `clarify`, `list`, `head`, `transition`, `sightings`, the item writes of
 [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
-`projectList` and `projectHead` drive the screens: `projectList.newProject` is the plus and
-`created()` waits for its draft, `projectList.statusIcon(name)` reads a tab's icon, its status and
+`projectList` and `projectHead` drive the screens, a spec building a project's URLs with
+`projectAddress(id)`, the folder the testing route answered (a draft created since is at its slug,
+`(await projects.head(id)).address`): `projectList.newProject` is the plus and `created()` waits
+for the draft its first message makes, the chats fixture's `openingNew()` putting that draft's
+folder in the store, `projectList.statusIcon(name)` reads a tab's icon, its status and
 its glyphs, and `projectList.written(id, kind)` waits for its pause or resume to be written;
 `projectHead.autopilotWarning` is the triangle, `autopilotDialog` the switch's dialog,
 `controls()` gives the head's controls' test ids in order, `memberAvatars` and `membersMore` the
@@ -539,7 +589,9 @@ reads Create project (`definitionChat.createReady`, `createButton` and `createLi
 tab's dot, the Documents tab's count, the page over them and the Plan tab's page. The status and the
 pause are pinned in `tests/projects/project-status.spec.ts`, the switch's dialog in
 `autopilot.spec.ts`; the plus in `new-project.spec.ts`, Create project and its pause in
-`create-project.spec.ts`, the tight head and a phone's head in `project-head.spec.ts`, a phone's
+`create-project.spec.ts`, the addresses in `project-address.spec.ts`, a switch that keeps the
+screen in `tests/shell/screen-switch.spec.ts`, the tight head, the auto pilot switch's refusals
+and a phone's head in `project-head.spec.ts`, a phone's
 tabs in `phone-tabs.spec.ts` and its views and Back in `phone-views.spec.ts`. Each Playwright
 worker's database is a clone of the dev seed ([`record.md`](record.md)), so every spec's list holds
 the seed's projects beside its own.

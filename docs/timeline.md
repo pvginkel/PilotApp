@@ -194,17 +194,25 @@ read.
 timeline's place ([`chats.md`](chats.md)).
 
 - **Dividers** (`rows.ts`). A day divider falls at each new date in the browser's time zone,
-  "Thursday 22 October"; a step divider where the step changes, the task's title. An item serving
+  "Thursday 22 October"; a step divider where the step changes, the task's title, cut with an
+  ellipsis where it is wider than the feed. An item serving
   no step starts no divider and ends no step. No divider falls between consecutive work items: a
   run of them stands under its last member's day and step dividers, placed before the run.
-- **Anchored to its end.** It opens at its end and stays there as items arrive or its height
-  changes, until the reader scrolls more than 48px away from it. An item that arrives after the
-  first read flashes once.
+- **At its top, following its end.** A timeline shorter than the page stands at its top (D164),
+  the feed padded 20px 24px, 12px on a phone, and nothing reserved under its last item. It opens at
+  its end, and at its end it follows what arrives, an item or a fold settling, and its own height
+  changing, until the reader scrolls more than 48px away from it. The reader's own open or close
+  never moves the top of what they read: a press of a control inside the feed, a button, a
+  `summary` or an element in a button's role, takes what lays out up to two frames after it for
+  theirs (`hooks/use-own-growth.ts`), and at the end the timeline then stops following its end
+  once that is out of reach, and follows it again once their close brings it back in reach. An
+  item that arrives after the first read flashes once.
 - **The ready line.** While `ready_after` names the setup's work item, one line stands right under
   its line, before the items the setup placed after it: Pilot's avatar and "The project is ready —
   resume the project to start it." (`rows.ts`'s `ready` row). It has nothing to press, and it goes
   at the first resume ([`projects.md`](projects.md)).
-- **The opening** (`opening.tsx`) is a bubble beside its author's avatar, "<who> started this
+- **The opening** (`opening.tsx`) is a bubble beside its author's avatar, on the primary's light
+  blue (`--primary-muted`), as a person's message in the chat is ([`chats.md`](chats.md)), "<who> started this
   project · <time>" over it, "You" for the signed-in person and the full name for the other; its
   words verbatim, folding with Show more, and its attachments under them. It has no head and is
   never done.
@@ -216,7 +224,10 @@ timeline's place ([`chats.md`](chats.md)).
   ([`work.md`](work.md)), a confirmation's reason line, the Urgent chip and "for
   <full name>" while it is for someone, and at its end Discuss,
   quoting the item into the chat ([`chats.md`](chats.md)). The kind never wraps, and where the
-  head's parts are wider than the card the head wraps, so that none leaves it or widens the page. The text's prose is GFM
+  head's parts are wider than the card the head wraps, so that none leaves it or widens the page.
+  At 600px and below the "for" chip stands on a line of its own under the rest of the head, led by
+  a person icon, and Discuss stays at the end of the head's first row however the rest wraps
+  (D166). The text's prose is GFM
   (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
   more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
   dashed border. An open work item is its session's: its env chip once its start has an
@@ -225,9 +236,10 @@ timeline's place ([`chats.md`](chats.md)).
   ([`work.md`](work.md)).
 - **An item Pilot is working on** (`PilotsLine`, `item.tsx`), its `pilots_work` set, is one line,
   as a done line is: a dashed circle in the time's grey in its kind's place, "Pilot is working on
-  it" its tooltip; the title (`title`, else `file_name`), plain text; Open once its text is read;
-  Discuss; what Pilot does; and the time it was placed. Its Open and Discuss show always, as a done
-  line's do not off a phone (below). What Pilot does (`PilotsButton`, `pilots.tsx`) is a ghost
+  it" its tooltip; the title (`title`, else `file_name`), which opens the document once its text is read; Open once
+  its text is read; Discuss; what Pilot does; and the time it was placed. Its Open and Discuss show
+  under the mouse, as a done line's do (below); on a phone they leave the line, and a tap on it
+  opens the document, or before the read the menu of its Discuss. What Pilot does (`PilotsButton`, `pilots.tsx`) is a ghost
   button: a pulsing dot while `pulse`, Pilot's mark, and the words `pilotsDoingLabel()` gives
   `doing` (`status-labels.ts`), "Awaiting the run", "Pre-ruling", "Asking the writer", "Doing it",
   "Researching" or "Waiting on your answer". It goes to `work`'s address, "Go to the work item:
@@ -343,8 +355,11 @@ one line in its block's place, inline and opened alike: Pilot's mark, the headin
 "·", the answer as the closed block shows it ("Deferred to <task>", a proposal agreed to as the
 proposal, an action's Done), a chevron, and the note as a second muted line, each clipped;
 consecutive lines are one list. A click on it, a segment of its document's bar or the block's
-address opens it, and it stays open on that page, the timeline or the opened document, each its own, while
-the page is shown. A person's answer is not Pilot's, so it opens the section for good, and Undo,
+address opens it, under a head of its own in its heading's place, Pilot's mark, the heading's words
+and a chevron up ("Show only the line"), whose click folds it back to its line (D165); the
+section's address opens it once, so that a section folded back there stays folded. Opened, it
+stays open on that page, the timeline or the opened document, each its own, while the page is
+shown, until it is folded back. A person's answer is not Pilot's, so it opens the section for good, and Undo,
 which never gives Pilot its answer back, leaves it open. A block with no section never collapses.
 The count, the bar and *Send answers* are the same whether it collapses or not.
 
@@ -397,13 +412,14 @@ answers*.
 - **A notice** has Read.
 
 A console (`console.tsx`) is the growing text field with Send and a cross, Cancel, inside its
-border; Ctrl+Enter (Cmd+Enter on a Mac) sends it and Esc closes it, and its Send is disabled while
+border; Ctrl+Enter (Cmd+Enter on a Mac) sends it and Esc closes it, and so does the answer it sends once that is saved; its Send is disabled while
 it is blank, a No's excepted. While its field has the focus, a resize of the window, as a phone's
 keyboard makes as it opens, scrolls the console back into view. Its words, and every field's here,
 are kept in the browser until sent ([`ui.md`](ui.md)).
 
 **An answered block on an open item**, Pilot's answer or a deferral, has a head: its kind, a
-chevron, Answered, the time and the avatar of who answered, Pilot's mark for Pilot, and before the
+chevron, "Show expansion list" while the block is closed and "Show only the answer" while it is
+open, a closed decision's row named as the first, Answered, the time and the avatar of who answered, Pilot's mark for Pilot, and before the
 time *In the chat* where the answer was given in the chat (`in_chat`), which goes to the message
 that gave it ([`chats.md`](chats.md)). An answer that is not a person's reads closed, the answer
 alone, and opens, on a click or the chevron, to the block's controls, live, so that the person can
@@ -412,7 +428,7 @@ the controls stand under that line with nothing chosen. A note stands under its 
 icon. In a document every block has that head, its kind named, once answered Answered, and at its
 end Discuss, quoting the block into the chat; a one-ask item's block has no Discuss of its own, its
 item's head quoting the item. In a done item, as Open shows it, every answered block reads closed, a
-person's answer too, and opens to its controls, all disabled.
+person's answer too, and a decision and an action open to their controls, all disabled.
 
 ## Done lines and Undo
 
@@ -482,13 +498,17 @@ offers Undo while the project is archived; Bring back gives every close and Undo
 ## Addresses
 
 An item's address is `/projects/<project>/items/<item>`, a block's
-`/projects/<project>/items/<item>/blocks/<block>`, by their ids; off a phone the project's route
-(`routes/_shell/projects/$projectId.tsx`) draws the timeline at them, and the two child routes
+`/projects/<project>/items/<item>/blocks/<block>`, under the project's address
+([`projects.md`](projects.md)), by their ids; off a phone the project's route
+(`routes/_shell/projects/$address.tsx`) draws the timeline at them, and the two child routes
 draw nothing of their own. Opened there, the timeline jumps to the middle of the item, the block or
 a confirmation card's row, and flashes it. A block the timeline does not draw, as in a done item's
 line or an id the item lacks, goes to its item; an item it does not draw leaves it at its end. Each
 address is gone to once, when the timeline is read or when Back reopens it, and the jump stops the
-timeline following its end. A block in a collapsed section opens its section first. A block's
+timeline following its end. An address whose item the timeline as read lacks, read before the item
+came, as a chat's quote chip can open it, waits: the timeline is read again, a read under way
+cancelled for it, and the address goes to its item once a read draws it, or leaves the timeline
+where it stands once that read has landed without it. A block in a collapsed section opens its section first. A block's
 address whose document is a card, done or open, also opens the document at the block, off a
 phone in its tab; a document's own address, an attachment's, the handbook's and the project document's are
 [`documents.md`](documents.md)'s.
@@ -507,7 +527,8 @@ tab under it is not gone to the item.
 **On a narrow window.** At 900px and below an option's line goes under its label, Recommended
 staying at the label's end. At 600px and below a block's head wraps, and Answered shows its icon
 alone, as *In the chat* does, their words left to a screen reader. An item's head, at 600px and
-below, sets its parts 6px apart, Urgent shows its triangle alone and *Edited* a pencil in place of
+below, sets its parts 4px apart, a work item's running time 8px from what precedes it, as off a
+phone, Urgent shows its triangle alone and *Edited* a pencil in place of
 its word, Pilot's mark and the time staying, in an opened document's head too, the words again left to a
 screen reader; a work item's env chip is its icon ([`work.md`](work.md)). At 390px a document's head
 with Urgent, *Edited* and its count, and a work item's with its env chip, its running time and
@@ -520,7 +541,7 @@ The engine's side is pinned in `backend/tests/engine/`, the read in
 writes and the event in `tests/api/test_items.py`, `tests/services/test_item_service.py` and
 `tests/services/test_project_event_service.py`. The browser suites are `frontend/tests/timeline/`,
 with `tests/projects/badge.spec.ts`; `document.spec.ts`, `card.spec.ts` and `settled.spec.ts` pin
-the documents, `phone-items.spec.ts` the item alone and a done line on a phone, and
+the documents, `phone-items.spec.ts` the item alone, a done line and every kind's head on a phone, and
 `frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)), `line-actions.spec.ts`
 a done line's actions under the mouse and its title, `jobs.spec.ts` Pilot's jobs on their items,
 and `waits.spec.ts` the
@@ -538,7 +559,8 @@ address (`openAt`), and reads its items, blocks, segments, cards, settled lines,
 the item alone's as the timeline's (`item(id, overlay.alone)`), banners and done lines, their
 title (`lineTitle`, a link), Open, Undo and Discuss, shown in a desktop spec only after
 `item.line.hover()` or the focus in the line, and *In the chat*, Pilot's job on an item
-(`item(id).job`: `root`, `pulse`, `retry`; a wait menu's `item.wait.menuJob`), an item's head that says Pilot asked its writer
+(`item(id).job`: `root`, `pulse`, `retry`; on a phone a line's menu, `lineMenu`, `lineMenuJob` and
+`lineMenuDiscuss`), an opened settled section's head (`settledHead(blockId)`), an item's head that says Pilot asked its writer
 (`item(id).writerAsked`, pinned in `frontend/tests/work/registered.spec.ts`), a block's head that
 says so, a claimed action's line and its work item's link, and the mark of Pilot's work that left
 it undone (`writerAsked`, `claim`, `claimWork`, `undone`, pinned in

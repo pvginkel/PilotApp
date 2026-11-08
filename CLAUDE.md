@@ -246,8 +246,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   signed-in test's session included, and the person on the record, with the handle they choose.
 - [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md),
   [`docs/timeline.md`](docs/timeline.md), [`docs/documents.md`](docs/documents.md): the UI's shell,
-  tokens, shared pieces and links in text, the phone's frame and the drawer; the projects' API and
-  screens, the plus and Create project, a project on a phone, its tabs and views; the timeline's
+  tokens, motion, shared pieces and links in text, the phone's frame and the drawer; the projects' API and
+  screens, a project's address, the plus and Create project, a project on a phone, its tabs and views; the timeline's
   API, live event and screens; a document read alone, a draft's asks, the attachments, the tabs, the
   tab line and the side panel with a draft's Draft tab.
 - [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),

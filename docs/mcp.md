@@ -283,9 +283,10 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   refused.
   "Marked done · <title>", "Marked read · …", "Marked reviewed · …".
 - **`stop_work(item)`**, `POST …/stops`, answers `200` `{effect}`: the work item's Session stopped
-  by Pilot as a Stop stops one ([`sessions.md`](sessions.md)), refused for an item that is no work
-  item, for Pilot's own work, a job, and for a Session neither running, starting nor held. "Stopped
-  · <title>".
+  by Pilot as a Stop stops one ([`sessions.md`](sessions.md)), one idle with its nudge owed among
+  them, its turn ended under a usage halt or the project's pause, as its served description says;
+  refused for an item that is no work item, for Pilot's own work, a job, and for a Session neither
+  running, starting, held nor idle with its nudge owed. "Stopped · <title>".
 - **`finish()`**, `POST …/finish`, answers `200` `{effect}`: the project finished by Pilot as
   Finish finishes it ([`projects.md`](projects.md)), refused but in an open project. Its effect,
   "Finished · <project>", is written first: the transition then stops the brain's own Session among

@@ -904,8 +904,8 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    makes its record through the record's testing endpoints, which answer on dev to the signed-in
    test account ([`projects.md`](projects.md)): a project with its opening, its items of each kind,
    an agent's save of one. One that needs a project as a person makes it starts a draft from the
-   plus, `POST /api/projects`, and drives it to Create project through the definition chat on the
-   real brain. Through the API, curl sends the session and keeps the cookies a refresh replaces:
+   plus with its first message, `POST /api/projects` `{words}`, and drives it to Create project
+   through the definition chat on the real brain. Through the API, curl sends the session and keeps the cookies a refresh replaces:
 
    ```bash
    S=tmp/dev-session/cookies.txt

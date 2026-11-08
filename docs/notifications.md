@@ -119,7 +119,9 @@ theirs counts (`AppPageService`, `backend/app/services/app_page_service.py`; `ap
 for a person with a handle while the page is visible and has had a key, a pointer, a touch or a
 wheel in the last two minutes (`keydown`, `pointerdown`, `pointermove`, `touchstart`, `wheel`, heard
 in the capture phase; not `scroll`, which the app's own scrolling fires too): at once as the page
-goes active, every thirty seconds after, and at once when the project the route shows changes.
+goes active, every thirty seconds after, and at once when the project the route shows changes. The
+project it beats with is the route's, by the id its address resolves to, whichever of the
+project's addresses the route is at ([`projects.md`](projects.md)).
 Hidden, or two minutes without input, it sends its away by beacon, at once, or once a beat in
 flight is answered, so that it gets out as the page hides. A beat the network lost is a beat
 missed, and the next goes at its time.
@@ -152,7 +154,8 @@ another transaction holds.
 **Closing on the device.** While the page is visible, `useAppPage` closes, on its own device, the
 notifications of what it shows, through the service worker's `getNotifications({tag})`: a project's,
 under the project's id, as a page of the project comes to show it, its timeline, one of its
-documents or one of its tabs, every route under `/projects/<id>` (D155), and the alarms', under
+documents or one of its tabs, every route under the project's address (D155), once the address is
+resolved to the project, and the alarms', under
 `alarms`, wherever a page of Pilot loads; each again as the page comes back to the foreground. It
 does so for anyone, a person at the handle step included. Pilot's own address lands on the project
 last open ([`projects.md`](projects.md)), so the alarms' tap, whose `url` is the app, closes that
@@ -175,9 +178,13 @@ line, no running work item, no pause, no plan task.
 - **The body** names the latest placed of the items that wait on the member, by its title, or by
   its kind's name, such as "Decision", when it has none, followed by ", +<n>" counting the others
   when more wait (D145): `Which tent?, +2`.
-- **The `url`** is absolute, on the stage's `BASEURL` (D091): `<BASEURL>/projects/<id>/items/<item
+- **The `url`** is absolute, on the stage's `BASEURL` (D091), on the project's address, its slug
+  or a draft's `draft-<number>` ([`projects.md`](projects.md)): `<BASEURL>/projects/<address>/items/<item
   id>`, the item's permalink, when exactly one item waits on the member, and the project's
-  timeline, `<BASEURL>/projects/<id>`, otherwise ([`timeline.md`](timeline.md)). On a phone the
+  timeline, `<BASEURL>/projects/<address>`, otherwise ([`timeline.md`](timeline.md)). The
+  reconcile compares the items, not the link, so that Create sends nothing again for the address
+  it moves, and a notification shown before it keeps the `draft-<number>`, which still opens the
+  project. On a phone the
   permalink opens the item alone, over the project's Timeline, which Back shows.
 
 ## The reconcile
@@ -341,8 +348,11 @@ subscription in `PushSubscription.toJSON()`'s shape, its endpoint the fake's; `p
   fake and kept in the page's storage, as the suite's headless Chromium subscribes to no push
   service; `subscription()`, `pushes()` and `prompts()` read what it holds. A spec that does not
   install it never sees the offer, the headless shell's permission being denied. The fixture
-  `device` (`frontend/tests/support/device.ts`) hands a push to the page's service worker, waiting
-  until it is displayed, reads the notifications standing there, and sets the page's visibility
+  `device` (`frontend/tests/support/device.ts`) hands a push to the page's service worker once the
+  page's closing of its notifications is done, the ui state `shell.closing` of its current load
+  ready (`useAppPage` reports it `loading` while any closing is in flight, each event carrying the
+  load's `performance.timeOrigin`), since headless Chromium drops a notification
+  `getNotifications()` reads while it is being displayed, and waits until it is displayed, reads the notifications standing there, and sets the page's visibility
   (`hide()`, `foreground()`); a push shows only in a file under `test.use({ channel: 'chromium',
   permissions: ['notifications'] })`, Chromium's full build. The record's testing read
   `GET /api/testing/projects/<id>/sightings?handle=<handle>` ([`projects.md`](projects.md)) says

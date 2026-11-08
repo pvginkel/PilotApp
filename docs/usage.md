@@ -95,8 +95,9 @@ first tick. A turn logs `The week's halt holds: work items' starts are held` or 
 lifted: held work items go on`, and an overrule's end `Quota overrule <id> (<kind>) ended: …`.
 
 Each halt that holds is a condition of the conditions service, `week_halt` and `five_hour_halt`,
-after the outage and the store's update ([`store-update.md`](store-update.md)), the week's first, with its `since`, its `share`, the reading's `taken_at` and
-whether it is `stale`, and the week's with the overrule it offers (`GET /api/conditions`,
+after the outage and the store's update ([`store-update.md`](store-update.md)), the week's first, with its `since`, its `share`, the reading's `taken_at`,
+whether it is `stale` and its `setting`, its window's halt setting, and the week's with the
+overrule it offers (`GET /api/conditions`,
 [`ui.md`](ui.md)); the week's halt alarms too, and the five-hour halt shows on the gold bar alone
 ([`notifications.md`](notifications.md)).
 A halt's line gives the reading's age, "as of <time>", only while the reading is stale (D102): the
@@ -185,9 +186,12 @@ done; a job's turn ends as it always does, done, with no nudge.
 
 While its nudge is owed, the item waits on nobody, and its line says what holds the nudge, in a
 held start's words, or "Waiting for its nudge" once nothing does, and so does its session log,
-under "The turn ended · <time>" ([`work.md`](work.md)). Stop and
-Resume refuse it, as they refuse any Session that is `idle`. It keeps its environment: no other
-start takes it ([`controller.md`](controller.md)).
+under "The turn ended · <time>" ([`work.md`](work.md)). It keeps its environment: no other
+start takes it ([`controller.md`](controller.md)). Resume refuses it, as it refuses any Session
+that is `idle`; Stop, offered on it as on a run under way, leaves it `stopped` by the person, its
+nudge owed no more, not done, so that the run is not carried on (D169;
+[`sessions.md`](sessions.md)), and so does the brain's `stop_work`, by Pilot
+([`mcp.md`](mcp.md)).
 
 ## The nudge
 
@@ -220,7 +224,8 @@ The nudges are asked for at a halt's turn and at an overrule made, at a resume's
 STARTUP, by the start job's reconcile, and by the timer `nudges` on every tick while a nudge owed is
 held by nothing or a wall decided missed still owes one. A person's Resume of a hard-stopped work
 item clears its nudge owed, its own continuation standing in for it: one continuation, never two.
-A document's Stop and take over clears the nudge owed to every Work it takes over: one halted is
+A person's Stop of an idle work item whose nudge is owed clears it (above). A document's Stop
+and take over clears the nudge owed to every Work it takes over: one halted is
 stopped by the person, and a pass at the wall stays `failed` and puts no question to the writer
 ([`round-trip.md`](round-trip.md)). Finish closes an item whose nudge is owed with its other open
 items, and its nudge never goes;

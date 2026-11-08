@@ -83,7 +83,11 @@ shows is read, its buttons: Pilot's job on it and its Undo where it has them, th
 it ([`chats.md`](chats.md)). The head stands at its top however tall it is, its buttons level with
 the title's first line, the title at weight 600. Under it stand the strip where what it shows has
 one (below), the body and the foot. Its body keeps its scroll while what it shows is read again.
-Where a read fails, its body reads "The document did not load."
+Where a read fails, its body reads "The document did not load." A document's address, a card's
+block's, the handbook's and the project document's read what they open before the router swaps
+it in (`readFirst`, `lib/screen-reads.ts`), the screen kept as it stood until then, the loading
+bar telling of a wait past 200 ms ([`ui.md`](ui.md)), so that a tab or a view opens with its
+document drawn; an open made while another's read is under way replaces it.
 
 **Off a phone, a tab.** A document, an attachment, the handbook and the project document each open
 as a tab in the timeline's place (`.stage`), the side panel beside it, at the timeline's width and on
@@ -346,6 +350,9 @@ here what you point it at in the chat: a card, a handover, a design."
 
 ## Addresses
 
+`<project>` is the project's address, its slug or a draft's `draft-<number>`, its id opening it
+too ([`projects.md`](projects.md)).
+
 | Address | Opens |
 |---|---|
 | `/projects/<project>/documents/<item>` | the item's document |
@@ -356,13 +363,13 @@ here what you point it at in the chat: a card, a handover, a design."
 | `/projects/<project>/handbook` | the handbook |
 | `/projects/<project>/project-document` | the project document |
 
-The routes draw nothing of their own: the project's route (`routes/_shell/projects/$projectId.tsx`)
+The routes draw nothing of their own: the project's route (`routes/_shell/projects/$address.tsx`)
 draws from them, off a phone, the tab showing, and on a phone the view, as it does from a card's
 block address ([`timeline.md`](timeline.md)). An attachment's chip on the timeline, the done line's
 indicator and a row of the Documents tab open its address under its item's, and its chip in an
 opened document the one under the document's; a draft's Documents tab and its links open the one
 under the project's. Closing a tab shows, at its address, the tab that showed before it; on a phone
-closing a view is Back. Another project's address remounts the project's route, closing whatever
+closing a view is Back. Another project's address draws the project's screen afresh, closing whatever
 the last one opened, its session log's popover among them, while its tab line and its panel's tab
 come back as that project left them.
 
@@ -376,7 +383,8 @@ and `tests/api/test_attachments.py`; a draft's answers in `tests/services/test_d
 The browser suites are `frontend/tests/timeline/overlay.spec.ts`, `attachments.spec.ts` and
 `project-documents.spec.ts`, and `tests/projects/doc-tabs.spec.ts` (the tab line, its addresses and
 what the browser keeps of it), `panel.spec.ts` (its width among the rest), `draft-panel.spec.ts`
-and, for the views on a phone, `phone-views.spec.ts`.
+and, for the views on a phone, `phone-views.spec.ts`; a document's tab that waits for its document
+in `tests/shell/screen-switch.spec.ts`.
 
 A spec hangs files on an item with `projects.attach(itemId, files)`, or on nothing in a draft with
 `projects.attachToDraft(projectId, files)`, saves the handbook or the project document with

@@ -435,12 +435,17 @@ not done. A controller that does not answer the interrupt lets the turn run out;
 session or an environment that is gone, a name holding another conversation among them, has no
 turn to interrupt, and the relay ends that Turn with
 no `result` (a `session-gone` record where its controller session is gone), as it does a turn the
-controller never got. A held or starting Session's Turn ends at the stop, unsent, and its start
-sends nothing more, unless its send was already going out: that Turn is put back in flight and
-interrupted (`send_turn`, above). It is a `409` for a Session that is no work item's, for a job's,
+controller never got. A held or starting Session's Turn ends at the stop, unsent, a `server` record
+`{"type": "stopped-unsent"}` its last, from which the chat and the session log draw " · Stopped",
+and its start sends nothing more, unless its send was already going out: that Turn is put back in
+flight and interrupted (`send_turn`, above). A running turn's stop writes none: its relay records
+the interrupt's `result`. An `idle` work item whose nudge is owed, its run halted or paused at its
+turn's end, is stopped where it rests (`_stop_at_rest`, as Stop and take over stops one), by the
+person, its turn as it ended and its nudge owed no more, not done (D097, D169); it held no slot,
+and its environment went to the shutdown timer at its turn's end. It is a `409` for a Session that is no work item's, for a job's,
 Pilot's own work ("it is Pilot's own work"), which a person stops only through a document's Stop and
-take over ([`round-trip.md`](round-trip.md)), for one neither running, starting nor held ("its turn
-has ended", "it is stopped already", "it has failed", "its session has ended"), and for a caller
+take over ([`round-trip.md`](round-trip.md)), for one neither running, starting, held nor idle with its nudge owed ("its
+turn has ended", "it is stopped already", "it has failed", "its session has ended"), and for a caller
 with no handle.
 
 **`POST /api/sessions/<id>/resume`**, no body (`SessionStartService.resume`), carries a stopped or
@@ -537,7 +542,7 @@ A record is one of four kinds:
 | `claude` | a line of the raw response stream, as `claude` printed it, with its controller session and the raw offset after it | the turn it came in |
 | `result` | the worker's `result` frame, `{turn, result, isError, interrupted}` as sent, with its controller session and offset | the turn it ended |
 | `send` | a person's message, in its place among the lines; its words are the Turn's `words`, and its author the Turn's | the Turn it sent |
-| `server` | the server's own line, a JSON object whose `type` says which: `starting`, `start-failed`, `send-failed`, `session-gone`, `restarting`, `environment-stopped`; `effect`, a tool call's ([`mcp.md`](mcp.md)); on a chat's Session, `closed`, its last ([`chats.md`](chats.md)); on the Session that registered a document, `read-failed` and `write-back-refused` ([`round-trip.md`](round-trip.md)) | a `send-failed`, `restarting`, `environment-stopped` or `effect` its Turn's; the others none |
+| `server` | the server's own line, a JSON object whose `type` says which: `starting`, `start-failed`, `send-failed`, `session-gone`, `restarting`, `environment-stopped`, `stopped-unsent`; `effect`, a tool call's ([`mcp.md`](mcp.md)); on a chat's Session, `closed`, its last ([`chats.md`](chats.md)); on the Session that registered a document, `read-failed` and `write-back-refused` ([`round-trip.md`](round-trip.md)) | a `send-failed`, `restarting`, `environment-stopped`, `stopped-unsent` or `effect` its Turn's; the others none |
 
 **The writer.** `SessionRecordService.append(session_id, kind, *, payload, turn_id, raw_offset,
 controller_session)` is the only one: in the caller's transaction it locks the Session row, reads
