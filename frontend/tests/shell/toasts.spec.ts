@@ -22,7 +22,8 @@ test('a toast has the mockup’s look, 24px from the corner', async ({ page, peo
   await expect(toast).toHaveCSS('background-color', background);
   await expect(toast).toHaveCSS('border-radius', '8px');
   await expect(toast).toHaveCSS('max-width', '380px');
-  await expect(toast.getByText('toast look')).toHaveCSS('font-size', '13.5px');
+  // Its words at the base size, as the mockup's.
+  await expect(toast.getByText('toast look')).toHaveCSS('font-size', '15px');
 
   // Once it has slid in.
   const viewport = page.viewportSize()!;
@@ -31,4 +32,20 @@ test('a toast has the mockup’s look, 24px from the corner', async ({ page, peo
     return [Math.round(viewport.width - (box.x + box.width)), Math.round(viewport.height - (box.y + box.height))];
   };
   await expect.poll(gaps).toEqual([24, 24]);
+});
+
+test('a toast’s action is a small button’s size', async ({ page, people, shell }) => {
+  await people.signIn();
+  await shell.open();
+
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new CustomEvent('app:testing:show-exception', {
+        detail: { message: 'toast action', error: new Error('toast action'), options: { action: { id: 'again', label: 'Again' } } },
+      }),
+    );
+  });
+
+  const toast = page.getByTestId('app-shell.toast.item').filter({ hasText: 'toast action' });
+  await expect(toast.getByTestId('app-shell.toast.action.again')).toHaveCSS('font-size', '13.5px');
 });

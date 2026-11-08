@@ -95,7 +95,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Eighteen stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Nineteen stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -150,6 +150,10 @@ app's height, `h-dvh` on the root layout of `frontend/src/routes/__root.tsx` and
 screens in `frontend/src/components/auth/auth-gate.tsx`, where the template's `h-screen`, `100vh`,
 which a phone's Chrome measures with its URL bar hidden, cut off the app's foot by the bar's
 height, the app scrolling inside itself so that the bar never hides; the
+type size of the toast's title, `text-base` in `frontend/src/components/primitives/toast.tsx`, and of
+the auth gate's messages, `text-base` in `frontend/src/components/auth/auth-gate.tsx`, where the
+template's `text-sm` stood a step below the mockup's base, the toast's action taking a small
+button's `text-sm` from the app-owned `frontend/src/styles/toast.ts`; the
 new-version feature's setting, `NEW_VERSION` in the app-owned `frontend/src/lib/config/new-version.ts`,
 which `frontend/src/contexts/deployment-context-provider.tsx` reads: `banner`, the template's
 banner, or `reload`, this app's, which reloads the page by itself once the reload takes nothing

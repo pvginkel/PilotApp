@@ -2,7 +2,7 @@
  * Toast tone class maps — app-owned, customizable per project.
  *
  * The template's toast in the mockup's look (PilotAppSpecs design/mockup/style.css, "Toasts"): a
- * card on the page's background, its text at 14px, sliding in from above. At 380px at most it
+ * card on the page's background, sliding in from above, its action a small button's size. At 380px at most it
  * stands 24px from the right edge of the template's 420px viewport, the mockup's place; on a wide
  * window it is lifted to 24px from the bottom too. An error or a warning is told apart by its
  * border.
@@ -14,7 +14,7 @@ const look = [
   '[&>div]:px-3.5 [&>div]:py-2.5',
 ].join(' ');
 
-const action = 'border border-primary-edge bg-primary-strong text-primary-foreground hover:bg-primary-edge focus:ring-ring';
+const action = 'border border-primary-edge bg-primary-strong text-sm text-primary-foreground hover:bg-primary-edge focus:ring-ring';
 
 export const toastToneStyles = {
   success: { container: look, action },

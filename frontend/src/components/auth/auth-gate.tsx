@@ -111,7 +111,7 @@ function AuthForbidden({ onLogout }: { onLogout: () => void }) {
           </svg>
         </div>
         <h2 className="text-lg font-semibold text-foreground">No Access</h2>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-base text-muted-foreground">
           Your account is not authorized to use this application. Please contact your administrator to request access.
         </p>
         <Button
@@ -156,7 +156,7 @@ function AuthError({ error, onRetry }: { error: Error; onRetry: () => void }) {
           </svg>
         </div>
         <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <p className="text-base text-muted-foreground">{description}</p>
         <Button
           variant="primary"
           onClick={onRetry}

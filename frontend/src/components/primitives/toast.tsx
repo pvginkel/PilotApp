@@ -108,7 +108,7 @@ const ToastComponent = React.forwardRef<
             )}
           </div>
           <div className="flex flex-1 flex-col gap-2 overflow-hidden">
-            <ToastPrimitive.Title className="text-sm font-medium overflow-hidden line-clamp-3">
+            <ToastPrimitive.Title className="text-base font-medium overflow-hidden line-clamp-3">
               {toast.message}
             </ToastPrimitive.Title>
             {toast.action && (
