@@ -9,9 +9,10 @@
  * project (F133). What Discuss quoted stands over the field as a chip, with its remove, and goes out
  * as its tag before the words (F38.3, F39.3); Discuss puts the focus in the field, once nothing lies
  * over it. In an archived
- * project it takes no message, and says why (F128.5); the server refuses one all the same. In a
- * draft it stands under the definition chat, in the timeline's column (F46.1), and so does a new
- * project's, whose box its first send wires (`new-project.tsx`).
+ * project it takes no message, and says why (F128.5); the server refuses one all the same. It lies
+ * over the chat's foot with no divider, the chat scrolling under its frosted glass (mockup M3;
+ * `ChatColumn`, panel.css). In a draft it lies over the definition chat, in the timeline's column
+ * (F46.1), and so does a new project's, whose box its first send wires (`new-project.tsx`).
  */
 
 import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from 'react';
@@ -125,9 +126,15 @@ interface ComposerBoxProps {
 /** The composer as it stands: the field and Send, or Stop in Send's place, what stands over the field above them. */
 export function ComposerBox({ home, field, text, onChange, onSend, sendable, waiting, disabled = false, stop = null, children }: ComposerBoxProps) {
   return (
-    // In the timeline's column, laid out as the transcript above it is: its scroll gutter kept.
-    <div className={cn('flex-none border-t', home === 'feed' && 'overflow-hidden [scrollbar-gutter:stable]')} data-testid="chat.composer">
-      <div className={cn('pt-2.5 pb-3.5', home === 'feed' ? 'mx-auto max-w-(--column) px-6 max-[900px]:px-3' : 'px-3.5')}>
+    <div className="composer" data-testid="chat.composer">
+      {/* In the timeline's column as the transcript is, its glass the column's width. */}
+      <div className={cn('composer-box', home === 'feed' ? 'mx-auto max-w-(--column) px-6 max-[900px]:px-3' : 'px-3.5')}>
+        <div className="glass" aria-hidden="true" data-testid="chat.composer.glass">
+          <i />
+          <i />
+          <i />
+          <b />
+        </div>
         {children}
         <div className="field-row">
           <TextField

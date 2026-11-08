@@ -69,11 +69,45 @@
   .ptab .unread { position: relative; top: -0.9em; margin-left: -2px; }
   .panel-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
   /* The Chat tab scrolls its transcript alone (project-chat.tsx), with its own gutter: the composer
-     under it spans the panel. */
+     lies over its foot, clear of the gutter. */
   .panel-body.chat { display: flex; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; }
   /* *In the chat* flashes the message it goes to, in the Chat tab and in a draft's definition chat,
      as the timeline flashes what it goes to (F42.3). */
   .project-chat .flash { animation: fresh 1.6s ease-out; }
+
+  /* The composer (composer.tsx): what Discuss quoted, the field that grows as you type, Send. It
+     lies over the chat's foot, clear of its scrollbar (--sb, set by project-chat.tsx), and the
+     chat scrolls under it, seen through frosted glass, with no divider: the Fieldnotes ruling
+     pane's glass, turned over to the foot (mockup M3). The blur starts --above over the field: a
+     line scrolling down blurs over that band, more behind the field and over the gap under it.
+     Three backdrop blurs stacked do it, each fading in over its band; a tint of the page's colour
+     comes in with them. Over the bottom 20px the blurs fade out and the tint is solid: a blur
+     there would reach down past the chat's edge. The glass is the composer's box, which in the
+     timeline's place is the column's: outside it there is nothing to blur, and each blurred pixel
+     costs on every scroll frame. */
+  .chat-foot { position: absolute; left: 0; right: var(--sb, 0px); bottom: 0; z-index: 3; }
+  .composer { --pad: 10px; --above: 20px; --field: 38px; --gap: 14px; }
+  .composer-box { position: relative; padding-block: var(--pad) 14px; }
+  .composer .glass { position: absolute; inset: calc(var(--pad) - var(--above)) 0 0; z-index: -1; pointer-events: none; }
+  .glass > * { position: absolute; inset: 0; }
+  /* Each blur: gone down to --none from the glass's top, full from --full. */
+  .glass > i:nth-child(1) { --none: 0px; --full: var(--above); backdrop-filter: blur(1.5px); }
+  .glass > i:nth-child(2) { --none: var(--above); --full: calc(var(--above) + var(--field)); backdrop-filter: blur(2px); }
+  .glass > i:nth-child(3) { --none: calc(var(--above) + var(--field)); --full: calc(var(--above) + var(--field) + var(--gap)); backdrop-filter: blur(2px) saturate(1.4); }
+  .glass > i {
+    --mask: linear-gradient(to bottom, transparent var(--none), #000 var(--full), #000 calc(100% - 20px), transparent 100%);
+    -webkit-mask-image: var(--mask);
+    mask-image: var(--mask);
+  }
+  .glass > b {
+    background: linear-gradient(to top,
+      hsl(var(--background)) 0,
+      hsl(var(--background) / 0.6) 20px,
+      hsl(var(--background) / 0.6) calc(100% - var(--above) - var(--field) - var(--gap)),
+      hsl(var(--background) / 0.45) calc(100% - var(--above) - var(--field)),
+      hsl(var(--background) / 0.3) calc(100% - var(--above)),
+      hsl(var(--background) / 0) 100%);
+  }
 
   /* A draft's Draft tab (the mockup's "A new project: the draft"). */
   .draft-empty { margin: 16px 18px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }

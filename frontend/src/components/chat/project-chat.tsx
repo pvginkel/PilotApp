@@ -1,6 +1,6 @@
 /**
  * The project's chats where they stand (F38, F40.3, F130.1): the side panel's Chat tab, or, for a
- * draft, its definition chat in the timeline's place, the composer under it in the timeline's
+ * draft, its definition chat in the timeline's place, the composer over its foot in the timeline's
  * column (F46.1; the mockup's `renderChat`, its home the page until Create). Either shows the
  * project's latest chat, or with none open the latest closed one, above the line where it closed.
  * "The chat before · <day>" at the top loads that chat above what is in view and leaves the view
@@ -12,8 +12,8 @@
  * ask, or in a draft "Tell Pilot what to manage" (F113). A chat shorter than its column stands at
  * its top. Sticky scroll keeps a streaming reply in view while the reader is at the bottom; only
  * their own scrolling lets go, or their own open of a step list or a card that takes the end out of
- * reach, which grows downward (use-sticky-bottom.ts); their message sent from the composer under
- * it, or a quote Discuss put there, goes back to the bottom. Shown at its
+ * reach, which grows downward (use-sticky-bottom.ts); their message sent from the composer over its
+ * foot, or a quote Discuss put there, goes back to the bottom. Shown at its
  * end, and not lying under a tab or the overlay, the chat is seen (F43). *In the chat* takes it to the
  * message that gave an answer (F42.3): the chats before loaded until the one holding it, the
  * pinning let go, the message scrolled into the middle of the view and flashed, and kept in its
@@ -21,7 +21,7 @@
  * column (decision 12).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ChevronUp } from 'lucide-react';
 import { useFlashes } from '@/components/timeline/flash';
 import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
@@ -197,20 +197,49 @@ interface ChatColumnProps {
   /** The scrolling transcript's box, and the wrapper of what stands in it. */
   container?: RefObject<HTMLDivElement | null>;
   wrapper?: RefObject<HTMLDivElement | null>;
-  /** The composer under the transcript. */
+  /** The composer over the transcript's foot. */
   composer: ReactNode;
   /** What stands in the transcript. */
   children: ReactNode;
 }
 
-/** The chat where it stands: its transcript, scrolling, over its composer; a new project's too (`new-project.tsx`). */
+/**
+ * The chat where it stands: its transcript, scrolling, its composer over its foot, clear of its
+ * scrollbar (mockup M3); a new project's too (`new-project.tsx`). The transcript is padded by the
+ * composer's height, `--composer-h`, which grows as the composer is typed in, and so is what a
+ * scroll into view keeps clear of.
+ */
 export function ChatColumn({ home, covered, container, wrapper, composer, children }: ChatColumnProps) {
+  const column = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const scroller = container ?? body;
+  const foot = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const box = scroller.current!;
+    const composed = foot.current!;
+    const fit = () => {
+      column.current!.style.setProperty('--composer-h', `${composed.offsetHeight}px`);
+      composed.style.setProperty('--sb', `${box.offsetWidth - box.clientWidth}px`);
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(composed);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [scroller]);
+
   return (
-    <div className="project-chat flex min-h-0 flex-1 flex-col" inert={covered} data-testid={home === 'feed' ? 'project.chat' : 'panel.chat'}>
+    <div
+      ref={column}
+      className="project-chat relative flex min-h-0 flex-1 flex-col"
+      inert={covered}
+      data-testid={home === 'feed' ? 'project.chat' : 'panel.chat'}
+    >
       {/* The browser's own scroll anchoring off: it would move the view a second time. */}
       <div
-        ref={container}
-        className="relative min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable]"
+        ref={scroller}
+        className="relative min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scroll-padding-bottom:var(--composer-h,0px)] [scrollbar-gutter:stable]"
         data-testid="chat.body"
       >
         <div
@@ -218,15 +247,17 @@ export function ChatColumn({ home, covered, container, wrapper, composer, childr
           className={cn(
             'flex min-h-full flex-col gap-4',
             home === 'feed'
-              ? 'mx-auto w-full max-w-(--column) px-6 py-5 text-base/[1.6] [--person-width:75%] max-[900px]:px-3'
-              : 'px-3.5 pt-2 pb-4 text-base/[1.6]',
+              ? 'mx-auto w-full max-w-(--column) px-6 pt-5 pb-[calc(20px_+_var(--composer-h,0px))] text-base/[1.6] [--person-width:75%] max-[900px]:px-3'
+              : 'px-3.5 pt-2 pb-[calc(16px_+_var(--composer-h,0px))] text-base/[1.6]',
           )}
           data-testid="chat"
         >
           {children}
         </div>
       </div>
-      {composer}
+      <div ref={foot} className="chat-foot">
+        {composer}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 /**
- * The Chat tab's composer (F44; the chat mockup's decision 7), under the transcript: the growing
- * field to five lines (F115), Enter breaking the line and Ctrl+Enter sending (F110), Send disabled
+ * The Chat tab's composer (F44; the chat mockup's decision 7), over the transcript's foot with no
+ * divider, the transcript scrolling under its frosted glass and padded by its height, the glass in
+ * a draft the column's width (mockup M3): the growing field to five lines (F115), Enter breaking the line and Ctrl+Enter sending (F110), Send disabled
  * while the field is empty and the field waiting while the message is on its way; a message with no
  * chat open starts one, shown in the tab. While Pilot answers Send's place is Stop, in every member's
  * composer whoever sent the message, the field not waiting; Stop ends the turn where it is, one
@@ -51,6 +52,66 @@ test.describe('The Chat tab’s composer', () => {
     // The caret's text is brought into view, not its line's leading: the window's top lies within
     // the leading between two lines of text, cutting none.
     expect(window.cut).toBeLessThanOrEqual(window.leading);
+  });
+
+  test('lies over the transcript’s foot with no divider, under frosted glass, short of its scrollbar: the transcript padded by its height, its end clear of it, and kept at its end as the field grows', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Glass'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'Plan the route.');
+    await controller.play(chats.store, session, [text('route', ROUTE)]);
+    await controller.finish(chats.store, session, 'success', 'The route.');
+    await expect(chat.send).toBeVisible();
+
+    await expect(chat.composer).toHaveCSS('border-top-width', '0px');
+    // Three blurs stacked, each over its band, a tint under them.
+    const blurs = chat.glass.locator('i');
+    await expect(blurs).toHaveCount(3);
+    expect(await blurs.evaluateAll((each) => each.map((blur) => getComputedStyle(blur).backdropFilter))).toEqual([
+      'blur(1.5px)',
+      'blur(2px)',
+      'blur(2px) saturate(1.4)',
+    ]);
+
+    const measure = () =>
+      chat.root.evaluate((root) => {
+        const body = root.querySelector<HTMLElement>('[data-testid="chat.body"]')!;
+        const composer = root.querySelector<HTMLElement>('[data-testid="chat.composer"]')!;
+        const transcript = root.querySelector<HTMLElement>('[data-testid="chat"]')!;
+        const [view, over, last] = [body, composer, transcript.lastElementChild!].map((each) => each.getBoundingClientRect());
+        return {
+          left: over.left - view.left,
+          short: view.left + body.clientWidth - over.right,
+          foot: view.bottom - over.bottom,
+          height: composer.offsetHeight,
+          padding: parseFloat(getComputedStyle(transcript).paddingBottom),
+          toEnd: body.scrollHeight - body.scrollTop - body.clientHeight,
+          clear: over.top - last.bottom,
+        };
+      });
+    const at = await measure();
+    // Over the transcript's view at its foot, across it to its scrollbar.
+    expect(at.left).toBeCloseTo(0, 0);
+    expect(at.short).toBeCloseTo(0, 0);
+    expect(at.foot).toBeCloseTo(0, 0);
+    expect(at.padding).toBe(16 + at.height);
+    expect(at.toEnd).toBeLessThan(2);
+    expect(Math.abs(at.clear - 16)).toBeLessThanOrEqual(1);
+
+    // Four lines typed: the composer three lines taller, the transcript's end still clear of it.
+    await chat.field.fill('One\nTwo\nThree\nFour');
+    await expect.poll(async () => (await measure()).height).toBe(at.height + 3 * 24);
+    const grown = await measure();
+    expect(grown.padding).toBe(16 + grown.height);
+    expect(grown.toEnd).toBeLessThan(2);
+    expect(Math.abs(grown.clear - 16)).toBeLessThanOrEqual(1);
   });
 
   test('sends with Ctrl+Enter and with Send, Enter breaking the line; the first message starts the chat in the tab; Send waits while the field is empty, the field while the message is on its way; the field grows to five lines; the focus stays in it', async ({
@@ -345,5 +406,37 @@ test.describe('The Chat tab’s composer', () => {
     await expect(chat.archived).toHaveCount(0);
     await expect(chat.field).toBeEnabled();
     await expect(chat.send).toBeEnabled();
+  });
+});
+
+test.describe('A draft’s composer', () => {
+  // Wide enough that the chat beside the draft's panel, half the window, is wider than the column.
+  test.use({ viewport: { width: 2600, height: 900 } });
+
+  test('lies over the definition chat’s foot in the timeline’s column, its glass the column’s width alone', async ({
+    people,
+    projects,
+    projectList,
+    definitionChat,
+  }) => {
+    const me = await people.signIn();
+    const { id } = await projects.makeDraft({ members: [me.handle!] });
+    const read = definitionChat.read();
+    await projectList.open(id);
+    await read;
+
+    const [view, column, composer, glass, field] = await Promise.all(
+      [definitionChat.body, definitionChat.root.getByTestId('chat'), definitionChat.composer, definitionChat.glass, definitionChat.field].map(
+        async (each) => (await each.boundingBox())!,
+      ),
+    );
+    expect(column.width).toBeCloseTo(820, 0);
+    expect(composer.width).toBeGreaterThan(column.width + 100);
+    expect(composer.y + composer.height).toBeCloseTo(view.y + view.height, 0);
+    expect(glass.x).toBeCloseTo(column.x, 0);
+    expect(glass.width).toBeCloseTo(column.width, 0);
+    // It starts over the field, by as far as the line scrolling down blurs.
+    expect(field.y - glass.y).toBeCloseTo(20, 0);
+    expect(field.x).toBeCloseTo(column.x + 24, 0);
   });
 });

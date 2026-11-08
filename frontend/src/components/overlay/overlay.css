@@ -128,8 +128,8 @@
   /* A work item's session log (session-log-overlay.tsx; the mockup's `.log-tail`): its turns, each
      ended one closing on its time, then the cue or how it ended. */
   .log-turn + .log-turn { margin-top: 12px; }
-  /* What the server sent a turn, as Pilot's message: the chat's message (person-message.tsx), on
-     the right in the primary's tint, folded, Pilot, the time and the mark under it. */
+  /* What the server sent a turn, as Pilot's message: on the right in the primary's tint, framed,
+     folded, Pilot, the time and the mark under it. */
   .log-sent { display: flex; flex-direction: column; align-items: flex-end; width: fit-content; max-width: 91%; min-width: 0; margin: 0 0 8px auto; }
   .log-sent .bubble {
     max-width: 100%;

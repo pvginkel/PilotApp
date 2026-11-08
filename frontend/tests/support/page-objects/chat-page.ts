@@ -7,10 +7,10 @@ import { waitTestEvent } from '../helpers';
  * chats shown with each person's message — its quotes, words, the name of another person, the time
  * and the avatar — and Pilot's reply to it, its steps, the phantom, the cue, a failure and its end;
  * the date dividers, the line where a chat closed, "The chat before · <day>" at the top, the empty
- * state, and the line in its place where the tab's read failed; and under the transcript the
- * composer (F44): the quote Discuss put over its field and its remove (F39.3), its field, Send or
- * Stop in its place, and why an archived project's takes no message. The tab carries the unread dot
- * (F43). A draft's definition chat is the same, standing in the timeline's place (`feed`, F46.1),
+ * state, and the line in its place where the tab's read failed; and over the transcript's foot the
+ * composer (F44) and its glass: the quote Discuss put over its field and its remove (F39.3), its
+ * field, Send or Stop in its place, and why an archived project's takes no message. The tab
+ * carries the unread dot (F43). A draft's definition chat is the same, standing in the timeline's place (`feed`, F46.1),
  * its empty state "Tell Pilot what to manage" (F113) and no tab, and at its end, once the project
  * can be created, Create project's box, its button and its line (F48; D119).
  */
@@ -40,6 +40,8 @@ export class ChatPage {
   /** Everything in the transcript, in its order: dividers, messages, replies, the button and the lines. */
   readonly lines: Locator;
   readonly composer: Locator;
+  /** The frosted glass the transcript scrolls under: its three blurs and its tint. */
+  readonly glass: Locator;
   /** The quote over the field: its `data-quote`, its label and its remove. */
   readonly quote: Locator;
   readonly quoteLabel: Locator;
@@ -80,6 +82,7 @@ export class ChatPage {
     this.failed = this.root.getByTestId('chat.failed');
     this.lines = this.root.getByTestId('chat').locator(':scope > *');
     this.composer = this.root.getByTestId('chat.composer');
+    this.glass = this.composer.getByTestId('chat.composer.glass');
     this.quote = this.composer.getByTestId('chat.composer.quote');
     this.quoteLabel = this.quote.getByTestId('chat.composer.quote.label');
     this.quoteRemove = this.quote.getByTestId('chat.composer.quote.remove');

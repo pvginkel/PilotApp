@@ -14,11 +14,12 @@
  * <time>", and the next message starts a new chat below it; "The chat before · <day>" at the top
  * loads that chat above what is in view and leaves the view where it is (F130.1). Nothing stands in
  * it while its read is under way, and "The chat did not load." where it fails (F113). On a phone it
- * is the same column, the composer under it (F98.3; the composer's own specs: composer.spec.ts).
+ * is the same column, the composer over its foot (F98.3; the composer's own specs: composer.spec.ts).
  */
 
 import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
+import { coloursOf, cssColour, hue, lightness } from '../support/contrast';
 import { expectConsoleError, makeUnique } from '../support/helpers';
 import { slowNetwork } from '../support/network';
 import { addressOf } from '../support/page-objects/timeline-page';
@@ -157,6 +158,51 @@ test.describe('The Chat tab', () => {
     expect(message.x + message.width).toBeGreaterThan(column.x + column.width - 32);
     expect(reply.x).toBeLessThan(column.x + 32);
   });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`draws a person’s words as the opening prompt is drawn, unframed, on the primary’s tint a step ${theme === 'light' ? 'darker' : 'lighter'}, the tail at the foot; Pilot’s mark in the primary, ${theme}`, async ({
+      page,
+      people,
+      projects,
+      controller,
+      timeline,
+      chat,
+      chats,
+    }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      const me = await people.signIn();
+      const project = await projects.make({ name: makeUnique('Bubbles'), members: [me.handle!], opening: 'Let us plan the summer trip.' });
+      await timeline.open(project);
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      const { session } = await chats.start(project, 'Which tent do we take?');
+      await controller.play(chats.store, session, [text('one', 'The dome is lighter.')]);
+      await controller.finish(chats.store, session, 'success', 'The dome is lighter.');
+      await expect(chat.replyEnds).toHaveCount(1);
+
+      const message = chat.messageTexts.first();
+      const prompt = timeline.opening.locator('.bubble');
+      await expect(message).toHaveCSS('border-top-width', '0px');
+      for (const [corner, radius] of [
+        ['top-left', '14px'],
+        ['top-right', '14px'],
+        ['bottom-right', '4px'],
+        ['bottom-left', '14px'],
+      ]) {
+        await expect(message).toHaveCSS(`border-${corner}-radius`, radius);
+      }
+      await expect(prompt).toHaveCSS('background-color', await cssColour(page, 'hsl(var(--primary-muted))'));
+      const [mine, opening] = await Promise.all([coloursOf(message), coloursOf(prompt)]);
+      expect(Math.abs(hue(mine.background) - hue(opening.background))).toBeLessThan(4);
+      if (theme === 'light') expect(lightness(mine.background)).toBeLessThan(lightness(opening.background));
+      else expect(lightness(mine.background)).toBeGreaterThan(lightness(opening.background));
+
+      // Pilot's mark under the reply: its lines the primary, its circle grey.
+      const mark = chat.replyEnds.locator('.avatar.pilot');
+      await expect(mark).toHaveCSS('color', await cssColour(page, 'hsl(var(--primary))'));
+      await expect(mark.locator('path').first()).toHaveCSS('stroke', await cssColour(page, 'hsl(var(--primary))'));
+      await expect(mark).toHaveCSS('background-color', await cssColour(page, 'hsl(var(--avatar-pilot))'));
+    });
+  }
 
   test('stands at the top of its column while it is shorter than that', async ({ people, projects, timeline, chat, chats }) => {
     const me = await people.signIn();
@@ -608,10 +654,10 @@ test.describe('The Chat tab on a phone', () => {
     expect(message.x + message.width).toBeGreaterThan(390 - 40);
     expect(message.x).toBeGreaterThan(390 * 0.09);
     expect(reply.x).toBeLessThan(32);
-    // The composer under it, across the column at its foot, over the tabs.
+    // The composer over its foot, across the column short of the transcript's scrollbar, over the tabs.
     const [composer, tabs] = await Promise.all([chat.composer.boundingBox(), phoneTabs.root.boundingBox()]);
     expect(composer!.x).toBe(0);
-    expect(composer!.width).toBeCloseTo(390, 0);
+    expect(composer!.width).toBeCloseTo(await chat.body.evaluate((body) => body.clientWidth), 0);
     expect(composer!.y + composer!.height).toBeCloseTo(side.y + side.height, 0);
     expect(side.y + side.height).toBeCloseTo(tabs!.y, 0);
   });

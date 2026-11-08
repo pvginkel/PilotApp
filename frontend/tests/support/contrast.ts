@@ -1,6 +1,6 @@
-/** Colours as the browser computes them, WCAG's contrast between them, and a colour's hue. */
+/** Colours as the browser computes them, WCAG's contrast between them, and a colour's hue and lightness. */
 
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 interface Colours {
   /** The text's colour and the element's own background, as sRGB bytes. */
@@ -44,4 +44,21 @@ export function hue([r, g, b]: [number, number, number]): number {
   const d = max - min;
   const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
   return (h * 60 + 360) % 360;
+}
+
+/** A colour as the browser computes it, from the page's tokens: `hsl(var(--primary))`. */
+export function cssColour(page: Page, colour: string): Promise<string> {
+  return page.evaluate((css) => {
+    const probe = document.createElement('div');
+    probe.style.backgroundColor = css;
+    document.body.append(probe);
+    const computed = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return computed;
+  }, colour);
+}
+
+/** A colour's lightness, from 0 to 1. */
+export function lightness(colour: [number, number, number]): number {
+  return (Math.max(...colour) + Math.min(...colour)) / 2 / 255;
 }

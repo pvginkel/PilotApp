@@ -1,5 +1,6 @@
 /**
- * A person's message (F38.2): on the right in the primary's tint, leaving at least 9 % of the
+ * A person's message (F38.2): on the right in the primary's tint, the opening prompt's bubble a
+ * step deeper, its tail at the foot (mockup M3), leaving at least 9 % of the
  * column on its left, the time and the avatar under it, and another person's name before the time
  * (the chat mockup's decision 13). A quote it opens with stands over it, and one inside it is a chip
  * where it stands (F39.3). Its words show as written, ticket ids, repos and environments linked
@@ -66,7 +67,7 @@ export function PersonMessage({ record, fresh, people, flash = false, onFlashed,
       {rest.length > 0 && (
         <div
           className={cn(
-            'rounded-lg border border-primary-muted-foreground/20 bg-primary-muted px-3 py-2 wrap-anywhere whitespace-pre-wrap',
+            'rounded-[14px_14px_4px] bg-bubble px-3 py-2 wrap-anywhere whitespace-pre-wrap',
             flash && 'flash',
           )}
           data-testid="chat.person.text"

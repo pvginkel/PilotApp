@@ -4,7 +4,9 @@
  * pinning as an arrival grows the inner wrapper — a reply streaming in token by token, a tool's
  * result, a fold settling. The reader scrolling up stops the pinning until they scroll back down.
  *
- * A `ResizeObserver` on the wrapper covers first paint and every later change. The reader's own
+ * A `ResizeObserver` on the wrapper's border box covers first paint and every later change, its
+ * padding's too: the chat's is the height of the composer over its foot (project-chat.tsx), so
+ * that a composer growing as it is typed in keeps a pinned view at its end. The reader's own
  * open or close of something in it (use-own-growth.ts) is not pinned: the view stays where it
  * stands, so what they opened grows downward, and it goes on pinning only if the end is still in
  * reach; their close that puts the view at the end again, of an open that let go of it, pins
@@ -139,7 +141,7 @@ export function useStickyBottom(
       pinToBottom(pinnedRef.current ? 'resize' : 'initial');
       pinnedRef.current = true;
     });
-    observer.observe(wrapper);
+    observer.observe(wrapper, { box: 'border-box' });
 
     return () => {
       container.removeEventListener('scroll', onScroll);

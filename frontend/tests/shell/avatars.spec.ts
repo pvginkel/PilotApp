@@ -1,13 +1,14 @@
 /**
  * The avatars' palette (F132; ui-conventions.md, "Answering: the options"): six colours, the
  * primary's tint first and the mockup's pink second, every pair at 4.5:1 or better in both
- * themes, and Pilot's mark grey, outside the palette. The palette is app-theme.css's; the avatars
+ * themes, and Pilot's mark outside the palette, a grey circle, its lines the primary (D118). The
+ * palette is app-theme.css's; the avatars
  * here are drawn as the Avatar piece draws them, slot n in colour (n - 1) mod 6 + 1.
  */
 
 import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
-import { coloursOf, hue } from '../support/contrast';
+import { coloursOf, cssColour, hue } from '../support/contrast';
 
 const COLOURS = [1, 2, 3, 4, 5, 6];
 
@@ -54,9 +55,9 @@ for (const theme of ['light', 'dark'] as const) {
     expect(colours[0].background).toEqual(tint.background);
     expect(Math.abs(hue(colours[1].background) - 330)).toBeLessThan(5);
 
-    // Pilot's mark: grey, none of the palette's colours.
+    // Pilot's mark: a grey circle, none of the palette's colours, its lines the primary.
     const pilot = await coloursOf(page.getByTestId('pilot'));
-    expect(pilot.ratio).toBeGreaterThanOrEqual(4.5);
+    await expect(page.getByTestId('pilot')).toHaveCSS('color', await cssColour(page, 'hsl(var(--primary))'));
     expect(Math.max(...pilot.background) - Math.min(...pilot.background)).toBeLessThan(40);
     expect(colours.map(({ background }) => background.join())).not.toContain(pilot.background.join());
   });
