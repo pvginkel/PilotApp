@@ -36,6 +36,7 @@ import { SectionsContext, useSections } from '@/components/timeline/sections';
 import { DocTabContext } from '@/hooks/use-doc-tabs';
 import { PhoneViewContext } from '@/hooks/use-phone-tab';
 import { useEscape } from '@/lib/keys';
+import { smoothly } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 
 interface OverlayProps {
@@ -166,7 +167,7 @@ export function Overlay({
   }, [left]);
   const blockIn = (blockId: string) => body.current!.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
   // The block is drawn in the body.
-  const goTo = (itemId: string, blockId: string, behavior: ScrollBehavior = 'smooth') => {
+  const goTo = (itemId: string, blockId: string, behavior: ScrollBehavior = smoothly()) => {
     scrollToIn(body.current!, blockIn(blockId)!, behavior);
     flash(blockKey(itemId, blockId));
   };

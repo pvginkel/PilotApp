@@ -187,8 +187,7 @@
   .prose pre { margin: 0 0 0.7em; }
   .prose pre code { font-size: inherit; overflow-wrap: normal; }
 
-  /* A streamed text's new deltas fading in (delta-fade.ts, FADE_MS), under reduced motion too: a
-     change of opacity moves nothing. */
+  /* A streamed text's new deltas fading in (delta-fade.ts, FADE_MS). */
   .delta-fresh { animation: delta-in 300ms ease-out; }
   @keyframes delta-in { from { opacity: 0; } }
 

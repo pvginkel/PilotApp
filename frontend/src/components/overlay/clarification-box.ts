@@ -9,6 +9,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import { scrollToIn } from '@/components/overlay/scroll-to';
 import { useFlashes } from '@/components/timeline/flash';
+import { smoothly } from '@/lib/motion';
 
 const BOX = 'clarification';
 
@@ -32,5 +33,5 @@ export function useClarificationBox(at: string | null) {
     reached.current = at;
     goTo('instant');
   });
-  return { body, box, flashing: fresh.has(BOX), onFlashed: () => flashed(BOX), goTo: () => goTo('smooth') };
+  return { body, box, flashing: fresh.has(BOX), onFlashed: () => flashed(BOX), goTo: () => goTo(smoothly()) };
 }

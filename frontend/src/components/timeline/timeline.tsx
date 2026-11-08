@@ -39,6 +39,7 @@ import { rowsOf, type Row } from '@/components/timeline/rows';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
 import { useOwnGrowth } from '@/hooks/use-own-growth';
 import { isLine, titleOf, useTimeline, type TimelineItem } from '@/hooks/use-timeline';
+import { smoothly } from '@/lib/motion';
 
 /** How far from the end, in pixels, still reads as at the end. */
 const END_SLACK = 48;
@@ -113,7 +114,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   // The reader goes to an item or a block, its middle to the timeline's or its top to its scroll
   // margin. A scroll that moves the timeline no longer follows its end until its scroll events put
   // it back there; one that would not move it fires none, and leaves following as it stands.
-  const scrollTo = (goal: HTMLElement, block: 'center' | 'start', behavior: ScrollBehavior = 'smooth') => {
+  const scrollTo = (goal: HTMLElement, block: 'center' | 'start', behavior: ScrollBehavior = smoothly()) => {
     const element = feed.current!;
     const box = goal.getBoundingClientRect();
     const top = box.top - element.getBoundingClientRect().top - element.clientTop + element.scrollTop;
@@ -144,7 +145,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const goToBlock = (item: string, block: string) => {
     // Its collapsed section opens first, so that the block is drawn to go to.
     flushSync(() => sections.open(blockKey(item, block)));
-    goTo({ item, block }, 'smooth');
+    goTo({ item, block }, smoothly());
   };
   // The address last gone to: each is gone to once, when the timeline is read, or when it is opened
   // with the timeline on screen.

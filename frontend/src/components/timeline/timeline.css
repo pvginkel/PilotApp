@@ -77,7 +77,11 @@
   }
   .item.concept { border-style: dashed; }
   .item.fresh { animation: fresh 1.6s ease-out; }
+  /* A flash's ring, fading; under reduced motion held for its time, with no fade (D2). */
   @keyframes fresh { from { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
+  @media (prefers-reduced-motion: reduce) {
+    @keyframes fresh { from, to { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
+  }
 
   .item-body { padding: 12px 16px 14px; }
   /* The head's text shares a baseline, its line as tall as a small button so it centres. Where its
