@@ -720,6 +720,7 @@ test.describe('Off a phone, the session log’s popover', () => {
     people,
     projects,
     projectList,
+    projectHead,
     timeline,
     docTabs,
     sessionLog,
@@ -764,6 +765,7 @@ test.describe('Off a phone, the session log’s popover', () => {
     await expect(sessionLog.item).toHaveText(TITLE);
     await projectList.tab(otherName).click();
     await expect(page).toHaveURL(projectAddress(other));
+    await expect(projectHead.name).toHaveText(otherName);
     await expect(sessionLog.overlay).toHaveCount(0);
     await projectList.tab(name).click();
     await expect(page).toHaveURL(documentAddress(project, packing));

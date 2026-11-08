@@ -964,6 +964,7 @@ test.describe('Switching projects', () => {
     await projectHead.open(a);
     await projectList.tab(b).click();
     await expect(page).toHaveURL(projectAddress(bId));
+    await expect(projectHead.name).toHaveText(b);
 
     // Back and Forward press nothing on the page: only another project closes what is open.
     await projectHead.step.click();

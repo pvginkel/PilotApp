@@ -201,21 +201,25 @@ test.describe('Create project', () => {
     controller,
     chats,
     definitionChat,
+    shell,
   }) => {
     const me = await people.signIn();
     const { title } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
-    const other = await projects.make({ name: makeUnique('Elsewhere'), members: [me.handle!] });
+    const elsewhere = makeUnique('Elsewhere');
+    const other = await projects.make({ name: elsewhere, members: [me.handle!] });
     await timeline.open(other);
 
+    // The switch keeps the screen it leaves until the draft's chats are read (H5).
     const restore = await slowNetwork(page, 1_000);
     const read = definitionChat.read();
     await projectList.tab(title).click();
-    await expect(projectHead.name).toHaveText(title);
-    await expect(definitionChat.root).toBeVisible();
+    await expect(shell.loading).toBeVisible();
+    await expect(projectHead.name).toHaveText(elsewhere);
     await expect(definitionChat.createReady).toHaveCount(0);
 
     await read;
     await restore();
+    await expect(projectHead.name).toHaveText(title);
     await expect(definitionChat.texts).toHaveText([REPLY]);
     await expect(definitionChat.createReady).toBeVisible();
   });

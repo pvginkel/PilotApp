@@ -79,8 +79,8 @@ test.describe('Documents in tabs', () => {
     await expect(overlay.root).toHaveCount(0);
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
     await timeline.item(route).card.open.click();
-    expect(await docTabs.keys()).toEqual([`document ${trip}`, `document ${route}`]);
     await expect(overlay.title).toHaveText('The route');
+    expect(await docTabs.keys()).toEqual([`document ${trip}`, `document ${route}`]);
 
     // Opened again, a document already open shows its tab, at the line's end no second one.
     await docTabs.first.click();
@@ -110,7 +110,11 @@ test.describe('Documents in tabs', () => {
     );
     await timeline.open(id);
     await panel.documentsTab.click();
-    for (const each of [a, b, c, d, e]) await panel.document(each).root.click();
+    // Each opened once the one before it shows: an address gone to while one is read is the one read.
+    for (const each of [a, b, c, d, e]) {
+      await panel.document(each).root.click();
+      await expect(docTabs.document(each).show).toHaveAttribute('aria-selected', 'true');
+    }
     // Shown in the order d, b, the line a to e: closing b goes back to d, neither of its neighbours
     // nor the line's last tab.
     await docTabs.document(d).show.click();
@@ -425,7 +429,10 @@ test.describe('Documents in tabs', () => {
     }
     await timeline.open(id);
     await panel.documentsTab.click();
-    for (const each of ids) await panel.document(each).root.click();
+    for (const each of ids) {
+      await panel.document(each).root.click();
+      await expect(docTabs.document(each).show).toHaveAttribute('aria-selected', 'true');
+    }
     const row = docTabs.root.locator('.doc-tabs-row');
     expect(await row.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     const inRow = async (key: string) => {
@@ -494,6 +501,7 @@ test.describe('Each project’s line kept in the browser', () => {
     await timeline.open(id);
     for (const each of [a, b, c]) {
       await timeline.item(each).card.open.click();
+      await expect(docTabs.document(each).show).toHaveAttribute('aria-selected', 'true');
       await docTabs.first.click();
     }
     // Shown in the order c, a, b: b's showing, and closing it goes back to a, not to its neighbours.

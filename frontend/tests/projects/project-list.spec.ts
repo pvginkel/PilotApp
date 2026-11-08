@@ -184,6 +184,7 @@ test.describe('The groups’ chevrons', () => {
     people,
     projects,
     projectList,
+    projectHead,
   }) => {
     const me = await people.signIn();
     const mine = makeUnique('Mine');
@@ -198,6 +199,7 @@ test.describe('The groups’ chevrons', () => {
     await expect(others.root.getByTestId('projects.tab')).toHaveCount(0);
 
     await projectList.tab(mine).click();
+    await expect(projectHead.name).toHaveText(mine);
     await expect(others.toggle).toHaveAttribute('aria-expanded', 'false');
     await page.goBack();
     await expect(page).toHaveURL(projectAddress(otherId));
@@ -206,7 +208,7 @@ test.describe('The groups’ chevrons', () => {
 });
 
 test.describe('A project’s address', () => {
-  test('the bare address opens the project the browser remembers', async ({ page, people, projects, projectList, shell }) => {
+  test('the bare address opens the project the browser remembers', async ({ page, people, projects, projectList, projectHead, shell }) => {
     const me = await people.signIn();
     const firstId = await projects.make({ name: makeUnique('First'), members: [me.handle!] });
     const second = makeUnique('Second');
@@ -218,6 +220,7 @@ test.describe('A project’s address', () => {
 
     await projectList.tab(second).click();
     await expect(page).toHaveURL(projectAddress(secondId));
+    await expect(projectHead.name).toHaveText(second);
     await shell.open('/');
     await expect(page).toHaveURL(projectAddress(secondId));
     await expect(projectList.tab(second)).toHaveAttribute('aria-current', 'page');
