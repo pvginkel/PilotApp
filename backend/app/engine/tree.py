@@ -11,6 +11,7 @@ from app.engine.attachments import AttachmentStore
 from app.engine.paths import (
     CHAT,
     DRAFT_FOLDER,
+    DRAFT_NUMBER_MAX,
     PLAN,
     REFERENCE,
     TIMELINE,
@@ -257,11 +258,19 @@ class TreeService:
         """The syncing project whose folder is `folder`, a name at the tree's
         root (DB decision 1); none when no syncing project's is."""
         draft = DRAFT_FOLDER.fullmatch(folder)
-        named = (
-            Project.slug == folder
-            if draft is None
-            else (Project.number == int(draft["number"])) & Project.slug.is_(None)
-        )
+        if draft is None:
+            named = Project.slug == folder
+        else:
+            digits = draft["number"]
+            # Past the column's range a draft's name is no project's, and
+            # comparing the column to it raises.
+            held = (
+                len(digits) <= len(str(DRAFT_NUMBER_MAX))
+                and int(digits) <= DRAFT_NUMBER_MAX
+            )
+            if not held:
+                return None
+            named = (Project.number == int(digits)) & Project.slug.is_(None)
         return self.db.scalars(select(Project).where(named, _SYNCING)).one_or_none()
 
 

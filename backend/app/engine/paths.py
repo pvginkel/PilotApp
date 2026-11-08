@@ -16,6 +16,9 @@ REFERENCE = "reference.json"
 DRAFT_FOLDER = re.compile(r"draft-(?P<number>[1-9][0-9]*)")
 """A draft's folder, `draft-<number>`; no slug starts `draft-`
 (`ck_projects_slug`)."""
+DRAFT_NUMBER_MAX = 2**31 - 1
+"""The largest `projects.number`, a PostgreSQL `integer`: a draft's name past
+it is no project's, and comparing the column to it raises."""
 
 
 def folder(project: Project) -> str:

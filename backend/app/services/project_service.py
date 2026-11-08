@@ -23,7 +23,7 @@ from app.engine.documents import (
     OPENING,
     DocumentService,
 )
-from app.engine.paths import DRAFT_FOLDER
+from app.engine.paths import DRAFT_FOLDER, DRAFT_NUMBER_MAX
 from app.engine.record import RecordService, autopilot_may_take
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -210,10 +210,6 @@ ID_SLUG_PROBLEM = "reads as a project's id"
 """Why Create project refuses a slug that reads as an id: an address that
 does is one (`ProjectService.at_address`)."""
 
-_NUMBER_MAX = 2**31 - 1
-"""The largest `projects.number`, a PostgreSQL `integer`: a draft's name past
-it is no project's, and comparing the column to it raises."""
-
 _CLOSES = {
     TransitionKind.FINISHED: CloseCause.FINISHED,
     TransitionKind.REOPENED: CloseCause.REOPENED,
@@ -331,7 +327,10 @@ class ProjectService:
             named = Project.id == project_id
         elif draft is not None:
             digits = draft["number"]
-            held = len(digits) <= len(str(_NUMBER_MAX)) and int(digits) <= _NUMBER_MAX
+            held = (
+                len(digits) <= len(str(DRAFT_NUMBER_MAX))
+                and int(digits) <= DRAFT_NUMBER_MAX
+            )
             named = Project.number == int(digits) if held else false()
         else:
             named = Project.slug == address

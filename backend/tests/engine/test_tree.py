@@ -409,6 +409,7 @@ class TestTreeServicePaths:
             "",
             "project.md",
             "draft-999999/project.md",
+            pytest.param("draft-3000000000/project.md", id="draft-past-every-number"),
             "draft-0{number}/project.md",
             "{folder}",
             "{folder}/handbook.md",
@@ -478,6 +479,8 @@ class TestTreeServicePaths:
             "notes.md",
             "camp/project.md",
             "draft-999999/project.md",
+            pytest.param("draft-3000000000/project.md", id="draft-past-every-number"),
+            pytest.param("draft-" + "9" * 5000 + "/project.md", id="draft-past-int"),
             "draft-0{number}/project.md",
         ],
     )
