@@ -35,8 +35,7 @@
      each gives way to its floor while the next gives up a millionth as much for its size. */
   .feed-head .repo { flex-shrink: 1e18; }
   .feed-head h1 { flex-shrink: 1e12; }
-  .feed-head .step-anchor { flex-shrink: 1e6; }
-  .feed-head .step-anchor > .btn { max-width: min(100%, 350px); }
+  .feed-head .step-anchor { flex-shrink: 1e6; max-width: 350px; }
   .feed-head .members { flex-shrink: 1; justify-content: flex-end; }
   .feed-head .ticket, .feed-head .chip, .feed-head .switch, .feed-head .head-icon { flex: none; }
   .feed-head .head-icon { align-self: center; }
@@ -155,7 +154,10 @@
   .feed-head.two-rows { flex-direction: column; align-items: stretch; gap: 8px; }
   .feed-head.two-rows .head-row { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
   .feed-head.two-rows h1 { min-width: 0; }
-  .feed-head.two-rows .step-anchor { flex: 1; }
+  /* The step's anchor fills its row, the members and the icons at its end, and its button stands no
+     wider than 350px inside it. */
+  .feed-head.two-rows .step-anchor { flex: 1; max-width: none; }
+  .feed-head.two-rows .step-anchor > .btn { max-width: min(100%, 350px); }
   .feed-head.two-rows .plan-pop { right: auto; left: 0; }
 
   /* A phone's head (phone-head.tsx), one line: the name gives way, cut to nothing; the rest keeps

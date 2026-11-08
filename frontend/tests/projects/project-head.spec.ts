@@ -556,7 +556,10 @@ test.describe('A tight head beside the side panel', () => {
     };
   }
 
-  /** Every part of the head that shows, left to right in its row, each clear of the next and inside the head. */
+  /**
+   * Every part of the head that shows, left to right in its row, each clear of the next and inside
+   * the head; in one row the step's anchor is its button's width, no blank standing beside it.
+   */
   async function clear(projectHead: ProjectHeadPage, panel: { root: Locator }): Promise<void> {
     const parts = await projectHead.root.evaluate((head) =>
       Array.from(head.querySelectorAll(':scope > .head-row > *, .members > *, .step-anchor > .btn'))
@@ -574,6 +577,12 @@ test.describe('A tight head beside the side panel', () => {
     }
     for (const part of parts) expect(part.right).toBeLessThanOrEqual(head.x + head.width);
     expect(head.x + head.width).toBeLessThanOrEqual((await panel.root.boundingBox())!.x);
+    const blank = await projectHead.root.evaluate((element) => {
+      const anchor = element.querySelector('.step-anchor');
+      if (element.classList.contains('two-rows') || anchor === null) return 0;
+      return anchor.getBoundingClientRect().width - anchor.querySelector('.btn')!.getBoundingClientRect().width;
+    });
+    expect(blank).toBeCloseTo(0, 1);
   }
 
   /** Whether the head stands in its two rows: the step below the name's row. */
@@ -677,6 +686,31 @@ test.describe('A tight head beside the side panel', () => {
     await expect(projectHead.step.getByTestId('project.step.name')).toHaveText(LONG_STEP.title);
     await expect(projectHead.step).toHaveAttribute('title', `1 of 3 steps done · in progress: ${LONG_STEP.title}; ${other.title}`);
     expect(await cut(projectHead.name)).toBe(false);
+    await clear(projectHead, panel);
+  });
+
+  test('the name gives way only for what the step button takes at its cap, above its floor beside a step at 350px', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    panel,
+  }) => {
+    await page.setViewportSize({ width: 1700, height: 720 });
+    const me = await people.signIn();
+    const id = await projects.make({
+      name: `${makeUnique('Tight')} has a long name that runs on`,
+      ticket: 'PL-7',
+      members: [me.handle!, 'ada', 'ben'],
+      tasks: [LONG_STEP],
+    });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await twoRows(projectHead)).toBe(false);
+    expect(await width(projectHead.step)).toBeCloseTo(350, 1);
+    expect(await cut(projectHead.name)).toBe(true);
+    expect(await width(projectHead.name)).toBeGreaterThan(PROJECT_NAME_FLOOR + 1);
     await clear(projectHead, panel);
   });
 
