@@ -78,7 +78,7 @@ test.describe("A project's address", () => {
     await expect(projectHead.draft).toHaveText('Draft');
   });
 
-  test('what the browser keeps of a project is the same at each of its addresses: its tab line and its words not sent', async ({
+  test('what the browser keeps of a project is the same at each of its addresses, kept once, by its id: its tab line and its words not sent', async ({
     page,
     people,
     projects,
@@ -102,5 +102,10 @@ test.describe("A project's address", () => {
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
     expect(await docTabs.keys()).toEqual([`document ${trip}`]);
     await expect(chat.field).toHaveValue('Which stove?');
+    const kept = await page.evaluate(() => ({
+      lines: Object.keys((JSON.parse(localStorage.getItem('pilot')!) as { lines: Record<string, unknown> }).lines),
+      unsent: Object.keys(JSON.parse(localStorage.getItem('pilot.unsent')!) as Record<string, unknown>),
+    }));
+    expect(kept).toEqual({ lines: [id], unsent: [`chat/${id}`] });
   });
 });

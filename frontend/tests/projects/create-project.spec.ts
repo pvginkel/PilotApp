@@ -67,7 +67,8 @@ interface Drafting {
 /**
  * A draft of the signed-in person's, open on its page: its definition chat's first message and
  * Pilot's reply, the draft saved with its title, its open ask and its slug, a file attached hung
- * on nothing, and the store ready for the project's folder. Answers its id, title, slug and folder.
+ * on nothing, and the store ready for the project's folder. Answers its id, title, slug, folder and
+ * the attached file's id.
  */
 async function drafted({ projects, projectHead, controller, chats, definitionChat }: Drafting, handle: string) {
   const { id, folder } = await projects.makeDraft({ members: [handle] });
@@ -79,11 +80,13 @@ async function drafted({ projects, projectHead, controller, chats, definitionCha
   const title = makeUnique('Summer trip');
   const slug = `summer-${makeUniqueToken().toLowerCase()}`;
   await projects.saveProjectDocument(id, 'draft', draftText(title, slug));
-  await projects.attachToDraft(id, [{ title: 'Packing list', filename: 'packing.txt', content_type: 'text/plain', content: 'Tent, stove, lamp.\n' }]);
+  const {
+    ids: [packing],
+  } = await projects.attachToDraft(id, [{ title: 'Packing list', filename: 'packing.txt', content_type: 'text/plain', content: 'Tent, stove, lamp.\n' }]);
   await controller.play(chats.store, session, [text('one', REPLY)]);
   await controller.finish(chats.store, session, 'success', REPLY);
   await expect(definitionChat.createButton).toBeVisible();
-  return { id, title, slug, folder };
+  return { id, title, slug, folder, packing };
 }
 
 /** Create project's box and what it holds, where they stand on the page. */
@@ -281,7 +284,7 @@ test.describe('Create project', () => {
     await expect(page).toHaveURL(`/projects/${slug}/project-document`);
   });
 
-  test('moves the page to the project’s slug, the project remembered as before; its draft’s name still opens it there, the rest of the address kept', async ({
+  test('moves the page to the project’s slug, the project remembered as before, its tab line and its words not sent kept; its draft’s name still opens it there, the rest of the address kept', async ({
     page,
     people,
     projects,
@@ -290,11 +293,19 @@ test.describe('Create project', () => {
     chats,
     definitionChat,
     overlay,
+    panel,
+    docTabs,
+    chat,
   }) => {
     const me = await people.signIn();
-    const { id, title, slug, folder } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    const { id, title, slug, folder, packing } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
     await chats.ready(id, slug);
+    await panel.documentsTab.click();
+    await panel.attachment(packing).root.click();
+    await expect(page).toHaveURL(`/projects/${folder}/attachments/${packing}`);
+    await docTabs.first.click();
     await expect(page).toHaveURL(`/projects/${folder}`);
+    await definitionChat.field.fill('Which stove?');
     const remembered = () => page.evaluate(() => (JSON.parse(localStorage.getItem('pilot')!) as { project: string }).project);
     // A mark on the head's element, which a screen drawn afresh would not carry.
     await projectHead.root.evaluate((head) => void ((head as HTMLElement).dataset.kept = 'yes'));
@@ -305,6 +316,14 @@ test.describe('Create project', () => {
     await expect(projectHead.name).toHaveText(title);
     await expect(projectHead.root).toHaveAttribute('data-kept', 'yes');
     expect(await remembered()).toBe(id);
+    await expect(docTabs.attachment(packing).root).toBeVisible();
+    expect(await docTabs.keys()).toEqual([`attachment ${packing}`]);
+    await chat.tab.click();
+    await expect(chat.field).toHaveValue('Which stove?');
+    await page.reload();
+    await expect(docTabs.attachment(packing).root).toBeVisible();
+    expect(await docTabs.keys()).toEqual([`attachment ${packing}`]);
+    await expect(chat.field).toHaveValue('Which stove?');
     await page.goto(`/projects/${folder}/project-document`);
     await expect(page).toHaveURL(`/projects/${slug}/project-document`);
     await expect(overlay.title).toHaveText(title);
