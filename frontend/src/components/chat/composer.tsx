@@ -10,10 +10,11 @@
  * as its tag before the words (F38.3, F39.3); Discuss puts the focus in the field, once nothing lies
  * over it. In an archived
  * project it takes no message, and says why (F128.5); the server refuses one all the same. In a
- * draft it stands under the definition chat, in the timeline's column (F46.1).
+ * draft it stands under the definition chat, in the timeline's column (F46.1), and so does a new
+ * project's, whose box its first send wires (`new-project.tsx`).
  */
 
-import { useEffect, useRef, type MouseEvent } from 'react';
+import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { SendHorizontal, Square } from 'lucide-react';
 import { TextField } from '@/components/shared/text-field';
 import { useSendMessage, useStopChat } from '@/hooks/use-chats';
@@ -82,35 +83,72 @@ export function Composer({ projectId, home, answering, onSent, onDiscussed, cove
   };
 
   return (
+    <ComposerBox
+      home={home}
+      field={field}
+      text={text}
+      onChange={change}
+      onSend={send}
+      sendable={sendable}
+      waiting={sending.pending}
+      disabled={archived}
+      stop={answering ? { pending: stopping.pending, onStop: stopIt } : null}
+    >
+      {archived && (
+        <p className="mb-2 text-sm/[1.6] text-muted-foreground" data-testid="chat.composer.archived">
+          The project is archived: bring it back to message Pilot.
+        </p>
+      )}
+      {quote !== null && <ComposerQuote quote={quote} onRemove={leaveOut} />}
+    </ComposerBox>
+  );
+}
+
+interface ComposerBoxProps {
+  home: ChatHome;
+  field: RefObject<HTMLTextAreaElement | null>;
+  text: string;
+  onChange: (text: string) => void;
+  onSend: () => void;
+  /** Send takes the words now. */
+  sendable: boolean;
+  /** The message is on its way: the field waits. */
+  waiting: boolean;
+  /** The field takes no message. */
+  disabled?: boolean;
+  /** Stop in Send's place, while Pilot answers. */
+  stop?: { pending: boolean; onStop: () => void } | null;
+  /** What stands over the field. */
+  children?: ReactNode;
+}
+
+/** The composer as it stands: the field and Send, or Stop in Send's place, what stands over the field above them. */
+export function ComposerBox({ home, field, text, onChange, onSend, sendable, waiting, disabled = false, stop = null, children }: ComposerBoxProps) {
+  return (
     // In the timeline's column, laid out as the transcript above it is: its scroll gutter kept.
     <div className={cn('flex-none border-t', home === 'feed' && 'overflow-hidden [scrollbar-gutter:stable]')} data-testid="chat.composer">
       <div className={cn('pt-2.5 pb-3.5', home === 'feed' ? 'mx-auto max-w-(--column) px-6 max-[900px]:px-3' : 'px-3.5')}>
-        {archived && (
-          <p className="mb-2 text-sm/[1.6] text-muted-foreground" data-testid="chat.composer.archived">
-            The project is archived: bring it back to message Pilot.
-          </p>
-        )}
-        {quote !== null && <ComposerQuote quote={quote} onRemove={leaveOut} />}
+        {children}
         <div className="field-row">
           <TextField
             ref={field}
             value={text}
-            onChange={change}
-            onSend={send}
+            onChange={onChange}
+            onSend={onSend}
             label="Message Pilot"
             placeholder="Message Pilot"
-            disabled={archived}
-            readOnly={sending.pending}
+            disabled={disabled}
+            readOnly={waiting}
             lines={LINES}
             testId="chat.composer.field"
           />
-          {answering ? (
+          {stop !== null ? (
             <button
               type="button"
               className="btn btn-soft btn-icon"
-              disabled={stopping.pending}
+              disabled={stop.pending}
               onMouseDown={keepFocus}
-              onClick={stopIt}
+              onClick={stop.onStop}
               title="Stop Pilot’s answer"
               aria-label="Stop"
               data-testid="chat.composer.stop"
@@ -123,7 +161,7 @@ export function Composer({ projectId, home, answering, onSent, onDiscussed, cove
               className="btn btn-primary btn-icon"
               disabled={!sendable}
               onMouseDown={keepFocus}
-              onClick={send}
+              onClick={onSend}
               title="Send (Ctrl+Enter)"
               aria-label="Send"
               data-testid="chat.composer.send"

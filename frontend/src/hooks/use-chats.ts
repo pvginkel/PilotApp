@@ -5,10 +5,10 @@
  * (use-project-events.ts). `pending` while the read has nothing yet, `failed` while its latest
  * attempt failed, whatever an earlier one read (F113).
  *
- * The composer's writes (F38, F44): a person's message, and the Stop of Pilot's answer, by any
- * person whoever sent the message. Each answer says at once whether Pilot answers in its chat, into
+ * The composer's writes (F38, F44): a person's message, a new project's first among them, which
+ * makes its draft (F46.1), and the Stop of Pilot's answer, by any person whoever sent the message. Each answer says at once whether Pilot answers in its chat, into
  * the list as read; then every screen reads again. A refusal is the query client's toast, the API's
- * words. Their form events are `chat.send`'s and `chat.stop`'s.
+ * words. Their form events are `chat.send`'s, `projects.new`'s and `chat.stop`'s.
  *
  * The unread dot (F43): the list says whether a reply of Pilot's came after the person last saw the
  * chat to its end, on any device, and the dot stands on the Chat tab, the panel's or the phone's,
@@ -19,8 +19,10 @@
 
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import type { ProjectHead } from '@/hooks/use-projects';
 import {
   useGetProjectsChatsByProjectId,
+  usePostProjects,
   usePostProjectsChatMessagesByProjectId,
   usePostProjectsChatStopByProjectId,
   usePutProjectsChatReadByProjectId,
@@ -70,6 +72,31 @@ export function useSendMessage(projectId: string) {
       () => {
         trackFormError('chat.send', fields);
         return false;
+      },
+    );
+  };
+  return { act, pending: mutation.isPending };
+}
+
+/**
+ * The signed-in person's first message to a new project, which makes its draft, its definition chat
+ * started with the words (F46.1), the draft's head into the page as read; answers the head, or null
+ * where the server refused it and so made nothing.
+ */
+export function useStartProject() {
+  const queryClient = useQueryClient();
+  const mutation = usePostProjects();
+  const act = (words: string): Promise<ProjectHead | null> => {
+    trackFormSubmit('projects.new');
+    return mutation.mutateAsync({ body: { words } }).then(
+      (draft) => {
+        trackFormSuccess('projects.new', { project: draft.id });
+        queryClient.setQueryData(['getProjectsByProjectId', { path: { project_id: draft.id } }], draft);
+        return draft;
+      },
+      () => {
+        trackFormError('projects.new');
+        return null;
       },
     );
   };

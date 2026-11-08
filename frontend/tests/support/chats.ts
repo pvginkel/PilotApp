@@ -5,7 +5,8 @@
  * the project's folder, which the fake requires of a boxed create (TD §4.2). A store's update
  * (store-update.ts) resets the store, clearing its tree: `ready()` puts back what it holds. A message is sent as a
  * person sends it (POST /api/projects/<id>/chat/messages): by the signed-in person, or by another
- * person on a connection of their own (`other()`); or through the composer, after `opening()`. A
+ * person on a connection of their own (`other()`); or through the composer, after `opening()`, a
+ * new project's first message after `openingNew()`. A
  * chat's start creates its headless session in the store, `claude-<n>` in the order the backend
  * creates them there; `start()` and `opening()` name it, and the spec plays its turns through
  * `controller` once it is working. While a turn is in flight, `answer()` records a person's answer
@@ -138,17 +139,35 @@ export class Chats {
   async opening(projectId: string, folder?: string): Promise<() => Promise<string>> {
     await this.ready(projectId, folder);
     const before = new Set(await this.controller.sessions(this.store));
-    return async () => {
-      let session = '';
-      await expect
-        .poll(async () => {
-          session = (await this.controller.sessions(this.store)).find((name) => !before.has(name)) ?? '';
-          return session;
-        })
-        .not.toBe('');
-      await this.working(session);
-      return session;
+    return () => this.opened(before);
+  }
+
+  /**
+   * The store, ready for a new project's definition chat, which the first message sent from the
+   * plus's chat starts in the draft it makes, and a wait for its session, given the draft's folder:
+   * puts the folder in the store's tree, as `pilot-sync` writes it once the draft is made, and answers
+   * the session's name once it works on its first turn.
+   */
+  async openingNew(): Promise<(folder: string) => Promise<string>> {
+    await this.stock();
+    const before = new Set(await this.controller.sessions(this.store));
+    return async (folder) => {
+      await this.controller.putFile(this.store, `${PROJECTS}/${folder}/project.md`, '# Invented\n');
+      return this.opened(before);
     };
+  }
+
+  /** The store's session not among `before`, once it works on its first turn. */
+  private async opened(before: Set<string>): Promise<string> {
+    let session = '';
+    await expect
+      .poll(async () => {
+        session = (await this.controller.sessions(this.store)).find((name) => !before.has(name)) ?? '';
+        return session;
+      })
+      .not.toBe('');
+    await this.working(session);
+    return session;
   }
 
   /**

@@ -90,15 +90,7 @@ interface AttachmentsProps {
 }
 
 function Attachments({ address, draft, batches }: AttachmentsProps) {
-  if (batches.length === 0) {
-    return (
-      <p className="none" data-testid="panel.attachments.none">
-        {draft
-          ? 'None yet. Pilot attaches here what you point it at in the chat: a card, a handover, a design.'
-          : 'None yet. A session attaches reader’s material here: a design, a survey, a log.'}
-      </p>
-    );
-  }
+  if (batches.length === 0) return <NoAttachments draft={draft} />;
   return (
     <ul data-testid="panel.attachments">
       {batches.map((batch) =>
@@ -113,6 +105,26 @@ function Attachments({ address, draft, batches }: AttachmentsProps) {
         ),
       )}
     </ul>
+  );
+}
+
+function NoAttachments({ draft }: { draft: boolean }) {
+  return (
+    <p className="none" data-testid="panel.attachments.none">
+      {draft
+        ? 'None yet. Pilot attaches here what you point it at in the chat: a card, a handover, a design.'
+        : 'None yet. A session attaches reader’s material here: a design, a survey, a log.'}
+    </p>
+  );
+}
+
+/** A new project's Documents tab, before its draft exists: nothing attached yet. */
+export function NewDocumentsTab() {
+  return (
+    <div className="docs" data-testid="panel.documents">
+      <h3>Attachments</h3>
+      <NoAttachments draft />
+    </div>
   );
 }
 

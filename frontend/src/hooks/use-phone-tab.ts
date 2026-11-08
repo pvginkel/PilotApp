@@ -14,9 +14,9 @@
  * where it was left, and a view opened afresh, or reloaded, starts at its top.
  */
 
-import { createContext, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useMatches, useRouter, type ParsedLocation } from '@tanstack/react-router';
-import { useShownProject } from '@/hooks/use-project-address';
+import { ShownProjectContext } from '@/hooks/use-project-address';
 
 /** `timeline` is a draft's Chat, the definition chat in the timeline's place. */
 export type PhoneTab = 'timeline' | 'chat' | 'plan' | 'documents' | 'draft';
@@ -90,9 +90,12 @@ function shownAt(location: ParsedLocation, overlaid: boolean, below: Shown | nul
   return { ...shown, kept: undefined, views: [location.pathname], unsaid: 'cold' };
 }
 
-/** The tab of the shown project's screen and the views over it, a draft's if `draft`, a view showing if `overlaid`. */
+/**
+ * The tab of the shown project's screen and the views over it, a draft's if `draft`, a view showing
+ * if `overlaid`; a new project's screen, outside the project's route, shows no view.
+ */
 export function usePhoneTab(draft: boolean, overlaid: boolean): PhoneScreen {
-  const { address } = useShownProject();
+  const project = useContext(ShownProjectContext);
   const router = useRouter();
   const location = useLocation();
   const matched = useMatches({ select: (matches) => matches.at(-1)?.pathname });
@@ -151,7 +154,8 @@ export function usePhoneTab(draft: boolean, overlaid: boolean): PhoneScreen {
       history.replace(href, own);
       return;
     }
-    history.replace(router.buildLocation({ to: '/projects/$address', params: { address } }).href, {});
+    // A view's address is the project route's, which shows its project.
+    history.replace(router.buildLocation({ to: '/projects/$address', params: { address: project!.address } }).href, {});
     // The browser takes both a microtask later, as one entry, unless the first is taken now.
     history.flush();
     history.push(href, own);

@@ -19,7 +19,7 @@
  * column (decision 12).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ChevronUp } from 'lucide-react';
 import { useFlashes } from '@/components/timeline/flash';
 import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
@@ -137,6 +137,73 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
   }, [stick]);
 
   return (
+    <ChatColumn
+      home={home}
+      covered={covered}
+      container={container}
+      wrapper={wrapper}
+      composer={
+        <Composer
+          projectId={projectId}
+          home={home}
+          answering={chats?.at(-1)?.answering ?? false}
+          onSent={toEnd}
+          onDiscussed={toEnd}
+          covered={covered}
+        />
+      }
+    >
+      {read === 'failed' ? (
+        <p className="mx-2 my-auto text-center text-base/[1.6] text-muted-foreground" data-testid="chat.failed">
+          The chat did not load.
+        </p>
+      ) : (
+        <>
+          {before !== undefined && (
+            <button
+              type="button"
+              onClick={loadMore}
+              className="mx-auto mt-1 inline-flex items-center gap-1.5 rounded-md border border-r-2 border-b-2 px-2.5 py-0.5 text-sm/[1.6] text-muted-foreground hover:bg-accent hover:text-foreground"
+              data-testid="chat.before"
+            >
+              <ChevronUp className="size-3.5" aria-hidden />
+              The chat before · {day(before.opened_at)}
+            </button>
+          )}
+          {chats?.length === 0 && <ChatEmptyState home={home} />}
+          {shown.map((chat) => (
+            <ChatSection
+              key={chat.id}
+              chat={chat}
+              people={people}
+              goTo={place?.chat === chat.id ? place.seq : undefined}
+              onFound={found}
+              flashing={flashing}
+              onFlashed={flashed}
+            />
+          ))}
+          {chats !== null && end}
+        </>
+      )}
+    </ChatColumn>
+  );
+}
+
+interface ChatColumnProps {
+  home: ChatHome;
+  covered: boolean;
+  /** The scrolling transcript's box, and the wrapper of what stands in it. */
+  container?: RefObject<HTMLDivElement | null>;
+  wrapper?: RefObject<HTMLDivElement | null>;
+  /** The composer under the transcript. */
+  composer: ReactNode;
+  /** What stands in the transcript. */
+  children: ReactNode;
+}
+
+/** The chat where it stands: its transcript, scrolling, over its composer; a new project's too (`new-project.tsx`). */
+export function ChatColumn({ home, covered, container, wrapper, composer, children }: ChatColumnProps) {
+  return (
     <div className="project-chat flex min-h-0 flex-1 flex-col" inert={covered} data-testid={home === 'feed' ? 'project.chat' : 'panel.chat'}>
       {/* The browser's own scroll anchoring off: it would move the view a second time. */}
       <div
@@ -154,48 +221,10 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
           )}
           data-testid="chat"
         >
-          {read === 'failed' ? (
-            <p className="mx-2 my-auto text-center text-base/[1.6] text-muted-foreground" data-testid="chat.failed">
-              The chat did not load.
-            </p>
-          ) : (
-            <>
-              {before !== undefined && (
-                <button
-                  type="button"
-                  onClick={loadMore}
-                  className="mx-auto mt-1 inline-flex items-center gap-1.5 rounded-md border border-r-2 border-b-2 px-2.5 py-0.5 text-sm/[1.6] text-muted-foreground hover:bg-accent hover:text-foreground"
-                  data-testid="chat.before"
-                >
-                  <ChevronUp className="size-3.5" aria-hidden />
-                  The chat before · {day(before.opened_at)}
-                </button>
-              )}
-              {chats?.length === 0 && <ChatEmptyState home={home} />}
-              {shown.map((chat) => (
-                <ChatSection
-                  key={chat.id}
-                  chat={chat}
-                  people={people}
-                  goTo={place?.chat === chat.id ? place.seq : undefined}
-                  onFound={found}
-                  flashing={flashing}
-                  onFlashed={flashed}
-                />
-              ))}
-              {chats !== null && end}
-            </>
-          )}
+          {children}
         </div>
       </div>
-      <Composer
-        projectId={projectId}
-        home={home}
-        answering={chats?.at(-1)?.answering ?? false}
-        onSent={toEnd}
-        onDiscussed={toEnd}
-        covered={covered}
-      />
+      {composer}
     </div>
   );
 }

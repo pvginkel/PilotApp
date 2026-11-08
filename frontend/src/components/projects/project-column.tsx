@@ -1,20 +1,17 @@
 /**
  * The side column (F1): the project list, the person's projects first, then Other projects and
- * Finished, under its head's plus, which starts a new project (F46.1); or the archived projects,
+ * Finished, under its head's plus, which opens a new project's chat (F46.1); or the archived projects,
  * opened from the list's menu, with a back arrow (D012).
  */
 
 import { useState } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { Archive, ArrowLeft, ChevronDown, ChevronRight, Ellipsis, Plus } from 'lucide-react';
 import { ProjectTab } from '@/components/projects/project-tab';
 import { Menu, MenuItem } from '@/components/shared/menu';
-import { discussIn } from '@/hooks/use-discuss';
 import { useProjectOnScreen } from '@/hooks/use-project-address';
 import { groupProjects, useArchivedProjects, useProjectList, type ProjectTab as Project } from '@/hooks/use-projects';
-import { usePostProjects } from '@/lib/api/generated/hooks';
 import { rememberInBrowser, useBrowserState, type Group } from '@/lib/browser-state';
-import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
 export function ProjectColumn() {
   const [archived, setArchived] = useState(false);
@@ -85,37 +82,12 @@ function ProjectList({ onArchived }: { onArchived: () => void }) {
   );
 }
 
-const NEW_PROJECT_FORM = 'projects.new';
-
-/** The plus: a draft, its creator the signed-in person, opened at its own address (F46.1), the focus in its chat's field. */
+/** The plus: a new project's definition chat, nothing behind it on the server until its first message makes the draft (F46.1). */
 function NewProjectButton() {
-  const navigate = useNavigate();
-  const create = usePostProjects();
-  const start = () => {
-    if (create.isPending) return;
-    trackFormSubmit(NEW_PROJECT_FORM);
-    create.mutate(undefined, {
-      onSuccess: (draft) => {
-        trackFormSuccess(NEW_PROJECT_FORM, { project: draft.id });
-        // As Discuss asks for it, with nothing quoted: the composer's field takes the focus once drawn.
-        discussIn(draft.id, null);
-        void navigate({ to: '/projects/$address', params: { address: draft.address } });
-      },
-      onError: () => trackFormError(NEW_PROJECT_FORM),
-    });
-  };
   return (
-    <button
-      type="button"
-      className="btn btn-ghost btn-sm btn-icon"
-      title="New project"
-      aria-label="New project"
-      disabled={create.isPending}
-      onClick={start}
-      data-testid="projects.new"
-    >
+    <Link to="/projects/draft-new" className="btn btn-ghost btn-sm btn-icon" title="New project" aria-label="New project" data-testid="projects.new">
       <Plus className="icon" aria-hidden="true" />
-    </button>
+    </Link>
   );
 }
 

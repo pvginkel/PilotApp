@@ -1,8 +1,8 @@
 """The projects as the signed-in person reads them, the project list, the
 archived projects, the project an address names, a project's head, its
 timeline, its draft and its handbook (F1, F2, F3, F8, F37.4, F129.4, D012); a
-draft made from the plus (F46.1), and their answers to its asks in place
-(F47.4); and what they change of a project's standing: its transitions,
+draft made with its first message (F46.1), and their answers to its asks in
+place (F47.4); and what they change of a project's standing: its transitions,
 Create project and its pause among them, and their membership (F4.1, F5, F6,
 F48, F127, F128, F141.2)."""
 
@@ -17,6 +17,7 @@ from app.api.caller import caller
 from app.engine.paths import folder
 from app.models import PlanNote, User
 from app.models.reference import DocumentRole, TransitionKind
+from app.schemas.chats import ChatMessageRequestSchema
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.items import ActionDoneRequestSchema, AnswerRequestSchema
 from app.schemas.projects import (
@@ -35,9 +36,10 @@ from app.schemas.projects import (
     TransitionRequestSchema,
 )
 from app.schemas.timeline import ProjectDocumentSchema, TimelineSchema
+from app.services.chat_service import ChatService
 from app.services.container import ServiceContainer
 from app.services.draft_service import DraftService
-from app.services.people_service import initials
+from app.services.people_service import PeopleService, initials
 from app.services.project_service import PlanProgress, ProjectHead, ProjectService
 from app.services.timeline_service import TimelineService
 from app.utils.spectree_config import api
@@ -149,8 +151,10 @@ def list_projects(
 
 @projects_bp.route("", methods=["POST"])
 @api.validate(
+    json=ChatMessageRequestSchema,
     resp=SpectreeResponse(
         HTTP_201=ProjectHeadSchema,
+        HTTP_400=ApiErrorResponseSchema,
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
         HTTP_409=ApiErrorResponseSchema,
@@ -159,19 +163,27 @@ def list_projects(
 @inject
 def create_project(
     project_service: ProjectService = Provide[ServiceContainer.project_service],
+    chat_service: ChatService = Provide[ServiceContainer.chat_service],
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
 ) -> Any:
-    """Start a new project, as the signed-in person: a draft, its creator its
-    one member and its draft, `project.md`, empty, whose definition chat
-    starts with the person's first message to it.
+    """Start a new project with the signed-in person's first message to it
+    (F46.1): a draft, its creator its one member and its draft, `project.md`,
+    empty, and its definition chat started with the words, as a message to a
+    draft with no chat starts it. A message refused leaves no draft.
 
     Returns:
         201: The draft's head
+        400: The message has no words
         401: No one is signed in
         403: The caller lacks the editor role
-        409: The caller has not chosen a handle
+        409: The caller has not chosen a handle; Pilot is updating its store;
+            or no controller or store environment is configured
     """
+    words = ChatMessageRequestSchema.model_validate(request.get_json()).words
     auth = caller()
+    person = people_service.require_person(auth, "start a new project")
     project = project_service.create(auth)
+    chat_service.send(project.id, person, words)
     return _head(project_service.head(auth, project.id)), 201
 
 

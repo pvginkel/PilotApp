@@ -417,11 +417,11 @@ class ProjectService:
         )
 
     def create(self, auth: AuthContext) -> Project:
-        """The caller's draft, from the plus (F46.1), now: its creator its
-        first member (F127), its draft, `project.md`, born empty (F47.1), in
-        the project list as a draft. Once committed the `manifest` event
-        writes its folder, `draft-<number>`, into the store's tree, which its
-        definition chat's start waits for (F50).
+        """The caller's draft, now, which its first message starts (F46.1):
+        its creator its first member (F127), its draft, `project.md`, born
+        empty (F47.1), in the project list as a draft. Once committed the
+        `manifest` event writes its folder, `draft-<number>`, into the store's
+        tree, which its definition chat's start waits for (F50).
 
         Raises:
             InvalidOperationException: the caller has not chosen a handle.

@@ -50,6 +50,7 @@ export function PhoneProject({ projectId, project, overlaid, children }: PhonePr
   const { tab, show, views, back, scroll, keep } = usePhoneTab(draft, overlaid);
   const { address } = useShownProject();
   const documents = usePanelDocuments(projectId);
+  const unread = useChatDot(projectId);
   const navigate = useNavigate();
   const chatTab = draft ? 'timeline' : 'chat';
   const discuss = (quote: QuoteRef) => {
@@ -94,7 +95,7 @@ export function PhoneProject({ projectId, project, overlaid, children }: PhonePr
                   )}
                   {tab === 'plan' && <PlanPage tasks={project.tasks} />}
                 </div>
-                <PhoneTabs projectId={projectId} draft={draft} tab={tab} count={documents.count} onTab={show} />
+                <PhoneTabs draft={draft} tab={tab} count={documents.count} unread={unread} onTab={show} />
               </div>
             )}
             <PhoneViewContext.Provider value={{ back, under: views.at(-2) ?? null, scroll, keep }}>{children}</PhoneViewContext.Provider>
@@ -114,16 +115,17 @@ const TABS: Record<PhoneTab, { name: string; icon: LucideIcon }> = {
 };
 
 interface PhoneTabsProps {
-  projectId: string;
   draft: boolean;
   tab: PhoneTab;
   /** The Documents tab's count. */
   count: number;
+  /** The unread dot stands on the Chat tab (F43). */
+  unread: boolean;
   onTab: (tab: PhoneTab) => void;
 }
 
-function PhoneTabs({ projectId, draft, tab, count, onTab }: PhoneTabsProps) {
-  const unread = useChatDot(projectId);
+/** The tabs at the bottom; a new project's too (`new-project.tsx`), a draft's. */
+export function PhoneTabs({ draft, tab, count, unread, onTab }: PhoneTabsProps) {
   return (
     <nav className="phone-tabs" role="tablist" aria-label="The project" data-testid="project.tabs">
       {(draft ? DRAFT_TABS : PROJECT_TABS).map((key) => {

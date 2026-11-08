@@ -4,13 +4,14 @@
  * narrow, it stands beside the timeline, always open, with no cross, its head as tall as the
  * project's head and its tab's text on the project name's baseline, in whatever font (F98.1,
  * F98.2). On a phone its tab stands alone between the project's head and the tabs at the bottom,
- * which carry the names, the dot and the count (F98.3).
+ * which carry the names, the dot and the count (F98.3). A new project's, before its draft exists
+ * (`new-project.tsx`), is a draft's with nothing in it: Draft empty and nothing attached.
  */
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { ProjectChat } from '@/components/chat/project-chat';
-import { DocumentsTab } from '@/components/panel/documents-tab';
-import { DraftTab } from '@/components/panel/draft-tab';
+import { DocumentsTab, NewDocumentsTab } from '@/components/panel/documents-tab';
+import { DraftEmpty, DraftTab } from '@/components/panel/draft-tab';
 import { useChatDot } from '@/hooks/use-chats';
 import { usePanelDocuments, type PanelDocuments } from '@/hooks/use-panel';
 import type { components } from '@/lib/api/generated/types';
@@ -85,6 +86,58 @@ export function PhonePanel({ projectId, draft, members, tab, documents, covered 
     <aside className="panel" aria-label={labelOf(draft)} inert={covered} data-testid="panel">
       <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} covered={covered} />
     </aside>
+  );
+}
+
+/** A new project's tabs, a draft's. */
+export type NewPanelTab = 'draft' | 'documents';
+
+interface NewPanelProps {
+  tab: NewPanelTab;
+  /** The new project's head, once drawn, which the panel's head lines up with. */
+  head: HTMLElement | null;
+  onTab: (tab: NewPanelTab) => void;
+}
+
+/** A new project's panel, off a phone, before its draft exists: a draft's, Draft first. */
+export function NewPanel({ tab, head, onTab }: NewPanelProps) {
+  const panelHead = useAlignedHead(head);
+  return (
+    <aside className="panel" aria-label={labelOf(true)} data-testid="panel">
+      <div ref={panelHead} className="panel-head" role="tablist" data-testid="panel.head">
+        {(['draft', 'documents'] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            className={cn('ptab', tab === key && 'on')}
+            onClick={() => onTab(key)}
+            data-testid={`panel.tab.${key}`}
+          >
+            {key === 'draft' ? 'Draft' : 'Documents'}
+          </button>
+        ))}
+      </div>
+      <NewPanelBody tab={tab} />
+    </aside>
+  );
+}
+
+/** A new project's panel on a phone: its tab alone, with no head. */
+export function NewPhonePanel({ tab }: { tab: NewPanelTab }) {
+  return (
+    <aside className="panel" aria-label={labelOf(true)} data-testid="panel">
+      <NewPanelBody tab={tab} />
+    </aside>
+  );
+}
+
+function NewPanelBody({ tab }: { tab: NewPanelTab }) {
+  return (
+    <div className="panel-body" role="tabpanel" data-testid="panel.body">
+      {tab === 'draft' ? <DraftEmpty /> : <NewDocumentsTab />}
+    </div>
   );
 }
 

@@ -12823,9 +12823,19 @@
         "x-required-role": "editor"
       },
       "post": {
-        "description": "Returns:     201: The draft's head     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle",
+        "description": "Returns:     201: The draft's head     400: The message has no words     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle; Pilot is updating its store;         or no controller or store environment is configured",
         "operationId": "post__api_projects",
         "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageRequestSchema.f9d9b43"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "content": {
@@ -12841,7 +12851,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
                 }
               }
             },
@@ -12883,7 +12893,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Start a new project, as the signed-in person: a draft, its creator its one member and its draft, `project.md`, empty, whose definition chat starts with the person's first message to it.",
+        "summary": "Start a new project with the signed-in person's first message to it (F46.1): a draft, its creator its one member and its draft, `project.md`, empty, and its definition chat started with the words, as a message to a draft with no chat starts it. A message refused leaves no draft.",
         "tags": [],
         "x-required-role": "editor"
       }

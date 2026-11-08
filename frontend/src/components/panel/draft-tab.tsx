@@ -49,9 +49,7 @@ export function DraftTab({ projectId }: { projectId: string }) {
   if (data.title === null && data.body.length === 0) {
     return (
       <>
-        <p className="draft-empty" data-testid="panel.draft.empty">
-          Empty. Pilot writes the project here as you talk, and nothing is set up until you press <b>Create project</b>.
-        </p>
+        <DraftEmpty />
         {data.writing && <PilotWriting />}
       </>
     );
@@ -89,6 +87,15 @@ export function DraftTab({ projectId }: { projectId: string }) {
         </p>
       )}
     </div>
+  );
+}
+
+/** The draft before its first save, or a new project's before its draft exists. */
+export function DraftEmpty() {
+  return (
+    <p className="draft-empty" data-testid="panel.draft.empty">
+      Empty. Pilot writes the project here as you talk, and nothing is set up until you press <b>Create project</b>.
+    </p>
   );
 }
 

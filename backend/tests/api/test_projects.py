@@ -1,8 +1,8 @@
 """/api/projects: the project list, the archived projects and a project's
 head, as the signed-in person reads them (F1, F2, F3, D012); a draft made
-from the plus (F46.1, F47.1), and their answers to its asks in place (F47.4);
-and what they change of a project's standing, its transitions and their
-membership (F4.1, F5, F6, F127, F128)."""
+with its first message (F46.1, F47.1), and their answers to its asks in
+place (F47.4); and what they change of a project's standing, its
+transitions and their membership (F4.1, F5, F6, F127, F128)."""
 
 import base64
 import uuid
@@ -38,14 +38,21 @@ from app.models.reference import (
 )
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.schemas.timeline import TimelineSchema
+from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.job_service import SETUP_TITLE
 from app.services.session_scope import STORE_REPO
 from tests.support.fake_sidecar import FakeSidecar
 from tests.support.starts import configured_starts
+from tests.support.store_updates import hold
 from tests.support.supervisor import Supervise
 
 PROJECTS = "/api/projects"
+
+ADA = AuthContext(
+    subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
+)
+"""The person `_sign_in` signs in, as a service reads them."""
 
 
 @pytest.fixture
@@ -1606,9 +1613,7 @@ class TestAddTransition:
     ) -> None:
         fake_sidecar.connect()
         _sign_in(client)
-        draft = session.get_one(
-            Project, uuid.UUID(client.post(PROJECTS).get_json()["id"])
-        )
+        draft = container.project_service().create(ADA)
         _definition_chat(session, draft, person, "Find us a camp site.")
         container.document_service().publish(
             session.scalars(
@@ -1668,8 +1673,8 @@ class TestAddTransition:
     def test_create_project_is_refused_with_its_reason(
         self, client: FlaskClient, container: ServiceContainer
     ) -> None:
+        draft = container.project_service().create(ADA).id
         _sign_in(client)
-        draft = client.post(PROJECTS).get_json()["id"]
 
         response = client.post(
             f"{PROJECTS}/{draft}/transitions", json={"kind": "opened"}
@@ -1774,18 +1779,19 @@ def _open_memberships(session: Session, project_id: uuid.UUID, person: User) -> 
 
 @pytest.mark.usefixtures("person")
 class TestCreateProject:
-    def test_the_plus_answers_the_drafts_head_and_writes_its_folder(
+    def test_the_first_message_makes_the_draft_answers_its_head_and_starts_its_chat(
         self,
         client: FlaskClient,
         session: Session,
         container: ServiceContainer,
         fake_sidecar: FakeSidecar,
+        starts: None,
     ) -> None:
         fake_sidecar.connect()
         fake_sidecar.drain()
         _sign_in(client)
 
-        response = client.post(PROJECTS)
+        response = client.post(PROJECTS, json={"words": "Plan the summer trip."})
         fake_sidecar.drain()
 
         assert response.status_code == 201, response.get_json()
@@ -1816,8 +1822,16 @@ class TestCreateProject:
             "running_work": [],
             "open_items": 0,
             "autopilot_may_take": 0,
-            "create_refusal": "nothing is drafted",
+            "create_refusal": "Pilot is writing",
         }
+        (chat,) = session.scalars(select(Chat)).all()
+        assert (chat.project_id, chat.kind_code) == (draft.id, ChatKind.DEFINITION)
+        turn = session.scalars(select(Turn)).one()
+        assert (turn.session_id, turn.words) == (chat.id, "Plan the summer trip.")
+        assert turn.message.endswith("\n\nThe message:\nPlan the summer trip.")
+        assert session.get_one(models.Session, chat.id).state_code is (
+            SessionState.STARTING
+        )
         assert fake_sidecar.tree[f"draft-{draft.number}/project.md"] == b""
         tree = container.tree_service()
         assert fake_sidecar.tree == {
@@ -1828,12 +1842,27 @@ class TestCreateProject:
             (tab["id"], tab["name"], tab["state"], tab["member"]) for tab in listed
         ] == [(body["id"], None, "draft", True)]
 
+    @pytest.mark.parametrize("payload", [{"words": "  \n"}, {"words": ""}, {}])
+    def test_a_message_without_words_is_400_and_makes_no_draft(
+        self,
+        client: FlaskClient,
+        session: Session,
+        starts: None,
+        payload: dict[str, str],
+    ) -> None:
+        _sign_in(client)
+
+        response = client.post(PROJECTS, json=payload)
+
+        assert response.status_code == 400
+        assert session.scalars(select(Project)).all() == []
+
     def test_a_caller_without_a_handle_is_a_conflict(
-        self, client: FlaskClient, session: Session
+        self, client: FlaskClient, session: Session, starts: None
     ) -> None:
         _sign_in(client, subject="subject-newcomer")
 
-        response = client.post(PROJECTS)
+        response = client.post(PROJECTS, json={"words": "Hi"})
 
         assert response.status_code == 409
         assert response.get_json()["error"] == (
@@ -1841,17 +1870,62 @@ class TestCreateProject:
         )
         assert session.scalars(select(Project)).all() == []
 
+    def test_a_message_while_pilot_updates_its_store_is_a_conflict_and_leaves_no_draft(
+        self, client: FlaskClient, session: Session, starts: None
+    ) -> None:
+        _sign_in(client)
+        hold(session)
+
+        response = client.post(PROJECTS, json={"words": "Hi"})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot send a message to Pilot in the untitled project because Pilot"
+            " is updating"
+        )
+        assert session.scalars(select(Project)).all() == []
+        assert session.scalars(select(Chat)).all() == []
+
+    def test_a_message_with_no_controller_configured_is_a_conflict_and_leaves_no_draft(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        supervise: Supervise,
+    ) -> None:
+        container.session_start_service.override(
+            providers.Object(
+                configured_starts(container, supervise, controller_configured=False)
+            )
+        )
+        try:
+            _sign_in(client)
+
+            response = client.post(PROJECTS, json={"words": "Hi"})
+        finally:
+            container.session_start_service.reset_last_overriding()
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot send a message to Pilot in the untitled project because no"
+            " controller is configured"
+        )
+        assert session.scalars(select(Project)).all() == []
+        assert session.scalars(select(ProjectMember)).all() == []
+        assert session.scalars(select(Document)).all() == []
+        assert session.scalars(select(Chat)).all() == []
+
     def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
         _sign_in(client, roles=())
 
-        response = client.post(PROJECTS)
+        response = client.post(PROJECTS, json={"words": "Hi"})
 
         assert response.status_code == 403
 
     def test_without_a_token_it_is_unauthenticated(
         self, oidc_client: FlaskClient
     ) -> None:
-        response = oidc_client.post(PROJECTS)
+        response = oidc_client.post(PROJECTS, json={"words": "Hi"})
 
         assert response.status_code == 401
 
