@@ -102,17 +102,17 @@ test.describe('A work item’s session log', () => {
       toolResult('toolu_read', '# Example'),
       toolUse('toolu_ls', 'Bash', { command: 'ls', description: 'List the files' }),
     ]);
-    await expect(sessionLog.runs).toHaveText('Running List the files · 2 steps');
+    await expect(sessionLog.runs).toHaveText('List the files · 2 steps');
     await expect(sessionLog.cue).toHaveText('Working');
     await controller.play(environment, 'claude-1', [toolResult('toolu_ls', 'README.md')]);
     await expect(sessionLog.runs).toHaveText('Read a file, ran a command · 2 steps');
     await expect(sessionLog.tools).toHaveCount(0);
     await sessionLog.runs.getByRole('button').click();
-    await expect(sessionLog.tools).toHaveText(['Read …/Example/README.md', 'Ran List the files']);
+    await expect(sessionLog.tools).toHaveText(['Read …/Example/README.md', 'List the files']);
 
     // A sub-agent is a card under its call, done once it reported.
     await controller.play(environment, 'claude-1', rawTurn('turn_subagent'));
-    await expect(sessionLog.agents).toHaveText('Explore agent · Survey the stylesheets');
+    await expect(sessionLog.agents).toHaveText('Survey the stylesheets · Explore agent');
     await expect(sessionLog.agents.getByLabel('Done')).toBeVisible();
     await expect(sessionLog.texts.last()).toHaveText('There are two stylesheets.');
 

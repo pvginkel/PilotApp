@@ -1,6 +1,6 @@
 /**
- * A tool call's line (decision 3): its icon, what it did, a spinner while it runs; it opens to
- * its input and its result. A call that changed the record — a `pilot-store` call, or a worker's
+ * A tool call's line (decision 3): its icon, what it did in the line's one colour (C4), a spinner
+ * while it runs; it opens to its input and its result. A call that changed the record — a `pilot-store` call, or a worker's
  * `register_document` or `attach_file` — shows as its effect where it ran, in its step's place
  * (decision 5, ruled 2026-10-18).
  */
@@ -12,6 +12,7 @@ import type { Effect } from '@/lib/chat/records';
 import type { ToolCallView } from '@/lib/chat/view';
 import { useOpenQuote } from '@/hooks/use-open-quote';
 import { StepLine } from './step-line';
+import { StepWords } from './step-words';
 
 const ICONS: Record<ToolKind, typeof FileText> = {
   read: FileText,
@@ -97,8 +98,7 @@ export function ToolCallLine({ call }: { call: ToolCallView }) {
         open={open}
         onToggle={() => setOpen(!open)}
       >
-        {running ? sum.verbRunning : sum.verb}
-        {sum.target && <span className="text-foreground/80"> {sum.target}</span>}
+        <StepWords words={running ? sum.running : sum.done} />
         {failed && ' — failed'}
       </StepLine>
       {open && <ToolDetail call={call} />}

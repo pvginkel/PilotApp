@@ -1,20 +1,29 @@
 /**
  * A tool call's summary line (decision 3): what the call did, in a few words, from its input.
  * The brain's tools are Claude Code's own, the fleet's (KubeCoder's MCP server) and
- * `pilot-store`'s; anything else shows its bare name.
+ * `pilot-store`'s; anything else shows its bare name. The line is one colour: what it names as code
+ * is set in the mono face, and a command's or an agent's description, the model's own sentence,
+ * stands without a verb (C4).
  */
 
 export type ToolKind = 'read' | 'command' | 'search' | 'edit' | 'agent' | 'web' | 'store' | 'fleet' | 'todo' | 'other';
 
+/** A stretch of a line's words; `code`, a command, a path, a glob or an environment's name, in the mono face. */
+export interface Words {
+  text: string;
+  code?: boolean;
+}
+
 interface ToolSummary {
   kind: ToolKind;
-  /** "Read", "Ran", "Searched": the verb, past tense, for a finished call. */
-  verb: string;
-  /** "Reading", "Running": while it runs. */
-  verbRunning: string;
-  /** The object: a path, a command, a pattern. */
-  target: string;
+  /** The finished call's line: "Read …/chat/tools.ts", "Searched for “cue”". */
+  done: Words[];
+  /** The running call's line: "Reading …/chat/tools.ts". */
+  running: Words[];
 }
+
+/** A line's words as plain text: "Read …/chat/tools.ts". */
+export const wordsText = (words: Words[]) => words.map((w) => w.text).join('');
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -35,61 +44,71 @@ const STORE_VERBS: Record<string, [string, string]> = {
   finish: ['Finished the project', 'Finishing the project'],
 };
 
-export function summarizeTool(name: string, input: Record<string, unknown>): ToolSummary {
+/**
+ * A call's line from its input, or its verb alone while its input streams in (`null`): the verb,
+ * past tense once it finished, then what it acted on; a description in the verb's place.
+ */
+export function summarizeTool(name: string, input: Record<string, unknown> | null): ToolSummary {
+  const given = input ?? {};
+  const line = (kind: ToolKind, verb: string, verbRunning: string, ...target: Words[]): ToolSummary => {
+    const object = input === null ? [] : target.filter((w) => w.text !== '');
+    const said = (v: string): Words[] => (object.length ? [{ text: `${v} ` }, ...object] : [{ text: v }]);
+    return { kind, done: said(verb), running: said(verbRunning) };
+  };
+  const standing = (kind: ToolKind, ...words: Words[]): ToolSummary => ({ kind, done: words, running: words });
   switch (name) {
     case 'Read':
-      return { kind: 'read', verb: 'Read', verbRunning: 'Reading', target: shortPath(str(input.file_path)) };
-    case 'Bash':
-      return {
-        kind: 'command',
-        verb: 'Ran',
-        verbRunning: 'Running',
-        target: str(input.description) || firstLine(str(input.command)),
-      };
+      return line('read', 'Read', 'Reading', { text: shortPath(str(given.file_path)), code: true });
+    case 'Bash': {
+      const description = str(given.description);
+      if (description) return standing('command', { text: description });
+      return line('command', 'Ran', 'Running', { text: firstLine(str(given.command)), code: true });
+    }
     case 'Grep':
-      return {
-        kind: 'search',
-        verb: 'Searched for',
-        verbRunning: 'Searching for',
-        target: `“${str(input.pattern)}”${input.path ? ` in ${shortPath(str(input.path))}` : ''}`,
-      };
+      return line(
+        'search',
+        'Searched for',
+        'Searching for',
+        { text: `“${str(given.pattern)}”` },
+        ...(given.path ? [{ text: ' in ' }, { text: shortPath(str(given.path)), code: true }] : []),
+      );
     case 'Glob':
-      return { kind: 'search', verb: 'Listed', verbRunning: 'Listing', target: str(input.pattern) };
+      return line('search', 'Listed', 'Listing', { text: str(given.pattern), code: true });
     case 'Edit':
     case 'Write':
     case 'NotebookEdit':
-      return { kind: 'edit', verb: 'Edited', verbRunning: 'Editing', target: shortPath(str(input.file_path)) };
+      return line('edit', 'Edited', 'Editing', { text: shortPath(str(given.file_path)), code: true });
     case 'Agent':
-    case 'Task':
-      return {
-        kind: 'agent',
-        verb: `${str(input.subagent_type) || 'Sub'} agent`,
-        verbRunning: `${str(input.subagent_type) || 'Sub'} agent`,
-        target: str(input.description),
-      };
+    case 'Task': {
+      const type = `${str(given.subagent_type) || 'Sub'} agent`;
+      const description = str(given.description);
+      return description ? standing('agent', { text: description }, { text: ` · ${type}` }) : standing('agent', { text: type });
+    }
     case 'WebFetch':
-      return { kind: 'web', verb: 'Fetched', verbRunning: 'Fetching', target: str(input.url) };
+      return line('web', 'Fetched', 'Fetching', { text: str(given.url) });
     case 'WebSearch':
-      return { kind: 'web', verb: 'Searched the web for', verbRunning: 'Searching the web for', target: `“${str(input.query)}”` };
+      return line('web', 'Searched the web for', 'Searching the web for', { text: `“${str(given.query)}”` });
     case 'TodoWrite':
-      return { kind: 'todo', verb: 'Updated the plan', verbRunning: 'Updating the plan', target: '' };
+      return line('todo', 'Updated the plan', 'Updating the plan');
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
   if (mcp) {
     const [, server, tool] = mcp;
     if (server === 'pilot-store') {
       const [verb, verbRunning] = STORE_VERBS[tool!] ?? [tool!, tool!];
-      return { kind: 'store', verb, verbRunning, target: '' };
+      return line('store', verb, verbRunning);
     }
-    const words = tool!.replace(/_/g, ' ');
-    return {
-      kind: 'fleet',
-      verb: server === 'kubecoder' ? 'KubeCoder' : server!,
-      verbRunning: server === 'kubecoder' ? 'KubeCoder' : server!,
-      target: `${words}${input.name ? ` · ${str(input.name)}` : input.environment ? ` · ${str(input.environment)}` : ''}`,
-    };
+    const who = server === 'kubecoder' ? 'KubeCoder' : server!;
+    const environment = str(given.name) || str(given.environment);
+    return line(
+      'fleet',
+      who,
+      who,
+      { text: tool!.replace(/_/g, ' ') },
+      ...(environment ? [{ text: ' · ' }, { text: environment, code: true }] : []),
+    );
   }
-  return { kind: 'other', verb: name, verbRunning: name, target: '' };
+  return line('other', name, name);
 }
 
 /** A run of calls in one line, in the order they first ran: "Asked KubeCoder, read a file". */

@@ -11,7 +11,7 @@
 import { Circle, CircleCheck, CircleDashed, Hourglass, OctagonPause, Pause, RefreshCw, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
 import type { components } from '@/lib/api/generated/types';
 import { phaseOf, type Activity } from '@/lib/chat/activity';
-import { summarizeTool } from '@/lib/chat/tools';
+import { summarizeTool, type Words } from '@/lib/chat/tools';
 import { clockFormat, formatTime } from '@/lib/utils/time-format';
 
 type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.ProjectTabSchema'];
@@ -410,7 +410,7 @@ interface WorkCue {
   kind: 'cue';
   activity: Activity;
   /** The latest tool call, worded as the chat words a call; a sub-agent's description while it runs. */
-  step: string | null;
+  step: Words[] | null;
 }
 
 /** "Stopped · <time>", or Pilot's stop's words before it, and the cause of a stop made elsewhere. */
@@ -443,7 +443,7 @@ export function nudgeCue(work: Work): Activity {
   return work.held_reason === null ? NUDGE_DUE : { kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) };
 }
 
-const cue = (activity: Activity, step: string | null = null): WorkCue => ({ kind: 'cue', activity, step });
+const cue = (activity: Activity, step: Words[] | null = null): WorkCue => ({ kind: 'cue', activity, step });
 
 /**
  * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
@@ -489,13 +489,12 @@ export function workLine(work: Work): WorkLine | null {
 
 /**
  * A current line's step as the chat words its call, running or done: its verb alone while its
- * input streams in, before the call's line gives its target; an empty target is not drawn.
+ * input streams in, before the call's line gives its target.
  */
-function stepWords(call: LineStep | null, running: boolean): string | null {
+function stepWords(call: LineStep | null, running: boolean): Words[] | null {
   if (call === null || call.tool === null) return null;
-  const summary = summarizeTool(call.tool, (call.input ?? {}) as Record<string, unknown>);
-  const verb = running ? summary.verbRunning : summary.verb;
-  return call.input === null ? verb : [verb, summary.target].filter(Boolean).join(' ');
+  const summary = summarizeTool(call.tool, call.input === null ? null : (call.input as Record<string, unknown>));
+  return running ? summary.running : summary.done;
 }
 
 /** The relay's current line in the chat cue's words (design 2 §9.5): the server's own while the session comes up. */
@@ -514,7 +513,7 @@ function lineCue(line: CurrentLine): WorkCue {
       const type = line.agent?.type ?? null;
       return cue(
         { kind: 'agent', phase: type === null ? 'Waiting for the agent' : `Waiting for the ${type} agent` },
-        line.agent?.description ?? null,
+        line.agent?.description ? [{ text: line.agent.description }] : null,
       );
     }
     default: {

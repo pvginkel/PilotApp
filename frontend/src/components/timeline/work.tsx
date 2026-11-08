@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Link } from '@tanstack/react-router';
 import { CircleAlert, Play, RotateCw, ScrollText, Server, Square } from 'lucide-react';
+import { StepWords } from '@/components/chat/step-words';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Popover } from '@/components/shared/popover';
@@ -42,6 +43,7 @@ import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
 import { offersRetry, RESUMABLE, STOPPABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
+import { wordsText } from '@/lib/chat/tools';
 import { useEscape } from '@/lib/keys';
 import { progressStepMark, workLine } from '@/lib/utils/status-labels';
 
@@ -370,8 +372,8 @@ function Line({ work }: { work: Work }) {
         <div className="work-line" {...shared}>
           <WorkingCue activity={line.activity} />
           {line.step !== null && (
-            <span className="step" title={line.step} data-testid="timeline.work.step">
-              {line.step}
+            <span className="step" title={wordsText(line.step)} data-testid="timeline.work.step">
+              <StepWords words={line.step} />
             </span>
           )}
         </div>

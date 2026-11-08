@@ -10,11 +10,13 @@
 
 import { useState } from 'react';
 import { Bot, Check, CircleAlert, Layers, Square } from 'lucide-react';
-import { summarizeRun, summarizeTool, type ToolKind } from '@/lib/chat/tools';
+import { summarizeRun, summarizeTool, type ToolKind, type Words } from '@/lib/chat/tools';
 import { shownSteps, type AgentView, type Step, type ToolCallView } from '@/lib/chat/view';
 import { Markdown } from '@/components/shared/markdown';
+import { useHeld } from '@/hooks/use-held';
 import { cn } from '@/lib/utils';
 import { StepLine } from './step-line';
+import { StepWords } from './step-words';
 import { EffectLine, ToolCallLine } from './tool-call';
 
 const fadeIn = 'animate-fade-in opacity-0';
@@ -59,30 +61,28 @@ function runningCall(steps: Step[]): ToolCallView | null {
   return null;
 }
 
+/**
+ * A run's line: its running call's words while one runs, else what the run did, and its count of
+ * steps, each text held for a moment (C1); the spinner, and the count of failed calls, the one red
+ * in the line (C3), change at once.
+ */
 function RunLine({ steps, liveFrom }: { steps: Step[]; liveFrom: number | null }) {
   const [open, setOpen] = useState(false);
   const running = runningCall(steps);
-  const failed = steps.some((s) => s.kind === 'tool' && s.call.result?.isError);
-  const sum = running ? summarizeTool(running.name, running.input) : null;
+  const failed = steps.filter((s) => s.kind === 'tool' && s.call.result?.isError).length;
+  const words: Words[] = running ? summarizeTool(running.name, running.input).running : [{ text: runSummary(steps) }];
+  const said = useHeld({ words, count: steps.length }, `${steps.length} ${JSON.stringify(words)}`);
   return (
     <div data-testid="chat.run">
-      <StepLine
-        icon={failed ? <CircleAlert className="size-3.5" aria-hidden /> : <Layers className="size-3.5" aria-hidden />}
-        tone={failed && !running ? 'error' : 'muted'}
-        running={!!running}
-        open={open}
-        onToggle={() => setOpen(!open)}
-      >
-        {running && sum ? (
+      <StepLine icon={<Layers className="size-3.5" aria-hidden />} running={!!running} open={open} onToggle={() => setOpen(!open)}>
+        <StepWords words={said.words} />
+        <span className="opacity-70"> · {said.count} steps</span>
+        {failed > 0 && (
           <>
-            {sum.verbRunning}
-            {sum.target && <span className="text-foreground/80"> {sum.target}</span>}
-            <span className="opacity-70"> · {steps.length} steps</span>
-          </>
-        ) : (
-          <>
-            {runSummary(steps)}
-            <span className="opacity-70"> · {steps.length} steps</span>
+            <span className="opacity-70"> · </span>
+            <span className="text-destructive-text" data-testid="chat.run.failed">
+              {failed} failed
+            </span>
           </>
         )}
       </StepLine>
@@ -115,8 +115,7 @@ function AgentCard({ call, agent, liveFrom }: { call: ToolCallView; agent: Agent
         onToggle={() => setOpen(!open)}
         className="px-2.5 py-1"
       >
-        <span className="font-medium text-foreground/90">{agent.type} agent</span>
-        {agent.description && <span> · {agent.description}</span>}
+        <StepWords words={summarizeTool(call.name, call.input).done} />
         {status && <span className="ml-1.5 inline-flex align-[-2px]">{status}</span>}
       </StepLine>
       {!open && running && agent.progress && (

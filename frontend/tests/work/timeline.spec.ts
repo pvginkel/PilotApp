@@ -3,8 +3,9 @@
  * name going nowhere, on a phone an icon whose tap shows the name in a popover, and the running
  * time, "17m", its dot 8px from what stands before it, while its turn runs (F26.1, F12), and its one line (F26.2), live as the server moves it (F80.2) — the server's own words
  * while the session comes up
- * or its environment restarts, the working state and the latest step — a call whose input streams
- * in by its verb alone — why the gate holds its start (F141.5), a slot among it (F143.4),
+ * or its environment restarts, the working state and the latest step, in the cue's colour, its
+ * code in the mono face and a command's description without the verb (C4) — a call whose input
+ * streams in by its verb alone — why the gate holds its start (F141.5), a slot among it (F143.4),
  * "Stopped · <time>" with the cause of a stop made elsewhere (F71), a failure's error (F125) — and
  * its Session log (F26.3). Done, it is a quieter line, its Open the session log, with
  * no Undo and its attachments' indicator (F13.5, F26.6, F13.6), and so is every work item of a
@@ -101,6 +102,12 @@ test.describe('An open work item', () => {
     await controller.play(environment, 'claude-1', [toolUse('toolu_read', 'Read', { file_path: '/work/Example/README.md' })]);
     await expect(item.work.cue).toHaveText('Working');
     await expect(item.work.step).toHaveText('Reading …/Example/README.md');
+    // The step in the cue's one colour, its path in the mono face (C4).
+    await expect(item.work.step.locator('.mono')).toHaveText('…/Example/README.md');
+    await expect(item.work.step.locator('.mono')).toHaveCSS('font-family', /monospace/);
+    const colour = (part: Locator) => part.evaluate((element) => getComputedStyle(element).color);
+    expect(await colour(item.work.step)).toBe(await colour(item.work.cue));
+    expect(await colour(item.work.step.locator('.mono'))).toBe(await colour(item.work.cue));
     await controller.play(environment, 'claude-1', [toolResult('toolu_read', '# Example')]);
     await expect(item.work.cue).toHaveText('Thinking');
     await expect(item.work.step).toHaveText('Read …/Example/README.md');
@@ -359,7 +366,8 @@ test.describe('An open work item on a phone', () => {
       toolResult('toolu_bash', 'Listed.'),
     ]);
     await expect(item.work.cue).toHaveText('Thinking');
-    await expect(item.work.step).toHaveText(`Ran ${step}`);
+    // A command's description stands alone, without the verb (C4).
+    await expect(item.work.step).toHaveText(step);
 
     const phase = item.work.cue.locator('> span').nth(1);
     const clipped = (part: Locator) => part.evaluate((element) => element.scrollWidth > element.clientWidth);
