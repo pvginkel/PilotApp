@@ -14,7 +14,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { FormTestEvent } from '@/lib/test/test-events';
 import { test, expect } from '../support/fixtures';
-import { makeUnique, waitTestEvent } from '../support/helpers';
+import { expectConsoleError, makeUnique, waitTestEvent } from '../support/helpers';
 import { slowNetwork } from '../support/network';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
@@ -260,7 +260,7 @@ test.describe('The keyboard focus', () => {
     await expect(item.stop).toBeFocused();
   });
 
-  test('goes back to the button a refused act was pressed on, Resume refused while the stopped turn is still ending', async ({
+  test('goes back to the button a refused act was pressed on: Stop it refused to a session without the editor role, and Resume refused while the stopped turn is still ending', async ({
     page,
     people,
     projects,
@@ -268,22 +268,36 @@ test.describe('The keyboard focus', () => {
     timeline,
     deploymentSse,
   }) => {
-    const { project } = await setUp({ people, projects });
+    const subject = makeUnique('subject');
+    const me = await people.signIn({ subject });
+    const project = await projects.make({ name: makeUnique('Stop'), members: [me.handle!] });
     const work = await startIn(projects, project);
     const { id: environment } = await projects.environment(project, work);
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     const item = timeline.item(work).work;
+    const refused = (form: string) => waitTestEvent<FormTestEvent>(page, 'form', (event) => event.formId === form && event.phase === 'error');
+
+    // The browser's session now lacks the editor role, and the API refuses the Stop.
+    await item.stop.click();
+    await item.stopConfirm.yes.focus();
+    await expectConsoleError(page, /403/);
+    await people.withoutRole({ subject });
+    const stopRefused = refused('timeline.stop');
+    await item.stopConfirm.yes.press('Enter');
+    await stopRefused;
+    await expect(item.stopConfirm.yes).toBeEnabled();
+    await expect(item.stopConfirm.yes).toBeFocused();
+    await people.firstSignIn({ subject });
+    expect((await projects.work(project, work)).state).toBe('running');
 
     // The interrupt meets the unreachable worker, so the stopped turn runs on.
     await controller.unreachable(environment);
-    await item.stop.click();
-    await item.stopConfirm.yes.focus();
     await item.stopConfirm.yes.press('Enter');
     await expect(item.resume).toBeFocused();
-    const refused = waitTestEvent<FormTestEvent>(page, 'form', (event) => event.formId === 'timeline.resume' && event.phase === 'error');
+    const resumeRefused = refused('timeline.resume');
     await item.resume.press('Enter');
-    await refused;
+    await resumeRefused;
     await expect(
       page.getByTestId('app-shell.toast.item').filter({ hasText: `Cannot resume ${TITLE} because its stopped turn is still ending` }),
     ).toBeVisible();
