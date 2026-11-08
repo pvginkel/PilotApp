@@ -204,6 +204,20 @@
   }
   .more { margin-top: 4px; font-size: var(--text-sm); }
 
+  /* ---- Long texts clamped (clamp.tsx) --------------------------------------------------- */
+
+  /* Cut by its line count; Show more over the end of the last line shown, on --clamp-bg, the
+     box's background, the line's text fading into it under the button's left edge. */
+  .clamp { position: relative; }
+  .clamp.cut { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--lines); overflow: hidden; }
+  .clamp-more {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    padding-left: 2.5em;
+    background: linear-gradient(to right, transparent, var(--clamp-bg, hsl(var(--card))) 2em);
+  }
+
   /* ---- Chips ---------------------------------------------------------------------------- */
 
   /* A word in a pill beside a name: a standing such as Draft or Finished. */

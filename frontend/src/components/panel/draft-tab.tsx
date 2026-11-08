@@ -54,6 +54,7 @@ export function DraftTab({ projectId }: { projectId: string }) {
       </>
     );
   }
+  const blocks = data.body.flatMap((part) => (part.type === 'block' ? [part.block] : []));
   return (
     <div ref={sheet} className="draft" data-testid="panel.draft">
       {data.title !== null && (
@@ -67,6 +68,7 @@ export function DraftTab({ projectId }: { projectId: string }) {
             key={`block ${part.block.id}`}
             projectId={projectId}
             block={part.block}
+            blocks={blocks}
             title={data.title}
             flash={{
               flashing: fresh.has(part.block.id),

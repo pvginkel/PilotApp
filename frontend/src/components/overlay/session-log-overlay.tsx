@@ -8,8 +8,9 @@
  * as the chat renders a reply — the runs of calls, the sub-agents' cards, the phantom — streamed
  * from the first record while it is open (F40.3), one reply per turn, each ended one closing on
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
- * (F69.2). Before a turn's reply stands what the server sent it, as Pilot's message, folded: the
- * brief, a continuation, a Resume's; a turn sent and not yet answered shows its message alone. Its tail is the working cue while the session is held, starts or runs, else how it
+ * (F69.2). Before a turn's reply stands what the server sent it, as Pilot's message, cut after its
+ * first lines, Show more at the end of the last one and, once opened, Show less after its end (T5):
+ * the brief, a continuation, a Resume's; a turn sent and not yet answered shows its message alone. Its tail is the working cue while the session is held, starts or runs, else how it
  * ended: "Stopped by you · <time>", by whom else, by Pilot at the usage limit, the environment
  * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6);
  * a run whose turn ended under a halt or a pause adds, under its end, what holds its nudge, as its
@@ -27,8 +28,8 @@ import { StepLine } from '@/components/chat/step-line';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { Avatar } from '@/components/shared/avatar';
+import { Clamp } from '@/components/shared/clamp';
 import { JobOn } from '@/components/timeline/job';
-import { Fold } from '@/components/shared/fold';
 import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { useSseContext } from '@/contexts/sse-context';
@@ -223,14 +224,17 @@ function logEntries(sessionId: string, turns: readonly { key: string; turn: Turn
   return entries.sort((a, b) => a.number - b.number);
 }
 
-/** What the server sent a turn, as Pilot's message (the chat's message, F38.2): folded until Show more, Pilot and the time under it. */
+/** The lines a sent message shows until Show more. */
+const SENT_LINES = 8;
+
+/** What the server sent a turn, as Pilot's message (the chat's message, F38.2): clamped until Show more, Pilot and the time under it. */
 function SentMessage({ sent }: { sent: SessionTurn }) {
   return (
     <section className="log-sent" data-testid="session-log.sent">
       <div className="bubble">
-        <Fold testId="session-log.sent.text">
+        <Clamp lines={SENT_LINES} testId="session-log.sent.text">
           <LinkedText text={sent.message} />
-        </Fold>
+        </Clamp>
       </div>
       <div className="end" data-testid="session-log.sent.end">
         <span>Pilot</span>

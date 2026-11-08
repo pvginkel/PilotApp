@@ -3,12 +3,17 @@
  * block, a file's overlay or a session log opens the side panel on the Chat tab, on top, with what
  * it quotes in the composer, until the message carrying it is sent or the quote is dropped (F39.3);
  * the project's head has no Discuss (F39.2). In a draft, Discuss takes its definition chat in the
- * timeline's place instead (F46.1). Either asks for the focus in the composer's field. The quote is kept in the page, by the project, and nothing of it in the
- * browser's storage.
+ * timeline's place instead (F46.1). Either asks for the focus in the composer's field. The quote is
+ * kept by the project in the browser's storage, beside the composer's unsent words, until the
+ * message carrying it is sent or it is dropped (F133): a reload finds it over the words it is about.
  */
 
 import { createContext, useContext, useSyncExternalStore } from 'react';
+import { keepUnsentQuote, unsentQuote } from '@/lib/browser-state';
 import type { QuoteRef } from '@/lib/chat/quotes';
+
+/** The project's composer's field, which keys its unsent words and its quote in the browser. */
+export const composerField = (projectId: string): string => `chat/${projectId}`;
 
 interface Discussed {
   /** What the composer quotes. */
@@ -17,12 +22,19 @@ interface Discussed {
   focus: boolean;
 }
 
-const NONE: Discussed = { quote: null, focus: false };
 let discussed: Record<string, Discussed> = {};
 const listeners = new Set<() => void>();
 
+/** The project's, read from the browser at the page's first look. */
+function stateOf(projectId: string): Discussed {
+  discussed[projectId] ??= { quote: unsentQuote(composerField(projectId)), focus: false };
+  return discussed[projectId];
+}
+
 function update(projectId: string, change: Partial<Discussed>): void {
-  discussed = { ...discussed, [projectId]: { ...(discussed[projectId] ?? NONE), ...change } };
+  const next = { ...stateOf(projectId), ...change };
+  discussed = { ...discussed, [projectId]: next };
+  if (change.quote !== undefined) keepUnsentQuote(composerField(projectId), next.quote);
   listeners.forEach((listener) => listener());
 }
 
@@ -43,13 +55,13 @@ export function focusTaken(projectId: string): void {
 
 /** The project's composer's quote, whether Discuss asks for the focus in its field, and the quote's drop. */
 export function useDiscussed(projectId: string) {
-  const { quote, focus } = useSyncExternalStore(subscribe, () => discussed[projectId] ?? NONE);
+  const { quote, focus } = useSyncExternalStore(subscribe, () => stateOf(projectId));
   return {
     quote,
     focus,
     /** Drops `which` where it is still the composer's quote. */
     drop: (which: QuoteRef) => {
-      if (discussed[projectId]?.quote === which) update(projectId, { quote: null });
+      if (stateOf(projectId).quote === which) update(projectId, { quote: null });
     },
   };
 }

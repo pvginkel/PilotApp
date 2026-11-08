@@ -129,7 +129,7 @@
      ended one closing on its time, then the cue or how it ended. */
   .log-turn + .log-turn { margin-top: 12px; }
   /* What the server sent a turn, as Pilot's message: on the right in the primary's tint, framed,
-     folded, Pilot, the time and the mark under it. */
+     clamped, Pilot, the time and the mark under it. */
   .log-sent { display: flex; flex-direction: column; align-items: flex-end; width: fit-content; max-width: 91%; min-width: 0; margin: 0 0 8px auto; }
   .log-sent .bubble {
     max-width: 100%;
@@ -140,7 +140,7 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .log-sent .fold.long::after { background: linear-gradient(hsl(var(--primary-muted) / 0), hsl(var(--primary-muted))); }
+  .log-sent .clamp { --clamp-bg: hsl(var(--primary-muted)); }
   .log-sent .end { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
   .log-turn-end { margin: 4px 6px 0; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
   .log-turn-end .failed { color: hsl(var(--destructive-text)); }

@@ -6,11 +6,11 @@
  * place is Stop, in every member's composer whoever sent the message, ending the turn where it is;
  * the field does not wait, so the next message can be written meanwhile. The focus stays in the
  * field after Send and after Stop. Its words are kept in the browser until sent, keyed by the
- * project (F133). What Discuss quoted stands over the field as a chip, with its remove, and goes out
- * as its tag before the words (F38.3, F39.3); Discuss puts the focus in the field, once nothing lies
- * over it. In an archived
- * project it takes no message, and says why (F128.5); the server refuses one all the same. It lies
- * over the chat's foot with no divider, the chat scrolling under its frosted glass (mockup M3;
+ * project (F133). What Discuss quoted stands over the field as a chip, with its remove, kept in the
+ * browser beside the words, and goes out as its tag before the words (F38.3, F39.3); Discuss puts
+ * the focus in the field, once nothing lies over it. In an archived project it takes no message,
+ * and says why (F128.5); the server refuses one all the same. It lies over the chat's foot with no
+ * divider, the chat scrolling under its frosted glass (mockup M3;
  * `ChatColumn`, panel.css). In a draft it lies over the definition chat, in the timeline's column
  * (F46.1), and so does a new project's, whose box its first send wires (`new-project.tsx`).
  */
@@ -19,7 +19,7 @@ import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } fr
 import { SendHorizontal, Square } from 'lucide-react';
 import { TextField } from '@/components/shared/text-field';
 import { useSendMessage, useStopChat } from '@/hooks/use-chats';
-import { focusTaken, useDiscussed } from '@/hooks/use-discuss';
+import { composerField, focusTaken, useDiscussed } from '@/hooks/use-discuss';
 import { useArchived } from '@/hooks/use-projects';
 import { useUnsentText } from '@/hooks/use-unsent-text';
 import { quoteTag } from '@/lib/chat/quotes';
@@ -47,7 +47,7 @@ interface ComposerProps {
 }
 
 export function Composer({ projectId, home, answering, onSent, onDiscussed, covered }: ComposerProps) {
-  const { text, change } = useUnsentText(`chat/${projectId}`);
+  const { text, change } = useUnsentText(composerField(projectId));
   const { quote, focus, drop } = useDiscussed(projectId);
   const sending = useSendMessage(projectId);
   const stopping = useStopChat(projectId);

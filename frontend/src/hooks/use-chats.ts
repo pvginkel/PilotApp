@@ -43,11 +43,11 @@ const ANSWERING: readonly TurnState[] = ['held', 'starting', 'running'];
 
 const chatsOf = (projectId: string) => ['getProjectsChatsByProjectId', { path: { project_id: projectId } }];
 
-export function useProjectChats(projectId: string): ChatRead {
+/** The project's chats as read, and whether a read of them is under way. */
+export function useProjectChats(projectId: string): { read: ChatRead; reading: boolean } {
   const query = useGetProjectsChatsByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
   useUiStateInstrumentation('panel.chat', { isLoading: query.isLoading, error: query.error });
-  if (query.error !== null) return 'failed';
-  return query.data ?? 'pending';
+  return { read: query.error !== null ? 'failed' : (query.data ?? 'pending'), reading: query.isFetching };
 }
 
 /** Whether Pilot answers in the chat, into the project's list as read; a chat it does not hold yet comes with its next read. */

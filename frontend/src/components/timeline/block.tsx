@@ -130,13 +130,15 @@ export function DocumentBlock({ document, block }: { document: string; block: Bl
 interface DraftBlockProps {
   projectId: string;
   block: BlockData;
+  /** The draft's blocks, among which its Discuss's label numbers it. */
+  blocks: readonly BlockData[];
   /** The draft's title, which its Discuss's label names. */
   title: string | null;
   flash: Flash;
 }
 
 /** A block of a draft's `project.md`, in the Draft tab: answered in place (F47.4). */
-export function DraftBlock({ projectId, block, title, flash }: DraftBlockProps) {
+export function DraftBlock({ projectId, block, blocks, title, flash }: DraftBlockProps) {
   const answering = useDraftAnswer(projectId, block.id);
   const archived = useArchived(projectId);
   return (
@@ -148,7 +150,7 @@ export function DraftBlock({ projectId, block, title, flash }: DraftBlockProps) 
       answering={answering}
       settled={false}
       disabled={archived}
-      quote={quoteOfDraftBlock(block, title)}
+      quote={quoteOfDraftBlock(block, blocks, title)}
       asked={null}
       flash={flash}
       held={null}

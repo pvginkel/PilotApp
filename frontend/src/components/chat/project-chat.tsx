@@ -3,8 +3,10 @@
  * draft, its definition chat in the timeline's place, the composer over its foot in the timeline's
  * column (F46.1; the mockup's `renderChat`, its home the page until Create). Either shows the
  * project's latest chat, or with none open the latest closed one, above the line where it closed.
- * "The chat before · <day>" at the top loads that chat above what is in view and leaves the view
- * where it is (the chat mockup's decision 11); a chat that opens while it shows comes in below.
+ * "Load previous" at the top loads the chat before above what is in view and leaves the view where
+ * it is (the chat mockup's decision 11; C10); how far back it shows is kept in the page by the
+ * project, and a chat opened since it last showed has it show the latest alone (C9, C11;
+ * use-chat-reach.ts); a chat that opens while it shows comes in below.
  * Every viewer streams the chats it shows, so another person's message and Pilot's reply come to
  * them as to the sender (decision 13); the list is read again on `project_changed`, which a chat's
  * open and close and each move of its session raise. Nothing stands in it while the list's read is
@@ -21,15 +23,15 @@
  * column (decision 12).
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import { ChevronUp } from 'lucide-react';
 import { useFlashes } from '@/components/timeline/flash';
+import { useChatReach } from '@/hooks/use-chat-reach';
 import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
 import { useChatPlace, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePerson } from '@/hooks/use-self';
 import { useStickyBottom } from '@/hooks/use-sticky-bottom';
 import type { components } from '@/lib/api/generated/types';
-import { day } from '@/lib/chat/format';
 import { cn } from '@/lib/utils';
 import { ChatEmptyState, type ChatHome } from './chat-empty-state';
 import { ChatSection, messageKey } from './chat-section';
@@ -52,14 +54,11 @@ interface ProjectChatProps {
 }
 
 export function ProjectChat({ projectId, members, home, covered, end }: ProjectChatProps) {
-  const read = useProjectChats(projectId);
+  const { read, reading } = useProjectChats(projectId);
   const person = usePerson();
   const people = useMemo(() => chatPeople(person, members), [person, members]);
   const chats = typeof read === 'string' ? null : read.chats;
-  // The first chat shown, by its place in the list: the latest at the first read, so that a chat
-  // opening later comes in below it.
-  const [from, setFrom] = useState<number | null>(null);
-  if (from === null && chats !== null) setFrom(Math.max(0, chats.length - 1));
+  const { from, setFrom } = useChatReach(projectId, chats, reading);
   const container = useRef<HTMLDivElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
   const { stick, unstick, stuck } = useStickyBottom(container, wrapper, 'chat');
@@ -169,7 +168,7 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
               data-testid="chat.before"
             >
               <ChevronUp className="size-3.5" aria-hidden />
-              The chat before · {day(before.opened_at)}
+              Load previous
             </button>
           )}
           {chats?.length === 0 && <ChatEmptyState home={home} />}

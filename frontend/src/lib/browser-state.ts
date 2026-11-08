@@ -1,9 +1,11 @@
 /**
  * What the browser remembers (F133): kept in its storage, nothing of it on the server. Unsent text
- * is kept under a key of its own, read when its field opens and written as it is typed.
+ * is kept under a key of its own, read when its field opens and written as it is typed, and beside
+ * it the quote a composer's field carries.
  */
 
 import { useSyncExternalStore } from 'react';
+import type { QuoteRef } from '@/lib/chat/quotes';
 
 export const THEMES = ['system', 'light', 'dark'] as const;
 export type Theme = (typeof THEMES)[number];
@@ -202,5 +204,27 @@ export function keepUnsent(field: string, text: string): void {
   const unsent = readUnsent();
   if (text === '') delete unsent[field];
   else unsent[field] = text;
+  localStorage.setItem(UNSENT_KEY, JSON.stringify(unsent));
+}
+
+const QUOTE_KINDS: readonly QuoteRef['kind'][] = ['item', 'block', 'path'];
+
+function isQuote(saved: unknown): saved is QuoteRef {
+  if (typeof saved !== 'object' || saved === null) return false;
+  const { kind, id, label } = saved as Partial<Record<keyof QuoteRef, unknown>>;
+  return QUOTE_KINDS.some((each) => each === kind) && typeof id === 'string' && typeof label === 'string';
+}
+
+/** The quote over the field `field`, not sent; none where it holds none. */
+export function unsentQuote(field: string): QuoteRef | null {
+  const quote = readUnsent()[`${field}/quote`];
+  return isQuote(quote) ? quote : null;
+}
+
+/** Keeps the quote over a field beside its words until it is sent or dropped, over what another tab keeps; none, nothing kept. */
+export function keepUnsentQuote(field: string, quote: QuoteRef | null): void {
+  const unsent = readUnsent();
+  if (quote === null) delete unsent[`${field}/quote`];
+  else unsent[`${field}/quote`] = quote;
   localStorage.setItem(UNSENT_KEY, JSON.stringify(unsent));
 }

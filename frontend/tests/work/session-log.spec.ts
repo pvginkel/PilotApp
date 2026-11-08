@@ -10,7 +10,7 @@
  * Thinking counted from its turn's first record (W2, C2), else "Stopped by you · <time>", the environment
  * stopped under it or in error, "The turn ended · <time>" or "Failed · <time>" under the error
  * (F69.2, F125). Before each turn's reply stands what the server sent it, as Pilot's message,
- * folded: the brief, a Resume's.
+ * cut after its first lines until Show more, Show less once opened (T5): the brief, a Resume's.
  * It follows the item through a Resume, sticks to its end until the reader scrolls up, and Esc
  * closes it.
  */
@@ -160,7 +160,7 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.cue).toHaveText('Thinking · 2 min');
   });
 
-  test('shows what the server sent each turn as Pilot’s message before its reply: the brief, folded until Show more unfolds it whole, and a Resume’s before the turn it starts', async ({
+  test('shows what the server sent each turn as Pilot’s message before its reply: the brief, cut after eight lines with Show more at the end of the last, opened whole with Show less after its last word, which cuts it again, and a Resume’s before the turn it starts', async ({
     people,
     projects,
     controller,
@@ -175,15 +175,35 @@ test.describe('A work item’s session log', () => {
     const { id: environment } = await projects.environment(project, work);
     await sessionLog.open(project, work);
 
-    // The brief shows before the turn has a reply, folded, Pilot and its time under it.
+    // The brief shows before the turn has a reply, cut after its first eight lines, Show more over
+    // the end of the last, Pilot and its time under it.
     const first = sessionLog.turns.first();
-    await expect(first.getByTestId('session-log.sent.text')).toContainText('Survey the stylesheets.');
+    const sentText = first.getByTestId('session-log.sent.text');
+    await expect(sentText).toContainText('Survey the stylesheets.');
     await expect(sessionLog.sentEnds).toHaveText([/^Pilot\s*\d\d:\d\d$/]);
-    await expect(sessionLog.sentTexts.first()).toHaveClass(/\bfold\b.*\blong\b/);
+    await expect(sessionLog.sentMore).toBeVisible();
+    expect(await sentText.evaluate((box) => box.clientHeight / parseFloat(getComputedStyle(box).lineHeight))).toBeCloseTo(8, 1);
+    const [cut, more] = [(await sentText.boundingBox())!, (await sessionLog.sentMore.boundingBox())!];
+    expect(Math.abs(cut.y + cut.height - (more.y + more.height))).toBeLessThanOrEqual(1);
+    expect(Math.abs(cut.x + cut.width - (more.x + more.width))).toBeLessThanOrEqual(1);
+
+    // Opened whole, the view stays where it stood: the reader's own open moves nothing.
     await sessionLog.sentMore.click();
     await expect(sessionLog.sentMore).toHaveCount(0);
-    await expect(sessionLog.sentTexts.first()).not.toHaveClass(/\bfold\b/);
-    await expect(sessionLog.sentTexts.first()).toHaveText(brief);
+    await expect(sentText).toHaveText(`${brief} Show less`);
+    await expect(sessionLog.sentLess).toBeFocused();
+    expect((await sentText.boundingBox())!.y).toBeCloseTo(cut.y, 0);
+    expect(await sessionLog.body.evaluate((body) => body.scrollHeight > body.clientHeight)).toBe(true);
+    // Show less after its last word, on its last line, not at that line's start.
+    const [whole, less] = [(await sentText.boundingBox())!, (await sessionLog.sentLess.boundingBox())!];
+    expect(Math.abs(whole.y + whole.height - (less.y + less.height))).toBeLessThanOrEqual(1);
+    expect(less.x).toBeGreaterThan(whole.x + 1);
+
+    // Show less cuts it again.
+    await sessionLog.sentLess.click();
+    await expect(sessionLog.sentLess).toHaveCount(0);
+    await expect(sessionLog.sentMore).toBeFocused();
+    expect((await sentText.boundingBox())!.height).toBeCloseTo(cut.height, 0);
 
     // Its reply follows it in the same turn.
     await controller.play(environment, 'claude-1', [text('looking', 'Looking at the stylesheets.')]);

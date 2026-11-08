@@ -11,18 +11,25 @@
  * each day's first message. A chat shorter than its column stands at its top; at its end, a step
  * list the reader opens grows downward, the view where it stood. A chat that opens while the tab
  * shows comes in; another person's turn streams to every viewer alike. With no chat open the latest closed one shows above "Chat closed ·
- * <time>", and the next message starts a new chat below it; "The chat before · <day>" at the top
- * loads that chat above what is in view and leaves the view where it is (F130.1). Nothing stands in
+ * <time>", and the next message starts a new chat below it; "Load previous" at the top loads the
+ * chat before above what is in view and leaves the view where it is (F130.1, C10). How far back it
+ * shows is kept in the page, by the project, back from another project or tab, and a reload starts
+ * from the latest (C9); a chat opened since it last showed has it show the latest alone, the list
+ * the page last read included (C11). Nothing stands in
  * it while its read is under way, and "The chat did not load." where it fails (F113). On a phone it
  * is the same column, the composer over its foot (F98.3; the composer's own specs: composer.spec.ts).
  */
 
 import type { Page } from '@playwright/test';
+import type { components } from '@/lib/api/generated/types';
 import { test, expect } from '../support/fixtures';
 import { coloursOf, cssColour, hue, lightness } from '../support/contrast';
 import { expectConsoleError, makeUnique } from '../support/helpers';
+import type { Chats } from '../support/chats';
+import type { Controller } from '../support/controller';
 import { slowNetwork } from '../support/network';
 import { addressOf } from '../support/page-objects/timeline-page';
+import { projectAddress, type Projects } from '../support/projects';
 
 const ZONE = 'Europe/Amsterdam';
 test.use({ timezoneId: ZONE });
@@ -47,6 +54,8 @@ const thinkingStart = () =>
   line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }, parent_tool_use_id: null });
 
 const MINUTE = 60_000;
+
+type ProjectList = components['schemas']['ProjectListResponseSchema.e86ccd6'];
 
 /** A span as the cue words it (`duration()` in src/lib/chat/format.ts): "4 s", "1 min 5 s". */
 function duration(ms: number): string {
@@ -485,10 +494,27 @@ test.describe('The Chat tab', () => {
   });
 });
 
+/** A project's two chats, each answered: the first closed by a Finish, and after a Reopen the second, open. */
+async function closedThenOpen(
+  { projects, controller, chats }: { projects: Projects; controller: Controller; chats: Chats },
+  project: string,
+): Promise<void> {
+  const first = await chats.start(project, 'Plan the route.');
+  await controller.play(chats.store, first.session, [text('route', 'By the lake.')]);
+  await controller.finish(chats.store, first.session, 'success', 'By the lake.');
+  await chats.idle(project);
+  await projects.transition(project, 'finished');
+  await projects.transition(project, 'reopened');
+  const second = await chats.start(project, 'And the tent?');
+  await controller.play(chats.store, second.session, [text('tent', 'The dome.')]);
+  await controller.finish(chats.store, second.session, 'success', 'The dome.');
+  await chats.idle(project);
+}
+
 test.describe('The Chat tab’s closed chats', () => {
   test.use({ viewport: { width: 1280, height: 600 } });
 
-  test('shows a closed chat above “Chat closed · <time>” and the next message’s chat below it; opened again, the latest alone, “The chat before · <day>” loading that chat above what is in view and leaving the view where it is', async ({
+  test('shows a closed chat above “Chat closed · <time>” and the next message’s chat below it; opened again, the latest alone, “Load previous” loading the chat before above what is in view and leaving the view where it is', async ({
     page,
     people,
     projects,
@@ -530,7 +556,7 @@ test.describe('The Chat tab’s closed chats', () => {
     await expect(chat.texts).toContainText('Pitch 30, by the lake.');
     await expect(chat.messageTexts).toHaveText(['And the tent?']);
     await expect(chat.closed).toHaveCount(0);
-    await expect(chat.before).toHaveText(`The chat before · ${dayOf(closed!.opened_at)}`);
+    await expect(chat.before).toHaveText('Load previous');
     // Opened at its end: the reader scrolls up to the button.
     await chat.body.hover();
     await page.mouse.wheel(0, -100_000);
@@ -544,6 +570,114 @@ test.describe('The Chat tab’s closed chats', () => {
     await expect(chat.before).toHaveCount(0);
     await expect.poll(async () => Math.abs((await chat.top(chat.messages.last())) - at)).toBeLessThanOrEqual(1);
     expect(await chat.top(chat.messages.first())).toBeLessThan(0);
+  });
+
+  test('keeps the chats loaded before while the page lives: back from the Documents tab or another project they show again, and after a reload the latest alone', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    projectList,
+    panel,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Kept');
+    const project = await projects.make({ name, members: [me.handle!] });
+    const other = makeUnique('Elsewhere');
+    const otherId = await projects.make({ name: other, members: [me.handle!] });
+    await closedThenOpen({ projects, controller, chats }, project);
+    await timeline.open(project);
+    await expect(chat.messageTexts).toHaveText(['And the tent?']);
+    await chat.before.click();
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+
+    await panel.documentsTab.click();
+    await expect(chat.root).toHaveCount(0);
+    await chat.tab.click();
+    await expect(chat.replyEnds).toHaveCount(2);
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+    await expect(chat.closed).toHaveCount(1);
+    await expect(chat.before).toHaveCount(0);
+
+    await projectList.tab(other).click();
+    await expect(page).toHaveURL(projectAddress(otherId));
+    await projectList.tab(name).click();
+    await expect(page).toHaveURL(projectAddress(project));
+    await expect(chat.replyEnds).toHaveCount(2);
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+    await expect(chat.before).toHaveCount(0);
+
+    await page.reload();
+    await expect(chat.replyEnds).toHaveCount(1);
+    await expect(chat.messageTexts).toHaveText(['And the tent?']);
+    await expect(chat.before).toHaveText('Load previous');
+  });
+
+  test('opened again after a chat opened while it did not show shows that chat alone: from another project, on the list as the page last read it, and from the Documents tab, on the list read meanwhile', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    projectList,
+    panel,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Away');
+    const project = await projects.make({ name, members: [me.handle!] });
+    const other = makeUnique('Elsewhere');
+    const otherId = await projects.make({ name: other, members: [me.handle!] });
+    await closedThenOpen({ projects, controller, chats }, project);
+    await timeline.open(project);
+    await chat.before.click();
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+
+    // Away on another project, its list no longer read, the chat closes and another opens. The
+    // project lists' read that has it finished is the page's word that it heard of the project's
+    // change, after which the list it holds is read again once it shows.
+    await projectList.tab(other).click();
+    await expect(page).toHaveURL(projectAddress(otherId));
+    const heard = page.waitForResponse(
+      async (response) =>
+        new URL(response.url()).pathname === '/api/projects' &&
+        response.request().method() === 'GET' &&
+        ((await response.json()) as ProjectList).projects.some((each) => each.id === project && each.finished_at !== null),
+    );
+    await projects.transition(project, 'finished');
+    await heard;
+    await projects.transition(project, 'reopened');
+    const third = await chats.start(project, 'And the stove?');
+    await controller.play(chats.store, third.session, [text('stove', 'The gas one.')]);
+    await controller.finish(chats.store, third.session, 'success', 'The gas one.');
+
+    // Back, on the list as the page last read it: what it shows waits for the read its opening makes.
+    await projectList.tab(name).click();
+    await expect(page).toHaveURL(projectAddress(project));
+    await expect(chat.replyEnds).toHaveCount(1);
+    await expect(chat.messageTexts).toHaveText(['And the stove?']);
+    await expect(chat.closed).toHaveCount(0);
+    await expect(chat.before).toHaveText('Load previous');
+
+    // Away on the Documents tab, the list read as it changes, another chat opens; its reply's dot
+    // says the page read it.
+    await chat.before.click();
+    await expect(chat.messageTexts).toHaveText(['And the tent?', 'And the stove?']);
+    await panel.documentsTab.click();
+    await projects.transition(project, 'finished');
+    await projects.transition(project, 'reopened');
+    const fourth = await chats.start(project, 'And the pegs?');
+    await controller.play(chats.store, fourth.session, [text('pegs', 'Twelve.')]);
+    await controller.finish(chats.store, fourth.session, 'success', 'Twelve.');
+    await expect(chat.tabDot).toBeVisible();
+    await chat.tab.click();
+    await expect(chat.replyEnds).toHaveCount(1);
+    await expect(chat.messageTexts).toHaveText(['And the pegs?']);
+    await expect(chat.before).toHaveText('Load previous');
   });
 });
 

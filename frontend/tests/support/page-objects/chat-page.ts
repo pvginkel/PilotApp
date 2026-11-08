@@ -6,7 +6,7 @@ import { waitTestEvent } from '../helpers';
  * The side panel's Chat tab (F38, F40, F130.1): its tab in the panel's head; its transcript, the
  * chats shown with each person's message — its quotes, words, the name of another person, the time
  * and the avatar — and Pilot's reply to it, its steps, the phantom, the cue, a failure and its end;
- * the date dividers, the line where a chat closed, "The chat before · <day>" at the top, the empty
+ * the date dividers, the line where a chat closed, "Load previous" at the top, the empty
  * state, and the line in its place where the tab's read failed; and over the transcript's foot the
  * composer (F44) and its glass: the quote Discuss put over its field and its remove (F39.3), its
  * field, Send or Stop in its place, and why an archived project's takes no message. The tab

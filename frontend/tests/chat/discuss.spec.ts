@@ -3,8 +3,10 @@
  * head and session log it shows the side panel's Chat tab and puts what it stands on in the
  * composer as a chip that can be dropped, which the sent message carries as its tag before the
  * words (F38.3, F39.3); the handbook's, the project document's and an attachment's overlay quote
- * the file by its path in the project's folder. It puts the focus in the composer's field. The head
- * has none (F2.3; tests/projects/panel.spec.ts).
+ * the file by its path in the project's folder. A block with no section of its own is named by its
+ * kind, numbered among its document's blocks of that kind where it holds more than one (C14). The
+ * quote is kept beside the composer's words in the browser until sent (C12). It puts the focus in
+ * the composer's field. The head has none (F2.3; tests/projects/panel.spec.ts).
  *
  * The unread dot (F43) stands on the Chat tab while a reply of Pilot's came
  * after the person last saw the chat to its end; the chat shown at its end is marked seen, so a
@@ -32,6 +34,9 @@ const DECISION = 'Which tent for the trip?\n\n```decision id=D1\noptions:\n  - D
 // Two asks: a document of one ask is that ask's item.
 const PACKING =
   'What we take.\n\n## Which stove?\n\n```decision id=D1\noptions:\n  - Gas\n  - Spirit\n```\n\n## How many pegs?\n\n```question id=Q1\n```\n';
+// A question under no heading, two decisions under one, and one with a heading of its own.
+const GEAR =
+  'What we take.\n\n```question id=Q1\n```\n\n## Gear\n\n```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n\n```decision id=D2\noptions:\n  - Wool\n  - Down\n```\n\n## Stove\n\n```decision id=D3\noptions:\n  - Gas\n  - Spirit\n```\n';
 const CONFIRM = 'The tag is cut.\n\n```decision id=C1\ntype: confirmation\nproposal: Push the release\nbecause: auto-pilot-off\n```\n';
 const NOTES = { title: 'Tent notes', filename: 'tent-notes.md', content_type: 'text/markdown', content: '# Tent notes\n\nThe dome is lighter.\n' };
 
@@ -126,6 +131,83 @@ test.describe('Discuss', () => {
     await expect(chat.quote).toHaveAttribute('data-quote', `item ${work}`);
     await expect(chat.quoteLabel).toHaveText('Survey the stylesheets');
     await expect(chat.field).toBeFocused();
+  });
+
+  test('names a block with no section of its own by its kind, numbered among its document’s blocks of that kind where it holds more than one, in the chip and the message sent', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Ordinal'), members: [me.handle!] });
+    const packing = await projects.place(project, { kind: 'document', title: 'Packing', text: GEAR });
+    await timeline.open(project);
+    const item = timeline.item(packing);
+
+    for (const [block, label] of [
+      ['Q1', 'Question · Packing'],
+      ['D1', 'Decision 1 · Packing'],
+      ['D2', 'Decision 2 · Packing'],
+      ['D3', 'Stove · Packing'],
+    ]) {
+      await item.blockAt(block!).discuss.click();
+      await expect(chat.quote).toHaveAttribute('data-quote', `block ${packing}/${block}`);
+      await expect(chat.quoteLabel).toHaveText(label!);
+    }
+
+    await item.blockAt('D1').discuss.click();
+    await chat.field.fill('Which one is this?');
+    const opened = await chats.opening(project);
+    const sent = chat.acted('send');
+    await chat.send.click();
+    await sent;
+    const session = await opened();
+    await expect(chat.messages.getByTestId('chat.quote')).toHaveText('Decision 1 · Packing');
+    await controller.finish(chats.store, session, 'success', 'The tent.');
+  });
+
+  test('keeps its quote beside the composer’s words in the browser: a reload finds both, a dropped quote stays dropped, and a sent message leaves neither', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Reload'), members: [me.handle!] });
+    const decision = await projects.place(project, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    await timeline.open(project);
+    await timeline.item(decision).discuss.click();
+    await chat.field.fill('Dome or tunnel?');
+
+    await page.reload();
+    await expect(chat.field).toHaveValue('Dome or tunnel?');
+    await expect(chat.quote).toHaveAttribute('data-quote', `item ${decision}`);
+    await expect(chat.quoteLabel).toHaveText('Which tent?');
+
+    await chat.quoteRemove.click();
+    await expect(chat.quote).toHaveCount(0);
+    await page.reload();
+    await expect(chat.field).toHaveValue('Dome or tunnel?');
+    await expect(chat.quote).toHaveCount(0);
+
+    await timeline.item(decision).discuss.click();
+    await expect(chat.quoteLabel).toHaveText('Which tent?');
+    const opened = await chats.opening(project);
+    const sent = chat.acted('send');
+    await chat.send.click();
+    await sent;
+    const session = await opened();
+    await page.reload();
+    await expect(chat.messages.getByTestId('chat.quote')).toHaveText('Which tent?');
+    await expect(chat.field).toHaveValue('');
+    await expect(chat.quote).toHaveCount(0);
+    await controller.finish(chats.store, session, 'success', 'The dome.');
   });
 
   test('on an overlay’s head quotes what it shows: a document the item, the handbook, the project document and an attachment by their paths; the session log’s popover has none', async ({
