@@ -39,6 +39,7 @@ class TestGetConditions:
                     "stale": None,
                     "offer": None,
                     "target": None,
+                    "setting": None,
                 }
             ]
         }
@@ -72,6 +73,7 @@ class TestGetConditions:
                     "stale": False,
                     "offer": "allowance",
                     "target": 0.95,
+                    "setting": "cooperative_stop",
                 }
             ]
         }

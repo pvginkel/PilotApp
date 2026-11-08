@@ -4,8 +4,9 @@
  * Stop stops one, by Pilot: its line "Stopped at the five-hour limit · <time>", or the week's once
  * the week's halt holds too, the halt read at display, the week's first, "the usage limit" once
  * neither does; its session log's tail "Stopped by Pilot at the usage limit · <time>"; Resume in
- * Stop's place; and it waits on nobody, so no badge counts it (DB 225, 269). Its nudge carries it on
- * once nothing holds it, its project's pause among what does (DB 232).
+ * Stop's place; and it waits on nobody, so no badge counts it (DB 225, 269). The halt's line on the
+ * gold bar says so. Its nudge carries it on once nothing holds it, its project's pause among what
+ * does (DB 232).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -13,6 +14,7 @@ import { makeUnique } from '../support/helpers';
 
 const ZONE = 'Europe/Amsterdam';
 test.use({ timezoneId: ZONE });
+const FIVE_HOUR_DOES = /\. Pilot has stopped every running work item, and none starts until a reading puts it under the limit; chats and Pilot’s own jobs go on\.$/;
 const clock = (at: string) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: ZONE }).format(new Date(at));
 
 test.describe('The hard stop', () => {
@@ -24,6 +26,7 @@ test.describe('The hard stop', () => {
     sessionLog,
     projectList,
     deploymentSse,
+    shell,
     page,
   }) => {
     const me = await people.signIn();
@@ -46,6 +49,7 @@ test.describe('The hard stop', () => {
     await expect(item.stop).toHaveCount(0);
     await expect(item.resume).toHaveText('Resume');
     await expect(projectList.badge(name)).toHaveCount(0);
+    await expect(shell.goldBadge('five_hour_halt')).toHaveAttribute('title', FIVE_HOUR_DOES);
 
     await item.sessionLog.click();
     await expect(sessionLog.tail).toHaveText(`Stopped by Pilot at the usage limit · ${at}`);

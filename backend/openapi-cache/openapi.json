@@ -1129,6 +1129,17 @@
             ],
             "description": "The week's halt's: the overrule it offers now, one at a time, `allowance` under the second limit, `run_out` at or over it and under the wall; null at the wall, where none is offered, and for the outage, the store's update and the five-hour halt, which has none"
           },
+          "setting": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConditionsSchema.6c014b4.HaltSetting"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A halt's: its window's halt setting, what the halt does to the work items (F135.6): `no_new_work`, none of them starts; `cooperative_stop`, besides, the running ones are asked to stop at their next step; `hard_stop`, besides, Pilot has stopped every running one; null for the outage and the store's update"
+          },
           "share": {
             "anyOf": [
               {
@@ -1198,10 +1209,21 @@
           "taken_at",
           "stale",
           "offer",
-          "target"
+          "target",
+          "setting"
         ],
         "title": "ConditionSchema",
         "type": "object"
+      },
+      "ConditionsSchema.6c014b4.HaltSetting": {
+        "description": "What a usage halt does to the work items, one setting per window\n(F135.6): no new work, the cooperative stop or the hard stop. The gate\nholds their starts under each.",
+        "enum": [
+          "no_new_work",
+          "cooperative_stop",
+          "hard_stop"
+        ],
+        "title": "HaltSetting",
+        "type": "string"
       },
       "ConditionsSchema.6c014b4.OverruleKind": {
         "description": "A kind of way a person lifts the week's usage halt (DB §2.4; decision\n66): the allowance, a target under the second limit; run-out, at it, the\ntarget the wall.",

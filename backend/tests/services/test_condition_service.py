@@ -13,12 +13,14 @@ from typing import Any
 import pytest
 from sqlalchemy.orm import Session as DbSession
 
+from app.app_config import HaltSetting
 from app.models import UsageReading, User, WindowShare
 from app.models.reference import UsageWindow
 from app.services.condition_service import ConditionService
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
+from app.services.usage_halts import UsageHalts
 from tests.support.store_updates import hold, lift
 
 
@@ -103,6 +105,7 @@ class TestConditionService:
                     "stale": None,
                     "offer": None,
                     "target": None,
+                    "setting": None,
                 }
             ]
         }
@@ -126,6 +129,7 @@ class TestConditionService:
                     "stale": None,
                     "offer": None,
                     "target": None,
+                    "setting": None,
                 },
                 {
                     "code": "week_halt",
@@ -135,6 +139,7 @@ class TestConditionService:
                     "stale": False,
                     "offer": "allowance",
                     "target": pytest.approx(0.97),
+                    "setting": "cooperative_stop",
                 },
                 {
                     "code": "five_hour_halt",
@@ -144,9 +149,45 @@ class TestConditionService:
                     "stale": False,
                     "offer": None,
                     "target": None,
+                    "setting": "cooperative_stop",
                 },
             ]
         }
+
+    @pytest.mark.parametrize(
+        ("week_halt", "five_hour_halt"),
+        [
+            (HaltSetting.NO_NEW_WORK, HaltSetting.HARD_STOP),
+            (HaltSetting.HARD_STOP, HaltSetting.COOPERATIVE_STOP),
+            (HaltSetting.COOPERATIVE_STOP, HaltSetting.NO_NEW_WORK),
+        ],
+    )
+    def test_a_halt_carries_its_windows_setting(
+        self,
+        container: ServiceContainer,
+        controller_outage: ControllerOutage,
+        manager: SSEConnectionManager,
+        session: DbSession,
+        week_halt: HaltSetting,
+        five_hour_halt: HaltSetting,
+    ) -> None:
+        halts = UsageHalts(
+            week_limit=0.9,
+            week_allowance=0.05,
+            week_second_limit=0.98,
+            five_hour_limit=0.75,
+            week_halt=week_halt,
+            five_hour_halt=five_hour_halt,
+        )
+        conditions = ConditionService(container, controller_outage, halts, manager)
+        _usage(session, week=0.92, five_hour=0.8)
+
+        held = conditions.conditions().model_dump(mode="json")["conditions"]
+
+        assert [(c["code"], c["setting"]) for c in held] == [
+            ("week_halt", week_halt.value),
+            ("five_hour_halt", five_hour_halt.value),
+        ]
 
     def test_the_stores_update_holds_after_the_outage_before_the_halts_since_made(
         self,
@@ -173,6 +214,7 @@ class TestConditionService:
             "stale": None,
             "offer": None,
             "target": None,
+            "setting": None,
         }
 
     def test_the_stores_update_holds_until_its_lift(
@@ -255,6 +297,7 @@ class TestConditionService:
                         "stale": None,
                         "offer": None,
                         "target": None,
+                        "setting": None,
                     }
                 ]
             },

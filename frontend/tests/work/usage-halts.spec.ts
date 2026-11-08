@@ -2,11 +2,11 @@
  * The usage halts (F135.1, F135.4, F135.7, F141.5): while the latest reading puts the week's share at
  * or over the first limit, or the five-hour share at or over its limit, the gate holds a work item's
  * start, its line saying which halt, in its session log too; each halt that holds shows on the gold
- * bar after the outage's, the week's first, its line giving the share and the reading's age — a
- * badge in the top bar off a phone, the week's a button opening its line in a popover, the
- * five-hour's and the outage's their line their title; a line on a phone. A reading under the limit
- * lifts it, and the held start goes on. The reading is the fake controller's, on the backend's fleet
- * stream.
+ * bar after the outage's, the week's first, its line giving the share, the reading's age and what
+ * the halt does to running work by its window's setting (F135.6) — a badge in the top bar off a
+ * phone, the week's a button opening its line in a popover, the five-hour's and the outage's their
+ * line their title; a line on a phone. A reading under the limit lifts it, and the held start goes
+ * on. The reading is the fake controller's, on the backend's fleet stream.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -16,19 +16,23 @@ import type { Projects } from '../support/projects';
 
 const PHONE = { width: 390, height: 844 };
 const CLOCK = String.raw`\d\d:\d\d`;
-const HOLDS = String.raw`No work item starts until a reading puts it under the limit; chats and Pilot’s own jobs go on\.`;
+// The suite's backends keep the week's halt at its default setting, the cooperative stop, and give
+// the five-hour halt the hard stop (tests/support/backend-env-extensions.ts).
+const HOLDS = String.raw`none starts until a reading puts it under the limit; chats and Pilot’s own jobs go on\.`;
+const WEEK_DOES = String.raw`The running work items are asked to stop at their next step, and ${HOLDS}`;
+const FIVE_HOUR_DOES = String.raw`Pilot has stopped every running work item, and ${HOLDS}`;
 
 const WEEK_BADGE = new RegExp(`^Halted at the week’s limit since ${CLOCK}$`);
 const FIVE_HOUR_BADGE = new RegExp(`^Halted at the five-hour limit since ${CLOCK}$`);
 // A fresh reading's line gives its share alone; a stale one's, the reading's age.
 const weekLine = (percent: number, age = '') =>
   new RegExp(
-    `^Work items have been halted at the week’s usage limit since ${CLOCK}\\. ${percent}% of the week’s quota is used${age}\\. ${HOLDS}$`,
+    `^Work items have been halted at the week’s usage limit since ${CLOCK}\\. ${percent}% of the week’s quota is used${age}\\. ${WEEK_DOES}$`,
   );
 const AS_OF = `, as of ${CLOCK}`;
 const fiveHourLine = (percent: number) =>
   new RegExp(
-    `^Work items have been halted at the five-hour usage limit since ${CLOCK}\\. ${percent}% of the five-hour window’s quota is used\\. ${HOLDS}$`,
+    `^Work items have been halted at the five-hour usage limit since ${CLOCK}\\. ${percent}% of the five-hour window’s quota is used\\. ${FIVE_HOUR_DOES}$`,
   );
 
 interface Fixtures {

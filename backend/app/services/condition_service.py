@@ -99,6 +99,7 @@ class ConditionService:
                     stale=None,
                     offer=None,
                     target=None,
+                    setting=None,
                 )
             ]
         )
@@ -113,6 +114,7 @@ class ConditionService:
                     stale=None,
                     offer=None,
                     target=None,
+                    setting=None,
                 )
             )
         held += [
@@ -124,6 +126,7 @@ class ConditionService:
                 stale=halt.stale,
                 offer=None if halt.offer is None else halt.offer.kind,
                 target=None if halt.offer is None else halt.offer.target,
+                setting=halt.setting,
             )
             for halt in self._halts.halts(db)
         ]

@@ -6,6 +6,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from app.app_config import HaltSetting
 from app.models.reference import OverruleKind
 
 
@@ -73,6 +74,15 @@ class ConditionSchema(BaseModel):
             "other conditions"
         ),
         examples=[0.97],
+    )
+    setting: HaltSetting | None = Field(
+        description=(
+            "A halt's: its window's halt setting, what the halt does to the "
+            "work items (F135.6): `no_new_work`, none of them starts; "
+            "`cooperative_stop`, besides, the running ones are asked to stop "
+            "at their next step; `hard_stop`, besides, Pilot has stopped every "
+            "running one; null for the outage and the store's update"
+        ),
     )
 
 

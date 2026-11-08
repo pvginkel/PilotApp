@@ -25,6 +25,7 @@ type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSche
 type LineStep = NonNullable<CurrentLine['step']>;
 type Condition = components['schemas']['ConditionsSchema.6c014b4.ConditionSchema'];
 type OverruleKind = components['schemas']['ConditionsSchema.6c014b4.OverruleKind'];
+type HaltSetting = components['schemas']['ConditionsSchema.6c014b4.HaltSetting'];
 type Doing = components['schemas']['TimelineSchema.1fdd8ae.Doing'];
 
 interface StepReading {
@@ -289,7 +290,29 @@ function halted(condition: Condition, quota: string, today: string): string {
   return `${used}, as of ${formatTime(takenAt, clockFormat(takenAt, today))}.`;
 }
 
-const HALT_HOLDS = 'No work item starts until a reading puts it under the limit; chats and Pilot’s own jobs go on.';
+const HALT_GOES_ON = 'chats and Pilot’s own jobs go on.';
+
+/**
+ * What a halt does to the work items, by its window's halt setting (F135.6): every setting holds
+ * their starts; the cooperative stop asks the running ones to stop at their next step, and under
+ * the hard stop Pilot has stopped them.
+ */
+function haltDoes(condition: Condition): string {
+  // The API gives a halt its setting.
+  const setting: HaltSetting = condition.setting!;
+  switch (setting) {
+    case 'no_new_work':
+      return `No work item starts until a reading puts it under the limit; ${HALT_GOES_ON}`;
+    case 'cooperative_stop':
+      return `The running work items are asked to stop at their next step, and none starts until a reading puts it under the limit; ${HALT_GOES_ON}`;
+    case 'hard_stop':
+      return `Pilot has stopped every running work item, and none starts until a reading puts it under the limit; ${HALT_GOES_ON}`;
+    default: {
+      const unknown: never = setting;
+      return String(unknown);
+    }
+  }
+}
 
 /**
  * A condition that holds all work, as its line and its badge on the gold bar say it (F125, F135.7, F144.4),
@@ -315,14 +338,14 @@ export function conditionLine(condition: Condition, today: string): ConditionLin
     case 'week_halt':
       return {
         title: 'Work items have been halted at the week’s usage limit',
-        detail: `${halted(condition, 'the week’s quota', today)} ${HALT_HOLDS}`,
+        detail: `${halted(condition, 'the week’s quota', today)} ${haltDoes(condition)}`,
         badge: 'Halted at the week’s limit',
         icon: OctagonPause,
       };
     case 'five_hour_halt':
       return {
         title: 'Work items have been halted at the five-hour usage limit',
-        detail: `${halted(condition, 'the five-hour window’s quota', today)} ${HALT_HOLDS}`,
+        detail: `${halted(condition, 'the five-hour window’s quota', today)} ${haltDoes(condition)}`,
         badge: 'Halted at the five-hour limit',
         icon: Hourglass,
       };

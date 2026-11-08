@@ -42,6 +42,7 @@ FIVE_HOUR = UsageWindow.FIVE_HOUR
 ALLOWANCE = OverruleKind.ALLOWANCE
 RUN_OUT = OverruleKind.RUN_OUT
 
+NO_NEW_WORK = HaltSetting.NO_NEW_WORK
 COOPERATIVE = HaltSetting.COOPERATIVE_STOP
 HARD = HaltSetting.HARD_STOP
 
@@ -346,8 +347,24 @@ class TestHalts:
         )
 
         assert HALTS.halts(session) == [
-            Halt(WEEK, 0.93, began, latest.taken_at, False, Offer(ALLOWANCE, 0.98)),
-            Halt(FIVE_HOUR, 0.8, latest.received_at, latest.taken_at, False, None),
+            Halt(
+                WEEK,
+                0.93,
+                began,
+                latest.taken_at,
+                False,
+                Offer(ALLOWANCE, 0.98),
+                COOPERATIVE,
+            ),
+            Halt(
+                FIVE_HOUR,
+                0.8,
+                latest.received_at,
+                latest.taken_at,
+                False,
+                None,
+                COOPERATIVE,
+            ),
         ]
 
     @pytest.mark.parametrize("stale", [False, True])
@@ -365,6 +382,21 @@ class TestHalts:
         [halt] = HALTS.halts(session)
 
         assert halt.stale is stale
+
+    @pytest.mark.parametrize(
+        ("week_halt", "five_hour_halt"),
+        [(NO_NEW_WORK, HARD), (HARD, COOPERATIVE), (COOPERATIVE, NO_NEW_WORK)],
+    )
+    def test_a_halt_carries_its_windows_setting(
+        self, session: Session, week_halt: HaltSetting, five_hour_halt: HaltSetting
+    ) -> None:
+        _record(session, week=0.95, five_hour=0.8)
+        halts = _halts(week_halt=week_halt, five_hour_halt=five_hour_halt)
+
+        assert [(halt.window, halt.setting) for halt in halts.halts(session)] == [
+            (WEEK, week_halt),
+            (FIVE_HOUR, five_hour_halt),
+        ]
 
     def test_a_run_reaches_back_to_the_first_reading(self, session: Session) -> None:
         first = _record(session, week=0.9)
@@ -402,6 +434,7 @@ class TestHalts:
                 held.taken_at,
                 False,
                 Offer(ALLOWANCE, 0.98),
+                COOPERATIVE,
             )
         ]
 
@@ -437,7 +470,15 @@ class TestOverrule:
         assert HALTS.holding(session) == (FIVE_HOUR,)
         assert HALTS.halted(session) == FIVE_HOUR
         assert HALTS.halts(session) == [
-            Halt(FIVE_HOUR, 0.8, reading.received_at, reading.taken_at, False, None)
+            Halt(
+                FIVE_HOUR,
+                0.8,
+                reading.received_at,
+                reading.taken_at,
+                False,
+                None,
+                COOPERATIVE,
+            )
         ]
         assert HALTS.offer(session) is None
 
@@ -821,6 +862,7 @@ class TestUsageWatcher:
             "stale": False,
             "offer": "allowance",
             "target": 0.98,
+            "setting": "cooperative_stop",
         }
         assert gate.released == 1
         assert halts_log.matching("The week's halt holds: .*")

@@ -112,6 +112,8 @@ class Halt:
     offer: Offer | None
     """The week's: the overrule it offers; None for the five-hour halt, and for
     the week's at the wall."""
+    setting: HaltSetting
+    """What it does to the work items: its window's halt setting (F135.6)."""
 
 
 def overrule(db: Session) -> QuotaOverrule | None:
@@ -189,8 +191,8 @@ class UsageHalts:
 
     def halts(self, db: Session) -> list[Halt]:
         """Each halt that holds now, the week's first, with the share it holds
-        at, when it began, the age of the reading and whether it is stale, and
-        the week's offer."""
+        at, when it began, the age of the reading and whether it is stale, the
+        week's offer, and its setting."""
         # Each read up to the latest as this one reads it: a reading recorded
         # between two statements is the next decision's.
         reading_id = db.scalar(select(func.max(UsageReading.id)))
@@ -208,6 +210,7 @@ class UsageHalts:
                 self._offer(usage.windows[window].share)
                 if window is UsageWindow.SEVEN_DAY
                 else None,
+                self._settings[window],
             )
             for window in self._holding(usage, datetime.now(UTC), overruled=overruled)
         ]
