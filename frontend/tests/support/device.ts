@@ -9,6 +9,8 @@
  */
 
 import { expect, type CDPSession, type Page } from '@playwright/test';
+import type { UiStateTestEvent } from '@/lib/test/test-events';
+import { getTestEventBuffer } from './helpers/test-events';
 
 /** A push as the server sends it (`backend/app/services/web_push.py`, `Push`). */
 export interface Push {
@@ -37,8 +39,9 @@ export class Device {
 
   /**
    * Hands `push` to the page's service worker, resolving once it stands on the device. Headless
-   * Chromium drops a notification `getNotifications()` reads while it is being displayed, so
-   * nothing reads before DevTools tells it displayed, under its tag.
+   * Chromium drops a notification `getNotifications()` reads while it is being displayed, so it
+   * goes once the page reads none to close them (`closed()`), and nothing reads before DevTools
+   * tells it displayed, under its tag.
    */
   async deliver(push: Push): Promise<void> {
     const { session, registrationId } = await (this.cdp ??= this.attach());
@@ -51,6 +54,7 @@ export class Device {
       };
       session.on('BackgroundService.backgroundServiceEventReceived', listener);
     });
+    await this.closed();
     await session.send('ServiceWorker.deliverPushMessage', {
       origin: new URL(this.page.url()).origin,
       registrationId,
@@ -60,6 +64,22 @@ export class Device {
     const shown = async () =>
       (await this.notifications()).some((each) => each.tag === push.tag && each.body === push.body && each.renotify === push.renotify);
     await expect.poll(shown, { message: `the push under ${push.tag} shows` }).toBe(true);
+  }
+
+  /**
+   * Resolves once the page, as loaded, reads none of its notifications to close them: the last of
+   * its `shell.closing` states is ready (`use-app-page.ts`), each visible load closing the alarms'
+   * as it starts.
+   */
+  private async closed(): Promise<void> {
+    const load = await this.page.evaluate(() => performance.timeOrigin);
+    const buffer = getTestEventBuffer(this.page);
+    const state = () =>
+      buffer
+        .snapshot(0)
+        .events.filter((event): event is UiStateTestEvent => event.kind === 'ui_state' && event.scope === 'shell.closing' && event.metadata?.load === load)
+        .at(-1)?.phase;
+    await expect.poll(state, { message: 'the page reads none of its notifications to close them' }).toBe('ready');
   }
 
   /** The notifications standing on the device, in the order they first showed. */

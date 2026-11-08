@@ -13,13 +13,16 @@
  * shows changes. Hidden, or two minutes without input, it sends its away, by beacon, so that it
  * gets out as the page hides; the server's ninety seconds end a page whose away is lost. Only a
  * person with a handle beats: the server refuses a page before it. Its ui state, `shell.app-page`,
- * is ready once the page hears its person's input.
+ * is ready once the page hears its person's input; `shell.closing` is loading while the page reads
+ * its device's notifications to close them, and ready once it reads none, each under the page's
+ * load, `performance.timeOrigin`: Chromium drops a push it is displaying as a page reads them.
  */
 
 import { useEffect, useRef } from 'react';
 import { useProjectOnScreen } from '@/hooks/use-project-address';
 import { isPerson, type Self } from '@/hooks/use-self';
 import { api } from '@/lib/api/generated/client';
+import { emitTestEvent } from '@/lib/test/event-emitter';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
 /** The `tag` the server pushes every person's alarms under (F142). */
@@ -41,12 +44,24 @@ function visible(): boolean {
   return document.visibilityState === 'visible';
 }
 
+/** The closings in flight. */
+let closing = 0;
+
+function closingState(phase: 'loading' | 'ready'): void {
+  emitTestEvent({ kind: 'ui_state', scope: 'shell.closing', phase, metadata: { load: performance.timeOrigin } });
+}
+
 /** Closes this device's notifications under `tags`; none stands before the service worker is registered. */
 async function closeNotifications(tags: readonly string[]): Promise<void> {
-  const registration = await navigator.serviceWorker.getRegistration();
-  if (registration === undefined) return;
-  for (const tag of tags) {
-    for (const notification of await registration.getNotifications({ tag })) notification.close();
+  if (closing++ === 0) closingState('loading');
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (registration === undefined) return;
+    for (const tag of tags) {
+      for (const notification of await registration.getNotifications({ tag })) notification.close();
+    }
+  } finally {
+    if (--closing === 0) closingState('ready');
   }
 }
 
