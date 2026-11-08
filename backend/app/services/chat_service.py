@@ -71,7 +71,12 @@ from app.models.reference import (
 from app.services.brief_service import BriefService
 from app.services.pilot_server import unheld_token_hash
 from app.services.project_service import project_name
-from app.services.relay_service import SEND_FAILED, RelayService, Words
+from app.services.relay_service import (
+    SEND_FAILED,
+    STOPPED_UNSENT,
+    RelayService,
+    Words,
+)
 from app.services.session_record_service import SessionRecordService, read_records
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
@@ -252,19 +257,19 @@ class ChatService:
     def _previous_author(self, session: AgentSession) -> uuid.UUID | None:
         """The author of the chat's latest Turn with one that reached the
         brain: a server Turn has none, and one whose send failed (F125) never
-        went out."""
+        went out, nor one a Stop ended before it was sent (F67.1)."""
         authored = self.db.execute(
             select(Turn.id, Turn.author_user_id, Turn.error)
             .where(Turn.session_id == session.id, Turn.author_user_id.is_not(None))
             .order_by(Turn.seq.desc())
         ).all()
         for turn_id, author, error in authored:
-            if error is None or not read_records(
+            if not read_records(
                 self.db,
                 session.id,
                 turn_id=turn_id,
                 kind=RecordKind.SERVER,
-                payload_type=SEND_FAILED,
+                payload_type=STOPPED_UNSENT if error is None else SEND_FAILED,
                 limit=1,
             ):
                 return author
@@ -305,19 +310,20 @@ class ChatService:
 
     def _previous_sent(self, session: AgentSession) -> datetime | None:
         """When the chat's previous Turn that reached the brain was sent; none
-        while none did."""
+        while none did. One whose send failed (F125) never went out, nor one a
+        Stop ended before it was sent (F67.1)."""
         turns = self.db.execute(
             select(Turn.id, Turn.started_at, Turn.error)
             .where(Turn.session_id == session.id)
             .order_by(Turn.seq.desc())
         ).all()
         for turn_id, started_at, error in turns:
-            if error is None or not read_records(
+            if not read_records(
                 self.db,
                 session.id,
                 turn_id=turn_id,
                 kind=RecordKind.SERVER,
-                payload_type=SEND_FAILED,
+                payload_type=STOPPED_UNSENT if error is None else SEND_FAILED,
                 limit=1,
             ):
                 return started_at

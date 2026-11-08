@@ -23,6 +23,7 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, _Delivery
 from app.engine.paths import tree_path
+from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Block,
@@ -58,8 +59,12 @@ from app.services.controller_client import HeadlessCreateRequest
 from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer
-from app.services.relay_service import RelayService, Words
-from app.services.session_record_service import StoredRecord, read_records
+from app.services.relay_service import STOPPED_UNSENT, RelayService, Words
+from app.services.session_record_service import (
+    SessionRecordService,
+    StoredRecord,
+    read_records,
+)
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held, WorkSlots
 from app.services.supervisor import LoopHandle
@@ -1917,6 +1922,26 @@ class TestHandbookNotice:
             counted + 1
         )
 
+    def test_a_turn_stopped_before_its_send_carried_no_notice(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """A Turn a Stop ended before it was sent never reached the brain, so a
+        handbook published before it is still news to the next."""
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        container.document_service().bear_handbook(opened, "# Handbook\n")
+        _stopped_unsent(container, session, run, person, "Two")
+
+        turn = _send(chats, opened, person, "Three")
+
+        assert turn.message == f"{STORE_NOTIFICATION}\n\nThree"
+
 
 @pytest.fixture
 def bea(session: DbSession, opened: Project) -> User:
@@ -1949,6 +1974,42 @@ def _turn_ended(
     fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "success", "Done.")
     services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
     clear_after_commit_callbacks()
+
+
+def _stopped_unsent(
+    container: ServiceContainer,
+    db: DbSession,
+    run: models.Session,
+    author: User,
+    words: str,
+) -> None:
+    """A Turn of `author`'s after the chat's last, ended by a Stop before it
+    was sent, its `stopped-unsent` record its last, as `_stop` ends a held or
+    starting Session's Turn."""
+    now = datetime.now(UTC)
+    seq = db.scalars(
+        select(Turn.seq).where(Turn.session_id == run.id).order_by(Turn.seq.desc())
+    ).first()
+    assert seq is not None
+    turn = Turn(
+        session_id=run.id,
+        seq=seq + 1,
+        author_user_id=author.id,
+        message=words,
+        words=words,
+        started_at=now,
+        ended_at=now,
+    )
+    db.add(turn)
+    db.flush()
+    SessionRecordService(
+        db,
+        container.session_stream_service(),
+        ViewService(db, container.engine_bus(), container.closed_chats()),
+    ).append(
+        run.id, RecordKind.SERVER, payload={"type": STOPPED_UNSENT}, turn_id=turn.id
+    )
+    db.flush()
 
 
 class TestNamedMessage:
@@ -2058,6 +2119,24 @@ class TestNamedMessage:
         assert retried.message == (
             "The message, from bea (member):\nApprove the red badge"
         )
+
+    def test_a_turn_stopped_before_its_send_names_no_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        """A Turn a Stop ended before it was sent never reached the brain: the
+        Turn compared is the one before it."""
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        _stopped_unsent(container, session, run, bea, "Approve the red badge")
+
+        assert _send(chats, opened, person, "Two").message == "Two"
 
     def test_a_turn_that_failed_after_its_send_went_out_is_not_named_again(
         self,
