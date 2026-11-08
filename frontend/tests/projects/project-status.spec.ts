@@ -165,7 +165,7 @@ test.describe('A tab’s status icon', () => {
     const icon = projectList.statusIcon(name);
     await expect(icon.root).toHaveAttribute('data-status', 'running');
     await expect(icon.rest).toHaveAttribute('data-glyph', 'running');
-    expect(await icon.rest.evaluate((element) => getComputedStyle(element).animationName)).toBe('pulse');
+    expect(await icon.rest.evaluate((element) => getComputedStyle(element).animationName)).toBe('live-pulse');
 
     const paused = projectList.written(project, 'paused');
     await icon.root.click();

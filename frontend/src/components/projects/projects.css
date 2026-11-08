@@ -56,11 +56,11 @@
     .status-icon[role="button"]:hover .glyph-rest { display: none; }
     .status-icon[role="button"]:hover .glyph-hover { display: grid; }
   }
-  .status-icon .glyph-rest[data-glyph="running"] { color: hsl(var(--success)); animation: pulse 1.4s ease-in-out infinite; }
+  .status-icon .glyph-rest[data-glyph="running"] { color: hsl(var(--success)); animation: live-pulse 1.4s ease-in-out infinite; }
   .status-icon .glyph-rest[data-glyph="running"] .icon { width: 9px; height: 9px; fill: currentColor; }
   .status-icon .glyph-rest[data-glyph="waiting_on_you"] { color: hsl(var(--primary-strong)); }
   .status-icon .glyph-rest[data-glyph="done"] { color: hsl(var(--success-text)); }
-  .status-icon .glyph-rest[data-glyph="pausing"] { animation: pulse 1.4s ease-in-out infinite; }
+  .status-icon .glyph-rest[data-glyph="pausing"] { animation: live-pulse 1.4s ease-in-out infinite; }
 
   .count-badge {
     display: inline-grid;

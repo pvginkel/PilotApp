@@ -609,7 +609,7 @@
     height: 8px;
     border-radius: 999px;
     background: hsl(var(--success));
-    animation: pulse 1.4s ease-in-out infinite;
+    animation: live-pulse 1.4s ease-in-out infinite;
   }
   /* Its one line: the working cue, a sub-agent's description after it past a " · ", in the cue's
      one colour (C4), cut short where long, the description under the cue on a phone, its " · "
