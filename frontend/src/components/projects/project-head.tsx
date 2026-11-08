@@ -10,14 +10,15 @@
  * chat's end (`create-project.tsx`). An archived project's reads as it was left, marked archived,
  * its switch not to be flipped (D012). A phone's head is `phone-head.tsx`'s.
  *
- * In a tight head its parts give way in one order: the repo, the name, the step's name down to its
- * floor, then the members, folding to the first avatars and a count; the ticket, the chips, auto
- * pilot and the icons keep their size. Where they still run past the head, it stands in its two
- * rows: the name and auto pilot, then the step, the members and the icons.
+ * In a tight head its parts give way in one order: the repo, the name down to its floor, 250px or
+ * its own width where it is narrower, the step's name down to its floor, then the members, folding
+ * to the first avatars and a count; the ticket, the chips, auto pilot and the icons keep their size,
+ * and the step button stands no wider than 350px. Where they still run past the head, it stands in
+ * its two rows: the name and auto pilot, the name taking what its row leaves, then the step, the
+ * members and the icons.
  */
 
-import { useCallback, useLayoutEffect, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Archive, Flag, TriangleAlert } from 'lucide-react';
 import { AutopilotDialog } from '@/components/projects/autopilot-dialog';
 import { NotesButton } from '@/components/projects/plan-notes';
@@ -25,9 +26,10 @@ import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
+import { useAutopilotFlip } from '@/hooks/use-autopilot-flip';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { STOPPABLE } from '@/hooks/use-work-acts';
-import { useGetProjectsTimelineByProjectId, usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
+import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
 interface ProjectHeadProps {
@@ -39,6 +41,8 @@ export function ProjectHead({ project, ref }: ProjectHeadProps) {
   const draft = project.state === 'draft';
   const [head, setHead] = useState<HTMLElement | null>(null);
   useRows(head);
+  const name = project.name ?? 'New project';
+  const heading = useNameFloor(name);
   const own = useCallback(
     (element: HTMLElement | null) => {
       setHead(element);
@@ -49,8 +53,8 @@ export function ProjectHead({ project, ref }: ProjectHeadProps) {
   return (
     <header ref={own} className="feed-head" data-testid="project.head">
       <div className="head-row">
-        <h1 data-testid="project.name">
-          <LinkedText text={project.name ?? 'New project'} />
+        <h1 ref={heading} data-testid="project.name">
+          <LinkedText text={name} />
         </h1>
         {draft && (
           <span className="chip draft-chip" data-testid="project.draft">
@@ -95,10 +99,7 @@ const AUTOPILOT_FORM = 'project.autopilot';
  * shows its icon alone.
  */
 export function Autopilot({ project, phone = false }: { project: Project; phone?: boolean }) {
-  const queryClient = useQueryClient();
-  // The flip stays pending until every query is read again, the head included: until then, a
-  // second flip would ask for the same change.
-  const flip = usePostProjectsTransitionsByProjectId({ onSuccess: () => queryClient.invalidateQueries() });
+  const flip = useAutopilotFlip(project.id);
   const [asking, setAsking] = useState(false);
   // The dialog asks only while auto pilot is off on an open, unarchived project: turned on,
   // finished or archived by another session, the server refuses each of its answers.
@@ -114,16 +115,13 @@ export function Autopilot({ project, phone = false }: { project: Project; phone?
   const send = (kind: 'autopilot_on' | 'autopilot_off', answerConfirmations = false) => {
     const fields = { kind, answer_confirmations: answerConfirmations };
     trackFormSubmit(AUTOPILOT_FORM, fields);
-    flip.mutate(
-      { path: { project_id: project.id }, body: answerConfirmations ? fields : { kind } },
-      {
-        onSuccess: () => {
-          trackFormSuccess(AUTOPILOT_FORM, fields);
-          setAsking(false);
-        },
-        onError: () => trackFormError(AUTOPILOT_FORM, fields),
+    flip.mutate(answerConfirmations ? fields : { kind }, {
+      onSuccess: () => {
+        trackFormSuccess(AUTOPILOT_FORM, fields);
+        setAsking(false);
       },
-    );
+      onError: () => trackFormError(AUTOPILOT_FORM, fields),
+    });
   };
   const toggle = () => {
     if (flip.isPending) return;
@@ -225,6 +223,23 @@ function Members({ members }: { members: Project['members'] }) {
       )}
     </div>
   );
+}
+
+// The least width the name gives way to in a tight head's one row, where it is wider.
+const NAME_FLOOR = 250;
+
+/**
+ * Sets the name's floor, `--name-floor` (project-head.css), from the name measured whole: no CSS
+ * width is the lesser of a length and the content's.
+ */
+function useNameFloor(name: string) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useLayoutEffect(() => {
+    const element = heading.current!;
+    element.style.removeProperty('--name-floor');
+    element.style.setProperty('--name-floor', `${Math.min(NAME_FLOOR, element.scrollWidth)}px`);
+  }, [name]);
+  return heading;
 }
 
 /**

@@ -13,10 +13,14 @@
  */
 
 import type { Locator, Page } from '@playwright/test';
+import type { FormTestEvent } from '@/lib/test/test-events';
+import type { People } from '../support/people';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
+import type { TimelinePage } from '../support/page-objects/timeline-page';
 import { test, expect } from '../support/fixtures';
-import { makeUnique } from '../support/helpers';
-import { projectAddress } from '../support/projects';
+import { makeUnique, waitTestEvent } from '../support/helpers';
+import { PageFetches } from '../support/network';
+import { projectAddress, type Projects } from '../support/projects';
 
 type Status = 'pending' | 'in_progress' | 'done';
 type Note = { id: string; summary: string; content: string };
@@ -324,6 +328,58 @@ test.describe('The members', () => {
   });
 });
 
+/** How far a chip's words, its text and not its icon, stand above its pill's middle, and the pill's height. */
+const lift = (chip: Locator) =>
+  chip.evaluate((element) => {
+    const texts = Array.from(element.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE);
+    const words = document.createRange();
+    words.setStart(texts[0], 0);
+    words.setEnd(texts[texts.length - 1], texts[texts.length - 1].textContent!.length);
+    const [text, pill] = [words.getBoundingClientRect(), element.getBoundingClientRect()];
+    return { lift: (pill.top + pill.bottom) / 2 - (text.top + text.bottom) / 2, height: pill.height };
+  });
+
+/** The Draft chip's words against a "for" chip's, a chip of the shared style, on an item of another project. */
+async function draftChipAgainstShared(
+  people: People,
+  projects: Projects,
+  projectHead: ProjectHeadPage,
+  timeline: TimelinePage,
+): Promise<void> {
+  const me = await people.signIn();
+  const id = await projects.makeWithSession({ name: makeUnique('Chips'), members: [me.handle!, 'ada'] });
+  const notice = await projects.place(id, { kind: 'notice', title: 'For Ada', text: '---\nfor: ada\n---\n\nA note for Ada.\n' });
+  const draft = await projects.make({ name: makeUnique('Draft'), state: 'draft', members: [me.handle!] });
+  await timeline.open(id);
+  const shared = await lift(timeline.item(notice).forUser);
+
+  await projectHead.open(draft);
+  const own = await lift(projectHead.draft);
+  expect(own.lift - shared.lift).toBeCloseTo(1, 1);
+  expect(own.height).toBeCloseTo(shared.height, 1);
+}
+
+/** The switch's flip answered, by the server's yes or its refusal: each in turn, as they come. */
+const flipAnswered = (page: Page) =>
+  waitTestEvent<FormTestEvent>(page, 'form', (event) => event.formId === 'project.autopilot' && event.phase !== 'submit');
+
+/** Flips the switch through the page once it is answered, and gives the page's sender, which every write of the page names. */
+async function flipThrough(page: Page, projectHead: ProjectHeadPage, id: string): Promise<string> {
+  const flipped = page.waitForRequest((request) => request.method() === 'POST' && request.url().endsWith(`/api/projects/${id}/transitions`));
+  await projectHead.autopilot.click();
+  await flipAnswered(page);
+  return (await flipped).headers()['x-sender'];
+}
+
+/**
+ * A transition behind the page's back: naming the page as its sender, it is one the page takes for
+ * its own write, which reads nothing on its event.
+ */
+async function behind(page: Page, backendUrl: string, id: string, kind: string, sender: string): Promise<void> {
+  const response = await page.request.post(`${backendUrl}/api/projects/${id}/transitions`, { data: { kind }, headers: { 'X-Sender': sender } });
+  expect(response.status(), await response.text()).toBe(201);
+}
+
 test.describe('Auto pilot', () => {
   test('the switch flips auto pilot on the record, each way', async ({ people, projects, projectHead }) => {
     const me = await people.signIn();
@@ -339,6 +395,84 @@ test.describe('Auto pilot', () => {
     await projectHead.autopilot.click();
     await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'false');
     expect((await projects.head(id)).autopilot).toBe(false);
+  });
+
+  test('a fast double tap turns it on, the second tap’s refusal read against the project and toasting nothing', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    appShell,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Double'), members: [me.handle!] });
+    await projectHead.open(id);
+    const flips: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith(`/api/projects/${id}/transitions`)) flips.push(request.postDataJSON().kind);
+    });
+    const fetches = new PageFetches(page);
+
+    await projectHead.autopilot.dblclick();
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'true');
+    await fetches.landed();
+    expect(flips).toEqual(['autopilot_on', 'autopilot_on']);
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'true');
+    await expect(appShell.toastItems).toHaveCount(0);
+    expect((await projects.head(id)).autopilot).toBe(true);
+  });
+
+  test('a page left stale behind its back reads the project again on the refusal, and where it stands as asked toasts nothing', async ({
+    page,
+    backendUrl,
+    people,
+    projects,
+    projectHead,
+    appShell,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Stale'), members: [me.handle!] });
+    await projectHead.open(id);
+    const sender = await flipThrough(page, projectHead, id);
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'true');
+
+    for (const [kind, shown] of [
+      ['autopilot_off', 'false'],
+      ['autopilot_on', 'true'],
+    ] as const) {
+      await behind(page, backendUrl, id, kind, sender);
+      await expect(projectHead.autopilot).not.toHaveAttribute('aria-checked', shown);
+      await projectHead.autopilot.click();
+      expect((await flipAnswered(page)).phase).toBe('success');
+      await expect(projectHead.autopilot).toHaveAttribute('aria-checked', shown);
+      await expect(appShell.toastItems).toHaveCount(0);
+    }
+  });
+
+  test('a refusal after which the project does not stand as asked toasts the server’s words once, the head read again', async ({
+    page,
+    backendUrl,
+    people,
+    projects,
+    projectHead,
+    appShell,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Refused');
+    const id = await projects.make({ name, members: [me.handle!] });
+    await projectHead.open(id);
+    const sender = await flipThrough(page, projectHead, id);
+    await projectHead.autopilot.click();
+    await flipAnswered(page);
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'false');
+    await behind(page, backendUrl, id, 'finished', sender);
+    await expect(projectHead.autopilot).toBeVisible();
+
+    await projectHead.autopilot.click();
+    expect((await flipAnswered(page)).phase).toBe('error');
+    await expect(projectHead.finished).toBeVisible();
+    await expect(appShell.toastItems).toHaveCount(1);
+    await expect(appShell.toastItems).toContainText(`Cannot turn auto pilot on for ${name} because it is finished`);
   });
 
   test('a finished project shows the Finished chip in the switch’s place', async ({ people, projects, projectHead }) => {
@@ -376,6 +510,10 @@ test.describe('A draft’s head', () => {
     await projectHead.open(untitled);
     await expect(projectHead.name).toHaveText('New project');
   });
+
+  test('its Draft chip’s word stands a pixel higher in its pill than a shared chip’s, the pill as high', async ({ people, projects, projectHead, timeline }) => {
+    await draftChipAgainstShared(people, projects, projectHead, timeline);
+  });
 });
 
 test.describe('An archived project’s head', () => {
@@ -403,6 +541,8 @@ test.describe('A tight head beside the side panel', () => {
   const LONG_STEP = { id: 'a', title: 'A step whose title runs on well past what the head has room for', status: 'in_progress' as const, notes: [] };
   // The step's name gives way down to this width (steps-button.tsx).
   const NAME_FLOOR = 28;
+  // The project's name gives way in one row down to this width, where it is wider (project-head.tsx).
+  const PROJECT_NAME_FLOOR = 250;
   const cut = (locator: Locator) => locator.evaluate((element) => element.scrollWidth > element.clientWidth);
   const width = async (locator: Locator) => (await locator.boundingBox())!.width;
 
@@ -453,10 +593,11 @@ test.describe('A tight head beside the side panel', () => {
     );
   }
 
-  test('gives way in the repo first, then the name, the ticket and the step’s name whole', async ({ people, projects, projectHead, panel }) => {
+  test('gives way in the repo first, then the name above its floor, the ticket and the step’s name whole', async ({ page, people, projects, projectHead, panel }) => {
+    await page.setViewportSize({ width: 1500, height: 720 });
     const me = await people.signIn();
     const id = await projects.make({
-      name: `${makeUnique('Tight')} has a long name`,
+      name: `${makeUnique('Tight')} has a long name that runs on past its row`,
       ticket: 'PL-7',
       repo: 'pvginkel/a-repository-whose-name-runs-on-and-on',
       members: [me.handle!, 'ada'],
@@ -465,17 +606,26 @@ test.describe('A tight head beside the side panel', () => {
     await projectHead.open(id);
     await expect(panel.root).toBeVisible();
 
+    expect(await twoRows(projectHead)).toBe(false);
     expect(await width(projectHead.repo)).toBe(0);
     expect(await cut(projectHead.name)).toBe(true);
+    expect(await width(projectHead.name)).toBeGreaterThan(PROJECT_NAME_FLOOR + 1);
     expect(await cut(projectHead.ticket)).toBe(false);
     expect(await cut(projectHead.step.getByTestId('project.step.name'))).toBe(false);
     await clear(projectHead, panel);
   });
 
-  test('then the step’s name once the name has given way, the members whole while it is above its floor', async ({ people, projects, projectHead, panel }) => {
+  test('then the step’s name once the name is at its floor, 250px, the members whole while the step’s name is above its own', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    panel,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 720 });
     const me = await people.signIn();
     const id = await projects.make({
-      name: `${makeUnique('Tight')} has a long name`,
+      name: `${makeUnique('Tight')} has a long name that runs on`,
       ticket: 'PL-7',
       members: [me.handle!, 'ada', 'ben'],
       tasks: [LONG_STEP],
@@ -483,12 +633,72 @@ test.describe('A tight head beside the side panel', () => {
     await projectHead.open(id);
     await expect(panel.root).toBeVisible();
 
-    expect(await width(projectHead.name)).toBe(0);
+    expect(await twoRows(projectHead)).toBe(false);
+    expect(await cut(projectHead.name)).toBe(true);
+    expect(await width(projectHead.name)).toBeCloseTo(PROJECT_NAME_FLOOR, 1);
     const name = projectHead.step.getByTestId('project.step.name');
     expect(await cut(name)).toBe(true);
     expect(await width(name)).toBeGreaterThan(NAME_FLOOR);
     await expect(projectHead.memberAvatars).toHaveCount(3);
     await expect(projectHead.membersMore).toHaveCount(0);
+    await clear(projectHead, panel);
+  });
+
+  test('a name narrower than the floor gives way not at all, the step’s name giving way beside it', async ({ page, people, projects, projectHead, panel }) => {
+    await page.setViewportSize({ width: 1340, height: 720 });
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Short'), ticket: 'PL-7', members: [me.handle!, 'ada'], tasks: [LONG_STEP] });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await twoRows(projectHead)).toBe(false);
+    expect(await width(projectHead.name)).toBeLessThan(PROJECT_NAME_FLOOR);
+    expect(await cut(projectHead.name)).toBe(false);
+    expect(await cut(projectHead.step.getByTestId('project.step.name'))).toBe(true);
+    await clear(projectHead, panel);
+  });
+
+  test('the step button stands no wider than 350px, its name cut and its tooltip naming the steps in progress whole', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    panel,
+  }) => {
+    await page.setViewportSize({ width: 1800, height: 720 });
+    const me = await people.signIn();
+    const other = { id: 'b', title: 'Another step in progress whose title is long as well', status: 'in_progress' as const, notes: [] };
+    const id = await projects.make({ name: makeUnique('Cap'), members: [me.handle!], tasks: [LONG_STEP, other, step('c', 'done')] });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await width(projectHead.step)).toBeCloseTo(350, 1);
+    expect(await cut(projectHead.step.getByTestId('project.step.name'))).toBe(true);
+    await expect(projectHead.step.getByTestId('project.step.name')).toHaveText(LONG_STEP.title);
+    await expect(projectHead.step).toHaveAttribute('title', `1 of 3 steps done · in progress: ${LONG_STEP.title}; ${other.title}`);
+    expect(await cut(projectHead.name)).toBe(false);
+    await clear(projectHead, panel);
+  });
+
+  test('in its two rows the name has its row’s room, below its floor only where the row holds no more', async ({ page, people, projects, projectHead, panel }) => {
+    await page.setViewportSize({ width: 1200, height: 720 });
+    const me = await people.signIn();
+    const id = await projects.make({
+      name: `${makeUnique('Rows')} has a name long enough to fill a project’s head on its own`,
+      archived: true,
+      ticket: 'PILOT-1207',
+      members: [me.handle!, 'ada'],
+      tasks: [LONG_STEP],
+    });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await twoRows(projectHead)).toBe(true);
+    const [name, archived, autopilot] = await Promise.all([projectHead.name, projectHead.archived, projectHead.autopilot].map(async (locator) => (await locator.boundingBox())!));
+    expect(name.width).toBeLessThan(PROJECT_NAME_FLOOR);
+    // The name, the chip, the ticket and the switch fill the row.
+    expect(autopilot.x + autopilot.width).toBeCloseTo((await projectHead.root.boundingBox())!.x + (await projectHead.root.boundingBox())!.width - 24, 0);
+    expect(archived.x).toBeCloseTo(name.x + name.width + 12, 0);
     await clear(projectHead, panel);
   });
 
@@ -529,6 +739,8 @@ test.describe('A tight head beside the side panel', () => {
     panel,
     links,
   }) => {
+    // One row, the repo given way and the name cut above its floor.
+    await page.setViewportSize({ width: 1500, height: 720 });
     await links.set({ ticket_url_template: `${backendUrl}/tickets/{id}` });
     const me = await people.signIn();
     const id = await projects.make({
@@ -540,6 +752,7 @@ test.describe('A tight head beside the side panel', () => {
     });
     await projectHead.open(id);
     await expect(panel.root).toBeVisible();
+    expect(await width(projectHead.repo)).toBe(0);
 
     const ticket = projectHead.ticket.getByRole('link', { name: 'RB-12' });
     const box = (await ticket.boundingBox())!;
@@ -574,19 +787,19 @@ test.describe('A tight head beside the side panel', () => {
   });
 
   for (const font of ['the default font', 'a wider font'] as const) {
-    test(`at 1240px, in ${font}, the members fold last to the first avatars and a count naming the rest, the step’s name at its floor and the menu inside the head`, async ({
+    test(`at 1480px, in ${font}, the members fold last to the first avatars and a count naming the rest, the names at their floors and the menu inside the head`, async ({
       page,
       people,
       projects,
       projectHead,
       panel,
     }) => {
-      await page.setViewportSize({ width: 1240, height: 720 });
+      await page.setViewportSize({ width: 1480, height: 720 });
       if (font === 'a wider font') await widen(page);
       const me = await people.signIn({ name: 'Test Person' });
       const { handles, names } = await six(people, me.handle!);
       const id = await projects.make({
-        name: `${makeUnique('Six')} has a long name`,
+        name: `${makeUnique('Six')} has a long name that runs on`,
         ticket: 'RB-1207',
         repo: 'pvginkel/Recipes',
         members: handles,
@@ -603,19 +816,21 @@ test.describe('A tight head beside the side panel', () => {
       await expect(projectHead.membersMore).toHaveText(`+${6 - shown}`);
       await expect(projectHead.membersMore).toHaveAttribute('title', names.slice(shown).join(', '));
       expect(await width(projectHead.step.getByTestId('project.step.name'))).toBeCloseTo(NAME_FLOOR, 0);
+      expect(await width(projectHead.name)).toBeCloseTo(PROJECT_NAME_FLOOR, 1);
+      expect(await twoRows(projectHead)).toBe(false);
       await clear(projectHead, panel);
     });
   }
 
   for (const font of ['the default font', 'a wider font'] as const) {
-    test(`an archived head at 1200px, in ${font}, stands in its two rows once its parts at their floors run past it in one, and in one again once brought back`, async ({
+    test(`an archived head at 1490px, in ${font}, stands in its two rows once its parts at their floors run past it in one, and in one again once brought back`, async ({
       page,
       people,
       projects,
       projectHead,
       panel,
     }) => {
-      await page.setViewportSize({ width: 1200, height: 720 });
+      await page.setViewportSize({ width: 1490, height: 720 });
       if (font === 'a wider font') await widen(page);
       const me = await people.signIn({ name: 'Test Person' });
       const { handles } = await six(people, me.handle!);
@@ -673,7 +888,7 @@ test.describe('A tight head beside the side panel', () => {
   });
 
   test('the members unfold as the window widens', async ({ page, people, projects, projectHead, panel }) => {
-    await page.setViewportSize({ width: 1200, height: 720 });
+    await page.setViewportSize({ width: 1330, height: 720 });
     const me = await people.signIn({ name: 'Test Person' });
     const { handles } = await six(people, me.handle!);
     const id = await projects.make({ name: makeUnique('Widen'), ticket: 'RB-12', members: handles, tasks: [LONG_STEP], notes: [note('one')] });
@@ -681,7 +896,7 @@ test.describe('A tight head beside the side panel', () => {
     await expect(panel.root).toBeVisible();
     await expect(projectHead.membersMore).toBeVisible();
 
-    await page.setViewportSize({ width: 1600, height: 720 });
+    await page.setViewportSize({ width: 1700, height: 720 });
     await expect(projectHead.memberAvatars).toHaveCount(6);
     await expect(projectHead.membersMore).toHaveCount(0);
     await clear(projectHead, panel);
@@ -880,6 +1095,10 @@ test.describe('The head on a phone', () => {
     const menu = await boxOf(projectHead.menuButton);
     expect(menu.x + menu.width).toBeLessThanOrEqual(rest);
     expect((await boxOf(projectHead.root)).height).toBe(52);
+  });
+
+  test('its Draft chip’s word stands a pixel higher in its pill than a shared chip’s, the pill as high', async ({ people, projects, projectHead, timeline }) => {
+    await draftChipAgainstShared(people, projects, projectHead, timeline);
   });
 
   test('a draft’s is its drawer’s button, its name and Draft chip, its members and its menu', async ({ people, projects, projectHead, shell }) => {
