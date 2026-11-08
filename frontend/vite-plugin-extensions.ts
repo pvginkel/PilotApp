@@ -1,4 +1,5 @@
 import type { PluginOption } from 'vite'
+import { buildCommit } from './vite-build-commit'
 import { appIcons } from './vite-icons'
 
 /**
@@ -7,5 +8,5 @@ import { appIcons } from './vite-icons'
  * This file is never overwritten by template updates.
  */
 export function loadAppPlugins(): PluginOption[] {
-  return [appIcons()]
+  return [appIcons(), buildCommit()]
 }

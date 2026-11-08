@@ -3,7 +3,8 @@
  * on a phone in the drawer's head. The template's user dropdown in the mockup's avatar, as
  * FieldnotesApp has it: the name, the theme, Profile and Sign out, under the template's test ids,
  * which its sign-in specs look for. At the handle step it has no Profile. A person's Sign out
- * removes this browser's subscription first (F146.3); at the handle step there is none.
+ * removes this browser's subscription first (F146.3); at the handle step there is none. Its foot
+ * is the short hash of the commit the page is built from.
  */
 
 import { useNavigate } from '@tanstack/react-router';
@@ -17,6 +18,8 @@ import { THEMES, type Theme } from '@/lib/browser-state';
 import { useTheme } from '@/lib/theme';
 
 const THEME_LABELS: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+
+const COMMIT = import.meta.env.VITE_BUILD_COMMIT.slice(0, 7);
 
 export function ProfileMenu({ self }: { self: Self }) {
   const { logout } = useAuthContext();
@@ -71,6 +74,9 @@ export function ProfileMenu({ self }: { self: Self }) {
       <MenuItem icon={LogOut} onSelect={isPerson(self) ? signOut : logout} testId="app-shell.topbar.user.logout">
         Sign out
       </MenuItem>
+      <div className="menu-foot" data-testid="shell.profile.version">
+        {COMMIT}
+      </div>
     </Menu>
   );
 }

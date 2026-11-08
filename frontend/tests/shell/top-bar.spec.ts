@@ -1,8 +1,9 @@
 /**
  * The top bar (F111) and its profile menu (F126): the logo and the name, the signed-in person's
- * avatar, and the menu it opens.
+ * avatar, and the menu it opens, which ends in the commit the page is built from.
  */
 
+import { execSync } from 'child_process';
 import { test, expect } from '../support/fixtures';
 
 test.describe('The top bar', () => {
@@ -55,6 +56,21 @@ test.describe('The profile menu', () => {
     await expect(shell.theme.locator('option')).toHaveText(['System', 'Light', 'Dark']);
     await expect(shell.profileMenu.getByRole('menuitem')).toHaveText(['Profile', 'Sign out']);
     await expect(shell.signOut).toHaveText('Sign out');
+  });
+
+  test('ends in the short hash of the commit the page is built from, in extra-small muted type', async ({ people, shell }) => {
+    await people.signIn();
+    await shell.open();
+
+    await shell.user.click();
+    // The dev server embeds the work tree's HEAD as it starts (vite-build-commit.ts).
+    const commit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    await expect(shell.profileVersion).toHaveText(commit.slice(0, 7));
+    const items = await shell.profileMenu.evaluate((menu) => Array.from(menu.children, (child) => child.getAttribute('data-testid')));
+    expect(items.at(-1)).toBe('shell.profile.version');
+    await expect(shell.profileVersion).toHaveCSS('font-size', '12px');
+    const muted = await shell.theme.locator('..').evaluate((field) => getComputedStyle(field).color);
+    await expect(shell.profileVersion).toHaveCSS('color', muted);
   });
 
   test('closes on a press outside it, on Esc, and on its button', async ({ page, people, shell }) => {

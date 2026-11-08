@@ -39,6 +39,8 @@ export class ShellPage {
   readonly theme: Locator;
   readonly profileItem: Locator;
   readonly signOut: Locator;
+  /** The profile menu's foot: the short hash of the commit the page is built from. */
+  readonly profileVersion: Locator;
   readonly keys: Locator;
   readonly keysBackdrop: Locator;
 
@@ -67,6 +69,7 @@ export class ShellPage {
     this.theme = page.getByTestId('shell.profile.theme');
     this.profileItem = page.getByTestId('shell.profile.page');
     this.signOut = page.getByTestId('app-shell.topbar.user.logout');
+    this.profileVersion = page.getByTestId('shell.profile.version');
     this.keys = page.getByTestId('shell.keys');
     this.keysBackdrop = page.getByTestId('shell.keys.backdrop');
   }

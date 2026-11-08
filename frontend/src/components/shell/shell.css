@@ -120,6 +120,7 @@
     font: inherit;
   }
   .menu-pop .menu-rule { margin: 2px -6px 6px; border: 0; border-top: 1px solid hsl(var(--border)); }
+  .menu-pop .menu-foot { padding: 4px 10px 2px; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
 
   /* ---- The side column and the centre --------------------------------------------------- */
 
