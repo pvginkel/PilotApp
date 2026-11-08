@@ -1408,7 +1408,7 @@ class TestRecordServiceOffersUndo:
 
         assert container.record_service().offers_undo(work) is False
 
-    def test_items_of_one_kind_read_the_kind_once(
+    def test_items_of_one_kind_and_cause_read_each_once(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1443,6 +1443,7 @@ class TestRecordServiceOffersUndo:
             event.remove(session.get_bind(), "before_cursor_execute", executed)
 
         assert sum("FROM item_kinds" in each for each in statements) == 1
+        assert sum("FROM done_causes" in each for each in statements) == 1
 
 
 class TestRecordServiceDone:

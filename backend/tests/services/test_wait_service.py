@@ -52,6 +52,7 @@ from app.services.wait_service import (
     WaitService,
 )
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.statements import sent
 
 NOTE = "ANS-312 read Done at 09:40; the rollout goes on"
 
@@ -1471,6 +1472,14 @@ class TestWaitServiceRefusals:
             quiet.id: None,
         }
 
+    def test_no_waits_read_nothing(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        with sent(session) as each:
+            assert _service(container).refusals(project, []) == {}
+
+        assert each.texts == []
+
 
 class TestWaitServiceRequestInTwoProcesses:
     """Two people's requests at once (F27.3)."""
@@ -1527,6 +1536,14 @@ def _outcomes(
 class TestWaitServiceFirings:
     """What the brain did with each firing, read from its run and the wait's
     close, never stored (DB Wait Firing)."""
+
+    def test_no_waits_read_nothing(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        with sent(session) as each:
+            assert _service(container).firings([]) == {}
+
+        assert each.texts == []
 
     def test_each_firing_in_order_with_its_transition_or_its_requester(
         self,

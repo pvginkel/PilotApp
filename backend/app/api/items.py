@@ -52,7 +52,7 @@ def get_item_document(
         403: The caller lacks the editor role
         404: No item has the id, or it has no document: work and waits
     """
-    return timeline_service.item_document(item_id).model_dump(mode="json")
+    return timeline_service.item_document(item_id)
 
 
 @items_bp.route("/<uuid:item_id>/blocks/<block_id>/answer", methods=["POST"])

@@ -42,6 +42,7 @@ from app.services.container import ServiceContainer
 from app.services.session_start_service import SessionStartService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.starts import configured_starts
+from tests.support.statements import sent
 from tests.support.supervisor import Supervise
 
 CUT_OVER = "/work/Example/docs/cut-over.md"
@@ -642,6 +643,30 @@ class TestClarifications:
             )
         )
         db.flush()
+
+    def test_no_documents_read_nothing(self, session: DbSession) -> None:
+        with sent(session) as each:
+            assert on_documents(session, []) == {}
+
+        assert each.texts == []
+
+    def test_documents_no_pass_asked_about_read_no_clarification_run(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _run(session, container, project, environment)
+        cut_over = _registered(
+            session, container, project, run, CUT_OVER, CUT_OVER_TEXT
+        )
+
+        with sent(session) as each:
+            assert on_documents(session, [cut_over.id]) == {}
+
+        assert len(each.texts) == 1
+        assert not each.texts[0].startswith("SELECT clarification_runs.")
 
     def test_before_the_reply_each_document_holds_its_questions(
         self,

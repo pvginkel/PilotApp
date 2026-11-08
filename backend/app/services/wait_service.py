@@ -336,6 +336,8 @@ class WaitService:
         (F27.3), by its id, none for one that takes it: its project archived
         or finished, the wait done, or Pilot checking, a firing of it pending
         or a run of it in flight (`run_in_flight`)."""
+        if not waits:
+            return {}
         checking = set(
             self.db.scalars(
                 select(Wait.id).where(
@@ -356,6 +358,8 @@ class WaitService:
         turn ended neither failed nor stopped, and none once it failed or was
         stopped. A firing no run took is Pilot's turn on an open wait, none on
         a done one."""
+        if not waits:
+            return {}
         by_id = {wait.id: wait for wait in waits}
         runs = {
             row.id: row

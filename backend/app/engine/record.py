@@ -164,6 +164,7 @@ class RecordService:
         self.continuations = continuations
         self.jobs = jobs
         self._forms: dict[str, str] = {}
+        self._undo_offered: dict[str, bool] = {}
 
     def answer(
         self,
@@ -832,6 +833,15 @@ class RecordService:
             self._forms[kind_code] = self.db.get_one(ItemKind, kind_code).form
         return self._forms[kind_code]
 
+    def _offered(self, done_cause_code: str) -> bool:
+        """Whether the done cause offers undo, read once per service, as
+        `_form` reads a kind's form."""
+        if done_cause_code not in self._undo_offered:
+            self._undo_offered[done_cause_code] = self.db.get_one(
+                DoneCause, done_cause_code
+            ).undo_offered
+        return self._undo_offered[done_cause_code]
+
     def _undo_refusal(self, item: Item) -> str | None:
         """Why a prose item takes no undo now, or none."""
         if item.done_at is None:
@@ -840,7 +850,9 @@ class RecordService:
             return "an archive question offers no undo"
         if item.consumed_at is not None:
             return "a session has taken the item's answers"
-        if not self.db.get_one(DoneCause, item.done_cause_code).undo_offered:
+        # A done item has its cause (`ck_items_done`).
+        assert item.done_cause_code is not None
+        if not self._offered(item.done_cause_code):
             return f"an item done as {item.done_cause_code} offers no undo"
         project = self.db.get_one(Project, item.project_id)
         if project.archived:

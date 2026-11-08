@@ -30,8 +30,9 @@ item's count. A job's end may open the gate for its Project's next job.
 import uuid
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
+from functools import cache
 
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import Select, and_, bindparam, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.models import Item, Work
@@ -149,29 +150,31 @@ def carried(db: Session, session: AgentSession) -> bool:
     )
 
 
+@cache
+def _conversing() -> Select[uuid.UUID]:
+    """`conversing`'s statement, built once, of the Sessions bound as `ids`."""
+    other = aliased(AgentSession)
+    return select(AgentSession.id).where(
+        AgentSession.id.in_(bindparam("ids", expanding=True)),
+        AgentSession.kind_code == WORK_KIND,
+        select(other.id)
+        .where(
+            other.conversation_id == AgentSession.conversation_id,
+            other.environment_id == AgentSession.environment_id,
+            other.id != AgentSession.id,
+            other.state_code.in_(COUNTED),
+        )
+        .correlate(AgentSession)
+        .exists(),
+    )
+
+
 def conversing(db: Session, session_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
     """The work items among `session_ids` whose conversation another Session
     runs or starts on now (`carried`), as a screen reads them."""
     if not session_ids:
         return set()
-    other = aliased(AgentSession)
-    return set(
-        db.scalars(
-            select(AgentSession.id).where(
-                AgentSession.id.in_(list(session_ids)),
-                AgentSession.kind_code == WORK_KIND,
-                select(other.id)
-                .where(
-                    other.conversation_id == AgentSession.conversation_id,
-                    other.environment_id == AgentSession.environment_id,
-                    other.id != AgentSession.id,
-                    other.state_code.in_(COUNTED),
-                )
-                .correlate(AgentSession)
-                .exists(),
-            )
-        )
-    )
+    return set(db.scalars(_conversing(), {"ids": list(session_ids)}))
 
 
 def queued(db: Session, session_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
@@ -187,6 +190,12 @@ def queued(db: Session, session_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
     at once, with no lock of the queue's own."""
     if not session_ids:
         return set()
+    return set(db.scalars(_queued(), {"ids": list(session_ids)}))
+
+
+@cache
+def _queued() -> Select[uuid.UUID]:
+    """`queued`'s statement, built once, of the Sessions bound as `ids`."""
     item = aliased(Item)
     ahead = aliased(AgentSession)
     ahead_item = aliased(Item)
@@ -208,16 +217,14 @@ def queued(db: Session, session_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
         .correlate(AgentSession, item)
         .exists()
     )
-    return set(
-        db.scalars(
-            select(AgentSession.id)
-            .join(item, item.id == AgentSession.id)
-            .where(
-                AgentSession.id.in_(list(session_ids)),
-                AgentSession.kind_code == JOB_KIND,
-                AgentSession.state_code == SessionState.HELD,
-                before,
-            )
+    return (
+        select(AgentSession.id)
+        .join(item, item.id == AgentSession.id)
+        .where(
+            AgentSession.id.in_(bindparam("ids", expanding=True)),
+            AgentSession.kind_code == JOB_KIND,
+            AgentSession.state_code == SessionState.HELD,
+            before,
         )
     )
 

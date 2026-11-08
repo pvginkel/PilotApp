@@ -218,7 +218,7 @@ def get_timeline(
         403: The caller lacks the editor role
         404: No project has the id
     """
-    return timeline_service.timeline(project_id).model_dump(mode="json")
+    return timeline_service.timeline(project_id)
 
 
 @projects_bp.route("/<uuid:project_id>/draft", methods=["GET"])

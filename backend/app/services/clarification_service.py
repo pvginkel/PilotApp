@@ -164,6 +164,8 @@ def on_documents(
     whose Turns asked about its Blocks, in the order first asked; a Document
     whose writer is asked nothing is left out. Each reads its pass's every
     question, whose headings span the documents the pass asked about."""
+    if not document_ids:
+        return {}
     passes = (
         select(Turn.session_id)
         .join(WriterQuestion, WriterQuestion.turn_id == Turn.id)
@@ -173,6 +175,8 @@ def on_documents(
     by_pass: dict[uuid.UUID, list[Asked]] = {}
     for pass_id, each in _asked(db, Turn.session_id.in_(passes)):
         by_pass.setdefault(pass_id, []).append(each)
+    if not by_pass:
+        return {}
     runs = {
         run.pass_id: run
         for run in db.scalars(

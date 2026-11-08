@@ -2,6 +2,7 @@
 person (F8, F12, F13, F18, F31, F78, F1.4)."""
 
 import base64
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
@@ -9,6 +10,7 @@ from typing import Any, get_args
 
 import pytest
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import psycopg
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -79,6 +81,7 @@ from app.services.usage_halts import UsageHalts
 from app.services.wait_service import ReportedTransition
 from app.services.working_on import Reading
 from tests.support.chats import ChatWriter, open_chat
+from tests.support.statements import sent
 from tests.support.store_updates import hold, lift, stopped_job
 from tests.support.turns import end_turns, turn_in_flight
 from tests.support.working_on import Camp
@@ -670,8 +673,74 @@ class TestReferenceCodes:
         )
 
 
+_ALIAS = re.compile(r"\b(?:FROM|JOIN) (\w+) AS \1_\d+\b")
+"""A table read through an alias in a compiled statement: `work AS work_1`."""
+
+
+_NAMED_READS = (
+    "SELECT waits.",
+    "SELECT work.id, work.retried_by_id, ",
+    "SELECT wait_firings.",
+    "SELECT users.",
+    "SELECT sessions.id, sessions.project_id, ",
+    "SELECT progress_steps.",
+    "SELECT clarification_runs.",
+    "SELECT blocks.id, blocks.document_id, blocks.local_id ",
+    "SELECT documents.id, documents.published_text ",
+    "SELECT items.id, items.title",
+)
+"""How the statements of a read open that read what its items name: the
+waits, their runs and firings; the users; the work items and their
+progress; the runs clarifying a pass; the held and taken-back blocks and
+their texts; the titles of the items linked."""
+
+
+def _through_aliases(built: list[Any]) -> list[Any]:
+    """The statements of `built` that read a table through an alias."""
+    return [
+        each
+        for each in built
+        if _ALIAS.search(str(each.compile(dialect=psycopg.dialect())))
+    ]
+
+
 @pytest.mark.usefixtures("person")
 class TestTimeline:
+    def test_a_second_read_builds_no_statement_through_an_alias_again(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        # Building a statement through aliases costs more than PostgreSQL's
+        # run of it (`working_on`): the timeline's read and a document's send
+        # each such statement as the first read built it.
+        camp = Camp(container, session)
+        writer = camp.worker()
+        held = camp.registered(writer, CLAIMED_AND_OPEN)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(held, "A1", doing)
+        asked = camp.registered(doing, QUESTION)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        queue = camp.worker()
+        camp.ended(queue)
+        camp.job_after(queue, SessionState.HELD)
+        camp.worker(SessionState.HELD)
+        camp.wait(queue)
+
+        def reads() -> list[Any]:
+            with sent(session) as each:
+                container.timeline_service().timeline(camp.project.id)
+                container.timeline_service().item_document(asked.id)
+            return _through_aliases(each.built)
+
+        first, second = reads(), reads()
+
+        assert len(second) == len(first) > 0
+        assert [
+            again for again in second if not any(again is built for built in first)
+        ] == []
+
     def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
         with pytest.raises(RecordNotFoundException):
             container.timeline_service().timeline(uuid.uuid4())
@@ -2366,9 +2435,13 @@ class TestWorkStatus:
         assert found[work.id].state == SessionState.RUNNING
 
     def test_no_ids_read_nothing(self, session: DbSession) -> None:
-        assert (
-            work_status(session, [], unreachable=False, halts=HALTS, slots=SLOTS) == {}
-        )
+        with sent(session) as each:
+            assert (
+                work_status(session, [], unreachable=False, halts=HALTS, slots=SLOTS)
+                == {}
+            )
+
+        assert each.texts == []
 
     def test_each_work_item_carries_its_own_steps_in_order(
         self,
@@ -3816,6 +3889,25 @@ class TestItemDocument:
         assert [
             part["block"]["section"] for part in read["body"] if part["type"] == "block"
         ] == [{"heading": "Which stove?"}]
+
+    def test_a_document_reads_nothing_of_what_it_has_none_of(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        # A statement that can find nothing is not sent: a notice of a
+        # session's has no wait, no work, no job, no user named, no pass
+        # and no hold.
+        project = _make(container, environment_id=environment.id)
+        item = container.test_data_service().item(
+            project.id, "notice", "The site opens", NOTICE
+        )
+
+        with sent(session) as each:
+            _read(container, item)
+
+        assert [text for text in each.texts if text.startswith(_NAMED_READS)] == []
 
     def test_the_opening_reads_its_words_verbatim(
         self, container: ServiceContainer, session: DbSession

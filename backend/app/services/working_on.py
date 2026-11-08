@@ -29,19 +29,26 @@ Item correlates, and then the Items that are Pilot's, each of
 `Reading.pilots`'s states by a query of its own. A statement that reads a
 Block held, or an Item Pilot's, takes the ids the reading found, never the
 reading's own SQL.
+
+A statement that a read of the timeline sends from here through aliases is
+built once, when first sent, and each read binds its ids into it as
+parameters, so that it holds no row it read: building one, its aliases'
+columns among it, costs more than PostgreSQL's run of it.
 """
 
 import uuid
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cache, cached_property
 from typing import Any
 
 from sqlalchemy import (
+    BindParameter,
     ColumnElement,
     Select,
     Subquery,
     and_,
+    bindparam,
     false,
     func,
     literal,
@@ -255,6 +262,7 @@ the reading over 2,000 characters, kept whole so that every hold is read at
 once."""
 
 
+@cache
 def _holding() -> Select[int, uuid.UUID, bool, bool, bool, bool]:
     """Each standing naming that still applies, with what its run makes of
     its Block, one row per Block: `holding`, the run neither handing it back,
@@ -361,15 +369,15 @@ def unanswered() -> ColumnElement[bool]:
     return and_(Block.done_at.is_(None), or_(Block.answer.is_(None), claimed()))
 
 
-def _all_held(document: type[Item], reading: "Reading") -> ColumnElement[bool]:
+def _all_held(document: type[Item], held: ColumnElement[bool]) -> ColumnElement[bool]:
     """The document `document` has a Block unanswered, and every one is
-    held, as `reading` reads the holds."""
+    `held`, a condition on a Block."""
     open_ = (
         select(Block.id)
         .where(Block.document_id == document.id, unanswered())
         .correlate_except(Block)
     )
-    return and_(open_.exists(), ~open_.where(~reading.held()).exists())
+    return and_(open_.exists(), ~open_.where(~held).exists())
 
 
 def _registered(document: type[Item]) -> ColumnElement[bool]:
@@ -462,6 +470,54 @@ def _after_reply(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
     return _replied(document, job).where(job.in_flight())
 
 
+@cache
+def _awaiting_items() -> Select[uuid.UUID, uuid.UUID | None]:
+    """The open Items that await their run's read (`_awaiting`), each with
+    the Work that registered it."""
+    return select(Item.id, Item.created_by_session_id).where(
+        Item.done_at.is_(None), _awaiting(Item)
+    )
+
+
+_State = tuple[Doing, Select[uuid.UUID, uuid.UUID, SessionState], bool]
+
+
+@cache
+def _in_flight_states() -> tuple[_State, ...]:
+    """`Reading.pilots`'s states of a Work in flight on an open Item, in its
+    order: what Pilot does in each; its statement, of the Item's id, the
+    Work's and its Session's state, in the Work's timeline order; and
+    whether the Item's line links the Work."""
+    states: list[_State] = []
+    for doing, state, linked in (
+        (Doing.PRE_RULING, _passing, True),
+        (Doing.ASKING_WRITER, _asking, False),
+        (Doing.PRE_RULING, _after_reply, True),
+    ):
+        rows = _Rows.new()
+        states.append(
+            (
+                doing,
+                state(Item, rows)
+                .with_only_columns(Item.id, rows.work.id, rows.session.state_code)
+                .where(Item.done_at.is_(None))
+                .order_by(rows.item.seq),
+                linked,
+            )
+        )
+    return tuple(states)
+
+
+@cache
+def _all_held_items() -> Select[uuid.UUID]:
+    """The open Items with a Block unanswered and every one held, the held
+    Blocks' ids bound as `held`."""
+    return select(Item.id).where(
+        Item.done_at.is_(None),
+        _all_held(Item, Block.id.in_(bindparam("held", expanding=True))),
+    )
+
+
 @dataclass(frozen=True)
 class Naming:
     """A standing naming that still applies, with what its run makes of its
@@ -519,25 +575,12 @@ class Reading:
         reads it; none for one Pilot's for its every open Block held alone,
         whose holds tell (`pilots_work`)."""
         found: dict[uuid.UUID, PilotsWork | None] = {}
-        open_ = Item.done_at.is_(None)
-        for item_id, run_id in self.db.execute(
-            select(Item.id, Item.created_by_session_id).where(open_, _awaiting(Item))
-        ):
+        for item_id, run_id in self.db.execute(_awaiting_items()):
             found.setdefault(
                 item_id, PilotsWork(Doing.AWAITING_RUN, run_id, False, None)
             )
-        for doing, states, linked in (
-            (Doing.PRE_RULING, _passing, True),
-            (Doing.ASKING_WRITER, _asking, False),
-            (Doing.PRE_RULING, _after_reply, True),
-        ):
-            rows = _Rows.new()
-            for item_id, work_id, state in self.db.execute(
-                states(Item, rows)
-                .with_only_columns(Item.id, rows.work.id, rows.session.state_code)
-                .where(open_)
-                .order_by(rows.item.seq)
-            ):
+        for doing, statement, linked in _in_flight_states():
+            for item_id, work_id, state in self.db.execute(statement):
                 found.setdefault(
                     item_id,
                     PilotsWork(
@@ -546,7 +589,7 @@ class Reading:
                 )
         if self.held_ids:
             for item_id in self.db.scalars(
-                select(Item.id).where(open_, _all_held(Item, self))
+                _all_held_items(), {"held": list(self.held_ids)}
             ):
                 found.setdefault(item_id, None)
         return found
@@ -581,6 +624,17 @@ def _documents_of(
     )
 
 
+@cache
+def _first_documents() -> Select[uuid.UUID, uuid.UUID | None]:
+    """Each Work bound as `works`, with the first open registered document
+    on the timeline of the run it begins, or none."""
+    start = aliased(Work)
+    return select(
+        start.id,
+        _documents_of(start.id, aliased(Item)).limit(1).scalar_subquery(),
+    ).where(start.id.in_(bindparam("works", expanding=True)))
+
+
 def _asked_in(
     db: Session, work_ids: Collection[uuid.UUID]
 ) -> dict[uuid.UUID, uuid.UUID]:
@@ -588,14 +642,10 @@ def _asked_in(
     Work of `work_ids` begins, by the Work's id, where it has one: while the
     run holds a Block with nothing of it in flight, the one the person
     answers."""
-    start = aliased(Work)
     return {
         work_id: document_id
         for work_id, document_id in db.execute(
-            select(
-                start.id,
-                _documents_of(start.id, aliased(Item)).limit(1).scalar_subquery(),
-            ).where(start.id.in_(list(work_ids)))
+            _first_documents(), {"works": list(work_ids)}
         )
         if document_id is not None
     }
@@ -680,6 +730,41 @@ def _not_withdrawn(job: _Rows) -> ColumnElement[bool]:
     return job.item.done_cause_code.is_distinct_from(WITHDRAWN)
 
 
+@cache
+def _passes_on() -> tuple[Select[uuid.UUID, uuid.UUID, int], ...]:
+    """The jobs of the passes not withdrawn, `_pass_over`'s and
+    `_replied`'s, on the Items bound as `wanted` or triggered by them: each
+    the Item's id, the job's and its timeline place."""
+    wanted: BindParameter[Any] = bindparam("wanted", expanding=True)
+    statements: list[Select[uuid.UUID, uuid.UUID, int]] = []
+    for over in (_pass_over, _replied):
+        rows = _Rows.new()
+        statements.append(
+            over(Item, rows)
+            .with_only_columns(Item.id, rows.work.id, rows.item.seq)
+            .where(
+                or_(Item.id.in_(wanted), rows.work.trigger_item_id.in_(wanted)),
+                _not_withdrawn(rows),
+            )
+        )
+    return tuple(statements)
+
+
+@cache
+def _triggered_by() -> Select[uuid.UUID | None, WorkTrigger | None, uuid.UUID, int]:
+    """The jobs not withdrawn that the Items bound as `wanted` triggered:
+    each its trigger item's id, its trigger, its id and its timeline
+    place."""
+    job = _Rows.new()
+    return job.select(
+        job.work.trigger_code.is_not(None),
+        job.work.trigger_item_id.in_(bindparam("wanted", expanding=True)),
+        _not_withdrawn(job),
+    ).with_only_columns(
+        job.work.trigger_item_id, job.work.trigger_code, job.work.id, job.item.seq
+    )
+
+
 def jobs_on(db: Session, item_ids: Collection[uuid.UUID]) -> JobsOn:
     """Which of Pilot's jobs each of the Items `item_ids` shows (F59.1),
     whatever its state: a pass on every registered document its trigger run
@@ -706,28 +791,13 @@ def jobs_on(db: Session, item_ids: Collection[uuid.UUID]) -> JobsOn:
             found[item_id] = (seq, job_id)
 
     passes: set[uuid.UUID] = set()
-    for over in (_pass_over, _replied):
-        rows = _Rows.new()
-        for document_id, job_id, seq in db.execute(
-            over(Item, rows)
-            .with_only_columns(Item.id, rows.work.id, rows.item.seq)
-            .where(
-                or_(Item.id.in_(wanted), rows.work.trigger_item_id.in_(wanted)),
-                _not_withdrawn(rows),
-            )
-        ):
+    for statement in _passes_on():
+        for document_id, job_id, seq in db.execute(statement, {"wanted": wanted}):
             passes.add(job_id)
             if document_id in among:
                 latest(shown, document_id, seq, job_id)
-    job = _Rows.new()
     for trigger_id, trigger, job_id, seq in db.execute(
-        job.select(
-            job.work.trigger_code.is_not(None),
-            job.work.trigger_item_id.in_(wanted),
-            _not_withdrawn(job),
-        ).with_only_columns(
-            job.work.trigger_item_id, job.work.trigger_code, job.work.id, job.item.seq
-        )
+        _triggered_by(), {"wanted": wanted}
     ):
         assert trigger_id is not None
         if trigger is WorkTrigger.WORKER_TURN_ENDED:
@@ -765,7 +835,7 @@ def holding_work(reading: Reading, document_id: uuid.UUID) -> list[uuid.UUID]:
             db.scalars(states(Item, _Rows.new()).where(Item.id == document_id))
         )
     if reading.held_ids and db.scalar(
-        select(Item.id).where(Item.id == document_id, _all_held(Item, reading))
+        select(Item.id).where(Item.id == document_id, _all_held(Item, reading.held()))
     ):
         for work_id in {
             hold.work_id for hold in holds(reading, [document_id]).held.values()
@@ -826,6 +896,35 @@ class Cancel:
         return bool(self.takes_back) and not self.going_on and not self.pilots_in_run
 
 
+@cache
+def _runs_named() -> Select[uuid.UUID, uuid.UUID | None, uuid.UUID | None]:
+    """Each Item bound as `items` that is an open registered document of a
+    worker's run and not among the Items bound as `pilots`, with the Work
+    that registered it, once with each Work of its run among the Works bound
+    as `named`, or once with none."""
+    creator = aliased(AgentSession)
+    member = aliased(Work)
+    return (
+        select(Item.id, Item.created_by_session_id, member.id.label("work_id"))
+        .join(Document, Document.id == Item.id)
+        .join(creator, creator.id == Item.created_by_session_id)
+        .outerjoin(
+            member,
+            and_(
+                member.id.in_(bindparam("named", expanding=True)),
+                member.id.in_(run_of(Item.created_by_session_id)),
+            ),
+        )
+        .where(
+            Item.id.in_(bindparam("items", expanding=True)),
+            Item.done_at.is_(None),
+            Document.source_path.is_not(None),
+            creator.kind_code == WORK_KIND,
+            ~Item.id.in_(bindparam("pilots", expanding=True)),
+        )
+    )
+
+
 def cancels(
     reading: Reading, item_ids: Collection[uuid.UUID]
 ) -> dict[uuid.UUID, Cancel]:
@@ -834,28 +933,15 @@ def cancels(
     its id, whether it is offered or not, as `reading` reads them; every
     other Item is left out."""
     db = reading.db
-    creator = aliased(AgentSession)
-    member = aliased(Work)
     runs: dict[uuid.UUID, uuid.UUID] = {}
     works: dict[uuid.UUID, set[uuid.UUID]] = {}
     for row in db.execute(
-        select(Item.id, Item.created_by_session_id, member.id.label("work_id"))
-        .join(Document, Document.id == Item.id)
-        .join(creator, creator.id == Item.created_by_session_id)
-        .outerjoin(
-            member,
-            and_(
-                member.id.in_(list({naming.work_id for naming in reading.namings})),
-                member.id.in_(run_of(Item.created_by_session_id)),
-            ),
-        )
-        .where(
-            Item.id.in_(list(item_ids)),
-            Item.done_at.is_(None),
-            Document.source_path.is_not(None),
-            creator.kind_code == WORK_KIND,
-            ~reading.pilots(),
-        )
+        _runs_named(),
+        {
+            "items": list(item_ids),
+            "named": list({naming.work_id for naming in reading.namings}),
+            "pilots": list(reading.found),
+        },
     ):
         runs[row.id] = row.created_by_session_id
         named = works.setdefault(row.id, set())
@@ -900,25 +986,43 @@ def cancels(
     }
 
 
+@cache
+def _runs_with_pilots() -> Select[uuid.UUID]:
+    """The Works bound as `runs` whose run has an open registered document
+    among the Items bound as `pilots`, or with a Block among those bound as
+    `held`."""
+    run = aliased(AgentSession)
+    held_blocks = (
+        select(Block.id)
+        .where(
+            Block.document_id == Item.id,
+            Block.id.in_(bindparam("held", expanding=True)),
+        )
+        .correlate_except(Block)
+    )
+    return select(run.id).where(
+        run.id.in_(bindparam("runs", expanding=True)),
+        _documents_of(run.id, Item)
+        .where(
+            or_(Item.id.in_(bindparam("pilots", expanding=True)), held_blocks.exists())
+        )
+        .exists(),
+    )
+
+
 def _pilots_in_runs(reading: Reading, run_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
     """Which of the runs the Works `run_ids` begin have an open registered
     document that is Pilot's, or with a Block held (DB 295, 296), as
     `reading` reads them: one that a Cancel's close would take from Pilot's
     work, another run's claim or research."""
-    run = aliased(AgentSession)
-    held_blocks = (
-        select(Block.id)
-        .where(Block.document_id == Item.id, reading.held())
-        .correlate_except(Block)
-    )
     return set(
         reading.db.scalars(
-            select(run.id).where(
-                run.id.in_(list(run_ids)),
-                _documents_of(run.id, Item)
-                .where(or_(reading.pilots(), held_blocks.exists()))
-                .exists(),
-            )
+            _runs_with_pilots(),
+            {
+                "runs": list(run_ids),
+                "pilots": list(reading.found),
+                "held": list(reading.held_ids),
+            },
         )
     )
 

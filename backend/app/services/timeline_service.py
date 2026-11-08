@@ -7,11 +7,12 @@ import uuid
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from functools import cache
 from pathlib import PurePosixPath
 from typing import Any, cast
 
 import pilot_dsl as dsl
-from sqlalchemy import ColumnElement, and_, exists, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, bindparam, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
@@ -229,6 +230,45 @@ def waiting(reading: Reading) -> ColumnElement[bool]:
     )
 
 
+@cache
+def _work_rows() -> Select[
+    AgentSession,
+    str,
+    str,
+    bool,
+    bool,
+    WorkTrigger | None,
+    User,
+    uuid.UUID,
+    datetime,
+]:
+    """`work_status`'s rows, built once, of the work items bound as `ids`:
+    each Session with its Environment's id and name, its Work's autopilot,
+    its Project's pause, its Work's trigger, the User who stopped it and the
+    id and creation of the job its Retry placed."""
+    stopper = aliased(User)
+    retry = aliased(AgentSession)
+    return (
+        select(
+            AgentSession,
+            Environment.id,
+            Environment.name,
+            Work.autopilot,
+            Project.paused,
+            Work.trigger_code,
+            stopper,
+            retry.id,
+            retry.created_at,
+        )
+        .join(Work, Work.id == AgentSession.id)
+        .outerjoin(Environment, Environment.id == AgentSession.environment_id)
+        .join(Project, Project.id == AgentSession.project_id)
+        .outerjoin(stopper, stopper.id == AgentSession.stopped_by_user_id)
+        .outerjoin(retry, retry.id == Work.retried_by_id)
+        .where(AgentSession.id.in_(bindparam("ids", expanding=True)))
+    )
+
+
 def work_status(
     db: Session,
     item_ids: Collection[uuid.UUID],
@@ -259,27 +299,9 @@ def work_status(
     Retries' the setup (F49); a retried one's names the job its Retry
     placed, created at the press. Its progress is its list of
     steps, in order (F145.1)."""
-    stopper = aliased(User)
-    retry = aliased(AgentSession)
-    rows = db.execute(
-        select(
-            AgentSession,
-            Environment.id,
-            Environment.name,
-            Work.autopilot,
-            Project.paused,
-            Work.trigger_code,
-            stopper,
-            retry.id,
-            retry.created_at,
-        )
-        .join(Work, Work.id == AgentSession.id)
-        .outerjoin(Environment, Environment.id == AgentSession.environment_id)
-        .join(Project, Project.id == AgentSession.project_id)
-        .outerjoin(stopper, stopper.id == AgentSession.stopped_by_user_id)
-        .outerjoin(retry, retry.id == Work.retried_by_id)
-        .where(AgentSession.id.in_(list(item_ids)))
-    ).all()
+    if not item_ids:
+        return {}
+    rows = db.execute(_work_rows(), {"ids": list(item_ids)}).all()
     progress: dict[uuid.UUID, list[ProgressStepSchema]] = {}
     for step in db.scalars(
         select(ProgressStep)
@@ -467,6 +489,8 @@ def writer_asked(
     about (DB Writer Question), in their order in it; a document whose writer
     is asked nothing is left out."""
     asked: dict[uuid.UUID, list[str]] = {}
+    if not document_ids:
+        return asked
     for document_id, local_id in db.execute(
         select(Block.document_id, Block.local_id)
         .join(WriterQuestion, WriterQuestion.block_id == Block.id)
@@ -695,12 +719,16 @@ class TimelineService:
             return JobSchema(id=job_id, title=job_titles[job_id], work=works[job_id])
 
         waits = [item for item, _, form in rows if form == WAIT]
-        fields = {
-            wait.id: wait
-            for wait in self.db.scalars(
-                select(Wait).where(Wait.id.in_([wait.id for wait in waits]))
-            )
-        }
+        fields = (
+            {
+                wait.id: wait
+                for wait in self.db.scalars(
+                    select(Wait).where(Wait.id.in_([wait.id for wait in waits]))
+                )
+            }
+            if waits
+            else {}
+        )
         firings = self.wait_service.firings(waits)
         refusals = self.wait_service.refusals(project, waits)
         reader = self._reader(
@@ -733,19 +761,22 @@ class TimelineService:
             ),
             pilots,
         )
-        held = set(
-            self.db.scalars(
-                select(SaveError.path).where(
-                    SaveError.kind_code == ErrorKind.PARSE,
-                    SaveError.path.in_(
-                        [
-                            tree_path(project, document.path)
-                            for _, document, _ in rows
-                            if document is not None
-                        ]
-                    ),
+        paths = [
+            tree_path(project, document.path)
+            for _, document, _ in rows
+            if document is not None
+        ]
+        held = (
+            set(
+                self.db.scalars(
+                    select(SaveError.path).where(
+                        SaveError.kind_code == ErrorKind.PARSE,
+                        SaveError.path.in_(paths),
+                    )
                 )
             )
+            if paths
+            else set()
         )
         return [
             TimelineItemSchema(
@@ -823,6 +854,8 @@ class TimelineService:
     def _titles(self, item_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
         """The titles of the work items `item_ids`, each of which has one."""
         titles: dict[uuid.UUID, str] = {}
+        if not item_ids:
+            return titles
         for item_id, title in self.db.execute(
             select(Item.id, Item.title).where(Item.id.in_(list(item_ids)))
         ):
@@ -999,14 +1032,18 @@ class TimelineService:
         }
         taken = [each for cancel in offered.values() for each in cancel.takes_back]
         named = set(reading.held) | reading.undone | {each.block_id for each in taken}
-        blocks = {
-            block_id: (document_id, local_id)
-            for block_id, document_id, local_id in self.db.execute(
-                select(Block.id, Block.document_id, Block.local_id).where(
-                    Block.id.in_(named)
+        blocks = (
+            {
+                block_id: (document_id, local_id)
+                for block_id, document_id, local_id in self.db.execute(
+                    select(Block.id, Block.document_id, Block.local_id).where(
+                        Block.id.in_(named)
+                    )
                 )
-            )
-        }
+            }
+            if named
+            else {}
+        )
         linked = {each.work_id for each in doing.values() if each.work_id} | {
             hold.work_id for hold in reading.held.values()
         }
@@ -1015,19 +1052,29 @@ class TimelineService:
             | {hold.asked_in for hold in reading.held.values() if hold.asked_in}
             | {each.document_id for each in taken}
         )
-        titles = {
-            item_id: (title, source_path)
-            for item_id, title, source_path in self.db.execute(
-                select(Item.id, Item.title, Document.source_path)
-                .outerjoin(Document, Document.id == Item.id)
-                .where(Item.id.in_(linked | linked_documents))
-            )
-        }
+        linked_items = linked | linked_documents
+        titles = (
+            {
+                item_id: (title, source_path)
+                for item_id, title, source_path in self.db.execute(
+                    select(Item.id, Item.title, Document.source_path)
+                    .outerjoin(Document, Document.id == Item.id)
+                    .where(Item.id.in_(linked_items))
+                )
+            }
+            if linked_items
+            else {}
+        )
         sections: dict[tuple[uuid.UUID, str], dsl.Block] = {}
-        for document_id, text in self.db.execute(
-            select(Document.id, Document.published_text).where(
-                Document.id.in_({each.document_id for each in taken})
+        taken_documents = {each.document_id for each in taken}
+        for document_id, text in (
+            self.db.execute(
+                select(Document.id, Document.published_text).where(
+                    Document.id.in_(taken_documents)
+                )
             )
+            if taken_documents
+            else ()
         ):
             # A held block is of a document read (DB 261, 293).
             assert text is not None
@@ -1095,6 +1142,8 @@ class TimelineService:
         time of its latest `turn` Version where a Version before it holds
         text as drawn, the first text it was shown with. A document with
         none is left out."""
+        if not document_ids:
+            return {}
         latest = {
             row.document_id: row
             for row in self.db.execute(
@@ -1211,6 +1260,8 @@ class TimelineService:
     ) -> dict[uuid.UUID | str, User]:
         """The users by id and by handle."""
         found: dict[uuid.UUID | str, User] = {}
+        if not user_ids and not handles:
+            return found
         for user in self.db.scalars(
             select(User).where(or_(User.id.in_(user_ids), User.handle.in_(handles)))
         ):

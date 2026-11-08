@@ -22,6 +22,7 @@ from app.engine.paths import tree_path
 from app.models import Document, Environment, Item, Project, User, WaitFiring
 from app.models.reference import FiringCause, ProjectState, SessionState
 from app.schemas.testing_record import InventedProjectCreateSchema
+from app.schemas.timeline import ItemDocumentSchema
 from app.services.container import ServiceContainer
 from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection
@@ -157,6 +158,28 @@ def _entry(client: FlaskClient, camp: Project, item: Item) -> dict[str, Any]:
 
 @pytest.mark.usefixtures("person")
 class TestGetItemDocument:
+    def test_a_document_is_answered_as_read_and_never_validated_again(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        item = _bear(container, camp, run, "document", RECOMMENDED)
+        _sign_in(client)
+        expected = container.timeline_service().item_document(item.id)
+
+        def validated_again(*_: object, **__: object) -> None:
+            raise AssertionError("the document was validated again")
+
+        monkeypatch.setattr(ItemDocumentSchema, "model_validate", validated_again)
+        monkeypatch.setattr(ItemDocumentSchema, "model_validate_json", validated_again)
+        response = client.get(f"{ITEMS}/{item.id}/document")
+
+        assert response.status_code == 200
+        assert response.get_json() == expected.model_dump(mode="json")
+
     def test_a_document_reads_as_its_timeline_entry_with_its_project(
         self,
         client: FlaskClient,

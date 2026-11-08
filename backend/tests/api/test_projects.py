@@ -37,6 +37,7 @@ from app.models.reference import (
     TransitionKind,
 )
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
+from app.schemas.timeline import TimelineSchema
 from app.services.container import ServiceContainer
 from app.services.job_service import SETUP_TITLE
 from app.services.session_scope import STORE_REPO
@@ -832,6 +833,26 @@ class TestGetTimeline:
 
         assert datetime.fromisoformat(body["finished_at"]) == finished_at
         assert [item["kind"] for item in body["items"]] == ["opening"]
+
+    def test_the_timeline_is_answered_as_read_and_never_validated_again(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client)
+        expected = container.timeline_service().timeline(camp).model_dump(mode="json")
+
+        def validated_again(*_: object, **__: object) -> None:
+            raise AssertionError("the timeline was validated again")
+
+        monkeypatch.setattr(TimelineSchema, "model_validate", validated_again)
+        monkeypatch.setattr(TimelineSchema, "model_validate_json", validated_again)
+        response = client.get(f"{PROJECTS}/{camp}/timeline")
+
+        assert response.status_code == 200
+        assert response.get_json() == expected
 
     def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
         _sign_in(client)
