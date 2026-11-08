@@ -1203,6 +1203,29 @@ class TestPilotStoreServiceStopWork:
             "Cannot stop Which tent? because it is no work item"
         )
 
+    def test_a_work_item_owed_its_nudge_is_stopped_by_pilot(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A run halted or paused at its turn's end is stopped, not done
+        (D097), and owed its nudge no more."""
+        run = _brain(session, project, environment)
+        work = _work(session, container, project, SessionState.IDLE)
+        work.nudge_owed_at = datetime.now(UTC)
+
+        line = _service(container).stop_work(_admitted(run), work.id, TOOL_USE_ID)
+        clear_after_commit_callbacks()
+
+        assert (work.state_code, work.stopped_by_user_id, work.nudge_owed_at) == (
+            SessionState.STOPPED,
+            _pilot(session).id,
+            None,
+        )
+        assert (line.verb, line.label) == ("Stopped", "Pitching the tent")
+
     def test_a_work_item_whose_turn_has_ended_is_refused(
         self,
         session: DbSession,

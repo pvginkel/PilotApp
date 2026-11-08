@@ -277,8 +277,8 @@ def stop_work(
         403: The bearer's session is not a chat's or a job's, or has no turn
             running
         404: The item is not of the session's project
-        409: It is no work item, or its session is neither running, starting
-            nor held: the reason
+        409: It is no work item, or its session is neither running, starting,
+            held nor idle with its nudge owed: the reason
     """
     body = StopRequestSchema.model_validate(request.get_json())
     line = pilot_store_service.stop_work(

@@ -741,13 +741,14 @@ STORE_SURFACE = {
             "type": "object",
         },
         _RECORDED,
-        "Stop a work item's session that runs, is starting or is held at the gate:"
-        " a runaway session, or one a correction makes moot. A turn in flight is"
-        " interrupted and the conversation kept; the item shows it stopped by"
-        " Pilot, and a person can resume it. An item not of your project, one that"
-        " is no work item, a job of yours, or one whose session is not running,"
-        " starting or held is refused with the reason. Answers `{effect}`, the"
-        " call's effect line.",
+        "Stop a work item's session that runs, is starting or is held at the gate,"
+        " or one whose turn ended under a usage halt or the project's pause, to be"
+        " carried on once it lifts: a runaway session, or one a correction makes"
+        " moot. A turn in flight is interrupted and the conversation kept; the item"
+        " shows it stopped by Pilot, and a person can resume it. An item not of"
+        " your project, one that is no work item, a job of yours, or one whose"
+        " session is none of these is refused with the reason. Answers `{effect}`,"
+        " the call's effect line.",
     ),
     "finish": (
         {"properties": {}, "title": "finishArguments", "type": "object"},
