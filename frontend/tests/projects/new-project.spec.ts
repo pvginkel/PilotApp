@@ -120,6 +120,10 @@ test.describe('The plus', () => {
     await expect(definitionChat.field).toBeFocused();
     expect((await chats.list(id)).chats.map((chat) => chat.kind)).toEqual(['definition']);
 
+    // The draft took the new project's entry: Back never returns to an empty new project's chat.
+    await page.goBack();
+    await expect(page).not.toHaveURL('/projects/draft-new');
+
     // The plus's chat starts empty again: what was sent left it.
     await projectList.newProject.click();
     await expect(definitionChat.field).toHaveValue('');
