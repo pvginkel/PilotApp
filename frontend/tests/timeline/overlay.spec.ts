@@ -176,7 +176,16 @@ test.describe('A document in its tab', () => {
 
     const van = overlay.blockAt('A1');
     await expect(van.root).not.toBeInViewport();
-    await overlay.segment('A1').click();
+    // Under the reduced-motion setting the suite's pages take, the scroll jumps: read in the click's
+    // own task, it is there at once, where a glide would not have moved yet.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const body = await overlay.body.elementHandle();
+    const moved = await overlay.segment('A1').evaluate((segment, body) => {
+      const before = body!.scrollTop;
+      (segment as HTMLElement).click();
+      return body!.scrollTop - before;
+    }, body);
+    expect(moved).toBeGreaterThan(0);
     await expect(van.root).toHaveClass(/\bflash\b/);
     await expect(van.root).toBeInViewport();
     await expect(timeline.item(trip).blockAt('A1').root).not.toHaveClass(/\bflash\b/);

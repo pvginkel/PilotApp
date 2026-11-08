@@ -165,7 +165,16 @@ test.describe('Pilot asking the writer', () => {
     await expect(shore).not.toHaveAttribute('href');
     await overlay.body.evaluate((body) => body.scrollTo({ top: body.scrollHeight }));
     await expect(overlay.clarificationBox).not.toBeInViewport();
-    await shore.click();
+    // Under the reduced-motion setting the suite's pages take, the scroll jumps: read in the click's
+    // own task, it is there at once, where a glide would not have moved yet.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const body = await overlay.body.elementHandle();
+    const moved = await shore.evaluate((mark, body) => {
+      const before = body!.scrollTop;
+      (mark as HTMLElement).click();
+      return body!.scrollTop - before;
+    }, body);
+    expect(moved).toBeLessThan(0);
     await expect(overlay.clarificationBox).toBeInViewport();
     await expect(overlay.clarificationBox).toHaveClass(/\bflash\b/);
     await expect(page).toHaveURL(documentAddress(project, route));
