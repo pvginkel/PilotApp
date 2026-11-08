@@ -170,6 +170,9 @@ test.describe('The plus', () => {
       await people.signIn();
       await page.goto('/');
       await waitForUiState(page, 'projects.list', 'ready');
+      // The bare address opens the list's first project, the seed's; going elsewhere closes the
+      // drawer, so it opens once that has landed.
+      await expect(page).toHaveURL(/\/projects\/[^/]+$/);
       await shell.drawerToggle.tap();
       await projectList.newProject.tap();
       await expect(page).toHaveURL('/projects/draft-new');
