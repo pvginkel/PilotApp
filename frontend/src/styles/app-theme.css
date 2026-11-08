@@ -183,8 +183,8 @@
   --accent-foreground: 210 40% 98%;
   --destructive: 0 63% 50%;
   --destructive-foreground: 0 0% 98%;
-  /* The dividers raised from 17% and the unfocused field's edge a step above them, the accent
-     staying at 17% (mockup M3). */
+  /* The dividers at 26% and the unfocused field's edge, a token of its own, a step above them at
+     36%, the accent at 17% (mockup M3). */
   --border: 216 28% 26%;
   --input: 216 24% 36%;
   --ring: 213 58% 58%;

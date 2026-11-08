@@ -1,7 +1,7 @@
 /**
  * The theme (F109): system, light or dark, following the OS live under System, and remembered in
- * the browser (F133). The dark theme's dividers and its fields' edge, a token of its own, are
- * raised from 17 % lightness, the light theme's kept (mockup M3).
+ * the browser (F133). The dark theme's dividers stand at 26 % lightness and its fields' edge, a
+ * token of its own, at 36 %; the light theme's both at 91 % (mockup M3).
  */
 
 import { cssColour } from '../support/contrast';
@@ -63,7 +63,7 @@ test.describe('The theme', () => {
     await expect(html).toHaveAttribute('data-theme', 'light');
   });
 
-  test('Dark raises the dividers to 26 % and a field’s edge, a token of its own, to 36 %; Light keeps both as they were', async ({
+  test('Dark draws the dividers at 26 % and a field’s edge, a token of its own, at 36 %; Light both at 91 %', async ({
     page,
     people,
     projects,
