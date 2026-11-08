@@ -177,6 +177,43 @@ test.describe('The Chat tab', () => {
     expect(await fromBottom()).toBeGreaterThan(32);
   });
 
+  test('a step list the reader opened at its end and closed again leaves the view at its end, following the reply streaming on', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Steps closed'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'Which route do we take?');
+    const reads = ['a', 'b', 'c'].flatMap((name) => [
+      toolUse(`read_${name}`, 'Read', { file_path: `/work/Example/${name}.md` }),
+      toolResult(`read_${name}`, `Stage ${name}.`),
+    ]);
+    await controller.play(chats.store, session, [text('route', LONG), ...reads]);
+    const run = chat.root.getByTestId('chat.run');
+    await expect(run).toBeInViewport();
+    const fromBottom = () => chat.body.evaluate((body) => body.scrollHeight - body.scrollTop - body.clientHeight);
+    await expect.poll(fromBottom).toBeLessThanOrEqual(1);
+
+    const letGo = chat.sticky(false);
+    await run.getByRole('button', { expanded: false }).click();
+    await letGo;
+    const takenBack = chat.sticky(true);
+    await run.getByRole('button', { expanded: true }).click();
+    await expect(run.getByRole('button', { expanded: false })).toBeVisible();
+    await takenBack;
+    expect(await fromBottom()).toBeLessThanOrEqual(1);
+
+    const lines = Array.from({ length: 12 }, (_, index) => `${index + 1}. Camp ${index + 1}, by the river.`).join('\n');
+    await controller.play(chats.store, session, [text('camps', lines)]);
+    await expect(chat.texts.last()).toContainText('Camp 12, by the river.');
+    await expect.poll(fromBottom).toBeLessThanOrEqual(1);
+  });
+
   test('shows another person’s message with their name before its time and their avatar, and streams their turn to the viewer as to them', async ({
     people,
     projects,

@@ -82,6 +82,8 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const [above, setAbove] = useState<string[]>([]);
   // At the end until the reader scrolls away from it; it opens there.
   const atEnd = useRef(true);
+  // The end was let go by the reader's own open, and no scroll has decided it since.
+  const released = useRef(false);
   // Where the timeline last put itself, at its end.
   const pinned = useRef<number | null>(null);
   const toEnd = () => {
@@ -99,6 +101,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   };
   const onScroll = () => {
     const element = feed.current!;
+    released.current = false;
     // A scroll event reports where the timeline stands once the frame is laid out, after the head
     // above it may have been drawn: one where the timeline put itself is its own, not the reader's.
     atEnd.current =
@@ -121,6 +124,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
     const target = Math.min(Math.max(wanted, 0), element.scrollHeight - element.clientHeight);
     if (Math.abs(target - element.scrollTop) < 1) return;
     atEnd.current = false;
+    released.current = false;
     element.scrollTo({ top: target, behavior });
   };
   // Only an item the timeline draws has a banner.
@@ -179,7 +183,8 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   // The timeline's own height changes, as when the head above it is drawn or the window is
   // resized, and nothing scrolls it: at its end, it stays there. Its content grows or shrinks: an
   // arrival keeps it at its end, and the reader's own open or close leaves it where it stands, no
-  // longer following its end once that is out of reach. A change of the column's width is a reflow.
+  // longer following its end once that is out of reach, and following it again once their close
+  // brings it back. A change of the column's width is a reflow.
   useLayoutEffect(() => {
     const element = feed.current!;
     const column = inner.current!;
@@ -188,7 +193,14 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
       const reflowed = column.offsetWidth !== width;
       width = column.offsetWidth;
       if (own() && !reflowed) {
-        if (element.scrollHeight - element.scrollTop - element.clientHeight >= END_SLACK) atEnd.current = false;
+        const reach = element.scrollHeight - element.scrollTop - element.clientHeight < END_SLACK;
+        if (atEnd.current && !reach) {
+          atEnd.current = false;
+          released.current = true;
+        } else if (released.current && reach) {
+          atEnd.current = true;
+          released.current = false;
+        }
       } else if (atEnd.current) toEnd();
       countAbove();
     });

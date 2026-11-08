@@ -7,7 +7,8 @@
  * A `ResizeObserver` on the wrapper covers first paint and every later change. The reader's own
  * open or close of something in it (use-own-growth.ts) is not pinned: the view stays where it
  * stands, so what they opened grows downward, and it goes on pinning only if the end is still in
- * reach. A change of the wrapper's width is a reflow, never the reader's own. Only the reader's
+ * reach; their close that puts the view at the end again, of an open that let go of it, pins
+ * again. A change of the wrapper's width is a reflow, never the reader's own. Only the reader's
  * own input lets go of the bottom: the wheel or a key moving up, a scroll while a finger or
  * pointer is down (a drag on the scrollbar, a selection), or an open that takes the end out of
  * reach. A scroll event alone is not taken as the reader's: when the content shrinks — a table's
@@ -41,12 +42,15 @@ export function useStickyBottom(
   scope: string,
 ): { stick: () => void; unstick: () => void; stuck: boolean } {
   const stickToBottomRef = useRef(true);
+  // The pinning was let go by the reader's own open, and nothing has decided it since.
+  const releasedRef = useRef(false);
   const pinnedRef = useRef(false);
   const [stuckNow, setStuckNow] = useState(true);
   const own = useOwnGrowth(containerRef);
 
   const setStuck = useCallback(
     (stuck: boolean) => {
+      releasedRef.current = false;
       if (stickToBottomRef.current === stuck) return;
       stickToBottomRef.current = stuck;
       setStuckNow(stuck);
@@ -123,11 +127,15 @@ export function useStickyBottom(
     const observer = new ResizeObserver(() => {
       const reflowed = wrapper.offsetWidth !== width;
       width = wrapper.offsetWidth;
-      if (!stickToBottomRef.current) return;
       if (own() && !reflowed) {
-        setStuck(distance() <= STICKY_THRESHOLD_PX);
+        const near = distance() <= STICKY_THRESHOLD_PX;
+        if (stickToBottomRef.current && !near) {
+          setStuck(false);
+          releasedRef.current = true;
+        } else if (releasedRef.current && near) setStuck(true);
         return;
       }
+      if (!stickToBottomRef.current) return;
       pinToBottom(pinnedRef.current ? 'resize' : 'initial');
       pinnedRef.current = true;
     });

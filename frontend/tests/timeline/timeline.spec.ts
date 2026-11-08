@@ -473,6 +473,36 @@ test.describe('Anchored to its end', () => {
     await expect(timeline.item(later).root).not.toBeInViewport();
   });
 
+  test('a block the reader opened at its end and closed again leaves the timeline at its end, following what arrives', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await longProject(projects, me.handle!, makeUnique('Closed again'));
+    const options = ['Dome', 'Tunnel', 'Tarp', 'Bivvy', 'Hammock', 'Van'].map((option) => `  - ${option}\n`).join('');
+    const decision = await projects.place(id, {
+      kind: 'decision',
+      title: 'Which tent?',
+      text: `\`\`\`decision id=D1\noptions:\n${options}answer: Dome\nby: agent\nat: 2026-10-20T09:00:00Z\n\`\`\`\n`,
+    });
+    await timeline.open(id);
+    const { block } = timeline.item(decision);
+    await expect(block.toggle).toBeInViewport();
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+
+    await block.toggle.click();
+    await expect(block.options).toHaveCount(6);
+    await expect.poll(() => timeline.fromEnd()).toBeGreaterThan(100);
+    await block.toggle.click();
+    await expect(block.options).toHaveCount(1);
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+
+    const later = await projects.place(id, { kind: 'notice', title: 'Later', text: NOTICE });
+    await expect(timeline.item(later).root).toBeAttached();
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+  });
+
   test('opens at its end, follows new items there with a flash, and stays where the reader scrolled', async ({
     people,
     projects,
