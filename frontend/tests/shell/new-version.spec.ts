@@ -12,6 +12,8 @@ import { slowNetwork } from '../support/network';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
 
 const DECISION = 'Which tent for the trip?\n\n```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n';
+const PILOTS_QUESTION = 'Which lake?\n\n```question id=Q1\nanswer: Lake Garda\nby: agent\nat: 2026-10-20T09:00:00Z\n```\n';
+const PILOTS_ACTION = 'Try the lamp.\n\n```action id=A1\noptions:\n  - Works\n  - Doesn\'t\nanswer: Works\nby: agent\nat: 2026-10-20T09:00:00Z\n```\n';
 
 type Hold = 'words' | 'write' | 'focus';
 
@@ -89,6 +91,67 @@ test.describe('A new version', () => {
     await restore();
     await reloaded;
     expect((await projects.block(id, decision)).answer).toBe('Neither: the van');
+  });
+
+  test('waits while a question or an action Pilot answered, opened to change, holds the person’s words, its field without the focus', async ({
+    page,
+    backendUrl,
+    people,
+    projects,
+    timeline,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Overruled'), members: [me.handle!] });
+    const question = await projects.place(id, { kind: 'question', title: 'Which lake?', text: PILOTS_QUESTION });
+    const action = await projects.place(id, { kind: 'action', title: 'Try the lamp', text: PILOTS_ACTION });
+    await timeline.open(id);
+
+    for (const [item, field, words] of [
+      [question, timeline.item(question).block.answerField, 'Lake Como'],
+      [action, timeline.item(action).block.paste, 'The bulb was loose'],
+    ] as const) {
+      const { block } = timeline.item(item);
+      const newer = await deployed(page, backendUrl, deploymentSse);
+      // The block reads closed with Pilot's answer until opened, and closed again after a reload.
+      await expect(field).toHaveCount(0);
+      await block.toggle.click();
+      await field.fill(words);
+      await field.press('Tab');
+      const holding = held(page, 'words');
+      await newer();
+      await holding;
+      await expect(field).toHaveValue(words);
+      await field.fill('');
+      const reloaded = page.waitForEvent('load');
+      await field.press('Tab');
+      await reloaded;
+      await timeline.open(id);
+    }
+  });
+
+  test('reloads over a question Pilot answered, opened and holding Pilot’s answer as it was', async ({
+    page,
+    backendUrl,
+    people,
+    projects,
+    timeline,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Looked at'), members: [me.handle!] });
+    const question = await projects.place(id, { kind: 'question', title: 'Which lake?', text: PILOTS_QUESTION });
+    await timeline.open(id);
+    const { block } = timeline.item(question);
+    const newer = await deployed(page, backendUrl, deploymentSse);
+
+    await block.toggle.click();
+    await expect(block.answerField).toHaveValue('Lake Garda');
+    const reloaded = page.waitForEvent('load');
+    await newer();
+    await reloaded;
+    await expect(block.said).toHaveText('Lake Garda');
+    await expect(block.answerField).toHaveCount(0);
   });
 
   test('waits while a field has the focus, its words kept in the browser, and reloads once it loses it', async ({

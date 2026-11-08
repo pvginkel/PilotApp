@@ -15,6 +15,11 @@ interface QuestionAnswerProps {
   field: string;
   block: Block;
   saving: Saving | null;
+  /**
+   * Its block reads closed until opened, as one Pilot answered: the reload closes it again, so its
+   * field holds the reload on words of the person's, never on the answer it opened with.
+   */
+  closable: boolean;
   closed: boolean;
   /** Whether it takes an answer now. */
   live: boolean;
@@ -23,14 +28,14 @@ interface QuestionAnswerProps {
   onAnswer: Answer;
 }
 
-export function QuestionAnswer({ field, block, saving, closed, live, disabled = false, onAnswer }: QuestionAnswerProps) {
+export function QuestionAnswer({ field, block, saving, closable, closed, live, disabled = false, onAnswer }: QuestionAnswerProps) {
   const own = block.answer === DEFERRED ? null : block.answer;
   if (closed || !live) {
     // An answer being saved is the person's, never Done.
     const words = saving === null ? own : saving.answer!;
     return words === null ? null : <Said words={words} note={saving === null ? block.note : saving.note} boxed />;
   }
-  return <QuestionField field={field} block={block} initial={own ?? ''} disabled={disabled} onAnswer={onAnswer} />;
+  return <QuestionField field={field} block={block} initial={own ?? ''} closable={closable} disabled={disabled} onAnswer={onAnswer} />;
 }
 
 interface QuestionFieldProps {
@@ -38,11 +43,12 @@ interface QuestionFieldProps {
   block: Block;
   /** What the field opens with while nothing is kept: the answer it changes. */
   initial: string;
+  closable: boolean;
   disabled: boolean;
   onAnswer: Answer;
 }
 
-function QuestionField({ field, block, initial, disabled, onAnswer }: QuestionFieldProps) {
+function QuestionField({ field, block, initial, closable, disabled, onAnswer }: QuestionFieldProps) {
   const { text, change, sent } = useUnsentText(`${field}/answer`, initial);
   const words = text.trim() === '' ? block.default : text;
   const send = () => {
@@ -57,7 +63,7 @@ function QuestionField({ field, block, initial, disabled, onAnswer }: QuestionFi
         label="Your answer"
         placeholder={block.default === null ? 'Your answer' : `Default: ${block.default}`}
         disabled={disabled}
-        survivesReload
+        survivesReload={!closable || text === initial}
         testId="timeline.block.field"
       />
       <button

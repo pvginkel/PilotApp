@@ -239,7 +239,18 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
           />
         );
       case 'question':
-        return <QuestionAnswer field={field} block={block} saving={saving} closed={closed} live={live} disabled={off} onAnswer={answer} />;
+        return (
+          <QuestionAnswer
+            field={field}
+            block={block}
+            saving={saving}
+            closable={closable}
+            closed={closed}
+            live={live}
+            disabled={off}
+            onAnswer={answer}
+          />
+        );
       case 'action':
         return (
           <ActionAnswer
@@ -247,6 +258,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
             block={block}
             claimed={!undone && held === null}
             saving={saving}
+            closable={closable}
             closed={closed}
             live={live}
             settled={settled}

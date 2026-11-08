@@ -30,6 +30,11 @@ interface ActionAnswerProps {
   /** Whether a claim on it reads "Pilot does it". */
   claimed: boolean;
   saving: Saving | null;
+  /**
+   * Its block reads closed until opened, as one Pilot answered: the reload closes it again, so its
+   * paste-back holds the reload on what is pasted in it.
+   */
+  closable: boolean;
   closed: boolean;
   /** Whether it takes an answer now. */
   live: boolean;
@@ -41,7 +46,7 @@ interface ActionAnswerProps {
   onDone: (sent: Sent) => void;
 }
 
-export function ActionAnswer({ field, block, claimed, saving, closed, live, settled, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
+export function ActionAnswer({ field, block, claimed, saving, closable, closed, live, settled, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
   const said = saidOf(block, saving);
   return (
     <>
@@ -49,7 +54,7 @@ export function ActionAnswer({ field, block, claimed, saving, closed, live, sett
         ? claimed && <Claimed block={block} work={block.claim.work} />
         : said !== null && <Said {...said} />}
       {(live || settled) && !closed && (
-        <ActionControls field={field} block={block} disabled={disabled || !live} onAnswer={onAnswer} onDone={onDone} />
+        <ActionControls field={field} block={block} closable={closable} disabled={disabled || !live} onAnswer={onAnswer} onDone={onDone} />
       )}
     </>
   );
@@ -99,12 +104,13 @@ function saidOf(block: Block, saving: Saving | null) {
 interface ActionControlsProps {
   field: string;
   block: Block;
+  closable: boolean;
   disabled: boolean;
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
 }
 
-function ActionControls({ field, block, disabled, onAnswer, onDone }: ActionControlsProps) {
+function ActionControls({ field, block, closable, disabled, onAnswer, onDone }: ActionControlsProps) {
   const pasted = useUnsentText(`${field}/paste`);
   const [typing, setTyping] = useState(false);
   const optioned = block.options.length > 0;
@@ -127,7 +133,7 @@ function ActionControls({ field, block, disabled, onAnswer, onDone }: ActionCont
         label="What to paste back"
         placeholder="What to paste back, if anything"
         disabled={disabled}
-        survivesReload
+        survivesReload={!closable}
         testId="timeline.block.paste"
       />
       <div className="item-actions">
