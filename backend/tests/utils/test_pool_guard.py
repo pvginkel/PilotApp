@@ -13,7 +13,7 @@ from app.extensions import db
 from app.utils.pool_guard import PoolGuard
 from tests.support.locks import in_thread
 
-_HERE = "tests/test_pool_guard.py"
+_HERE = "tests/utils/test_pool_guard.py"
 
 
 @pytest.fixture
