@@ -187,10 +187,14 @@ export class TimelinePage {
         environment: root.getByTestId('timeline.work.environment'),
         environmentIcon: root.getByTestId('timeline.work.environment.icon'),
         environmentPopover: root.getByTestId('timeline.work.environment.popover'),
+        /** The head's pulse while its run is under way, and the running time beside it once the run began. */
+        live: root.getByTestId('timeline.work.live'),
         running: root.getByTestId('timeline.work.running'),
+        /** Its one line: the working cue, its dancing dots, never drawn here, and a sub-agent's description after it. */
         line: root.getByTestId('timeline.work.line'),
         cue: root.getByTestId('timeline.work.line').getByTestId('chat.cue'),
-        step: root.getByTestId('timeline.work.step'),
+        dots: root.getByTestId('timeline.work.line').getByTestId('chat.cue.dots'),
+        detail: root.getByTestId('timeline.work.detail'),
         /** Session log's and Stop's icons, in the head. */
         sessionLog: root.getByTestId('timeline.work.session-log'),
         stop: root.getByTestId('timeline.work.stop'),

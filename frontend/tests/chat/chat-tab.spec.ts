@@ -5,7 +5,8 @@
  * avatar under it and another person's name before the time (F38.2; the chat mockup's decision 13),
  * a quote it opens with over it and one inside it a chip, each going to what it quotes (F39.3);
  * Pilot's reply bare in the column, the server's lines while the session comes up in the cue alone
- * (F40.2), the phantom while a block streams (F40.4), then its time and avatar, "· Stopped" by a
+ * (F40.2), its dots dancing, its Thinking counted from the press of Send, by the page's clock where
+ * the page sent the message and by the message's record where it did not (C2), the phantom while a block streams (F40.4), then its time and avatar, "· Stopped" by a
  * stopped turn's and its reason in red and "· Failed" by a failed one's (F44); a date divider over
  * each day's first message. A chat shorter than its column stands at its top; at its end, a step
  * list the reader opens grows downward, the view where it stood. A chat that opens while the tab
@@ -16,6 +17,7 @@
  * is the same column, the composer under it (F98.3; the composer's own specs: composer.spec.ts).
  */
 
+import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { expectConsoleError, makeUnique } from '../support/helpers';
 import { slowNetwork } from '../support/network';
@@ -40,6 +42,33 @@ const toolUse = (id: string, name: string, input: object) =>
   line({ type: 'assistant', message: { id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input }] }, parent_tool_use_id: null });
 const toolResult = (id: string, content: string) =>
   line({ type: 'user', message: { role: 'user', content: [{ tool_use_id: id, type: 'tool_result', content }] }, parent_tool_use_id: null });
+const thinkingStart = () =>
+  line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }, parent_tool_use_id: null });
+
+const MINUTE = 60_000;
+
+/** A span as the cue words it (`duration()` in src/lib/chat/format.ts): "4 s", "1 min 5 s". */
+function duration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  return s % 60 ? `${m} min ${s % 60} s` : `${m} min`;
+}
+
+/** The cue's words at `at`, for a press of Send between `from` and `to`, all by the page's clock. */
+function thinkingSince(from: number, to: number, at: number): RegExp {
+  const words = new Set<string>();
+  for (let press = from; press < to; press += 100) words.add(duration(at - press));
+  words.add(duration(at - to));
+  return new RegExp(`^Thinking · (${[...words].join('|')})$`);
+}
+
+/** The page's clock, read in the page. */
+// eslint-disable-next-line no-restricted-properties -- The page's own clock, read to set it, pause it and count from it.
+const pageNow = (page: Page) => page.evaluate(() => Date.now());
+
+/** The page comes back into view: the cue counts again at once. */
+const cameIntoView = (page: Page) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
 
 const EMPTY = 'Ask Pilot about this project: how a session is going, what an item means, a change to the plan. Discuss on an item quotes it here.';
 
@@ -326,6 +355,67 @@ test.describe('The Chat tab', () => {
     const failed = (await projects.records(id)).records.at(-1)!;
     await expect(chat.replyEnds.last()).toHaveText(`${clock(failed.at)}· Failed`);
     await expect(chat.replyEnds.last().getByText('· Failed')).toHaveClass(/text-destructive-text/);
+  });
+
+  test('counts Thinking from the press of Send, by this page’s clock where this page sent the message and by the message’s record where it did not, never again from a later block; its dots dancing, “Waiting for Pilot” among them', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Thinking'), members: [me.handle!] });
+    await page.clock.install();
+    await timeline.open(project);
+    // This page's clock an hour ahead of the server's: counted from its record, a press would read an hour.
+    await page.clock.setSystemTime((await pageNow(page)) + 60 * MINUTE);
+    const opened = await chats.opening(project);
+    await chat.field.fill('Which tent do we take?');
+    const sent = chat.acted('send');
+    const before = await pageNow(page);
+    await chat.send.click();
+    const after = await pageNow(page);
+    await sent;
+    const session = await opened();
+    const { id } = (await chats.list(project)).chats.at(-1)!;
+    await chat.live(id);
+    await expect(chat.dots).toBeVisible();
+
+    // The page's clock stands still from here; the cue counts again once the page comes back into view.
+    await page.clock.pauseAt((await pageNow(page)) + 1_000);
+    const paused = await pageNow(page);
+    await controller.play(chats.store, session, [thinkingStart()]);
+    await expect(chat.cue).toHaveText(/^Thinking · /);
+    await cameIntoView(page);
+    await expect(chat.cue).toHaveText(thinkingSince(before, after, paused));
+    // A later thinking block counts from the press still.
+    await page.clock.runFor(10_000);
+    await controller.play(chats.store, session, [text('weigh', 'Weighing them.'), thinkingStart()]);
+    await expect(chat.texts).toHaveText(['Weighing them.']);
+    await expect(chat.cue).toHaveText(/^Thinking · /);
+    await cameIntoView(page);
+    await expect(chat.cue).toHaveText(thinkingSince(before, after, paused + 10_000));
+    await controller.play(chats.store, session, [text('dome', 'The dome.')]);
+    await controller.finish(chats.store, session, 'success', 'The dome.');
+    await expect(chat.replyEnds).toHaveCount(1);
+
+    // A message this page did not send, as after a reload: from its record.
+    await page.clock.resume();
+    await chats.send(project, 'And the stove?');
+    await chats.working(session);
+    await expect(chat.cue).toHaveText('Waiting for Pilot');
+    await expect(chat.dots).toBeVisible();
+    await page.clock.pauseAt((await pageNow(page)) + 1_000);
+    await controller.play(chats.store, session, [thinkingStart()]);
+    await expect(chat.cue).toHaveText(/^Thinking · /);
+    const message = (await projects.records(id)).records.filter((record) => record.kind === 'send').at(-1)!;
+    await page.clock.setSystemTime(Date.parse(message.at) + 5 * MINUTE);
+    await cameIntoView(page);
+    await expect(chat.cue).toHaveText('Thinking · 5 min');
+    await controller.finish(chats.store, session, 'success', 'The gas one.');
   });
 
   test('Archive closes the chat open then, its “Chat closed · <time>” coming while the tab shows', async ({ people, projects, controller, timeline, chat, chats }) => {

@@ -405,12 +405,17 @@ function stopWords(work: Work): StopWords | null {
   }
 }
 
-/** A work item's one line on the timeline while its session is held, starts or runs: the working cue's state, and the latest step. */
+/**
+ * A work item's one line on the timeline while its session is held, starts or runs, or owes its
+ * nudge: the working cue's state, or the call it runs alone (W2).
+ */
 interface WorkCue {
   kind: 'cue';
   activity: Activity;
-  /** The latest tool call, worded as the chat words a call; a sub-agent's description while it runs. */
+  /** The call it runs, in the phase's place, worded as the chat words a running call. */
   step: Words[] | null;
+  /** What follows the phase after a " · ": a sub-agent's description while it runs. */
+  detail: string | null;
 }
 
 /** "Stopped · <time>", or Pilot's stop's words before it, and the cause of a stop made elsewhere. */
@@ -443,11 +448,17 @@ export function nudgeCue(work: Work): Activity {
   return work.held_reason === null ? NUDGE_DUE : { kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) };
 }
 
-const cue = (activity: Activity, step: Words[] | null = null): WorkCue => ({ kind: 'cue', activity, step });
+const cue = (activity: Activity, step: Words[] | null = null, detail: string | null = null): WorkCue => ({
+  kind: 'cue',
+  activity,
+  step,
+  detail,
+});
 
 /**
  * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
- * chat words its cue, or that it starts, or waits for Pilot, before its session gives one;
+ * chat words its cue, the call it runs alone in the phase's place and Thinking or Writing with
+ * nothing after it (W2), or that it starts, or waits for Pilot, before its session gives one;
  * "Stopped · <time>" with a stop made elsewhere's cause, or a usage halt's hard stop's "Stopped at
  * the week’s limit · <time>" and its like (F135.6), or the store's update's "Stopped for Pilot’s
  * update · <time>" (F144.4); the error it failed on; what holds the nudge
@@ -488,37 +499,40 @@ export function workLine(work: Work): WorkLine | null {
 }
 
 /**
- * A current line's step as the chat words its call, running or done: its verb alone while its
- * input streams in, before the call's line gives its target.
+ * A current line's call as the chat words a running one: its verb alone while its input streams
+ * in, before the call's line gives its target.
  */
-function stepWords(call: LineStep | null, running: boolean): Words[] | null {
+function runningWords(call: LineStep | null): Words[] | null {
   if (call === null || call.tool === null) return null;
-  const summary = summarizeTool(call.tool, call.input === null ? null : (call.input as Record<string, unknown>));
-  return running ? summary.running : summary.done;
+  return summarizeTool(call.tool, call.input === null ? null : (call.input as Record<string, unknown>)).running;
 }
 
-/** The relay's current line in the chat cue's words (design 2 §9.5): the server's own while the session comes up. */
+/**
+ * The relay's current line in the chat cue's words (design 2 §9.5): the server's own while the
+ * session comes up; the call it runs, else "Working"; Thinking and Writing alone, never the call
+ * that finished before them; the sub-agent it waits for, and its description.
+ */
 function lineCue(line: CurrentLine): WorkCue {
-  const done = stepWords(line.step, false);
   switch (line.state) {
     case 'starting':
       return cue({ kind: 'starting', phase: line.text === null ? STARTING.phase : phaseOf(line.text) });
     case 'thinking':
-      return cue({ kind: 'thinking', phase: 'Thinking' }, done);
+      return cue({ kind: 'thinking', phase: 'Thinking' });
     case 'writing':
-      return cue({ kind: 'writing', phase: 'Writing' }, done);
+      return cue({ kind: 'writing', phase: 'Writing' });
     case 'working':
-      return cue({ kind: 'tool', phase: 'Working' }, stepWords(line.step, true));
+      return cue({ kind: 'tool', phase: 'Working' }, runningWords(line.step));
     case 'waiting': {
       const type = line.agent?.type ?? null;
       return cue(
         { kind: 'agent', phase: type === null ? 'Waiting for the agent' : `Waiting for the ${type} agent` },
-        line.agent?.description ? [{ text: line.agent.description }] : null,
+        null,
+        line.agent?.description || null,
       );
     }
     default: {
       const unknown: never = line.state;
-      return cue({ kind: 'working', phase: String(unknown) }, done);
+      return cue({ kind: 'working', phase: String(unknown) });
     }
   }
 }

@@ -7,6 +7,7 @@
  */
 
 import { CircleAlert } from 'lucide-react';
+import { sentFromHere } from '@/hooks/use-chats';
 import { activityOf } from '@/lib/chat/activity';
 import { duration } from '@/lib/chat/format';
 import type { Phantom } from '@/lib/chat/stream-state';
@@ -52,22 +53,29 @@ export function ReplyBody({
   );
 }
 
-/** The cue of the turn in flight: what it is doing, a thinking block under way with its elapsed time. */
-export function ReplyCue({ turn, phantom }: { turn: TurnView; phantom: Phantom | null }) {
-  const now = useNow(!!phantom);
-  const base = activityOf(turn, phantom);
-  const activity =
-    base.kind === 'thinking' && phantom ? { ...base, phase: `Thinking · ${duration(now - phantom.startedAt)}` } : base;
-  return <WorkingCue activity={activity} />;
+/**
+ * The cue of the turn in flight: what it is doing, a thinking block under way with the time since
+ * the turn's message was sent (C2): by this page's clock where this page sent it, else by the
+ * message's record, else, where no person sent one, from the turn's first record.
+ */
+export function ReplyCue({ sessionId, turn, phantom }: { sessionId: string; turn: TurnView; phantom: Phantom | null }) {
+  const now = useNow();
+  const activity = activityOf(turn, phantom);
+  if (activity.kind !== 'thinking') return <WorkingCue activity={activity} />;
+  const since = sentFromHere(sessionId, turn.turn) ?? Date.parse(turn.person?.at ?? turn.startedAt);
+  return <WorkingCue activity={{ ...activity, phase: `Thinking · ${duration(now - since)}` }} />;
 }
 
 /** Pilot's reply in the chat: its body, the cue while its turn runs, and its end once it has ended. */
 export function PilotReply({
+  sessionId,
   turn,
   phantom,
   liveFrom,
   streamed,
 }: {
+  /** The chat's session, whose turn it is. */
+  sessionId: string;
   turn: TurnView;
   phantom: Phantom | null;
   liveFrom: number | null;
@@ -78,7 +86,7 @@ export function PilotReply({
       <ReplyBody turn={turn} phantom={phantom} liveFrom={liveFrom} streamed={streamed} />
       {turn.state === 'running' ? (
         <div className="mx-1.5">
-          <ReplyCue turn={turn} phantom={phantom} />
+          <ReplyCue sessionId={sessionId} turn={turn} phantom={phantom} />
         </div>
       ) : (
         turn.endedAt !== undefined && (

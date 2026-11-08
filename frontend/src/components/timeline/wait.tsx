@@ -126,7 +126,7 @@ function Since({ at }: { at: string }) {
 
 /** A timed wait's due time from now, counted again each tick, and what the brain did once it fired. */
 function Due({ at, firing }: { at: string; firing: Firing | undefined }) {
-  const now = performance.timeOrigin + useNow(true, TICK);
+  const now = useNow(TICK);
   return (
     <p className="item-sub" data-testid="timeline.wait.due">
       <time dateTime={at} title={formatTime(at, 'full')}>

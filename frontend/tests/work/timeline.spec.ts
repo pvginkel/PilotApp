@@ -1,18 +1,21 @@
 /**
  * A work item on the timeline (F26): open, its head with the env chip once its start has one, its
- * name going nowhere, on a phone an icon whose tap shows the name in a popover, and the running
- * time, "17m", its dot 8px from what stands before it, while its turn runs (F26.1, F12), and its one line (F26.2), live as the server moves it (F80.2) — the server's own words
- * while the session comes up
- * or its environment restarts, the working state and the latest step, in the cue's colour, its
- * code in the mono face and a command's description without the verb (C4) — a call whose input
- * streams in by its verb alone — why the gate holds its start (F141.5), a slot among it (F143.4),
+ * name going nowhere, on a phone an icon whose tap shows the name in a popover, a pulse 8px from
+ * what stands before it from its start, and the running time, "17m", beside it once its run began,
+ * counted by the wall clock and again as the page comes back into view (F26.1, F12, W1), and its
+ * one line (F26.2), live as the server moves it (F80.2) and standing still, the pulse the tile's one
+ * motion (W2) — the server's own words while the session comes up or its environment restarts, the
+ * call it runs alone, in the cue's colour, its code in the mono face and a command's description
+ * without the verb (C4), Thinking and Writing alone, the sub-agent it waits for and its description,
+ * which a phone puts under it — a call whose input streams in by its verb alone, a call that is no
+ * status on its own by the verb it is given — why the gate holds its start (F141.5), a slot among it (F143.4),
  * "Stopped · <time>" with the cause of a stop made elsewhere (F71), a failure's error (F125) — and
  * its Session log (F26.3). Done, it is a quieter line, its Open the session log, with
  * no Undo and its attachments' indicator (F13.5, F26.6, F13.6), and so is every work item of a
  * finished project (F5.3). A run of work items stands under its last member's dividers (F9.1).
  */
 
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
@@ -37,6 +40,17 @@ const blockStart = () =>
 const toolStart = (id: string, name: string) =>
   line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name, input: {} } }, parent_tool_use_id: null });
 
+const MINUTE = 60_000;
+
+/** The line moves nothing: no dancing dots, and no animation of any kind in it (W2). */
+async function expectStill(line: Locator): Promise<void> {
+  await expect(line.getByTestId('chat.cue.dots')).toHaveCount(0);
+  expect(await line.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0);
+}
+
+/** The page comes back into view, as a phone's does when it wakes. */
+const cameIntoView = (page: Page) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+
 interface Fixtures {
   people: People;
   projects: Projects;
@@ -56,7 +70,7 @@ async function startIn(projects: Projects, project: string, state = 'running', t
 }
 
 test.describe('An open work item', () => {
-  test('comes up with the server’s words, then runs under its env chip and its running time, “0m”, its line the working state and the latest step, live', async ({
+  test('comes up with the server’s words under its head’s pulse, then runs under its env chip and its running time, “0m”, its line the call it runs alone, Thinking and Writing alone, the agent it waits for and its description, live and standing still', async ({
     people,
     projects,
     controller,
@@ -86,45 +100,86 @@ test.describe('An open work item', () => {
     // Its icon's button is the phone's alone.
     await expect(item.work.environmentIcon).toBeHidden();
     await expect(item.work.cue).toHaveText(`Preparing ${name}`);
+    // The head's pulse from the start, the running time not yet; the line stands still (W2).
+    await expect(item.work.live.locator('.pulse')).toBeVisible();
     await expect(item.work.running).toHaveCount(0);
+    await expectStill(item.work.line);
 
     await controller.setStatus(environment, 'running');
     await expect(item.work.running).toHaveText('0m');
-    // The running time's dot stands 8px from the chip.
-    const [chip, dot] = await Promise.all([item.work.environment.boundingBox(), item.work.running.locator('.pulse').boundingBox()]);
+    // The pulse stands 8px from the chip.
+    const [chip, dot] = await Promise.all([item.work.environment.boundingBox(), item.work.live.locator('.pulse').boundingBox()]);
     expect(dot!.x - (chip!.x + chip!.width)).toBeCloseTo(8, 0);
     await expect(item.work.running).toHaveAccessibleName('Running for 0m');
     await expect(item.work.running).toHaveAttribute('title', 'Running for 0m');
-    await expect(item.work.running.locator('.pulse')).toBeVisible();
     await expect(item.work.cue).toHaveText('Creating the session');
-    await expect(item.work.step).toHaveCount(0);
+    await expect(item.work.detail).toHaveCount(0);
+    await expectStill(item.work.line);
 
     await controller.play(environment, 'claude-1', [toolUse('toolu_read', 'Read', { file_path: '/work/Example/README.md' })]);
-    await expect(item.work.cue).toHaveText('Working');
-    await expect(item.work.step).toHaveText('Reading …/Example/README.md');
-    // The step in the cue's one colour, its path in the mono face (C4).
-    await expect(item.work.step.locator('.mono')).toHaveText('…/Example/README.md');
-    await expect(item.work.step.locator('.mono')).toHaveCSS('font-family', /monospace/);
+    // The call it runs alone, in the cue's one colour, its path in the mono face (C4).
+    await expect(item.work.line).toHaveText('Reading …/Example/README.md');
+    const code = item.work.cue.locator('.mono');
+    await expect(code).toHaveText('…/Example/README.md');
+    await expect(code).toHaveCSS('font-family', /monospace/);
     const colour = (part: Locator) => part.evaluate((element) => getComputedStyle(element).color);
-    expect(await colour(item.work.step)).toBe(await colour(item.work.cue));
-    expect(await colour(item.work.step.locator('.mono'))).toBe(await colour(item.work.cue));
+    expect(await colour(code)).toBe(await colour(item.work.cue));
+    await expectStill(item.work.line);
+    // Thinking alone, never the call that finished before it.
     await controller.play(environment, 'claude-1', [toolResult('toolu_read', '# Example')]);
-    await expect(item.work.cue).toHaveText('Thinking');
-    await expect(item.work.step).toHaveText('Read …/Example/README.md');
+    await expect(item.work.line).toHaveText('Thinking');
+    await expectStill(item.work.line);
     await controller.play(environment, 'claude-1', [blockStart()]);
-    await expect(item.work.cue).toHaveText('Writing');
+    await expect(item.work.line).toHaveText('Writing');
+    await expectStill(item.work.line);
     await controller.play(environment, 'claude-1', [
       toolUse('toolu_agent', 'Task', { subagent_type: 'Explore', description: 'Survey the stylesheets', prompt: 'Find them.' }),
     ]);
     await expect(item.work.cue).toHaveText('Waiting for the Explore agent');
-    await expect(item.work.step).toHaveText('Survey the stylesheets');
+    await expect(item.work.detail).toHaveText('Survey the stylesheets');
+    // The description past a " · ", a space's width from either side.
+    const [said, separator, detail] = await Promise.all(
+      [item.work.cue.locator('> span').nth(1), item.work.line.locator('.sep'), item.work.detail].map(async (part) => (await part.boundingBox())!),
+    );
+    expect(separator.x - (said.x + said.width)).toBeCloseTo(4, 0);
+    expect(detail.x - (separator.x + separator.width)).toBeCloseTo(4, 0);
+    await expectStill(item.work.line);
+    await expect(item.work.live.locator('.pulse')).toBeVisible();
 
+    // The session log keeps its dots while the turn runs.
     await item.work.sessionLog.click();
     await expect(page).toHaveURL(sessionLogAddress(project, work));
     await expect(sessionLog.item).toHaveText(TITLE);
+    await expect(sessionLog.cue).toHaveText('Waiting for the Explore agent');
+    await expect(sessionLog.dots).toBeVisible();
   });
 
-  test('names the call whose input streams in by its running verb alone, never the finished call before it, and its target once its line arrives', async ({
+  test('counts its running time by the wall clock, and again as the page comes back into view, a page that lived through a suspend among them', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const project = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    const { started_at } = await projects.work(project, work);
+    await page.clock.install();
+    await timeline.open(project);
+    const item = timeline.item(work).work;
+    await expect(item.running).toHaveText('0m');
+
+    // The page's clock stands still from here; then its wall clock moves on while its monotonic one
+    // stands, as across a phone's suspend.
+    // eslint-disable-next-line no-restricted-properties -- The page's own clock, read to pause it.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    await page.clock.setSystemTime(Date.parse(started_at!) + 20 * MINUTE + 10_000);
+    await expect(item.running).toHaveText('0m');
+    await cameIntoView(page);
+    await expect(item.running).toHaveText('20m');
+    await expect(item.running).toHaveAccessibleName('Running for 20m');
+  });
+
+  test('names the call whose input streams in by its running verb alone, its target once its line arrives, and a call that is no status on its own by the verb it is given', async ({
     people,
     projects,
     controller,
@@ -136,24 +191,31 @@ test.describe('An open work item', () => {
     await timeline.open(project);
     const item = timeline.item(work).work;
 
-    await controller.play(environment, 'claude-1', [
-      toolUse('toolu_read', 'Read', { file_path: '/work/Example/README.md' }),
-      toolResult('toolu_read', '# Example'),
-    ]);
-    await expect(item.step).toHaveText('Read …/Example/README.md');
     await controller.play(environment, 'claude-1', [toolStart('toolu_edit', 'Edit')]);
-    await expect(item.cue).toHaveText('Working');
-    await expect(item.step).toHaveText('Editing');
+    await expect(item.line).toHaveText('Editing');
     await controller.play(environment, 'claude-1', [
       toolUse('toolu_edit', 'Edit', { file_path: '/work/Example/README.md', old_string: 'Example', new_string: 'Sample' }),
     ]);
-    await expect(item.step).toHaveText('Editing …/Example/README.md');
+    await expect(item.line).toHaveText('Editing …/Example/README.md');
 
     // No search pattern is drawn before the call's line gives one.
     await controller.play(environment, 'claude-1', [toolResult('toolu_edit', 'Edited.'), toolStart('toolu_grep', 'Grep')]);
-    await expect(item.step).toHaveText('Searching for');
+    await expect(item.line).toHaveText('Searching for');
     await controller.play(environment, 'claude-1', [toolUse('toolu_grep', 'Grep', { pattern: 'badge' })]);
-    await expect(item.step).toHaveText('Searching for “badge”');
+    await expect(item.line).toHaveText('Searching for “badge”');
+
+    // An MCP call asks its server, the tool named while its input streams in, its environment once it has come.
+    await controller.play(environment, 'claude-1', [toolResult('toolu_grep', 'Found.'), toolStart('toolu_fleet', 'mcp__kubecoder__get_environment')]);
+    await expect(item.line).toHaveText('Asking KubeCoder get environment');
+    await controller.play(environment, 'claude-1', [toolUse('toolu_fleet', 'mcp__kubecoder__get_environment', { name: 'example-1' })]);
+    await expect(item.line).toHaveText('Asking KubeCoder get environment · example-1');
+    await expect(item.cue.locator('.mono')).toHaveText('example-1');
+    // A tool it has no words for is used by its name.
+    await controller.play(environment, 'claude-1', [toolResult('toolu_fleet', 'Running.'), toolUse('toolu_skill', 'Skill', { skill: 'survey' })]);
+    await expect(item.line).toHaveText('Using Skill');
+    // An agent is started, its type unknown while its input streams in.
+    await controller.play(environment, 'claude-1', [toolResult('toolu_skill', 'Surveyed.'), toolStart('toolu_agent', 'Task')]);
+    await expect(item.line).toHaveText('Starting an agent');
   });
 
   test('held by the pause reads “Paused” with no env chip before its take, and comes up once the project resumes', async ({
@@ -168,7 +230,8 @@ test.describe('An open work item', () => {
     const item = timeline.item(work);
     await expect(item.work.line).toHaveAttribute('data-state', 'held');
     await expect(item.work.cue).toHaveText('Paused');
-    await expect(item.work.running).toHaveCount(0);
+    await expect(item.work.live).toHaveCount(0);
+    await expectStill(item.work.line);
     await expect(item.work.environment).toHaveCount(0);
 
     await projects.transition(project, 'resumed');
@@ -207,8 +270,12 @@ test.describe('An open work item', () => {
     await expect(item.line).toHaveAttribute('data-state', 'held');
     await expect(item.cue).toHaveText('Waiting for a slot · 3 running');
     await expect(item.environment).toHaveCount(0);
+    // Nothing moves while it waits, in its session log neither (W2).
+    await expect(item.live).toHaveCount(0);
+    await expectStill(item.line);
     await item.sessionLog.click();
     await expect(sessionLog.cue).toHaveText('Waiting for a slot · 3 running');
+    await expect(sessionLog.dots).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(sessionLog.overlay).toHaveCount(0);
 
@@ -321,8 +388,8 @@ test.describe('An open work item on a phone', () => {
     };
     const kind = await middle(item.kind.locator('svg'));
     expect(Math.abs((await middle(icon.locator('svg'))) - kind)).toBeLessThan(1);
-    // The running time's dot stands 8px from the chip, as off a phone.
-    const [box, dot] = await Promise.all([chip.boundingBox(), item.work.running.locator('.pulse').boundingBox()]);
+    // The pulse stands 8px from the chip, as off a phone.
+    const [box, dot] = await Promise.all([chip.boundingBox(), item.work.live.locator('.pulse').boundingBox()]);
     expect(dot!.x - (box!.x + box!.width)).toBeCloseTo(8, 0);
 
     await expect(popover).toHaveCount(0);
@@ -349,7 +416,7 @@ test.describe('An open work item on a phone', () => {
     await expect(popover).toHaveCount(0);
   });
 
-  test('puts the latest step on a line of its own under the phase, indented to its text, the phase whole and each cut at most once', async ({
+  test('puts a sub-agent’s description on a line of its own under the phase, indented to its text, its “ · ” gone, the phase whole and each cut at most once; the call it runs is cut once in the phase’s place', async ({
     people,
     projects,
     controller,
@@ -360,25 +427,34 @@ test.describe('An open work item on a phone', () => {
     const { id: environment } = await projects.environment(project, work);
     await timeline.open(project);
     const item = timeline.item(work);
-    const step = 'List the closed lists in the reference documents of the project and of each of its slices';
+    const description = 'List the closed lists in the reference documents of the project and of each of its slices';
     await controller.play(environment, 'claude-1', [
-      toolUse('toolu_bash', 'Bash', { command: 'ls', description: step }),
-      toolResult('toolu_bash', 'Listed.'),
+      toolUse('toolu_agent', 'Task', { subagent_type: 'Explore', description, prompt: 'List them.' }),
     ]);
-    await expect(item.work.cue).toHaveText('Thinking');
-    // A command's description stands alone, without the verb (C4).
-    await expect(item.work.step).toHaveText(step);
+    await expect(item.work.cue).toHaveText('Waiting for the Explore agent');
+    await expect(item.work.detail).toHaveText(description);
+    await expect(item.work.line.locator('.sep')).toBeHidden();
 
     const phase = item.work.cue.locator('> span').nth(1);
     const clipped = (part: Locator) => part.evaluate((element) => element.scrollWidth > element.clientWidth);
     expect(await clipped(phase)).toBe(false);
-    expect(await clipped(item.work.step)).toBe(true);
+    expect(await clipped(item.work.detail)).toBe(true);
     const cue = (await item.work.cue.boundingBox())!;
-    expect((await item.work.step.boundingBox())!.y).toBeGreaterThanOrEqual(cue.y + cue.height - 1);
-    const textAt = await item.work.step.evaluate(
+    expect((await item.work.detail.boundingBox())!.y).toBeGreaterThanOrEqual(cue.y + cue.height - 1);
+    const textAt = await item.work.detail.evaluate(
       (element) => element.getBoundingClientRect().left + parseFloat(getComputedStyle(element).paddingLeft),
     );
     expect(Math.abs(textAt - (await phase.boundingBox())!.x)).toBeLessThan(1);
+
+    // A command's description stands alone, without the verb (C4), in the phase's place.
+    await controller.play(environment, 'claude-1', [
+      toolResult('toolu_agent', 'Listed.'),
+      toolUse('toolu_bash', 'Bash', { command: 'ls', description }),
+    ]);
+    await expect(item.work.line).toHaveText(description);
+    await expect(item.work.detail).toHaveCount(0);
+    expect(await clipped(phase)).toBe(true);
+    expect((await item.work.line.boundingBox())!.height).toBeLessThan(cue.height + 1);
   });
 });
 

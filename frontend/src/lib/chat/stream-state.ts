@@ -33,8 +33,6 @@ export interface Phantom {
   /** The text deltas so far: a text block's only. */
   text: string;
   deltas: Delta[];
-  /** The client's clock when the marker came: how long the block has been under way. */
-  startedAt: number;
 }
 
 export interface ChatStreamState {
@@ -104,7 +102,6 @@ export function streamReducer(state: ChatStreamState, action: StreamAction): Cha
                 name: ev.content_block.name,
                 text: '',
                 deltas: [],
-                startedAt: action.now,
               },
             };
           }

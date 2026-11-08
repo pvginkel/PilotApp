@@ -4,8 +4,8 @@
  * firings, one line each, with what Pilot did with it: its turn while its run is to run or runs,
  * *left open* once the run's turn ended with the wait open; each arrives on the open timeline as it
  * lands. A timed wait open shows its hourglass and its due time from now in one coarse unit, *Due
- * now* under a minute, its full stamp the tooltip, and once its due time fired it, how long ago and
- * Pilot's turn. The head's one button, touching Discuss, is *Check now* on a card wait and *Skip
+ * now* under a minute, its full stamp the tooltip, counted by the wall clock and again as the page
+ * comes back into view (W1), and once its due time fired it, how long ago and Pilot's turn. The head's one button, touching Discuss, is *Check now* on a card wait and *Skip
  * wait* on a timed wait, its label its tooltip; a press records the person's request, which fires
  * the wait, and while Pilot is checking it is disabled, the reason its tooltip. Pilot's close
  * leaves the line its title, its time and the note under it, with no Open and no Undo, its title
@@ -13,7 +13,7 @@
  * actions under it, Discuss alone, which a tap elsewhere closes.
  */
 
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique, makeUniqueToken } from '../support/helpers';
 import { projectAddress } from '../support/projects';
@@ -26,6 +26,9 @@ const fullStamp = (at: string) =>
   new Intl.DateTimeFormat('en-GB', { dateStyle: 'full', timeStyle: 'long', timeZone: ZONE }).format(new Date(at));
 
 const MINUTE = 60_000;
+
+/** The page comes back into view, as a phone's does when it wakes. */
+const cameIntoView = (page: Page) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
 const CLOCK = '\\d\\d:\\d\\d';
 const PHONE = { width: 390, height: 844 };
 const NOTE = 'The card read Done at 09:40; the rollout goes on';
@@ -208,6 +211,32 @@ test.describe('A timed wait', () => {
       await expect(item.wait.since).toHaveCount(0);
       await expect(item.wait.firings).toHaveCount(0);
     }
+  });
+
+  test('counts its due time by the wall clock, and again as the page comes back into view, a page that lived through a suspend among them', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    waits,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Woken'), members: [me.handle!] });
+    const wait = await waits.add(id, { kind: 'timed_wait', title: 'The certificate is issued', due_at: ahead(7 * MINUTE + 20_000) });
+    const due = (await projects.item(id, wait)).wait!.due_at!;
+    await page.clock.install();
+    await timeline.open(id);
+    const item = timeline.item(wait);
+    await expect(item.wait.due).toHaveText('Due in 7 minutes');
+
+    // The page's clock stands still from here; then its wall clock moves on while its monotonic one
+    // stands, as across a phone's suspend.
+    // eslint-disable-next-line no-restricted-properties -- The page's own clock, read to pause it.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    await page.clock.setSystemTime(Date.parse(due) + 5 * MINUTE + 20_000);
+    await expect(item.wait.due).toHaveText('Due in 7 minutes');
+    await cameIntoView(page);
+    await expect(item.wait.due).toHaveText('Due 5 minutes ago');
   });
 
   test('past its due time and fired, reads how long ago it was due and that it is Pilot’s turn', async ({ people, projects, timeline, waits }) => {

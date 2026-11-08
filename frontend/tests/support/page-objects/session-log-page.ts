@@ -46,6 +46,8 @@ export class SessionLogPage {
   /** The effects whose call no record shows; a call's own stand in its line's place, among `tools`. */
   readonly effects: Locator;
   readonly cue: Locator;
+  /** The cue's dancing dots. */
+  readonly dots: Locator;
   readonly tail: Locator;
   readonly failed: Locator;
   readonly discuss: Locator;
@@ -82,6 +84,7 @@ export class SessionLogPage {
     this.notices = this.log.getByTestId('chat.notice');
     this.effects = this.log.getByTestId('chat.effect');
     this.cue = this.log.getByTestId('session-log.cue');
+    this.dots = this.cue.getByTestId('chat.cue.dots');
     this.tail = this.log.getByTestId('session-log.tail');
     this.failed = this.overlay.getByTestId('overlay.failed');
     this.discuss = this.overlay.getByTestId('overlay.discuss');

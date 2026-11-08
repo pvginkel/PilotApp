@@ -2,14 +2,16 @@
  * An open work item on the timeline (F26): a session Pilot started, updated in place as the
  * server's `work_moved` carries it (F80.2). Its head has the env chip once its start has one, the
  * environment's name in words that go nowhere, its full name their tooltip; on a phone its icon
- * alone, a button that shows the full name in a popover under it; the running time, a pulse and
- * "17m", while its turn runs (F26.1, F12); then Session log and Stop as icons, their names their
- * tooltips, before the head's Discuss (F26.8). Under its title is its one line (F26.2): the
- * server's own words while its session comes up, or comes back while its environment restarts;
- * the working state and the latest step while it runs; why the gate holds its start; "Stopped ·
- * <time>" with the cause of a stop made elsewhere, or a usage halt's hard stop's "Stopped at the
- * week’s limit · <time>" and its like (F135.6); the error a failed start or a turn ended in error
- * left, shown as a stopped one is (F125); what holds the nudge owed to a run whose turn ended under
+ * alone, a button that shows the full name in a popover under it; a pulse while its run is under
+ * way, from its start, and the running time, "17m", beside it once its run began (F26.1, F12),
+ * the tile's one motion, its line standing still (W2); then Session log and Stop as icons, their
+ * names their tooltips, before the head's Discuss (F26.8). Under its title is its one line
+ * (F26.2): the server's own words while its session comes up, or comes back while its environment
+ * restarts; the call it runs alone, "Reading …/chat/tools.ts", Thinking or Writing alone, the
+ * sub-agent it waits for and that one's description, while it runs; why the gate holds its start;
+ * "Stopped · <time>" with the cause of a stop made elsewhere, or a usage halt's hard stop's
+ * "Stopped at the week’s limit · <time>" and its like (F135.6); the error a failed start or a turn
+ * ended in error left, shown as a stopped one is (F125); what holds the nudge owed to a run whose turn ended under
  * a halt or a pause, as a held start's reason, "Halted at the week’s limit", "Paused" (F135.3,
  * F141.3). Session log, in every state, opens the session's records in the overlay (F26.3, F69).
  * Stop, while it runs, starts or is held, asks first in the row under the line, Esc dismissing the
@@ -29,7 +31,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Link } from '@tanstack/react-router';
 import { CircleAlert, Play, RotateCw, ScrollText, Server, Square } from 'lucide-react';
-import { StepWords } from '@/components/chat/step-words';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Popover } from '@/components/shared/popover';
@@ -43,7 +44,6 @@ import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
 import { offersRetry, RESUMABLE, STOPPABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
-import { wordsText } from '@/lib/chat/tools';
 import { useEscape } from '@/lib/keys';
 import { progressStepMark, workLine } from '@/lib/utils/status-labels';
 
@@ -79,7 +79,7 @@ export function WorkItem({ item }: { item: TimelineItem }) {
       <ItemHead item={item}>
         {/* A job's environment is the store's once its start takes it. */}
         {!work.pilots_own && work.environment !== null && <EnvironmentChip name={work.environment.name} />}
-        {work.state === 'running' && work.started_at !== null && <Running since={work.started_at} />}
+        {underWay(work) && <Live since={work.state === 'running' ? work.started_at : null} />}
         <SessionLog item={item} rest={actions === 'log' ? handoff.button : undefined} />
         {actions === 'stop' && (
           <button
@@ -331,23 +331,25 @@ function Retried({ at }: { at: string }) {
   );
 }
 
-/**
- * The running time from when its run began, a pulse and the figure alone, "17m"; "Running for 17m"
- * its tooltip and its accessible name.
- */
-function Running({ since }: { since: string }) {
-  // performance.timeOrigin + performance.now() is the wall clock's time, in milliseconds.
-  const now = performance.timeOrigin + useNow(true, TICK);
-  const figure = span(now - new Date(since).getTime());
+/** Its run is under way: it comes up, or runs; held, once nothing holds it. */
+const underWay = (work: Work) =>
+  work.state === 'starting' || work.state === 'running' || (work.state === 'held' && work.held_reason === null);
+
+/** The run under way: a pulse, and beside it the running time once `since`, when its run began. */
+function Live({ since }: { since: string | null }) {
   return (
-    <span
-      className="work-live"
-      role="timer"
-      title={`Running for ${figure}`}
-      aria-label={`Running for ${figure}`}
-      data-testid="timeline.work.running"
-    >
+    <span className="work-live" data-testid="timeline.work.live">
       <span className="pulse" aria-hidden="true" />
+      {since !== null && <Running since={since} />}
+    </span>
+  );
+}
+
+/** The running time from when its run began, the figure alone, "17m"; "Running for 17m" its tooltip and its accessible name. */
+function Running({ since }: { since: string }) {
+  const figure = span(useNow(TICK) - Date.parse(since));
+  return (
+    <span role="timer" title={`Running for ${figure}`} aria-label={`Running for ${figure}`} data-testid="timeline.work.running">
       {figure}
     </span>
   );
@@ -370,11 +372,16 @@ function Line({ work }: { work: Work }) {
     case 'cue':
       return (
         <div className="work-line" {...shared}>
-          <WorkingCue activity={line.activity} />
-          {line.step !== null && (
-            <span className="step" title={wordsText(line.step)} data-testid="timeline.work.step">
-              <StepWords words={line.step} />
-            </span>
+          <WorkingCue activity={line.activity} words={line.step} animate={false} />
+          {line.detail !== null && (
+            <>
+              <span className="sep" aria-hidden="true">
+                ·
+              </span>
+              <span className="detail" title={line.detail} data-testid="timeline.work.detail">
+                {line.detail}
+              </span>
+            </>
           )}
         </div>
       );

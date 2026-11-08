@@ -1,12 +1,16 @@
 /**
  * The working state (ruling 6), in place of F40.2's box: DesignAssistant's cue
  * (progress-indicator.tsx), dots animated one at a time beside the phase. It is the reply's
- * current line, so its icon and words line up with the step lines above it.
+ * current line, so its icon and words line up with the step lines above it. Still, it has no dots,
+ * its icon and its words alone: a work item's line on the timeline, whose one motion is its head's
+ * pulse, and a session log that runs no turn (W2).
  */
 
 import { useEffect, useRef } from 'react';
 import { Bot, Brain, Hourglass, PenLine, Power, Wrench } from 'lucide-react';
 import type { Activity, ActivityKind } from '@/lib/chat/activity';
+import { wordsText, type Words } from '@/lib/chat/tools';
+import { StepWords } from './step-words';
 
 const ICON: Record<ActivityKind, typeof Brain> = {
   waiting: Hourglass,
@@ -21,9 +25,10 @@ const ICON: Record<ActivityKind, typeof Brain> = {
 /** DesignAssistant's timings: a 400 ms pulse per dot, the next dot a different one. */
 const CYCLE = 400;
 
-function useDotLoop() {
+function useDotLoop(active: boolean) {
   const refs = [useRef<HTMLSpanElement>(null), useRef<HTMLSpanElement>(null), useRef<HTMLSpanElement>(null)];
   useEffect(() => {
+    if (!active) return;
     let stopped = false;
     let last = -1;
     let anims: Animation[] = [];
@@ -52,24 +57,40 @@ function useDotLoop() {
       for (const a of anims) a.cancel();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the refs are stable
-  }, []);
+  }, [active]);
   return refs;
 }
 
-export function WorkingCue({ activity }: { activity: Activity }) {
-  const dots = useDotLoop();
+interface WorkingCueProps {
+  activity: Activity;
+  /** Words in the phase's place, their code in the mono face: a work item's running step. */
+  words?: Words[] | null;
+  /** Its dots dance; false, it stands still. */
+  animate?: boolean;
+}
+
+export function WorkingCue({ activity, words = null, animate = true }: WorkingCueProps) {
+  const dots = useDotLoop(animate);
   const Icon = ICON[activity.kind];
   return (
     <div className="flex min-w-0 items-center gap-2 py-0.5 text-sm leading-5 text-muted-foreground" data-working data-testid="chat.cue">
       <span className="flex size-4 flex-none translate-y-px items-center justify-center">
         <Icon className="size-3.5" aria-hidden />
       </span>
-      <span className="min-w-0 truncate">{activity.phase}</span>
-      <span className="inline-flex flex-none translate-y-px items-center gap-0.5" aria-hidden>
-        {dots.map((ref, i) => (
-          <span key={i} ref={ref} className="inline-block size-1.5 origin-bottom rounded-full bg-muted-foreground/70 opacity-50" />
-        ))}
-      </span>
+      {words === null ? (
+        <span className="min-w-0 truncate">{activity.phase}</span>
+      ) : (
+        <span className="min-w-0 truncate" title={wordsText(words)}>
+          <StepWords words={words} />
+        </span>
+      )}
+      {animate && (
+        <span className="inline-flex flex-none translate-y-px items-center gap-0.5" aria-hidden data-testid="chat.cue.dots">
+          {dots.map((ref, i) => (
+            <span key={i} ref={ref} className="inline-block size-1.5 origin-bottom rounded-full bg-muted-foreground/70 opacity-50" />
+          ))}
+        </span>
+      )}
     </div>
   );
 }

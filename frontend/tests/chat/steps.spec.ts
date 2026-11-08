@@ -2,7 +2,10 @@
  * A reply's step lines in the Chat tab (decisions 3 and 4), as the session log draws them too: a
  * tool call's line in one colour, a failed one red throughout, with its code — a command without a
  * description, a path, a glob — in the mono face, a search's pattern in its quotes, a command's
- * description standing alone, without the verb, and an agent's description before its type (C4).
+ * description standing alone, without the verb, and an agent's description before its type (C4);
+ * a call that is no status on its own by the verb it is given, running and done, an MCP call asking
+ * its server, a tool with no words of its own used by its name, an agent with no description
+ * started (W2).
  * A run of calls is one line whose failures are a count, the one red in it (C3); each text it
  * shows stands for a moment, one that came and went within that moment never shown, and it moves
  * on however fast its calls come, its spinner and its count of failures at once (C1).
@@ -98,6 +101,36 @@ test.describe('A reply’s step lines', () => {
     // The run's line keeps the usual colour; its count of failures alone is red.
     expect(await colour(head)).toBe(muted);
     expect(await colour(failed)).toBe(red);
+  });
+
+  test('words a call that is no status on its own by the verb it is given, running and done: an MCP call asks its server, a tool with no words of its own is used by its name, an agent with no description is started', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Words'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'What runs?');
+    const tools = chat.root.getByTestId('chat.tool');
+    const calls: [string, string, object, string, string][] = [
+      ['fleet', 'mcp__kubecoder__start_session', { name: 'example-1' }, 'Asking KubeCoder start session · example-1', 'Asked KubeCoder start session · example-1'],
+      ['store', 'mcp__pilot-store__ask_writer', { item: 'invented' }, 'Using ask_writer', 'Used ask_writer'],
+      ['skill', 'Skill', { skill: 'survey' }, 'Using Skill', 'Used Skill'],
+      // An agent's card heads its steps with its call's words done, its spinner saying that it runs.
+      ['agent', 'Agent', { subagent_type: 'Explore', prompt: 'Find it.' }, 'Started the Explore agent', 'Started the Explore agent'],
+    ];
+    for (const [id, name, input, running, done] of calls) {
+      await controller.play(chats.store, session, [text(`before_${id}`, `Next: ${id}.`), toolUse(id, name, input)]);
+      await expect(tools.last()).toHaveText(running);
+      await controller.play(chats.store, session, [toolResult(id, 'Done.')]);
+      await expect(tools.last()).toHaveText(done);
+    }
+    await expect(tools.first().locator('.mono')).toHaveText('example-1');
+    await controller.finish(chats.store, session, 'success', 'Done.');
   });
 
   test('holds each text of a run’s line for a moment, never showing one that came and went within it, and moves on however fast its calls come; its spinner and its failures at once', async ({

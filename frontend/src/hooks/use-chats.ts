@@ -19,6 +19,7 @@
 
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { wallClock } from '@/hooks/use-now';
 import type { ProjectHead } from '@/hooks/use-projects';
 import {
   useGetProjectsChatsByProjectId,
@@ -56,15 +57,26 @@ function setAnswering(queryClient: QueryClient, projectId: string, chatId: strin
   );
 }
 
-/** The signed-in person's message to the project's chat, the words verbatim; answers whether the server took it. */
+/** When this page's person pressed Send, by the wall clock, for each message the server took from this page: by its chat's session and its Turn. */
+const pressedAt = new Map<string, number>();
+
+/** When this page's person pressed Send for the session's Turn; none for a message this page did not send. */
+export const sentFromHere = (sessionId: string, turn: number): number | undefined => pressedAt.get(`${sessionId}:${turn}`);
+
+/**
+ * The signed-in person's message to the project's chat, the words verbatim, its press of Send kept
+ * by this page's clock; answers whether the server took it.
+ */
 export function useSendMessage(projectId: string) {
   const queryClient = useQueryClient();
   const mutation = usePostProjectsChatMessagesByProjectId();
   const fields = { project: projectId };
   const act = (words: string): Promise<boolean> => {
+    const pressed = wallClock();
     trackFormSubmit('chat.send', fields);
     return mutation.mutateAsync({ path: { project_id: projectId }, body: { words } }).then(
       (turn) => {
+        pressedAt.set(`${turn.chat}:${turn.seq}`, pressed);
         trackFormSuccess('chat.send', fields);
         setAnswering(queryClient, projectId, turn.chat, ANSWERING.includes(turn.state));
         return true;

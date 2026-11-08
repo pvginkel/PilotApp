@@ -6,7 +6,8 @@
  * body the session's records as the chat renders a reply — a run of calls, a sub-agent's card,
  * the phantom fading in and gone at its record, a quote a chip once its tag has closed, each effect
  * of a call as its line where the call ran (F41) — streamed while it is open; its tail the working
- * cue while the session is held, starts or runs, else "Stopped by you · <time>", the environment
+ * cue while the session is held, starts or runs, its dots dancing while a turn runs or comes up and
+ * Thinking counted from its turn's first record (W2, C2), else "Stopped by you · <time>", the environment
  * stopped under it or in error, "The turn ended · <time>" or "Failed · <time>" under the error
  * (F69.2, F125). Before each turn's reply stands what the server sent it, as Pilot's message,
  * folded: the brief, a Resume's.
@@ -45,6 +46,8 @@ const blockStart = () =>
   line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, parent_tool_use_id: null });
 const delta = (words: string) =>
   line({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: words } }, parent_tool_use_id: null });
+const thinkingStart = () =>
+  line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }, parent_tool_use_id: null });
 
 // Files the session writes in its environment, registered and attached as its worker does.
 const SURVEY_PATH = '/work/Example/survey.md';
@@ -92,8 +95,9 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.environment).toHaveText(name);
     await expect(sessionLog.environment).toHaveAttribute('href', `${KUBECODER}/environments/${environment}/ssh/open`);
     await expect(sessionLog.sub).toHaveText(`${TITLE}·${name}`);
-    // The server's lines while the session comes up show in the cue alone.
+    // The server's lines while the session comes up show in the cue alone, its dots dancing.
     await expect(sessionLog.cue).toHaveText('Creating the session');
+    await expect(sessionLog.dots).toBeVisible();
     await expect(sessionLog.tail).toHaveCount(0);
 
     // Consecutive calls are one line, its running call's words while one runs.
@@ -129,6 +133,31 @@ test.describe('A work item’s session log', () => {
     const { done } = await projects.item(project, work);
     await expect(sessionLog.tail).toHaveText(`The turn ended · ${clock(done!.at)}`);
     await expect(sessionLog.cue).toHaveCount(0);
+  });
+
+  test('counts Thinking from its turn’s first record, where no person sent the turn its message', async ({
+    page,
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await page.clock.install();
+    await sessionLog.open(project, work);
+    await expect(sessionLog.cue).toHaveText('Creating the session');
+    const [first] = (await projects.records(work)).records;
+
+    // The page's clock stands still from here; the cue counts again once the page comes back into view.
+    // eslint-disable-next-line no-restricted-properties -- The page's own clock, read to pause it.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    await controller.play(environment, 'claude-1', [thinkingStart()]);
+    await expect(sessionLog.cue).toHaveText(/^Thinking · /);
+    await page.clock.setSystemTime(Date.parse(first!.at) + 2 * 60_000);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(sessionLog.cue).toHaveText('Thinking · 2 min');
   });
 
   test('shows what the server sent each turn as Pilot’s message before its reply: the brief, folded until Show more unfolds it whole, and a Resume’s before the turn it starts', async ({

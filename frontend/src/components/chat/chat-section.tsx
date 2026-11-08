@@ -91,6 +91,7 @@ export function ChatSection({ chat, people, goTo, onFound, flashing, onFlashed }
         )}
         {replied && (
           <PilotReply
+            sessionId={chat.id}
             turn={turn}
             phantom={item === last && turn.state === 'running' ? stream.phantom : null}
             liveFrom={stream.liveFrom}

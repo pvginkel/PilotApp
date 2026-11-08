@@ -28,6 +28,8 @@ export class ChatPage {
   readonly texts: Locator;
   readonly phantom: Locator;
   readonly cue: Locator;
+  /** The cue's dancing dots. */
+  readonly dots: Locator;
   readonly failures: Locator;
   readonly replyEnds: Locator;
   readonly days: Locator;
@@ -68,6 +70,7 @@ export class ChatPage {
     this.texts = this.root.getByTestId('chat.text');
     this.phantom = this.root.getByTestId('chat.phantom');
     this.cue = this.root.getByTestId('chat.cue');
+    this.dots = this.cue.getByTestId('chat.cue.dots');
     this.failures = this.root.getByTestId('chat.failure');
     this.replyEnds = this.root.getByTestId('chat.pilot.end');
     this.days = this.root.getByTestId('chat.day');

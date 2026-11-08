@@ -84,7 +84,7 @@ test.describe('Stop', () => {
     const tile = timeline.item(work);
     const item = tile.work;
     await expect(item.running).toBeVisible();
-    expect(await headEnd(tile.head)).toEqual(['timeline.work.running', 'timeline.work.session-log', 'timeline.work.stop', 'timeline.item.discuss']);
+    expect(await headEnd(tile.head)).toEqual(['timeline.work.live', 'timeline.work.session-log', 'timeline.work.stop', 'timeline.item.discuss']);
     await expect(item.stop).toHaveText('');
     await expect(item.stop).toHaveAttribute('title', 'Stop');
     await expect(item.stop).toHaveAccessibleName('Stop');

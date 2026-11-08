@@ -1,9 +1,11 @@
 /**
  * A tool call's summary line (decision 3): what the call did, in a few words, from its input.
  * The brain's tools are Claude Code's own, the fleet's (KubeCoder's MCP server) and
- * `pilot-store`'s; anything else shows its bare name. The line is one colour: what it names as code
- * is set in the mono face, and a command's or an agent's description, the model's own sentence,
- * stands without a verb (C4).
+ * `pilot-store`'s; anything else is used by its bare name. The line is one colour: what it names as
+ * code is set in the mono face, and a command's or an agent's description, the model's own
+ * sentence, stands without a verb (C4). Every other line opens on its verb, so that a running
+ * call's line reads as a status on its own, as a work item's line shows it (W2): "Asking KubeCoder
+ * start session", "Using Skill".
  */
 
 export type ToolKind = 'read' | 'command' | 'search' | 'edit' | 'agent' | 'web' | 'store' | 'fleet' | 'todo' | 'other';
@@ -80,9 +82,10 @@ export function summarizeTool(name: string, input: Record<string, unknown> | nul
       return line('edit', 'Edited', 'Editing', { text: shortPath(str(given.file_path)), code: true });
     case 'Agent':
     case 'Task': {
-      const type = `${str(given.subagent_type) || 'Sub'} agent`;
+      const type = str(given.subagent_type);
       const description = str(given.description);
-      return description ? standing('agent', { text: description }, { text: ` · ${type}` }) : standing('agent', { text: type });
+      if (description) return standing('agent', { text: description }, { text: ` · ${type || 'Sub'} agent` });
+      return type ? line('agent', `Started the ${type} agent`, `Starting the ${type} agent`) : line('agent', 'Started an agent', 'Starting an agent');
     }
     case 'WebFetch':
       return line('web', 'Fetched', 'Fetching', { text: str(given.url) });
@@ -95,20 +98,14 @@ export function summarizeTool(name: string, input: Record<string, unknown> | nul
   if (mcp) {
     const [, server, tool] = mcp;
     if (server === 'pilot-store') {
-      const [verb, verbRunning] = STORE_VERBS[tool!] ?? [tool!, tool!];
+      const [verb, verbRunning] = STORE_VERBS[tool!] ?? [`Used ${tool}`, `Using ${tool}`];
       return line('store', verb, verbRunning);
     }
-    const who = server === 'kubecoder' ? 'KubeCoder' : server!;
+    const asked = `${server === 'kubecoder' ? 'KubeCoder' : server} ${tool!.replace(/_/g, ' ')}`;
     const environment = str(given.name) || str(given.environment);
-    return line(
-      'fleet',
-      who,
-      who,
-      { text: tool!.replace(/_/g, ' ') },
-      ...(environment ? [{ text: ' · ' }, { text: environment, code: true }] : []),
-    );
+    return line('fleet', `Asked ${asked}`, `Asking ${asked}`, ...(environment ? [{ text: '· ' }, { text: environment, code: true }] : []));
   }
-  return line('other', name, name);
+  return line('other', `Used ${name}`, `Using ${name}`);
 }
 
 /** A run of calls in one line, in the order they first ran: "Asked KubeCoder, read a file". */

@@ -3,8 +3,8 @@
  * turn ends well while the halt file is written for it — the week's halt, the suite's backends' a
  * cooperative stop (tests/support/backend-env-extensions.ts), or its project's pause — is not done. It
  * stays open, its line saying what holds it as a held start's does, "Halted at the week’s limit" or
- * "Paused", waiting on nobody, and its halt file goes at its turn's end; its session log says so too,
- * under the turn's end. Once nothing holds it, the nudge carries the same run on, and it is done at
+ * "Paused", waiting on nobody, its tile and its session log's cue standing still, and its halt
+ * file goes at its turn's end; its session log says so too, under the turn's end. Once nothing holds it, the nudge carries the same run on, and it is done at
  * that turn's end.
  */
 
@@ -85,6 +85,9 @@ test.describe("A run halted at its turn’s end", () => {
 
     await expect(item.work.line).toHaveAttribute("data-state", "idle");
     await expect(item.work.cue).toHaveText("Halted at the week’s limit");
+    // Its nudge owed, nothing moves: no pulse, no dots (W2).
+    await expect(item.work.live).toHaveCount(0);
+    await expect(item.work.dots).toHaveCount(0);
     await expect(item.root).toHaveAttribute("data-state", "open");
     await expect(item.work.stop).toHaveCount(0);
     await expect(item.work.resume).toHaveCount(0);
@@ -96,6 +99,7 @@ test.describe("A run halted at its turn’s end", () => {
     await item.work.sessionLog.click();
     await expect(sessionLog.tail).toHaveText(/^The turn ended · \d\d:\d\d$/);
     await expect(sessionLog.cue).toHaveText("Halted at the week’s limit");
+    await expect(sessionLog.dots).toHaveCount(0);
     await page.keyboard.press("Escape");
 
     await controller.usage({ seven_day: 0.5, five_hour: 0.1 });

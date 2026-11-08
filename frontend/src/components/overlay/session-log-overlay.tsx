@@ -13,7 +13,8 @@
  * ended: "Stopped by you · <time>", by whom else, by Pilot at the usage limit, the environment
  * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6);
  * a run whose turn ended under a halt or a pause adds, under its end, what holds its nudge, as its
- * line does (F135.3, F141.3). The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
+ * line does (F135.3, F141.3). The cue's dots dance while a turn runs or comes up, and it stands
+ * still while the gate holds the start or a nudge is owed (W2). The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
  * log on. An address that names no work item of the project reads "The session log did not load".
  */
 
@@ -159,7 +160,7 @@ function SessionLog({ item, work, body }: SessionLogProps) {
       ))}
       {tail === null ? (
         <div className="log-cue mx-1.5" data-testid="session-log.cue">
-          <Cue work={work} last={last} stream={stream} />
+          <Cue work={work} sessionId={item.id} last={last} stream={stream} />
         </div>
       ) : (
         <>
@@ -188,7 +189,7 @@ function SessionLog({ item, work, body }: SessionLogProps) {
           </div>
           {work.state === 'idle' && work.nudge_owed && (
             <div className="log-cue mx-1.5" data-testid="session-log.cue">
-              <WorkingCue activity={nudgeCue(work)} />
+              <WorkingCue activity={nudgeCue(work)} animate={false} />
             </div>
           )}
         </>
@@ -256,11 +257,11 @@ function TurnEnd({ turn }: { turn: TurnView }) {
  * The working cue as the tail: why the gate holds the start; else what the turn in flight is
  * doing; else, before its first record, that it starts, or waits for Pilot.
  */
-function Cue({ work, last, stream }: { work: Work; last: TurnView | undefined; stream: ChatStreamState }) {
+function Cue({ work, sessionId, last, stream }: { work: Work; sessionId: string; last: TurnView | undefined; stream: ChatStreamState }) {
   if (work.state === 'held' && work.held_reason !== null) {
-    return <WorkingCue activity={{ kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) }} />;
+    return <WorkingCue activity={{ kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) }} animate={false} />;
   }
-  if (last?.state === 'running') return <ReplyCue turn={last} phantom={stream.phantom} />;
+  if (last?.state === 'running') return <ReplyCue sessionId={sessionId} turn={last} phantom={stream.phantom} />;
   const activity: Activity =
     work.state === 'running' ? { kind: 'waiting', phase: 'Waiting for Pilot' } : { kind: 'starting', phase: 'Starting' };
   return <WorkingCue activity={activity} />;
