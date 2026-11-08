@@ -130,7 +130,7 @@ function Retry({ job, testId, onLanded }: { job: Job; testId: string; onLanded: 
       disabled={pending || archived}
       onClick={(event) => {
         const pressed = document.activeElement === event.currentTarget;
-        void act().then((work) => {
+        void act(event.currentTarget).then((work) => {
           const focused = document.activeElement;
           if (work !== null && pressed && (focused === null || focused === document.body || focused === self.current)) onLanded();
         });

@@ -787,6 +787,38 @@ class TestStopSession:
         body = response.get_json()
         assert (body["state"], body["environment"]) == ("stopped", None)
         assert records.status_code == 200, records.get_json()
+        # C13: its unsent turn's stop, the record the session log reads.
+        (record,) = records.get_json()["records"]
+        assert (record["kind"], record["turn"], record["payload"]) == (
+            "server",
+            1,
+            {"type": "stopped-unsent"},
+        )
+
+    def test_an_idle_work_item_owed_its_nudge_is_stopped(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """W8: halted or paused at its turn's end, its nudge owed no more."""
+        run = _work_item(
+            container, session, project, project_session, SessionState.IDLE
+        )
+        run.nudge_owed_at = datetime.now(UTC)
+        session.flush()
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/stop")
+
+        assert response.status_code == 200, response.get_json()
+        body = response.get_json()
+        assert body["state"] == "stopped"
+        assert body["stopped_by"]["handle"] == "ada"
+        assert session.get_one(models.Session, run.id).nudge_owed_at is None
 
     @pytest.mark.parametrize(
         ("state", "refusal"),

@@ -161,6 +161,10 @@ STARTING = "starting"
 """The `type` of the `server` record that names a phase of a Session's start;
 one is written before each create of its controller session."""
 
+STOPPED_UNSENT = "stopped-unsent"
+"""The `type` of the `server` record that ends a Turn a Stop ended before it
+was sent: its start held at the gate or under way (F67.1)."""
+
 CONTINUE = "continue"
 """The message of the server's own Turn that carries a resumed job or chat on
 (F71), and of a person's Resume (D037)."""

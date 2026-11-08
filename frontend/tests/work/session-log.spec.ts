@@ -451,6 +451,26 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.sub).toHaveText(TITLE);
   });
 
+  test('a held start stopped ends its turn "· Stopped", and a Resume sends it again under that turn', async ({ people, projects, sessionLog }) => {
+    const { project, start } = await started({ people, projects }, { paused: true, state: 'held' });
+    const work = await start();
+    await sessionLog.open(project, work);
+    await expect(sessionLog.cue).toHaveText('Paused');
+
+    const stopped = await projects.stop(work);
+    await expect(sessionLog.tail).toHaveText(`Stopped by you · ${clock(stopped.stopped_at!)}`);
+    // C13: the stop of a turn never sent is its last record.
+    const last = (await projects.records(work)).records.at(-1)!;
+    expect(last).toMatchObject({ kind: 'server', payload: { type: 'stopped-unsent' } });
+
+    await projects.transition(project, 'resumed');
+    await projects.resume(work);
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    await expect(sessionLog.turns).toHaveCount(2);
+    await expect(sessionLog.turnEnds).toHaveText([`${clock(last.at)} · Stopped`]);
+    await expect(sessionLog.cue).toBeVisible();
+  });
+
   test('a start the pause holds reads "Paused" in the cue, and names no environment before its take', async ({ people, projects, sessionLog }) => {
     const { project, start } = await started({ people, projects }, { paused: true, state: 'held' });
     const work = await start();

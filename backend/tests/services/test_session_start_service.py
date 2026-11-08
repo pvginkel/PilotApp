@@ -84,7 +84,13 @@ from app.services.fake_controller import (
 )
 from app.services.job_service import NEXT_TITLE
 from app.services.pilot_server import PilotServer, token_hash
-from app.services.relay_service import CONTINUE, SEND_FAILED, SESSION_GONE, RelayService
+from app.services.relay_service import (
+    CONTINUE,
+    SEND_FAILED,
+    SESSION_GONE,
+    STOPPED_UNSENT,
+    RelayService,
+)
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import (
     HARD_STOP_KEY,
@@ -3671,6 +3677,8 @@ class TestStop:
         assert stopped.current_line is None
         (brief,) = _turns(session, run.id)
         assert brief.ended_at is None and stopped.turn_ended_at is None
+        # Its relay records the interrupt's `result`: no record of the stop.
+        assert (1, {"type": STOPPED_UNSENT}) not in _server(session, run.id)
         # The interrupt runs once the stop commits.
         assert "_InterruptStart" in _callbacks()
         name = stopped.controller_session
@@ -3720,6 +3728,13 @@ class TestStop:
         (brief,) = _turns(session, run.id)
         assert brief.ended_at == run.stopped_at == run.turn_ended_at
         assert fake.calls == []
+        # C13: the unsent Turn's last record says that it was stopped.
+        last = _records(session, run.id)[-1]
+        assert (last.turn, last.record.kind_code, last.record.payload) == (
+            1,
+            RecordKind.SERVER,
+            {"type": STOPPED_UNSENT},
+        )
 
     def test_a_held_work_item_is_stopped_and_nothing_of_it_starts_afterwards(
         self,
@@ -3744,7 +3759,8 @@ class TestStop:
         (brief,) = _turns(session, run.id)
         assert brief.ended_at is not None
         assert fake.calls == []
-        assert _server(session, run.id) == []
+        # Nothing of its start: the stop's record alone.
+        assert _server(session, run.id) == [(1, {"type": STOPPED_UNSENT})]
 
     def test_a_held_work_item_stopped_has_the_environment_pilot_created_stopped(
         self,
@@ -3809,9 +3825,71 @@ class TestStop:
         (created,) = fake.sessions(env_id)
         assert _sends(fake, env_id, created.name) == 0
 
+    def test_an_idle_work_item_owed_its_nudge_is_stopped_and_owed_it_no_more(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """W8: a run halted at its turn's end, stopped as Stop and take over
+        stops it, not done (D097)."""
+        halted = _halted_end(starts, fake, session, project)
+        (turn,) = _turns(session, halted.id)
+        ended_at = turn.ended_at
+        records = len(_records(session, halted.id))
+        before = datetime.now(UTC)
+
+        stopped = starts.stop(session, halted.id, person)
+
+        assert (
+            stopped.state_code,
+            stopped.stopped_by_user_id,
+            stopped.nudge_owed_at,
+            stopped.turn_ended_at,
+        ) == (SessionState.STOPPED, person.id, None, ended_at)
+        assert stopped.stopped_at is not None and stopped.stopped_at >= before
+        (turn,) = _turns(session, halted.id)
+        assert turn.ended_at == ended_at
+        # Its turn had ended: nothing to interrupt, nothing more recorded.
+        assert "_InterruptStart" not in _callbacks()
+        assert len(_records(session, halted.id)) == records
+        assert session.get_one(Item, halted.id).done_at is None
+        clear_after_commit_callbacks()
+
+        # The halt lifted, nothing carries it on.
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(starts)
+
+        assert _read(session, halted.id).state_code == SessionState.STOPPED
+        assert len(_turns(session, halted.id)) == 1
+
+    def test_an_idle_work_items_stop_moves_the_item_and_its_state(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        engine_events.clear()
+
+        with scoped_session(container) as db:
+            starts.stop(db, halted.id, person)
+
+        assert _moves(engine_events) == [
+            WorkMoved(project.id, halted.id),
+            ProjectChanged(project.id),
+        ]
+
     @pytest.mark.parametrize(
         ("state", "refusal"),
         [
+            # Idle with no nudge owed: its run went to its end.
             (SessionState.IDLE, "its turn has ended"),
             (SessionState.STOPPED, "it is stopped already"),
             (SessionState.FAILED, "it has failed"),
@@ -3941,6 +4019,12 @@ class TestStopChat:
         (turn,) = _turns(session, run.id)
         assert run.state_code == SessionState.STOPPED
         assert turn.ended_at == run.stopped_at == run.turn_ended_at
+        # C13: after the person's message, the record of its stop.
+        assert [
+            (stored.turn, stored.record.kind_code, stored.record.payload)
+            for stored in _records(session, run.id)
+        ][-1] == (1, RecordKind.SERVER, {"type": STOPPED_UNSENT})
+        assert _records(session, run.id)[0].record.kind_code == RecordKind.SEND
         # A chat's Session has no work item; its state's move is the project's.
         assert _moves(engine_events) == [ProjectChanged(project.id)]
 
@@ -4008,6 +4092,10 @@ class TestStopProject:
                 at,
                 person.id,
             )
+        # A start under way or held: its Turn ended unsent, so recorded.
+        for unsent in (starting.id, chat.id, held.id):
+            assert _server(session, unsent)[-1] == (1, {"type": STOPPED_UNSENT})
+        assert (1, {"type": STOPPED_UNSENT}) not in _server(session, running.id)
         assert _read(session, idle.id).state_code == SessionState.IDLE
         assert _read(session, elsewhere.id).state_code == SessionState.STARTING
         # No controller call in the transaction: the interrupt follows its commit.

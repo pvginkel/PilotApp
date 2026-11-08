@@ -53,6 +53,8 @@ type ServerEvent =
   | { type: 'session-gone'; reason: string }
   /** The environment stopped under the Turn, a stop made elsewhere (F71, F69.2): the Turn's last record. */
   | { type: 'environment-stopped'; cause: StopCause; reason: string }
+  /** A Stop ended the Turn before it was sent, its start held at the gate or under way (F67.1): the Turn's last record. */
+  | { type: 'stopped-unsent' }
   /** A document the session registered, its file not read at its run's end (ruling D1): it keeps no text. */
   | { type: 'read-failed'; item: string; path: string; reason: string }
   /** A document the session registered, closed, its file not written back (F65.1). */

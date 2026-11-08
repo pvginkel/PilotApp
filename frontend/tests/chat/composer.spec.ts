@@ -3,8 +3,9 @@
  * field to five lines (F115), Enter breaking the line and Ctrl+Enter sending (F110), Send disabled
  * while the field is empty and the field waiting while the message is on its way; a message with no
  * chat open starts one, shown in the tab. While Pilot answers Send's place is Stop, in every member's
- * composer whoever sent the message, the field not waiting; Stop ends the turn where it is. The
- * focus stays in the field after Send and after Stop, and a message sent takes the chat back to its
+ * composer whoever sent the message, the field not waiting; Stop ends the turn where it is, one
+ * stopped before it was sent "· Stopped" too (C13). The focus stays in the field after Send and
+ * after Stop, and a message sent takes the chat back to its
  * end, wherever the reader had scrolled. The words are kept in the browser until sent,
  * keyed by the project (F133). In an archived project it takes no message and says why (F128.5).
  * While Pilot updates its store it takes none, the refusal toasted in the API's words and the words
@@ -173,6 +174,40 @@ test.describe('The Chat tab’s composer', () => {
     await controller.play(chats.store, session, [text('second', 'The lakeside ones, then.')]);
     await controller.finish(chats.store, session, 'success', 'The lakeside ones, then.');
     await expect(chat.replyEnds).toHaveCount(2);
+  });
+
+  test('stops a message whose session is still coming up, its turn ending “· Stopped” with nothing of it sent', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Unsent'), members: [me.handle!] });
+    const read = chat.read();
+    await timeline.open(project);
+    await read;
+    await chats.ready(project);
+    // The controller unreachable, the chat's start waits at the gate.
+    await controller.outage(true, 'ingress');
+
+    const { chat: id } = await chats.send(project, 'Survey the campsites.');
+    await expect(chat.messageTexts).toHaveText(['Survey the campsites.']);
+    await expect(chat.stop).toBeVisible();
+    const stopped = chat.acted('stop');
+    await chat.stop.click();
+    await stopped;
+
+    const { records } = await projects.records(id);
+    expect(records.map((record) => [record.kind, record.kind === 'server' ? record.payload : null])).toEqual([
+      ['send', null],
+      ['server', { type: 'stopped-unsent' }],
+    ]);
+    await expect(chat.replyEnds).toHaveText([/^\d\d:\d\d· Stopped$/]);
+    await expect(chat.stop).toHaveCount(0);
+    await expect(chat.cue).toHaveCount(0);
   });
 
   test('takes the chat back to its end with a message sent, where the reader had scrolled up', async ({

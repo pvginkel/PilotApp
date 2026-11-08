@@ -11,8 +11,8 @@
  * falls in the Turn in flight, else in the next: the one numbered after the last. The server's word
  * on a file the session registered — its read at the run's end failed, its write-back refused —
  * is written after the run's last Turn ended, and stands at that Turn's end. A Turn ends at
- * its `result`, at a failed send or start, at the environment stopped under it, or, ended with no
- * record of it, where a later Turn's records begin; a call or a sub-agent still running then was
+ * its `result`, at a failed send or start, at the environment stopped under it, at a Stop before it
+ * was sent, or, ended with no record of it, where a later Turn's records begin; a call or a sub-agent still running then was
  * stopped with it. An effect goes on the call that made it, whether its record is written before
  * or after the call's line; one whose call no record shows, as where its client sent no tool-use id,
  * stands in its own record's place.
@@ -202,6 +202,7 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
           end(t, 'failed', r.at);
           break;
         case 'environment-stopped':
+        case 'stopped-unsent':
           end(t, 'interrupted', r.at);
           break;
         case 'effect': {

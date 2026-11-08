@@ -555,7 +555,7 @@ class PilotStoreService:
             RecordNotFoundException: the item is not of the brain's project.
             InvalidOperationException: it is no work item, it is a job of
                 Pilot's own (F26.3), or its Session is neither running,
-                starting nor held.
+                starting, held nor idle with its nudge owed.
         """
         self._project(brain)
         item = self._item(brain, item_id)

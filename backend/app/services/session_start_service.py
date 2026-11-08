@@ -172,6 +172,7 @@ from app.services.relay_service import (
     CONTINUE,
     SESSION_GONE,
     STARTING,
+    STOPPED_UNSENT,
     RelayService,
 )
 from app.services.session_record_service import (
@@ -979,7 +980,9 @@ class SessionStartService:
 
     def stop(self, db: Session, session_id: uuid.UUID, person: User) -> AgentSession:
         """`person`'s Stop of a work item, in the caller's transaction (F67.1):
-        its Session `stopped` where it is, as `_stop` writes it.
+        its Session `stopped` where it is, as `_stop` writes it; one idle with
+        its nudge owed, its run halted or paused at its turn's end, as Stop and
+        take over stops it (`_stop_at_rest`), not done (D097).
 
         Returns:
             The Session, `stopped`
@@ -987,8 +990,8 @@ class SessionStartService:
         Raises:
             RecordNotFoundException: No Session has the id
             InvalidOperationException: The Session is no work item's, is a
-                job's, Pilot's own (F26.3), or it is neither running, starting
-                nor held at the gate
+                job's, Pilot's own (F26.3), or it is neither running, starting,
+                held at the gate nor idle with its nudge owed
         """
         session = self._records(db).lock_session(session_id)
         operation = f"stop {_work_named(db, session_id)}"
@@ -996,11 +999,18 @@ class SessionStartService:
             raise InvalidOperationException(operation, "it is no work item")
         if session.kind_code == JOB_KIND:
             raise InvalidOperationException(operation, PILOTS_OWN)
-        if session.state_code not in STOPPABLE:
+        at = datetime.now(UTC)
+        if session.state_code in STOPPABLE:
+            self._stop(db, session, person, at)
+        elif (
+            session.state_code == SessionState.IDLE
+            and session.nudge_owed_at is not None
+        ):
+            self._stop_at_rest(session, person, at)
+        else:
             raise InvalidOperationException(
                 operation, _STOP_REFUSALS[session.state_code]
             )
-        self._stop(db, session, person, datetime.now(UTC))
         return session
 
     def take_over(
@@ -1025,11 +1035,9 @@ class SessionStartService:
             before = session.state_code
             if before in STOPPABLE:
                 self._stop(db, session, person, at)
+            elif before in (SessionState.IDLE, SessionState.STOPPED):
+                self._stop_at_rest(session, person, at)
             else:
-                if before in (SessionState.IDLE, SessionState.STOPPED):
-                    session.state_code = SessionState.STOPPED
-                    session.stopped_at = at
-                    session.stopped_by_user_id = person.id
                 self._moved(session, state=True)
             session.nudge_owed_at = None
             logger.info(
@@ -1225,11 +1233,11 @@ class SessionStartService:
         """Under the Session's lock: `stopped` by `person` at `at`, with no
         current line (F67.1, F69.2). A turn in flight stays so, for its relay to
         record to the end the controller's interrupt gives it once this
-        commits; a start held or under way has its Turn ended unsent, and its
-        loop sends nothing more, and a job held before its brief has none. Its
-        environment is handed to the shutdown timer (`_hand_to_timer`); a start
-        held before it had one arms none. A work item's slot opens once this
-        commits."""
+        commits; a start held or under way has its Turn ended unsent, a
+        `stopped-unsent` record its last, and its loop sends nothing more, and
+        a job held before its brief has none. Its environment is handed to the
+        shutdown timer (`_hand_to_timer`); a start held before it had one arms
+        none. A work item's slot opens once this commits."""
         before = session.state_code
         session.state_code = SessionState.STOPPED
         session.stopped_at = at
@@ -1241,10 +1249,27 @@ class SessionStartService:
             turn = _latest_turn(db, session.id)
             turn.ended_at = at
             session.turn_ended_at = at
+            self._records(db).append(
+                session.id,
+                RecordKind.SERVER,
+                payload={"type": STOPPED_UNSENT},
+                turn_id=turn.id,
+            )
         self._hand_to_timer(db, session)
         self._moved(session, state=True)
         self._slots.left(session, before)
         logger.info("Session %s stopped by %s, %s", session.id, person.handle, before)
+
+    def _stop_at_rest(self, session: AgentSession, person: User, at: datetime) -> None:
+        """Under the Session's lock: one at rest, idle or stopped, `stopped` by
+        `person` at `at`, its turn as it ended, owed its nudge no more. It held
+        no slot, and its environment went to the shutdown timer at its turn's
+        end or its stop."""
+        session.state_code = SessionState.STOPPED
+        session.stopped_at = at
+        session.stopped_by_user_id = person.id
+        session.nudge_owed_at = None
+        self._moved(session, state=True)
 
     def _stop_halted(self, db: Session, session_id: uuid.UUID) -> None:
         session = self._records(db).lock_session(session_id)

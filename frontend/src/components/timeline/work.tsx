@@ -14,8 +14,8 @@
  * ended in error left, shown as a stopped one is (F125); what holds the nudge owed to a run whose turn ended under
  * a halt or a pause, as a held start's reason, "Halted at the week’s limit", "Paused" (F135.3,
  * F141.3). Session log, in every state, opens the session's records in the overlay (F26.3, F69).
- * Stop, while it runs, starts or is held, asks first in the row under the line, Esc dismissing the
- * question; Resume, in that row once it stopped or failed, carries it on (F67), disabled while the
+ * Stop, while it runs, starts or is held, or idle with its nudge owed (W8), asks first in the row
+ * under the line, Esc dismissing the question; Resume, in that row once it stopped or failed, carries it on (F67), disabled while the
  * project is archived, as its head's switch is (D012). Pilot's own work, the setup, the one job
  * drawn here (every other shows on the item it follows from, job.tsx), has no env chip and no Stop
  * or Resume (F26.3, F59.1), and Retry where Resume is once it stopped or failed: a fresh job for
@@ -25,7 +25,8 @@
  * list is emptied; a job publishes none. A tile with nothing for the row has no row. Once this
  * browser's Stop or Resume swaps the two, the keyboard focus on the button that went goes to the
  * other, Resume or Stop's icon, and once its Retry lands, to Session log's icon; a swap another
- * browser's act made moves no focus.
+ * browser's act made moves no focus, and a refused act gives it back to the button pressed, Resume,
+ * Retry or Stop it (W7).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
@@ -42,7 +43,7 @@ import { useNow } from '@/hooks/use-now';
 import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
-import { offersRetry, RESUMABLE, STOPPABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
+import { offersRetry, offersStop, RESUMABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
 import { useEscape } from '@/lib/keys';
 import { progressStepMark, workLine } from '@/lib/utils/status-labels';
@@ -57,7 +58,7 @@ type Actions = 'stop' | 'resume' | 'retry' | 'log';
 /** The actions a session offers: a worker's Stop or Resume by its state, a job's Retry where it offers it, else its session log alone. */
 function actionsOf(work: Work): Actions {
   if (work.pilots_own) return offersRetry(work) ? 'retry' : 'log';
-  return STOPPABLE.includes(work.state) ? 'stop' : RESUMABLE.includes(work.state) ? 'resume' : 'log';
+  return offersStop(work) ? 'stop' : RESUMABLE.includes(work.state) ? 'resume' : 'log';
 }
 
 export function WorkItem({ item }: { item: TimelineItem }) {
@@ -220,7 +221,7 @@ function StopQuestion({ item, handoff, cancelButton, onCancel }: StopQuestionPro
         disabled={pending}
         onClick={(event) => {
           handoff.start(event.currentTarget, 'resume');
-          void act().then(handoff.land);
+          void act(event.currentTarget).then(handoff.land);
         }}
         data-testid="timeline.work.stop-confirm.yes"
       >
@@ -286,7 +287,7 @@ function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
       disabled={pending || archived}
       onClick={(event) => {
         handoff.start(event.currentTarget, 'stop');
-        void act().then(handoff.land);
+        void act(event.currentTarget).then(handoff.land);
       }}
       data-testid="timeline.work.resume"
     >
@@ -309,7 +310,7 @@ function Retry({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
       disabled={pending || archived}
       onClick={(event) => {
         handoff.start(event.currentTarget, 'log');
-        void act().then(handoff.land);
+        void act(event.currentTarget).then(handoff.land);
       }}
       data-testid="timeline.work.retry"
     >

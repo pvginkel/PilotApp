@@ -185,8 +185,9 @@ def stop_session(
 ) -> Any:
     """Stop the work item's session where it is, as the signed-in person: a
     turn in flight is interrupted, the conversation kept, and a start held or
-    under way ends, nothing of it sent afterwards. The interrupt runs once the
-    request commits; a controller that does not answer lets the turn run out.
+    under way ends, nothing of it sent afterwards; an idle one owed its nudge
+    is owed it no more. The interrupt runs once the request commits; a
+    controller that does not answer lets the turn run out.
 
     Returns:
         200: The work item's status, stopped
@@ -194,7 +195,8 @@ def stop_session(
         403: The caller lacks the editor role
         404: No session has the id
         409: The caller has not chosen a handle; the session is no work
-            item's, is Pilot's own, or is neither running, starting nor held
+            item's, is Pilot's own, or is neither running, starting, held nor
+            idle with its nudge owed
     """
     record_service.require_session(session_id)
     person = people_service.require_person(caller(), f"stop work item {session_id}")

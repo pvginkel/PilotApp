@@ -7,12 +7,14 @@
  * item through the gate, held while the project is paused, disabled while it is archived; a held
  * start stopped starts no more. A refusal shows as the API words it. A running item has no row.
  * Once this browser's Stop or Resume lands, the keyboard focus on the button that went is on
- * Resume, or on Stop's icon; one made elsewhere, or a focus moved meanwhile, moves no focus.
+ * Resume, or on Stop's icon; one made elsewhere, or a focus moved meanwhile, moves no focus. A
+ * refused act gives the focus back to the button pressed (W7).
  */
 
 import type { Locator, Page } from '@playwright/test';
+import type { FormTestEvent } from '@/lib/test/test-events';
 import { test, expect } from '../support/fixtures';
-import { makeUnique } from '../support/helpers';
+import { makeUnique, waitTestEvent } from '../support/helpers';
 import { slowNetwork } from '../support/network';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
@@ -256,6 +258,41 @@ test.describe('The keyboard focus', () => {
     await turnEnded(projects, work);
     await item.resume.press('Enter');
     await expect(item.stop).toBeFocused();
+  });
+
+  test('goes back to the button a refused act was pressed on, Resume refused while the stopped turn is still ending', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project } = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    const { id: environment } = await projects.environment(project, work);
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(work).work;
+
+    // The interrupt meets the unreachable worker, so the stopped turn runs on.
+    await controller.unreachable(environment);
+    await item.stop.click();
+    await item.stopConfirm.yes.focus();
+    await item.stopConfirm.yes.press('Enter');
+    await expect(item.resume).toBeFocused();
+    const refused = waitTestEvent<FormTestEvent>(page, 'form', (event) => event.formId === 'timeline.resume' && event.phase === 'error');
+    await item.resume.press('Enter');
+    await refused;
+    await expect(
+      page.getByTestId('app-shell.toast.item').filter({ hasText: `Cannot resume ${TITLE} because its stopped turn is still ending` }),
+    ).toBeVisible();
+    await expect(item.resume).toBeEnabled();
+    await expect(item.resume).toBeFocused();
+
+    await controller.finish(environment, 'claude-1', 'interrupted');
+    await controller.unreachable(environment, false);
+    await turnEnded(projects, work);
   });
 
   test('moves nowhere when a Stop or a Resume made elsewhere swaps the two', async ({ page, people, projects, timeline, deploymentSse }) => {
