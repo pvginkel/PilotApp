@@ -54,6 +54,14 @@ lifted stopped, which the lift retries ([`store-update.md`](store-update.md)). F
 otherwise, it is not, so a pass that fails or is stopped hands its documents to the person, and a
 Retry of it, once placed, makes them Pilot's again.
 
+A read takes all of it from a `Reading` of its own (`working_on.Reading`), made after the read's
+last write and kept by no other read: every hold at once, by one query over the standing namings
+and the Works of their runs, kept whole over 2,000 characters by a bound of its own
+([`slice-test-plan.md`](slice-test-plan.md)), then the items that are Pilot's, a query per state. A
+statement that reads a block held or an item Pilot's takes the ids the reading found. The reading
+joins `work.trigger_item_id` to `items.created_by_session_id`, and neither is indexed: an index goes
+on each once production's plans show the joins (D163).
+
 A document that is Pilot's waits on nobody: `waiting()` (`backend/app/services/timeline_service.py`)
 leaves it out, and with it the badge, the project's *waiting on you* and the project's notification
 ([`projects.md`](projects.md), [`notifications.md`](notifications.md)). Its timeline item carries

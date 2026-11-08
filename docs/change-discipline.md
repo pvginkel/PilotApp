@@ -99,8 +99,12 @@ convention changes, rewrite the doc rather than appending a note that the old ru
 
 ## Validate at the boundary, nowhere else
 
-No `try`/`except` that swallows an error, no silent fallback, no retry or cache without an observed
-failure to point at, and no guard for a condition the types already rule out.
+No `try`/`except` that swallows an error, no silent fallback, no retry without an observed failure
+to point at, no cache without a measured cost, and no guard for a condition the types already rule
+out. A read whose server time, measured, is over about 500 ms is cached server-side: in the
+process, keyed by its project and dropped on its `project_changed`, on disk only where several
+worker processes must share it, never in Redis (D161). No cache holds what Pilot is working on, so
+no read that carries it is cached whole (D162).
 
 The boundaries are where checking is the feature: tool and endpoint input, a document the brain or a
 worker session wrote (the block DSL and its front matter, the ownership of an `answer:` line), and

@@ -313,8 +313,12 @@ The server's own turns, the brief's frame and the follow-up among them, are not 
 reply to a follow-up continues its run. A record of a chat's Session that the file shows, a `send`,
 an effect, Pilot's text or a main-thread tool call, moves it in the record's own transaction
 (`SessionRecordService.append`, through `ViewService.recorded`); a record that shows nothing moves
-nothing, and no work item's record moves it. A render reads three kinds of record per chat,
-filtered, a page at a time.
+nothing, and no work item's record moves it. A render reads an open chat's records, three kinds of
+record, filtered, a page at a time. A closed chat's paragraphs are kept (`ClosedChats`,
+`backend/app/engine/closed_chats.py`, a singleton of the container) with the id of its last record,
+read before them, and handed back while that id is still its last: no id is handed out twice, so a
+record the chat takes after its close gives it a last id of its own, and its paragraphs are read
+again. They hold 4,000,000 characters at most, the chat read least recently dropped first.
 
 ## The Chat tab
 

@@ -224,9 +224,9 @@ the menu, a dialog, the session log's popover) is closed on the next one, while 
 side panel's tab come back as that project left them, and a phone shows its Timeline (below); the drawer closes on any change of
 address ([`ui.md`](ui.md)).
 
-The list and the head are read again when the window regains focus, after each of the person's
-own writes, which invalidate every query, on the server's `project_changed` event, and whenever the
-event stream comes up ([`timeline.md`](timeline.md)).
+The list and the head are read again when the window regains focus, after each of the page's own
+writes, which invalidate every query, on the server's `project_changed` event but the one such a
+write committed, and whenever the event stream comes up ([`timeline.md`](timeline.md)).
 
 ## The head
 

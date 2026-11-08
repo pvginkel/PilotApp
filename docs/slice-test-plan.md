@@ -105,6 +105,19 @@ anywhere in its worker's backend, which runs the guard under `POOL_GUARD`: a req
 which the backend suite cannot see. The test's own or one a test before it left running, as the
 stacks say.
 
+A backend test errors at its teardown, too, where the app sent a statement over 2,000 characters
+(`backend/app/utils/statement_cap.py`, D160). A statement is measured as SQLAlchemy compiled it,
+before an expanding IN list's ids are filled in, and one sent as text, through `exec_driver_sql`, as
+sent. One kept whole over 2,000 carries its own bound beside it in the code,
+`.execution_options(max_statement_length=<bound>)`, as the holds query of what Pilot is working on
+does ([`round-trip.md`](round-trip.md)), and fails only over that. The error gives the length, the
+bound, where the statement was sent and its text. A statement is the app's where the innermost
+frame of the backend's own code that sends it is in `app/` or `pilot_mcp/`: a test's own, a
+migration test's read of the schema among them, is let be, and a test that has the app send one on
+purpose drains it from the cap the `statement_cap` fixture hands it. A Playwright test fails the
+same way on any statement of its worker's backend, which runs the cap under `STATEMENT_CAP`, the
+`statementCap` fixture taking what it kept from `POST /api/testing/statement-cap/take`.
+
 Then the same verbs from the root of every other repo the slice touched, each where it declares
 them: `../PilotDeploy`, whose `test` reads `../PilotApp/docs/architecture/architecture.yaml` and so
 needs this checkout beside it, and a registry repo the slice changed in `/work/scratch/`

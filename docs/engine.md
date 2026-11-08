@@ -16,6 +16,8 @@ commits.
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json`, `timeline.json` and `chat.md` ([`chats.md`](chats.md)) |
+| `References` (`references.py`) | the reference rows the reads look up, a kind's form, a cause's undo and a confirmation reason, kept for the process's life, each read on its code's first lookup ([`record.md`](record.md)) |
+| `ClosedChats` (`closed_chats.py`) | a closed chat's paragraphs in `chat.md`, kept with the id of its last record ([`chats.md`](chats.md)) |
 | `AttachmentStore` (`attachments.py`) | an attachment's bytes, kept, read and deleted ([`documents.md`](documents.md)) |
 | `AttachService` (`attachments.py`) | files a session copied from its environment, hung on an item as one batch, or a draft's on nothing ([`mcp.md`](mcp.md)); at Create project, the draft's copy and the draft's material hung on the opening |
 | `EngineBus` (`bus.py`) | the events, one bus per process |

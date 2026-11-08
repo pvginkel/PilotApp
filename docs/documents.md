@@ -260,9 +260,9 @@ attachment is its words alone, and every other link opens in a new browser tab.
 
 ### Live
 
-What a tab or a view shows is read again on its project's `project_changed`, on every rise of the event
-stream, when the window regains focus and after the person's own writes
-([`timeline.md`](timeline.md)). A save of the handbook or the project document raises one where it
+What a tab or a view shows is read again on its project's `project_changed`, but for the one the
+page's own write committed, on every rise of the event stream, when the window regains focus and
+after the page's own writes ([`timeline.md`](timeline.md)). A save of the handbook or the project document raises one where it
 changes the published text or makes its session the one writing it, and a turn's end raises one for
 each document it lets go ([`engine.md`](engine.md)), so an open document shows Pilot's new text, and
 its dots come and go, as they happen.

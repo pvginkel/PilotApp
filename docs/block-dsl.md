@@ -6,7 +6,10 @@ imported as `pilot_dsl` (`backend/packages/pilot-dsl/`, [below](#the-package)): 
 `validate()`, `body()` and `words()` in `reader.py`; the splice, the merge, `with_title()` and
 `with_facts()` in `writer.py`. The library is pure: it takes text and returns text, and imports
 nothing but the standard library and PyYAML, so what it validates against comes in as values
-(`Facts`).
+(`Facts`). It keeps each text's reading, keyed on the text, which alone decides it: `parse()`,
+`body()` and `words()` parse a text once, across requests and threads, and hand every caller the
+same values, which a caller never assigns into, a block's `lines` included. The texts kept hold
+8,000,000 characters at most, the one read least recently dropped first; `validate()` is not kept.
 
 ````markdown
 ---

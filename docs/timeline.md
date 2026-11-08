@@ -13,7 +13,9 @@ attachments and the side panel are [`documents.md`](documents.md)'s.
 ## Reading it
 
 **`GET /api/projects/<id>/timeline`** answers the timeline whole, `{finished_at, items, ready_after,
-unhung_attachments}`, and `404` for an unknown project. `finished_at` is the latest `finished`
+unhung_attachments}`, and `404` for an unknown project, built from the rows at every read: no cache
+holds what Pilot is working on, which it carries, so it is never cached whole (D162), and the texts
+it shows are parsed once ([`block-dsl.md`](block-dsl.md)). `finished_at` is the latest `finished`
 transition's time while the project is finished, else null. `ready_after` is the setup's work item,
 its latest Retry's where it was retried, once it is done at its turn's end, while the project stands
 paused by the pause Create wrote (D083, [`projects.md`](projects.md)); else null.
@@ -163,8 +165,9 @@ it needs no handle. A request on an item that is no wait, or on a wait that take
 
 Once a change to what a project's timeline, head or tab shows commits, the engine's
 `ProjectChanged` ([`engine.md`](engine.md)) goes to every person's connections as the SSE event
-`project_changed`, `{"project_id": "<id>"}`, the writer's own browser included
-(`ProjectEventService`, `backend/app/services/project_event_service.py`). A person is a user with a
+`project_changed`, `{"project_id": "<id>"}`, the writer's own browser included, with
+`"sender": "<page>"` where the request that committed it named its page in `X-Sender`
+(`ProjectEventService`, `backend/app/services/project_event_service.py`; `backend/app/utils/sender.py`). A person is a user with a
 handle, so a connection whose user has none hears nothing. Only the process that holds a connection
 delivers to it. A work item's status moves on an event of its own, `work_moved`, which carries it
 and moves nothing else ([`work.md`](work.md)).
@@ -178,7 +181,11 @@ from a process that does not hold the browser's stream. A read the event finds u
 predate it, is left to land, and its query is read again once it has: a read made over it would
 cancel it, and events closer together than a read takes would then let none land, nor end what
 awaits the query's read, as Create project's success does ([`projects.md`](projects.md)). A
-person's own write reads every query again as well. Each `work_moved`'s status it writes into the timeline as read, with no read.
+page's own write reads every query again once it is answered: its generated mutation hook names the
+page in the request's `X-Sender` header (`SENDER`, `frontend/src/lib/api/generated/hooks.ts`), and
+the page skips the event that names it, so a click reads each query once. Another page reads on it,
+the same person's included. Each `work_moved`'s status it writes into the timeline as read, with no
+read.
 
 ## The timeline
 

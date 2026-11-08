@@ -241,7 +241,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 Twenty-one are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and
 four are tables with rows, because each value carries a fact. The revisions write the rows; a value
-is added by a revision and nowhere else.
+is added by a revision and nowhere else, and the backend starts once its revisions are applied. So a
+process keeps each row it looks up for its life (`References`, [`engine.md`](engine.md)), a kind's
+form, a cause's undo and a confirmation reason, each read on its code's first lookup.
 
 | Table | Rows |
 |---|---|
