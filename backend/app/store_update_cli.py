@@ -95,11 +95,10 @@ def _retries(db: Session, update: StoreUpdate, lifted_at: datetime) -> str | Non
     retry = aliased(AgentSession)
     retried = 0
     left: list[str] = []
-    for job, work, line, project, retried_at in db.execute(
-        select(AgentSession, Work, Item, Project, retry.created_at)
+    for job, work, line, retried_at in db.execute(
+        select(AgentSession, Work, Item, retry.created_at)
         .join(Work, Work.id == AgentSession.id)
         .join(Item, Item.id == AgentSession.id)
-        .join(Project, Project.id == AgentSession.project_id)
         .outerjoin(retry, retry.id == Work.retried_by_id)
         .where(stopped_by(update))
         .order_by(AgentSession.created_at, AgentSession.id)
@@ -107,6 +106,7 @@ def _retries(db: Session, update: StoreUpdate, lifted_at: datetime) -> str | Non
         if retried_at is not None and retried_at <= lifted_at:
             retried += 1
         elif line.done_at is None or line.done_at > lifted_at:
+            project = db.get_one(Project, job.project_id)
             refusal = retry_refusal(db, project, job, work, line)
             left.append(
                 f"{line.title} in {project_name(project)}"

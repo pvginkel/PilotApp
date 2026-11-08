@@ -17077,6 +17077,38 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/statement-cap/send": {
+      "post": {
+        "description": "Returns:     204: Sent     400: A body with no length, or with no id     409: A length below the shortest such statement's",
+        "operationId": "post__api_testing_statement-cap_send",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Send one statement of `length` characters before SQLAlchemy expands it, its IN list of `ids` ids filled in as it is sent, for a spec of the cap: no route of the app's sends one over the cap.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/statement-cap/take": {
+      "post": {
+        "description": "Refused where the cap is not installed, so that a backend without STATEMENT_CAP fails the spec rather than passing it unwatched.",
+        "operationId": "post__api_testing_statement-cap_take",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The statements over their bound since the last take, each told with its length, where it was sent and its text, the cap keeping none.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/store-update": {
       "post": {
         "description": "Returns:     201: The update made     200: The unlifted update, its lift asked     400: The body is invalid, or the stage is prd     409: An update is under way, to make one, or none is, to lift: the         reason",

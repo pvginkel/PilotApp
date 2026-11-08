@@ -389,6 +389,16 @@ class TestAppSettings:
 
         assert settings.pool_guard is True
 
+    def test_the_statement_cap_is_off_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.statement_cap is False
+
+    def test_load_reads_the_statement_cap_from_the_environment(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None, STATEMENT_CAP=True))
+
+        assert settings.statement_cap is True
+
     @pytest.mark.parametrize(
         "name",
         ["CHAT_CLOSE_TIMEOUT", "CACHE_EXPIRATION_TTL", "WAIT_QUIET_WINDOW_SECONDS"],
@@ -463,6 +473,7 @@ class TestAppSettings:
             "cache_expiration_ttl_seconds": repr(3300.0),
             "wait_quiet_window_seconds": repr(5.0),
             "pool_guard": "False",
+            "statement_cap": "False",
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -567,4 +578,5 @@ class TestAppSettings:
             "cache_expiration_ttl_seconds": repr(3300.0),
             "wait_quiet_window_seconds": repr(5.0),
             "pool_guard": "False",
+            "statement_cap": "False",
         }

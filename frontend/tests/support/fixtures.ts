@@ -18,7 +18,8 @@
  * `waits` adds the brain's waits, fires them, places their runs and closes them.
  * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
  * server serve the app once before the worker's first test. `poolGuard` fails a test where a thread of
- * the worker's backend checked out a second connection of its pool while it held one.
+ * the worker's backend checked out a second connection of its pool while it held one, and
+ * `statementCap` one where the worker's backend sent a statement over its bound.
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
@@ -71,6 +72,7 @@ interface DomainFixtures {
   storeUpdate: StoreUpdate;
   waits: Waits;
   poolGuard: void;
+  statementCap: void;
 }
 
 interface DomainWorkerFixtures {
@@ -189,6 +191,24 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
         expect(response.ok(), await response.text()).toBe(true);
         const { nestings } = (await response.json()) as { nestings: string[] };
         expect(nestings, nestings.join('\n\n')).toEqual([]);
+      } finally {
+        await request.dispose();
+      }
+    },
+    { auto: true },
+  ],
+  // The statements over their bound the backend's statement cap kept
+  // (backend/app/utils/statement_cap.py), taken once the test and the fixtures it used are done: the
+  // test's, its fixtures', or those of a thread a test before it left running, whose stacks say so.
+  statementCap: [
+    async ({ playwright, backendUrl }, use) => {
+      await use();
+      const request = await playwright.request.newContext({ baseURL: backendUrl });
+      try {
+        const response = await request.post('/api/testing/statement-cap/take');
+        expect(response.ok(), await response.text()).toBe(true);
+        const { statements } = (await response.json()) as { statements: string[] };
+        expect(statements, statements.join('\n\n')).toEqual([]);
       } finally {
         await request.dispose();
       }

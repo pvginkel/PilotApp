@@ -48,5 +48,9 @@ export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
     // The pool guard on the backend's pool (backend/app/utils/pool_guard.py): fixtures.ts takes its
     // nestings after each test, under /api/testing/pool-guard, and fails the test on any.
     POOL_GUARD: 'true',
+    // The statement cap on the backend's engine (backend/app/utils/statement_cap.py): fixtures.ts
+    // takes the statements over it after each test, under /api/testing/statement-cap, and fails the
+    // test on any.
+    STATEMENT_CAP: 'true',
   };
 }

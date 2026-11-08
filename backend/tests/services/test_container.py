@@ -50,6 +50,7 @@ from app.services.chat_close_service import ChatCloseService
 from app.services.container import (
     ServiceContainer,
     install_pool_guard,
+    install_statement_cap,
     require_pilot_server,
     require_vapid_key,
     start_controller_client,
@@ -237,6 +238,42 @@ class TestInstallPoolGuard:
         with pytest.raises(ConfigurationError, match="POOL_GUARD requires"):
             install_pool_guard(container)
         assert not container.pool_guard().installed
+
+
+class TestInstallStatementCap:
+    def test_under_statement_cap_it_installs_the_cap(
+        self, test_settings: Settings
+    ) -> None:
+        container = _container(test_settings, AppSettings(statement_cap=True))
+
+        install_statement_cap(container)
+        try:
+            assert container.statement_cap().installed
+        finally:
+            container.statement_cap().uninstall()
+
+    def test_unset_it_installs_none(self, test_settings: Settings) -> None:
+        container = _container(test_settings, AppSettings())
+
+        install_statement_cap(container)
+
+        assert not container.statement_cap().installed
+
+    @pytest.mark.parametrize(
+        "update",
+        [{"flask_env": "development"}, {"stage": Stage("prd")}],
+        ids=["outside-testing-mode", "testing-on-prd"],
+    )
+    def test_outside_testing_mode_the_server_does_not_start(
+        self, test_settings: Settings, update: dict[str, object]
+    ) -> None:
+        container = _container(
+            test_settings.model_copy(update=update), AppSettings(statement_cap=True)
+        )
+
+        with pytest.raises(ConfigurationError, match="STATEMENT_CAP requires"):
+            install_statement_cap(container)
+        assert not container.statement_cap().installed
 
 
 class TestRequireVapidKey:

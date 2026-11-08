@@ -263,6 +263,14 @@ class AppEnvironment(BaseSettings):
             "nestings taken at /api/testing/pool-guard (Playwright's backends)"
         ),
     )
+    STATEMENT_CAP: bool = Field(
+        default=False,
+        description=(
+            "Testing mode alone: the statement cap on the app's engines, the "
+            "statements over it taken at /api/testing/statement-cap "
+            "(Playwright's backends)"
+        ),
+    )
 
 
 class AppSettings(BaseModel):
@@ -444,6 +452,11 @@ class AppSettings(BaseModel):
     nestings taken at /api/testing/pool-guard: Playwright's backends, in
     testing mode alone."""
 
+    statement_cap: bool = False
+    """The statement cap on the app's engines (app/utils/statement_cap.py),
+    the statements over it taken at /api/testing/statement-cap: Playwright's
+    backends, in testing mode alone."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -497,4 +510,5 @@ class AppSettings(BaseModel):
             cache_expiration_ttl_seconds=env.CACHE_EXPIRATION_TTL,
             wait_quiet_window_seconds=env.WAIT_QUIET_WINDOW_SECONDS,
             pool_guard=env.POOL_GUARD,
+            statement_cap=env.STATEMENT_CAP,
         )

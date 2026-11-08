@@ -88,6 +88,7 @@ from app.services.web_push import WebPushService
 from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.pool_guard import PoolGuard
+from app.utils.statement_cap import StatementCap
 from app.utils.temp_file_manager import TempFileManager
 
 # Background service startup registry. Services register lambdas here
@@ -114,6 +115,21 @@ def install_pool_guard(container: "ServiceContainer") -> None:
             "POOL_GUARD requires FLASK_ENV=testing and a STAGE other than prd"
         )
     container.pool_guard().install()
+
+
+def install_statement_cap(container: "ServiceContainer") -> None:
+    """Install the statement cap under STATEMENT_CAP, which testing mode
+    alone takes, on a stage other than prd, as POOL_GUARD does. Its starter
+    is the second, after the pool guard's, so that the cap sees every
+    statement of the services' threads."""
+    if not container.app_config().statement_cap:
+        return
+    config = container.config()
+    if not config.is_testing or config.stage == "prd":
+        raise ConfigurationError(
+            "STATEMENT_CAP requires FLASK_ENV=testing and a STAGE other than prd"
+        )
+    container.statement_cap().install()
 
 
 def start_controller_client(container: "ServiceContainer") -> None:
@@ -174,6 +190,12 @@ class ServiceContainer(containers.DeclarativeContainer):
     # its nestings taken under /api/testing/pool-guard in testing mode
     pool_guard = providers.Singleton(PoolGuard, watched=None)
     register_for_background_startup(lambda c: install_pool_guard(c))
+
+    # The statement cap on every statement of the process
+    # (app/utils/statement_cap.py), the statements over it taken under
+    # /api/testing/statement-cap in testing mode
+    statement_cap = providers.Singleton(StatementCap, watched=None)
+    register_for_background_startup(lambda c: install_statement_cap(c))
 
     # Testing service - test sessions and content generation
     testing_service = providers.Factory(TestingService)

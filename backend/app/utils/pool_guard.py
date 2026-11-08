@@ -26,16 +26,15 @@ checked out. One the app may make names the function they part in in
 `EXEMPT`, with the reason it cannot fill the pool.
 """
 
-import sys
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
-from types import FrameType
 from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.pool import Pool, QueuePool
+
+from app.utils.stacks import APP, Frame, backend_stack, format_stack
 
 # A function, as `<path from backend/>:<qualname>`, that may hold one
 # connection while it takes another, and why that cannot fill the pool.
@@ -48,32 +47,8 @@ EXEMPT: dict[str, str] = {
     ),
 }
 
-# The app's code, from backend/.
-APP = ("app/", "pilot_mcp/")
 
-_ROOT = f"{Path(__file__).resolve().parents[2]}/"
-_VENV = f"{_ROOT}.venv/"
-
-# A frame: its file from backend/, its line and its function's qualname.
-_Frame = tuple[str, int, str]
-
-
-def _stack() -> tuple[_Frame, ...]:
-    """The calling thread's frames in the backend's own code, outermost
-    first."""
-    frames: list[_Frame] = []
-    frame: FrameType | None = sys._getframe(2)
-    while frame is not None:
-        code = frame.f_code
-        path = code.co_filename
-        if path.startswith(_ROOT) and not path.startswith(_VENV):
-            frames.append((path[len(_ROOT) :], frame.f_lineno, code.co_qualname))
-        frame = frame.f_back
-    frames.reverse()
-    return tuple(frames)
-
-
-def _parting(held: tuple[_Frame, ...], taken: tuple[_Frame, ...]) -> _Frame | None:
+def _parting(held: tuple[Frame, ...], taken: tuple[Frame, ...]) -> Frame | None:
     """The frame the two stacks part in: the last function they share, at
     whichever line; None when they share none."""
     parting = None
@@ -86,15 +61,11 @@ def _parting(held: tuple[_Frame, ...], taken: tuple[_Frame, ...]) -> _Frame | No
     return parting
 
 
-def _format(stack: tuple[_Frame, ...]) -> str:
-    return "\n".join(f"    {path}:{line} in {name}" for path, line, name in stack)
-
-
 @dataclass(frozen=True)
 class _Hold:
     pool: Pool
     thread: int
-    stack: tuple[_Frame, ...]
+    stack: tuple[Frame, ...]
 
 
 @dataclass(frozen=True)
@@ -103,15 +74,15 @@ class Nesting:
     it."""
 
     thread: str
-    held: tuple[_Frame, ...]
-    taken: tuple[_Frame, ...]
+    held: tuple[Frame, ...]
+    taken: tuple[Frame, ...]
 
     def describe(self) -> str:
         return (
             f"Thread {self.thread} checked out a second connection of a pool "
             f"while it held one.\n"
-            f"  The connection it held, checked out at:\n{_format(self.held)}\n"
-            f"  The second, checked out at:\n{_format(self.taken)}"
+            f"  The connection it held, checked out at:\n{format_stack(self.held)}\n"
+            f"  The second, checked out at:\n{format_stack(self.taken)}"
         )
 
 
@@ -156,7 +127,7 @@ class PoolGuard:
         if not isinstance(pool, QueuePool):
             return
         thread = threading.get_ident()
-        stack = _stack()
+        stack = backend_stack()
         with self._lock:
             held = next(
                 (
@@ -178,7 +149,7 @@ class PoolGuard:
         with self._lock:
             self._holds.pop(record, None)
 
-    def _faults(self, held: tuple[_Frame, ...], taken: tuple[_Frame, ...]) -> bool:
+    def _faults(self, held: tuple[Frame, ...], taken: tuple[Frame, ...]) -> bool:
         parting = _parting(held, taken)
         if parting is None:
             return self._watched is None

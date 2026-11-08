@@ -38,6 +38,7 @@ from app.services.web_push import WebPushService
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.pool_guard import PoolGuard
+from app.utils.statement_cap import StatementCap
 
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
@@ -58,6 +59,8 @@ from tests.support.supervisor import Supervise
 _SUITE_LOCK = pytest.StashKey[HeldLock | None]()
 
 _POOL_GUARD = PoolGuard()
+
+_STATEMENT_CAP = StatementCap()
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -95,6 +98,29 @@ def pool_guard(pool_guard_installed: None) -> Generator[None]:
     nestings = _POOL_GUARD.drain()
     if nestings:
         pytest.fail("\n\n".join(n.describe() for n in nestings), pytrace=False)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def statement_cap_installed() -> Generator[None]:
+    """The statement cap (app/utils/statement_cap.py) on every engine, for
+    the run."""
+    _STATEMENT_CAP.install()
+    try:
+        yield
+    finally:
+        _STATEMENT_CAP.uninstall()
+
+
+@pytest.fixture(autouse=True)
+def statement_cap(statement_cap_installed: None) -> Generator[StatementCap]:
+    """Fails the test where the app sent a statement over its bound: in the
+    test, its fixtures, or a thread a test before it left running, whose
+    stack says so. A test that has the app send one drains it from the cap
+    this hands it."""
+    yield _STATEMENT_CAP
+    statements = _STATEMENT_CAP.drain()
+    if statements:
+        pytest.fail("\n\n".join(s.describe() for s in statements), pytrace=False)
 
 
 @pytest.fixture(scope="session")
