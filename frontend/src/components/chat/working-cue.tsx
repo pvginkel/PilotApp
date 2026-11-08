@@ -3,7 +3,7 @@
  * (progress-indicator.tsx), dots animated one at a time beside the phase. It is the reply's
  * current line, so its icon and words line up with the step lines above it. Still, it has no dots,
  * its icon and its words alone: a work item's line on the timeline, whose one motion is its head's
- * pulse, and a session log that runs no turn (W2).
+ * pulse, and a session log that runs no turn (D167).
  */
 
 import { useEffect, useRef } from 'react';

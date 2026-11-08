@@ -281,11 +281,11 @@
   :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 }
 
-/* Under the reduced-motion setting, which Remote Desktop reports, what moves goes instant (D2): a
+/* Under the reduced-motion setting, which Remote Desktop reports, what moves goes instant (D175): a
    transition at once; the fades and the toast's slide-in on their last frame, a fade's forwards
    fill still showing what `opacity-0` hides, where `animation: none` would leave it hidden; a
    flash its ring held for its time (timeline.css), its end still clearing it. What says that
-   something runs keeps moving: the pulses, the spinner and the loading bar, which no rule here
+   something runs keeps moving (D176): the pulses, the spinner and the loading bar, which no rule here
    names, and the dancing dots, run by script (el.animate). A smooth scroll is lib/motion.ts's. */
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after { transition-duration: 0s; transition-delay: 0s; }

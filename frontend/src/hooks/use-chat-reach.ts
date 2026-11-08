@@ -1,8 +1,8 @@
 /**
  * How far back a project's chat shows (F130.1): its first chat shown, kept in the page by the
- * project for the page's life (C9), so that the chats loaded earlier show again once the reader is
+ * project for the page's life, so that the chats loaded earlier show again once the reader is
  * back from another project or another tab; a reload starts from the latest again. Where a chat has
- * opened since the chat last showed, it shows the latest alone (C11). A list the cache holds as the
+ * opened since the chat last showed, it shows the latest alone. A list the cache holds as the
  * chat opens may predate that chat, and while the read its opening makes is under way, what it
  * shows waits for that read before it says whether one opened. A chat that opens while it shows
  * comes in below.

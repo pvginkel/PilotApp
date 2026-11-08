@@ -3,8 +3,8 @@
  * The brain's tools are Claude Code's own, the fleet's (KubeCoder's MCP server) and
  * `pilot-store`'s; anything else is used by its bare name. The line is one colour: what it names as
  * code is set in the mono face, and a command's or an agent's description, the model's own
- * sentence, stands without a verb (C4). Every other line opens on its verb, so that a running
- * call's line reads as a status on its own, as a work item's line shows it (W2): "Asking KubeCoder
+ * sentence, stands without a verb. Every other line opens on its verb, so that a running
+ * call's line reads as a status on its own, as a work item's line shows it (D167): "Asking KubeCoder
  * start session", "Using Skill".
  */
 

@@ -1,5 +1,5 @@
 /**
- * The loading bar (H5): while the router keeps the screen showing for what its successor reads
+ * The loading bar: while the router keeps the screen showing for what its successor reads
  * (`screen-reads.ts`), a thin line under the top bar, on a phone at the page's top, once the wait
  * has lasted 200 ms; a shorter wait shows none.
  */

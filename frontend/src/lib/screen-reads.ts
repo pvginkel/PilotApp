@@ -1,5 +1,5 @@
 /**
- * What a project's screens read before the router swaps one in (H5): a project's head and its
+ * What a project's screens read before the router swaps one in: a project's head and its
  * timeline, or a draft's chats in the timeline's place; a document's tab its document, a card's
  * block its card's, the handbook's and the project document's their own. A route's loader reads
  * them into the page's cache, each under its generated hook's key, so that the router keeps the

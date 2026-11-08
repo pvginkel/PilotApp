@@ -4,7 +4,7 @@
  * environment's name in words that go nowhere, its full name their tooltip; on a phone its icon
  * alone, a button that shows the full name in a popover under it; a pulse while its run is under
  * way, from its start, and the running time, "17m", beside it once its run began (F26.1, F12),
- * the tile's one motion, its line standing still (W2); then Session log and Stop as icons, their
+ * the tile's one motion, its line standing still (D167); then Session log and Stop as icons, their
  * names their tooltips, before the head's Discuss (F26.8). Under its title is its one line
  * (F26.2): the server's own words while its session comes up, or comes back while its environment
  * restarts; the call it runs alone, "Reading …/chat/tools.ts", Thinking or Writing alone, the
@@ -14,7 +14,7 @@
  * ended in error left, shown as a stopped one is (F125); what holds the nudge owed to a run whose turn ended under
  * a halt or a pause, as a held start's reason, "Halted at the week’s limit", "Paused" (F135.3,
  * F141.3). Session log, in every state, opens the session's records in the overlay (F26.3, F69).
- * Stop, while it runs, starts or is held, or idle with its nudge owed (W8), asks first in the row
+ * Stop, while it runs, starts or is held, or idle with its nudge owed (D169), asks first in the row
  * under the line, Esc dismissing the question; Resume, in that row once it stopped or failed, carries it on (F67), disabled while the
  * project is archived, as its head's switch is (D012). Pilot's own work, the setup, the one job
  * drawn here (every other shows on the item it follows from, job.tsx), has no env chip and no Stop
@@ -26,7 +26,7 @@
  * browser's Stop or Resume swaps the two, the keyboard focus on the button that went goes to the
  * other, Resume or Stop's icon, and once its Retry lands, to Session log's icon; a swap another
  * browser's act made moves no focus, and a refused act gives it back to the button pressed, Resume,
- * Retry or Stop it (W7).
+ * Retry or Stop it.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';

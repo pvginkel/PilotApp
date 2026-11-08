@@ -77,7 +77,7 @@
   }
   .item.concept { border-style: dashed; }
   .item.fresh { animation: fresh 1.6s ease-out; }
-  /* A flash's ring, fading; under reduced motion held for its time, with no fade (D2). */
+  /* A flash's ring, fading; under reduced motion held for its time, with no fade (D175). */
   @keyframes fresh { from { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
   @media (prefers-reduced-motion: reduce) {
     @keyframes fresh { from, to { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
@@ -612,7 +612,7 @@
     animation: live-pulse 1.4s ease-in-out infinite;
   }
   /* Its one line: the working cue, a sub-agent's description after it past a " · ", in the cue's
-     one colour (C4), cut short where long, the description under the cue on a phone, its " · "
+     one colour, cut short where long, the description under the cue on a phone, its " · "
      gone; a stop or a failure in the stopped chip's colour, an error wrapping whole; a job's Retry
      muted under it. The " · " stands a space's width from either side. */
   .work-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 2px 0 0; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }

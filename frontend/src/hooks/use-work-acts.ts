@@ -1,12 +1,12 @@
 /**
  * A work item's Stop and Resume (F67), the record's writes: Stop ends its session where it is, a
- * start held or under way included, and one idle with its nudge owed is owed it no more (W8);
+ * start held or under way included, and one idle with its nudge owed is owed it no more (D169);
  * Resume carries a stopped or failed one on through the gate. A job of Pilot's own takes neither;
  * Retry places a fresh job for a stopped or failed one's trigger, at the project's next place, and
  * marks the one retried. The answer, the item's session as it stands, goes into its project's
  * timeline as read; then every screen reads again. A refusal is the query client's toast, the
  * API's words, and the button pressed, disabled while its act was on its way, has the keyboard
- * focus back where it had it and nothing took it meanwhile (W7). Their form events are
+ * focus back where it had it and nothing took it meanwhile. Their form events are
  * `timeline.stop`'s, `timeline.resume`'s and `timeline.retry`'s, sent whether or not the item's
  * actions are still drawn when the answer comes. An act answers the item's session as it stands,
  * or none where it was refused.
@@ -31,7 +31,7 @@ type State = Work['state'];
 export const STOPPABLE: readonly State[] = ['running', 'starting', 'held'];
 export const RESUMABLE: readonly State[] = ['stopped', 'failed'];
 
-/** Whether a worker's item offers Stop: while it runs, starts or is held, and idle with its nudge owed, its run halted or paused at its turn's end (W8). */
+/** Whether a worker's item offers Stop: while it runs, starts or is held, and idle with its nudge owed, its run halted or paused at its turn's end (D169). */
 export const offersStop = (work: Work) => STOPPABLE.includes(work.state) || (work.state === 'idle' && work.nudge_owed);
 
 /** The states a Stop's answer replaces the item's session in. */

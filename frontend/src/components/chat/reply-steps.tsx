@@ -63,8 +63,8 @@ function runningCall(steps: Step[]): ToolCallView | null {
 
 /**
  * A run's line: its running call's words while one runs, else what the run did, and its count of
- * steps, each text held for a moment (C1); the spinner, and the count of failed calls, the one red
- * in the line (C3), change at once.
+ * steps, each text held for a moment; the spinner, and the count of failed calls, the one red
+ * in the line, change at once.
  */
 function RunLine({ steps, liveFrom }: { steps: Step[]; liveFrom: number | null }) {
   const [open, setOpen] = useState(false);

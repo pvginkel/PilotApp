@@ -1,4 +1,4 @@
-/** A step line's words, in the line's one colour: code in the mono face (C4). */
+/** A step line's words, in the line's one colour: code in the mono face. */
 
 import { Fragment } from 'react';
 import type { Words } from '@/lib/chat/tools';

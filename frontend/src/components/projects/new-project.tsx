@@ -1,5 +1,5 @@
 /**
- * A new project, the plus's (F46.1; slice 037's asks D1, on its first message): its definition chat,
+ * A new project, the plus's (F46.1; D174, on its first message): its definition chat,
  * "Tell Pilot what to manage", with nothing behind it on the server, its composer over its foot, the
  * focus in its field; over it the draft's head, "New project" and its Draft chip, and beside it the
  * panel's Draft and Documents, both empty; on a phone the tabs at the bottom, a draft's. The first

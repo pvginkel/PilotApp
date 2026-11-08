@@ -4,9 +4,9 @@
  * column (F46.1; the mockup's `renderChat`, its home the page until Create). Either shows the
  * project's latest chat, or with none open the latest closed one, above the line where it closed.
  * "Load previous" at the top loads the chat before above what is in view and leaves the view where
- * it is (the chat mockup's decision 11; C10); how far back it shows is kept in the page by the
- * project, and a chat opened since it last showed has it show the latest alone (C9, C11;
- * use-chat-reach.ts); a chat that opens while it shows comes in below.
+ * it is (the chat mockup's decision 11; D170); how far back it shows is kept in the page by the
+ * project, and a chat opened since it last showed has it show the latest alone
+ * (use-chat-reach.ts); a chat that opens while it shows comes in below.
  * Every viewer streams the chats it shows, so another person's message and Pilot's reply come to
  * them as to the sender (decision 13); the list is read again on `project_changed`, which a chat's
  * open and close and each move of its session raise. Nothing stands in it while the list's read is

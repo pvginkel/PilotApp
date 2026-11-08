@@ -9,13 +9,13 @@
  * from the first record while it is open (F40.3), one reply per turn, each ended one closing on
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
  * (F69.2). Before a turn's reply stands what the server sent it, as Pilot's message, cut after its
- * first lines, Show more at the end of the last one and, once opened, Show less after its end (T5):
+ * first lines, Show more at the end of the last one and, once opened, Show less after its end:
  * the brief, a continuation, a Resume's; a turn sent and not yet answered shows its message alone. Its tail is the working cue while the session is held, starts or runs, else how it
  * ended: "Stopped by you · <time>", by whom else, by Pilot at the usage limit, the environment
  * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6);
  * a run whose turn ended under a halt or a pause adds, under its end, what holds its nudge, as its
  * line does (F135.3, F141.3). The cue's dots dance while a turn runs or comes up, and it stands
- * still while the gate holds the start or a nudge is owed (W2). The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
+ * still while the gate holds the start or a nudge is owed (D167). The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
  * log on. An address that names no work item of the project reads "The session log did not load".
  */
 

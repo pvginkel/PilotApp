@@ -6,7 +6,7 @@ import type { QuoteRef } from '@/lib/chat/quotes';
 
 /**
  * A block as its quote names it: its own section's heading, else its kind, numbered among the
- * blocks of that kind in its document where it holds more than one (C14), so that two decisions
+ * blocks of that kind in its document where it holds more than one, so that two decisions
  * under one heading, or under none, quote as "Decision 1 · Packing" and "Decision 2 · Packing".
  */
 function nameOf(block: Block, blocks: readonly Block[]): string {

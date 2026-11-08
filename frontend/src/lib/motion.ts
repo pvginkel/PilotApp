@@ -1,5 +1,5 @@
 /**
- * A smooth scroll's behaviour: instant under the reduced-motion setting (D2), which no style rule
+ * A smooth scroll's behaviour: instant under the reduced-motion setting (D175), which no style rule
  * reaches for a scroll a script asks to be smooth.
  */
 

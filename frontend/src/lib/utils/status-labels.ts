@@ -430,7 +430,7 @@ function stopWords(work: Work): StopWords | null {
 
 /**
  * A work item's one line on the timeline while its session is held, starts or runs, or owes its
- * nudge: the working cue's state, or the call it runs alone (W2).
+ * nudge: the working cue's state, or the call it runs alone (D167).
  */
 interface WorkCue {
   kind: 'cue';
@@ -481,7 +481,7 @@ const cue = (activity: Activity, step: Words[] | null = null, detail: string | n
 /**
  * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
  * chat words its cue, the call it runs alone in the phase's place and Thinking or Writing with
- * nothing after it (W2), or that it starts, or waits for Pilot, before its session gives one;
+ * nothing after it (D167), or that it starts, or waits for Pilot, before its session gives one;
  * "Stopped · <time>" with a stop made elsewhere's cause, or a usage halt's hard stop's "Stopped at
  * the week’s limit · <time>" and its like (F135.6), or the store's update's "Stopped for Pilot’s
  * update · <time>" (F144.4); the error it failed on; what holds the nudge

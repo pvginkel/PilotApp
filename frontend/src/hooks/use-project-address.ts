@@ -1,5 +1,5 @@
 /**
- * A project's address, `/projects/<address>` (H3): its slug once Create project has given it one,
+ * A project's address, `/projects/<address>` (D173): its slug once Create project has given it one,
  * else `draft-<number>`, the name of its folder in the store's tree, which still names it after
  * Create; and its id names it too. An address names its one project for good: a slug is set once,
  * a draft's number is never handed out again, and no slug starts `draft-` or reads as an id. The

@@ -1,5 +1,5 @@
 /**
- * A long text clamped (T5): cut after its first `lines` lines, Show more over the end of the last
+ * A long text clamped: cut after its first `lines` lines, Show more over the end of the last
  * one, and once opened whole, Show less after its last word, which cuts it again. A text that fits
  * shows whole, with neither. Both are buttons, so that a scrolling view takes what they open or
  * close for the reader's own (use-own-growth.ts); the one pressed hands the focus to the other.
