@@ -169,7 +169,8 @@ test.describe('A work item’s session log', () => {
     const me = await people.signIn();
     const project = await projects.make({ name: makeUnique('Log'), members: [me.handle!] });
     const steps = Array.from({ length: 24 }, (_, n) => `Step ${n + 1}: read the next stylesheet.`);
-    const brief = ['Survey the stylesheets.', ...steps].join('\n');
+    // A worker's brief ends in its line break, as the server's does, which ends it on the handbook.
+    const brief = `${['Survey the stylesheets.', ...steps].join('\n')}\n`;
     const work = await projects.startWork(project, { title: TITLE, brief, cwd: '/work/Example' });
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
     const { id: environment } = await projects.environment(project, work);
@@ -194,10 +195,20 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.sentLess).toBeFocused();
     expect((await sentText.boundingBox())!.y).toBeCloseTo(cut.y, 0);
     expect(await sessionLog.body.evaluate((body) => body.scrollHeight > body.clientHeight)).toBe(true);
-    // Show less after its last word, on its last line, not at that line's start.
+    // Show less after its last word, on its line, not on a line of its own.
     const [whole, less] = [(await sentText.boundingBox())!, (await sessionLog.sentLess.boundingBox())!];
     expect(Math.abs(whole.y + whole.height - (less.y + less.height))).toBeLessThanOrEqual(1);
-    expect(less.x).toBeGreaterThan(whole.x + 1);
+    const word = await sentText.evaluate((box) => {
+      const text = [...box.childNodes].filter((node): node is Text => node instanceof Text && node.data.trim() !== '').at(-1)!;
+      const range = document.createRange();
+      range.setStart(text, text.data.trimEnd().length - 1);
+      range.setEnd(text, text.data.trimEnd().length);
+      const { right, top, bottom } = range.getBoundingClientRect();
+      return { right, top, bottom };
+    });
+    expect(less.x).toBeGreaterThan(word.right);
+    expect(less.y + less.height / 2).toBeGreaterThan(word.top);
+    expect(less.y + less.height / 2).toBeLessThan(word.bottom);
 
     // Show less cuts it again.
     await sessionLog.sentLess.click();

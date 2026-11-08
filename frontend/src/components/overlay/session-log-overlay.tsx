@@ -233,7 +233,8 @@ function SentMessage({ sent }: { sent: SessionTurn }) {
     <section className="log-sent" data-testid="session-log.sent">
       <div className="bubble">
         <Clamp lines={SENT_LINES} testId="session-log.sent.text">
-          <LinkedText text={sent.message} />
+          {/* The bubble keeps the text's line breaks: one it ends in would put Show less on a line of its own. */}
+          <LinkedText text={sent.message.trimEnd()} />
         </Clamp>
       </div>
       <div className="end" data-testid="session-log.sent.end">
