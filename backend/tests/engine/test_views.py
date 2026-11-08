@@ -3,16 +3,25 @@ shapes pinned, each with its hash computed on render."""
 
 import hashlib
 import json
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
-from app.engine.views import READONLY, Rendering, project_chats, utc_time
+from app.engine.closed_chats import ClosedChats
+from app.engine.views import (
+    READONLY,
+    Rendering,
+    ViewService,
+    project_chats,
+    utc_time,
+)
 from app.models import (
     Attachment,
     CardTransition,
@@ -664,6 +673,24 @@ def _rendering(rendering: Rendering) -> str:
     return rendering.text
 
 
+def _views(session: DbSession, container: ServiceContainer) -> ViewService:
+    """A view service keeping closed chats of its own, none yet."""
+    return ViewService(session, container.engine_bus(), ClosedChats())
+
+
+def _reads(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
+    """The chats whose records each render reads, in order."""
+    read: list[uuid.UUID] = []
+    conversation = ViewService._conversation
+
+    def reading(views: ViewService, session_id: uuid.UUID) -> list[str]:
+        read.append(session_id)
+        return conversation(views, session_id)
+
+    monkeypatch.setattr(ViewService, "_conversation", reading)
+    return read
+
+
 class TestChatView:
     """`chat.md` (design 3 §10; F74; D7)."""
 
@@ -821,6 +848,100 @@ class TestChatView:
             earlier.id,
             later.id,
         ]
+
+    def test_a_closed_chat_is_read_once_and_an_open_one_at_every_render(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        closed = open_chat(session, project, opened_at=_at(9))
+        _writer(session, container, closed).message(person, "Earlier.")
+        close_chat(session, closed, _at(9, 30), CloseCause.TIMEOUT)
+        running = open_chat(session, project, opened_at=_at(10))
+        _writer(session, container, running).message(person, "Now.")
+        views = _views(session, container)
+        read = _reads(monkeypatch)
+
+        first = views.chat(project)
+        again = views.chat(project)
+
+        assert again == first
+        assert "Earlier." in first.text
+        assert read == [closed.id, running.id, running.id]
+
+    def test_a_record_a_closed_chat_takes_after_its_render_shows_in_the_next(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        # A Finish or Reopen while the chat's start sends its brief leaves the
+        # turn's records after the close (slice 022's B7).
+        run = open_chat(session, project, opened_at=_at(9))
+        chat = _writer(session, container, run)
+        chat.message(person, "Finish it.")
+        close_chat(session, run, _at(9, 30), CloseCause.FINISHED)
+        views = _views(session, container)
+        views.chat(project)
+
+        chat.text("Finished.")
+
+        assert "Finished." in _rendering(views.chat(project))
+
+    def test_a_record_taken_while_a_closed_chat_is_read_shows_in_the_next_render(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        run = open_chat(session, project, opened_at=_at(9))
+        chat = _writer(session, container, run)
+        chat.message(person, "Finish it.")
+        close_chat(session, run, _at(9, 30), CloseCause.FINISHED)
+        views = _views(session, container)
+        conversation = ViewService._conversation
+        late: list[str] = []
+
+        def reading(views: ViewService, session_id: uuid.UUID) -> list[str]:
+            paragraphs = conversation(views, session_id)
+            if not late:
+                late.append("Late.")
+                chat.text("Late.")
+            return paragraphs
+
+        monkeypatch.setattr(ViewService, "_conversation", reading)
+
+        assert "Late." not in views.chat(project).text
+        assert "Late." in _rendering(views.chat(project))
+
+    def test_a_record_rolled_back_never_shows_once_another_takes_its_place(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = open_chat(session, project, opened_at=_at(9))
+        chat = _writer(session, container, run)
+        chat.message(person, "Finish it.")
+        close_chat(session, run, _at(9, 30), CloseCause.FINISHED)
+        views = _views(session, container)
+        nested = session.begin_nested()
+        chat.text("Rolled back.")
+        assert "Rolled back." in views.chat(project).text
+        nested.rollback()
+
+        chat.text("Kept.")
+
+        text = _rendering(views.chat(project))
+        assert "Kept." in text
+        assert "Rolled back." not in text
 
     def test_another_projects_chats_are_not_in_it(
         self,

@@ -176,7 +176,9 @@ def _end_turn(container: ServiceContainer, db: DbSession, run: models.Session) -
         select(Turn).where(Turn.session_id == run.id, Turn.ended_at.is_(None))
     ).one()
     SessionRecordService(
-        db, container.session_stream_service(), ViewService(db, container.engine_bus())
+        db,
+        container.session_stream_service(),
+        ViewService(db, container.engine_bus(), container.closed_chats()),
     ).append(
         run.id,
         RecordKind.RESULT,

@@ -670,7 +670,9 @@ def _turn_ended(
 
 def _records(db: DbSession, container: ServiceContainer) -> SessionRecordService:
     return SessionRecordService(
-        db, container.session_stream_service(), ViewService(db, container.engine_bus())
+        db,
+        container.session_stream_service(),
+        ViewService(db, container.engine_bus(), container.closed_chats()),
     )
 
 

@@ -868,7 +868,7 @@ def _worker_run(
     SessionRecordService(
         db,
         container.session_stream_service(),
-        ViewService(db, container.engine_bus()),
+        ViewService(db, container.engine_bus(), container.closed_chats()),
     ).append(
         run.id,
         RecordKind.RESULT,

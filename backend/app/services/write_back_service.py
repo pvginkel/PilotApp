@@ -294,7 +294,11 @@ class WriteBackService:
         assert item is not None
         db.execute(select(Project.id).where(Project.id == project.id).with_for_update())
         records = SessionRecordService(
-            db, self._streams, ViewService(db, self._container.engine_bus())
+            db,
+            self._streams,
+            ViewService(
+                db, self._container.engine_bus(), self._container.closed_chats()
+            ),
         )
         records.lock_session(owed.session_id)
         documents.lock(document)

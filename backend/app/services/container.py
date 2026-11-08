@@ -10,6 +10,7 @@ from app.app_config import AppSettings
 from app.config import Settings
 from app.engine.attachments import AttachmentStore, AttachService
 from app.engine.bus import EngineBus
+from app.engine.closed_chats import ClosedChats
 from app.engine.documents import DocumentService
 from app.engine.ingest import IngestService
 from app.engine.plan import PlanService
@@ -221,6 +222,10 @@ class ServiceContainer(containers.DeclarativeContainer):
     # The reference rows the reads look up, kept for the process's life, as
     # app/engine/references.py keeps them
     references = providers.Singleton(References)
+
+    # A closed chat's paragraphs in chat.md, kept for the process's life, as
+    # app/engine/closed_chats.py keeps them
+    closed_chats = providers.Singleton(ClosedChats)
 
     # The slot, the gate's fourth condition (design 2 §13.5): the start raises
     # its event at a work item's start, the relay and the start at its end.
@@ -469,7 +474,9 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # The engine (design 1 §0): one bus per process, its services per session
     engine_bus = providers.Singleton(EngineBus)
-    view_service = providers.Factory(ViewService, db=db_session, engine_bus=engine_bus)
+    view_service = providers.Factory(
+        ViewService, db=db_session, engine_bus=engine_bus, closed_chats=closed_chats
+    )
     plan_service = providers.Factory(
         PlanService,
         db=db_session,

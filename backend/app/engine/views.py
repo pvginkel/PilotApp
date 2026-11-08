@@ -4,7 +4,7 @@ decisions 34 and 49, TD §7.1.1, design 1 §8, design 3 §10)."""
 
 import json
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, ProjectChanged, TreeHashMoved
+from app.engine.closed_chats import ClosedChats
 from app.engine.paths import (
     CHAT,
     TIMELINE,
@@ -40,7 +41,11 @@ from app.models.reference import ChatKind, RecordKind, SessionState, TaskStatus
 from app.services.current_line import TOOL_BLOCKS
 from app.services.effect_service import EFFECT
 from app.services.people_service import AGENT_HANDLE
-from app.services.session_record_service import StoredRecord, read_records
+from app.services.session_record_service import (
+    StoredRecord,
+    last_record,
+    read_records,
+)
 from app.services.start_gate import CHAT_KIND
 
 READONLY = (
@@ -84,9 +89,12 @@ class _Said:
 
 
 class ViewService:
-    def __init__(self, db: Session, engine_bus: EngineBus) -> None:
+    def __init__(
+        self, db: Session, engine_bus: EngineBus, closed_chats: ClosedChats
+    ) -> None:
         self.db = db
         self.engine_bus = engine_bus
+        self.closed_chats = closed_chats
 
     def confirmation_reasons(self) -> list[ConfirmationReason]:
         """The reasons in `reference.json`'s order, which a fault naming them
@@ -227,12 +235,16 @@ class ViewService:
         from the `send` records, their words verbatim, and Pilot's text,
         the main thread's `assistant` text blocks alone, with each effect's
         line where its call ran, every record read through the one read
-        function."""
+        function; a closed chat's kept (`_closed_conversation`)."""
         paragraphs = [f"<!-- {READONLY} -->"]
         for listed in project_chats(self.db, project.id):
             paragraphs.append(f"## Chat · opened {utc_time(listed.opened_at)}")
-            paragraphs.extend(self._conversation(listed.chat.id))
             closed = listed.chat.closed_at
+            paragraphs.extend(
+                self._conversation(listed.chat.id)
+                if closed is None
+                else self._closed_conversation(listed.chat.id)
+            )
             paragraphs.append(
                 "Open" if closed is None else f"Closed {utc_time(closed)}"
             )
@@ -260,6 +272,23 @@ class ViewService:
         transaction commits (F80.2's chat)."""
         self.chat_moved(project)
         self.engine_bus.emit(ProjectChanged(project.id))
+
+    def _closed_conversation(self, chat_id: uuid.UUID) -> Sequence[str]:
+        """A closed chat's paragraphs, kept with the id of its last record,
+        read before them.
+
+        A Session's records are written one per transaction under its row's
+        lock, so committed in the order of their ids, and never changed; and
+        an id is never handed out again, a rolled-back record's included. So
+        the paragraphs read after the last id hold every record up to it, and
+        any record they hold past it gives every later read a last id of its
+        own."""
+        last = _last_id(self.db, chat_id)
+        kept = self.closed_chats.get(chat_id, last)
+        if kept is None:
+            kept = tuple(self._conversation(chat_id))
+            self.closed_chats.keep(chat_id, last, kept)
+        return kept
 
     def _conversation(self, session_id: uuid.UUID) -> list[str]:
         """The chat's paragraphs in their order, each run of Pilot's and each
@@ -370,6 +399,11 @@ def pilot_text(payload: Any) -> list[str]:
         and isinstance(block.get("text"), str)
         and block["text"].strip()
     ]
+
+
+def _last_id(db: Session, session_id: uuid.UUID) -> int | None:
+    last = last_record(db, session_id)
+    return None if last is None else last.record.id
 
 
 def shows_in_chat(kind: RecordKind, payload: Any) -> bool:

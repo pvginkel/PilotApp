@@ -226,7 +226,9 @@ class ChatCloseService:
         return SessionRecordService(db, self._streams, self._views(db))
 
     def _views(self, db: Session) -> ViewService:
-        return ViewService(db, self._container.engine_bus())
+        return ViewService(
+            db, self._container.engine_bus(), self._container.closed_chats()
+        )
 
     def _client(self) -> ControllerClient:
         client: ControllerClient = self._container.controller_client()

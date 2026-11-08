@@ -172,7 +172,7 @@ def _end(db: DbSession, container: ServiceContainer, run: models.Session) -> Non
     SessionRecordService(
         db,
         container.session_stream_service(),
-        ViewService(db, container.engine_bus()),
+        ViewService(db, container.engine_bus(), container.closed_chats()),
     ).append(
         run.id,
         RecordKind.RESULT,

@@ -267,7 +267,11 @@ class TurnEndReadService:
             .execution_options(populate_existing=True)
         ).one()
         records = SessionRecordService(
-            db, self._streams, ViewService(db, self._container.engine_bus())
+            db,
+            self._streams,
+            ViewService(
+                db, self._container.engine_bus(), self._container.closed_chats()
+            ),
         )
         records.lock_session(session_id)
         documents.lock(document)

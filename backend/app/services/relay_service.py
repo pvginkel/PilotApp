@@ -1219,7 +1219,11 @@ class RelayService:
 
     def _records(self, db: Session) -> SessionRecordService:
         return SessionRecordService(
-            db, self._streams, ViewService(db, self._container.engine_bus())
+            db,
+            self._streams,
+            ViewService(
+                db, self._container.engine_bus(), self._container.closed_chats()
+            ),
         )
 
     def _client(self) -> ControllerClient:
