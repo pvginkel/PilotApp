@@ -30,6 +30,7 @@ import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePanelDocuments } from '@/hooks/use-panel';
 import { DRAFT_TABS, PhoneViewContext, PROJECT_TABS, usePhoneTab, type PhoneTab } from '@/hooks/use-phone-tab';
+import { useShownProject } from '@/hooks/use-project-address';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import type { QuoteRef } from '@/lib/chat/quotes';
 import { cn } from '@/lib/utils';
@@ -46,7 +47,8 @@ interface PhoneProjectProps {
 
 export function PhoneProject({ projectId, project, overlaid, children }: PhoneProjectProps) {
   const draft = project?.state === 'draft';
-  const { tab, show, views, back, scroll, keep } = usePhoneTab(projectId, draft, overlaid);
+  const { tab, show, views, back, scroll, keep } = usePhoneTab(draft, overlaid);
+  const { address } = useShownProject();
   const documents = usePanelDocuments(projectId);
   const navigate = useNavigate();
   const chatTab = draft ? 'timeline' : 'chat';
@@ -60,7 +62,7 @@ export function PhoneProject({ projectId, project, overlaid, children }: PhonePr
   };
   const toDraftBlock = (block: string) => {
     if (!draft) {
-      void navigate({ to: '/projects/$projectId/project-document', params: { projectId } });
+      void navigate({ to: '/projects/$address/project-document', params: { address } });
       return;
     }
     goToDraftBlock(projectId, block);

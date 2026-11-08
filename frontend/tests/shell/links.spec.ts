@@ -10,6 +10,7 @@
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique, makeUniqueToken } from '../support/helpers';
+import { projectAddress } from '../support/projects';
 
 const ENVIRONMENT_ID = 'pvginkel-example-1a2b3c';
 
@@ -53,14 +54,14 @@ test.describe('Links in text', () => {
     const clicked = page.waitForEvent('popup');
     await ticket.click();
     expect((await clicked).url()).toBe(`${backendUrl}/tickets/PL-7`);
-    await expect(page).toHaveURL(`/projects/${onScreen}`);
+    await expect(page).toHaveURL(projectAddress(onScreen));
 
     // Enter on a focused one opens it too.
     await environment.focus();
     const entered = page.waitForEvent('popup');
     await page.keyboard.press('Enter');
     expect((await entered).url()).toBe(`${kubecoder}/${lab.id}/ssh/open`);
-    await expect(page).toHaveURL(`/projects/${onScreen}`);
+    await expect(page).toHaveURL(projectAddress(onScreen));
   });
 
   test('of two environments, one named as the other plus a hyphen suffix, the longer name links to its own', async ({

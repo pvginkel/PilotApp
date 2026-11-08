@@ -18,6 +18,7 @@ import type { Locator, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import type { ShellPage } from '../support/page-objects/shell-page';
+import { projectAddress } from '../support/projects';
 
 const PHONE = { width: 390, height: 844 };
 const TOP_BAR_COLOUR = '#568ed2';
@@ -175,12 +176,12 @@ test.describe('The frame at the narrow width', () => {
     await shell.drawerToggle.click();
     await expect(shell.side).toBeVisible();
     await projectList.tab(b).click();
-    await expect(page).toHaveURL(`/projects/${bId}`);
+    await expect(page).toHaveURL(projectAddress(bId));
     await expect(shell.side).toBeHidden();
     await expect(shell.scrim).toBeHidden();
 
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${aId}`);
+    await expect(page).toHaveURL(projectAddress(aId));
     await expect(shell.side).toBeHidden();
   });
 });

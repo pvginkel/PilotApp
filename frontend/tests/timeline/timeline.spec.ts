@@ -7,7 +7,7 @@
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 import type { components } from '@/lib/api/generated/types';
 
 type TimelineItem = components['schemas']['TimelineSchema.1fdd8ae.TimelineItemSchema'];
@@ -414,13 +414,13 @@ test.describe('Anchored to its end', () => {
     await timeline.scrollToTop();
 
     await projectList.tab(second).click();
-    await expect(page).toHaveURL(`/projects/${secondId}`);
+    await expect(page).toHaveURL(projectAddress(secondId));
     await expect(timeline.items).toHaveCount(8);
     await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
     await timeline.scrollToTop();
 
     await projectList.tab(first).click();
-    await expect(page).toHaveURL(`/projects/${firstId}`);
+    await expect(page).toHaveURL(projectAddress(firstId));
     await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
   });
 });

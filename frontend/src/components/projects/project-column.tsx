@@ -5,11 +5,12 @@
  */
 
 import { useState } from 'react';
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { Archive, ArrowLeft, ChevronDown, ChevronRight, Ellipsis, Plus } from 'lucide-react';
 import { ProjectTab } from '@/components/projects/project-tab';
 import { Menu, MenuItem } from '@/components/shared/menu';
 import { discussIn } from '@/hooks/use-discuss';
+import { useProjectOnScreen } from '@/hooks/use-project-address';
 import { groupProjects, useArchivedProjects, useProjectList, type ProjectTab as Project } from '@/hooks/use-projects';
 import { usePostProjects } from '@/lib/api/generated/hooks';
 import { rememberInBrowser, useBrowserState, type Group } from '@/lib/browser-state';
@@ -24,7 +25,7 @@ const GROUP_NAMES: Record<Group, string> = { others: 'Other projects', finished:
 
 function ProjectList({ onArchived }: { onArchived: () => void }) {
   const { data } = useProjectList();
-  const onScreen = useParams({ strict: false, select: (params) => params.projectId });
+  const onScreen = useProjectOnScreen();
   const { chevrons } = useBrowserState();
   // A group the project on screen is in stands open by itself; closed by the person, it stays
   // closed until another project comes on screen.
@@ -98,7 +99,7 @@ function NewProjectButton() {
         trackFormSuccess(NEW_PROJECT_FORM, { project: draft.id });
         // As Discuss asks for it, with nothing quoted: the composer's field takes the focus once drawn.
         discussIn(draft.id, null);
-        void navigate({ to: '/projects/$projectId', params: { projectId: draft.id } });
+        void navigate({ to: '/projects/$address', params: { address: draft.address } });
       },
       onError: () => trackFormError(NEW_PROJECT_FORM),
     });

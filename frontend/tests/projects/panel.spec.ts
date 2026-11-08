@@ -27,7 +27,7 @@ import { documentAddress, projectDocumentAddress } from '../support/page-objects
 import { isOnTop } from '../support/page-objects/panel-page';
 import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
 import type { People } from '../support/people';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 
 const ZONE = 'Europe/Amsterdam';
 test.use({ timezoneId: ZONE });
@@ -201,7 +201,7 @@ test.describe('The side panel on a wide window', () => {
 
     await docTabs.closeAll.click();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${p.id}`);
+    await expect(page).toHaveURL(projectAddress(p.id));
     await expect(panel.root).toBeVisible();
   });
 
@@ -232,11 +232,11 @@ test.describe('The side panel on a wide window', () => {
     await expect(panel.projectDocument.title).toHaveText(oneName);
 
     await projectList.tab(otherName).click();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
     await expect(projectHead.name).toHaveText(otherName);
     await expect(chat.tab).toHaveAttribute('aria-selected', 'true');
     await projectList.tab(oneName).click();
-    await expect(page).toHaveURL(`/projects/${one}`);
+    await expect(page).toHaveURL(projectAddress(one));
     await expect(projectHead.name).toHaveText(oneName);
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
 

@@ -6,10 +6,11 @@
  * item's under it, is the current page's. An <a> itself, its text links through spans (F91, F93).
  */
 
-import { Link, useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { StatusIcon } from '@/components/projects/status-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
+import { useProjectOnScreen } from '@/hooks/use-project-address';
 import type { ProjectTab as Project } from '@/hooks/use-projects';
 import { projectStatusLine } from '@/lib/utils/status-labels';
 import { cn } from '@/lib/utils';
@@ -17,12 +18,12 @@ import { cn } from '@/lib/utils';
 export function ProjectTab({ project, archived = false }: { project: Project; archived?: boolean }) {
   const status = projectStatusLine(project);
   // The tab of the project on screen is no switch (F1.6): it goes to the project's own address.
-  const onScreen = useParams({ strict: false, select: (params) => params.projectId === project.id });
+  const onScreen = useProjectOnScreen() === project.id;
   return (
     <Link
-      to="/projects/$projectId"
-      params={{ projectId: project.id }}
-      state={onScreen ? undefined : { fromList: true }}
+      to="/projects/$address"
+      params={{ address: project.address }}
+      state={onScreen ? undefined : { fromList: project.id }}
       className={cn('tab', project.state === 'finished' && 'finished')}
       data-testid="projects.tab"
     >

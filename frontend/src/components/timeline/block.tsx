@@ -28,7 +28,6 @@
  */
 
 import { useContext, useState } from 'react';
-import { useParams } from '@tanstack/react-router';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfBlock, quoteOfDraftBlock } from '@/components/chat/discuss-quotes';
@@ -51,6 +50,7 @@ import { SectionsContext } from '@/components/timeline/sections';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { useAnswer, useDraftAnswer, type Answering } from '@/hooks/use-answer';
+import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { isAnswered, type Block as BlockData, type BodyPart, type TimelineItem } from '@/hooks/use-timeline';
 import type { QuoteRef } from '@/lib/chat/quotes';
@@ -67,7 +67,7 @@ interface BlockProps {
 
 /** An item's block, answered through its item. */
 export function Block({ item, block, solo = false, section = [{ type: 'block', block }] }: BlockProps) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const answering = useAnswer(item.id, block.id);
   const archived = useArchived(projectId);
   const locked = useContext(LockedContext);

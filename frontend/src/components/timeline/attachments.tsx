@@ -7,10 +7,11 @@
  */
 
 import type { ReactNode } from 'react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { Files, Paperclip } from 'lucide-react';
 import { Menu, MenuItem } from '@/components/shared/menu';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
+import { useShownProject } from '@/hooks/use-project-address';
 import type { Attachment, TimelineItem } from '@/hooks/use-timeline';
 
 interface AttachmentsProps {
@@ -43,7 +44,7 @@ export function Attachments({ item, inDocument = false }: AttachmentsProps) {
 
 /** A done line's indicator: the one attachment, or a menu of several. */
 export function LineAttachments({ item }: { item: TimelineItem }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   const navigate = useNavigate();
   const replace = useTabReplace();
   const { attachments } = item;
@@ -88,8 +89,8 @@ export function LineAttachments({ item }: { item: TimelineItem }) {
           icon={Paperclip}
           onSelect={() =>
             void navigate({
-              to: '/projects/$projectId/items/$itemId/attachments/$attachmentId',
-              params: { projectId, itemId: item.id, attachmentId: attachment.id },
+              to: '/projects/$address/items/$itemId/attachments/$attachmentId',
+              params: { address, itemId: item.id, attachmentId: attachment.id },
               replace,
             })
           }
@@ -116,21 +117,21 @@ interface AttachmentLinkProps {
 }
 
 function AttachmentLink({ item, attachment, inDocument = false, className, title, label, testId, children }: AttachmentLinkProps) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   const replace = useTabReplace();
   const shared = { replace, className, title, 'aria-label': label, 'data-testid': testId, 'data-attachment-id': attachment.id };
   return inDocument ? (
     <Link
-      to="/projects/$projectId/documents/$documentId/attachments/$attachmentId"
-      params={{ projectId, documentId: item.id, attachmentId: attachment.id }}
+      to="/projects/$address/documents/$documentId/attachments/$attachmentId"
+      params={{ address, documentId: item.id, attachmentId: attachment.id }}
       {...shared}
     >
       {children}
     </Link>
   ) : (
     <Link
-      to="/projects/$projectId/items/$itemId/attachments/$attachmentId"
-      params={{ projectId, itemId: item.id, attachmentId: attachment.id }}
+      to="/projects/$address/items/$itemId/attachments/$attachmentId"
+      params={{ address, itemId: item.id, attachmentId: attachment.id }}
       {...shared}
     >
       {children}

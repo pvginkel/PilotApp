@@ -16,6 +16,7 @@ import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
+import { projectAddress } from '../support/projects';
 
 const SHELTERS = ['Dome', 'Tunnel', 'Tarp', 'Hammock', 'Bivvy', 'Cabin'];
 const DECISION = `Which shelter do we take?\n\n\`\`\`decision id=D1\noptions:\n${SHELTERS.map((shelter) => `  - ${shelter}`).join('\n')}\n\`\`\`\n`;
@@ -75,11 +76,11 @@ test.describe('The item alone on a phone', () => {
 
     await overlay.back.tap();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await expect(timeline.item(decision).root).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${before}`);
+    await expect(page).toHaveURL(projectAddress(before));
   });
 
   test('answered, the item alone answers as the timeline’s does, and opened again it shows as it stands, its line opening its document over it', async ({
@@ -215,7 +216,7 @@ test.describe('The item alone on a phone', () => {
     await overlay.back.tap();
     await expect(overlay.root).toHaveCount(0);
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 });
 
@@ -263,7 +264,7 @@ test.describe('A done line on a phone', () => {
     await item.undo.tap();
     await expect(item.root).toHaveAttribute('data-state', 'open');
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 
   test('has its title as its way in from the keyboard and a screen reader, a link named by the title that opens its document’s view; a work item’s its session log’s', async ({

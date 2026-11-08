@@ -56,7 +56,7 @@ interface SessionLogOverlayProps {
 }
 
 export function SessionLogOverlay({ projectId, sessionId }: SessionLogOverlayProps) {
-  const close = useOverlayClose(projectId);
+  const close = useOverlayClose();
   const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const item = data?.items.find((each) => each.id === sessionId);
   const work = item?.work ?? undefined;

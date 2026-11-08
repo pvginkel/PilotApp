@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
 import { blockParts, settledParts } from './timeline-page';
+import { projectAddress } from '../projects';
 
 /**
  * A document opened (F28): off a phone in its tab in its project's timeline's place, on a phone a
@@ -252,7 +253,7 @@ export function documentAttachmentAddress(projectId: string, documentId: string,
 
 /** A document's address under its project's (F97). */
 export function documentAddress(projectId: string, documentId: string): string {
-  return `/projects/${projectId}/documents/${documentId}`;
+  return `${projectAddress(projectId)}/documents/${documentId}`;
 }
 
 /** The address under a document's of the box of Pilot's questions to its writer and the reply (F52.2). */
@@ -262,10 +263,10 @@ export function clarificationAddress(projectId: string, documentId: string): str
 
 /** The project's handbook's address under its project's (F129.4). */
 export function handbookAddress(projectId: string): string {
-  return `/projects/${projectId}/handbook`;
+  return `${projectAddress(projectId)}/handbook`;
 }
 
 /** The project document's address under its project's (F37.4). */
 export function projectDocumentAddress(projectId: string): string {
-  return `/projects/${projectId}/project-document`;
+  return `${projectAddress(projectId)}/project-document`;
 }

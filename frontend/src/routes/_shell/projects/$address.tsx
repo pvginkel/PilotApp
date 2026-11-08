@@ -1,6 +1,8 @@
 /**
- * A project at its own address, by its id (F1.6): its head over its timeline. The browser
- * remembers it as the current project, which the bare address opens. Under it an item's address,
+ * A project at its own address (F1.6), its slug or a draft's `draft-<number>` (`use-project-address.ts`):
+ * its head over its timeline. At its id, or a created project's `draft-<number>`, it is the same
+ * screen, and its own address takes the other's place. The browser remembers it as the current
+ * project, which the bare address opens. Under it an item's address,
  * and under that a block's, open the timeline at the item or the block, and a document's opens
  * the document (F97), as a block's does where its document is a card, at the block (F33), and the
  * address under a document's of the box of Pilot's questions to its writer at the box (F52.2). An
@@ -29,7 +31,8 @@
  * it.
  */
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, redirect, useMatches, useNavigate, useRouter } from '@tanstack/react-router';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { ItemAttachmentOverlay, ProjectAttachmentOverlay } from '@/components/overlay/attachment-overlay';
@@ -51,39 +54,61 @@ import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePanel } from '@/hooks/use-panel';
 import { isPhone, usePhone } from '@/hooks/use-phone';
+import { knowAt, ShownProjectContext, useProjectIdAt, useShownProject } from '@/hooks/use-project-address';
 import { useProjectHead, type ProjectHead as ProjectHeadOf } from '@/hooks/use-projects';
 import { useTimelineItem, type TimelineItem } from '@/hooks/use-timeline';
 import { rememberInBrowser, type DocTab } from '@/lib/browser-state';
 import type { QuoteRef } from '@/lib/chat/quotes';
 
-export const Route = createFileRoute('/_shell/projects/$projectId')({
-  // Everything a project opens under its route starts closed on each project, and its timeline
-  // at its end (F1.6), or at the address it is opened at.
-  remountDeps: ({ params }) => params.projectId,
+export const Route = createFileRoute('/_shell/projects/$address')({
   // Off a phone, a project gone to from its row in the list shows the tab it was left on, at the
   // tab's address in the entry's place (F1.6); at its own address however else, its timeline.
-  beforeLoad: ({ params, location, preload }) => {
-    const tab = !preload && location.state.fromList === true && !isPhone() ? tabLeftOn(params.projectId) : null;
+  beforeLoad: ({ location, preload }) => {
+    const row = location.state.fromList;
+    const tab = !preload && row !== undefined && !isPhone() ? tabLeftOn(row) : null;
     if (tab !== null) throw redirect({ href: tab.href, replace: true });
   },
   component: Project,
 });
 
+/**
+ * The project at the address, once the address is resolved to its id. Everything it opens under
+ * its route starts closed on each project, and its timeline at its end (F1.6), or at the address it
+ * is opened at; another of the same project's addresses keeps all of it.
+ */
 function Project() {
-  const { projectId } = Route.useParams();
+  const { address } = Route.useParams();
+  const id = useProjectIdAt(address);
+  if (id === undefined) return null;
+  return <ProjectAt key={id} projectId={id} address={address} />;
+}
+
+function ProjectAt({ projectId, address }: { projectId: string; address: string }) {
   useEffect(() => rememberInBrowser({ project: projectId }), [projectId]);
+  const shown = useMemo(() => ({ id: projectId, address }), [projectId, address]);
   const { data } = useProjectHead(projectId);
   const phone = usePhone();
   const router = useRouter();
+  // At another of its addresses, an id or a created project's `draft-<number>`, the project's own
+  // takes its place in the entry, the rest of the path and the entry's state kept: a phone's views.
+  // Known at it first, it is the same screen there, never drawn afresh while it is looked up.
+  const queryClient = useQueryClient();
+  const named = data?.address;
+  useEffect(() => {
+    if (named === undefined || named === address) return;
+    knowAt(queryClient, named, projectId);
+    const { href, state } = router.history.location;
+    router.history.replace(href.replace(/^\/projects\/[^/?#]+/, `/projects/${named}`), state);
+  }, [named, address, projectId, queryClient, router]);
   // The matches' address: the router takes a new location a render before the matches it draws.
-  const address = useMatches({ select: (matches) => matches.at(-1)!.pathname });
-  const { sessionId } = shownAt(router, address);
+  const at = useMatches({ select: (matches) => matches.at(-1)!.pathname });
+  const { sessionId } = shownAt(router, at);
   // Off a phone the session log's address names no tab: the one under it is the line's last.
   const under = phone || sessionId === undefined ? null : tabLeftOn(projectId);
-  const pathname = under?.href ?? address;
+  const pathname = under?.href ?? at;
   const { route, itemId, blockId, documentId, attachmentId } = shownAt(router, pathname);
   const addressed = useTimelineItem(projectId, blockId === undefined ? undefined : itemId);
-  const box = route === '/_shell/projects/$projectId/documents/$documentId/clarification';
+  const box = route === '/_shell/projects/$address/documents/$documentId/clarification';
   const opened =
     documentId !== undefined ? { documentId, block: null, attachment: attachmentId ?? null, box } : cardAt(addressed, blockId);
   const attached = itemId !== undefined && attachmentId !== undefined ? { itemId, attachmentId } : null;
@@ -95,8 +120,8 @@ function Project() {
     phone && itemId !== undefined && attached === null && opened === null && (blockId === undefined || addressed !== undefined)
       ? { itemId, block: blockId ?? null }
       : null;
-  const handbook = route === '/_shell/projects/$projectId/handbook';
-  const projectDocument = route === '/_shell/projects/$projectId/project-document';
+  const handbook = route === '/_shell/projects/$address/handbook';
+  const projectDocument = route === '/_shell/projects/$address/project-document';
   const documents = (
     <>
       {opened !== null && <DocumentOverlay projectId={projectId} project={data} {...opened} />}
@@ -110,11 +135,13 @@ function Project() {
   if (phone) {
     const overlaid = opened !== null || attached !== null || loose !== null || alone !== null || handbook || projectDocument || sessionId !== undefined;
     return (
-      <PhoneProject projectId={projectId} project={data} overlaid={overlaid}>
-        {documents}
-        {alone !== null && <ItemOverlay projectId={projectId} project={data} {...alone} />}
-        {log}
-      </PhoneProject>
+      <ShownProjectContext.Provider value={shown}>
+        <PhoneProject projectId={projectId} project={data} overlaid={overlaid}>
+          {documents}
+          {alone !== null && <ItemOverlay projectId={projectId} project={data} {...alone} />}
+          {log}
+        </PhoneProject>
+      </ShownProjectContext.Provider>
     );
   }
   // A document's tab shows it again at its own address, not at a block's or its box's.
@@ -122,7 +149,7 @@ function Project() {
     key: `document ${id}`,
     kind: 'document',
     id,
-    href: router.buildLocation({ to: '/projects/$projectId/documents/$documentId', params: { projectId, documentId: id } }).pathname,
+    href: router.buildLocation({ to: '/projects/$address/documents/$documentId', params: { address, documentId: id } }).pathname,
   });
   const tab: DocTab | null =
     opened !== null && opened.attachment === null
@@ -135,9 +162,11 @@ function Project() {
             ? { key: 'project-document', kind: 'project-document', id: null, href: pathname }
             : null;
   return (
-    <DeskProject projectId={projectId} project={data} tab={tab} goneTo={goneTo} log={log}>
-      {documents}
-    </DeskProject>
+    <ShownProjectContext.Provider value={shown}>
+      <DeskProject projectId={projectId} project={data} tab={tab} goneTo={goneTo} log={log}>
+        {documents}
+      </DeskProject>
+    </ShownProjectContext.Provider>
   );
 }
 
@@ -158,9 +187,10 @@ interface DeskProjectProps {
  * tab showing in its place, the session log's popover over it; the side panel beside them.
  */
 function DeskProject({ projectId, project: data, tab, goneTo, log, children }: DeskProjectProps) {
+  const { address } = useShownProject();
   const draft = data?.state === 'draft';
   const panel = usePanel(projectId, draft);
-  const line = useDocTabs(projectId, tab);
+  const line = useDocTabs(tab);
   const navigate = useNavigate();
   const covered = tab !== null;
   // A draft's chat is its first tab.
@@ -179,7 +209,7 @@ function DeskProject({ projectId, project: data, tab, goneTo, log, children }: D
   };
   const toDraftBlock = (block: string) => {
     if (!draft) {
-      void navigate({ to: '/projects/$projectId/project-document', params: { projectId }, replace: true });
+      void navigate({ to: '/projects/$address/project-document', params: { address }, replace: true });
       return;
     }
     goToDraftBlock(projectId, block);

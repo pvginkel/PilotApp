@@ -9,6 +9,7 @@
 import type { Page, Request } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { projectAddress } from '../support/projects';
 
 const QUESTION = '```question id=Q1\n```\n';
 const PAGES = '/api/people/self/app-pages';
@@ -43,7 +44,7 @@ test.describe("A project's notification", () => {
           title: name,
           body: 'Which lake?',
           tag: projectId,
-          url: expect.stringMatching(new RegExp(`/projects/${projectId}/items/${question}$`)),
+          url: expect.stringMatching(new RegExp(`${projectAddress(projectId)}/items/${question}$`)),
           renotify: true,
           urgency: 'high',
           ttl: 86400,
@@ -76,7 +77,7 @@ test.describe("A project's notification", () => {
         title: name,
         body: 'Which site?, +1',
         tag: projectId,
-        url: expect.stringMatching(new RegExp(`/projects/${projectId}$`)),
+        url: expect.stringMatching(new RegExp(`${projectAddress(projectId)}$`)),
         renotify: true,
         urgency: 'high',
         ttl: 86400,

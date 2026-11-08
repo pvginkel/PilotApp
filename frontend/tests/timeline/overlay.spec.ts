@@ -19,7 +19,7 @@ import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 import type { components } from '@/lib/api/generated/types';
 
 type TimelineItem = components['schemas']['TimelineSchema.1fdd8ae.TimelineItemSchema'];
@@ -155,7 +155,7 @@ test.describe('A document’s address', () => {
       await expect(overlay.foot).toHaveCount(0);
       await expect(docTabs.titles).toHaveText(['Document']);
       await docTabs.closeAll.click();
-      await expect(page).toHaveURL(`/projects/${id}`);
+      await expect(page).toHaveURL(projectAddress(id));
     }
   });
 });
@@ -193,7 +193,7 @@ test.describe('A document in its tab', () => {
 
     await overlay.send.click();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(timeline.item(trip).root).toHaveAttribute('data-state', 'done');
     expect((await itemOf(projects, id, trip)).done).toMatchObject({ cause: 'marked', by: { kind: 'person', handle: me.handle } });
   });
@@ -221,7 +221,7 @@ test.describe('A document in its tab', () => {
     await overlay.send.click();
     await sendDialog.confirm.click();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     expect((await itemOf(projects, id, trip)).done).toMatchObject({ cause: 'marked' });
   });
 
@@ -436,7 +436,7 @@ test.describe('On a phone', () => {
     await expect(overlay.close).toHaveCount(0);
     await overlay.back.click();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 
   test('a document’s view lies over the head and its drawer’s button, which its arrow back gives back to switch projects', async ({
@@ -467,7 +467,7 @@ test.describe('On a phone', () => {
 
     await shell.drawerToggle.click();
     await projectList.tab(otherName).click();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
     await expect(overlay.root).toHaveCount(0);
     await expect(overlay.backdrop).toHaveCount(0);
   });

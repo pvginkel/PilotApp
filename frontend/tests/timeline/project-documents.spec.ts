@@ -25,7 +25,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { attachmentAddress } from '../support/page-objects/timeline-page';
-import type { AttachedFile, Projects } from '../support/projects';
+import { projectAddress, type AttachedFile, type Projects } from '../support/projects';
 
 const HANDBOOK = '# Handbook\n\nHow the trip is planned.\n\n- We **always** pack light.\n- The van is booked a week ahead.\n';
 const NOTE = { id: 'one', summary: 'Summary one', content: 'Content one' };
@@ -84,7 +84,7 @@ test.describe('The handbook', () => {
 
     await docTabs.tab('handbook').close.click();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
 
     await panel.handbook.root.click();
     await expect(overlay.root).toBeVisible();
@@ -144,7 +144,7 @@ test.describe('The handbook', () => {
     await expect(overlay.title).toHaveCount(0);
     await expect(overlay.foot).toHaveCount(0);
     await docTabs.tab('handbook').close.click();
-    await expect(page).toHaveURL(`/projects/${draft}`);
+    await expect(page).toHaveURL(projectAddress(draft));
   });
 });
 
@@ -180,7 +180,7 @@ test.describe('The project document', () => {
 
     await docTabs.tab('project-document').close.click();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 
   test('reads a save that renames the project live, its title and the project’s name with it', async ({
@@ -683,7 +683,7 @@ test.describe('On a phone', () => {
 
     await shell.drawerToggle.click();
     await projectList.tab(otherName).click();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
     await expect(overlay.root).toHaveCount(0);
     await expect(overlay.backdrop).toHaveCount(0);
   });

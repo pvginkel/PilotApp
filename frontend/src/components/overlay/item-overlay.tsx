@@ -26,7 +26,7 @@ interface ItemOverlayProps {
 }
 
 export function ItemOverlay({ projectId, project, itemId, block }: ItemOverlayProps) {
-  const close = useOverlayClose(projectId);
+  const close = useOverlayClose();
   const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const item = data?.items.find((each) => each.id === itemId);
   const failed = error !== null || (data !== undefined && item === undefined);

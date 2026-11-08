@@ -7,10 +7,11 @@
  * client's toast, the API's words. Its form events are `overlay.cancel`'s.
  */
 
-import { Link, useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { ItemDocument } from '@/hooks/use-document';
+import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
 import { usePostItemsCancelByItemId } from '@/lib/api/generated/hooks';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
@@ -24,7 +25,7 @@ const AND = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
 /** The line and the button, the foot's first row and the start of its second. */
 export function RunCancel({ itemId, cancel }: { itemId: string; cancel: Cancel }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const archived = useArchived(projectId);
   const mutation = usePostItemsCancelByItemId();
   const fields = { item: itemId };
@@ -42,7 +43,7 @@ export function RunCancel({ itemId, cancel }: { itemId: string; cancel: Cancel }
   return (
     <>
       <p className="run-cancel-line" data-testid="overlay.cancel.line">
-        Pilot asks this as part of its work on <Documents projectId={projectId} cancel={cancel} />.
+        Pilot asks this as part of its work on <Documents cancel={cancel} />.
       </p>
       <button
         type="button"
@@ -61,7 +62,8 @@ export function RunCancel({ itemId, cancel }: { itemId: string; cancel: Cancel }
 }
 
 /** The documents whose blocks it takes back, each linking its address, in their order. */
-function Documents({ projectId, cancel }: { projectId: string; cancel: Cancel }) {
+function Documents({ cancel }: { cancel: Cancel }) {
+  const { address } = useShownProject();
   const documents = [...new Map(cancel.takes_back.map(({ document }) => [document.id, document])).values()];
   const replace = useTabReplace();
   return AND.formatToParts(documents.map(({ id }) => id)).map((part, index) => {
@@ -70,8 +72,8 @@ function Documents({ projectId, cancel }: { projectId: string; cancel: Cancel })
     return (
       <Link
         key={index}
-        to="/projects/$projectId/documents/$documentId"
-        params={{ projectId, documentId: document.id }}
+        to="/projects/$address/documents/$documentId"
+        params={{ address, documentId: document.id }}
         replace={replace}
         className="link"
         data-testid="overlay.cancel.link"

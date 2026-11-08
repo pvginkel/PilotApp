@@ -10,6 +10,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
+import { projectAddress } from '../support/projects';
 
 const DECISION = 'Which tent do we take?\n\n```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n';
 const NOTES = { title: 'Tent notes', filename: 'tent-notes.md', content_type: 'text/markdown', content: '# Tents\n' };
@@ -163,7 +164,7 @@ test.describe('A done line’s title', () => {
     await expect(page.locator('[data-testid="overlay"][role="tabpanel"]')).toBeVisible();
 
     await docTabs.document(decision).close.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await item.lineTitle.focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(documentAddress(id, decision));

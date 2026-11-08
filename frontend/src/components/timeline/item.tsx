@@ -21,7 +21,7 @@
  */
 
 import { useCallback, useState, type AnimationEvent, type MouseEvent, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { Check, CircleDashed, FileText, MessagesSquare, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
@@ -49,6 +49,7 @@ import { useDismiss } from '@/hooks/use-dismiss';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useRead, useUndo } from '@/hooks/use-marks';
 import { usePhone } from '@/hooks/use-phone';
+import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
 import { blocksOf, isProse, titleOf, type BodyPart, type PilotsWork, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
@@ -132,7 +133,7 @@ function askOf(item: TimelineItem): ReactNode {
  * project is archived, which the API refuses until Bring back (D012).
  */
 function Read({ item }: { item: TimelineItem }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const { mark, pending } = useRead(item.id);
   const archived = useArchived(projectId);
   return (
@@ -399,15 +400,15 @@ interface BehindProps {
  * address (F13.3); a work item's session log, at its session's (F26.6).
  */
 function Behind({ item, className, title, label, testId, children }: BehindProps) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   const replace = useTabReplace();
   const shared = { replace, className, title, 'aria-label': label, 'data-testid': testId };
   return item.kind === 'work' ? (
-    <Link to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId: item.id }} {...shared}>
+    <Link to="/projects/$address/sessions/$sessionId" params={{ address, sessionId: item.id }} {...shared}>
       {children}
     </Link>
   ) : (
-    <Link to="/projects/$projectId/documents/$documentId" params={{ projectId, documentId: item.id }} {...shared}>
+    <Link to="/projects/$address/documents/$documentId" params={{ address, documentId: item.id }} {...shared}>
       {children}
     </Link>
   );
@@ -415,14 +416,14 @@ function Behind({ item, className, title, label, testId, children }: BehindProps
 
 /** A tap on the line, on a phone: what its title opens, unless the tap is on a control of its own (F13.9). */
 function useOpenLine(item: TimelineItem) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   const navigate = useNavigate();
   return (event: MouseEvent) => {
     if (onControl(event)) return;
     if (item.kind === 'work') {
-      void navigate({ to: '/projects/$projectId/sessions/$sessionId', params: { projectId, sessionId: item.id } });
+      void navigate({ to: '/projects/$address/sessions/$sessionId', params: { address, sessionId: item.id } });
     } else {
-      void navigate({ to: '/projects/$projectId/documents/$documentId', params: { projectId, documentId: item.id } });
+      void navigate({ to: '/projects/$address/documents/$documentId', params: { address, documentId: item.id } });
     }
   };
 }

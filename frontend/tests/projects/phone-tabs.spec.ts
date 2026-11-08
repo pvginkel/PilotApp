@@ -20,6 +20,7 @@ import { makeUnique, makeUniqueToken, waitForUiState } from '../support/helpers'
 import { isOnTop } from '../support/page-objects/panel-page';
 import type { PhoneTabsPage } from '../support/page-objects/phone-tabs-page';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
+import { projectAddress } from '../support/projects';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
 const CONVERSATION = '4d7a2e91-6b3c-4f05-8e1d-9c2b5a7f3e64';
@@ -242,7 +243,7 @@ test.describe('The tabs at the bottom on a phone', () => {
     await phoneTabs.tab('plan').tap();
     await phoneTabs.tab('documents').tap();
     await expect(phoneTabs.tab('documents')).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await page.reload();
     await waitForUiState(page, 'project.head', 'ready');
     await expect(phoneTabs.tab('documents')).toHaveAttribute('aria-selected', 'true');
@@ -250,12 +251,12 @@ test.describe('The tabs at the bottom on a phone', () => {
     await page.goBack();
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await expect(timeline.root).toBeVisible();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${before}`);
+    await expect(page).toHaveURL(projectAddress(before));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await page.goForward();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
 
     // The Timeline's tab is Back to it, from any other tab.
@@ -264,17 +265,17 @@ test.describe('The tabs at the bottom on a phone', () => {
     await phoneTabs.tab('timeline').tap();
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${before}`);
+    await expect(page).toHaveURL(projectAddress(before));
     await page.goForward();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
 
     await phoneTabs.tab('chat').tap();
     await shell.drawerToggle.tap();
     await projectList.tab(otherName).tap();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(phoneTabs.tab('chat')).toHaveAttribute('aria-selected', 'true');
   });
 

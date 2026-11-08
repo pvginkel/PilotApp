@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
+import { projectAddress } from '../projects';
 
 /**
  * A work item's session log in the overlay (F69), at its own address: off a phone its popover over
@@ -127,5 +128,5 @@ export class SessionLogPage {
 
 /** A work item's session log's address under its project's, by its session's id, the item's (F69). */
 export function sessionLogAddress(projectId: string, sessionId: string): string {
-  return `/projects/${projectId}/sessions/${sessionId}`;
+  return `${projectAddress(projectId)}/sessions/${sessionId}`;
 }

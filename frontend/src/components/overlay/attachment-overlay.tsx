@@ -15,7 +15,7 @@
  */
 
 import { useContext } from 'react';
-import { Link, useParams, useRouter } from '@tanstack/react-router';
+import { Link, useRouter } from '@tanstack/react-router';
 import { Download, Paperclip } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfAttachment } from '@/components/chat/discuss-quotes';
@@ -26,12 +26,13 @@ import { attachmentUrl, useAttachmentText } from '@/hooks/use-attachment';
 import { DocTabContext } from '@/hooks/use-doc-tabs';
 import { useOverlayClose } from '@/hooks/use-overlay-close';
 import { PhoneViewContext, type PhoneView } from '@/hooks/use-phone-tab';
+import { useShownProject } from '@/hooks/use-project-address';
 import { attachmentIn, hungById, titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
 
 /** An attachment of an item of the project's timeline, at the attachment's address under the item's. */
 export function ItemAttachmentOverlay({ projectId, itemId, attachmentId }: { projectId: string; itemId: string; attachmentId: string }) {
-  const close = useOverlayClose(projectId);
+  const close = useOverlayClose();
   // The timeline's read, which the timeline under it reports.
   const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const item = data?.items.find((each) => each.id === itemId);
@@ -52,7 +53,7 @@ export function ItemAttachmentOverlay({ projectId, itemId, attachmentId }: { pro
 
 /** An attachment of the project, at its address under the project's, wherever it hangs. */
 export function ProjectAttachmentOverlay({ projectId, attachmentId }: { projectId: string; attachmentId: string }) {
-  const close = useOverlayClose(projectId);
+  const close = useOverlayClose();
   const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const hung = data && hungById(data, attachmentId);
   const failed = error !== null || (data !== undefined && hung === undefined);
@@ -72,8 +73,8 @@ export function ProjectAttachmentOverlay({ projectId, attachmentId }: { projectI
 interface AttachmentTitlesProps {
   item: TimelineItem | null;
   attachment: Attachment;
-  /** The document it was opened from, by its address. */
-  document?: { projectId: string; documentId: string };
+  /** The document it was opened from, by its id. */
+  document?: { documentId: string };
 }
 
 /** Its title over what it hangs on: its item, or none, a draft's material. */
@@ -109,7 +110,6 @@ export function AttachmentTitles({ item, attachment, document }: AttachmentTitle
 
 interface DocumentLinkProps {
   view: PhoneView;
-  projectId: string;
   documentId: string;
   /** The document's title. */
   title: string;
@@ -120,11 +120,12 @@ interface DocumentLinkProps {
  * attachment's, at the document's address or at one of its blocks', where a card's document opens
  * too, else its view pushed.
  */
-function DocumentLink({ view, projectId, documentId, title }: DocumentLinkProps) {
+function DocumentLink({ view, documentId, title }: DocumentLinkProps) {
+  const { address } = useShownProject();
   const router = useRouter();
-  const to = '/projects/$projectId/documents/$documentId';
-  const params = { projectId, documentId };
-  const blocks = `${router.buildLocation({ to: '/projects/$projectId/items/$itemId', params: { projectId, itemId: documentId } }).pathname}/blocks/`;
+  const to = '/projects/$address/documents/$documentId';
+  const params = { address, documentId };
+  const blocks = `${router.buildLocation({ to: '/projects/$address/items/$itemId', params: { address, itemId: documentId } }).pathname}/blocks/`;
   const under = view.under !== null && (view.under === router.buildLocation({ to, params }).pathname || view.under.startsWith(blocks));
   return (
     <Link
@@ -146,11 +147,11 @@ function DocumentLink({ view, projectId, documentId, title }: DocumentLinkProps)
 
 /** In an attachment's tab, the way to its item's document: its tab. */
 function TabDocumentLink({ documentId, title }: { documentId: string; title: string }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   return (
     <Link
-      to="/projects/$projectId/documents/$documentId"
-      params={{ projectId, documentId }}
+      to="/projects/$address/documents/$documentId"
+      params={{ address, documentId }}
       replace
       className="link"
       title="Open the document"

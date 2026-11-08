@@ -46,9 +46,10 @@ test.describe('The plus', () => {
     await projectList.newProject.click();
     const id = (await created).fields!.project as string;
 
-    await expect(page).toHaveURL(`/projects/${id}`);
     const head = await projects.head(id);
     expect([head.state, head.name, head.members.map((member) => member.handle)]).toEqual(['draft', null, [me.handle]]);
+    expect(head.address).toMatch(/^draft-\d+$/);
+    await expect(page).toHaveURL(`/projects/${head.address}`);
     const tab = projectList.tab('New project', projectList.mine);
     await expect(tab).toHaveAttribute('aria-current', 'page');
     await expect(tab.getByTestId('projects.tab.status')).toHaveText('Draft');

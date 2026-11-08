@@ -9,7 +9,7 @@
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 
 type Spec = Omit<Parameters<Projects['make']>[0], 'name'>;
 
@@ -453,20 +453,20 @@ test.describe('Switching projects', () => {
     const bId = await projects.make({ name: b, members: [me.handle!] });
     await projectHead.open(a);
     await projectList.tab(b).click();
-    await expect(page).toHaveURL(`/projects/${bId}`);
+    await expect(page).toHaveURL(projectAddress(bId));
 
     // Back and Forward press nothing on the page: only another project closes what is open.
     await projectHead.menuButton.click();
     await expect(projectHead.menu).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${a}`);
+    await expect(page).toHaveURL(projectAddress(a));
     await expect(projectHead.menuButton).toBeVisible();
     await expect(projectHead.menu).toHaveCount(0);
 
     await projectHead.choose('finish');
     await expect(projectHead.dialog('finish').root).toBeVisible();
     await page.goForward();
-    await expect(page).toHaveURL(`/projects/${bId}`);
+    await expect(page).toHaveURL(projectAddress(bId));
     await expect(projectHead.menuButton).toBeVisible();
     await expect(projectHead.dialog('finish').root).toHaveCount(0);
   });

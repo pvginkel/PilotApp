@@ -20,7 +20,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress, documentAttachmentAddress, handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
-import type { AttachedFile } from '../support/projects';
+import { projectAddress, type AttachedFile } from '../support/projects';
 
 const WORDS = (count: number) => Array.from({ length: count }, (_, index) => `word${index}`).join(' ');
 const TENT = '```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n';
@@ -75,7 +75,7 @@ test.describe('Documents in tabs', () => {
     await expect(timeline.root).toHaveAttribute('inert', '');
 
     await docTabs.first.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(overlay.root).toHaveCount(0);
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
     await timeline.item(route).card.open.click();
@@ -125,7 +125,7 @@ test.describe('Documents in tabs', () => {
     await docTabs.first.click();
     await docTabs.document(c).show.click();
     await docTabs.document(c).close.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(overlay.root).toHaveCount(0);
     expect(await docTabs.keys()).toEqual([a, d, e].map((each) => `document ${each}`));
 
@@ -137,7 +137,7 @@ test.describe('Documents in tabs', () => {
     await expect(overlay.title).toHaveText('Delta');
 
     await docTabs.document(d).close.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(overlay.root).toHaveCount(0);
     await expect(docTabs.root).toHaveCount(0);
 
@@ -148,7 +148,7 @@ test.describe('Documents in tabs', () => {
     await docTabs.closeAll.click();
     await expect(docTabs.root).toHaveCount(0);
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 
   test('Done closes its tab, showing the one before it; Esc closes none; a tab has no maximize, backdrop or cross of its own', async ({
@@ -178,7 +178,7 @@ test.describe('Documents in tabs', () => {
     await overlay.send.click();
     await expect(overlay.root).toHaveCount(0);
     await expect(docTabs.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(timeline.item(trip).root).toHaveAttribute('data-state', 'done');
   });
 
@@ -200,7 +200,7 @@ test.describe('Documents in tabs', () => {
     await timeline.item(trip).card.open.click();
     await expect(page).toHaveURL(documentAddress(id, trip));
     await docTabs.first.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await timeline.item(route).card.open.click();
     await docTabs.document(trip).show.click();
     await expect(page).toHaveURL(documentAddress(id, trip));
@@ -460,7 +460,7 @@ test.describe('Documents in tabs', () => {
     const me = await people.signIn();
     const { id } = await projects.makeDraft({ members: [me.handle!] });
     const { ids } = await projects.attachToDraft(id, [NOTES]);
-    await page.goto(`/projects/${id}`);
+    await page.goto(projectAddress(id));
     await panel.documentsTab.click();
     await panel.attachment(ids[0]).root.click();
 
@@ -472,7 +472,7 @@ test.describe('Documents in tabs', () => {
     await overlay.discuss.click();
     await expect(overlay.root).toHaveCount(0);
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(definitionChat.quote).toBeVisible();
   });
 });
@@ -511,7 +511,7 @@ test.describe('Each project’s line kept in the browser', () => {
     await expect(page).toHaveURL(documentAddress(id, a));
     await expect(overlay.title).toHaveText('Alpha');
 
-    await page.goto(`/projects/${id}`);
+    await page.goto(projectAddress(id));
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
     await expect(overlay.root).toHaveCount(0);
     expect(await docTabs.keys()).toEqual([a, c].map((each) => `document ${each}`));
@@ -519,7 +519,7 @@ test.describe('Each project’s line kept in the browser', () => {
     await docTabs.document(a).show.click();
     await page.reload();
     await docTabs.document(a).close.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await docTabs.document(c).close.click();
     await expect(docTabs.root).toHaveCount(0);
     await page.reload();
@@ -549,7 +549,7 @@ test.describe('Each project’s line kept in the browser', () => {
     await docTabs.document(a).show.click();
 
     await projectList.tab(second).click();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
     await expect(docTabs.root).toHaveCount(0);
     await timeline.item(c).card.open.click();
 
@@ -569,7 +569,7 @@ test.describe('Each project’s line kept in the browser', () => {
     await projectList.tab(first).click();
     await expect(page).toHaveURL(documentAddress(one, a));
     await projectList.tab(second).click();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
     expect(await docTabs.keys()).toEqual([`document ${c}`]);
 
@@ -599,7 +599,7 @@ test.describe('Each project’s line kept in the browser', () => {
     await expect(overlay.title).toHaveText('Alpha');
 
     await projectList.tab(name).click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
     await expect(overlay.root).toHaveCount(0);
     await expect(timeline.item(a).root).toBeVisible();
@@ -622,12 +622,12 @@ test.describe('Each project’s line kept in the browser', () => {
     await timeline.open(one);
     await timeline.item(a).card.open.click();
     await projectList.tab(second).click();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
 
     await page.setViewportSize({ width: 390, height: 844 });
     await shell.drawerToggle.click();
     await projectList.tab(first).click();
-    await expect(page).toHaveURL(`/projects/${one}`);
+    await expect(page).toHaveURL(projectAddress(one));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
   });
 });
@@ -655,7 +655,7 @@ test.describe('Each project’s line at the narrow width', () => {
 
     await shell.drawerToggle.click();
     await projectList.tab(second).click();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
     await shell.drawerToggle.click();
     await projectList.tab(first).click();
     await expect(page).toHaveURL(documentAddress(one, a));

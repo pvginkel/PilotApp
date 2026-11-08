@@ -7,6 +7,7 @@
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { projectAddress } from '../support/projects';
 
 const step = (id: string, status: 'pending' | 'in_progress' | 'done') => ({ id, title: `Step ${id}`, status });
 
@@ -92,7 +93,7 @@ test.describe('The project list', () => {
     await expect(projectList.tab(b)).not.toHaveAttribute('aria-current', 'page');
     await projectList.tab(b).click();
     await expect(projectList.tab(b)).toHaveAttribute('aria-current', 'page');
-    await expect(projectList.tab(b)).toHaveAttribute('href', `/projects/${bId}`);
+    await expect(projectList.tab(b)).toHaveAttribute('href', projectAddress(bId));
     await expect(projectList.tab(a)).not.toHaveAttribute('aria-current', 'page');
   });
 });
@@ -199,7 +200,7 @@ test.describe('The groups’ chevrons', () => {
     await projectList.tab(mine).click();
     await expect(others.toggle).toHaveAttribute('aria-expanded', 'false');
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${otherId}`);
+    await expect(page).toHaveURL(projectAddress(otherId));
     await expect(others.toggle).toHaveAttribute('aria-expanded', 'true');
   });
 });
@@ -213,12 +214,12 @@ test.describe('A project’s address', () => {
 
     // Nothing remembered yet: the list's first.
     await shell.open('/');
-    await expect(page).toHaveURL(`/projects/${firstId}`);
+    await expect(page).toHaveURL(projectAddress(firstId));
 
     await projectList.tab(second).click();
-    await expect(page).toHaveURL(`/projects/${secondId}`);
+    await expect(page).toHaveURL(projectAddress(secondId));
     await shell.open('/');
-    await expect(page).toHaveURL(`/projects/${secondId}`);
+    await expect(page).toHaveURL(projectAddress(secondId));
     await expect(projectList.tab(second)).toHaveAttribute('aria-current', 'page');
   });
 
@@ -236,7 +237,7 @@ test.describe('A project’s address', () => {
     await projects.transition(leavingId, 'archived');
 
     await shell.open('/');
-    await expect(page).toHaveURL(`/projects/${firstId}`);
+    await expect(page).toHaveURL(projectAddress(firstId));
   });
 });
 
@@ -266,7 +267,7 @@ test.describe('The archived projects', () => {
     await expect(projectList.tab(archived, projectList.archived).getByTestId('projects.tab.status')).toHaveText('Step a');
 
     await projectList.tab(archived).click();
-    await expect(page).toHaveURL(`/projects/${archivedId}`);
+    await expect(page).toHaveURL(projectAddress(archivedId));
     await expect(projectList.tab(archived)).toHaveAttribute('aria-current', 'page');
 
     await projectList.archivedBack.click();
@@ -290,13 +291,13 @@ test.describe('The list on a narrow window', () => {
     await expect(shell.side).toBeVisible();
     await projectList.tab(b).click();
 
-    await expect(page).toHaveURL(`/projects/${bId}`);
+    await expect(page).toHaveURL(projectAddress(bId));
     await expect(shell.side).toBeHidden();
     await expect(shell.scrim).toBeHidden();
 
     // Back on the project it was opened on, the drawer stays closed.
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${aId}`);
+    await expect(page).toHaveURL(projectAddress(aId));
     await expect(shell.side).toBeHidden();
     await expect(shell.scrim).toBeHidden();
   });

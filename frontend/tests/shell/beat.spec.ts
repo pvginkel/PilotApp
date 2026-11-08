@@ -1,7 +1,8 @@
 /**
  * A page's beat (F147; `database.md` assertion 312): while the page is visible and has had a key,
  * a pointer, a touch or a scroll in the last two minutes, it beats every thirty seconds and at once
- * when the project it shows changes, the project whose route it is on, none elsewhere; hidden, or
+ * when the project it shows changes, the project whose route it is on, by its id at each of its
+ * addresses, none elsewhere; hidden, or
  * two minutes without input, it sends its away, and a page the server ended beats afresh. A person
  * at the handle step beats nothing. The page's clock is the spec's; its input waits for the page
  * to hear it (`shell.listening()`).
@@ -9,7 +10,8 @@
 
 import type { Page, Request, Response } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
-import { makeUnique } from '../support/helpers';
+import { makeUnique, waitForUiState } from '../support/helpers';
+import { projectAddress } from '../support/projects';
 
 const PAGES = '/api/people/self/app-pages';
 
@@ -109,6 +111,22 @@ test.describe("A page's beat", () => {
     await tab.click();
     expect((await beat).request().postDataJSON()).toEqual({ project_id: there });
   });
+
+  for (const form of ['a draft’s name', 'a slug', 'an id'] as const) {
+    test(`shows its project by the project’s id at ${form}`, async ({ page, people, projects, shell }) => {
+      const me = await people.signIn();
+      const { id, folder } =
+        form === 'a draft’s name'
+          ? await projects.makeDraft({ members: [me.handle!] })
+          : { id: await projects.make({ name: makeUnique('Open'), members: [me.handle!] }), folder: null };
+      await page.goto(form === 'an id' ? `/projects/${id}` : form === 'a slug' ? projectAddress(id) : `/projects/${folder}`);
+      await waitForUiState(page, 'project.head', 'ready');
+      const first = firstBeat(page);
+      await shell.listening();
+      await input(page);
+      expect((await first).request().postDataJSON()).toEqual({ project_id: id });
+    });
+  }
 
   test('shows no project on a page of none', async ({ page, people, shell }) => {
     await people.signIn();

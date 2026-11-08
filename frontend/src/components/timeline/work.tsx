@@ -26,7 +26,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { CircleAlert, Play, RotateCw, ScrollText, Server, Square } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
@@ -35,6 +35,7 @@ import { Time } from '@/components/shared/time';
 import { ItemHead } from '@/components/timeline/item-head';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useNow } from '@/hooks/use-now';
+import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
 import { offersRetry, RESUMABLE, STOPPABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
@@ -244,7 +245,7 @@ function Progress({ steps }: { steps: Work['progress'] }) {
 
 /** Resume, disabled while the project is archived, which the API refuses until Bring back. */
 function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const { act, pending } = useResume(item.id);
   const archived = useArchived(projectId);
   return (
@@ -267,7 +268,7 @@ function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
 
 /** A job's Retry, where a worker's Resume is; disabled while the project is archived, which the API refuses until Bring back. */
 function Retry({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const { act, pending } = useRetry(item.id);
   const archived = useArchived(projectId);
   return (
@@ -385,13 +386,13 @@ function Line({ work }: { work: Work }) {
  * item's id, its session's; `rest` takes it where it is the actions' resting element.
  */
 function SessionLog({ item, rest }: { item: TimelineItem; rest?: (element: HTMLElement | null) => void }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   const replace = useTabReplace();
   return (
     <Link
       ref={rest}
-      to="/projects/$projectId/sessions/$sessionId"
-      params={{ projectId, sessionId: item.id }}
+      to="/projects/$address/sessions/$sessionId"
+      params={{ address, sessionId: item.id }}
       replace={replace}
       className="btn btn-ghost btn-sm btn-icon work-log"
       title="Session log"

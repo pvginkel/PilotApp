@@ -14,7 +14,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { addressOf } from '../support/page-objects/timeline-page';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 import type { components } from '@/lib/api/generated/types';
 
 type TimelineItem = components['schemas']['TimelineSchema.1fdd8ae.TimelineItemSchema'];
@@ -147,7 +147,7 @@ test.describe('A larger document', () => {
 
     await docTabs.document(trip).close.click();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(timeline.item(trip).card.root).toBeVisible();
   });
 

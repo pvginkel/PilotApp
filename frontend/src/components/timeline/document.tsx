@@ -23,7 +23,7 @@
  */
 
 import { useContext, useState } from 'react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { Check, FileText } from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/dialog';
 import { LinkedText } from '@/components/shared/linked-text';
@@ -41,6 +41,7 @@ import { SettledLines } from '@/components/timeline/settled';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useReviewed, useSend } from '@/hooks/use-marks';
+import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { blocksOf, isAnswered, titleOf, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
@@ -76,15 +77,15 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
 }
 
 export function DocumentCard({ item }: { item: TimelineItem }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId, address } = useShownProject();
   const navigate = useNavigate();
   const replace = useTabReplace();
   const blocks = blocksOf(item);
   const autopilotOff = useAutopilotOff(projectId);
   const read = readOf(item);
-  const params = { projectId, documentId: item.id };
+  const params = { address, documentId: item.id };
   const openAt = (itemId: string, blockId: string) =>
-    void navigate({ to: '/projects/$projectId/items/$itemId/blocks/$blockId', params: { projectId, itemId, blockId }, replace });
+    void navigate({ to: '/projects/$address/items/$itemId/blocks/$blockId', params: { address, itemId, blockId }, replace });
   return (
     <div className="item-body">
       <DocumentHead item={item} />
@@ -116,7 +117,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
         <Attachments item={item} />
         <div className="item-actions">
           <Link
-            to="/projects/$projectId/documents/$documentId"
+            to="/projects/$address/documents/$documentId"
             params={params}
             replace={replace}
             className="btn btn-primary"
@@ -159,7 +160,7 @@ function CountChips({ counts, autopilot }: { counts: Counts; autopilot: number }
 
 /** A review's one mark: read, nothing to answer (F25.2); disabled while the project is archived (D012). */
 function Reviewed({ item }: { item: TimelineItem }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const { mark, pending } = useReviewed(item.id);
   const archived = useArchived(projectId);
   return (
@@ -259,7 +260,7 @@ function sendTitle(held: boolean, ready: boolean): string {
 
 /** `onSent` runs once the record holds the answers; disabled while the project is archived (D012). */
 export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () => void }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const { mark, pending } = useSend(item.id, onSent);
   const archived = useArchived(projectId);
   const [asking, setAsking] = useState(false);

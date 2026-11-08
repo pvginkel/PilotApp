@@ -6,4 +6,4 @@
 
 import { createFileRoute } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/_shell/projects/$projectId/documents/$documentId')({});
+export const Route = createFileRoute('/_shell/projects/$address/documents/$documentId')({});

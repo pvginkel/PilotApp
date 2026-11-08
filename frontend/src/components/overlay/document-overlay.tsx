@@ -25,7 +25,6 @@
  */
 
 import type { ReactNode } from 'react';
-import { useParams } from '@tanstack/react-router';
 import { Check } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfAttachment, quoteOfItem } from '@/components/chat/discuss-quotes';
@@ -50,6 +49,7 @@ import { PilotWriting } from '@/components/timeline/writing';
 import { useItemDocument, type ItemDocument } from '@/hooks/use-document';
 import { useReviewed } from '@/hooks/use-marks';
 import { useOverlayClose } from '@/hooks/use-overlay-close';
+import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived, type ProjectHead } from '@/hooks/use-projects';
 import { usePerson } from '@/hooks/use-self';
 import { attachmentIn, blocksOf, titleOf } from '@/hooks/use-timeline';
@@ -71,7 +71,7 @@ interface DocumentOverlayProps {
 export function DocumentOverlay({ projectId, project, documentId, block, attachment, box }: DocumentOverlayProps) {
   const clarification = useClarificationBox(box && attachment === null ? documentId : null);
   const { handle } = usePerson();
-  const close = useOverlayClose(projectId);
+  const close = useOverlayClose();
   const { data, error } = useItemDocument(documentId);
   // An address may name an item of another project, or the opening, which has no text.
   const own = data !== undefined && data.project_id === projectId ? data : undefined;
@@ -84,7 +84,7 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
     return (
       <Overlay
         showing={`attachment ${attachment}`}
-        titles={headed && shown && <AttachmentTitles item={headed} attachment={shown} document={{ projectId, documentId }} />}
+        titles={headed && shown && <AttachmentTitles item={headed} attachment={shown} document={{ documentId }} />}
         acts={shown && <DiscussButton quote={quoteOfAttachment(shown)} testId="overlay.discuss" />}
         foot={null}
         onClose={close}
@@ -248,7 +248,7 @@ function ownFoot(item: ItemDocument, onSent: () => void): ReactNode {
 
 /** A review's one mark: read, nothing to answer (F25.2); disabled while the project is archived (D012). */
 function Reviewed({ item }: { item: ItemDocument }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const { mark, pending } = useReviewed(item.id);
   const archived = useArchived(projectId);
   return (

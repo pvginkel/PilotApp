@@ -6,6 +6,8 @@
  * project's id, as it comes to show the project; and any page of Pilot closes the alarms', on a
  * fresh load and on coming back to the foreground.
  *
+ * A page at any of a project's addresses shows it, by its id (`use-project-address.ts`).
+ *
  * Its beat says its person is online: every thirty seconds while the page is visible and has had a
  * key, a pointer, a touch or a scroll in the last two minutes, and at once when the project it
  * shows changes. Hidden, or two minutes without input, it sends its away, by beacon, so that it
@@ -15,9 +17,9 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { useParams } from '@tanstack/react-router';
-import { api } from '@/lib/api/generated/client';
+import { useProjectOnScreen } from '@/hooks/use-project-address';
 import { isPerson, type Self } from '@/hooks/use-self';
+import { api } from '@/lib/api/generated/client';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
 /** The `tag` the server pushes every person's alarms under (F142). */
@@ -160,7 +162,7 @@ class AppPage {
 
 /** This page in front of `self`, under the shell: the notifications it closes and its beat. */
 export function useAppPage(self: Self | undefined): void {
-  const projectId = useParams({ strict: false, select: (params) => params.projectId ?? null });
+  const projectId = useProjectOnScreen() ?? null;
   const person = self !== undefined && isPerson(self);
   const shown = useRef<string | null>(null);
   const page = useRef<AppPage | null>(null);

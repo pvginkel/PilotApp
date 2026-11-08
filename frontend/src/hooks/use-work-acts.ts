@@ -10,8 +10,8 @@
  * was refused.
  */
 
-import { useParams } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
+import { useShownProject } from '@/hooks/use-project-address';
 import { moveWork } from '@/hooks/use-project-events';
 import {
   usePostSessionsResumeBySessionId,
@@ -41,7 +41,7 @@ type Mutation =
 
 function useAct(mutation: Mutation, form: string, itemId: string, from: readonly State[]) {
   const queryClient = useQueryClient();
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const fields = { item: itemId };
   const act = (): Promise<Work | null> => {
     trackFormSubmit(form, fields);

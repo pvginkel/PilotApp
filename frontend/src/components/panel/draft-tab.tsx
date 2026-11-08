@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, type AnimationEvent } from 'react';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { Markdown, type DocumentLinkProps } from '@/components/shared/markdown';
 import { DraftBlock } from '@/components/timeline/block';
 import { useFlashes } from '@/components/timeline/flash';
@@ -17,6 +17,7 @@ import { PilotWriting } from '@/components/timeline/writing';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useProjectDraft } from '@/hooks/use-document';
 import { useDraftPlace } from '@/hooks/use-draft-place';
+import { useShownProject } from '@/hooks/use-project-address';
 import { hungAt, pathOfLink } from '@/hooks/use-timeline';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
 
@@ -93,15 +94,15 @@ export function DraftTab({ projectId }: { projectId: string }) {
 
 /** A link of the draft: to an attachment by its path in the project's folder, at its address; any other its words alone. */
 function DraftLink({ href, children }: DocumentLinkProps) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId, address } = useShownProject();
   const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const replace = useTabReplace();
   const hung = data === undefined ? undefined : hungAt(data, pathOfLink(href));
   if (hung === undefined) return <>{children}</>;
   return (
     <Link
-      to="/projects/$projectId/attachments/$attachmentId"
-      params={{ projectId, attachmentId: hung.attachment.id }}
+      to="/projects/$address/attachments/$attachmentId"
+      params={{ address, attachmentId: hung.attachment.id }}
       replace={replace}
       data-testid="panel.draft.link"
     >

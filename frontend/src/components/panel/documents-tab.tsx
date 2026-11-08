@@ -18,6 +18,7 @@ import { Time } from '@/components/shared/time';
 import { isUnsent } from '@/components/timeline/document-state';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { Batch, PanelRead } from '@/hooks/use-panel';
+import { useShownProject } from '@/hooks/use-project-address';
 import { titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
 import { useGetProjectsHandbookByProjectId } from '@/lib/api/generated/hooks';
 
@@ -29,6 +30,7 @@ interface DocumentsTabProps {
 }
 
 export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists } }: DocumentsTabProps) {
+  const { address } = useShownProject();
   const replace = useTabReplace();
   return (
     <div className="docs" data-testid="panel.documents">
@@ -36,8 +38,8 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
         <ul>
           <li>
             <Link
-              to="/projects/$projectId/project-document"
-              params={{ projectId }}
+              to="/projects/$address/project-document"
+              params={{ address }}
               replace={replace}
               className="doc-row"
               data-testid="panel.project-document"
@@ -48,7 +50,7 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
             </Link>
           </li>
           <li>
-            <HandbookRow projectId={projectId} />
+            <HandbookRow projectId={projectId} address={address} />
           </li>
         </ul>
       )}
@@ -59,9 +61,9 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
       ) : (
         <>
           <h3>Attachments</h3>
-          {lists !== 'pending' && <Attachments projectId={projectId} draft={draft} batches={lists.batches} />}
+          {lists !== 'pending' && <Attachments address={address} draft={draft} batches={lists.batches} />}
           {!draft && <h3>In the timeline</h3>}
-          {!draft && lists !== 'pending' && <TimelineDocuments projectId={projectId} documents={lists.documents} />}
+          {!draft && lists !== 'pending' && <TimelineDocuments address={address} documents={lists.documents} />}
         </>
       )}
     </div>
@@ -69,11 +71,11 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
 }
 
 /** The handbook, opening at its address as the project document does. */
-function HandbookRow({ projectId }: { projectId: string }) {
+function HandbookRow({ projectId, address }: { projectId: string; address: string }) {
   const { data } = useGetProjectsHandbookByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
   const replace = useTabReplace();
   return (
-    <Link to="/projects/$projectId/handbook" params={{ projectId }} replace={replace} className="doc-row" data-testid="panel.handbook">
+    <Link to="/projects/$address/handbook" params={{ address }} replace={replace} className="doc-row" data-testid="panel.handbook">
       <Row icon={<NotebookText className="icon" aria-hidden="true" />} title={data?.title ?? 'Handbook'}>
         Handbook
       </Row>
@@ -82,12 +84,12 @@ function HandbookRow({ projectId }: { projectId: string }) {
 }
 
 interface AttachmentsProps {
-  projectId: string;
+  address: string;
   draft: boolean;
   batches: Batch[];
 }
 
-function Attachments({ projectId, draft, batches }: AttachmentsProps) {
+function Attachments({ address, draft, batches }: AttachmentsProps) {
   if (batches.length === 0) {
     return (
       <p className="none" data-testid="panel.attachments.none">
@@ -102,19 +104,19 @@ function Attachments({ projectId, draft, batches }: AttachmentsProps) {
       {batches.map((batch) =>
         batch.attachments.length === 1 ? (
           <li key={batch.batch}>
-            <AttachmentRow projectId={projectId} item={batch.item} attachment={batch.attachments[0]}>
+            <AttachmentRow address={address} item={batch.item} attachment={batch.attachments[0]}>
               <Hung item={batch.item} at={batch.attachments[0].copied_at} />
             </AttachmentRow>
           </li>
         ) : (
-          <BatchRows key={batch.batch} projectId={projectId} batch={batch} />
+          <BatchRows key={batch.batch} address={address} batch={batch} />
         ),
       )}
     </ul>
   );
 }
 
-function TimelineDocuments({ projectId, documents }: { projectId: string; documents: TimelineItem[] }) {
+function TimelineDocuments({ address, documents }: { address: string; documents: TimelineItem[] }) {
   if (documents.length === 0) {
     return (
       <p className="none" data-testid="panel.timeline-documents.none">
@@ -126,7 +128,7 @@ function TimelineDocuments({ projectId, documents }: { projectId: string; docume
     <ul data-testid="panel.timeline-documents">
       {documents.map((item) => (
         <li key={item.id}>
-          <DocumentRow projectId={projectId} item={item} />
+          <DocumentRow address={address} item={item} />
         </li>
       ))}
     </ul>
@@ -161,7 +163,7 @@ function Hung({ item, at }: { item: TimelineItem | null; at: string }) {
 }
 
 interface AttachmentRowProps {
-  projectId: string;
+  address: string;
   item: TimelineItem | null;
   attachment: Attachment;
   /** The line under its title. */
@@ -169,7 +171,7 @@ interface AttachmentRowProps {
 }
 
 /** An attachment, opening at its address under its item's (F28.5), or under its project's where it hangs on none. */
-function AttachmentRow({ projectId, item, attachment, children }: AttachmentRowProps) {
+function AttachmentRow({ address, item, attachment, children }: AttachmentRowProps) {
   const row = (
     <Row icon={<Paperclip className="icon" aria-hidden="true" />} title={attachment.title}>
       {children}
@@ -178,18 +180,18 @@ function AttachmentRow({ projectId, item, attachment, children }: AttachmentRowP
   const replace = useTabReplace();
   const props = { replace, className: 'doc-row', 'data-testid': 'panel.attachment', 'data-attachment-id': attachment.id };
   return item === null ? (
-    <Link to="/projects/$projectId/attachments/$attachmentId" params={{ projectId, attachmentId: attachment.id }} {...props}>
+    <Link to="/projects/$address/attachments/$attachmentId" params={{ address, attachmentId: attachment.id }} {...props}>
       {row}
     </Link>
   ) : (
-    <Link to="/projects/$projectId/items/$itemId/attachments/$attachmentId" params={{ projectId, itemId: item.id, attachmentId: attachment.id }} {...props}>
+    <Link to="/projects/$address/items/$itemId/attachments/$attachmentId" params={{ address, itemId: item.id, attachmentId: attachment.id }} {...props}>
       {row}
     </Link>
   );
 }
 
 /** Files attached in one call: their folder, with their item and stamp, and each file under it by its title and file name. */
-function BatchRows({ projectId, batch }: { projectId: string; batch: Batch }) {
+function BatchRows({ address, batch }: { address: string; batch: Batch }) {
   const { item, attachments } = batch;
   return (
     <li className="doc-batch" data-testid="panel.batch" data-batch={batch.batch}>
@@ -201,7 +203,7 @@ function BatchRows({ projectId, batch }: { projectId: string; batch: Batch }) {
       <ul>
         {attachments.map((attachment) => (
           <li key={attachment.id}>
-            <AttachmentRow projectId={projectId} item={item} attachment={attachment}>
+            <AttachmentRow address={address} item={item} attachment={attachment}>
               {attachment.filename}
             </AttachmentRow>
           </li>
@@ -233,14 +235,14 @@ function folderOf(attachments: Attachment[]): string | null {
 const STATES = { open: 'Open', unsent: 'Unsent', done: 'Done' } as const;
 
 /** A document or review of the timeline, opening at the document's address (F97). */
-function DocumentRow({ projectId, item }: { projectId: string; item: TimelineItem }) {
+function DocumentRow({ address, item }: { address: string; item: TimelineItem }) {
   const state = item.done !== null ? 'done' : isUnsent(item) ? 'unsent' : 'open';
   const Icon = item.kind === 'review' ? BookOpen : FileText;
   const replace = useTabReplace();
   return (
     <Link
-      to="/projects/$projectId/documents/$documentId"
-      params={{ projectId, documentId: item.id }}
+      to="/projects/$address/documents/$documentId"
+      params={{ address, documentId: item.id }}
       replace={replace}
       className="doc-row"
       data-testid="panel.document"

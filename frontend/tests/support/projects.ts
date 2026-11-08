@@ -56,6 +56,19 @@ export function slugOf(projectId: string): string {
   return `project-${projectId.replaceAll('-', '').slice(0, 12)}`;
 }
 
+/** Each project the worker's specs made, by its id: its folder in the store's tree, as the testing route answered it. */
+const folders = new Map<string, string>();
+
+/**
+ * A project's own address (H3), of a project the worker's specs made: `/projects/<slug>`, or a
+ * draft's `/projects/draft-<number>`, as it was made; a draft created since is at its slug.
+ */
+export function projectAddress(projectId: string): string {
+  const folder = folders.get(projectId);
+  if (folder === undefined) throw new Error(`Project ${projectId} was not made by the worker's specs`);
+  return `/projects/${folder}`;
+}
+
 export class Projects {
   /**
    * The repository the spec's work items are placed by: its own, so that a start takes no
@@ -89,7 +102,9 @@ export class Projects {
   private async invent(spec: ProjectSpec): Promise<Invented> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects`, { data: spec });
     expect(response.status(), await response.text()).toBe(201);
-    return (await response.json()) as Invented;
+    const invented = (await response.json()) as Invented;
+    folders.set(invented.id, invented.folder);
+    return invented;
   }
 
   /** An environment of its own for a project's session; answers its id. */

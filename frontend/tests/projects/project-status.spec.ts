@@ -11,7 +11,7 @@
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 
 const step = (id: string, status: 'pending' | 'in_progress' | 'done') => ({ id, title: `Step ${id}`, status });
 const QUESTION = '```question id=Q1\n```\n';
@@ -113,7 +113,7 @@ test.describe('A tab’s status icon', () => {
     await expect(icon.root).toHaveAttribute('data-status', 'paused');
     await expect(icon.root).toHaveAttribute('aria-busy', 'false');
     await expect(icon.hover).toHaveAttribute('data-glyph', 'play');
-    await expect(page).toHaveURL(`/projects/${shownId}`);
+    await expect(page).toHaveURL(projectAddress(shownId));
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect((await projects.head(id)).status).toBe('paused');
 
@@ -122,7 +122,7 @@ test.describe('A tab’s status icon', () => {
     await resumed;
     await expect(icon.root).toHaveAttribute('data-status', 'idle');
     await expect(icon.hover).toHaveAttribute('data-glyph', 'pause');
-    await expect(page).toHaveURL(`/projects/${shownId}`);
+    await expect(page).toHaveURL(projectAddress(shownId));
     expect((await projects.head(id)).status).toBe('idle');
 
     // Away from the pointer, the status's own glyph.
@@ -150,7 +150,7 @@ test.describe('A tab’s status icon', () => {
     await page.keyboard.press(' ');
     await resumed;
     await expect(icon.root).toHaveAttribute('data-status', 'idle');
-    await expect(page).toHaveURL(`/projects/${shownId}`);
+    await expect(page).toHaveURL(projectAddress(shownId));
   });
 
   test('running, the glyph pulses; a pause is pausing until the turn ends, then paused; a resume while pausing cancels it', async ({
@@ -255,7 +255,7 @@ test.describe('A tab’s status icon on the phone', () => {
     await paused;
     await expect(icon.root).toHaveAttribute('data-status', 'paused');
     await expect(shell.side).toBeVisible();
-    await expect(page).toHaveURL(`/projects/${shownId}`);
+    await expect(page).toHaveURL(projectAddress(shownId));
 
     const resumed = projectList.written(id, 'resumed');
     await icon.root.tap();

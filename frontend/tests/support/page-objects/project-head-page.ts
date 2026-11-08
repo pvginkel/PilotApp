@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { FormTestEvent } from '@/lib/test/test-events';
 import { waitForUiState, waitTestEvent } from '../helpers';
+import { projectAddress } from '../projects';
 
 type Act = 'join' | 'leave' | 'finish' | 'reopen' | 'archive' | 'bring-back';
 type Ask = Exclude<Act, 'join' | 'leave'>;
@@ -76,7 +77,7 @@ export class ProjectHeadPage {
 
   /** Opens a project at its own address, once its head is read. */
   async open(id: string): Promise<void> {
-    await this.page.goto(`/projects/${id}`);
+    await this.page.goto(projectAddress(id));
     await waitForUiState(this.page, 'project.head', 'ready');
   }
 

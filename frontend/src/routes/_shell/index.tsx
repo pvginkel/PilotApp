@@ -20,5 +20,5 @@ function Home() {
   const listed = [...mine, ...others, ...finished];
   const project = listed.find((tab) => tab.id === browserState().project) ?? listed[0];
   if (!project) return <EmptyState icon={FolderKanban} title="No projects yet" testId="projects.empty" />;
-  return <Navigate to="/projects/$projectId" params={{ projectId: project.id }} replace />;
+  return <Navigate to="/projects/$address" params={{ address: project.address }} replace />;
 }

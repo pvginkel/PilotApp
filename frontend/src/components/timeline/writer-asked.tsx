@@ -7,15 +7,16 @@
  */
 
 import { useContext } from 'react';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { Avatar } from '@/components/shared/avatar';
 import { ToClarificationContext } from '@/components/timeline/to-clarification';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
+import { useShownProject } from '@/hooks/use-project-address';
 
 const TITLE = 'Show Pilot’s question to the writer and the reply';
 
 export function WriterAsked({ documentId, testId }: { documentId: string; testId: string }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   const replace = useTabReplace();
   const toBox = useContext(ToClarificationContext);
   const words = (
@@ -33,8 +34,8 @@ export function WriterAsked({ documentId, testId }: { documentId: string; testId
   }
   return (
     <Link
-      to="/projects/$projectId/documents/$documentId/clarification"
-      params={{ projectId, documentId }}
+      to="/projects/$address/documents/$documentId/clarification"
+      params={{ address, documentId }}
       replace={replace}
       className="pilot-mark asked"
       title={TITLE}

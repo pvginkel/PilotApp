@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { FormTestEvent } from '@/lib/test/test-events';
 import { waitForUiState, waitTestEvent } from '../helpers';
+import { projectAddress } from '../projects';
 
 type Group = 'others' | 'finished';
 
@@ -35,7 +36,7 @@ export class ProjectListPage {
 
   /** Opens a project at its own address, once the person and the list are read. */
   async open(id: string): Promise<void> {
-    await this.page.goto(`/projects/${id}`);
+    await this.page.goto(projectAddress(id));
     await waitForUiState(this.page, 'projects.list', 'ready');
   }
 

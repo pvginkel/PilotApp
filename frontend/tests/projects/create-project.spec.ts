@@ -67,7 +67,7 @@ interface Drafting {
 /**
  * A draft of the signed-in person's, open on its page: its definition chat's first message and
  * Pilot's reply, the draft saved with its title, its open ask and its slug, a file attached hung
- * on nothing, and the store ready for the project's folder. Answers its id, title and slug.
+ * on nothing, and the store ready for the project's folder. Answers its id, title, slug and folder.
  */
 async function drafted({ projects, projectHead, controller, chats, definitionChat }: Drafting, handle: string) {
   const { id, folder } = await projects.makeDraft({ members: [handle] });
@@ -83,7 +83,7 @@ async function drafted({ projects, projectHead, controller, chats, definitionCha
   await controller.play(chats.store, session, [text('one', REPLY)]);
   await controller.finish(chats.store, session, 'success', REPLY);
   await expect(definitionChat.createButton).toBeVisible();
-  return { id, title, slug };
+  return { id, title, slug, folder };
 }
 
 /** Create project's box and what it holds, where they stand on the page. */
@@ -278,7 +278,37 @@ test.describe('Create project', () => {
     await expect(panel.projectDocument.title).toHaveText(title);
     await expect(panel.handbook.root).toBeVisible();
     await panel.projectDocument.root.click();
-    await expect(page).toHaveURL(`/projects/${id}/project-document`);
+    await expect(page).toHaveURL(`/projects/${slug}/project-document`);
+  });
+
+  test('moves the page to the project’s slug, the project remembered as before; its draft’s name still opens it there, the rest of the address kept', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    controller,
+    chats,
+    definitionChat,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const { id, title, slug, folder } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    await chats.ready(id, slug);
+    await expect(page).toHaveURL(`/projects/${folder}`);
+    const remembered = () => page.evaluate(() => (JSON.parse(localStorage.getItem('pilot')!) as { project: string }).project);
+    // A mark on the head's element, which a screen drawn afresh would not carry.
+    await projectHead.root.evaluate((head) => void ((head as HTMLElement).dataset.kept = 'yes'));
+
+    await definitionChat.create();
+
+    await expect(page).toHaveURL(`/projects/${slug}`);
+    await expect(projectHead.name).toHaveText(title);
+    await expect(projectHead.root).toHaveAttribute('data-kept', 'yes');
+    expect(await remembered()).toBe(id);
+    await page.goto(`/projects/${folder}/project-document`);
+    await expect(page).toHaveURL(`/projects/${slug}/project-document`);
+    await expect(overlay.title).toHaveText(title);
+    expect(await remembered()).toBe(id);
   });
 
   test('leaves the definition chat in the Chat tab above its line, with no label, and the next message opens a new chat below it', async ({
@@ -412,7 +442,7 @@ test.describe('The setup', () => {
     await expect(setup.lineTitle).toHaveText(SETUP);
     await setup.line.hover();
     await setup.open.click();
-    await expect(page).toHaveURL(`/projects/${id}/sessions/${setupId}`);
+    await expect(page).toHaveURL(`/projects/${slug}/sessions/${setupId}`);
   });
 
   test('a job placed while it runs, the one after a worker’s turn, waits its turn behind it, on the worker’s line, its session log saying so, and goes on once its turn ends', async ({

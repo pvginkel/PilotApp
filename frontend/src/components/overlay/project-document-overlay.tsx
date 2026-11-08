@@ -12,7 +12,7 @@
  * document did not load" (F113).
  */
 
-import { Link, useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { FileText, NotebookText, type LucideIcon } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfFile } from '@/components/chat/discuss-quotes';
@@ -24,6 +24,7 @@ import { PilotWriting } from '@/components/timeline/writing';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useHandbook, useProjectDraft, type ProjectDocument } from '@/hooks/use-document';
 import { useOverlayClose } from '@/hooks/use-overlay-close';
+import { useShownProject } from '@/hooks/use-project-address';
 import type { ProjectHead } from '@/hooks/use-projects';
 import { hungAt, pathOfLink } from '@/hooks/use-timeline';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
@@ -75,7 +76,7 @@ interface ReadOnlyOverlayProps extends ProjectDocumentOverlayProps {
 }
 
 function ReadOnlyOverlay({ projectId, project, read: { data, error }, showing, path, role, icon: Icon }: ReadOnlyOverlayProps) {
-  const close = useOverlayClose(projectId);
+  const close = useOverlayClose();
   const failed = error !== null;
   const title = data?.title ?? role;
   return (
@@ -137,7 +138,7 @@ function Body({ document, documentKey }: { document: ProjectDocument; documentKe
 
 /** A link to the project's attached material: the attachment where it hangs, at its address under its item's or, hung on nothing, the project's. */
 function MaterialLink({ href, children }: DocumentLinkProps) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId, address } = useShownProject();
   const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const replace = useTabReplace();
   const hung = data === undefined ? undefined : hungAt(data, pathOfLink(href));
@@ -145,8 +146,8 @@ function MaterialLink({ href, children }: DocumentLinkProps) {
   const attachmentId = hung.attachment.id;
   return hung.item === null ? (
     <Link
-      to="/projects/$projectId/attachments/$attachmentId"
-      params={{ projectId, attachmentId }}
+      to="/projects/$address/attachments/$attachmentId"
+      params={{ address, attachmentId }}
       replace={replace}
       data-testid="overlay.material-link"
     >
@@ -154,8 +155,8 @@ function MaterialLink({ href, children }: DocumentLinkProps) {
     </Link>
   ) : (
     <Link
-      to="/projects/$projectId/items/$itemId/attachments/$attachmentId"
-      params={{ projectId, itemId: hung.item.id, attachmentId }}
+      to="/projects/$address/items/$itemId/attachments/$attachmentId"
+      params={{ address, itemId: hung.item.id, attachmentId }}
       replace={replace}
       data-testid="overlay.material-link"
     >

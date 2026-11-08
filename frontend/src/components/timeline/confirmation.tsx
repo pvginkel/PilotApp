@@ -14,7 +14,6 @@
  */
 
 import { useState, type ReactNode } from 'react';
-import { useParams } from '@tanstack/react-router';
 import { Check, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
@@ -27,6 +26,7 @@ import { Note } from '@/components/timeline/note';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useAnswer, type Answer } from '@/hooks/use-answer';
+import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { blocksOf, isProse, titleOf, type Block, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
@@ -36,7 +36,7 @@ const NO = 'No';
 
 /** An open confirmation item's card. */
 export function Confirmation({ item }: { item: TimelineItem }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const [block] = blocksOf(item);
   const { answer, saving } = useAnswer(item.id, block.id);
   const flash = useBlockFlash(item.id, block.id);

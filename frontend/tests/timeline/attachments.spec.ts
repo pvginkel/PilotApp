@@ -15,7 +15,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress, documentAttachmentAddress } from '../support/page-objects/overlay-page';
 import { attachmentAddress } from '../support/page-objects/timeline-page';
-import type { AttachedFile } from '../support/projects';
+import { projectAddress, type AttachedFile } from '../support/projects';
 
 const WORDS = (count: number) => Array.from({ length: count }, (_, index) => `word${index}`).join(' ');
 const DECISION = 'Which tent for the trip?\n\n```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n';
@@ -119,7 +119,7 @@ test.describe('Attachments', () => {
     await expect(timeline.item(decision).block.root).toBeAttached();
 
     await docTabs.attachment(notes).close.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(overlay.root).toHaveCount(0);
     await expect(timeline.item(decision).block.root).toBeVisible();
   });

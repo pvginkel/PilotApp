@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { addressOf } from '../support/page-objects/timeline-page';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 
 const DECISION = 'Which tent for the trip?\n\n```decision id=D1\noptions:\n  - Dome: up in five minutes\n  - Tunnel\n```\n';
 const CONFIRMATION = 'The tag is cut.\n\n```decision id=C1\ntype: confirmation\nproposal: Push the release\nbecause: auto-pilot-off\n```\n';
@@ -73,7 +73,7 @@ test.describe('An item’s address', () => {
 
     // The project's own address keeps the timeline where it stands.
     await projectList.tab(name).click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(item.root).toBeInViewport();
     await timeline.root.evaluate((feed) => feed.scrollTo({ top: feed.scrollHeight }));
     await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);

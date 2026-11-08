@@ -6,6 +6,7 @@
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { ProjectListPage } from '../support/page-objects/project-list-page';
+import { projectAddress } from '../support/projects';
 
 test.describe('The theme', () => {
   test('follows the OS, live, under System', async ({ page, people, shell }) => {
@@ -67,7 +68,7 @@ test.describe('The theme', () => {
     const bId = await projects.make({ name: b, members: [me.handle!] });
     await projectList.open(a);
     const other = await page.context().newPage();
-    await other.goto(`/projects/${a}`);
+    await other.goto(projectAddress(a));
     const otherList = new ProjectListPage(other);
     await expect(otherList.tab(b)).toBeVisible();
 
@@ -75,7 +76,7 @@ test.describe('The theme', () => {
     await shell.theme.selectOption('dark');
     await otherList.tab(b).click();
 
-    await expect(other).toHaveURL(`/projects/${bId}`);
+    await expect(other).toHaveURL(projectAddress(bId));
     const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('pilot')!) as { theme: string; project: string });
     await expect.poll(async () => (await stored()).project).toBe(bId);
     expect((await stored()).theme).toBe('dark');

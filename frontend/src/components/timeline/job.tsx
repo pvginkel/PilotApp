@@ -13,11 +13,12 @@
  */
 
 import { useRef } from 'react';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { RotateCw } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
 import { PILOT_MARK } from '@/components/shared/pilot-mark';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
+import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
 import type { TimelineItem } from '@/hooks/use-timeline';
 import { offersRetry, useRetry } from '@/hooks/use-work-acts';
@@ -39,7 +40,7 @@ export function JobOn({ job, testId }: JobProps) {
 
 /** The job's button while it is queued or runs, or once it failed or stopped, and then its Retry. */
 export function JobButton({ job, testId = 'timeline.job' }: JobProps) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   const replace = useTabReplace();
   const button = useRef<HTMLAnchorElement>(null);
   const form = jobForm(job.work);
@@ -48,8 +49,8 @@ export function JobButton({ job, testId = 'timeline.job' }: JobProps) {
     <span className="pilots-slot">
       <Link
         ref={button}
-        to="/projects/$projectId/sessions/$sessionId"
-        params={{ projectId, sessionId: job.id }}
+        to="/projects/$address/sessions/$sessionId"
+        params={{ address, sessionId: job.id }}
         replace={replace}
         className={cn('btn btn-ghost btn-sm pilots-btn job-btn', halted !== null && 'halted')}
         title={`Pilot’s job on this ${halted ?? 'is under way'}: open its session log`}
@@ -74,12 +75,12 @@ export function JobButton({ job, testId = 'timeline.job' }: JobProps) {
 
 /** The ended job's mark, an icon button among a line's actions or in a head. */
 export function JobMark({ job, testId = 'timeline.job' }: JobProps) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   const replace = useTabReplace();
   return (
     <Link
-      to="/projects/$projectId/sessions/$sessionId"
-      params={{ projectId, sessionId: job.id }}
+      to="/projects/$address/sessions/$sessionId"
+      params={{ address, sessionId: job.id }}
       replace={replace}
       className="btn btn-ghost btn-sm btn-icon job-mark"
       title={`Pilot’s job on this: ${job.title}. Open its session log`}
@@ -95,11 +96,11 @@ export function JobMark({ job, testId = 'timeline.job' }: JobProps) {
 
 /** The job as a row of a phone's line menu, Pilot's mark and its title, opening its session log. */
 export function JobMenuRow({ job, onOpen }: { job: Job; onOpen: () => void }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { address } = useShownProject();
   return (
     <Link
-      to="/projects/$projectId/sessions/$sessionId"
-      params={{ projectId, sessionId: job.id }}
+      to="/projects/$address/sessions/$sessionId"
+      params={{ address, sessionId: job.id }}
       role="menuitem"
       className="btn btn-ghost btn-sm"
       onClick={onOpen}
@@ -117,7 +118,7 @@ export function JobMenuRow({ job, onOpen }: { job: Job; onOpen: () => void }) {
  * nowhere.
  */
 function Retry({ job, testId, onLanded }: { job: Job; testId: string; onLanded: () => void }) {
-  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { id: projectId } = useShownProject();
   const { act, pending } = useRetry(job.id);
   const archived = useArchived(projectId);
   const self = useRef<HTMLButtonElement>(null);

@@ -16,6 +16,7 @@ import type { Locator, Page } from '@playwright/test';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { projectAddress } from '../support/projects';
 
 type Status = 'pending' | 'in_progress' | 'done';
 type Note = { id: string; summary: string; content: string };
@@ -59,7 +60,7 @@ test.describe('The head', () => {
     const opened = page.waitForEvent('popup');
     await ticket.click();
     expect((await opened).url()).toBe(`${backendUrl}/tickets/PL-7`);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 
   test('has no Discuss, Documents or handbook button: its controls are the switch, the step button, the plan’s notes and the menu, the icons after the members', async ({
@@ -713,20 +714,20 @@ test.describe('Switching projects', () => {
     const bId = await projects.make({ name: b, ...spec });
     await projectHead.open(a);
     await projectList.tab(b).click();
-    await expect(page).toHaveURL(`/projects/${bId}`);
+    await expect(page).toHaveURL(projectAddress(bId));
 
     // Back and Forward press nothing on the page: only another project closes what is open.
     await projectHead.step.click();
     await expect(projectHead.plan).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${a}`);
+    await expect(page).toHaveURL(projectAddress(a));
     await expect(projectHead.step).toBeVisible();
     await expect(projectHead.plan).toHaveCount(0);
 
     await projectHead.notesButton.click();
     await expect(projectHead.notes).toBeVisible();
     await page.goForward();
-    await expect(page).toHaveURL(`/projects/${bId}`);
+    await expect(page).toHaveURL(projectAddress(bId));
     await expect(projectHead.step).toBeVisible();
     await expect(projectHead.notes).toHaveCount(0);
     await expect(projectHead.plan).toHaveCount(0);

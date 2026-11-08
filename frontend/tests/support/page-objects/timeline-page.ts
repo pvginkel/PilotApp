@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
+import { projectAddress } from '../projects';
 
 /**
  * A project's timeline (F8): its rows, the opening, its items open and as done lines, their title
@@ -72,7 +73,7 @@ export class TimelinePage {
    * StrictMode's first unmount reports, marked aborted.
    */
   async open(id: string): Promise<void> {
-    await this.goto(`/projects/${id}`);
+    await this.goto(projectAddress(id));
   }
 
   /** Opens the project at an item's address, or a block's under it, once its timeline is read and drawn. */
@@ -294,12 +295,12 @@ export class TimelinePage {
 
 /** An attachment's address under its item's (F28.5). */
 export function attachmentAddress(projectId: string, itemId: string, attachmentId: string): string {
-  return `/projects/${projectId}/items/${itemId}/attachments/${attachmentId}`;
+  return `${projectAddress(projectId)}/items/${itemId}/attachments/${attachmentId}`;
 }
 
 /** An item's address under its project's, or a block's under the item's (F97). */
 export function addressOf(projectId: string, itemId: string, blockId?: string): string {
-  return `/projects/${projectId}/items/${itemId}${blockId === undefined ? '' : `/blocks/${blockId}`}`;
+  return `${projectAddress(projectId)}/items/${itemId}${blockId === undefined ? '' : `/blocks/${blockId}`}`;
 }
 
 /** A settled section's line (F31.5), by its block's id: Pilot's mark, the heading's words, the answer, the note. */

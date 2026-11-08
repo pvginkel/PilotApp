@@ -12,6 +12,7 @@ import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { addressOf } from '../support/page-objects/timeline-page';
+import { projectAddress } from '../support/projects';
 
 const AT = 'at: 2026-10-20T09:00:00Z';
 const LONG_NOTE = 'Lake Garda has the shortest drive of the three, a shop at the gate and room for the van. '.repeat(4).trim();
@@ -297,7 +298,7 @@ test.describe('A section Pilot settled in the overlay', () => {
     await timeline.open(id);
 
     await timeline.item(trip).lineTitle.click();
-    await expect(page).toHaveURL(`/projects/${id}/documents/${trip}`);
+    await expect(page).toHaveURL(`${projectAddress(id)}/documents/${trip}`);
     await expect(overlay.doneChip).toHaveText('Done');
     await expect(overlay.settled).toHaveCount(1);
     await expect(overlay.settledLines).toHaveCount(2);
@@ -357,7 +358,7 @@ test.describe('A settled section’s block address', () => {
 
     await docTabs.document(trip).close.click();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(timeline.item(trip).card.root).toBeInViewport();
   });
 });

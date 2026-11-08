@@ -13,12 +13,16 @@
 
 import { createContext, useContext, useLayoutEffect, useSyncExternalStore } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { useShownProject } from '@/hooks/use-project-address';
 import { browserState, rememberLine, type DocTab, type KeptLine } from '@/lib/browser-state';
 
 declare module '@tanstack/react-router' {
   interface HistoryState {
-    /** Gone to from the project's row in the list, which off a phone shows the tab it was left on (F1.6). */
-    fromList?: boolean;
+    /**
+     * Gone to from the project's row in the list, which off a phone shows the tab it was left on
+     * (F1.6): the project's id, which its line is kept by.
+     */
+    fromList?: string;
   }
 }
 
@@ -108,8 +112,9 @@ export interface TabLine {
   shown: (key: string) => ShownTab;
 }
 
-/** The project's tab line, `showing` the tab the address shows, none for the timeline. */
-export function useDocTabs(projectId: string, showing: DocTab | null): TabLine {
+/** The shown project's tab line, `showing` the tab the address shows, none for the timeline. */
+export function useDocTabs(showing: DocTab | null): TabLine {
+  const { id: projectId, address } = useShownProject();
   const line = useSyncExternalStore(subscribe, () => lineOf(projectId));
   const navigate = useNavigate();
   const key = showing?.key ?? TIMELINE;
@@ -135,7 +140,7 @@ export function useDocTabs(projectId: string, showing: DocTab | null): TabLine {
 
   const show = (tab: DocTab | null) =>
     void (tab === null
-      ? navigate({ to: '/projects/$projectId', params: { projectId }, replace: true })
+      ? navigate({ to: '/projects/$address', params: { address }, replace: true })
       : navigate({ href: tab.href, replace: true }));
   const close = (closed: string) => {
     const now = lineOf(projectId);

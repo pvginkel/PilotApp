@@ -9,7 +9,8 @@
  * composer, the session log's Discuss included. Back is the browser's: a view is an entry of its
  * own, and Back, the arrow or Esc takes it off and shows what lay under it, the tab it was opened
  * from; a reload keeps the tab and the views; a view's address reached cold lies over the
- * project's Timeline, so that Back lands there. A view keeps its scroll while another lies over it,
+ * project's Timeline, so that Back lands there, at the project's id too, which gives way to its own
+ * address. A view keeps its scroll while another lies over it,
  * so that Back from an attachment shows its document where it was read; one opened afresh, or
  * reloaded, starts at its top.
  */
@@ -20,7 +21,7 @@ import { makeUnique } from '../support/helpers';
 import { documentAddress, documentAttachmentAddress, handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { addressOf } from '../support/page-objects/timeline-page';
-import type { AttachedFile } from '../support/projects';
+import { projectAddress, type AttachedFile } from '../support/projects';
 
 const SUMMARY = 'Where we go, what we take and who drives.';
 const WORDS = Array.from({ length: 160 }, (_, index) => `word${index}`).join(' ');
@@ -106,13 +107,13 @@ test.describe('Views on a phone', () => {
 
     await overlay.back.tap();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(phoneTabs.tab('documents')).toHaveAttribute('aria-selected', 'true');
     await expect(panel.document(trip).root).toBeVisible();
     await expect(panel.root).toHaveAttribute('data-kept', '');
     await page.goBack();
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 
   test('an attachment opened from its document’s view lies on top of it: its arrow, Back and Esc each show the document again, as its document’s link does; Done in the document’s view closes it', async ({
@@ -156,7 +157,7 @@ test.describe('Views on a phone', () => {
     await expect(page).toHaveURL(documentAddress(id, trip));
     await page.keyboard.press('Escape');
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
 
     // Done closes the document's view as Back does: forward is the view again.
@@ -166,7 +167,7 @@ test.describe('Views on a phone', () => {
     await overlay.blockAt('A2').done.tap();
     await overlay.send.tap();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(timeline.item(sent).root).toHaveAttribute('data-state', 'done');
     await page.goForward();
     await expect(page).toHaveURL(documentAddress(id, sent));
@@ -247,11 +248,37 @@ test.describe('Views on a phone', () => {
     await expect(page).toHaveURL(documentAttachmentAddress(id, trip, notes));
     await overlay.back.tap();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await expect(timeline.root).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL(`/projects/${before}`);
+    await expect(page).toHaveURL(projectAddress(before));
+  });
+
+  test('a view’s address reached cold at the project’s id gives way to the project’s own, still a view over the Timeline, so that Back lands there', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    phoneTabs,
+  }) => {
+    const me = await people.signIn();
+    const before = await projects.makeWithSession({ name: makeUnique('Before'), members: [me.handle!] });
+    const id = await projects.makeWithSession({ name: makeUnique('Cold'), members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
+    await timeline.open(before);
+
+    await page.goto(`/projects/${id}/documents/${trip}`);
+    await expect(page).toHaveURL(documentAddress(id, trip));
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    await overlay.back.tap();
+    await expect(overlay.root).toHaveCount(0);
+    await expect(page).toHaveURL(projectAddress(id));
+    await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
+    await expect(timeline.root).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(projectAddress(before));
   });
 
   test('a card’s document opened at one of its blocks lies under its attachment too: the attachment’s document link is Back to it, adding no entry', async ({
@@ -279,7 +306,7 @@ test.describe('Views on a phone', () => {
     expect(await page.evaluate(() => history.length)).toBe(entries);
     await overlay.back.tap();
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -338,7 +365,7 @@ test.describe('Views on a phone', () => {
     await expect(overlay.root).toHaveCount(0);
     await expect(phoneTabs.tab('chat')).toHaveAttribute('aria-selected', 'true');
     await expect(chat.quote).toHaveAttribute('data-quote', quote!);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
 
     await page.goBack();
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
@@ -421,6 +448,6 @@ test.describe('Views on a phone', () => {
     await overlay.back.tap();
     await expect(overlay.root).toHaveCount(0);
     await expect(phoneTabs.tab('documents')).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 });

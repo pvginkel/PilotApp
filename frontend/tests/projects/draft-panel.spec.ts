@@ -19,6 +19,7 @@
 import { test, expect } from '../support/fixtures';
 import { expectConsoleError, makeUnique, waitForUiState } from '../support/helpers';
 import { isOnTop } from '../support/page-objects/panel-page';
+import { projectAddress } from '../support/projects';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
 const CONVERSATION = '2b6e9d41-7c3a-4f18-9e5d-3a8c1f6b0d27';
@@ -177,14 +178,14 @@ test.describe('The Draft tab', () => {
     await expect(panel.draft.links).toHaveText(['the handover']);
 
     await panel.draft.links.click();
-    await expect(page).toHaveURL(`/projects/${id}/attachments/${handover}`);
+    await expect(page).toHaveURL(`${projectAddress(id)}/attachments/${handover}`);
     await expect(overlay.title).toHaveText('Handover');
     await expect(overlay.sub).toHaveText('Attachment of the draft');
     await expect(overlay.attachment.prose).toContainText('The lake.');
 
     // The definition chat lies under the attachment's tab: Discuss shows the chat's.
     await overlay.discuss.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await expect(overlay.root).toHaveCount(0);
     await expect(definitionChat.quote).toHaveAttribute('data-quote', `path attachments/${batch}/handover.md`);
     await expect(definitionChat.field).toBeFocused();
@@ -371,7 +372,7 @@ test.describe('A draft’s Documents tab', () => {
     await expect(together.files.getByTestId('panel.row.sub')).toHaveText(['handover.md', 'map.txt']);
 
     await panel.attachment(card).root.click();
-    await expect(page).toHaveURL(`/projects/${id}/attachments/${card}`);
+    await expect(page).toHaveURL(`${projectAddress(id)}/attachments/${card}`);
     await expect(overlay.title).toHaveText('The card');
     await expect(overlay.sub).toHaveText('Attachment of the draft');
     await expect(overlay.attachment.text).toHaveText('RB-12');

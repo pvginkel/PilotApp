@@ -19,7 +19,7 @@ import { test, expect } from '../support/fixtures';
 import { rawTurn } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
-import type { Projects } from '../support/projects';
+import { projectAddress, type Projects } from '../support/projects';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { attachmentAddress } from '../support/page-objects/timeline-page';
@@ -224,7 +224,7 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.steps.last()).toHaveText('Attached · route.txt');
 
     await sessionLog.tools.getByRole('button', { name: registered }).click();
-    await expect(page).toHaveURL(new RegExp(`/projects/${project}/items/${survey}$`));
+    await expect(page).toHaveURL(new RegExp(`${projectAddress(project)}/items/${survey}$`));
     await expect(sessionLog.overlay).toHaveCount(0);
   });
 
@@ -285,7 +285,7 @@ test.describe('A work item’s session log', () => {
 
     await page.keyboard.press('Escape');
     await expect(sessionLog.overlay).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${project}`);
+    await expect(page).toHaveURL(projectAddress(project));
   });
 
   test('stopped by you reads "Stopped by you · <time>", and a Resume carries it on under the stopped turn', async ({
@@ -537,7 +537,7 @@ test.describe('Off a phone, the session log’s popover', () => {
 
     await sessionLog.close.click();
     await expect(sessionLog.overlay).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${project}`);
+    await expect(page).toHaveURL(projectAddress(project));
     expect(await page.evaluate(() => history.length)).toBe(entries);
 
     await timeline.item(second).work.sessionLog.click();
@@ -567,13 +567,13 @@ test.describe('Off a phone, the session log’s popover', () => {
     await expect(sessionLog.item).toHaveText('Surveying the scripts');
     await two.click();
     await expect(sessionLog.overlay).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${project}`);
+    await expect(page).toHaveURL(projectAddress(project));
 
     await one.click();
     await expect(sessionLog.overlay).toBeVisible();
     await panel.documentsTab.click();
     await expect(sessionLog.overlay).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${project}`);
+    await expect(page).toHaveURL(projectAddress(project));
     await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
     await expect(panel.documentsTab).toBeFocused();
 
@@ -679,7 +679,7 @@ test.describe('Off a phone, the session log’s popover', () => {
     await page.goto(sessionLogAddress(project, work));
     await expect(sessionLog.item).toHaveText(TITLE);
     await projectList.tab(otherName).click();
-    await expect(page).toHaveURL(`/projects/${other}`);
+    await expect(page).toHaveURL(projectAddress(other));
     await expect(sessionLog.overlay).toHaveCount(0);
     await projectList.tab(name).click();
     await expect(page).toHaveURL(documentAddress(project, packing));

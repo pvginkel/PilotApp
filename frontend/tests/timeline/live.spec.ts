@@ -13,6 +13,7 @@ import { createDeploymentSseHelper } from '../support/helpers/deployment-sse';
 import { PageFetches, slowNetwork } from '../support/network';
 import { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import type { TimelinePage } from '../support/page-objects/timeline-page';
+import { projectAddress } from '../support/projects';
 
 const QUESTION = '```question id=Q1\n```\n';
 const DECISION = '```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n';
@@ -130,7 +131,7 @@ test.describe('Live updates', () => {
     const id = await projects.makeWithSession({ name: makeUnique('Tabs'), members: [me.handle!] });
     const other = await context.newPage();
     const otherHead = new ProjectHeadPage(other);
-    await other.goto(`/projects/${id}`);
+    await other.goto(projectAddress(id));
     await expect(otherHead.autopilot).toHaveAttribute('aria-checked', 'false');
     await createDeploymentSseHelper(other).ensureConnected();
 

@@ -12,6 +12,7 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import type { Push } from '../support/device';
 import { makeUnique } from '../support/helpers';
+import { projectAddress } from '../support/projects';
 
 test.use({ channel: 'chromium', permissions: ['notifications'] });
 
@@ -136,7 +137,7 @@ test.describe("A device's notifications", () => {
 
       await shell.open('/');
 
-      await expect(page).toHaveURL(new RegExp(`/projects/${last}$`));
+      await expect(page).toHaveURL(new RegExp(`${projectAddress(last)}$`));
       await expect.poll(() => device.tags()).toEqual([]);
     });
   });

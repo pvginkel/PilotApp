@@ -16,6 +16,7 @@
 import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique, makeUniqueToken } from '../support/helpers';
+import { projectAddress } from '../support/projects';
 
 // The browser's time zone, which every time on the timeline is shown in.
 const ZONE = 'Europe/Amsterdam';
@@ -255,7 +256,7 @@ test.describe('A wait done', () => {
     await expect(item.undo).toHaveCount(0);
     await expect(item.wait.request).toHaveCount(0);
     await item.lineTitle.click();
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
 
     await projects.transition(id, 'finished');
     const other = timeline.item(finished);
@@ -293,7 +294,7 @@ test.describe('A wait’s done line on a phone', () => {
     await item.lineTitle.tap();
     await expect(item.wait.menu.getByRole('menuitem')).toHaveText(['Discuss']);
     await expect(overlay.root).toHaveCount(0);
-    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(page).toHaveURL(projectAddress(id));
     await item.lineTitle.tap();
     await expect(item.wait.menu).toHaveCount(0);
 

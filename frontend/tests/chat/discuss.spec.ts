@@ -16,6 +16,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { ChatPage } from '../support/page-objects/chat-page';
 import { attachmentAddress, TimelinePage } from '../support/page-objects/timeline-page';
+import { projectAddress } from '../support/projects';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
 const CONVERSATION = '7b2e9c41-3f8d-4a65-b1c0-5d9e2a7f8c36';
@@ -264,7 +265,7 @@ test.describe('The unread dot', () => {
     // The person's other device, its panel on the Documents tab as this one's.
     const other = await page.context().newPage();
     const otherChat = new ChatPage(other);
-    await other.goto(`/projects/${project}`);
+    await other.goto(projectAddress(project));
     await expect(otherChat.tabDot).toBeVisible();
 
     const marked = chat.acted('read');
