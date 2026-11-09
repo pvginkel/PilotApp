@@ -1,7 +1,9 @@
 /**
  * Text as every screen shows it (F91, F93): ticket ids, repos and environments link where they
  * stand, in the colour of the text around them, underlined under the mouse. Inside a link or a
- * button, where a link cannot nest, each is a span that opens it on a click or on Enter.
+ * button, where a link cannot nest, each is a span that opens it on a click or on Enter. A ticket
+ * id stays plain text where a tap meant for what is around it would open the tracker: a project's
+ * tab and a steps button's name.
  */
 
 import { useMemo, type ReactNode, type SyntheticEvent } from 'react';
@@ -23,12 +25,14 @@ interface LinkedTextProps {
   text: string;
   /** The text stands inside a link or a button. */
   nested?: boolean;
+  /** Whether a ticket id links; repos and environments link either way. */
+  tickets?: boolean;
 }
 
-export function LinkedText({ text, nested = false }: LinkedTextProps) {
+export function LinkedText({ text, nested = false, tickets = true }: LinkedTextProps) {
   const link = useLinker();
   return link(text).map((piece, index) => {
-    if (piece.link === undefined) return piece.text;
+    if (piece.link === undefined || (!tickets && piece.link.kind === 'ticket')) return piece.text;
     const { href, title } = piece.link;
     return nested ? (
       <NestedLink key={index} href={href} title={title}>

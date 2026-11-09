@@ -8,9 +8,13 @@ import type { components } from '@/lib/api/generated/types';
 
 type LinkSettings = components['schemas']['LinksResponseSchema.d9d9a05'];
 
+/** What a link opens: a ticket, a repo or an environment. */
+type LinkKind = 'ticket' | 'repo' | 'environment';
+
 interface Link {
   href: string;
   title: string;
+  kind: LinkKind;
 }
 
 interface TextPiece {
@@ -43,7 +47,7 @@ const environmentName = (name: string) =>
 
 /** An environment's KubeCoder Open, by its id, under the deployment's base URL, `name` naming it in the title. */
 export function environmentLink(base: string, id: string, name: string): Link {
-  return { href: `${base}/environments/${encodeURIComponent(id)}/ssh/open`, title: `Open ${name} in VS Code` };
+  return { href: `${base}/environments/${encodeURIComponent(id)}/ssh/open`, title: `Open ${name} in VS Code`, kind: 'environment' };
 }
 
 /** The ticket id pattern is the backend's, in Python `re` syntax; its default reads the same here. */
@@ -53,10 +57,17 @@ export function linker(settings: LinkSettings): Linker {
   if (ticketUrl !== null) {
     kinds.push({
       pattern: String.raw`\b(?:${settings.ticket_id_pattern})\b`,
-      link: (id) => ({ href: ticketUrl.replaceAll('{id}', encodeURIComponent(id)), title: `Open ${id} in the tracker` }),
+      link: (id) => ({
+        href: ticketUrl.replaceAll('{id}', encodeURIComponent(id)),
+        title: `Open ${id} in the tracker`,
+        kind: 'ticket',
+      }),
     });
   }
-  kinds.push({ pattern: REPO, link: (repo) => ({ href: `https://github.com/${repo}`, title: `Open ${repo} on GitHub` }) });
+  kinds.push({
+    pattern: REPO,
+    link: (repo) => ({ href: `https://github.com/${repo}`, title: `Open ${repo} on GitHub`, kind: 'repo' }),
+  });
   if (base !== null) {
     const open = (id: string, found: string) => environmentLink(base, id, found);
     kinds.push({ pattern: ENVIRONMENT_ID, link: (id) => open(id, id) });

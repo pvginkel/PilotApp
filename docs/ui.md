@@ -236,7 +236,8 @@ In `src/components/shared/`:
   mark `done`, `now` or `pending` (`planStepMark()` and `progressStepMark()`,
   `src/lib/utils/status-labels.ts`). The button is the donut of the steps done, in progress and the
   rest, counts and not places, and the step reading (`stepReading()`), its name giving way down to
-  about three letters in a tight row, ", …" kept; its popover, named `name`, lists the steps in
+  about three letters in a tight row, ", …" kept, its ticket ids plain text; its popover, named
+  `name`, lists the steps in
   order under `<name> · N of M done`, a step's open notes beside it where it has some.
 - `Dialog`, a modal dialog on Radix's (`@radix-ui/react-dialog`, not the template's wrapper) that a
   click beside it or Esc closes, Esc through `useEscape` (below) and never Radix's own. While it is
@@ -379,7 +380,9 @@ reads `GET /api/links` once; until it answers, text shows unlinked. A link is an
 class="mention">` that opens in a new tab, in the colour of the text around it and underlined under
 the mouse. With `nested`, for text inside a link or a button, where a link cannot nest, each link
 is a `span role="link"` that opens on a click or on Enter and keeps the link or button around it
-from acting.
+from acting. With `tickets={false}` a ticket id is plain text, repos and environments linking as
+ever: a project's tab and a step button's name, where a tap meant for what is around it would open
+the tracker ([`projects.md`](projects.md)).
 
 **`<EnvironmentLink environment={{id, name}} />`** is an environment by its name, linked by its id
 to `<base>/environments/<id>/ssh/open`, "Open <name> in VS Code", while the base is set, and plain

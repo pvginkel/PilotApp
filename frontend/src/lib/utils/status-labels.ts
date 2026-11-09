@@ -43,23 +43,30 @@ export function stepReading(progress: PlanProgress): StepReading {
   return { text: `${progress.done} of ${progress.total} done`, more: false };
 }
 
-interface StatusLine extends StepReading {
+interface StatusLine {
+  text: string;
   /** The time shown after the text: when a finished project finished. */
   at: string | null;
 }
 
-/** "Draft" while the project is in the chat, "Finished <date>" once finished, else the step reading. */
+/**
+ * "Draft" while the project is in the chat, "Finished <date>" once finished, else every step in
+ * progress, in the plan's order, "; " between them, which the tab cuts at two lines (F1.1); with
+ * none in progress, the step reading.
+ */
 export function projectStatusLine(tab: Pick<ProjectTab, 'state' | 'finished_at' | 'progress'>): StatusLine {
   switch (tab.state) {
     case 'draft':
-      return { text: 'Draft', more: false, at: null };
+      return { text: 'Draft', at: null };
     case 'finished':
-      return { text: 'Finished', more: false, at: tab.finished_at };
-    case 'open':
-      return { ...stepReading(tab.progress), at: null };
+      return { text: 'Finished', at: tab.finished_at };
+    case 'open': {
+      const going = tab.progress.in_progress;
+      return { text: going.length > 0 ? going.join('; ') : stepReading(tab.progress).text, at: null };
+    }
     default: {
       const unknown: never = tab.state;
-      return { text: String(unknown), more: false, at: null };
+      return { text: String(unknown), at: null };
     }
   }
 }

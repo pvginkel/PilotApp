@@ -1,8 +1,8 @@
 /**
  * A list of steps behind a button, the plan's step button (F2.2, F3.1) and a work item's progress
  * button (F145.2, F145.3) alike: the donut of the steps done, in progress and the rest, and the
- * first step in progress by name, ", …" when more are; with none in progress "Not started",
- * "N of M done" or "All steps done". Its popover lists the steps in order, done ones ticked, every
+ * first step in progress by name, its ticket ids plain text, ", …" when more are; with none in
+ * progress "Not started", "N of M done" or "All steps done". Its popover lists the steps in order, done ones ticked, every
  * step in progress highlighted, side by side (F3.4), how many are done in its heading, and beside a
  * step with open notes the sticky-note icon, listing them on hover and on a tap (F3.6).
  */
@@ -75,7 +75,7 @@ export function StepsButton({ steps, name, anchorClassName, testId, popoverTestI
         >
           <StepRing done={done} now={going.length} total={steps.length} testId={`${testId}.ring`} />
           <span className="step-name" data-testid={`${testId}.name`}>
-            <LinkedText text={reading.text} nested />
+            <LinkedText text={reading.text} nested tickets={false} />
           </span>
           {reading.more && <span className="step-more">, …</span>}
         </button>

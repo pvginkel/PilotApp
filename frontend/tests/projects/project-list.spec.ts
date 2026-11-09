@@ -1,10 +1,11 @@
 /**
  * The project list (F1): the person's projects, then Other projects and Finished, each group with
- * its count and a remembered chevron; a tab's name, ticket id and status line; each project at its
- * own address, the bare address opening the one the browser remembers; the archived projects
- * (D012).
+ * its count and a remembered chevron; a tab's name, ticket id and status line, every step in
+ * progress in it, at most two lines; each project at its own address, the bare address opening the
+ * one the browser remembers; the archived projects (D012).
  */
 
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { projectAddress } from '../support/projects';
@@ -77,8 +78,44 @@ test.describe('The project list', () => {
     await expect(status('New project')).toHaveText('Draft');
     await expect(status(between)).toHaveText('1 of 3 done');
     await expect(status(one)).toHaveText('Step b');
-    await expect(status(two)).toHaveText('Step a, …');
+    // Every step in progress, in the plan's order.
+    await expect(status(two)).toHaveText('Step a; Step c');
     await expect(status(all)).toHaveText('All steps done');
+  });
+
+  test('a tab’s status line is at most two lines, ellipsized, the badge beside it', async ({ people, projects, projectList }) => {
+    const me = await people.signIn();
+    const long = (id: string) => ({
+      id,
+      // 25 words, the most a plan's save takes.
+      title: `Step ${id} ${Array.from({ length: 23 }, (_, index) => `word${index}`).join(' ')}`,
+      status: 'in_progress' as const,
+    });
+    const short = makeUnique('Short');
+    const shortId = await projects.make({ name: short, tasks: [step('a', 'in_progress')], members: [me.handle!] });
+    const name = makeUnique('Long');
+    const id = await projects.makeWithSession({ name, tasks: [long('a'), long('b')], members: [me.handle!] });
+    await projects.place(id, { kind: 'question', title: 'Which lake?', text: '```question id=Q1\n```\n' });
+    await projectList.open(shortId);
+
+    const lines = async (step: Locator) =>
+      step.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { lines: Math.round(element.clientHeight / parseFloat(style.lineHeight)), cut: element.scrollHeight > element.clientHeight };
+      });
+    const tab = projectList.tab(name);
+    const line = tab.getByTestId('projects.tab.step');
+    await expect(line).toHaveText(`${long('a').title}; ${long('b').title}`);
+    await expect(line).toHaveAttribute('title', `${long('a').title}; ${long('b').title}`);
+    await expect(tab.getByTestId('projects.tab.badge')).toHaveText('1');
+    expect(await lines(line)).toEqual({ lines: 2, cut: true });
+    expect(await line.evaluate((element) => getComputedStyle(element).webkitLineClamp)).toBe('2');
+    // The badge stands beside the line, inside the tab.
+    const badge = (await tab.getByTestId('projects.tab.badge').boundingBox())!;
+    const box = (await tab.boundingBox())!;
+    expect(badge.x + badge.width).toBeLessThanOrEqual(box.x + box.width);
+    // A short line is one line, and nothing is cut.
+    expect(await lines(projectList.tab(short).getByTestId('projects.tab.step'))).toEqual({ lines: 1, cut: false });
   });
 
   test('the tab of the project on screen is the current one', async ({ people, projects, projectList }) => {
