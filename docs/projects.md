@@ -214,12 +214,12 @@ the draft at its address, `draft-<number>`, in the entry's place, the focus in i
   without a title), its ticket, and its status line, at most two lines, ellipsized, its whole text
   its tooltip: "Draft"; "Finished" and the day it finished; else every step in progress, in the
   plan's order, "; " between them, or with none in progress the step reading's "Not started", "N of
-  M done" or "All steps done" (`projectStatusLine()`). The step reading, `stepReading()` in
+  M done" or "All steps done" (`projectStatusLine()`, D181). The step reading, `stepReading()` in
   `frontend/src/lib/utils/status-labels.ts`, is the head's step button's and a work item's progress
   button's ([`work.md`](work.md)): the first step in progress, ", …" after it while more are. The
   tab's text links repos and environments ([`ui.md`](ui.md)) but no ticket id, its ticket, name and
   status line alike, as a step button's name links none, so that a tap meant for the tab never opens
-  the tracker; the plan popover's steps link theirs. While `badge.count` is above 0, the
+  the tracker (D182); the plan popover's steps link theirs. While `badge.count` is above 0, the
   status line ends in it, "N waiting on you" as its tooltip, orange while `badge.urgent`; a finished
   tab's too.
 - **The status icon** (`status-icon.tsx`) stands before the status line, where the project has a

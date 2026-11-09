@@ -144,7 +144,7 @@ the head, the tab and the tabs under it take none.
 At a document's address (`DocumentOverlay`, read by `useItemDocument`):
 
 - **The head**: the title, and under it the project's name, the step, at most two lines,
-  ellipsized, its whole title its tooltip, the segment bar, *Done* or *Unsent*, and *Edited
+  ellipsized, its whole title its tooltip (D183), the segment bar, *Done* or *Unsent*, and *Edited
   <time>*, a pencil in place of its word at 600px and below
   ([`timeline.md`](timeline.md)); then Pilot's job on the item, the read's `job`, in the form the
   timeline draws it ([`work.md`](work.md)), and the item's Undo while `done.undo` holds, before

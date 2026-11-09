@@ -112,7 +112,7 @@ is stored nowhere.
   task's title names the task alone, in at most 25 words as whitespace separates them; what it
   waits on, what follows it and the actions related to it go into a note on the task. Every title
   of the save is counted, not only one it changes, so a title the rows took before the rule holds
-  the plan's next save until it is shortened. A
+  the plan's next save until it is shortened (D180). A
   ref names a block of one of the project's items, never one of the draft's, which are no item's
   (D001): a draft save may drop any of its blocks, since no note can name one.
 - **Writing.** The tasks take the save's order. A task the save leaves out is removed: it keeps
