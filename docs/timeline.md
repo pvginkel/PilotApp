@@ -517,7 +517,8 @@ phone in its tab; a document's own address, an attachment's, the handbook's and 
 `components/overlay/item-overlay.tsx`), the whole screen, a view pushed over the tabs
 ([`projects.md`](projects.md)); a notification's link is such an address
 ([`notifications.md`](notifications.md)). Its head is the view's arrow back and the project's name
-over the item's step; its body the item as the timeline draws it, open or as its done line, answered
+over the item's step, at most two lines, ellipsized, as a document's head has it
+([`documents.md`](documents.md)); its body the item as the timeline draws it, open or as its done line, answered
 in place as there, its option rows at least 48px high, a thumb's height. A block's address waits for
 the timeline's read: where the block's document is a card it opens the document at the block, as at
 every width, and otherwise the item alone, going to the block. An address naming no item, or a

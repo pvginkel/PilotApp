@@ -1,6 +1,7 @@
 /**
  * An item on a phone (F99, F13.9). Its address shows the item alone, full screen, as a view pushed
- * over the tabs (F98.4): the item as the timeline draws it, its option rows a thumb's height and
+ * over the tabs (F98.4): the item as the timeline draws it, under the project's name and its plan
+ * step, at most two lines, its option rows a thumb's height and
  * Other's console kept above the keyboard while it is typed in, answered in place as there; a
  * notification's link reached cold lies over the project's Timeline, and an item no longer open
  * shows as it stands. A block's address shows its item alone at the block, or a card's document
@@ -88,6 +89,30 @@ test.describe('The item alone on a phone', () => {
     await expect(timeline.item(decision).root).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(projectAddress(before));
+  });
+
+  test('the item alone cuts a long plan step under the project’s name at two lines, ellipsized, its whole title its tooltip', async ({
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const step = `Pitch the shelter ${Array.from({ length: 22 }, (_, index) => `wordwordword${index}`).join(' ')}`;
+    const name = makeUnique('Long step');
+    const id = await projects.makeWithSession({ name, members: [me.handle!], tasks: [{ id: 'pitch', title: step, status: 'in_progress' }] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which shelter?', text: `---\nstep: pitch\n---\n\n${DECISION}` });
+    await timeline.openAt(id, decision);
+
+    await expect(timeline.item(decision, overlay.alone).root).toBeVisible();
+    await expect(overlay.title).toHaveText(name);
+    await expect(overlay.step).toHaveText(step);
+    await expect(overlay.step).toHaveAttribute('title', step);
+    const shown = await overlay.step.evaluate((element) => ({
+      lines: Math.round(element.clientHeight / parseFloat(getComputedStyle(element).lineHeight)),
+      cut: element.scrollHeight > element.clientHeight,
+    }));
+    expect(shown).toEqual({ lines: 2, cut: true });
   });
 
   test('answered, the item alone answers as the timeline’s does, and opened again it shows as it stands, its line opening its document over it', async ({

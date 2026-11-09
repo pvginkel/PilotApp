@@ -59,7 +59,7 @@ function Titles({ project, item }: { project: ProjectHead; item: TimelineItem | 
       </h2>
       {item?.step && (
         <div className="sub" data-testid="overlay.sub">
-          <span className="mono" data-testid="overlay.step">
+          <span className="mono step" title={item.step.title} data-testid="overlay.step">
             <LinkedText text={item.step.title} />
           </span>
         </div>

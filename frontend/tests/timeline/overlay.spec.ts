@@ -2,7 +2,8 @@
  * A document opened (F28): a document at its own address opens in its tab, in the timeline's place
  * under the tab line, the side panel beside it (F28.1, F97; the tabs whole in
  * tests/projects/doc-tabs.spec.ts). Its head holds the title, bold, the
- * project, the step, the segment bar, *Unsent* or *Done*, and *Edited <time>* (F28.2, F28.7, D026),
+ * project, the step, at most two lines, the segment bar, *Unsent* or *Done*, and *Edited <time>*
+ * (F28.2, F28.7, D026),
  * Discuss level with the title's line, in its tab as in a phone's view;
  * its body the summary as its lead, the prose and every block answered in place, and Pilot's dots
  * (F28.3); its foot "Done · <stamp> · <who>", Reviewed, or *Send answers*, which closes its tab (F28.4).
@@ -51,6 +52,15 @@ const PILOTS_DECISION =
 const DEFERRED_TENT = '```decision id=D1\noptions:\n  - Dome\n  - Tunnel\nanswer: deferred\nby: agent\nat: 2026-10-20T09:00:00Z\nto: plan\n```\n';
 const PILOTS_PITCH = '```question id=Q1\nanswer: Lake Garda\nby: agent\nat: 2026-10-20T09:00:00Z\n```\n';
 const BUILD = [{ id: 'build', title: 'Build the card', status: 'in_progress' as const }];
+// A step's title of 25 words, the most a plan's save takes, longer than two lines of any head.
+const LONG_STEP = `Build the card ${Array.from({ length: 22 }, (_, index) => `wordwordword${index}`).join(' ')}`;
+
+/** How many lines an element shows, and whether its text is cut. */
+const linesOf = (element: Locator) =>
+  element.evaluate((shown) => ({
+    lines: Math.round(shown.clientHeight / parseFloat(getComputedStyle(shown).lineHeight)),
+    cut: shown.scrollHeight > shown.clientHeight,
+  }));
 
 /** The button's middle is the title's line's, which is not the head's. */
 async function expectLevelWithTitle(button: Locator, title: Locator, head: Locator): Promise<void> {
@@ -92,6 +102,7 @@ test.describe('A document’s address', () => {
     await expect(overlay.title).toHaveText('The trip');
     await expect(overlay.project).toHaveText(name);
     await expect(overlay.step).toHaveText('Build the card');
+    expect(await linesOf(overlay.step)).toEqual({ lines: 1, cut: false });
     await expect(overlay.segments).toHaveCount(3);
     // The title bold, Discuss level with its line and not the middle of the head under it.
     expect(await overlay.title.evaluate((title) => getComputedStyle(title).fontWeight)).toBe('600');
@@ -134,6 +145,19 @@ test.describe('A document’s address', () => {
     expect(side.x + side.width).toBe(viewport.width);
     expect(box.y).toBeCloseTo(line.y + line.height, 0);
     expect(box.y + box.height).toBe(app.y + app.height);
+  });
+
+  test('cuts a long plan step in its head at two lines, ellipsized, its whole title its tooltip', async ({ people, projects, overlay }) => {
+    const me = await people.signIn();
+    const tasks = [{ id: 'build', title: LONG_STEP, status: 'in_progress' as const }];
+    const id = await projects.makeWithSession({ name: makeUnique('Long step'), members: [me.handle!], tasks });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP.replace('---\n', '---\nstep: build\n') });
+    await overlay.open(id, trip);
+
+    await expect(overlay.step).toHaveText(LONG_STEP);
+    await expect(overlay.step).toHaveAttribute('title', LONG_STEP);
+    expect(await linesOf(overlay.step)).toEqual({ lines: 2, cut: true });
+    expect(await overlay.step.evaluate((step) => getComputedStyle(step).webkitLineClamp)).toBe('2');
   });
 
   test('reads “The document did not load” for an address that names no document of the project', async ({

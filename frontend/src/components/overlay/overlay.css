@@ -37,6 +37,8 @@
   .sheet-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 600; line-height: var(--title-line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sheet-head .sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .sheet-head .sub .segbar { align-self: center; }
+  /* The plan step at most two lines, ellipsized; a word longer than the line breaks. */
+  .sheet-head .sub .step { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
   .sheet-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
   .sheet-head .edited .avatar { align-self: center; }
   .sheet-head .btn-icon + .btn-icon { margin-left: -10px; }
