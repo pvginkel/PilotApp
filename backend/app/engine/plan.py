@@ -31,6 +31,9 @@ _PLAN_KEYS = ("ticket", "repo", "tasks", "notes")
 _TASK_KEYS = ("id", "title", "status", "notes")
 _NOTE_KEYS = ("id", "summary", "content", "refs", "created")
 _STATUSES = "pending, in_progress or done"
+# The most words a task's title holds, counted as whitespace separates them: a title names the task
+# alone, and what it waits on and the actions around it go into its notes.
+TITLE_WORDS = 25
 # What a JSON escape can write and no PostgreSQL `text` holds.
 _UNSTORABLE = re.compile(r"[\x00\ud800-\udfff]")
 _NOT_TEXT = "the plan is not text: a string holds `\\u0000` or an unpaired surrogate"
@@ -425,6 +428,12 @@ class _Reader:
         subject = f"task {index}" if task_id is None else f"task `{task_id}`"
         self._keys(entry, _TASK_KEYS, f"{subject}: ", "a task")
         title = self._required(entry, "title", subject)
+        if title is not None and len(words := title.split()) > TITLE_WORDS:
+            self._fault(
+                f"{subject}: its title is {len(words)} words, over {TITLE_WORDS}: a"
+                " task's title names the task alone; what it waits on, what follows"
+                " it and the actions related to it go into a note on the task"
+            )
         status = self._status(entry, subject)
         found = self._notes(entry, task_id, subject)
         if task_id is None:

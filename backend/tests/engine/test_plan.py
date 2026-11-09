@@ -67,6 +67,20 @@ CREATED = datetime(2026, 10, 12, 12, 34, tzinfo=UTC)
 
 NOT_TEXT = "the plan is not text: a string holds `\\u0000` or an unpaired surrogate"
 
+# A task's title and what it waits on and the actions after it, in one: 26 words.
+LONG_TITLE = (
+    "Plan slice 067 once t1 is done, then ask the operator to restore the backup"
+    " and re-run the import before the store's update runs on production"
+)
+
+
+def _long_title(subject: str, words: int) -> str:
+    return (
+        f"{subject}: its title is {words} words, over 25: a task's title names the task"
+        " alone; what it waits on, what follows it and the actions related to it go"
+        " into a note on the task"
+    )
+
 
 def _save(container: ServiceContainer, project: Project, data: Any) -> list[str]:
     """The messages of a save's faults; `data` is JSON's, or the bytes."""
@@ -638,6 +652,14 @@ class TestPlanServiceFaults:
                 ["task `fix`: `title` is not a string"],
             ),
             (
+                {"tasks": [{"id": "fix", "title": LONG_TITLE, "status": "pending"}]},
+                [_long_title("task `fix`", 26)],
+            ),
+            (
+                {"tasks": [{"title": LONG_TITLE, "status": "done"}]},
+                ["task 1 has no `id`", _long_title("task 1", 26)],
+            ),
+            (
                 {"tasks": [{"id": "fix", "title": "Fix"}]},
                 ["task `fix` has no `status`"],
             ),
@@ -757,6 +779,54 @@ class TestPlanServiceFaults:
 
         assert _save(container, project, save) == messages
         assert _rows(session, project) == rows
+
+    def test_a_title_of_25_words_counted_by_whitespace_is_saved(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        # Any run of whitespace parts two words; a dash or a comma standing
+        # alone is a word.
+        title = "Fix  the\tclient\nfor v4 — " + " ".join(["word"] * 18) + " ,"
+        assert len(title.split()) == 25
+        plan = _plan()
+        plan["tasks"][1]["title"] = title
+
+        assert _save(container, project, plan) == []
+        assert _task(session, project, "verify").title == title
+
+        plan["tasks"][1]["title"] = f"{title} more"
+        assert _save(container, project, plan) == [
+            _long_title("task `verify`", 26)
+        ]
+        assert _task(session, project, "verify").title == title
+
+    def test_a_long_title_saved_before_holds_every_save_until_it_is_shortened(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        # A title the rows took before the rule: every title of a save is read,
+        # not only one it changes, so the next save of the plan is held.
+        _save(container, project, _plan())
+        _task(session, project, "verify").title = LONG_TITLE
+        session.flush()
+        rows = _rows(session, project)
+        rendered = json.loads(container.plan_service().render(project).text)
+        rendered["tasks"][0]["status"] = "done"
+
+        assert _save(container, project, rendered) == [
+            _long_title("task `verify`", 26)
+        ]
+        assert _rows(session, project) == rows
+
+        rendered["tasks"][1]["title"] = "Restore the backup"
+        rendered["tasks"][1]["notes"] = [
+            {
+                "id": "n2",
+                "summary": "Waits on t1",
+                "content": "Ask the operator to restore the backup once t1 is done.",
+            }
+        ]
+        assert _save(container, project, rendered) == []
+        assert _task(session, project, "fix").status_code == TaskStatus.DONE
+        assert _task(session, project, "verify").title == "Restore the backup"
 
     def test_a_json_fault_names_its_line(
         self, container: ServiceContainer, project: Project
