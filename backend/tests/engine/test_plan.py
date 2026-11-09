@@ -794,9 +794,7 @@ class TestPlanServiceFaults:
         assert _task(session, project, "verify").title == title
 
         plan["tasks"][1]["title"] = f"{title} more"
-        assert _save(container, project, plan) == [
-            _long_title("task `verify`", 26)
-        ]
+        assert _save(container, project, plan) == [_long_title("task `verify`", 26)]
         assert _task(session, project, "verify").title == title
 
     def test_a_long_title_saved_before_holds_every_save_until_it_is_shortened(
@@ -811,9 +809,7 @@ class TestPlanServiceFaults:
         rendered = json.loads(container.plan_service().render(project).text)
         rendered["tasks"][0]["status"] = "done"
 
-        assert _save(container, project, rendered) == [
-            _long_title("task `verify`", 26)
-        ]
+        assert _save(container, project, rendered) == [_long_title("task `verify`", 26)]
         assert _rows(session, project) == rows
 
         rendered["tasks"][1]["title"] = "Restore the backup"
