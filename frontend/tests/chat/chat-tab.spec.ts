@@ -169,7 +169,7 @@ test.describe('The Chat tab', () => {
   });
 
   for (const theme of ['light', 'dark'] as const) {
-    test(`draws a person’s words as the opening prompt is drawn, unframed, on the primary’s tint a step ${theme === 'light' ? 'darker' : 'lighter'}, the tail at the foot; Pilot’s mark in the primary, ${theme}`, async ({
+    test(`draws a person’s words as the opening prompt is drawn, unframed, on the primary’s tint a step ${theme === 'light' ? 'darker' : 'lighter'}, the tail at the foot; Pilot’s mark in the primary blue, ${theme}`, async ({
       page,
       people,
       projects,
@@ -205,10 +205,12 @@ test.describe('The Chat tab', () => {
       if (theme === 'light') expect(lightness(mine.background)).toBeLessThan(lightness(opening.background));
       else expect(lightness(mine.background)).toBeGreaterThan(lightness(opening.background));
 
-      // Pilot's mark under the reply: its lines the primary, its circle grey.
+      // Pilot's mark under the reply: its lines the primary blue, the light theme's in its strong
+      // shade (D179), its circle grey.
       const mark = chat.replyEnds.locator('.avatar.pilot');
-      await expect(mark).toHaveCSS('color', await cssColour(page, 'hsl(var(--primary))'));
-      await expect(mark.locator('path').first()).toHaveCSS('stroke', await cssColour(page, 'hsl(var(--primary))'));
+      const blue = await cssColour(page, theme === 'light' ? 'hsl(var(--primary-strong))' : 'hsl(var(--primary))');
+      await expect(mark).toHaveCSS('color', blue);
+      await expect(mark.locator('path').first()).toHaveCSS('stroke', blue);
       await expect(mark).toHaveCSS('background-color', await cssColour(page, 'hsl(var(--avatar-pilot))'));
     });
   }

@@ -162,7 +162,7 @@
   --avatar-6: 188 45% 95%;
   --avatar-6-text: 188 40% 35%;
   --avatar-pilot: 220 13% 88%;
-  --avatar-pilot-text: var(--primary);
+  --avatar-pilot-text: var(--primary-strong);
   color-scheme: light;
 }
 

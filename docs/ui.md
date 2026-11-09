@@ -176,8 +176,11 @@ class that replaced a `text-[Npx]`, which set no line, keeps the body's with it,
 tint, pink, green, amber, violet and teal. A person's avatar slot counts from 1 and slot *n* takes
 colour (*n* − 1) modulo 6, plus 1; `tests/shell/avatars.spec.ts` measures every pair at 4.5:1 or
 better in both themes. Pilot's avatar is outside the palette: its circle `--avatar-pilot`, a grey,
-and its mark's lines the primary, `--avatar-pilot-text` (D118), wherever it shows, the timeline,
-the session log, settled lines and the chat; the spec pins the mark's colour as the primary's. `Avatar`
+and its mark's lines the primary blue, `--avatar-pilot-text` (D118), wherever it shows, the
+timeline, the session log, settled lines and the chat. In the light theme the blue is the primary's
+strong shade, `--primary-strong`, at about 4.3:1 on the grey, where the primary stands at 2.5:1,
+under the 3:1 WCAG asks of a graphic; the dark theme's primary stands at 3.1:1 (D179). The spec pins
+the mark's colour in each theme and its contrast at 3:1 or better. `Avatar`
 (`components/shared/avatar.tsx`) shows a person's initials with their full name as its tooltip, or
 a user icon for a name without initials. It is 38px, `sm` 29px and `xs`, an answer's, 24px, its
 initials 14.5, 12 and 10.2px, and Pilot's mark 13/20 of the circle.

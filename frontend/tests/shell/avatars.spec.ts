@@ -1,9 +1,10 @@
 /**
  * The avatars' palette (F132; ui-conventions.md, "Answering: the options"): six colours, the
  * primary's tint first and the mockup's pink second, every pair at 4.5:1 or better in both
- * themes, and Pilot's mark outside the palette, a grey circle, its lines the primary (D118). The
- * palette is app-theme.css's; the avatars
- * here are drawn as the Avatar piece draws them, slot n in colour (n - 1) mod 6 + 1.
+ * themes, and Pilot's mark outside the palette, a grey circle, its lines the primary blue (D118),
+ * the light theme's in its strong shade (D179), so that the mark stands at 3:1 or better, as WCAG
+ * asks of a graphic, in both themes. The palette is app-theme.css's; the avatars here are drawn as
+ * the Avatar piece draws them, slot n in colour (n - 1) mod 6 + 1.
  */
 
 import type { Page } from '@playwright/test';
@@ -55,9 +56,12 @@ for (const theme of ['light', 'dark'] as const) {
     expect(colours[0].background).toEqual(tint.background);
     expect(Math.abs(hue(colours[1].background) - 330)).toBeLessThan(5);
 
-    // Pilot's mark: a grey circle, none of the palette's colours, its lines the primary.
+    // Pilot's mark: a grey circle, none of the palette's colours, its lines the primary blue, the
+    // light theme's in its strong shade, at 3:1 or better on the circle.
     const pilot = await coloursOf(page.getByTestId('pilot'));
-    await expect(page.getByTestId('pilot')).toHaveCSS('color', await cssColour(page, 'hsl(var(--primary))'));
+    const blue = theme === 'light' ? 'hsl(var(--primary-strong))' : 'hsl(var(--primary))';
+    await expect(page.getByTestId('pilot')).toHaveCSS('color', await cssColour(page, blue));
+    expect(pilot.ratio, "Pilot's mark").toBeGreaterThanOrEqual(3);
     expect(Math.max(...pilot.background) - Math.min(...pilot.background)).toBeLessThan(40);
     expect(colours.map(({ background }) => background.join())).not.toContain(pilot.background.join());
   });
