@@ -5,7 +5,7 @@
  * included, the job after its run's turn; once ended, Pilot's mark among the
  * line's actions, first, under the mouse; failed or stopped, the button in the destructive colour
  * saying so, with Retry beside it, whose job then stands in its place. An open card carries it in
- * its head after the time. Each opens the job's session log, which still opens at its address
+ * its head after the time, its dot going with it where the head wraps. Each opens the job's session log, which still opens at its address
  * reached cold. On a phone a running job's button takes a row under the line's title, the ended
  * mark is left to the item's view, and the menu of a line with nothing behind it offers the job
  * beside Discuss (F13.7, F13.9). An opened document's head carries the job and the item's Undo
@@ -21,6 +21,7 @@ import { makeUnique, makeUniqueToken } from '../support/helpers';
 import type { Projects } from '../support/projects';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
+import { dotsEndingARow } from '../support/page-objects/timeline-page';
 
 const QUESTION = '```question id=Q1\n```\n';
 /** The job after an item of Pilot's is closed (backend/app/services/job_service.py). */
@@ -241,6 +242,12 @@ test.describe('Pilot’s job on an open card', () => {
     await expect(timeline.item(run).root).toHaveCount(0);
     const [time, button] = await Promise.all([box(item.time), box(item.job.root)]);
     expect(button.x).toBeGreaterThan(time.x + time.width);
+    // On a narrow phone the job goes to the head's second row, its dot with it.
+    const wide = page.viewportSize()!;
+    await page.setViewportSize({ width: 280, height: 653 });
+    await expect.poll(async () => (await box(item.job.root)).y - (await box(item.time)).y).toBeGreaterThan(20);
+    expect(await dotsEndingARow(item.head)).toBe(0);
+    await page.setViewportSize(wide);
 
     await controller.finish(chats.store, session);
     await expect(item.job.root).toHaveAttribute('data-form', 'ended');

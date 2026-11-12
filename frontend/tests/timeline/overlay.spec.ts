@@ -62,6 +62,12 @@ const linesOf = (element: Locator) =>
     cut: shown.scrollHeight > shown.clientHeight,
   }));
 
+const faceOf = (element: Locator) =>
+  element.evaluate((shown) => {
+    const { fontFamily, fontSize } = getComputedStyle(shown);
+    return { fontFamily, fontSize };
+  });
+
 /** The button's middle is the title's line's, which is not the head's. */
 async function expectLevelWithTitle(button: Locator, title: Locator, head: Locator): Promise<void> {
   const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
@@ -103,6 +109,9 @@ test.describe('A document’s address', () => {
     await expect(overlay.project).toHaveText(name);
     await expect(overlay.step).toHaveText('Build the card');
     expect(await linesOf(overlay.step)).toEqual({ lines: 1, cut: false });
+    // The step in the face and the size of the line it stands in, the project's beside it.
+    expect(await faceOf(overlay.step)).toEqual(await faceOf(overlay.project));
+    await expect(overlay.step).not.toHaveCSS('font-family', /monospace/);
     await expect(overlay.segments).toHaveCount(3);
     // The title bold, Discuss level with its line and not the middle of the head under it.
     expect(await overlay.title.evaluate((title) => getComputedStyle(title).fontWeight)).toBe('600');

@@ -9,8 +9,10 @@
  * on. A done line shows Undo alone among its actions, and a tap on it opens its view, whose head
  * carries Discuss, its title the way in from the keyboard; Undo undoes and opens nothing. An item's
  * head keeps Discuss at the end of its first line however the rest wraps, and puts "for <user>" on a
- * line of its own under the rest, led by its icon, on every kind. Off a phone the line keeps its
- * actions under the mouse, and the address is as it was.
+ * line of its own under the rest, led by its icon, on every kind; no row of it ends on a dot, each
+ * dot going with the part after it, a part wider than the row wrapping behind its dot; and Urgent's
+ * triangle stands centred on the capitals of the head's text, as the kind's icon. Off a phone the
+ * line keeps its actions under the mouse, and the address is as it was.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -19,8 +21,10 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique, makeUniqueToken } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
-import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
-import { projectAddress } from '../support/projects';
+import { addressOf, attachmentAddress, dotsEndingARow, type TimelinePage } from '../support/page-objects/timeline-page';
+import type { People } from '../support/people';
+import { projectAddress, type Projects } from '../support/projects';
+import type { Waits } from '../support/waits';
 import type { components } from '@/lib/api/generated/types';
 
 const SHELTERS = ['Dome', 'Tunnel', 'Tarp', 'Hammock', 'Bivvy', 'Cabin'];
@@ -111,8 +115,11 @@ test.describe('The item alone on a phone', () => {
     const shown = await overlay.step.evaluate((element) => ({
       lines: Math.round(element.clientHeight / parseFloat(getComputedStyle(element).lineHeight)),
       cut: element.scrollHeight > element.clientHeight,
+      // In the face and the size of the head's line under the name.
+      plain: (['fontFamily', 'fontSize'] as const).every((face) => getComputedStyle(element)[face] === getComputedStyle(element.parentElement!)[face]),
+      body: getComputedStyle(element).fontFamily === getComputedStyle(document.body).fontFamily,
     }));
-    expect(shown).toEqual({ lines: 2, cut: true });
+    expect(shown).toEqual({ lines: 2, cut: true, plain: true, body: true });
   });
 
   test('answered, the item alone answers as the timeline’s does, and opened again it shows as it stands, its line opening its document over it', async ({
@@ -263,12 +270,12 @@ test.describe('An item’s head on a phone', () => {
     expect(Math.abs(discussBox.y + discussBox.height / 2 - (kindBox.y + kindBox.height / 2))).toBeLessThan(2);
   };
 
-  test('puts “for <user>” on a line of its own under the rest, led by its icon, and keeps Discuss at the end of its first line however the rest wraps, on every kind', async ({
-    people,
-    projects,
-    waits,
-    timeline,
-  }) => {
+  /**
+   * A project with an urgent item of every kind for Ben, the confirmation's reason long enough that
+   * its head wraps before it, and a wait, opened; answers the items' ids in their order, and the
+   * wait's.
+   */
+  const everyKind = async (people: People, projects: Projects, waits: Waits, timeline: TimelinePage): Promise<{ placed: string[]; wait: string }> => {
     const ben = makeUnique('ben', 8);
     await people.other(ben, 'Ben Example');
     const me = await people.signIn();
@@ -291,6 +298,16 @@ test.describe('An item’s head on a phone', () => {
     const key = `H${makeUniqueToken(6).toUpperCase()}`;
     const wait = await waits.add(id, { kind: 'card_wait', title: 'The night shift takes the cards', cards: [`${key}-1`], states: ['Done'] });
     await timeline.open(id);
+    return { placed, wait };
+  };
+
+  test('puts “for <user>” on a line of its own under the rest, led by its icon, and keeps Discuss at the end of its first line however the rest wraps, on every kind', async ({
+    people,
+    projects,
+    waits,
+    timeline,
+  }) => {
+    const { placed, wait } = await everyKind(people, projects, waits, timeline);
 
     for (const each of placed) {
       const item = timeline.item(each);
@@ -312,6 +329,61 @@ test.describe('An item’s head on a phone', () => {
     await discussOnFirstLine(item.head, item.kind, item.discuss);
     const [request, discuss] = await Promise.all([box(item.wait.request), box(item.discuss)]);
     expect(request.x + request.width).toBeCloseTo(discuss.x, 0);
+  });
+
+  test('ends no row on a dot, each dot going with the part after it, a reason wider than the row wrapping behind its dot, on every kind', async ({
+    page,
+    people,
+    projects,
+    waits,
+    timeline,
+  }) => {
+    const { placed, wait } = await everyKind(people, projects, waits, timeline);
+    const confirmation = timeline.item(placed[1]);
+    const dot = confirmation.head.locator('.sep').last();
+    const rows = async () => {
+      const [kind, at, why] = await Promise.all([box(confirmation.kind), box(dot), box(confirmation.why)]);
+      return { kind, at, why };
+    };
+
+    for (const each of [...placed, wait]) expect(await dotsEndingARow(timeline.item(each).head)).toBe(0);
+    // The reason starts the head's second row behind its dot, on one line.
+    const wide = await rows();
+    expect(wide.at.y).toBeGreaterThanOrEqual(wide.kind.y + wide.kind.height - 1);
+    expect(wide.why.x).toBeGreaterThan(wide.at.x + wide.at.width);
+    expect(wide.why.height).toBeCloseTo(wide.at.height, 0);
+
+    // On the narrowest phone the reason is wider than the row: it wraps behind its dot, inside the card.
+    await page.setViewportSize({ width: 280, height: 653 });
+    await expect.poll(async () => (await rows()).why.height).toBeGreaterThan(wide.why.height + 20);
+    for (const each of [...placed, wait]) {
+      const item = timeline.item(each);
+      expect(await dotsEndingARow(item.head)).toBe(0);
+      expect(await item.head.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+    }
+    const narrow = await rows();
+    expect(narrow.why.y).toBeCloseTo(narrow.at.y, 0);
+    expect(narrow.why.x).toBeGreaterThan(narrow.at.x + narrow.at.width);
+  });
+
+  test('stands Urgent’s triangle centred on the capitals of the head’s text, as the kind’s icon, at its chip’s size, on every kind', async ({
+    people,
+    projects,
+    waits,
+    timeline,
+  }) => {
+    const { placed } = await everyKind(people, projects, waits, timeline);
+
+    for (const each of placed) {
+      const item = timeline.item(each);
+      await expect(item.urgent).toBeVisible();
+      const [kind, triangle] = await Promise.all([box(item.kind.locator('.icon')), box(item.urgent.locator('.icon'))]);
+      // Level with the kind's icon, a whole number of the head's 28 px rows under it where the head wraps.
+      const under = triangle.y + triangle.height / 2 - (kind.y + kind.height / 2);
+      expect(Math.abs(under - 28 * Math.round(under / 28))).toBeLessThan(0.1);
+      expect(triangle.height).toBe(13);
+      expect(triangle.width).toBe(13);
+    }
   });
 
   test('of a work item keeps Discuss at the end of its first line, Session log and Stop beside it', async ({ people, projects, timeline }) => {

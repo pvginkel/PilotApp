@@ -12,7 +12,7 @@
  *
  * A larger one, and every review (F25.1), leaves a card: its head, its title, its summary (F34),
  * its count chips (F24.2) and the auto pilot chip, counting the confirmations the switch would
- * answer (F4.4), its segment bar, or for a text with no block "N min read", its attachments, Open, which reads Continue while the document reads *Unsent*, and on a review
+ * answer (F4.4), its segment bar, or for a text with no block "N min read", its attachments, Open, and on a review
  * Reviewed (F25.2); Pilot's dots end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
  * it at its block's (F33, F97). A registered document has no text until its file is read at its
  * run's end, nor after a read that failed: awaiting its read, it is Pilot's line (item.tsx, F13.7);
@@ -125,7 +125,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
             data-testid="timeline.item.open"
           >
             <FileText className="icon" aria-hidden="true" />
-            {isUnsent(item) ? 'Continue' : 'Open'}
+            Open
           </Link>
           {item.kind === 'review' && <Reviewed item={item} />}
         </div>

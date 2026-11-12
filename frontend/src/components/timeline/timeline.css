@@ -56,7 +56,8 @@
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: hsl(var(--border)); }
   .divider.date { font-weight: 600; margin-top: 26px; }
   .divider.step::before { flex: 0 0 24px; }
-  .divider.step { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-xs); }
+  /* A name cut short leaves the line after it as long as the one before it. */
+  .divider.step::after { flex: 1 0 24px; }
   .divider.step .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .divider.finished { margin-top: 22px; font-weight: 600; color: hsl(var(--foreground)); }
   .divider.finished .icon { margin-right: 6px; color: hsl(var(--primary)); }
@@ -100,6 +101,9 @@
   .item-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .item.urgent .item-head .kind { color: hsl(var(--urgent-text)); }
   .item-head .sep { opacity: 0.75; }
+  /* A dot and the part after it, one item of the head's wrap; a part wider than the head's row
+     wraps or is cut inside its group. */
+  .item-head .dotted { display: inline-flex; align-items: baseline; gap: inherit; min-width: 0; }
   /* The auto pilot mark (autopilot-mark.tsx), in the time's grey, centred on the text's capitals
      as a kind's icon is. */
   .ap-may { display: inline-flex; align-items: baseline; color: hsl(var(--muted-foreground)); cursor: help; }
@@ -426,6 +430,9 @@
 
   /* The card a larger document or a review leaves: what is in it, how far the answers are. */
   .doc-card .counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+  /* A count's words a pixel higher in their pill than the shared chip's, the pill as high, as the
+     Draft chip's (project-head.css). */
+  .doc-card .counts .chip { padding-bottom: 2px; line-height: calc(1.6em - 2px); }
   .doc-card .title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
   /* A registered document whose read failed: the one state of the three that waits on the person. */
   .chip.did-not-load { background: hsl(var(--warning) / 0.15); color: hsl(var(--warning-text)); font-weight: 600; }
@@ -638,14 +645,17 @@
     /* An item head's parts 4px apart, and Urgent its triangle bare, so that a document's head with
        Urgent, Edited and its asks' count holds one line at 390px in the scale's sm. Discuss stands
        at the end of its first line however the rest wraps, in room kept for it; a wait's request
-       still touches it. The "for" chip takes a line of its own under the rest, led by its icon. */
+       still touches it. The "for" chip takes a line of its own under the rest, led by its icon.
+       The triangle, at the chip's size, is centred on the capitals of the head's text: its chip,
+       the word out of the flow, takes its baseline from the triangle's foot, in the head's font. */
     .item-head { position: relative; column-gap: 4px; padding-right: 32px; }
     .item-head .item-discuss { position: absolute; top: 0; right: 0; }
     .item-head .wait-request { margin-right: -4px; }
     .item-head .for-line { display: block; order: 1; flex-basis: 100%; }
     .chip.for .icon { display: inline-block; }
     .item-head .kind, .item-head .edited { gap: 4px; }
-    .item-head .chip.urgent { padding: 0; background: none; }
+    .item-head .chip.urgent { padding: 0; background: none; font-size: inherit; }
+    .item-head .chip.urgent .icon { width: var(--text-xs); height: var(--text-xs); top: calc(0.5 * var(--text-xs) - 0.5cap); }
     /* The running time's dot stands 8px from what comes before it, as off a phone. */
     .item-head .work-live { margin-left: 4px; }
     /* The env chip is its icon's button alone, which a screen reader names after the environment. */

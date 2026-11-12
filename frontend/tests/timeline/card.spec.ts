@@ -3,17 +3,20 @@
  * short (F25.1), leaves a card on the timeline, none of its text drawn: its head, *Unsent* in it
  * while it has an answer and no Done (D026); its title, its summary (F34), its count chips, what
  * is still the person's by kind, what Pilot settled and what it deferred; its segment bar (F33), or
- * "N min read" for a text with no block; Open, which reads Continue while it reads *Unsent*; and on
- * a review Reviewed (F25.2). Open opens it in the overlay at its address, and a segment opens the
+ * "N min read" for a text with no block; Open, whatever is answered in it; and on
+ * a review Reviewed (F25.2). A count chip's words stand in their pill as the Draft chip's do. Open opens it in the overlay at its address, and a segment opens the
  * overlay at its block's address, at the block, which flashes; a section Pilot settled is its line
  * there (F31.5). Pilot's dots end it while Pilot writes it (F35), and *Edited <time>* stands in its
  * head once a later turn changed it (F28.7).
  */
 
+import { lift } from '../support/chips';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
-import { addressOf } from '../support/page-objects/timeline-page';
+import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
+import { addressOf, type TimelinePage } from '../support/page-objects/timeline-page';
+import type { People } from '../support/people';
 import { projectAddress, type Projects } from '../support/projects';
 import type { components } from '@/lib/api/generated/types';
 
@@ -46,6 +49,28 @@ const TRIP = longText([
   ['Book the van', VAN],
   ['How many bikes?', DEFERRED_BIKES],
 ]);
+
+/** A card's count chips' words against a "for" chip's, a chip of the shared style, and against a draft's Draft chip's. */
+async function countChipsAgainstDraft(people: People, projects: Projects, timeline: TimelinePage, projectHead: ProjectHeadPage): Promise<void> {
+  const me = await people.signIn();
+  const id = await projects.makeWithSession({ name: makeUnique('Counts'), members: [me.handle!, 'ada'] });
+  const trip = await projects.place(id, { kind: 'document', title: 'The long trip', text: TRIP });
+  const notice = await projects.place(id, { kind: 'notice', title: 'For Ada', text: '---\nfor: ada\n---\n\nA note for Ada.\n' });
+  const draft = await projects.make({ name: makeUnique('Draft'), state: 'draft', members: [me.handle!] });
+  await timeline.open(id);
+  const shared = await lift(timeline.item(notice).forUser);
+  const chips = timeline.item(trip).card.counts;
+  await expect(chips).toHaveText(['2 decisions', '1 question', '1 action', '1 deferred']);
+  const counts = await Promise.all((await chips.all()).map(lift));
+
+  await projectHead.open(draft);
+  const drafts = await lift(projectHead.draft);
+  for (const count of counts) {
+    expect(count.lift - shared.lift).toBeCloseTo(1, 1);
+    expect(count.lift).toBeCloseTo(drafts.lift, 1);
+    expect(count.height).toBeCloseTo(shared.height, 1);
+  }
+}
 
 /** An item as the project's timeline reads it. */
 async function itemOf(projects: Projects, project: string, item: string): Promise<TimelineItem> {
@@ -90,13 +115,13 @@ test.describe('A larger document', () => {
     ]);
   });
 
-  test('reads Continue and Unsent once it has an answer, a person’s or Pilot’s, its counts as they were', async ({
+  test('reads Unsent once it has an answer, a person’s or Pilot’s, its button Open still, its counts as they were', async ({
     people,
     projects,
     timeline,
   }) => {
     const me = await people.signIn();
-    const id = await projects.makeWithSession({ name: makeUnique('Continue'), members: [me.handle!] });
+    const id = await projects.makeWithSession({ name: makeUnique('Unsent'), members: [me.handle!] });
     const trip = await projects.place(id, { kind: 'document', title: 'The long trip', text: TRIP });
     const pilots = await projects.place(id, {
       kind: 'document',
@@ -112,16 +137,25 @@ test.describe('A larger document', () => {
 
     await projects.answer(trip, 'D1', 'Dome');
     await timeline.refocus();
-    await expect(item.card.open).toHaveText('Continue');
     await expect(item.unsent).toHaveText('Unsent');
+    await expect(item.card.open).toHaveText('Open');
     await expect(item.segment('D1')).toHaveClass(/\bdone\b/);
     await expect(item.card.counts).toHaveText(['2 decisions', '1 question', '1 action', '1 deferred']);
 
     // Pilot's answer counts apart from what is still the person's, and is an answer to send.
     const settled = timeline.item(pilots);
     await expect(settled.card.counts).toHaveText(['1 decision', '1 settled by Pilot']);
-    await expect(settled.card.open).toHaveText('Continue');
     await expect(settled.unsent).toHaveText('Unsent');
+    await expect(settled.card.open).toHaveText('Open');
+  });
+
+  test('its count chips’ words stand a pixel higher in their pills than a shared chip’s, as the Draft chip’s do, the pills as high', async ({
+    people,
+    projects,
+    timeline,
+    projectHead,
+  }) => {
+    await countChipsAgainstDraft(people, projects, timeline, projectHead);
   });
 
   test('Open opens it in its tab at its address, and closing its tab returns to the project’s', async ({
@@ -209,6 +243,19 @@ test.describe('A larger document', () => {
     const { edited_at: edited } = await itemOf(projects, id, trip);
     await expect(item.edited).toHaveText(`Edited ${clock(edited!)}`);
     await expect(item.edited.locator('.avatar')).toHaveAttribute('title', 'Pilot');
+  });
+});
+
+test.describe('A larger document on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('its count chips’ words stand a pixel higher in their pills than a shared chip’s, as the Draft chip’s do, the pills as high', async ({
+    people,
+    projects,
+    timeline,
+    projectHead,
+  }) => {
+    await countChipsAgainstDraft(people, projects, timeline, projectHead);
   });
 });
 

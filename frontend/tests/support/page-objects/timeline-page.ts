@@ -304,6 +304,22 @@ export class TimelinePage {
 }
 
 /** An attachment's address under its item's (F28.5). */
+/**
+ * The dots of an item's head that end a row: each with nothing of the part after it on its row,
+ * to its right.
+ */
+export function dotsEndingARow(head: Locator): Promise<number> {
+  return head.locator('.sep').evaluateAll(
+    (dots) =>
+      dots.filter((dot) => {
+        const after = document.createRange();
+        after.selectNodeContents(dot.nextElementSibling!);
+        const [at, part] = [dot.getBoundingClientRect(), after.getClientRects()[0]];
+        return !(part.left >= at.right && part.top < at.bottom && part.bottom > at.top);
+      }).length,
+  );
+}
+
 export function attachmentAddress(projectId: string, itemId: string, attachmentId: string): string {
   return `${projectAddress(projectId)}/items/${itemId}/attachments/${attachmentId}`;
 }

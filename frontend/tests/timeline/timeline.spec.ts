@@ -1,8 +1,8 @@
 /**
  * A project's timeline (F8): its items in their order under their date and step dividers (F9); the
  * opening (F18.1, F18.2); an item's head (F12, F10.1, F107, F114); its prose as GFM, linked, folding
- * when long (F29.1, F12.2); a concept (F78); the done line (F13.1, F13.2); a step's long name cut
- * on a phone; a short timeline at its top, no band under its last item; opened at its end, following
+ * when long (F29.1, F12.2); a concept (F78); the done line (F13.1, F13.2); a step's name in the
+ * page's face, its long name cut on a phone with the line after it as long as the one before it; a short timeline at its top, no band under its last item; opened at its end, following
  * what arrives there, a new item flashing, and at its end on each project (F8.2, F1.6); the reader's
  * own Show more growing downward.
  */
@@ -363,7 +363,11 @@ test.describe('A done line', () => {
 test.describe('On a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('cuts a step’s long name at the divider’s end, and the timeline scrolls only down', async ({ people, projects, timeline }) => {
+  test('cuts a step’s long name short of the divider’s end, a line before it and a line after it, its face the page’s, and the timeline scrolls only down', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
     const me = await people.signIn();
     const title = 'Build the card that shows every running session of the fleet, its environment and its turn';
     const id = await projects.makeWithSession({
@@ -374,12 +378,28 @@ test.describe('On a phone', () => {
     await projects.place(id, { kind: 'notice', title: 'Built one', text: '---\nstep: build\n---\n\nOne.\n' });
     await timeline.open(id);
 
-    const name = timeline.root.getByTestId('timeline.divider.step').locator('.name');
+    const divider = timeline.root.getByTestId('timeline.divider.step');
+    const name = divider.locator('.name');
     await expect(name).toHaveText(title);
     expect(await name.evaluate((element) => [element.scrollWidth > element.clientWidth, getComputedStyle(element).textOverflow])).toEqual([
       true,
       'ellipsis',
     ]);
+    const lines = await divider.evaluate((element) => {
+      const [row, cut] = [element.getBoundingClientRect(), element.querySelector('.name')!.getBoundingClientRect()];
+      const line = (pseudo: string) => {
+        const { width, height, backgroundColor } = getComputedStyle(element, pseudo);
+        return { width, height, drawn: backgroundColor !== 'rgba(0, 0, 0, 0)' };
+      };
+      return { before: line('::before'), after: line('::after'), left: cut.left - row.left, right: row.right - cut.right };
+    });
+    expect(lines.before).toEqual({ width: '24px', height: '1px', drawn: true });
+    expect(lines.after).toEqual(lines.before);
+    // Each line and its gap beside the name.
+    expect(lines.left).toBeCloseTo(36, 0);
+    expect(lines.right).toBeCloseTo(36, 0);
+    expect(await divider.evaluate((element) => getComputedStyle(element).fontFamily === getComputedStyle(document.body).fontFamily)).toBe(true);
+    await expect(divider).not.toHaveCSS('font-family', /monospace/);
     expect(await timeline.root.evaluate((feed) => feed.scrollWidth - feed.clientWidth)).toBeLessThanOrEqual(0);
   });
 

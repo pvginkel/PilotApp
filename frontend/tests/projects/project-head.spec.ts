@@ -17,6 +17,7 @@ import type { FormTestEvent } from '@/lib/test/test-events';
 import type { People } from '../support/people';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import type { TimelinePage } from '../support/page-objects/timeline-page';
+import { lift } from '../support/chips';
 import { test, expect } from '../support/fixtures';
 import { makeUnique, waitTestEvent } from '../support/helpers';
 import { PageFetches } from '../support/network';
@@ -335,17 +336,6 @@ test.describe('The members', () => {
     expect(second.x).toBeCloseTo(first.x + first.width - 2, 1);
   });
 });
-
-/** How far a chip's words, its text and not its icon, stand above its pill's middle, and the pill's height. */
-const lift = (chip: Locator) =>
-  chip.evaluate((element) => {
-    const texts = Array.from(element.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE);
-    const words = document.createRange();
-    words.setStart(texts[0], 0);
-    words.setEnd(texts[texts.length - 1], texts[texts.length - 1].textContent!.length);
-    const [text, pill] = [words.getBoundingClientRect(), element.getBoundingClientRect()];
-    return { lift: (pill.top + pill.bottom) / 2 - (text.top + text.bottom) / 2, height: pill.height };
-  });
 
 /** The Draft chip's words against a "for" chip's, a chip of the shared style, on an item of another project. */
 async function draftChipAgainstShared(

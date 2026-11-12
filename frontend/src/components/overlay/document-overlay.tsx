@@ -141,7 +141,7 @@ function Titles({ item, project }: { item: ItemDocument; project: ProjectHead | 
         {item.step !== null && (
           <>
             <span>·</span>
-            <span className="mono step" title={item.step.title} data-testid="overlay.step">
+            <span className="step" title={item.step.title} data-testid="overlay.step">
               <LinkedText text={item.step.title} />
             </span>
           </>

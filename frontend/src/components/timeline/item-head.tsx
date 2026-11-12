@@ -9,7 +9,8 @@
  * shown with says so, *Edited <time>* beside Pilot's mark (F28.7). On a phone Urgent is its
  * triangle and *Edited* a pencil, their words left to a screen reader; the kind never wraps, and
  * the head wraps where its parts still do not fit, so that none leaves the card, Discuss staying at
- * the end of its first line; the "for" chip takes a line of its own under it, led by its icon.
+ * the end of its first line; the "for" chip takes a line of its own under it, led by its icon. A
+ * dot goes with the part after it, so that no row of a wrapping head ends on one.
  */
 
 import type { ReactNode } from 'react';
@@ -83,27 +84,25 @@ export function ItemHead({ item, because = null, mayTake = false, asked = false,
         <Icon className="icon" aria-hidden="true" />
         {label}
       </span>
-      <span className="sep">·</span>
-      <Time at={item.created_at} format="clock" testId="timeline.item.time" />
+      <Dotted>
+        <Time at={item.created_at} format="clock" testId="timeline.item.time" />
+      </Dotted>
       {mayTake && (
-        <>
-          <span className="sep">·</span>
+        <Dotted>
           <AutopilotMark testId="timeline.item.autopilot-mark" />
-        </>
+        </Dotted>
       )}
       {item.job !== null && (
-        <>
-          <span className="sep">·</span>
+        <Dotted>
           <JobOn job={item.job} />
-        </>
+        </Dotted>
       )}
       {why !== null && (
-        <>
-          <span className="sep">·</span>
+        <Dotted>
           <span className="why" title={why.tooltip} data-testid="timeline.item.why">
             {why.label}
           </span>
-        </>
+        </Dotted>
       )}
       {item.urgent && (
         <span className="chip urgent" data-testid="timeline.item.urgent">
@@ -123,6 +122,16 @@ export function ItemHead({ item, because = null, mayTake = false, asked = false,
       {children}
       <DiscussButton quote={quoteOfItem(item)} className="item-discuss" testId="timeline.item.discuss" />
     </div>
+  );
+}
+
+/** A part of the head behind its dot, the two one group that the head's wrap never parts. */
+function Dotted({ children }: { children: ReactNode }) {
+  return (
+    <span className="dotted">
+      <span className="sep">·</span>
+      {children}
+    </span>
   );
 }
 
