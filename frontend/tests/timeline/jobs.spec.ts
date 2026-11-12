@@ -16,8 +16,9 @@
  */
 
 import type { Locator, Page } from '@playwright/test';
+import type { FormTestEvent } from '@/lib/test/test-events';
 import { test, expect } from '../support/fixtures';
-import { makeUnique, makeUniqueToken } from '../support/helpers';
+import { expectConsoleError, makeUnique, makeUniqueToken, waitTestEvent } from '../support/helpers';
 import type { Projects } from '../support/projects';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
@@ -169,6 +170,44 @@ test.describe('Pilot’s job on a line', () => {
     await expect(timeline.item(failedId).root).toHaveCount(0);
     await expect(timeline.item(retryId).root).toHaveCount(0);
     expect((await projects.work(project, failedId)).retried?.id).toBe(retryId);
+  });
+
+  test('a Retry the API refuses, pressed from the keyboard, has the focus back once it is enabled again, and the failed job stands as it stood', async ({
+    page,
+    people,
+    projects,
+    chats,
+    controller,
+    timeline,
+    deploymentSse,
+  }) => {
+    const subject = makeUnique('subject');
+    const me = await people.signIn({ subject });
+    const project = await projects.make({ name: makeUnique('Refused retry'), members: [me.handle!] });
+    const started = await chats.opening(project);
+    const question = await projects.place(project, { kind: 'question', title: 'Which lake?', text: QUESTION, by_pilot: true });
+    await projects.answer(question, 'Q1', 'Lake Como');
+    const session = await started();
+    const failedId = await jobIn(projects, project);
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const { job } = timeline.item(question);
+    await controller.finish(chats.store, session, 'error', 'The model is overloaded.');
+    await expect(job.root).toHaveAttribute('data-form', 'failed');
+
+    // The browser's session now lacks the editor role, and the API refuses the Retry.
+    await job.retry.focus();
+    await expectConsoleError(page, /403/);
+    await people.withoutRole({ subject });
+    const refused = waitTestEvent<FormTestEvent>(page, 'form', (event) => event.formId === 'timeline.retry' && event.phase === 'error');
+    await page.keyboard.press('Enter');
+    await refused;
+    await expect(job.retry).toBeEnabled();
+    await expect(job.retry).toBeFocused();
+    await people.firstSignIn({ subject });
+    await expect(job.root).toHaveAttribute('data-form', 'failed');
+    await expect(job.root).toHaveAttribute('href', sessionLogAddress(project, failedId));
+    expect((await projects.work(project, failedId)).retried).toBeNull();
   });
 });
 

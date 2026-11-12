@@ -181,6 +181,51 @@ test.describe('A question', () => {
     expect(narrow.shown).toBeGreaterThan(wide.shown);
   });
 
+  test('sizes its field again when the window is made narrower and when a phone is turned, its wrapped lines never cut off and no line left empty under them', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Turned'), members: [me.handle!] });
+    const question = await projects.place(id, { kind: 'question', title: 'Which lake?', text: QUESTION });
+    await timeline.open(id);
+    const { block } = timeline.item(question);
+    const lines = () =>
+      block.answerField.evaluate((field: HTMLTextAreaElement) => {
+        const style = getComputedStyle(field);
+        const text = field.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+        return { width: field.offsetWidth, shown: Math.round(text / parseFloat(style.lineHeight)), cut: field.scrollHeight - field.clientHeight };
+      });
+    /** The field once it is `narrower` or wider than `than` and holds its lines whole. */
+    const sized = async (narrower: boolean, than: { width: number }) => {
+      await expect.poll(async () => Math.sign((await lines()).width - than.width)).toBe(narrower ? -1 : 1);
+      await expect.poll(lines).toMatchObject({ cut: 0 });
+      return lines();
+    };
+
+    // A window made narrower, at the widths that leave the panel out.
+    const { height } = page.viewportSize()!;
+    await page.setViewportSize({ width: 800, height });
+    await block.answerField.fill('The lake with the shortest drive of the three, a shop at the gate, room for the van and a pier.');
+    const wide = await lines();
+    expect(wide.cut).toBe(0);
+    await page.setViewportSize({ width: 560, height });
+    const narrow = await sized(true, wide);
+    expect(narrow.shown).toBeGreaterThan(wide.shown);
+
+    // A phone lying on its side, turned upright and back.
+    await page.setViewportSize({ width: 844, height: 390 });
+    const lying = await sized(false, narrow);
+    expect(lying.shown).toBeLessThan(narrow.shown);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const upright = await sized(true, lying);
+    expect(upright.shown).toBeGreaterThan(lying.shown);
+    await page.setViewportSize({ width: 844, height: 390 });
+    expect(await sized(false, upright)).toEqual(lying);
+  });
+
   test('answered by Pilot reads boxed and closed, and opens to the field holding it, for the person’s answer to replace', async ({
     people,
     projects,
@@ -202,8 +247,15 @@ test.describe('A question', () => {
     await expect(block.said.locator('.said')).toHaveClass(/\bboxed\b/);
     await expect(block.note).toHaveText('The closest one.');
     await expect(block.answerField).toHaveCount(0);
+    // Its chevron says what a press shows, closed and open, by its name and its tooltip.
+    await expect(block.toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(block.toggle).toHaveAccessibleName('Show expansion list');
+    await expect(block.toggle).toHaveAttribute('title', 'Show expansion list');
 
     await block.toggle.click();
+    await expect(block.toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(block.toggle).toHaveAccessibleName('Show only the answer');
+    await expect(block.toggle).toHaveAttribute('title', 'Show only the answer');
     await expect(block.said).toHaveCount(0);
     await expect(block.answerField).toHaveValue('Lake Garda');
     await block.answerField.fill('Lake Como');

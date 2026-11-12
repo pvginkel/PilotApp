@@ -482,6 +482,25 @@ async function draftChipAgainstShared(
   expect(own.height).toBeCloseTo(shared.height, 1);
 }
 
+/**
+ * The chips the Draft chip's lift leaves alone, a work item's env chip and an urgent item's Urgent:
+ * their words against a "for" chip's on the same timeline, where the shared style puts them.
+ */
+async function sharedChipsUnmoved(people: People, projects: Projects, timeline: TimelinePage): Promise<void> {
+  const me = await people.signIn();
+  const id = await projects.makeWithSession({ name: makeUnique('Chips'), members: [me.handle!, 'ada'] });
+  const notice = await projects.place(id, { kind: 'notice', title: 'For Ada', text: '---\nfor: ada\nurgent: true\n---\n\nA note for Ada.\n' });
+  const work = await projects.startWork(id, { title: 'Surveying the stylesheets', brief: 'Survey.', cwd: '/work/Example' });
+  await projects.environment(id, work);
+  await timeline.open(id);
+  const shared = await lift(timeline.item(notice).forUser);
+  for (const chip of [timeline.item(notice).urgent, timeline.item(work).work.environment]) {
+    const own = await lift(chip);
+    expect(own.lift).toBeCloseTo(shared.lift, 1);
+    expect(own.height).toBeCloseTo(shared.height, 1);
+  }
+}
+
 /** The switch's flip answered, by the server's yes or its refusal: each in turn, as they come. */
 const flipAnswered = (page: Page) =>
   waitTestEvent<FormTestEvent>(page, 'form', (event) => event.formId === 'project.autopilot' && event.phase !== 'submit');
@@ -636,6 +655,14 @@ test.describe('A draft’s head', () => {
 
   test('its Draft chip’s word stands a pixel higher in its pill than a shared chip’s, the pill as high', async ({ people, projects, projectHead, timeline }) => {
     await draftChipAgainstShared(people, projects, projectHead, timeline);
+  });
+
+  test('the env chip’s and the Urgent chip’s words stand in their pills where a shared chip’s do, a pill as high: the Draft chip’s lift is its own', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    await sharedChipsUnmoved(people, projects, timeline);
   });
 });
 

@@ -3,7 +3,8 @@
  * App-owned — extends infrastructure fixtures with domain page objects.
  *
  * `people` signs the spec in as a fresh person, `projects` puts projects on the record, `links` sets
- * what links in text, `controller` drives the worker's fake controller, `shell` is the frame every
+ * what links in text, `controller` drives the worker's fake controller, `haltSettings` sets what the
+ * backend's usage halts do to the work items, `shell` is the frame every
  * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
  * list, `projectHead` a project's head, `timeline` its timeline, `overlay` a document opened, in its
  * tab or its view, or the session log over the timeline,
@@ -30,6 +31,7 @@ import { Chats } from './chats';
 import { Conditions, Controller } from './controller';
 import { Device } from './device';
 import { infrastructureFixtures } from './fixtures-infrastructure';
+import { HaltSettings } from './halt-settings';
 import { Links } from './links';
 import { ChatPage } from './page-objects/chat-page';
 import { DocTabsPage } from './page-objects/doc-tabs-page';
@@ -53,6 +55,7 @@ interface DomainFixtures {
   projects: Projects;
   links: Links;
   controller: Controller;
+  haltSettings: HaltSettings;
   shell: ShellPage;
   handleStep: HandleStepPage;
   profile: ProfilePage;
@@ -96,6 +99,13 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
     const controller = new Controller(page, backendUrl, conditions);
     await use(controller);
     await controller.restore();
+  },
+  haltSettings: async ({ page, backendUrl, controller }, use) => {
+    const haltSettings = new HaltSettings(page, backendUrl);
+    await use(haltSettings);
+    // The usage under the limits first: no halt holds while its setting changes back.
+    await controller.restore();
+    await haltSettings.set({});
   },
   conditions: [
     async ({ playwright, _serviceManager }, use) => {

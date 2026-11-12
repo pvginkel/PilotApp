@@ -101,6 +101,8 @@ test.describe('An open work item', () => {
     // Its icon's button is the phone's alone.
     await expect(item.work.environmentIcon).toBeHidden();
     await expect(item.work.cue).toHaveText(`Preparing ${name}`);
+    // The cue's icon is its state's: the power icon while the environment is prepared.
+    await expect(item.work.cue.locator('svg')).toHaveClass(/\blucide-power\b/);
     // The head's pulse from the start, the running time not yet; the line stands still (W2).
     await expect(item.work.live.locator('.pulse')).toBeVisible();
     await expect(item.work.running).toHaveCount(0);
@@ -120,6 +122,7 @@ test.describe('An open work item', () => {
     await controller.play(environment, 'claude-1', [toolUse('toolu_read', 'Read', { file_path: '/work/Example/README.md' })]);
     // The call it runs alone, in the cue's one colour, its path in the mono face (C4).
     await expect(item.work.line).toHaveText('Reading …/Example/README.md');
+    await expect(item.work.cue.locator('svg')).toHaveClass(/\blucide-wrench\b/);
     const code = item.work.cue.locator('.mono');
     await expect(code).toHaveText('…/Example/README.md');
     await expect(code).toHaveCSS('font-family', /monospace/);

@@ -22,6 +22,8 @@ const CLOCK = String.raw`\d\d:\d\d`;
 const HOLDS = String.raw`none starts until a reading puts it under the limit; chats and Pilot’s own jobs go on\.`;
 const WEEK_DOES = String.raw`The running work items are asked to stop at their next step, and ${HOLDS}`;
 const FIVE_HOUR_DOES = String.raw`Pilot has stopped every running work item, and ${HOLDS}`;
+// The setting no backend of the suite boots with, given through tests/support/halt-settings.ts.
+const NO_NEW_WORK_DOES = String.raw`No work item starts until a reading puts it under the limit; chats and Pilot’s own jobs go on\.`;
 
 const WEEK_BADGE = new RegExp(`^Halted at the week’s limit since ${CLOCK}$`);
 const FIVE_HOUR_BADGE = new RegExp(`^Halted at the five-hour limit since ${CLOCK}$`);
@@ -119,6 +121,31 @@ test.describe('The usage halts', () => {
     await expect(shell.goldLine('five_hour_halt')).toHaveText('Halted at the five-hour limit');
     await shell.goldLine('five_hour_halt').click();
     await expect(shell.goldText(shell.goldFlyout)).toHaveText(fiveHourLine(80));
+  });
+
+  test('a halt whose setting is no new work says that no work item starts, and nothing of the running ones: the week’s in its popover, the five-hour’s in its title', async ({
+    people,
+    projects,
+    controller,
+    haltSettings,
+    timeline,
+    shell,
+  }) => {
+    const project = await setUp({ people, projects });
+    await haltSettings.set({ week_halt: 'no_new_work', five_hour_halt: 'no_new_work' });
+    await controller.usage({ seven_day: 0.92, five_hour: 0.8 });
+    await timeline.open(project);
+
+    await shell.goldBadge('week_halt').click();
+    await expect(shell.goldText(shell.goldPopover)).toHaveText(
+      new RegExp(`^Work items have been halted at the week’s usage limit since ${CLOCK}\\. 92% of the week’s quota is used\\. ${NO_NEW_WORK_DOES}$`),
+    );
+    await expect(shell.goldBadge('five_hour_halt')).toHaveAttribute(
+      'title',
+      new RegExp(
+        `^Work items have been halted at the five-hour usage limit since ${CLOCK}\\. 80% of the five-hour window’s quota is used\\. ${NO_NEW_WORK_DOES}$`,
+      ),
+    );
   });
 
   test('both show, the outage’s first, then the week’s, then the five-hour’s, and a held start says the week’s', async ({

@@ -17,6 +17,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
+import { cssColour } from '../support/contrast';
 import { rawTurn } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import { iconOf } from '../support/lines';
@@ -41,8 +42,12 @@ const text = (id: string, words: string) =>
   line({ type: 'assistant', message: { id: `msg_${id}`, content: [{ type: 'text', text: words }] }, parent_tool_use_id: null });
 const toolUse = (id: string, name: string, input: object) =>
   line({ type: 'assistant', message: { id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input }] }, parent_tool_use_id: null });
-const toolResult = (id: string, content: string) =>
-  line({ type: 'user', message: { role: 'user', content: [{ tool_use_id: id, type: 'tool_result', content }] }, parent_tool_use_id: null });
+const toolResult = (id: string, content: string, isError = false) =>
+  line({
+    type: 'user',
+    message: { role: 'user', content: [{ tool_use_id: id, type: 'tool_result', content, is_error: isError }] },
+    parent_tool_use_id: null,
+  });
 const blockStart = () =>
   line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, parent_tool_use_id: null });
 const delta = (words: string) =>
@@ -553,6 +558,88 @@ test.describe('A work item’s session log', () => {
     await controller.play(environment, 'claude-1', [text('three', long(3))]);
     await expect(sessionLog.texts).toHaveCount(3);
     await expect.poll(async () => (await sessionLog.scroll()).fromBottom).toBeLessThanOrEqual(1);
+  });
+
+  test('at its end, opens a run of calls downward while its turn runs: the run’s line and the view stay where they stood, the end is let go, and what streams in after it grows under the view', async ({
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await sessionLog.open(project, work);
+    const long = (n: number) => Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of survey ${n}.`).join('\n\n');
+    const reads = ['a', 'b', 'c'].flatMap((name) => [
+      toolUse(`toolu_${name}`, 'Read', { file_path: `/work/Example/${name}.md` }),
+      toolResult(`toolu_${name}`, `Stage ${name}.`),
+    ]);
+    await controller.play(environment, 'claude-1', [text('one', long(1)), ...reads]);
+    const closed = sessionLog.runs.getByRole('button', { expanded: false });
+    // The line's running words are held a moment (C1): what the run did stands before the view is measured.
+    await expect(closed).toHaveText('Read 3 files · 3 steps');
+    await expect.poll(async () => (await sessionLog.scroll()).fromBottom).toBeLessThanOrEqual(1);
+    const top = () => sessionLog.body.evaluate((body) => body.scrollTop);
+    const lineTop = async () => (await sessionLog.runs.boundingBox())!.y;
+    const [view, run] = [await top(), await lineTop()];
+
+    const letGo = sessionLog.sticky(false);
+    await closed.click();
+    await letGo;
+    await expect(sessionLog.tools).toHaveCount(3);
+    expect(await top()).toBe(view);
+    expect(Math.abs((await lineTop()) - run)).toBeLessThan(1);
+    expect((await sessionLog.scroll()).fromBottom).toBeGreaterThan(32);
+
+    // The end let go, the turn's next text grows under the view.
+    await controller.play(environment, 'claude-1', [text('two', long(2))]);
+    await expect(sessionLog.texts).toHaveCount(2);
+    await expect.poll(async () => (await sessionLog.scroll()).fromBottom).toBeGreaterThan(1000);
+    expect(await top()).toBe(view);
+    expect(Math.abs((await lineTop()) - run)).toBeLessThan(1);
+  });
+
+  test('draws a call’s line in one colour, its code in the mono face: the muted words’, and a failed call’s the destructive words’ throughout', async ({
+    page,
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await sessionLog.open(project, work);
+    // Each call stands between two texts, a line of its own.
+    await controller.play(environment, 'claude-1', [
+      text('look', 'Looking.'),
+      toolUse('toolu_read', 'Read', { file_path: '/work/Example/README.md' }),
+      toolResult('toolu_read', '# Example'),
+      text('tree', 'Now the tree.'),
+      toolUse('toolu_status', 'Bash', { command: 'git status --short' }),
+      toolResult('toolu_status', 'fatal: not a git repository', true),
+      text('none', 'It is no repository.'),
+    ]);
+    await expect(sessionLog.tools).toHaveText(['Read …/Example/README.md', 'Ran git status --short — failed']);
+    const [read, failed] = [sessionLog.tools.first(), sessionLog.tools.last()];
+    await expect(read.locator('.mono')).toHaveText('…/Example/README.md');
+    await expect(failed.locator('.mono')).toHaveText('git status --short');
+
+    // The mouse off the lines: one under it takes the foreground.
+    await page.mouse.move(0, 0);
+    const [muted, destructive] = await Promise.all([
+      cssColour(page, 'hsl(var(--muted-foreground))'),
+      cssColour(page, 'hsl(var(--destructive-text))'),
+    ]);
+    for (const [call, colour] of [
+      [read, muted],
+      [failed, destructive],
+    ] as const) {
+      await expect(call.getByRole('button')).toHaveCSS('color', colour);
+      await expect(call.locator('.mono')).toHaveCSS('color', colour);
+      await expect(call.locator('.mono')).toHaveCSS('font-family', /monospace/);
+    }
   });
 
   test('stays at its end when its view gets shorter, as under the keyboard or in a window made shorter; a reader who scrolled away keeps their place', async ({
