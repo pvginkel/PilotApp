@@ -181,8 +181,12 @@ class RecordService:
         with `to`, a task in the plan or `plan` (decision 47). It replaces the
         block's answer, Pilot's included, while the item is not done (F32.2);
         the answer to a one-ask item is its done (DB 163). An archive question
-        takes Archive or Keep alone (DB 263)."""
+        takes Archive or Keep alone (DB 263). An answer a done item holds
+        from `user` already (`answered_so`) is taken as done and changes
+        nothing, ahead of every refusal."""
         project, item = self._closing(document)
+        if self.answered_so(document, local_id, user, answer, note=note, to=to):
+            return
         operation = f"answer block {local_id} of {tree_path(project, document.path)}"
         _not_archived(project, operation)
         _not_awaiting_read(item, document, operation)
@@ -234,6 +238,28 @@ class RecordService:
         self.document_service.publish(document, text)
         self._done_by_its_answer(project, item, document, blocks, user, at, via=via)
 
+    def answered_so(
+        self,
+        document: Document,
+        local_id: str,
+        user: User,
+        answer: str,
+        *,
+        note: str | None = None,
+        to: str | None = None,
+    ) -> bool:
+        """Whether `answer`, with `note` and `to`, is the answer block
+        `local_id` of a done item holds from `user`: a request that reaches
+        the record a second time."""
+        _, item = self.document_service.owner(document)
+        held = _closed_by(item, document, local_id, user)
+        return (
+            held is not None
+            and held.answer is not None
+            and (held.answer, held.note, held.to)
+            == (_value(answer), _value(note), _value(to))
+        )
+
     def done_action(
         self,
         document: Document,
@@ -245,8 +271,13 @@ class RecordService:
         """Done on action `local_id`: `done` and `by`, with `note`, what
         `user` pasted back (FM §4). An action with options is answered with
         one of them instead. Done on a one-ask item's action is its done (DB
-        163)."""
+        163). A Done a done item's action holds from `user` already, with the
+        same `note`, is taken as done and changes nothing, ahead of every
+        refusal."""
         project, item = self._closing(document)
+        held = _closed_by(item, document, local_id, user)
+        if held is not None and held.done is not None and held.note == _value(note):
+            return
         operation = (
             f"mark action {local_id} of {tree_path(project, document.path)} done"
         )
@@ -368,7 +399,9 @@ class RecordService:
         action not yet done among them (DB 154). Pilot's Done is on a document
         it settled whole, every block answered (decision 42), and on a
         registered document of one block, which takes its block's kind, once
-        that block is answered, deferred, or claimed and done."""
+        that block is answered, deferred, or claimed and done. Done on a
+        document `user`'s own Done closed is taken as done and changes
+        nothing, ahead of every refusal."""
         if self.references.form(self.db, item.kind_code) != PROSE:
             raise InvalidOperationException(
                 f"mark item {item.id} done",
@@ -376,6 +409,8 @@ class RecordService:
             )
         document = self.db.get_one(Document, item.id)
         project, _ = self._closing(document)
+        if _marked_by(item, user, DOCUMENT):
+            return
         operation = f"mark {tree_path(project, document.path)} done"
         _not_archived(project, operation)
         _not_awaiting_read(item, document, operation)
@@ -417,14 +452,15 @@ class RecordService:
         self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP
     ) -> None:
         """Read on a notice, given through `via`: the item's mark, the text
-        untouched."""
+        untouched. Read on a notice `user`'s own Read closed is taken as done
+        and changes nothing, ahead of every refusal."""
         self._mark_by_kind(item, user, NOTICE, "Read", via)
 
     def reviewed(
         self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP
     ) -> None:
         """Reviewed on a review, given through `via`: the item's mark, the
-        text untouched."""
+        text untouched; one sent again is taken as a Read is."""
         self._mark_by_kind(item, user, REVIEW, "Reviewed", via)
 
     def close_unanswered(self, project: Project, user: User, at: datetime) -> None:
@@ -815,6 +851,8 @@ class RecordService:
             )
         document = self.db.get_one(Document, item.id)
         project, _ = self._closing(document)
+        if _marked_by(item, user, kind):
+            return
         operation = f"mark {tree_path(project, document.path)} {mark}"
         _not_archived(project, operation)
         _not_awaiting_read(item, document, operation)
@@ -1089,6 +1127,33 @@ def _not_done(item: Item | None, operation: str) -> None:
     """Done fixes an item's answers (F15, F24.3)."""
     if item is not None and item.done_at is not None:
         raise InvalidOperationException(operation, "the item is done")
+
+
+def _closed_by(
+    item: Item | None, document: Document, local_id: str, user: User
+) -> dsl.Block | None:
+    """Block `local_id` of a done item as the person `user` closed it; none
+    where the item is open, or has no such block, or another closed it, or
+    `user` is Pilot, whose closes are the file's."""
+    if item is None or item.done_at is None or user.kind_code is UserKind.AGENT:
+        return None
+    return next(
+        (
+            block
+            for block in _blocks(item, document)
+            if block.local_id == local_id and block.by == user.handle
+        ),
+        None,
+    )
+
+
+def _marked_by(item: Item, user: User, kind: str) -> bool:
+    """Whether the item is of `kind` and done by `user`'s own mark."""
+    return (
+        item.kind_code == kind
+        and item.done_cause_code == MARKED
+        and item.done_by_user_id == user.id
+    )
 
 
 def _blocks(item: Item | None, document: Document) -> tuple[dsl.Block, ...]:

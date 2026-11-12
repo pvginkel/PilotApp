@@ -104,6 +104,14 @@ def _block(session: DbSession, item: Item, local_id: str) -> dsl.Block:
     )
 
 
+def _ben(container: ServiceContainer) -> AuthContext:
+    """A second person, signed in."""
+    ben = container.test_data_service().person("ben", "Ben Example")
+    return AuthContext(
+        subject=ben.subject, email=None, name="Ben Example", roles={"editor"}
+    )
+
+
 def _work(
     session: DbSession, project: Project, project_session: models.Session
 ) -> Item:
@@ -236,6 +244,41 @@ class TestItemServiceAnswer:
 
         with pytest.raises(InvalidOperationException) as refused:
             container.item_service().answer(ADA, item.id, "D1", "Tunnel", None)
+
+        assert refused.value.cause == "the item is done"
+
+    def test_the_same_answer_sent_again_is_taken_as_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item = _bear(container, project, project_session, "decision", DECISION)
+        items = container.item_service()
+        items.answer(ADA, item.id, "D1", "Dome", "More room.")
+        answered = session.get_one(Document, item.id).published_text
+        done = item.done_at
+
+        items.answer(ADA, item.id, "D1", "Dome", "More room.")
+
+        assert session.get_one(Document, item.id).published_text == answered
+        assert (item.done_at, item.done_by_user_id) == (done, person.id)
+
+    def test_the_same_answer_by_another_person_is_refused(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear(container, project, project_session, "decision", DECISION)
+        container.item_service().answer(ADA, item.id, "D1", "Dome", None)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().answer(
+                _ben(container), item.id, "D1", "Dome", None
+            )
 
         assert refused.value.cause == "the item is done"
 
@@ -559,6 +602,68 @@ class TestItemServiceArchiveQuestion:
         assert refused.value.cause == "the item is done"
         assert made.archived is False
         assert _transitions(session, made) == before
+
+    def test_archive_sent_again_by_who_answered_is_taken_as_done(
+        self, session: DbSession, container: ServiceContainer, person: User
+    ) -> None:
+        made, question = _finished(session, container)
+        items = container.item_service()
+        items.answer(ADA, question.id, "D1", "Archive", None)
+        before = _transitions(session, made)
+        answered = session.get_one(Document, question.id).published_text
+        done = question.done_at
+
+        items.answer(ADA, question.id, "D1", "Archive", None)
+
+        assert (made.state_code, made.archived) == (ProjectState.FINISHED, True)
+        assert _transitions(session, made) == before
+        assert session.get_one(Document, question.id).published_text == answered
+        assert (question.done_at, question.done_by_user_id) == (done, person.id)
+
+    def test_archive_sent_again_by_another_person_is_refused(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        made, question = _finished(session, container)
+        container.item_service().answer(ADA, question.id, "D1", "Archive", None)
+        before = _transitions(session, made)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().answer(
+                _ben(container), question.id, "D1", "Archive", None
+            )
+
+        assert refused.value.cause == "the item is done"
+        assert _transitions(session, made) == before
+
+    def test_archive_with_another_note_on_an_archived_question_is_refused(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        made, question = _finished(session, container)
+        container.item_service().answer(ADA, question.id, "D1", "Archive", None)
+        before = _transitions(session, made)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().answer(
+                ADA, question.id, "D1", "Archive", "For good."
+            )
+
+        assert refused.value.cause == "the item is done"
+        assert _transitions(session, made) == before
+
+    def test_keep_sent_again_by_who_answered_is_taken_as_done(
+        self, session: DbSession, container: ServiceContainer, person: User
+    ) -> None:
+        made, question = _finished(session, container)
+        items = container.item_service()
+        items.answer(ADA, question.id, "D1", "Keep", None)
+        before = _transitions(session, made)
+        done = question.done_at
+
+        items.answer(ADA, question.id, "D1", "Keep", None)
+
+        assert (made.state_code, made.archived) == (ProjectState.FINISHED, False)
+        assert _transitions(session, made) == before
+        assert (question.done_at, question.done_by_user_id) == (done, person.id)
 
     def test_archive_on_a_block_the_question_lacks_is_not_found(
         self, session: DbSession, container: ServiceContainer

@@ -24,6 +24,7 @@ from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, WriteBackOwed
 from app.engine.paths import sha256_hex, tree_path
 from app.engine.record import (
+    RecordService,
     autopilot_may_take,
     owes_write_back,
     resume_message,
@@ -930,31 +931,6 @@ class TestRecordServiceDoneAction:
 
         assert refused.value.cause == "Pilot settles an action in the file"
 
-    def test_done_on_a_done_item_is_refused(
-        self,
-        session: DbSession,
-        container: ServiceContainer,
-        project: Project,
-        project_session: models.Session,
-        person: User,
-    ) -> None:
-        item, document = _bear(
-            session,
-            container,
-            project,
-            project_session,
-            "action",
-            "Put the key into OpenBao",
-            ACTION,
-        )
-        records = container.record_service()
-        records.done_action(document, "A1", person)
-
-        with pytest.raises(InvalidOperationException) as refused:
-            records.done_action(document, "A1", person)
-
-        assert refused.value.cause == "the item is done"
-
     def test_a_refusal_of_the_writer_is_an_invalid_operation(
         self,
         session: DbSession,
@@ -1656,32 +1632,6 @@ class TestRecordServiceDone:
         assert refused.value.cause == f"a {kind} item is not done by Done"
         assert _done(item) == (None, None, None)
 
-    def test_done_on_a_done_document_is_refused(
-        self,
-        session: DbSession,
-        container: ServiceContainer,
-        project: Project,
-        project_session: models.Session,
-        person: User,
-    ) -> None:
-        item, document = _bear(
-            session,
-            container,
-            project,
-            project_session,
-            "document",
-            "Camp plan",
-            SETTLED,
-        )
-        records = container.record_service()
-        records.done(item, person)
-
-        with pytest.raises(InvalidOperationException) as refused:
-            records.done(item, person)
-
-        assert refused.value.cause == "the item is done"
-        assert len(_versions(session, document)) == 2
-
     def test_pilots_done_is_refused_while_an_action_it_claimed_is_not_done(
         self,
         session: DbSession,
@@ -1916,7 +1866,195 @@ class TestRecordServiceMarks:
             "Pilot marks done only a document it settled whole"
         )
 
-    def test_a_mark_on_a_done_item_is_refused(
+
+RESENT = [
+    ("answer", "decision", DECISION),
+    ("done_action", "action", ACTION),
+    ("done", "document", RECOMMENDED),
+    ("read", "notice", NOTICE),
+    ("reviewed", "review", NOTICE),
+]
+"""Each close a person gives, with an item it closes."""
+
+
+def _close(
+    records: RecordService,
+    close: str,
+    item: Item,
+    document: Document,
+    user: User,
+) -> None:
+    if close == "answer":
+        records.answer(document, "D1", user, "Tunnel")
+    elif close == "done_action":
+        records.done_action(document, "A1", user)
+    else:
+        getattr(records, close)(item, user)
+
+
+def _standing(
+    session: DbSession, item: Item, document: Document
+) -> tuple[str | None, tuple[datetime | None, str | None, uuid.UUID | None], int]:
+    """What a close leaves of an item: its text, its done and its Versions."""
+    return document.published_text, _done(item), len(_versions(session, document))
+
+
+class TestRecordServiceSentAgain:
+    """A close that reaches the record a second time, from the person who
+    gave it, is taken as done and changes nothing, where a done item refuses
+    every other close (slice 041's R1)."""
+
+    @pytest.mark.parametrize(("close", "kind", "text"), RESENT)
+    def test_a_close_sent_again_by_its_person_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        close: str,
+        kind: str,
+        text: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, kind, "Camp", text
+        )
+        records = container.record_service()
+        with scoped_session(container):
+            _close(records, close, item, document, person)
+        before = _standing(session, item, document)
+        engine_events.clear()
+
+        with scoped_session(container):
+            _close(records, close, item, document, person)
+
+        assert before[1][2] == person.id
+        assert _standing(session, item, document) == before
+        assert engine_events == []
+
+    @pytest.mark.parametrize(("close", "kind", "text"), RESENT)
+    def test_the_same_close_by_another_person_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        close: str,
+        kind: str,
+        text: str,
+    ) -> None:
+        ben = container.test_data_service().person("ben", "Ben Example")
+        item, document = _bear(
+            session, container, project, project_session, kind, "Camp", text
+        )
+        records = container.record_service()
+        _close(records, close, item, document, person)
+        before = _standing(session, item, document)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _close(records, close, item, document, ben)
+
+        assert refused.value.cause == "the item is done"
+        assert _standing(session, item, document) == before
+
+    @pytest.mark.parametrize(("close", "kind", "text"), RESENT)
+    def test_a_close_sent_again_is_taken_ahead_of_the_archives_refusal(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        close: str,
+        kind: str,
+        text: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, kind, "Camp", text
+        )
+        records = container.record_service()
+        _close(records, close, item, document, person)
+        project.archived = True
+        session.flush()
+        before = _standing(session, item, document)
+
+        _close(records, close, item, document, person)
+
+        assert _standing(session, item, document) == before
+
+    def test_an_answer_sent_again_with_its_note_and_its_to_is_taken_as_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, "decision", "Camp", DECISION
+        )
+        records = container.record_service()
+        note = "  Not this week.\n\nAfter the trip. "
+        records.answer(document, "D1", person, " deferred ", note=note, to="plan")
+        before = _standing(session, item, document)
+
+        records.answer(document, "D1", person, " deferred ", note=note, to="plan")
+
+        assert _block(session, document, "D1").note == note.strip()
+        assert _standing(session, item, document) == before
+
+    @pytest.mark.parametrize(
+        ("answer", "note"),
+        [("Dome", "More room."), ("Tunnel", None), ("Tunnel", "Less wind.")],
+    )
+    def test_another_answer_or_note_on_a_done_item_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        answer: str,
+        note: str | None,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, "decision", "Camp", DECISION
+        )
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel", note="More room.")
+        before = _standing(session, item, document)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            records.answer(document, "D1", person, answer, note=note)
+
+        assert refused.value.cause == "the item is done"
+        assert _standing(session, item, document) == before
+
+    def test_done_with_another_paste_back_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, "action", "Camp", ACTION
+        )
+        records = container.record_service()
+        records.done_action(document, "A1", person, note="key-1")
+        before = _standing(session, item, document)
+
+        records.done_action(document, "A1", person, note=" key-1 ")
+        with pytest.raises(InvalidOperationException) as refused:
+            records.done_action(document, "A1", person, note="key-2")
+
+        assert refused.value.cause == "the item is done"
+        assert _standing(session, item, document) == before
+
+    def test_a_mark_on_an_item_finish_closed_under_the_same_person_is_refused(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1925,21 +2063,35 @@ class TestRecordServiceMarks:
         person: User,
     ) -> None:
         item, _ = _bear(
-            session,
-            container,
-            project,
-            project_session,
-            "notice",
-            "The palette",
-            NOTICE,
+            session, container, project, project_session, "notice", "Camp", NOTICE
         )
         records = container.record_service()
-        records.read(item, person)
+        records.close_unanswered(project, person, FINISH)
 
         with pytest.raises(InvalidOperationException) as refused:
             records.read(item, person)
 
         assert refused.value.cause == "the item is done"
+        assert _done(item) == (FINISH, "finished", person.id)
+
+    def test_pilots_done_sent_again_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, "document", "Camp", SETTLED
+        )
+        records = container.record_service()
+        records.done(item, _agent(session))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            records.done(item, _agent(session))
+
+        assert refused.value.cause == "the item is done"
+        assert len(_versions(session, document)) == 2
 
 
 FINISH = datetime(2026, 10, 19, 15, 0, 1, 250000, tzinfo=UTC)

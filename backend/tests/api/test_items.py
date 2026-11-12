@@ -814,6 +814,70 @@ class TestMarks:
 
 
 @pytest.mark.usefixtures("person")
+class TestSentAgain:
+    """A close the same person sends a second time answers as the first did
+    and changes nothing (slice 041's R1): a browser sends a request again on
+    a new connection."""
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "path", "body"),
+        [
+            ("decision", DECISION, "blocks/D1/answer", {"answer": "Dome"}),
+            ("action", ACTION, "blocks/A1/done", {"note": "key-1"}),
+            ("document", RECOMMENDED, "done", None),
+            ("notice", NOTICE, "read", None),
+            ("review", NOTICE, "reviewed", None),
+        ],
+    )
+    def test_every_close_sent_again_is_answered_as_the_first(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        person: User,
+        kind: str,
+        text: str,
+        path: str,
+        body: dict[str, str] | None,
+    ) -> None:
+        item = _bear(container, camp, run, kind, text)
+        _sign_in(client)
+        assert client.post(f"{ITEMS}/{item.id}/{path}", json=body).status_code == 204
+        published = session.get_one(Document, item.id).published_text
+        done = item.done_at
+
+        response = client.post(f"{ITEMS}/{item.id}/{path}", json=body)
+
+        assert response.status_code == 204
+        assert response.data == b""
+        assert session.get_one(Document, item.id).published_text == published
+        assert (item.done_at, item.done_by_user_id) == (done, person.id)
+
+    def test_archive_sent_again_on_the_archive_question_is_answered_as_the_first(
+        self, client: FlaskClient, camp: Project
+    ) -> None:
+        _sign_in(client)
+        response = client.post(
+            f"/api/projects/{camp.id}/transitions", json={"kind": "finished"}
+        )
+        assert response.status_code == 201
+        timeline = client.get(f"/api/projects/{camp.id}/timeline").get_json()
+        answer = f"{ITEMS}/{timeline['items'][-1]['id']}/blocks/D1/answer"
+        assert client.post(answer, json={"answer": "Archive"}).status_code == 204
+        before = client.get(f"/api/projects/{camp.id}").get_json()
+
+        response = client.post(answer, json={"answer": "Archive"})
+
+        assert response.status_code == 204
+        assert response.data == b""
+        after = client.get(f"/api/projects/{camp.id}").get_json()
+        assert (after["state"], after["archived"]) == ("finished", True)
+        assert after == before
+
+
+@pytest.mark.usefixtures("person")
 class TestUndo:
     def test_undo_of_an_answer_opens_the_item_and_clears_it(
         self,

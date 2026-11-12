@@ -505,11 +505,13 @@ class ProjectService:
         answered Archive by `person`, with `note`, and the project archived by
         them in the same act, with every effect of the menu's Archive
         (F128.1), under the project's row as every change of its standing.
+        Archive on a question `person` answered Archive already, with the
+        same `note`, is taken as done and changes nothing.
 
         Raises:
             RecordNotFoundException: the question has no block `local_id`.
-            InvalidOperationException: the question is done, or the project's
-                standing does not allow Archive (DB 170).
+            InvalidOperationException: the question is done otherwise, or the
+                project's standing does not allow Archive (DB 170).
         """
         project = self._locked(question.project_id)
         operation = f"answer block {local_id} of item {question.id}"
@@ -517,6 +519,11 @@ class ProjectService:
             raise RecordNotFoundException("Block", f"{question.id}/{local_id}")
         self.db.refresh(question)
         if question.done_at is not None:
+            document = self.db.get_one(Document, question.id, populate_existing=True)
+            if self.record_service.answered_so(
+                document, local_id, person, ARCHIVE, note=note
+            ):
+                return
             raise InvalidOperationException(operation, "the item is done")
         self.record_service.close_archive_question(project, person, ARCHIVE, note=note)
         self._transition(project, person, TransitionKind.ARCHIVED)
