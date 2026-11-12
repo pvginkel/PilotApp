@@ -1587,6 +1587,39 @@
         "title": "InventedChatAnswerCreateSchema",
         "type": "object"
       },
+      "InventedChatFinishCreateSchema.6d6b324": {
+        "additionalProperties": false,
+        "description": "A finish of the project, which its brain makes in the chat as its\n`finish` call does.",
+        "properties": {
+          "archive": {
+            "default": false,
+            "description": "Finish and archive: the project is archived in the same act, and no archive question is placed",
+            "examples": [
+              true
+            ],
+            "title": "Archive",
+            "type": "boolean"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id Claude Code gives the call, which its effect's record names; none for a call whose client sent none",
+            "examples": [
+              "toolu_01"
+            ],
+            "title": "Tool Use Id"
+          }
+        },
+        "title": "InventedChatFinishCreateSchema",
+        "type": "object"
+      },
       "InventedClarificationCreateSchema.6d6b324": {
         "description": "The clarification run of the pre-ruling pass that asked about a\nregistered document's blocks, with the writer's reply or to run.",
         "properties": {
@@ -8072,6 +8105,19 @@
       "TimelineSchema.1fdd8ae": {
         "description": "A project's timeline, whole.",
         "properties": {
+          "archive_question": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The archive question the project's latest finish placed, which stands under its end divider (F5.6); null unless the project is finished, and where that finish placed none, as a Finish and archive places none (F5.4)",
+            "title": "Archive Question"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -8117,6 +8163,7 @@
         },
         "required": [
           "finished_at",
+          "archive_question",
           "items",
           "ready_after",
           "unhung_attachments"
@@ -16606,6 +16653,84 @@
           }
         ],
         "summary": "Record a person's answer to a block through the project's open chat, as its brain's `answer` records it (F42.1, F86.2): the effect of the call `tool_use_id` names in the chat's turn in flight, the place *In the chat* goes to (F42.3).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/chat/finish": {
+      "post": {
+        "description": "Returns:     201: The call's effect line     400: The body is not an optional archive flag and call id, or the         stage is prd     404: No project has the id     409: The project has no chat open, its chat has no turn in flight, or         the project's standing does not allow Finish: the reason",
+        "operationId": "post__api_testing_projects_{project_id}_chat_finish",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedChatFinishCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Finish the project through its open chat, as its brain's `finish` finishes it (F86.5), with `archive` Finish and archive: the effect of the call `tool_use_id` names in the chat's turn in flight, whose author the archive is recorded under.",
         "tags": [],
         "x-required-role": "editor"
       }

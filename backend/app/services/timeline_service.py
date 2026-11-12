@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
 from app.engine.claims import standing
-from app.engine.documents import OPENING, PROSE, awaits_read
+from app.engine.documents import ARCHIVE_QUESTION, OPENING, PROSE, awaits_read
 from app.engine.paths import tree_path
 from app.engine.record import MARKED, NOTICE, SETTLED, TURN_ENDED, RecordService
 from app.engine.references import Reason, References
@@ -592,8 +592,12 @@ class TimelineService:
             .where(Item.project_id == project.id)
             .order_by(Item.seq)
         ).all()
+        finished_at = self._finished_at(project)
         return TimelineSchema(
-            finished_at=self._finished_at(project),
+            finished_at=finished_at,
+            archive_question=self._archive_question(
+                project, finished_at, [item for item, _, _ in rows]
+            ),
             ready_after=self._ready_after(project),
             items=self._items(
                 project,
@@ -1252,6 +1256,32 @@ class TimelineService:
                 ProjectTransition.project_id == project.id,
                 ProjectTransition.kind_code == TransitionKind.FINISHED,
             )
+        )
+
+    def _archive_question(
+        self, project: Project, finished_at: datetime | None, items: list[Item]
+    ) -> uuid.UUID | None:
+        """The archive question the finish at `finished_at` placed, the last
+        of `items`, the project's in their order: none where an Archive
+        stands at that finish's instant, a Finish and archive, which places
+        none (DB 343), so that the question of a finish before a Reopen is
+        never taken for it."""
+        if finished_at is None:
+            return None
+        and_archived = self.db.scalar(
+            select(
+                exists().where(
+                    ProjectTransition.project_id == project.id,
+                    ProjectTransition.kind_code == TransitionKind.ARCHIVED,
+                    ProjectTransition.at == finished_at,
+                )
+            )
+        )
+        if and_archived:
+            return None
+        return next(
+            (item.id for item in reversed(items) if item.kind_code == ARCHIVE_QUESTION),
+            None,
         )
 
     def _users(

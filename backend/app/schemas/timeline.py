@@ -1048,6 +1048,14 @@ class TimelineSchema(BaseModel):
             "finished"
         )
     )
+    archive_question: uuid.UUID | None = Field(
+        description=(
+            "The archive question the project's latest finish placed, which "
+            "stands under its end divider (F5.6); null unless the project is "
+            "finished, and where that finish placed none, as a Finish and "
+            "archive places none (F5.4)"
+        )
+    )
     items: list[TimelineItemSchema] = Field(description="The items, in their order")
     ready_after: uuid.UUID | None = Field(
         description=(

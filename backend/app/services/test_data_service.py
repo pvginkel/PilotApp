@@ -543,7 +543,7 @@ class TestDataService:
             TransitionKind.AUTOPILOT_OFF,
         )
         bikes.state_code = ProjectState.FINISHED
-        # Every finish puts its archive question (DB 263).
+        # A plain Finish puts its archive question (DB 263).
         self.document_service.bear_archive_question(bikes)
 
         album = self._project(ada, ARCHIVED_SLUG, now)
@@ -1262,9 +1262,49 @@ class TestDataService:
             InvalidOperationException: the project has no chat open, its chat
                 has no turn in flight, or the record refuses the answer.
         """
+        return self.pilot_store_service.answer(
+            self._chats_brain(
+                project_id,
+                f"answer block {block_id} in the chat of project {project_id}",
+            ),
+            block_id,
+            value,
+            person,
+            note=note,
+            to=to,
+            tool_use_id=tool_use_id,
+        )
+
+    def finish_in_chat(
+        self, project_id: uuid.UUID, *, archive: bool, tool_use_id: str | None
+    ) -> EffectLine:
+        """The project finished through its open chat as its brain's `finish`
+        finishes it (F86.5), with `archive` Finish and archive: the call
+        `tool_use_id`'s effect in the chat's Turn in flight, whose author the
+        archive is recorded under.
+
+        Raises:
+            RecordNotFoundException: no project has the id.
+            InvalidOperationException: the project has no chat open, its chat
+                has no turn in flight, or the project's standing does not
+                allow Finish.
+        """
+        return self.pilot_store_service.finish(
+            self._chats_brain(project_id, f"finish project {project_id} in its chat"),
+            tool_use_id,
+            archive=archive,
+        )
+
+    def _chats_brain(self, project_id: uuid.UUID, operation: str) -> Brain:
+        """The brain of the project's open chat, its turn in flight.
+
+        Raises:
+            RecordNotFoundException: no project has the id.
+            InvalidOperationException: the project has no chat open, or its
+                chat has no turn in flight.
+        """
         if self.db.get(Project, project_id) is None:
             raise RecordNotFoundException("Project", str(project_id))
-        operation = f"answer block {block_id} in the chat of project {project_id}"
         chat = self.db.scalars(
             select(AgentSession)
             .join(Chat, Chat.id == AgentSession.id)
@@ -1274,15 +1314,7 @@ class TestDataService:
             raise InvalidOperationException(operation, "the project has no chat open")
         if chat.state_code != SessionState.RUNNING:
             raise InvalidOperationException(operation, "its chat has no turn in flight")
-        return self.pilot_store_service.answer(
-            Brain(chat.id, project_id, chat.kind_code),
-            block_id,
-            value,
-            person,
-            note=note,
-            to=to,
-            tool_use_id=tool_use_id,
-        )
+        return Brain(chat.id, project_id, chat.kind_code)
 
     def attach(
         self, item_id: uuid.UUID, files: Sequence[InventedFileSchema]

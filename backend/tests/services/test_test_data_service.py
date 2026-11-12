@@ -2208,19 +2208,20 @@ class TestClarify:
         assert raised.value.cause == "its project is archived"
 
 
-class TestAnswerInChat:
-    def _chat(
-        self, container: ServiceContainer, camp: Project, person: User
-    ) -> tuple[models.Session, ChatWriter]:
-        """The project's chat open, a message of `person`'s in flight."""
-        session = container.db_session()
-        chat = open_chat(session, camp)
-        writer = ChatWriter(session, container.session_record_service(), chat)
-        writer.message(person, "The dome.")
-        chat.state_code = SessionState.RUNNING
-        session.flush()
-        return chat, writer
+def _chat_in_flight(
+    container: ServiceContainer, camp: Project, person: User
+) -> tuple[models.Session, ChatWriter]:
+    """The project's chat open, a message of `person`'s in flight."""
+    session = container.db_session()
+    chat = open_chat(session, camp)
+    writer = ChatWriter(session, container.session_record_service(), chat)
+    writer.message(person, "The dome.")
+    chat.state_code = SessionState.RUNNING
+    session.flush()
+    return chat, writer
 
+
+class TestAnswerInChat:
     def test_the_answer_is_recorded_through_the_chat_its_effect_in_the_turn_in_flight(
         self,
         container: ServiceContainer,
@@ -2231,7 +2232,7 @@ class TestAnswerInChat:
         item = container.test_data_service().item(
             camp.id, "decision", "Which tent?", DECISION_TEXT
         )
-        chat, writer = self._chat(container, camp, person)
+        chat, writer = _chat_in_flight(container, camp, person)
 
         line = container.test_data_service().answer_in_chat(
             camp.id,
@@ -2288,7 +2289,7 @@ class TestAnswerInChat:
     def test_a_chat_with_no_turn_in_flight_is_refused(
         self, container: ServiceContainer, camp: Project, person: User
     ) -> None:
-        chat, _ = self._chat(container, camp, person)
+        chat, _ = _chat_in_flight(container, camp, person)
         chat.state_code = SessionState.IDLE
 
         with pytest.raises(InvalidOperationException) as raised:
@@ -2297,6 +2298,103 @@ class TestAnswerInChat:
             )
 
         assert raised.value.cause == "its chat has no turn in flight"
+
+
+class TestFinishInChat:
+    def test_with_archive_the_chats_brain_finishes_and_the_turns_author_archives(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        person: User,
+    ) -> None:
+        chat, _ = _chat_in_flight(container, camp, person)
+        pilot = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+
+        line = container.test_data_service().finish_in_chat(
+            camp.id, archive=True, tool_use_id="toolu_01"
+        )
+        clear_after_commit_callbacks()
+
+        assert (line.verb, line.label) == ("Finished and archived", "Camp")
+        assert (camp.state_code, camp.archived) == (ProjectState.FINISHED, True)
+        assert _transitions(session, camp)[-2:] == [
+            (TransitionKind.FINISHED, pilot.id),
+            (TransitionKind.ARCHIVED, person.id),
+        ]
+        [record] = [
+            stored.record
+            for stored in read_records(session, chat.id, limit=10)
+            if stored.record.kind_code == "server"
+        ]
+        assert record.payload["toolUseId"] == "toolu_01"
+
+    def test_without_it_the_project_is_finished_and_not_archived(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        person: User,
+    ) -> None:
+        _chat_in_flight(container, camp, person)
+
+        line = container.test_data_service().finish_in_chat(
+            camp.id, archive=False, tool_use_id=None
+        )
+        clear_after_commit_callbacks()
+
+        assert (line.verb, line.label) == ("Finished", "Camp")
+        assert (camp.state_code, camp.archived) == (ProjectState.FINISHED, False)
+        assert _transitions(session, camp)[-1][0] == TransitionKind.FINISHED
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().finish_in_chat(
+                uuid.uuid4(), archive=True, tool_use_id=None
+            )
+
+    def test_a_project_with_no_chat_open_is_refused(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().finish_in_chat(
+                camp.id, archive=True, tool_use_id=None
+            )
+
+        assert raised.value.cause == "the project has no chat open"
+        assert camp.state_code == ProjectState.OPEN
+
+    def test_a_chat_with_no_turn_in_flight_is_refused(
+        self, container: ServiceContainer, camp: Project, person: User
+    ) -> None:
+        chat, _ = _chat_in_flight(container, camp, person)
+        chat.state_code = SessionState.IDLE
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().finish_in_chat(
+                camp.id, archive=True, tool_use_id=None
+            )
+
+        assert raised.value.cause == "its chat has no turn in flight"
+        assert camp.state_code == ProjectState.OPEN
+
+    def test_a_project_whose_standing_refuses_finish_is_refused(
+        self, container: ServiceContainer, camp: Project, person: User
+    ) -> None:
+        _chat_in_flight(container, camp, person)
+        camp.archived = True
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().finish_in_chat(
+                camp.id, archive=True, tool_use_id=None
+            )
+
+        assert raised.value.cause == (
+            "it is archived, and an archived project takes Bring back alone"
+        )
+        assert camp.state_code == ProjectState.OPEN
 
 
 def _wait_spec(**spec: Any) -> InventedWaitCreateSchema:

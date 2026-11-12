@@ -69,8 +69,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const items = useMemo(() => data?.items.filter(isLine), [data]);
   const finishedAt = data?.finished_at ?? null;
   const readyAfter = data?.ready_after ?? null;
-  // Every finish puts one, so a finished project's latest archive question is its latest finish's.
-  const question = finishedAt === null ? undefined : items?.filter((item) => item.kind === 'archive_question').at(-1);
+  const question = items?.find((item) => item.id === data?.archive_question);
   const placed = question === undefined ? items : items?.filter((item) => item !== question);
   const urgent = finishedAt === null ? (items ?? []).filter((item) => item.urgent && item.done === null) : [];
   const { fresh, flashed, flash } = useFresh(items);

@@ -55,6 +55,7 @@ from app.models.reference import (
     SessionState,
     TransitionKind,
     UsageWindow,
+    UserKind,
     VersionCause,
     WorkTrigger,
 )
@@ -2065,6 +2066,68 @@ class TestTimeline:
         timeline = container.timeline_service().timeline(project.id)
 
         assert timeline.finished_at is None
+        assert timeline.archive_question is None
+
+    def test_a_finished_project_has_the_archive_question_of_its_latest_finish(
+        self, container: ServiceContainer, person: User
+    ) -> None:
+        project = _make(container)
+        transition = container.project_service().transition
+        transition(ADA, project.id, TransitionKind.FINISHED)
+        transition(ADA, project.id, TransitionKind.REOPENED)
+        transition(ADA, project.id, TransitionKind.FINISHED)
+
+        timeline = container.timeline_service().timeline(project.id)
+
+        first, second = [
+            item for item in timeline.items if item.kind == "archive_question"
+        ]
+        assert (first.done is None, second.done is None) == (False, True)
+        assert timeline.archive_question == second.id
+
+    def test_its_archive_question_answered_archive_or_kept_stays_its_finishs(
+        self, container: ServiceContainer, person: User
+    ) -> None:
+        project = _make(container)
+        transition = container.project_service().transition
+        transition(ADA, project.id, TransitionKind.FINISHED)
+        transition(ADA, project.id, TransitionKind.ARCHIVED)
+
+        archived = container.timeline_service().timeline(project.id)
+        transition(ADA, project.id, TransitionKind.BROUGHT_BACK)
+        brought_back = container.timeline_service().timeline(project.id)
+
+        [question] = [
+            item for item in archived.items if item.kind == "archive_question"
+        ]
+        assert question.done is not None
+        assert archived.archive_question == question.id
+        assert brought_back.archive_question == question.id
+
+    def test_a_finish_and_archive_has_none_an_earlier_finishs_question_not_its(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        project = _make(container)
+        transition = container.project_service().transition
+        transition(ADA, project.id, TransitionKind.FINISHED)
+        transition(ADA, project.id, TransitionKind.REOPENED)
+        pilot = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        container.project_service().finish_and_archive(pilot, person, project.id)
+
+        archived = container.timeline_service().timeline(project.id)
+        transition(ADA, project.id, TransitionKind.BROUGHT_BACK)
+        brought_back = container.timeline_service().timeline(project.id)
+
+        assert archived.finished_at is not None
+        [question] = [
+            item for item in archived.items if item.kind == "archive_question"
+        ]
+        assert question.done is not None
+        assert archived.archive_question is None
+        assert brought_back.finished_at == archived.finished_at
+        assert brought_back.archive_question is None
 
     def test_a_work_item_carries_its_session_as_its_line_and_head_show_it(
         self,

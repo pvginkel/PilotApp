@@ -655,6 +655,7 @@ class TestGetTimeline:
         }
         assert body == {
             "finished_at": None,
+            "archive_question": None,
             "items": [
                 {
                     "id": str(opening.id),
@@ -977,7 +978,20 @@ class TestGetTimeline:
         body = client.get(f"{PROJECTS}/{bikes}/timeline").get_json()
 
         assert datetime.fromisoformat(body["finished_at"]) == finished_at
+        assert body["archive_question"] is None
         assert [item["kind"] for item in body["items"]] == ["opening"]
+
+    def test_a_project_finished_by_finish_has_its_archive_question(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client)
+        client.post(f"{PROJECTS}/{camp}/transitions", json={"kind": "finished"})
+
+        body = client.get(f"{PROJECTS}/{camp}/timeline").get_json()
+
+        assert body["items"][-1]["kind"] == "archive_question"
+        assert body["archive_question"] == body["items"][-1]["id"]
 
     def test_the_timeline_is_answered_as_read_and_never_validated_again(
         self,

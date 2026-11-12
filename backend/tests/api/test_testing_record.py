@@ -150,6 +150,10 @@ def _chat_answers_path(project_id: uuid.UUID | str) -> str:
     return f"/api/testing/projects/{project_id}/chat/answers"
 
 
+def _chat_finish_path(project_id: uuid.UUID | str) -> str:
+    return f"/api/testing/projects/{project_id}/chat/finish"
+
+
 def _waits_path(project_id: uuid.UUID | str) -> str:
     return f"{PROJECTS}/{project_id}/waits"
 
@@ -1849,6 +1853,7 @@ ENDPOINTS = [
         _chat_answers_path(NO_ROW),
         {"block": f"{NO_ROW}/D1", "value": "Yes", "for": "ada"},
     ),
+    (_chat_finish_path(NO_ROW), {"archive": True}),
     (STORE_UPDATE, {}),
     (_waits_path(NO_ROW), {"kind": "card_wait", "title": "SR-4", "cards": ["SR-4"]}),
     (f"{TRACKER_EVENTS}/youtrack", youtrack_delivery()),
@@ -2731,6 +2736,135 @@ class TestCreateChatAnswer:
         body = {**body, "block": body["block"].replace("{item}", item_id)}
 
         response = client.post(_chat_answers_path(project_id), json=body)
+
+        assert response.status_code == 400
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateChatFinish:
+    def _chat(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        project_id: str,
+        person: User,
+        *,
+        running: bool = True,
+    ) -> models.Session:
+        """The project's chat open, a message of `person`'s in flight while
+        `running`, committed so that a refused call's rollback keeps it."""
+        chat = open_chat(session, session.get_one(Project, uuid.UUID(project_id)))
+        ChatWriter(session, container.session_record_service(), chat).message(
+            person, "We are done."
+        )
+        if running:
+            chat.state_code = SessionState.RUNNING
+        session.commit()
+        return chat
+
+    def test_with_archive_the_project_is_finished_and_archived_no_question_placed(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project_id = _make(client, name="Camp", environment_id=environment.id)
+        chat = self._chat(session, container, project_id, person)
+
+        response = client.post(
+            _chat_finish_path(project_id),
+            json={"archive": True, "tool_use_id": "toolu_01"},
+        )
+
+        assert response.status_code == 201
+        assert response.get_json() == {"effect": "Finished and archived · Camp"}
+        [record] = [
+            stored.record
+            for stored in read_records(session, chat.id, limit=10)
+            if stored.record.kind_code == "server"
+        ]
+        assert record.payload["toolUseId"] == "toolu_01"
+        project = session.get_one(Project, uuid.UUID(project_id))
+        assert (project.state_code, project.archived) == (ProjectState.FINISHED, True)
+        kinds = [
+            item["kind"]
+            for item in client.get(f"/api/projects/{project_id}/timeline").get_json()[
+                "items"
+            ]
+        ]
+        assert "archive_question" not in kinds
+
+    def test_without_it_the_project_is_finished_and_asked_whether_to_archive(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project_id = _make(client, name="Camp", environment_id=environment.id)
+        self._chat(session, container, project_id, person)
+
+        response = client.post(_chat_finish_path(project_id), json={})
+
+        assert response.status_code == 201
+        assert response.get_json() == {"effect": "Finished · Camp"}
+        project = session.get_one(Project, uuid.UUID(project_id))
+        assert (project.state_code, project.archived) == (ProjectState.FINISHED, False)
+        timeline = client.get(f"/api/projects/{project_id}/timeline").get_json()
+        assert timeline["items"][-1]["kind"] == "archive_question"
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(_chat_finish_path(uuid.uuid4()), json={})
+
+        assert response.status_code == 404
+
+    def test_no_chat_open_none_in_flight_or_an_archived_project_conflicts(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        closed = client.post(_chat_finish_path(project_id), json={})
+        chat = self._chat(session, container, project_id, person, running=False)
+        idle = client.post(_chat_finish_path(project_id), json={})
+        chat.state_code = SessionState.RUNNING
+        session.get_one(Project, uuid.UUID(project_id)).archived = True
+        session.commit()
+        archived = client.post(_chat_finish_path(project_id), json={})
+
+        assert (closed.status_code, idle.status_code, archived.status_code) == (
+            409,
+            409,
+            409,
+        )
+        assert closed.get_json()["error"].endswith(
+            "because the project has no chat open"
+        )
+        assert idle.get_json()["error"].endswith(
+            "because its chat has no turn in flight"
+        )
+        assert archived.get_json()["error"].endswith(
+            "because it is archived, and an archived project takes Bring back alone"
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        [{"archive": "soon"}, {"archive": True, "by": "ada"}],
+        ids=["not-a-flag", "an-unknown-field"],
+    )
+    def test_a_body_that_is_not_a_finish_is_invalid(
+        self, client: FlaskClient, environment: Environment, body: dict[str, Any]
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        response = client.post(_chat_finish_path(project_id), json=body)
 
         assert response.status_code == 400
 

@@ -47,6 +47,7 @@ from app.schemas.testing_record import (
     InventedAttachmentsCreateSchema,
     InventedAttachmentsSchema,
     InventedChatAnswerCreateSchema,
+    InventedChatFinishCreateSchema,
     InventedClarificationCreateSchema,
     InventedClarificationSchema,
     InventedEnvironmentSchema,
@@ -745,6 +746,43 @@ def create_chat_answer(
         note=data.note,
         to=data.to,
         tool_use_id=data.tool_use_id,
+    )
+    return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(
+        mode="json"
+    ), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/chat/finish", methods=["POST"])
+@api.validate(
+    json=InventedChatFinishCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=RecordedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_chat_finish(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Finish the project through its open chat, as its brain's `finish`
+    finishes it (F86.5), with `archive` Finish and archive: the effect of the
+    call `tool_use_id` names in the chat's turn in flight, whose author the
+    archive is recorded under.
+
+    Returns:
+        201: The call's effect line
+        400: The body is not an optional archive flag and call id, or the
+            stage is prd
+        404: No project has the id
+        409: The project has no chat open, its chat has no turn in flight, or
+            the project's standing does not allow Finish: the reason
+    """
+    data = InventedChatFinishCreateSchema.model_validate(request.get_json())
+    line = test_data_service.finish_in_chat(
+        project_id, archive=data.archive, tool_use_id=data.tool_use_id
     )
     return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(
         mode="json"

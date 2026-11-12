@@ -11,7 +11,8 @@
  * creates them there; `start()` and `opening()` name it, and the spec plays its turns through
  * `controller` once it is working. While a turn is in flight, `answer()` records a person's answer
  * to a block as the chat's brain records it (POST /api/testing/projects/<id>/chat/answers), the
- * place *In the chat* goes to. The pre-ruling pass a worker's run's end places runs in the store
+ * place *In the chat* goes to, and `finish()` finishes the project as the chat's brain does (POST
+ * /api/testing/projects/<id>/chat/finish). The pre-ruling pass a worker's run's end places runs in the store
  * too: `passing()` ends it, and `pass()` holds it running until the spec ends it.
  */
 
@@ -26,7 +27,7 @@ type Sent = components['schemas']['ChatTurnSchema.f9d9b43'];
 type ChatList = components['schemas']['ChatListSchema.f9d9b43'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 
-/** The answer route's refusal while the chat's session is not `running` (POST /api/testing/projects/<id>/chat/answers). */
+/** The answer and the finish routes' refusal while the chat's session is not `running` (POST /api/testing/projects/<id>/chat/answers, …/chat/finish). */
 const NO_TURN_IN_FLIGHT = 'its chat has no turn in flight';
 
 /** The states of a job's session in which the server goes on with it. */
@@ -229,6 +230,22 @@ export class Chats {
         response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/answers`, {
           data: { block, value, for: person, note, tool_use_id: toolUseId },
         });
+        return response.status() === 409 && (await response.text()).includes(NO_TURN_IN_FLIGHT);
+      })
+      .toBe(false);
+    expect(response.status(), await response.text()).toBe(201);
+  }
+
+  /**
+   * The project finished through its open chat as its brain's `finish` finishes it while its turn is
+   * in flight (F86.5), with `archive` Finish and archive, the archive the turn's author's.
+   */
+  async finish(projectId: string, { archive = false } = {}): Promise<void> {
+    // As `answer()`: refused until the backend has written the chat's send accepted.
+    let response!: APIResponse;
+    await expect
+      .poll(async () => {
+        response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/finish`, { data: { archive } });
         return response.status() === 409 && (await response.text()).includes(NO_TURN_IN_FLIGHT);
       })
       .toBe(false);
