@@ -20,6 +20,7 @@ from app.schemas.pilot_store import (
     AnswerRequestSchema,
     AttachedSchema,
     AttachRequestSchema,
+    FinishRequestSchema,
     MarkRequestSchema,
     RecordedSchema,
     StopRequestSchema,
@@ -290,8 +291,10 @@ def stop_work(
 @pilot_store_bp.route("/finish", methods=["POST"])
 @public
 @api.validate(
+    json=FinishRequestSchema,
     resp=SpectreeResponse(
         HTTP_200=RecordedSchema,
+        HTTP_400=ApiErrorResponseSchema,
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
         HTTP_409=ApiErrorResponseSchema,
@@ -303,18 +306,24 @@ def finish(
         ServiceContainer.pilot_store_service
     ],
 ) -> Any:
-    """`finish()` (F86.5, F5.4): the session's project finished by Pilot as
-    Finish finishes it, its own turn stopped with every other once this
-    commits.
+    """`finish(archive)` (F86.5, F5.4): the session's project finished by
+    Pilot as Finish finishes it, its own turn stopped with every other once
+    this commits. With `archive` it is archived in the same act, the archive
+    the person's whose word the call carries out, and no archive question is
+    placed.
 
     Returns:
         200: The call's effect line
+        400: The body is not the request's
         401: No bearer, or one no session has
         403: The bearer's session is not a chat's or a job's, or has no turn
             running
         409: The project is a draft, finished or archived: the reason
     """
-    line = pilot_store_service.finish(g.brain, request.headers.get(TOOL_USE_ID_HEADER))
+    body = FinishRequestSchema.model_validate(request.get_json())
+    line = pilot_store_service.finish(
+        g.brain, request.headers.get(TOOL_USE_ID_HEADER), archive=body.archive
+    )
     return _recorded(line), 200
 
 

@@ -484,8 +484,12 @@ class PilotStoreApi(_Routes):
         )
         return Recorded.model_validate(answer)
 
-    async def finish(self, authorization: str, tool_use_id: str | None) -> Recorded:
-        answer = await self._post("finish", authorization, tool_use_id, {})
+    async def finish(
+        self, authorization: str, tool_use_id: str | None, *, archive: bool
+    ) -> Recorded:
+        answer = await self._post(
+            "finish", authorization, tool_use_id, {"archive": archive}
+        )
         return Recorded.model_validate(answer)
 
     async def ask_writer(

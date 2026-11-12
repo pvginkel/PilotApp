@@ -1363,6 +1363,208 @@ class TestPilotStoreServiceFinish:
         assert refused.value.message.endswith(f"because {cause}")
         assert run.state_code == SessionState.RUNNING
 
+    def test_a_plain_finish_asks_whether_to_archive_and_archives_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _opened(session, project)
+        run = _brain(session, project, environment)
+
+        _service(container).finish(_admitted(run), TOOL_USE_ID)
+        clear_after_commit_callbacks()
+
+        assert project.archived is False
+        [question] = _archive_questions(session, project)
+        assert question.done_at is None
+        assert _archived_by(session, project) == []
+
+    def test_with_archive_a_job_archives_as_the_person_whose_close_placed_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        _opened(session, project)
+        job = _job_after_close(session, container, project, environment)
+        pilot = _pilot(session)
+
+        line = _service(container).finish(_admitted(job), TOOL_USE_ID, archive=True)
+        clear_after_commit_callbacks()
+
+        assert (project.state_code, project.archived) == (ProjectState.FINISHED, True)
+        finished, archived = session.scalars(
+            select(ProjectTransition)
+            .where(
+                ProjectTransition.kind_code.in_(
+                    (TransitionKind.FINISHED, TransitionKind.ARCHIVED)
+                )
+            )
+            .order_by(ProjectTransition.id)
+        )
+        assert (finished.kind_code, finished.by_user_id) == (
+            TransitionKind.FINISHED,
+            pilot.id,
+        )
+        assert (archived.kind_code, archived.by_user_id, archived.at) == (
+            TransitionKind.ARCHIVED,
+            person.id,
+            finished.at,
+        )
+        assert _archive_questions(session, project) == []
+        assert (job.state_code, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            pilot.id,
+        )
+        assert (line.verb, line.label) == ("Finished and archived", "Camp")
+        assert _effect_record(session, job) == {
+            "type": "effect",
+            "toolUseId": TOOL_USE_ID,
+            "effect": {"verb": "Finished and archived", "label": "Camp"},
+        }
+        [effect] = [
+            effect
+            for effect in _effects(session)
+            if effect.kind_code == EffectKind.FINISHED
+        ]
+        assert (effect.kind_code, effect.item_id, effect.block_id) == (
+            EffectKind.FINISHED,
+            None,
+            None,
+        )
+
+    def test_with_archive_a_chat_archives_as_the_author_of_its_turn_in_flight(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        _opened(session, project)
+        run = _brain(session, project, environment)
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
+        turn.author_user_id = person.id
+        turn.words = "Finish and archive it."
+        session.flush()
+
+        _service(container).finish(_admitted(run), TOOL_USE_ID, archive=True)
+        clear_after_commit_callbacks()
+
+        assert project.archived is True
+        assert _archived_by(session, project) == [person.id]
+        assert _archive_questions(session, project) == []
+
+    def test_with_archive_a_turn_the_server_wrote_archives_as_pilot(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _opened(session, project)
+        run = _brain(session, project, environment)
+
+        _service(container).finish(_admitted(run), TOOL_USE_ID, archive=True)
+        clear_after_commit_callbacks()
+
+        assert project.archived is True
+        assert _archived_by(session, project) == [_pilot(session).id]
+        assert _archive_questions(session, project) == []
+
+    def test_with_archive_a_job_no_persons_close_placed_archives_as_pilot(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _opened(session, project)
+        worker = _work(session, container, project, SessionState.IDLE)
+        job = _pass(session, container, project, environment, worker)
+
+        _service(container).finish(_admitted(job), TOOL_USE_ID, archive=True)
+        clear_after_commit_callbacks()
+
+        assert project.archived is True
+        assert _archived_by(session, project) == [_pilot(session).id]
+
+    def test_with_archive_a_refused_finish_archives_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).finish(_admitted(run), TOOL_USE_ID, archive=True)
+
+        assert refused.value.message == (
+            "Cannot finish the untitled project because it is a draft"
+        )
+        assert project.archived is False
+        assert _archived_by(session, project) == []
+
+
+def _job_after_close(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    environment: Environment,
+) -> models.Session:
+    """The job after the `person` fixture's close of a decision of Pilot's
+    own, its turn in flight, its bearer `TOKEN`."""
+    chat = _brain(db, project, environment, token="chat-token")
+    item = _bear(container, project, chat, "decision", "Which tent?", DECISION)
+    _service(container).answer(
+        _admitted(chat),
+        f"{item.id}/D1",
+        "Tunnel",
+        "ada",
+        note=None,
+        to=None,
+        tool_use_id=None,
+    )
+    job = _brain(db, project, environment, "job")
+    container.record_service().place_work(
+        project,
+        job,
+        "Deciding what is next",
+        trigger=WorkTrigger.ITEM_DONE,
+        trigger_item_id=item.id,
+    )
+    return job
+
+
+def _archive_questions(db: DbSession, project: Project) -> list[Item]:
+    return list(
+        db.scalars(
+            select(Item).where(
+                Item.project_id == project.id, Item.kind_code == "archive_question"
+            )
+        )
+    )
+
+
+def _archived_by(db: DbSession, project: Project) -> list[uuid.UUID]:
+    """Who archived the project, in the order of its `archived` transitions."""
+    return list(
+        db.scalars(
+            select(ProjectTransition.by_user_id)
+            .where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.kind_code == TransitionKind.ARCHIVED,
+            )
+            .order_by(ProjectTransition.id)
+        )
+    )
+
 
 class TestPilotStoreServiceAskWriter:
     def test_a_jobs_question_is_recorded_with_its_turn_and_counted(

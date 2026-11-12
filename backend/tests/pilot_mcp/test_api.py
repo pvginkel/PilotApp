@@ -113,7 +113,7 @@ class TestPilotStoreApi:
         api = PilotStoreApi(str(McpSettings().api_url), transport=routes)
 
         with pytest.raises(ToolError):
-            await api.finish(BEARER["Authorization"], None)
+            await api.finish(BEARER["Authorization"], None, archive=False)
         await api.aclose()
 
         [(request, _)] = routes.calls
@@ -126,7 +126,7 @@ class TestPilotStoreApi:
         api = PilotStoreApi(url)
 
         with pytest.raises(ToolError) as refused:
-            await api.finish(BEARER["Authorization"], None)
+            await api.finish(BEARER["Authorization"], None, archive=False)
         await api.aclose()
 
         assert str(refused.value) == (

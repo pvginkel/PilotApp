@@ -2074,6 +2074,125 @@ class TestTransition:
             "Cannot finish Camp because it is finished already"
         )
 
+    def test_finish_and_archive_is_the_finishers_finish_and_the_archivers_archive(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        made = _make(
+            container,
+            name="Camp",
+            autopilot=True,
+            paused=True,
+            open_items=1,
+            environment_id=environment.id,
+        )
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+        before = _transitions(session, made)
+
+        container.project_service().finish_and_archive(pilot, person, made.id)
+
+        after = _transitions(session, made)[len(before) :]
+        assert [(kind, by) for kind, _, by in after] == [
+            (TransitionKind.FINISHED, pilot.id),
+            (TransitionKind.AUTOPILOT_OFF, pilot.id),
+            (TransitionKind.RESUMED, pilot.id),
+            (TransitionKind.ARCHIVED, person.id),
+        ]
+        assert len({at for _, at, _ in after}) == 1
+        assert _standing(made) == (ProjectState.FINISHED, True, False)
+        assert made.paused is False
+        [notice] = session.scalars(
+            select(Item).where(Item.project_id == made.id, Item.kind_code == "notice")
+        )
+        assert (notice.done_cause_code, notice.done_by_user_id) == (
+            "finished",
+            pilot.id,
+        )
+
+    def test_finish_and_archive_places_no_archive_question(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        made = _make(
+            container, name="Camp", open_items=1, environment_id=environment.id
+        )
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+
+        container.project_service().finish_and_archive(pilot, person, made.id)
+
+        assert _questions(session, made) == []
+        open_items = session.scalars(
+            select(Item.id).where(
+                Item.project_id == made.id,
+                Item.done_at.is_(None),
+                Item.kind_code != "opening",
+            )
+        ).all()
+        assert open_items == []
+
+    def test_finish_and_archive_announces_the_manifest_once_committed(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        made = _make(container, name="Camp")
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.project_service().finish_and_archive(pilot, person, made.id)
+            assert engine_events == []
+
+        assert engine_events[-1] == ManifestChanged()
+        assert ProjectChanged(made.id) in engine_events
+
+    @pytest.mark.parametrize(
+        ("spec", "cause"),
+        [
+            ({"state": "draft"}, "it is a draft"),
+            ({"state": "finished"}, "it is finished already"),
+            (
+                {"state": "open", "archived": True},
+                "it is archived, and an archived project takes Bring back alone",
+            ),
+        ],
+    )
+    def test_finish_and_archive_is_refused_as_a_finish_is_and_archives_nothing(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        spec: dict[str, Any],
+        cause: str,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+        before = (_transitions(session, made), _standing(made))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().finish_and_archive(pilot, person, made.id)
+
+        assert refused.value.message == f"Cannot finish Camp because {cause}"
+        assert (_transitions(session, made), _standing(made)) == before
+
+    def test_finish_and_archive_of_no_project_is_not_found(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+
+        with pytest.raises(RecordNotFoundException):
+            container.project_service().finish_and_archive(pilot, person, uuid.uuid4())
+
     @pytest.mark.parametrize(
         ("spec", "kind", "paused"),
         [

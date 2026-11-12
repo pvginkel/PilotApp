@@ -749,7 +749,7 @@ class TestFinish:
         project.name = "Camp"
         run = _brain(session, project, environment)
 
-        response = client.post(FINISH, headers=_bearer())
+        response = client.post(FINISH, json={}, headers=_bearer())
 
         assert response.status_code == 200
         assert response.get_json() == {"effect": "Finished · Camp"}
@@ -757,6 +757,72 @@ class TestFinish:
         session.refresh(run)
         assert project.state_code == ProjectState.FINISHED
         assert run.state_code == SessionState.STOPPED
+
+    def test_with_archive_the_project_is_archived_with_the_finish(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        project.state_code = ProjectState.OPEN
+        project.slug = "camp"
+        project.name = "Camp"
+        _brain(session, project, environment)
+
+        response = client.post(FINISH, json={"archive": True}, headers=_bearer())
+
+        assert response.status_code == 200
+        assert response.get_json() == {"effect": "Finished and archived · Camp"}
+        session.refresh(project)
+        assert (project.state_code, project.archived) == (ProjectState.FINISHED, True)
+        assert (
+            session.scalars(
+                select(Item).where(Item.kind_code == "archive_question")
+            ).all()
+            == []
+        )
+
+    def test_archive_false_is_a_plain_finish(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        project.state_code = ProjectState.OPEN
+        project.slug = "camp"
+        project.name = "Camp"
+        _brain(session, project, environment)
+
+        response = client.post(FINISH, json={"archive": False}, headers=_bearer())
+
+        assert response.status_code == 200
+        assert response.get_json() == {"effect": "Finished · Camp"}
+        session.refresh(project)
+        assert (project.state_code, project.archived) == (ProjectState.FINISHED, False)
+
+    @pytest.mark.parametrize(
+        "body", [{"archive": "perhaps"}, {"archive": True, "keep": True}]
+    )
+    def test_a_body_that_is_not_the_requests_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        body: dict[str, Any],
+    ) -> None:
+        project.state_code = ProjectState.OPEN
+        project.slug = "camp"
+        _brain(session, project, environment)
+        session.commit()
+
+        response = client.post(FINISH, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+        session.refresh(project)
+        assert project.state_code == ProjectState.OPEN
 
     def test_a_draft_is_409(
         self,
@@ -769,7 +835,7 @@ class TestFinish:
         # Committed, so that the refused call's rollback keeps it.
         session.commit()
 
-        response = client.post(FINISH, headers=_bearer())
+        response = client.post(FINISH, json={}, headers=_bearer())
 
         assert response.status_code == 409
         assert _error(response) == (

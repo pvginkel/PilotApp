@@ -195,6 +195,21 @@ class StopRequestSchema(BaseModel):
     )
 
 
+class FinishRequestSchema(BaseModel):
+    """How the project is finished."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    archive: bool = Field(
+        default=False,
+        description=(
+            "Finish and archive: the project is archived in the same act, and"
+            " no archive question is placed"
+        ),
+        examples=[True],
+    )
+
+
 class WriterQuestionRequestSchema(BaseModel):
     """A question to a registered document's writer about one of its blocks,
     the block's id naming the document."""

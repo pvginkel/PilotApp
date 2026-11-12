@@ -909,8 +909,30 @@ class TestFinish:
         assert result.structuredContent == {"effect": "Finished · Camp"}
         [(request, _)] = routes.calls
         assert str(request.url) == f"{API_URL}/tools/pilot-store/finish"
+        assert json.loads(request.content) == {"archive": False}
         session.refresh(project)
-        assert project.state_code == ProjectState.FINISHED
+        assert (project.state_code, project.archived) == (ProjectState.FINISHED, False)
+
+    async def test_with_archive_the_project_is_finished_and_archived(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        project: models.Project,
+        brain: models.Session,
+    ) -> None:
+        project.state_code = ProjectState.OPEN
+        project.slug = "camp"
+        project.name = "Camp"
+        session.commit()
+
+        result = await call(mcp_app, "finish", {"archive": True}, path=STORE_PATH)
+
+        assert result.structuredContent == {"effect": "Finished and archived · Camp"}
+        [(request, _)] = routes.calls
+        assert json.loads(request.content) == {"archive": True}
+        session.refresh(project)
+        assert (project.state_code, project.archived) == (ProjectState.FINISHED, True)
 
 
 @pytest.mark.anyio

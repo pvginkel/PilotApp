@@ -1310,6 +1310,23 @@
         "title": "DeploymentTriggerResponseSchema",
         "type": "object"
       },
+      "FinishRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "How the project is finished.",
+        "properties": {
+          "archive": {
+            "default": false,
+            "description": "Finish and archive: the project is archived in the same act, and no archive question is placed",
+            "examples": [
+              true
+            ],
+            "title": "Archive",
+            "type": "boolean"
+          }
+        },
+        "title": "FinishRequestSchema",
+        "type": "object"
+      },
       "ForceErrorQuerySchema.e510e64": {
         "description": "Query parameters for force-error endpoint.",
         "properties": {
@@ -18172,9 +18189,19 @@
     },
     "/tools/pilot-store/finish": {
       "post": {
-        "description": "Returns:     200: The call's effect line     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     409: The project is a draft, finished or archived: the reason",
+        "description": "Returns:     200: The call's effect line     400: The body is not the request's     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     409: The project is a draft, finished or archived: the reason",
         "operationId": "post__tools_pilot-store_finish",
         "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -18190,7 +18217,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
                 }
               }
             },
@@ -18227,7 +18254,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "`finish()` (F86.5, F5.4): the session's project finished by Pilot as Finish finishes it, its own turn stopped with every other once this commits.",
+        "summary": "`finish(archive)` (F86.5, F5.4): the session's project finished by Pilot as Finish finishes it, its own turn stopped with every other once this commits. With `archive` it is archived in the same act, the archive the person's whose word the call carries out, and no archive question is placed.",
         "tags": []
       }
     },

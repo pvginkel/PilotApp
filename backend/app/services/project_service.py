@@ -498,6 +498,27 @@ class ProjectService:
         """
         self._transition(self._locked(project_id), user, kind)
 
+    def finish_and_archive(
+        self, finisher: User, archiver: User, project_id: uuid.UUID
+    ) -> None:
+        """Finish and archive in one act, Pilot's `finish` with `archive`
+        (F5.4): `finisher`'s Finish as `transition_as` makes it, but for the
+        archive question, which is not placed, followed at the same instant
+        by `archiver`'s Archive, with every effect of the menu's Archive
+        (F128.1). The transitions' ids keep their order (`_write`).
+
+        Raises:
+            RecordNotFoundException: no project has the id.
+            InvalidOperationException: the project's standing does not allow
+                Finish (DB 170), and then nothing is archived.
+        """
+        project = self._locked(project_id)
+        at = datetime.now(UTC)
+        self._transition(
+            project, finisher, TransitionKind.FINISHED, at=at, asks_archive=False
+        )
+        self._transition(project, archiver, TransitionKind.ARCHIVED, at=at)
+
     def archive_by_its_question(
         self, person: User, question: Item, local_id: str, note: str | None
     ) -> None:
@@ -535,14 +556,20 @@ class ProjectService:
         kind: TransitionKind,
         *,
         autopilot_yes: bool = False,
+        at: datetime | None = None,
+        asks_archive: bool = True,
     ) -> None:
+        """`person`'s transition of `kind` under the project's row, at `at`,
+        now where none is given; a Finish puts the archive question unless
+        `asks_archive` is off (`finish_and_archive`)."""
         if kind is TransitionKind.OPENED:
             self._create(project, person)
             return
         refusal = _refusal(project, kind)
         if refusal is not None:
             raise InvalidOperationException(_operation(project, kind), refusal)
-        at = datetime.now(UTC)
+        if at is None:
+            at = datetime.now(UTC)
         paused = project.paused
         if kind in _QUESTION_CLOSES:
             # Before the archived flag, which refuses every close (D012).
@@ -561,7 +588,8 @@ class ProjectService:
             if project.paused:
                 self._write(project, person, at, TransitionKind.RESUMED)
             self.record_service.close_unanswered(project, person, at)
-            self.document_service.bear_archive_question(project)
+            if asks_archive:
+                self.document_service.bear_archive_question(project)
         if kind is TransitionKind.AUTOPILOT_ON and autopilot_yes:
             self.record_service.autopilot_yes(project, person)
         if project.paused != paused:

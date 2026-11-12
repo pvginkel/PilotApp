@@ -427,15 +427,31 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         return await api.stop_work(_authorization(ctx), _tool_use_id(ctx), item=item)
 
     @mcp.tool()
-    async def finish(ctx: Call) -> Recorded:
+    async def finish(
+        ctx: Call,
+        archive: Annotated[
+            bool,
+            Field(
+                description=(
+                    "True on the operator's Finish and archive: the project is"
+                    " archived with the finish. Without it, the app asks them"
+                    " whether to archive it"
+                ),
+            ),
+        ] = False,
+    ) -> Recorded:
         """Finish the project, as the project menu's Finish does: only on the
         operator's Yes to the decision you asked once the plan's last task was
         done. Every open item is closed unanswered, auto pilot is switched off
         and a pause lifted, and every session of the project that runs, is
         starting or is held is stopped, this one's turn among them once the
-        call is recorded. A project that is a draft, finished or archived is
-        refused with the reason. Answers `{effect}`, the call's effect line."""
-        return await api.finish(_authorization(ctx), _tool_use_id(ctx))
+        call is recorded. The app then asks the operator whether to archive
+        the project. With `archive`, only where they chose Finish and archive
+        on that decision, the project is archived in the same act, as their
+        Archive, and that question is not asked. A project that is a draft,
+        finished or archived is refused with the reason. Answers `{effect}`,
+        the call's effect line."""
+        return await api.finish(_authorization(ctx), _tool_use_id(ctx), archive=archive)
 
     @mcp.tool()
     async def ask_writer(

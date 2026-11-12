@@ -67,6 +67,7 @@ from app.models.reference import (
     Surface,
     TransitionKind,
     UserKind,
+    WorkTrigger,
 )
 from app.schemas.pilot_store import AddItemRequestSchema, Mark, source_parts
 from app.services.brief_service import BriefService
@@ -129,6 +130,7 @@ MARKED: dict[Mark, str] = {
 }
 STOPPED = "Stopped"
 FINISHED = "Finished"
+FINISHED_AND_ARCHIVED = "Finished and archived"
 """The verbs of the tools' effect lines (F41)."""
 
 PASS_QUESTIONS_TOTAL = Counter(
@@ -573,26 +575,67 @@ class PilotStoreService:
         )
         return line
 
-    def finish(self, brain: Brain, tool_use_id: str | None) -> EffectLine:
+    def finish(
+        self, brain: Brain, tool_use_id: str | None, *, archive: bool = False
+    ) -> EffectLine:
         """The brain's project finished by Pilot as Finish finishes it (F86.5,
         F5.4), the call's effect, "Finished · <name>", written first: every
         Session of the project that runs, starts or is held is then stopped,
         the brain's own among them, whose turn the interrupt ends once this
-        commits.
+        commits. With `archive`, Finish and archive: the project is archived
+        in the same act and no archive question is placed, the finish Pilot's
+        still and the archive the person's the call acts for (`_acts_for`),
+        Pilot's where there is none, and the effect reads "Finished and
+        archived · <name>".
 
         Raises:
             InvalidOperationException: the project is a draft, finished or
                 archived.
         """
         project = self._project(brain)
-        line = EffectLine(FINISHED, project_name(project))
+        line = EffectLine(
+            FINISHED_AND_ARCHIVED if archive else FINISHED, project_name(project)
+        )
         self.effect_service.record(
             brain.session_id, tool_use_id, line, [Change(EffectKind.FINISHED)]
         )
-        self.project_service.transition_as(
-            self._pilot(), project.id, TransitionKind.FINISHED
-        )
+        pilot = self._pilot()
+        if archive:
+            self.project_service.finish_and_archive(
+                pilot, self._acts_for(brain) or pilot, project.id
+            )
+        else:
+            self.project_service.transition_as(
+                pilot, project.id, TransitionKind.FINISHED
+            )
         return line
+
+    def _acts_for(self, brain: Brain) -> User | None:
+        """The person whose word the brain's call carries out: a job's, the
+        one whose close of its trigger item placed it (`JobService.item_done`);
+        a chat's, the author of its Turn in flight. None where no person
+        stands behind it: a job after a worker's turn, a wait's run, the
+        setup, or a Turn the server wrote."""
+        if brain.kind_code == JOB:
+            user_id = self.db.scalar(
+                select(Item.done_by_user_id)
+                .join(Work, Work.trigger_item_id == Item.id)
+                .where(
+                    Work.id == brain.session_id,
+                    Work.trigger_code == WorkTrigger.ITEM_DONE,
+                )
+            )
+        else:
+            user_id = self.db.scalar(
+                select(Turn.author_user_id)
+                .where(Turn.session_id == brain.session_id, Turn.ended_at.is_(None))
+                .order_by(Turn.seq.desc())
+                .limit(1)
+            )
+        if user_id is None:
+            return None
+        user = self.db.get_one(User, user_id)
+        return user if user.kind_code == UserKind.PERSON else None
 
     def ask_writer(self, brain: Brain, block_id: str, question: str) -> list[str]:
         """The pre-ruling pass's `question` to the writer of the registered
