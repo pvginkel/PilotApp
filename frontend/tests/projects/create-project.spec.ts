@@ -537,6 +537,8 @@ test.describe('The setup', () => {
     await expect(setup.work.row).toHaveText('Retry');
     await expect(setup.work.resume).toHaveCount(0);
     await expect(setup.work.retried).toHaveCount(0);
+    // Failed, it can be acted on, which "N open above" counts; retried, no more.
+    await expect(setup.root).toHaveAttribute('data-actionable', 'true');
 
     const restarted = await chats.opening(id, slug);
     await setup.work.retry.click();
@@ -547,6 +549,7 @@ test.describe('The setup', () => {
     await expect(setup.work.retried).toContainText('Retried as a new job below');
     await expect(setup.work.line).toHaveText('Failed · The model is overloaded.');
     await expect(setup.root).toHaveAttribute('data-state', 'open');
+    await expect(setup.root).toHaveAttribute('data-actionable', 'false');
 
     const items = (await projects.timeline(id)).items;
     const retryId = items.find((item) => item.work?.pilots_own && item.id !== setupId)!.id;

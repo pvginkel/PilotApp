@@ -52,7 +52,7 @@ import { useRead, useUndo } from '@/hooks/use-marks';
 import { usePhone } from '@/hooks/use-phone';
 import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
-import { blocksOf, isProse, titleOf, type BodyPart, type PilotsWork, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
+import { blocksOf, isActionable, isProse, titleOf, type BodyPart, type PilotsWork, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
 import { cn } from '@/lib/utils';
 import { jobForm } from '@/lib/utils/status-labels';
@@ -87,6 +87,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
       data-item-id={item.id}
       data-kind={item.kind}
       data-state={done ? 'done' : pilots !== null ? 'pilots' : 'open'}
+      data-actionable={isActionable(item)}
       data-concept={item.concept}
     >
       {done ? <DoneLine item={item} /> : pilots !== null ? <PilotsItem item={item} pilots={pilots} /> : <OpenItem item={item} />}

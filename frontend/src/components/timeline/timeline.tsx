@@ -6,9 +6,10 @@
  * took the end out of reach: the reader's own open or close never moves the top of what they read
  * (use-own-growth.ts). A new item flashes (F8.2).
  *
- * An open urgent item has a banner pinned to the top, whose Show scrolls to the item and flashes
- * it; a finished project's has none (F10.2). While open items are scrolled out above, a chip under
- * the banners counts them and scrolls to the nearest (F11). A finished project's timeline ends in
+ * The first open urgent item that is not Pilot's has a banner pinned to the top, whose Show scrolls
+ * to the item and flashes it, with "+<n>" for the other such items; a finished project's has none
+ * (F10.2). While items that can be acted on (use-timeline.ts `isActionable`) are scrolled out
+ * above, a chip under the banner counts them and scrolls to the nearest (F11). A finished project's timeline ends in
  * "Finished · <stamp>", every item but the opening done by Finish (F5.3), and under it the archive
  * question its latest finish put, open or as its done line (F5.6). A new project paused by its
  * Create has, once its setup is done, Pilot's line under the setup saying it is ready to resume,
@@ -43,7 +44,7 @@ import { smoothly } from '@/lib/motion';
 
 /** How far from the end, in pixels, still reads as at the end. */
 const END_SLACK = 48;
-/** How far under the banners an item's end may stand, in pixels, and still read as scrolled out above. */
+/** How far under the banner an item's end may stand, in pixels, and still read as scrolled out above. */
 const ABOVE_SLACK = 8;
 
 /** Where the timeline is opened: an item, or one of its blocks. */
@@ -71,14 +72,15 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const readyAfter = data?.ready_after ?? null;
   const question = items?.find((item) => item.id === data?.archive_question);
   const placed = question === undefined ? items : items?.filter((item) => item !== question);
-  const urgent = finishedAt === null ? (items ?? []).filter((item) => item.urgent && item.done === null) : [];
+  const urgent =
+    finishedAt === null ? (items ?? []).filter((item) => item.urgent && item.done === null && item.pilots_work === null) : [];
   const { fresh, flashed, flash } = useFresh(items);
   const sections = useSections(address === null || address.block === null ? null : blockKey(address.item, address.block));
   const feed = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const pins = useRef<HTMLDivElement>(null);
   const own = useOwnGrowth(feed);
-  // The open items scrolled out above the banners, by id, in their order.
+  // The items that can be acted on scrolled out above the banner, by id, in their order.
   const [above, setAbove] = useState<string[]>([]);
   // At the end until the reader scrolls away from it; it opens there.
   const atEnd = useRef(true);
@@ -94,7 +96,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const countAbove = () => {
     const element = feed.current!;
     const top = element.getBoundingClientRect().top + pins.current!.offsetHeight;
-    const ids = [...element.querySelectorAll<HTMLElement>('.feed-inner > .item.open')]
+    const ids = [...element.querySelectorAll<HTMLElement>('.feed-inner > .item[data-actionable="true"]')]
       .filter((article) => article.getBoundingClientRect().bottom < top + ABOVE_SLACK)
       .map((article) => article.dataset.itemId!);
     setAbove((current) => (same(current, ids) ? current : ids));
@@ -214,9 +216,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
       <div ref={pins} className="pins">
         {urgent.length > 0 && (
           <div className="pinned" data-testid="timeline.banners">
-            {urgent.map((item) => (
-              <UrgentBanner key={item.id} item={item} onShow={() => show(item.id)} />
-            ))}
+            <UrgentBanner item={urgent[0]} more={urgent.length - 1} onShow={() => show(urgent[0].id)} />
           </div>
         )}
         {above.length > 0 && (
@@ -253,17 +253,28 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   );
 }
 
-function UrgentBanner({ item, onShow }: { item: TimelineItem; onShow: () => void }) {
+interface UrgentBannerProps {
+  item: TimelineItem;
+  /** How many other items would have the banner. */
+  more: number;
+  onShow: () => void;
+}
+
+function UrgentBanner({ item, more, onShow }: UrgentBannerProps) {
+  const others = `${more} more urgent ${more === 1 ? 'item' : 'items'}`;
   return (
     <button type="button" className="pin-banner" onClick={onShow} data-testid="timeline.banner" data-item-id={item.id}>
       <TriangleAlert className="icon" aria-hidden="true" />
       <span className="what">Urgent</span>
-      <span className="sep">·</span>
-      <span className="title">
+      <span className="title" data-testid="timeline.banner.title">
         <LinkedText text={titleOf(item)} nested />
       </span>
-      <span className="sep">·</span>
-      <span className="go">
+      {more > 0 && (
+        <span className="more" role="img" title={others} aria-label={others} data-testid="timeline.banner.more">
+          +{more}
+        </span>
+      )}
+      <span className="go" data-testid="timeline.banner.show">
         Show <ArrowDown className="icon" aria-hidden="true" />
       </span>
     </button>

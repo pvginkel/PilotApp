@@ -13,7 +13,7 @@ import { projectAddress } from '../projects';
  * its writer (F85.1, F86.8), a section
  * Pilot settled as its line (F31.5), an item's attachments
  * and a done line's indicator of them (F17.5, F13.6), Pilot's dots (F35), the
- * urgent banners and the "N open above" chip
+ * urgent banner with its "+<n>" and the "N open above" chip
  * (F10.2, F11), a finished timeline's end (F5.3) with the archive question under it (F5.6), a new
  * project's ready line under its setup (D083), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97). A work item open shows its env
@@ -35,7 +35,10 @@ export class TimelinePage {
   readonly openingMore: Locator;
   /** The opening's attachments' chips. */
   readonly openingAttachments: Locator;
+  /** The urgent banners drawn: one at most. */
   readonly banners: Locator;
+  /** The banner's "+<n>", the other urgent items it stands for. */
+  readonly bannerMore: Locator;
   readonly openAbove: Locator;
   readonly finishedEnd: Locator;
   readonly finishedTime: Locator;
@@ -54,6 +57,7 @@ export class TimelinePage {
     this.openingMore = this.opening.getByTestId('timeline.opening.words.more');
     this.openingAttachments = this.opening.getByTestId('timeline.attachment');
     this.banners = this.root.getByTestId('timeline.banner');
+    this.bannerMore = this.banners.getByTestId('timeline.banner.more');
     this.openAbove = this.root.getByTestId('timeline.open-above');
     this.finishedEnd = this.root.getByTestId('timeline.divider.finished');
     this.finishedTime = this.root.getByTestId('timeline.divider.finished.time');
@@ -271,7 +275,7 @@ export class TimelinePage {
     return this.root.locator(`[data-testid="timeline.banner"][data-item-id="${id}"]`);
   }
 
-  /** The items the banners point at, in their order. */
+  /** The items the banners drawn point at: the one banner's, or none. */
   async bannerItems(): Promise<string[]> {
     return this.banners.evaluateAll((banners) => banners.map((banner) => banner.getAttribute('data-item-id') ?? ''));
   }

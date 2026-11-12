@@ -4,6 +4,7 @@
  * and on its project's live event (F80.2; use-project-events.ts).
  */
 
+import { RESUMABLE } from '@/hooks/use-work-acts';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
@@ -43,6 +44,30 @@ export const isProse = (part: BodyPart): part is ProsePart => part.type === 'pro
  * session log finds it.
  */
 export const isLine = (item: TimelineItem) => item.work === null || !item.work.pilots_own || item.work.setup;
+
+/**
+ * Whether an item can be acted on, which "N open above" counts (F11): open, and a prose item but
+ * the opening that is not Pilot's, a notice urgent or not, whichever member it is for; or a work
+ * item stopped or failed, until it is retried, and not while its nudge is owed. Never work that
+ * runs, starts or is held, nor a wait. It is what waits on a person (F94.5) less two of its
+ * filters, a notice's urgency and the member an item is for.
+ */
+export function isActionable(item: TimelineItem): boolean {
+  if (item.done !== null) return false;
+  switch (item.form) {
+    case 'prose':
+      return item.kind !== 'opening' && item.pilots_work === null;
+    case 'work':
+      // The API gives every work item its session.
+      return RESUMABLE.includes(item.work!.state) && item.work!.retried === null && !item.work!.nudge_owed;
+    case 'wait':
+      return false;
+    default: {
+      const unhandled: never = item.form;
+      return unhandled;
+    }
+  }
+}
 
 /** A prose item's blocks, in their order. */
 export function blocksOf(item: TimelineItem): Block[] {

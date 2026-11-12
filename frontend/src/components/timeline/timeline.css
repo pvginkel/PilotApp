@@ -15,7 +15,7 @@
     padding: 20px 24px;
   }
 
-  /* The banners pinned to the top, and the "N open above" chip under them. */
+  /* The banner pinned to the top, and the "N open above" chip under it. */
   .pins { position: sticky; top: 0; z-index: 5; flex: none; width: 100%; max-width: var(--column); margin: 0 auto; }
   .pinned { padding: 12px 24px 0; background: linear-gradient(hsl(var(--background)) 85%, hsl(var(--background) / 0)); }
   .pin-banner {
@@ -37,9 +37,9 @@
   }
   .pin-banner > .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .pin-banner .what { font-weight: 600; }
-  .pin-banner .sep { opacity: 0.5; }
   .pin-banner .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--foreground)); }
-  .pin-banner .go { flex: none; font-size: var(--text-sm); }
+  .pin-banner .more { flex: none; font-size: var(--text-sm); font-weight: 600; }
+  .pin-banner .go { flex: none; margin-left: 6px; font-size: var(--text-sm); }
   .open-above { position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); box-shadow: var(--shadow-md); }
 
   /* ---- Dividers ------------------------------------------------------------------------- */
@@ -666,7 +666,8 @@
     .work-line:not(.ended) { flex-wrap: wrap; row-gap: 0; }
     .work-line .sep { display: none; }
     .work-line .detail { flex-basis: 100%; padding-left: 24px; }
-    .block-head .chip-label, .block-head .in-chat-label, .item-head .chip-label, .edited .edited-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    /* The banner's triangle says Urgent alone, as an item's head does, its title taking the word's room. */
+    .block-head .chip-label, .block-head .in-chat-label, .item-head .chip-label, .edited .edited-label, .pin-banner .what { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .edited .edited-icon { display: inline-block; }
   }
 }

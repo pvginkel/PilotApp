@@ -90,6 +90,8 @@ test.describe("A run halted at its turn’s end", () => {
     await expect(item.work.live).toHaveCount(0);
     await expect(item.work.dots).toHaveCount(0);
     await expect(item.root).toHaveAttribute("data-state", "open");
+    // Owed its nudge, it is not one to act on, which "N open above" counts.
+    await expect(item.root).toHaveAttribute("data-actionable", "false");
     // W8: Stop is offered, in the head; nothing in the row.
     await expect(item.work.stop).toBeVisible();
     await expect(item.work.resume).toHaveCount(0);
