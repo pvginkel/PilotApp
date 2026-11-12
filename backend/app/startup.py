@@ -97,6 +97,7 @@ def register_root_blueprints(app: Flask) -> None:
     from app.api.pilot_work import pilot_work_bp
     from app.api.sync import sync_bp
     from app.api.testing_controller import testing_controller_bp
+    from app.api.testing_halt_settings import testing_halt_settings_bp
     from app.api.testing_links import testing_links_bp
     from app.api.testing_pool_guard import testing_pool_guard_bp
     from app.api.testing_push_service import testing_push_service_bp
@@ -110,6 +111,7 @@ def register_root_blueprints(app: Flask) -> None:
     app.register_blueprint(pilot_store_bp)
     app.register_blueprint(testing_sync_bp)
     app.register_blueprint(testing_links_bp)
+    app.register_blueprint(testing_halt_settings_bp)
     app.register_blueprint(testing_controller_bp)
     app.register_blueprint(testing_push_service_bp)
     app.register_blueprint(testing_pool_guard_bp)

@@ -331,6 +331,17 @@ class TestStopping:
             False,
         )
 
+    def test_settings_set_on_the_running_halts_replace_the_boots(
+        self, session: Session
+    ) -> None:
+        _record(session, week=0.95, five_hour=0.8)
+        halts = _halts(week_halt=HARD)
+
+        halts.set_settings(week_halt=NO_NEW_WORK, five_hour_halt=HARD)
+
+        assert (halts.stops([WEEK]), halts.stops([FIVE_HOUR])) == (False, True)
+        assert [halt.setting for halt in halts.halts(session)] == [NO_NEW_WORK, HARD]
+
 
 class TestHalts:
     def test_a_halt_carries_its_share_its_age_and_the_receipt_its_run_began(

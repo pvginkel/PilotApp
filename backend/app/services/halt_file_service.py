@@ -107,6 +107,17 @@ class HaltFileService:
         supervisor.register_timer(TIMER, self.run_timer, needs_controller=True)
         work_slots.subscribe(self.request)
 
+    def set_settings(
+        self, *, week_halt: HaltSetting, five_hour_halt: HaltSetting
+    ) -> None:
+        """Give each window's halt its setting on the running app, where
+        only the boot gives it otherwise: the testing endpoint's
+        (`/api/testing/halt-settings`)."""
+        self._settings = {
+            UsageWindow.SEVEN_DAY: week_halt,
+            UsageWindow.FIVE_HOUR: five_hour_halt,
+        }
+
     def halting(self, db: Session) -> bool:
         """Whether a usage halt whose setting is the cooperative stop holds
         now: the file is wanted wherever a work item runs."""

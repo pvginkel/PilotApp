@@ -165,6 +165,17 @@ class UsageHalts:
         self._allowance = week_allowance
         self._second_limit = week_second_limit
 
+    def set_settings(
+        self, *, week_halt: HaltSetting, five_hour_halt: HaltSetting
+    ) -> None:
+        """Give each window's halt its setting on the running app, where
+        only the boot gives it otherwise: the testing endpoint's
+        (`/api/testing/halt-settings`)."""
+        self._settings = {
+            UsageWindow.SEVEN_DAY: week_halt,
+            UsageWindow.FIVE_HOUR: five_hour_halt,
+        }
+
     def holding(self, db: Session) -> tuple[UsageWindow, ...]:
         """The windows whose halt holds now, the week's first."""
         return self._holding(

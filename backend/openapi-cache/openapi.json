@@ -1361,6 +1361,55 @@
         "title": "ForceSSECallbackErrorQuerySchema",
         "type": "object"
       },
+      "HaltSettingsSchema.c4ded92": {
+        "description": "What each usage halt does to the work items (F135.6); a setting left\nout or null is the one the app booted with.",
+        "properties": {
+          "five_hour_halt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HaltSettingsSchema.c4ded92.HaltSetting"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What the five-hour halt does to the work items",
+            "examples": [
+              "hard_stop",
+              null
+            ]
+          },
+          "week_halt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HaltSettingsSchema.c4ded92.HaltSetting"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What the week's halt does to the work items",
+            "examples": [
+              "no_new_work",
+              null
+            ]
+          }
+        },
+        "title": "HaltSettingsSchema",
+        "type": "object"
+      },
+      "HaltSettingsSchema.c4ded92.HaltSetting": {
+        "description": "What a usage halt does to the work items, one setting per window\n(F135.6): no new work, the cooperative stop or the hard stop. The gate\nholds their starts under each.",
+        "enum": [
+          "no_new_work",
+          "cooperative_stop",
+          "hard_stop"
+        ],
+        "title": "HaltSetting",
+        "type": "string"
+      },
       "HandleChoiceSchema.d1d9f70": {
         "description": "The handle a person chooses at their first sign-in.",
         "properties": {
@@ -16506,6 +16555,53 @@
           }
         ],
         "summary": "Put an environment Pilot has touched on the record.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/halt-settings": {
+      "put": {
+        "description": "Returns:     200: The halt settings as the app now holds them     400: A setting that is none of the three",
+        "operationId": "put__api_testing_halt-settings",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltSettingsSchema.c4ded92"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HaltSettingsSchema.c4ded92"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set what the week's halt and the five-hour halt do to the work items; a setting left out is the one the app booted with. The halts decided from here on take it: nothing is done for a halt that holds already.",
         "tags": [],
         "x-required-role": "editor"
       }

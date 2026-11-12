@@ -224,6 +224,21 @@ class TestHaltFileServiceHalting:
     ) -> None:
         assert halt_files.halting(session) is False
 
+    def test_settings_set_on_the_running_service_replace_the_boots(
+        self, session: DbSession, halt_files: HaltFileService
+    ) -> None:
+        _usage(session, week=0.95, five_hour=0.8)
+
+        halt_files.set_settings(
+            week_halt=HaltSetting.NO_NEW_WORK, five_hour_halt=HaltSetting.HARD_STOP
+        )
+        neither = halt_files.halting(session)
+        halt_files.set_settings(
+            week_halt=HaltSetting.NO_NEW_WORK, five_hour_halt=COOPERATIVE
+        )
+
+        assert (neither, halt_files.halting(session)) == (False, True)
+
 
 class TestHaltFileServiceSettle:
     def test_a_pause_writes_the_file_where_its_work_item_runs(
