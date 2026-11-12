@@ -65,6 +65,9 @@ test.describe('An urgent item', () => {
     expect(more!.x - (title.x + title.width)).toBeGreaterThanOrEqual(10);
     expect(show.x - (more!.x + more!.width)).toBeGreaterThanOrEqual(16);
     expect(title.width).toBeGreaterThan(whole.width / 2);
+    // "+n" moves none of the bar's words off its middle: they stand as far from its top as from its bottom.
+    expect(await timeline.bannerMore.evaluate((element) => getComputedStyle(element).marginTop)).toBe('0px');
+    expect(Math.abs(title.y - whole.y - (whole.y + whole.height - (title.y + title.height)))).toBeLessThanOrEqual(1);
 
     const feed = (await timeline.root.boundingBox())!;
     const banners = (await timeline.root.getByTestId('timeline.banners').boundingBox())!;

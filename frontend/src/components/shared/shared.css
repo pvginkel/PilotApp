@@ -223,7 +223,7 @@
     height: 3em;
     background: linear-gradient(hsl(var(--card) / 0), hsl(var(--card)));
   }
-  .more { margin-top: 4px; font-size: var(--text-sm); }
+  .link.more { margin-top: 4px; font-size: var(--text-sm); }
 
   /* ---- Long texts clamped (clamp.tsx) --------------------------------------------------- */
 
