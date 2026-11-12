@@ -119,9 +119,12 @@ test.describe('An urgent item', () => {
     expect(passing.urgent).toBe(true);
     expect(passing.pilots_work).not.toBeNull();
     await expect(timeline.banners).toHaveCount(0);
+    // Nor is it one to act on, for "N open above", while Pilot works on it.
+    await expect(item.root).toHaveAttribute('data-actionable', 'false');
 
     await pass.end();
     await expect(item.root).toHaveAttribute('data-state', 'open');
+    await expect(item.root).toHaveAttribute('data-actionable', 'true');
     await expect(item.root).toHaveClass(/\burgent\b/);
     await expect(timeline.banner(pitch)).toHaveText(/^Urgent\s*Where do we pitch\?\s*Show\s*$/);
   });

@@ -49,6 +49,8 @@ test.describe('The hard stop', () => {
     await expect(item.stop).toHaveCount(0);
     await expect(item.resume).toHaveText('Resume');
     await expect(projectList.badge(name)).toHaveCount(0);
+    // Owed its nudge, it is not one to act on, for "N open above" either.
+    await expect(timeline.item(work).root).toHaveAttribute('data-actionable', 'false');
     await expect(shell.goldBadge('five_hour_halt')).toHaveAttribute('title', FIVE_HOUR_DOES);
 
     await item.sessionLog.click();
