@@ -493,19 +493,47 @@ class TestSetup:
             "The plan: plan.json, empty."
         )
 
-    @pytest.mark.parametrize("resumed", [False, True])
-    def test_under_a_pause_it_composes_with_no_pause_line(
+    def test_under_creates_pause_it_says_what_it_adds_is_held(
         self,
         session: DbSession,
         container: ServiceContainer,
         briefs: BriefService,
         opened: Project,
         person: User,
-        resumed: bool,
     ) -> None:
         """Paused at Create's instant by Pilot, its trigger's, and still
-        paused, or resumed and paused again by a person before a Retry: the
-        pause holds no setup, whose brief is the one with no pause (D083)."""
+        paused: the pause holds no setup, but every work item the setup adds
+        is held until a person resumes it, and the brief says so under the
+        switch (D083)."""
+        container.document_service().bear_opening(
+            opened, "Ada Example started this project", person, "Soup?"
+        )
+        pilot = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        _transition(session, opened, pilot, TransitionKind.PAUSED, AT)
+        opened.paused = True
+        session.flush()
+
+        assert (
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md).\n"
+            "Create project paused the project: every work item you add is held"
+            " until a person resumes it.\n\n"
+            "The project was created 2026-10-26T09:30:15Z from"
+        ) in briefs.job(opened, SETUP, AT, LATER)
+
+    def test_once_a_resume_ended_creates_pause_it_has_no_pause_line(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Resumed, and paused again by a person before a Retry: Create's
+        pause is over, and the setup's brief has no pause line, the pause
+        holding no setup."""
         container.document_service().bear_opening(
             opened, "Ada Example started this project", person, "Soup?"
         )
@@ -514,9 +542,10 @@ class TestSetup:
             select(User).where(User.kind_code == UserKind.AGENT)
         ).one()
         _transition(session, opened, pilot, TransitionKind.PAUSED, AT)
-        if resumed:
-            _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
-            _transition(session, opened, person, TransitionKind.PAUSED, LATER)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+        _transition(session, opened, person, TransitionKind.PAUSED, LATER)
+        opened.paused = True
+        session.flush()
 
         assert briefs.job(opened, SETUP, AT, LATER) == unpaused
         assert "paused" not in unpaused
@@ -1436,8 +1465,8 @@ PAUSE_LINE = (
 class TestJobPause:
     """A job whose trigger came while its project was paused carries the
     pause it came in, its interval and that the record moved on (design 3
-    §5.2; F141.4; V11). The setup carries none: the pause holds it not
-    (D083)."""
+    §5.2; F141.4; V11). The setup carries none: the pause holds it not; it
+    says Create's pause instead (D083, `TestSetup`)."""
 
     @pytest.fixture
     def job(

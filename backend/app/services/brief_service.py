@@ -274,9 +274,10 @@ class BriefService:
         """The setup's (F49), triggered at Create project's instant, which
         opened the project and took its slug: `/plan`, then the draft's folder
         and the project's, the draft, the opening that holds the words that
-        started it, and the plan, empty. No notes: its plan holds none. No
-        pause line: the pause holds no setup (`setups`), and Create's pauses
-        the project it opens (D083)."""
+        started it, and the plan, empty. No notes: its plan holds none. The
+        pause holds no setup (`setups`), so no pause line; but while Create's
+        pause stands (D083) the setup is told of it, since every work item it
+        adds is held (`_create_paused`)."""
         opening = self.db.scalars(
             select(Item.id).where(
                 Item.project_id == project.id, Item.kind_code == OPENING
@@ -287,7 +288,7 @@ class BriefService:
             "the setup",
             project,
             at,
-            [_switch(project)],
+            [_switch(project), self._create_paused(project)],
             [
                 f"The project was created {utc_time(triggered)} from"
                 f" {draft_folder(project)}; its folder is now"
@@ -799,6 +800,25 @@ class BriefService:
         return (
             f"The project is paused since {utc_time(since)}: anything you start"
             " is held until it resumes — say so."
+        )
+
+    def _create_paused(self, project: Project) -> str | None:
+        """The setup's line while Create's pause stands: the project paused,
+        and never resumed, since Pilot pauses a project at its Create alone
+        and a resume ends that pause for good (D083); None otherwise."""
+        if not project.paused:
+            return None
+        resumed = self.db.scalar(
+            select(func.count(ProjectTransition.id)).where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.kind_code == TransitionKind.RESUMED,
+            )
+        )
+        if resumed:
+            return None
+        return (
+            "Create project paused the project: every work item you add is held"
+            " until a person resumes it."
         )
 
     def _trigger_paused(self, project: Project, triggered: datetime) -> str | None:
