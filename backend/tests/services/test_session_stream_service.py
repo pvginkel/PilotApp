@@ -3,6 +3,7 @@
 
 import json
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from queue import Empty
 from typing import Any
@@ -22,6 +23,7 @@ from app.services.session_record_service import (
     to_record_schema,
 )
 from app.services.session_stream_service import (
+    PARTIAL_WINDOW_SECONDS,
     STREAM_VIEWS,
     SessionStreamService,
     StreamNotConnectedException,
@@ -426,6 +428,352 @@ class TestForwardPartial:
 
         assert streams.forward_partial(project_session.id, self.LINE) is False
         assert frames(connection) == []
+
+
+@dataclass
+class _Timer:
+    seconds: float
+    run: Callable[[], None]
+    cancelled: bool = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
+@dataclass
+class _Time:
+    """The hub's clock, which a test moves, and the timers it started, which a
+    test runs."""
+
+    now: float = 1000.0
+    timers: list[_Timer] = field(default_factory=list)
+
+    def clock(self) -> float:
+        return self.now
+
+    def start_timer(self, seconds: float, run: Callable[[], None]) -> _Timer:
+        timer = _Timer(seconds, run)
+        self.timers.append(timer)
+        return timer
+
+    def pass_(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def block_start(index: int = 0) -> dict[str, Any]:
+    return {
+        "type": "stream_event",
+        "parent_tool_use_id": None,
+        "uuid": f"start-{index}",
+        "event": {
+            "type": "content_block_start",
+            "index": index,
+            "content_block": {"type": "text", "text": ""},
+        },
+    }
+
+
+def text_delta(text: str, index: int = 0) -> dict[str, Any]:
+    return {
+        "type": "stream_event",
+        "parent_tool_use_id": None,
+        "uuid": f"delta-{text}",
+        "event": {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": "text_delta", "text": text},
+        },
+    }
+
+
+def partials(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    assert all(p["frame"] == "partial" for p in payloads)
+    return [p["data"] for p in payloads]
+
+
+class TestTheTextWindow:
+    """A turn's text is one `partial` frame per window at most (F40.4), on a
+    clock and timers the test holds."""
+
+    @pytest.fixture
+    def time(self) -> _Time:
+        return _Time()
+
+    @pytest.fixture
+    def streams(
+        self,
+        streams: SessionStreamService,
+        time: _Time,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> SessionStreamService:
+        """The hubs, on the test's clock and timers."""
+        monkeypatch.setattr(streams, "_clock", time.clock)
+        monkeypatch.setattr(streams, "_start_timer", time.start_timer)
+        return streams
+
+    @pytest.fixture
+    def connection(
+        self,
+        streams: SessionStreamService,
+        connect: Connect,
+        project_session: models.Session,
+    ) -> SSEConnection:
+        connection = connect("req-1")
+        streams.subscribe(project_session.id, "req-1", "chat", SUBJECT)
+        return connection
+
+    def test_a_blocks_start_and_its_first_delta_go_out_at_once_as_they_are(
+        self,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, block_start())
+        streams.forward_partial(project_session.id, text_delta("The dome "))
+
+        assert partials(frames(connection)) == [block_start(), text_delta("The dome ")]
+        assert time.timers == []
+
+    def test_the_deltas_inside_one_window_go_out_as_one_frame_at_its_end(
+        self,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, text_delta("The dome "))
+        frames(connection)
+
+        time.pass_(0.05)
+        assert streams.forward_partial(project_session.id, text_delta("is ")) is True
+        time.pass_(0.05)
+        streams.forward_partial(project_session.id, text_delta("lighter, "))
+        time.pass_(0.05)
+        streams.forward_partial(project_session.id, text_delta("and dry."))
+
+        assert frames(connection) == []
+        [timer] = time.timers
+        assert timer.seconds == pytest.approx(PARTIAL_WINDOW_SECONDS - 0.05)
+
+        time.pass_(0.05)
+        timer.run()
+
+        # The window's first delta, as `claude` printed it, with the text of
+        # the three.
+        joined = text_delta("is ")
+        joined["event"]["delta"]["text"] = "is lighter, and dry."
+        assert partials(frames(connection)) == [joined]
+
+    def test_a_held_frame_opens_the_next_window(
+        self,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, text_delta("One "))
+        time.pass_(0.1)
+        streams.forward_partial(project_session.id, text_delta("two "))
+        time.pass_(0.1)
+        time.timers[0].run()
+        frames(connection)
+
+        # Inside the window the held frame opened: held to its end.
+        time.pass_(0.15)
+        streams.forward_partial(project_session.id, text_delta("three "))
+        assert frames(connection) == []
+        assert time.timers[1].seconds == pytest.approx(PARTIAL_WINDOW_SECONDS - 0.15)
+        time.pass_(0.05)
+        time.timers[1].run()
+        assert partials(frames(connection)) == [text_delta("three ")]
+
+        # After a window with no text in it: at once.
+        time.pass_(PARTIAL_WINDOW_SECONDS)
+        streams.forward_partial(project_session.id, text_delta("four."))
+        assert partials(frames(connection)) == [text_delta("four.")]
+        assert len(time.timers) == 2
+
+    def test_a_record_flushes_the_text_before_it(
+        self,
+        container: ServiceContainer,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, text_delta("The dome "))
+        time.pass_(0.05)
+        streams.forward_partial(project_session.id, text_delta("is "))
+        streams.forward_partial(project_session.id, text_delta("lighter."))
+        frames(connection)
+
+        write(container, project_session, "The dome is lighter.")
+
+        text, record = frames(connection)
+        joined = text_delta("is ")
+        joined["event"]["delta"]["text"] = "is lighter."
+        assert (text["frame"], text["data"]) == ("partial", joined)
+        assert (record["frame"], record["data"]["seq"]) == ("record", 1)
+        [timer] = time.timers
+        assert timer.cancelled
+
+    def test_a_wake_with_no_record_leaves_the_text_held(
+        self,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, text_delta("The dome "))
+        streams.forward_partial(project_session.id, text_delta("is lighter."))
+        frames(connection)
+
+        streams.wake(project_session.id)
+
+        assert frames(connection) == []
+        assert not time.timers[0].cancelled
+
+    def test_the_next_blocks_start_flushes_the_last_ones_text(
+        self,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, block_start())
+        streams.forward_partial(project_session.id, text_delta("The dome "))
+        time.pass_(0.05)
+        streams.forward_partial(project_session.id, text_delta("is lighter."))
+        frames(connection)
+
+        streams.forward_partial(project_session.id, block_start(1))
+
+        assert partials(frames(connection)) == [
+            text_delta("is lighter."),
+            block_start(1),
+        ]
+        assert time.timers[0].cancelled
+
+        # The flushed text opened a window, which holds the next block's.
+        streams.forward_partial(project_session.id, text_delta("The tunnel ", 1))
+        assert frames(connection) == []
+        time.pass_(PARTIAL_WINDOW_SECONDS)
+        time.timers[1].run()
+        assert partials(frames(connection)) == [text_delta("The tunnel ", 1)]
+
+    def test_a_timer_cancelled_too_late_leaves_the_next_windows_text(
+        self,
+        container: ServiceContainer,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, text_delta("One "))
+        streams.forward_partial(project_session.id, text_delta("two "))
+        write(container, project_session, "One two")
+        streams.forward_partial(project_session.id, text_delta("three."))
+        frames(connection)
+        first, second = time.timers
+
+        first.run()
+        assert frames(connection) == []
+
+        second.run()
+        assert partials(frames(connection)) == [text_delta("three.")]
+
+    def test_a_timer_that_runs_after_its_text_went_out_pushes_nothing(
+        self,
+        container: ServiceContainer,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, text_delta("One "))
+        streams.forward_partial(project_session.id, text_delta("two."))
+        write(container, project_session, "One two.")
+        frames(connection)
+
+        time.timers[0].run()
+
+        assert frames(connection) == []
+
+    def test_end_follows_the_held_text(
+        self,
+        session: DbSession,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, text_delta("One "))
+        streams.forward_partial(project_session.id, text_delta("two."))
+        frames(connection)
+        project_session.state_code = SessionState.ENDED
+        session.flush()
+
+        streams.wake(project_session.id)
+
+        assert frames(connection) == [
+            {
+                "session": str(project_session.id),
+                "frame": "partial",
+                "data": text_delta("two."),
+            },
+            {"session": str(project_session.id), "frame": "end"},
+        ]
+
+    def test_the_text_held_for_views_that_went_reaches_no_later_view(
+        self,
+        manager: SSEConnectionManager,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        connect: Connect,
+        project_session: models.Session,
+    ) -> None:
+        streams.forward_partial(project_session.id, text_delta("One "))
+        streams.forward_partial(project_session.id, text_delta("two."))
+        manager.on_disconnect(connection)
+        later = connect("req-2")
+        streams.subscribe(project_session.id, "req-2", "chat", SUBJECT)
+
+        time.timers[0].run()
+
+        assert frames(later) == []
+
+    def test_each_session_has_a_window_of_its_own(
+        self,
+        session: DbSession,
+        streams: SessionStreamService,
+        time: _Time,
+        connection: SSEConnection,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        other = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="chat",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(other)
+        session.flush()
+        streams.subscribe(other.id, "req-1", "chat", SUBJECT)
+
+        streams.forward_partial(project_session.id, text_delta("Here "))
+        streams.forward_partial(other.id, text_delta("There "))
+
+        assert [(p["session"], p["data"]) for p in frames(connection)] == [
+            (str(project_session.id), text_delta("Here ")),
+            (str(other.id), text_delta("There ")),
+        ]
+        assert time.timers == []
 
 
 class TestViews:

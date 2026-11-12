@@ -280,6 +280,13 @@ def _token(body: dict[str, Any]) -> str:
     return token
 
 
+class _NoTimer:
+    """A hub's timer that never runs."""
+
+    def cancel(self) -> None:
+        pass
+
+
 def _relay(relays: RelayService, run: models.Session) -> None:
     """The relay's run, as its loop calls it."""
     relays.relay(run.id, LoopHandle(f"relay:{run.id}"))
@@ -1401,6 +1408,68 @@ class TestRelay:
             {"session": str(idle.id), "frame": "partial", "data": partials[0]}
         )
         assert [frame["data"]["seq"] for frame in frames[:first]] == [1, 2, 3]
+
+    def test_a_turns_text_deltas_reach_a_view_joined_ahead_of_the_record_after_them(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+        person: User,
+        connect: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def delta(text: str) -> dict[str, Any]:
+            return {
+                "type": "stream_event",
+                "parent_tool_use_id": None,
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": text},
+                },
+            }
+
+        start = {
+            "type": "stream_event",
+            "parent_tool_use_id": None,
+            "event": {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+        }
+        written = {"type": "assistant", "text": "The dome is lighter."}
+        lines = [start, delta("The dome "), delta("is "), delta("lighter."), written]
+        # The window of the first delta stays open: the clock stands still,
+        # and its timer never runs.
+        streams = container.session_stream_service()
+        monkeypatch.setattr(streams, "_clock", lambda: 0.0)
+        monkeypatch.setattr(streams, "_start_timer", lambda seconds, run: _NoTimer())
+        connection = connect(idle)
+        _send(relays, session, idle, author=person)
+        _turn_of(
+            fake_controller, controller_session, [json.dumps(line) for line in lines]
+        )
+
+        _relay(relays, idle)
+
+        frames = _frames(connection)
+        first = frames.index(
+            {"session": str(idle.id), "frame": "partial", "data": start}
+        )
+        assert [
+            (frame["frame"], frame["data"].get("payload", frame["data"]))
+            for frame in frames[first : first + 4]
+        ] == [
+            ("partial", start),
+            ("partial", delta("The dome ")),
+            ("partial", delta("is lighter.")),
+            ("record", written),
+        ]
+        assert frames[-1]["data"]["kind"] == "result"
 
     @pytest.mark.parametrize(
         ("outcome", "result", "state", "error"),

@@ -8,6 +8,12 @@ view on this process: it holds the views per connection and a cursor, the last
 cursor through the one read function and pushes them in order, so a record is
 pushed once and after its commit, whichever writer's wake comes first.
 
+A turn's text goes out as one `partial` frame per `PARTIAL_WINDOW_SECONDS` at
+most (F40.4): a text delta that comes inside the window its Session's last text
+frame opened is held, the deltas after it joined to it, and the window's end
+pushes them as one delta. What is held goes out before any record, before the
+next block's start and before `end`.
+
 Only the process that holds a connection delivers to it (§11.1): a subscribe
 for a connection this process does not hold is refused, and the browser
 retries.
@@ -15,10 +21,12 @@ retries.
 
 import logging
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from functools import partial
+from typing import TYPE_CHECKING, Any, Protocol
 
 from prometheus_client import Gauge
 from sqlalchemy import select
@@ -42,7 +50,28 @@ logger = logging.getLogger(__name__)
 EVENT_NAME = "session"
 """The SSE event every frame of a session stream travels as."""
 
+PARTIAL_WINDOW_SECONDS = 0.2
+"""The least time between two text frames of one Session's stream."""
+
 _PAGE = 200
+
+
+class Timer(Protocol):
+    """A timer started, which `cancel()` keeps from running."""
+
+    def cancel(self) -> None: ...
+
+
+type StartTimer = Callable[[float, Callable[[], None]], Timer]
+"""Runs the callback once, after that many seconds, on a thread of its own."""
+
+
+def _start_timer(seconds: float, run: Callable[[], None]) -> Timer:
+    timer = threading.Timer(seconds, run)
+    timer.daemon = True
+    timer.start()
+    return timer
+
 
 STREAM_VIEWS = Gauge(
     "pilot_stream_views",
@@ -67,9 +96,19 @@ class StreamNotConnectedException(InvalidOperationException):
         self.error_code = "NOT_CONNECTED"
 
 
+@dataclass
+class _Held:
+    """The text deltas of a window, joined into one line, and the timer that
+    ends the window."""
+
+    line: dict[str, Any]
+    timer: Timer
+
+
 class _Hub:
-    """One Session's views and cursor. The views change under the service's
-    lock; the passes run under the hub's own."""
+    """One Session's views, cursor and held text. The views change under the
+    service's lock; the passes run, and the held text changes, under the
+    hub's own."""
 
     def __init__(self, session_id: uuid.UUID) -> None:
         self.session_id = session_id
@@ -78,6 +117,12 @@ class _Hub:
         # None until the first pass or subscribe reads the Session's last record
         self.cursor: int | None = None
         self.end_pushed = False
+        self.held: _Held | None = None
+        # The clock's time at the last text frame; None before the first
+        self.text_at: float | None = None
+        # Counts the windows held, so that a timer cancelled too late finds
+        # another window's text and leaves it.
+        self.window = 0
 
 
 @dataclass(frozen=True)
@@ -106,6 +151,10 @@ class SessionStreamService:
         """
         self._container = container
         self._manager = sse_connection_manager
+        # A window's clock and the timer that ends it; the tests put their own
+        # in their place.
+        self._clock: Callable[[], float] = time.perf_counter
+        self._start_timer: StartTimer = _start_timer
         self._lock = threading.Lock()
         self._hubs: dict[uuid.UUID, _Hub] = {}
         # A replaced connection fires the connect observer alone (§11.1).
@@ -185,11 +234,16 @@ class SessionStreamService:
         its stream has ended. Nothing without a hub."""
         hub = self._hub(session_id)
         if hub is not None:
-            self._pass(hub, partial=None)
+            with hub.lock:
+                self._pass(hub, line=None)
 
     def forward_partial(self, session_id: uuid.UUID, line: dict[str, Any]) -> bool:
-        """Push a `stream_event` line to the Session's views as a `partial`,
-        after the records before it.
+        """Send a `stream_event` line to the Session's views as a `partial`,
+        after the records before it. A block's start goes out as it is, and at
+        once. A text delta goes out at once when the Session's last text frame
+        is `PARTIAL_WINDOW_SECONDS` old or older; one that comes sooner is
+        held to that window's end, and goes out joined with the deltas that
+        came after it, as one delta.
 
         Returns:
             False when the Session has no hub, and the line went nowhere
@@ -197,37 +251,79 @@ class SessionStreamService:
         hub = self._hub(session_id)
         if hub is None:
             return False
-        self._pass(hub, partial=line)
+        with hub.lock:
+            if hub.held is not None and _is_text(line):
+                hub.held.line = _joined(hub.held.line, line)
+            else:
+                self._pass(hub, line=line)
         return True
 
     def _hub(self, session_id: uuid.UUID) -> _Hub | None:
         with self._lock:
             return self._hubs.get(session_id)
 
-    def _pass(self, hub: _Hub, partial: dict[str, Any] | None) -> None:
+    def _pass(self, hub: _Hub, line: dict[str, Any] | None) -> None:
+        # Under the hub's lock
+        with self._open_session() as db:
+            # The state is read before the records, so `end` follows every
+            # record committed before the stream ended.
+            state = db.scalar(
+                select(AgentSession.state_code).where(AgentSession.id == hub.session_id)
+            )
+            cursor = self._prime(db, hub)
+            while True:
+                page = read_records(db, hub.session_id, after=cursor, limit=_PAGE)
+                if page:
+                    self._flush(hub)
+                for stored in page:
+                    frame = to_record_schema(stored).model_dump(mode="json")
+                    self._push(hub, "record", frame)
+                    cursor = hub.cursor = stored.record.seq
+                if len(page) < _PAGE:
+                    break
+        if line is not None:
+            self._partial(hub, line)
+        if state in STREAM_ENDED_STATES and not hub.end_pushed:
+            self._flush(hub)
+            self._push(hub, "end", None)
+            hub.end_pushed = True
+
+    def _partial(self, hub: _Hub, line: dict[str, Any]) -> None:
+        # Under the hub's lock
+        if not _is_text(line):
+            self._flush(hub)
+            self._push(hub, "partial", line)
+            return
+        # Nothing is held here: `forward_partial` joins a text delta to what is.
+        now = self._clock()
+        left = (
+            0.0 if hub.text_at is None else hub.text_at + PARTIAL_WINDOW_SECONDS - now
+        )
+        if left <= 0:
+            self._push(hub, "partial", line)
+            hub.text_at = now
+            return
+        hub.window += 1
+        ended = partial(self._window_ended, hub, hub.window)
+        hub.held = _Held(line, self._start_timer(left, ended))
+
+    def _window_ended(self, hub: _Hub, window: int) -> None:
+        """The timer's run: push the window's text, unless it went out
+        already or the hub has lost its last view."""
+        if self._hub(hub.session_id) is not hub:
+            return
         with hub.lock:
-            with self._open_session() as db:
-                # The state is read before the records, so `end` follows every
-                # record committed before the stream ended.
-                state = db.scalar(
-                    select(AgentSession.state_code).where(
-                        AgentSession.id == hub.session_id
-                    )
-                )
-                cursor = self._prime(db, hub)
-                while True:
-                    page = read_records(db, hub.session_id, after=cursor, limit=_PAGE)
-                    for stored in page:
-                        frame = to_record_schema(stored).model_dump(mode="json")
-                        self._push(hub, "record", frame)
-                        cursor = hub.cursor = stored.record.seq
-                    if len(page) < _PAGE:
-                        break
-            if partial is not None:
-                self._push(hub, "partial", partial)
-            if state in STREAM_ENDED_STATES and not hub.end_pushed:
-                self._push(hub, "end", None)
-                hub.end_pushed = True
+            if hub.window == window:
+                self._flush(hub)
+
+    def _flush(self, hub: _Hub) -> None:
+        # Under the hub's lock
+        if hub.held is None:
+            return
+        hub.held.timer.cancel()
+        self._push(hub, "partial", hub.held.line)
+        hub.text_at = self._clock()
+        hub.held = None
 
     def _prime(self, db: Session, hub: _Hub) -> int:
         """The hub's cursor; a new hub's is set to the Session's last record:
@@ -304,3 +400,18 @@ class SessionStreamService:
                 for views in hub.views.values()
             )
         )
+
+
+def _is_text(line: dict[str, Any]) -> bool:
+    """Whether a forwarded `stream_event` line is a text delta; the other
+    kind the relay forwards is a block's start."""
+    kind: str = line["event"]["type"]
+    return kind == "content_block_delta"
+
+
+def _joined(held: dict[str, Any], line: dict[str, Any]) -> dict[str, Any]:
+    """The held text delta with the next one's text after its own."""
+    event = held["event"]
+    delta = event["delta"]
+    text = delta["text"] + line["event"]["delta"]["text"]
+    return {**held, "event": {**event, "delta": {**delta, "text": text}}}
