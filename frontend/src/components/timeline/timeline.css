@@ -167,6 +167,7 @@
   .confirm-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-top: 6px; font-size: var(--text-base); }
   .link.details { display: inline-flex; align-items: center; gap: 2px; font-size: var(--text-base); }
   .confirm-prose { margin-top: 8px; }
+  .confirm-prose > .prose + .prose { margin-top: 0.7em; }
   .block .console.no { margin-top: 8px; }
   .console.no { border-color: hsl(var(--destructive) / 0.6); }
   .console.no:focus-within { box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.15); }

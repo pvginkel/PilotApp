@@ -130,6 +130,11 @@ test.describe('A confirmation', () => {
     expect(await confirm.details.evaluate(underline)).toBe('none');
     await expect(confirm.prose).toContainText(BEFORE);
     await expect(confirm.prose).toContainText(AFTER);
+    // The words before the block and after it stand a paragraph apart, as a document's parts do.
+    const parts = confirm.prose.locator(':scope > .prose');
+    await expect(parts).toHaveText([BEFORE, AFTER]);
+    const fontSize = await parts.nth(1).evaluate((part) => parseFloat(getComputedStyle(part).fontSize));
+    expect(await parts.nth(1).evaluate((part) => parseFloat(getComputedStyle(part).marginTop))).toBeCloseTo(0.7 * fontSize, 1);
     await confirm.details.click();
     await expect(confirm.prose).toHaveCount(0);
 
