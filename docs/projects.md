@@ -154,14 +154,24 @@ only; once it is archived nothing does, its chat included ([`chats.md`](chats.md
 items takes a close or an Undo ([`timeline.md`](timeline.md), D012). Pilot finishes
 a project through `finish` the same way, as Pilot ([`mcp.md`](mcp.md)).
 
-**The archive question.** After the close, every finish, the dialog's and Pilot's `finish` alike,
-puts one item of the kind `archive_question` (`DocumentService.bear_archive_question`), the finished
+**Finish and archive** (D189) is Pilot's `finish` with `archive` ([`mcp.md`](mcp.md)), on the finish
+decision's option of that name: under one hold on the project's row and at one instant, the finish
+by Pilot as above, then an `archived` transition with every effect of the menu's Archive, and no
+archive question (`ProjectService.finish_and_archive`). The archive is the person's whose word the
+call carries out: for a job, the person whose close of its trigger item placed it; for a chat, the
+author of its turn in flight; Pilot's where no person stands behind the call, as for a job after a
+worker's turn, a wait's run or the setup. A finish the record refuses archives nothing.
+
+**The archive question.** After the close, every finish but a Finish and archive, the dialog's and
+Pilot's `finish` alike, puts one item of the kind `archive_question` (`DocumentService.bear_archive_question`), the finished
 project's one open item: titled "Archive the project?", its text one decision, `D1`, that offers
 Archive and Keep, created by Pilot and by no session, so its close places no job
 ([`work.md`](work.md)). Its kind is fixed at its birth and kept on every publish. It is answered
 through the item's answer route ([`timeline.md`](timeline.md)), Archive or Keep and nothing else:
 Archive answers it and archives the project by the person who answered, in the same act, with every
-effect of the menu's Archive (`ProjectService.archive_by_its_question`), and Keep closes it. It
+effect of the menu's Archive (`ProjectService.archive_by_its_question`), and Keep closes it.
+Archive sent again on a question the same person answered Archive, with the same note, answers
+`204` and changes nothing; any other answer to it once answered is refused, "the item is done". It
 takes no Undo, refused by its kind. The menu's Archive and Reopen close an open one first, as its
 Archive and as its Keep, by whoever made the transition. Finish, Archive and Reopen keep their hold
 on the project's row at `FOR NO KEY UPDATE` while they stop its sessions: the question's birth takes
@@ -200,8 +210,11 @@ new project's definition chat with nothing behind it on the server (D174; `NewPr
 its composer, the focus in its field, and beside them the side panel's Draft and Documents, both
 empty; on a phone a draft's tabs. Its words are kept in the browser until sent. Leaving it leaves
 nothing behind. Its first message is the draft's start (`useStartProject`, `POST /api/projects`,
-above), so that a message the server refuses makes nothing, its words left in the field. Sent, the
-new project's composer waits until the route shows the draft's chats (below), and the page shows
+above), so that a message the server refuses makes nothing, its words back in the field. Sent, it
+stands at once as the person's message, a stand-in ([`chats.md`](chats.md)), on the new project's
+screen until the draft's chats are read and then on the draft's until its chat has streamed it;
+the new project's composer, empty from the Send, waits until the route shows the draft's chats
+(below), and the page shows
 the draft at its address, `draft-<number>`, in the entry's place, the focus in its chat's field.
 
 - **The groups.** The person's projects, the unfinished ones they are a member of, stand under the
@@ -211,7 +224,8 @@ the draft at its address, `draft-<number>`, in the entry's place, the focus in i
   last set, closed by default. A group also stands open while the project on screen is in it,
   until the person closes it.
 - **A tab** (`project-tab.tsx`) is a link to the project: its name ("New project" for a draft
-  without a title), its ticket, and its status line, at most two lines, ellipsized, its whole text
+  without a title) with its status icon after its last word (below), its ticket, on one line, the
+  name giving way to it, and its status line, at most two lines, ellipsized, its whole text
   its tooltip: "Draft"; "Finished" and the day it finished; else every step in progress, in the
   plan's order, "; " between them, or with none in progress the step reading's "Not started", "N of
   M done" or "All steps done" (`projectStatusLine()`, D181). The step reading, `stepReading()` in
@@ -222,8 +236,10 @@ the draft at its address, `draft-<number>`, in the entry's place, the focus in i
   the tracker (D182); the plan popover's steps link theirs. While `badge.count` is above 0, the
   status line ends in it, "N waiting on you" as its tooltip, orange while `badge.urgent`; a finished
   tab's too.
-- **The status icon** (`status-icon.tsx`) stands before the status line, where the project has a
-  `status`, its label in its tooltip: running, a filled dot, green and pulsing; waiting on you, a
+- **The status icon** (`status-icon.tsx`) stands after the name's last word (D195), on that word's line
+  however the name wraps and never on a line alone, the name ending in the icon's room and the icon
+  standing back into it; the status line holds the step and the badge. It shows where the project
+  has a `status`, its label in its tooltip: running, a filled dot, green and pulsing; waiting on you, a
   person; waiting on an event, an hourglass; done, a check in a circle; idle, a dashed circle;
   pausing and paused, the pause glyph, pausing pulsing. It is the pause: a click, a tap, Enter or
   Space pauses a project that is not paused, the pause glyph showing under the pointer and the
@@ -279,7 +295,10 @@ repo, then the auto pilot switch; below them the step button, the members, the p
 and the project's menu. The two rows share one line. Nothing in it opens or closes the side panel,
 which stands open beside it: the chat is the panel's Chat tab, the documents and the handbook its
 Documents tab ([`documents.md`](documents.md)). While a document is open, the tab line stands under
-it as its last row. A phone's head is its own, in one line (below).
+it as its last row. A phone's head is its own, in one line (below). On both sizes the head, a new
+project's included, stands on the project list's tint (`--side`, D194), the phone's tabs at the bottom
+taking the same, its members' avatars ringed in it, and the tab line under it with it, the tab
+showing on the page's colour.
 
 **A tight head** gives way in one order (D073):
 
@@ -324,7 +343,11 @@ refusal toasts the server's words. Turned on while the head's
   [`ui.md`](ui.md)) shows the plan as a donut of its steps, done and in progress, and the step
   reading; its tooltip is "N of M steps done", then " · in progress: a; b" while any step is. It
   opens the plan popover: "The plan · N of M done" ("The plan" alone with no steps), the steps in
-  order, a done one ticked and every one in progress highlighted. A step with open notes has a
+  order, a done one ticked and every one in progress highlighted, one not started its ring in the
+  same primary colour with nothing in it. It opens with its first step in progress, or with none
+  its first not started, at the middle of the box it scrolls in (D201), a step too near an end of the list
+  standing at that end, and a list with every step done at its top; placed once, on opening, it
+  stays where it is as the list changes. A step with open notes has a
   sticky-note icon; its notes list under the step while the mouse is on the icon, or after a tap
   or a click on it until the next.
 - **The plan's notes button** shows while the plan has open notes of its own, and opens "The plan's
@@ -332,19 +355,21 @@ refusal toasts the server's words. Turned on while the head's
 - **The members** are small avatars, overlapping by 2px, in the order they joined, in a group named
   "Members"; a tight head folds them (above).
 
-The popovers and the menu close on a press outside them and on Esc.
+The popovers and the menu close on a press outside them, which does nothing else (D202), and on Esc
+([`ui.md`](ui.md)).
 
 **A phone's head** (`PhoneHead`, `phone-head.tsx`) is one line, 52px high: the drawer's button
-([`ui.md`](ui.md)); the name, its chip and the ticket, with no repo; the auto pilot switch without
+([`ui.md`](ui.md)); the name and its chip, with no ticket (D192) and no repo; the auto pilot switch without
 its label, named "Auto pilot" to a screen reader, and its warning triangle, or the Finished chip in
 its place; the plan's donut alone (`PlanDonut`), with no button's chrome and no step's name, its
 tooltip the step button's, a tap on it showing the Plan tab (below); the members, two circles at
-most, the first member's avatar and then the second's, or a "+N" whose tooltip names the rest; the
+most, the first member's avatar and then the second's, or a "+N", level with it, whose tooltip
+names the rest; the
 plan's notes button while it shows; and the project's menu. As off a phone, it has no Discuss,
 Documents, handbook or Draft button: the tabs stand for them, the Documents tab listing the handbook
 ([`documents.md`](documents.md)). The Archived and Finished chips show their icon alone, their word
 the tooltip's and a screen reader's (D128). Only the name gives way, cut to nothing: an archived or
-finished head with its ticket, three members and the notes' button holds its line from about 390px
+finished head with three members and the notes' button holds its line from about 390px
 wide, and on a narrower phone its menu runs past the head's edge. A draft's has its name, the Draft
 chip, its members and its menu.
 
@@ -377,6 +402,7 @@ then "Chat, a reply unread" ([`chats.md`](chats.md)), and Documents its count on
 - **Plan** is the plan popover's content as a page (`PlanPage`): "The plan · N of M done" ("The
   plan" alone with no steps), the steps in their rows at the base size, a step's notes listed on its
   icon as in the popover, or "No steps yet." while the plan has none. The head's donut shows it too.
+  It opens at its first step in progress, or its first not started, as the popover does (above).
 - **The Timeline**, or a draft's Chat, stays mounted under the other tabs, hidden and inert, so that
   it keeps its scroll.
 
@@ -554,6 +580,11 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   ([`chats.md`](chats.md)). It answers `201` `{effect}`, the effect's line; an unknown project,
   block or handle is a `404`, and a project with no chat open, a chat with no turn in flight or an
   answer the record refuses a `409`.
+- `POST /api/testing/projects/<id>/chat/finish` `{archive?, tool_use_id?}` finishes the project
+  through its open chat as its brain's `finish` does, with `archive` a Finish and archive, the
+  archive under the author of the chat's turn in flight. It answers `201` `{effect}`; an unknown
+  project is a `404`, and a project with no chat open, a chat with no turn in flight or a finish the
+  record refuses a `409`.
 - `POST /api/testing/store-update` `{lift?}` makes the store's update, `201`, or with `{"lift":
   true}` asks the unlifted one's lift, `200`, as `update-store` does; each answers the update's row,
   and a second make or a lift with none under way is a `409`

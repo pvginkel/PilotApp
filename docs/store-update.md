@@ -141,8 +141,8 @@ not retried: it stays the open one, and the next message after the lift goes to 
 ([`chats.md`](chats.md)).
 A stopped job shows stopped on the item it follows from, the setup's line reading "Stopped for
 Pilot's update · <time>", and its session log ends "Stopped by Pilot for its update · <time>". Once
-retried, the item shows the retry's job in its place, and the setup's line has "Retried as a new job
-below" under it ([`work.md`](work.md)).
+retried, the item shows the retry's job in its place, and the setup reads as its line under an
+orange triangle, its session log adding "Retried as a new job · <time>" ([`work.md`](work.md)).
 
 ## Testing it
 

@@ -290,7 +290,7 @@ the block is held through that work item's run as a claimed action is.
 Each refuses with `InvalidOperationException`, its message saying why: Pilot as the actor of an
 answer, an action's Done, Read, Reviewed or a Cancel, since Pilot answers in the file with `by:
 agent`; any
-write on a done item; a blank answer; `deferred` without `to`, `to` without `deferred`, or a `to`
+write on a done item, but a close sent again (below); a blank answer; `deferred` without `to`, `to` without `deferred`, or a `to`
 naming neither `plan` nor a task in the plan; an answer to an action without options other than a
 deferral; Done on an action with options or on a block that is no action; Done on an item that is
 not a `document`, Pilot's on a registered document of one block excepted, Read on one that is not
@@ -301,6 +301,18 @@ prose item, is an archive question, is not done, has been consumed, was done by 
 none, or is of a finished or an archived project. A block the text does not have is a
 `RecordNotFoundException`, and the opening has none, nor a registered document whose read failed:
 an answer or a Done on either is refused so.
+
+**A close sent again** is taken as done (D184): it returns, writing nothing, cutting no Version and raising
+no event, before any refusal, the archived project's and the done item's included, where the done
+item holds that close from the same person already. That is an answer through the app whose block
+the published text holds `by` the person's handle with the same answer, note and `to`
+(`answered_so`); an action's Done whose block holds the person's Done with the same note; and a
+document's Done, a notice's Read or a review's Reviewed through the app on an item of that kind done
+by the person's own mark, cause `marked`. So a request a browser sends twice is not refused the
+second time. Another answer or note, the same close by another person, and Pilot's, whose closes
+are the file's, are refused as before; so is one through the chat, whose tool call would show in
+the chat as a close given. `ProjectService.archive_by_its_question` takes Archive sent again on an
+archive question the same way ([`projects.md`](projects.md)).
 
 The close of a registered document by anything but Finish or a Cancel (`ENDS_RUN`), a one-ask
 answer, an action's Done that closes it, Done or Reviewed, emits `WriteBackOwed` for the Session that

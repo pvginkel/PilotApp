@@ -594,7 +594,8 @@ The live frames travel as the SSE event `session`, `{session, frame, data}`, on 
 `session:<id>`:
 
 - `record`: a record, in the shape above;
-- `partial`: a forwarded `stream_event` line, as `claude` printed it;
+- `partial`: a forwarded `stream_event` line, as `claude` printed it, or a text delta holding the
+  text of several, joined (below);
 - `end`, with no `data`: once, after the last record, when the Session is `ended` or `failed`.
 
 **The hub.** Only the process that holds a connection delivers to it. Each process keeps a hub per
@@ -603,6 +604,16 @@ first the Session's last record when the hub was made. A wake carries no record:
 records after its cursor through the one read and pushes them in order, so each is pushed once and
 after its commit, whichever wake comes first. A partial is pushed after the records before it. A
 connection that goes, or is replaced, drops its views.
+
+**The text's window.** A Session's text goes out as one `partial` frame per 200 ms at most (D191,
+`PARTIAL_WINDOW_SECONDS`), the chat's and the session log's alike. A text delta that comes 200 ms
+or more after the Session's last text frame goes out at once, as above, and opens a window; one
+that comes inside the window is held in the hub, with no read of the database, and each delta
+after it joins its `text` to it. The window's end pushes the held line as one frame, the shape of
+the first delta held, and opens the next window. What is held goes out sooner before any record,
+before a block's start, which goes out at once as it is, and before `end`. A timer whose text went
+out already, or whose hub lost its last view, pushes nothing. `pilot_partials_forwarded_total`
+counts the lines the relay forwards, not the frames pushed.
 
 ## Recovery
 

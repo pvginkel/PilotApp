@@ -59,8 +59,16 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
   its `title`. The week's usage halt's badge, which carries its overrule, is a button with a chevron
   and no `title`: it opens a popover (`Popover`, `.gold-pop`) that holds its line and the overrule's
   button, so that a stray click on the top bar spends no quota, and the overrule's click closes it.
-  On a phone it is `GoldBar` instead, a `role="status"` region across the page's top, a line per
-  condition, the overrule's button on the week's halt's line. The offer of the browser's
+  On a phone it is `GoldBar` instead, a `role="status"` region across the page's top, one line per
+  condition in the bar's gold (`GoldStrip`, `.gold-strip`, D193): the condition's icon, its badge's words
+  without the time, "Halted at the week’s limit", cut with an ellipsis where they do not fit, and a
+  chevron at the line's end. Each line is a button whose tap opens a flyout (`Popover`, `.gold-pop`)
+  under the bar's last line, every line still in sight, 8px in from the page's left and 380px wide
+  at most: the condition's whole line, the time it began and what the halt does to running work in
+  it, and for the week's halt the overrule's button, which closes the flyout as it is pressed. The
+  overrule is in the flyout alone. One flyout stands at a time: a tap on another line, as any tap
+  outside it, closes it and does nothing else, the next tap opening that line's own; Esc and the
+  line's own tap close it too, and it goes with its condition. The offer of the browser's
   notifications (`notifications-offer.tsx`, [`notifications.md`](notifications.md)) is a gold line
   of its own, the gold bar's look, across the full width of the page's top on every browser: over
   the top bar off a phone, and over `GoldBar` on one. A time is the clock alone for today,
@@ -122,9 +130,15 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
   `@property --drawer`, over 160ms. Under reduced motion (`prefers-reduced-motion: reduce`) the
   drawer comes and goes at once. Closed, the drawer and the scrim are hidden once out of sight, so
   that they take no focus and no press.
-- **The browser's bar** takes the page's colour on a phone: `useBrowserBarInPageColour()`
-  (`src/lib/theme.ts`) sets `theme-color` to the page's background, again at each change of the
-  theme, and puts the page head's back when the phone's frame goes.
+- **The browser's bar** takes the bottom tabs' tint (`--side`) on a phone (D194), one colour with a
+  project's head and its tabs, from the page as it is served: the page head names three
+  `theme-color`s by `media`, a phone's in the dark scheme, a phone's (`max-width: 900px`) and,
+  with no `media`, the top bar's blue, `#568ed2`, and the browser takes the first that holds, so
+  that off a phone the bar is the top bar's blue. The two phone colours are `--side` as each scheme
+  computes it, `#111824` and `#f9fafb`. A theme chosen over the OS's gives both phone metas that
+  theme's tint, set as the app starts and at the choice (`applyTheme()`, `src/lib/theme.ts`), which
+  sets their `content` and never their `media`. On a phone a screen with no project's head, as the
+  profile, stands on the page's colour under the tinted bar.
 - **The phone's screen.** The app is as tall as the screen the browser shows: `h-dvh` on
   `__root.tsx`'s root and on the auth gate's screens, never `h-screen`, `100vh`, which a phone's
   Chrome measures with its URL bar hidden. The app scrolls inside itself, so the bar never hides,
@@ -163,12 +177,13 @@ above the chat mockup's own sizes on a phone (D177):
 - **xs**: a timestamp elsewhere, a card id, a divider, a chip, Recommended, *In the chat*, a quiet
   line's icon, time and button.
 - **lg**: an item's title, a project's name in the list, an opened document's title, an empty state's and
-  a dialog's title, a prose h2.
-- **xl**: the project head's title, the profile's, a prose h1.
-- **2xl**: Pilot's name in the top bar and the drawer's head.
+  a dialog's title, a prose h3.
+- **xl**: the project head's title, the profile's, a prose h2.
+- **2xl**: Pilot's name in the top bar and the drawer's head, a prose h1, and so a draft's title in
+  its Draft tab.
 
 Text sized to its shape keeps a size of its own: an avatar's letters, a count (11.5px in a tab or a
-group, 12px in the project list) and Yes and No (18px); so does mono, `code` at 0.86em, `.mono` at
+group, 12px in the project list); so does mono, `code` at 0.86em, `.mono` at
 0.92em, `pre` at 13px and `kbd` at 11px. Tailwind's line heights, ratios, follow the step; a chat
 class that replaced a `text-[Npx]`, which set no line, keeps the body's with it, as `text-sm/[1.6]`.
 
@@ -225,11 +240,20 @@ In `src/components/shared/`:
 - `PILOT_MARK` (`pilot-mark.ts`): the paths of Pilot's mark, which Pilot's avatar draws and the
   timeline's auto pilot mark cuts its bolt out of ([`timeline.md`](timeline.md)).
 - `Menu` and `MenuItem`, and `Popover`: each closes on a press outside it and on Esc
-  (`src/hooks/use-dismiss.ts`). A `Popover`, which stands in Esc's order at the plan's rank, closes
+  (`src/hooks/use-dismiss.ts`). The press that closes it does nothing else (D202): the click that ends it
+  is taken before anything hears it, a button, a link or a tab under it alike, so that a press on
+  another popover's or menu's button closes the open one and opens nothing, the next press opening
+  it. The press still moves the keyboard focus, as a press on a field does. A press that ends in no
+  click, the right button's or a touch that turns into a scroll, closes it too and leaves the next
+  press of the pointer its own. Every user of the hook has the rule, a phone line's menu
+  ([`timeline.md`](timeline.md)) and the phone's gold flyouts included; the session log's popover,
+  which has its own handler, closes and lets the press go on ([`work.md`](work.md)). A `Popover`,
+  which stands in Esc's order at the plan's rank, closes
   on its button too, and its content may be a function of `close`, for an action in it that closes
   it. It drops from its button and runs to 12px short of the edge of what it is seen in, the nearest
   pane that scrolls it, else the window, scrolling past that; where, as it opens, it does not fit
-  below and has more room above, it opens above its button.
+  below and has more room above, it opens above its button. `onOpened` is called with it once it
+  has its height.
 - `StepsButton({steps, name, anchorClassName, testId, popoverTestId})` (`steps-button.tsx`): a list
   of steps behind a button, the plan's step button and a work item's progress button alike
   ([`projects.md`](projects.md), [`work.md`](work.md)), each step `{id, title, mark, notes?}`, its
@@ -238,7 +262,18 @@ In `src/components/shared/`:
   rest, counts and not places, and the step reading (`stepReading()`), its name giving way down to
   about three letters in a tight row, ", …" kept, its ticket ids plain text; its popover, named
   `name`, lists the steps in
-  order under `<name> · N of M done`, a step's open notes beside it where it has some.
+  order under `<name> · N of M done`, a step's open notes beside it where it has some, each step's
+  ring in the primary colour, filled by its mark, a step not started's empty. Opened (D201), the
+  list scrolls its first step `now`, or with none its first `pending`, to the middle of the box it
+  scrolls in (`showCurrentStep()`), once, after the popover has its height; the browser's own clamp
+  keeps a step near an end of the list at that end, and a list with neither stays at its top. The
+  phone's Plan tab places its list the same way.
+- `CopyButton({text, title, className?, testId})` (`copy-button.tsx`, D199): a ghost icon button that
+  copies `text` to the clipboard as written, `title` its tooltip and its name, and shows a check
+  in its icon's place for a moment once it has copied, the toast's copy's mark
+  (`use-copy-to-clipboard.ts`); its state is in `data-copy-state`. An action's head, an opened
+  document's head, a reply in the chat and a code block in prose carry one
+  ([`timeline.md`](timeline.md), [`documents.md`](documents.md), [`chats.md`](chats.md)).
 - `Dialog`, a modal dialog on Radix's (`@radix-ui/react-dialog`, not the template's wrapper) that a
   click beside it or Esc closes, Esc through `useEscape` (below) and never Radix's own. While it is
   open, Tab and Shift+Tab stay inside it and the page behind it is hidden from a screen reader. It
@@ -272,7 +307,16 @@ In `src/components/shared/`:
   code span or fence, or raw HTML, as the text's own Markdown parse reads it, or behind a backslash
   escape, the tag shows as written (`quotesToLinks`, `lib/chat/quotes.ts`).
   With `deltas`, a streamed text's, its new text fades in (`.delta-fresh`); the chat's view code
-  draws its text through it ([`work.md`](work.md)).
+  draws its text through it ([`work.md`](work.md)). A code block (`CodeBlock`, a `pre` inside
+  `div.code-block`) has a copy button at its top right, "Copy the code", which copies its source
+  without the newline that ends it: above 900px with a mouse it shows under the mouse or with the
+  keyboard's focus, at 900px and below always, the code keeping 36px clear of it. It is every prose
+  surface's, a document's, an action's, a chat's reply, the project document and the handbook,
+  and not a tool call's detail or a text attachment's. A prose heading is bold and sized by the
+  type scale (above), h1 2xl, h2 xl, h3 lg and h4 to h6 the body's size, with its space above,
+  1.4em for h1 and h2 and 1.2em for the rest, wherever it falls: a heading that opens a later prose
+  part keeps it, after a part, a block, an item's ask or a reply's steps, and only a text's first
+  part starts flush. A writer's reply to a clarification takes the same headings.
   `HeadingWords({text})` is a heading's inline Markdown alone, for inside a button: emphasis, code
   and links as the heading shows them, each link nested as `LinkedText`'s are.
 - `Fold({children, testId})`: a text cut at 13.5em, fading out, with Show more; one that fits shows
@@ -297,7 +341,9 @@ In `src/components/shared/`:
 button beside it, level with its bottom edge), `.chip`, `.popover`, the steps behind a button
 (`.plan-ring`, `.plan-pop`, `.plan-step`), `.menu-pop`, `.dialog`,
 `.empty-state`, `.mention`, `.prose` (its lists with their bullets and numbers, a task list's
-checkboxes), `.fold` and `.link`; `.switch`, a button of role `switch` whose knob moves right while
+checkboxes), `.fold` and `.link`, a button drawn as a link, as Show more and a confirmation's
+Details are, which never underlines (D196): only a link that goes somewhere, an `<a>`, underlines under
+the mouse (`a:hover` in `app-theme.css`); `.switch`, a button of role `switch` whose knob moves right while
 it is `aria-checked`, the head's auto pilot switch and the profile's two switches; `.icon-cap`, an
 icon on its text's capitals in a flex row;
 `.delta-fresh`; `.unread`, the chat's unread dot ([`chats.md`](chats.md)); and `@keyframes pulse`.
@@ -335,7 +381,10 @@ The unsent text of every answer's field and of the chat's composer is a second e
 `useUnsentText(field, initial)` (`src/hooks/use-unsent-text.ts`) reads it when the field opens, so a
 field opened again, after a reload or in another tab, starts from what was left in it, and writes it
 on every keystroke over what the storage holds. An emptied field's entry is deleted, and so is a
-sent one's once the record holds it; a refused send keeps it.
+sent one's once the record holds it; a refused send keeps it. Words that leave a field on their
+send, as the chat's composer's do (`leave()`), stay in its entry, before what is typed after them,
+until the server takes them (`taken()`), so that a reload meanwhile finds them in the field; refused
+(`refused()`), they stand in the field again, what was typed since under them.
 
 ## Toasts
 
@@ -402,9 +451,10 @@ render is in the next build with nothing copied: the favicon (`favicon.png`, the
 and the manifest's icons (`icon-192.png`, `icon-512.png` and the maskable `icon-512-maskable.png`)
 from the blue renders, and the top bar's `logo.png`, the drawer's head's too, from the 96px white
 one, three times the bar's 32px, the bar being the theme's blue itself (D020). Beside them stand
-`public/`'s manifest (`manifest.json`) and service worker, `sw.js`; the page head links the manifest
-and sets `theme-color` to `#568ed2`, a standing edit of the template's `index.html` (`CLAUDE.md`),
-which the phone's frame paints in the page's colour (above). `registerServiceWorker()`
+`public/`'s manifest (`manifest.json`), which names no `theme_color`, and service worker, `sw.js`;
+the page head links the manifest, names the page "Pilot — AI powered work orchestration" (D205) and sets
+the three `theme-color`s of the browser's bar (above), a standing edit of the template's
+`index.html` (`CLAUDE.md`). `registerServiceWorker()`
 (`src/lib/service-worker.ts`) registers the worker when the shell's module loads, on any page,
 before sign-in too, wherever the browser offers service workers (a secure context). The worker
 shows the server's pushes and opens the app at a tap on one
@@ -429,8 +479,10 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   the page's fetches have landed ([`sign-in.md`](sign-in.md)).
 - `shell`: `open(path)` opens an address once the signed-in person is read; `goldBadges`,
   `goldBadge(code)` and `goldPopover` read the badges and the week's halt's popover, `goldBar` and
-  `goldLine(code)` the phone's lines, `goldText(line)` a line's words without its button, and
-  `goldOverrule(line)` its overrule's button; `drawerToggle` is the drawer's button, on a phone
+  `goldLine(code)` the phone's lines, `goldLineWords(line)` a phone's line's words and `goldFlyout`
+  its open flyout, `goldText(line)` a whole line's words without its button, in the popover or the
+  flyout, and `goldOverrule(line)` its overrule's button; `browserBarColour()` the browser's bar's
+  colour as the browser computes it, of the first `theme-color` whose `media` holds; `drawerToggle` is the drawer's button, on a phone
   and at the narrow width, `drawerHead` the phone's drawer's head and `scrim` the scrim; `offer`,
   `offerOn` and `offerNotNow` are the notifications' offer and its two buttons, `loading` the
   loading bar, `profileVersion` the profile menu's commit, and `listening()`

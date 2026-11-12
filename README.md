@@ -10,9 +10,9 @@ manifest and service worker ([`docs/ui.md`](docs/ui.md)): the handle a person ch
 sign-in ([`docs/sign-in.md`](docs/sign-in.md)), the project list, and a project's head with its
 plan, its members, the auto pilot switch, which offers to answer the confirmations it would take as
 it turns on, and Finish, Reopen, Archive and Bring back, a finish followed by the question whether
-to archive ([`docs/projects.md`](docs/projects.md)); under the head, its timeline, where every item
+to archive, which Pilot's Finish and archive leaves out ([`docs/projects.md`](docs/projects.md)); under the head, its timeline, where every item
 that asks one thing is answered in place and a document inline or from its card, its answers sent at
-once, with Undo, urgent banners, the auto pilot mark, a badge per tab and a URL per item, an item
+once, with Undo, an urgent banner, the auto pilot mark, a badge per tab and a URL per item, an item
 Pilot is still working on one line until it is done, read-only under a gold strip with Stop and
 take over, and which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its
 work items, each a

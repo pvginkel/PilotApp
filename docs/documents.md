@@ -13,11 +13,13 @@ Chat tab, and Discuss in an opened document's head, are [`chats.md`](chats.md)'s
 ## Reading a document on its own
 
 - **`GET /api/items/<item_id>/document`** answers the item's timeline entry, every field of it
-  ([`timeline.md`](timeline.md)), and `project_id`. A document done by Done, a person's (cause
+  ([`timeline.md`](timeline.md)), `project_id`, and `text`, the text the read is drawn from as
+  written, front matter, prose and blocks, null for the opening and for a registered document with
+  no text. A document done by Done, a person's (cause
   `marked`) or Pilot's (`settled`), reads as Done fixed it: its `title`, `summary`, `body`,
   `word_count` and `read_minutes` come from its latest `done` Version, and the rest (`done`,
-  `writing`, `edited_at`, `concept`, `attachments`) is the record's as it stands. Only Done cuts
-  that Version, so an open item, and one done any other way (an answer, Read, Reviewed, or Finish's
+  `writing`, `edited_at`, `concept`, `attachments`) is the record's as it stands, and `text` is that
+  Version's. Only Done cuts that Version, so an open item, and one done any other way (an answer, Read, Reviewed, or Finish's
   close, a Done undone before it included), reads as last published. An unknown id, a work item and
   a wait answer `404` "Document of item <id> was not found".
 - **`GET /api/projects/<project_id>/draft`** and **`…/handbook`** answer the project document,
@@ -143,12 +145,13 @@ the head, the tab and the tabs under it take none.
 
 At a document's address (`DocumentOverlay`, read by `useItemDocument`):
 
-- **The head**: the title, and under it the project's name, the step, at most two lines,
-  ellipsized, its whole title its tooltip (D183), the segment bar, *Done* or *Unsent*, and *Edited
+- **The head**: the title, and under it the project's name, the step in the page's face at the
+  head's small size (D198), at most two lines, ellipsized, its whole title its tooltip (D183), the segment bar, *Done* or *Unsent*, and *Edited
   <time>*, a pencil in place of its word at 600px and below
   ([`timeline.md`](timeline.md)); then Pilot's job on the item, the read's `job`, in the form the
-  timeline draws it ([`work.md`](work.md)), and the item's Undo while `done.undo` holds, before
-  Discuss. On a phone a job queued, running, failed or stopped takes a row under the head's top line.
+  timeline draws it ([`work.md`](work.md)), the item's Undo while `done.undo` holds, and a copy
+  button, "Copy the document’s text", which copies the read's `text` and stands where it is not
+  null (`CopyButton`, [`ui.md`](ui.md)), before Discuss. On a phone a job queued, running, failed or stopped takes a row under the head's top line.
 - **The body**: the summary as its lead, the attachments, then Pilot's questions to the writer
   (below), then the text as an inline document draws it, every block answered in place, every
   settled section collapsed and every held block its line, a claimed action reading "Pilot does it"

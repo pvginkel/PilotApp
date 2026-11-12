@@ -287,9 +287,12 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   them, its turn ended under a usage halt or the project's pause, as its served description says;
   refused for an item that is no work item, for Pilot's own work, a job, and for a Session neither
   running, starting, held nor idle with its nudge owed. "Stopped · <title>".
-- **`finish()`**, `POST …/finish`, answers `200` `{effect}`: the project finished by Pilot as
-  Finish finishes it ([`projects.md`](projects.md)), refused but in an open project. Its effect,
-  "Finished · <project>", is written first: the transition then stops the brain's own Session among
+- **`finish(archive=false)`**, `POST …/finish` `{archive}`, answers `200` `{effect}`: the project
+  finished by Pilot as Finish finishes it ([`projects.md`](projects.md)), refused but in an open
+  project. With `archive`, on the operator's Finish and archive, the project is archived in the
+  same act and no archive question is put, the archive the person's whose word the call carries
+  out (there). A body that is not `{archive?}` is a `400`. Its effect, "Finished · <project>", or
+  "Finished and archived · <project>" with `archive`, is written first: the transition then stops the brain's own Session among
   the rest, whose turn the interrupt ends once the call commits.
 - **`ask_writer(block, question)`**, `POST …/writer-questions`, answers `201` `{blocks}`: the
   pre-ruling pass's question to the writer of a registered document about one of its blocks, the

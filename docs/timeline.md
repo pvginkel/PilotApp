@@ -12,11 +12,15 @@ attachments and the side panel are [`documents.md`](documents.md)'s.
 
 ## Reading it
 
-**`GET /api/projects/<id>/timeline`** answers the timeline whole, `{finished_at, items, ready_after,
-unhung_attachments}`, and `404` for an unknown project, built from the rows at every read: no cache
-holds what Pilot is working on, which it carries, so it is never cached whole (D162), and the texts
-it shows are parsed once ([`block-dsl.md`](block-dsl.md)). `finished_at` is the latest `finished`
-transition's time while the project is finished, else null. `ready_after` is the setup's work item,
+**`GET /api/projects/<id>/timeline`** answers the timeline whole, `{finished_at, archive_question,
+items, ready_after, unhung_attachments}`, and `404` for an unknown project, built from the rows at
+every read: no cache holds what Pilot is working on, which it carries, so it is never cached whole
+(D162), and the texts it shows are parsed once ([`block-dsl.md`](block-dsl.md)). `finished_at` is
+the latest `finished` transition's time while the project is finished, else null.
+`archive_question` is the id of the archive question that finish put, the project's last item of
+that kind, and null while the project is not finished or where an `archived` transition stands at
+`finished_at`, a Finish and archive, which puts none ([`projects.md`](projects.md)), so that the
+question of a finish before a Reopen is never taken for the latest's. `ready_after` is the setup's work item,
 its latest Retry's where it was retried, once it is done at its turn's end, while the project stands
 paused by the pause Create wrote (D083, [`projects.md`](projects.md)); else null.
 `unhung_attachments` are a draft's attachments hung on no item, by batch and then file name, in an
@@ -149,6 +153,13 @@ Stop and take over, `POST take-over`, and the Cancel, `POST cancel`, are
 [`round-trip.md`](round-trip.md)'s. An answer, an action's Done and a document's Done are refused
 while the item is Pilot's or the block is held, with "Pilot is working on …" (there).
 
+A close the done item holds from the caller already, sent again as a browser resends a request when
+its page comes back, answers `204` and changes nothing (D184): the same answer and note to the same block,
+an action's Done with the same paste-back, a document's Done, a notice's Read or a review's Reviewed
+the caller's own mark closed, and Archive on an archive question the caller answered Archive
+([`engine.md`](engine.md)). Another answer or note, or the same close by another person, is refused
+as any close of a done item, "the item is done".
+
 An answer or a Done on a one-ask item is the item's done. Neither body takes `to` or `via`, and
 neither takes another key (`400`): the page never defers. The archive question takes `Archive` or
 `Keep` alone, and its Archive archives the project in the same act ([`projects.md`](projects.md));
@@ -194,8 +205,9 @@ read.
 timeline's place ([`chats.md`](chats.md)).
 
 - **Dividers** (`rows.ts`). A day divider falls at each new date in the browser's time zone,
-  "Thursday 22 October"; a step divider where the step changes, the task's title, cut with an
-  ellipsis where it is wider than the feed. An item serving
+  "Thursday 22 October"; a step divider where the step changes, the task's title in the page's face
+  at the divider's size (D198), cut with an ellipsis where it is wider than the feed, 24px of line before
+  it and at least 24px after it. An item serving
   no step starts no divider and ends no step. No divider falls between consecutive work items: a
   run of them stands under its last member's day and step dividers, placed before the run.
 - **At its top, following its end.** A timeline shorter than the page stands at its top (D164),
@@ -223,8 +235,14 @@ timeline's place ([`chats.md`](chats.md)).
   tooltip, a confirmation's auto pilot mark (below), Pilot's job on it where one shows
   ([`work.md`](work.md)), a confirmation's reason line, the Urgent chip and "for
   <full name>" while it is for someone, and at its end Discuss,
-  quoting the item into the chat ([`chats.md`](chats.md)). The kind never wraps, and where the
+  quoting the item into the chat ([`chats.md`](chats.md)). An action's head has before Discuss,
+  touching it, a copy button, "Copy the action’s text" (`CopyButton`, [`ui.md`](ui.md)): its prose
+  as Pilot wrote it, the parts a blank line apart, without its block; an action with no prose, and
+  every other kind, has none. The kind never wraps, and where the
   head's parts are wider than the card the head wraps, so that none leaves it or widens the page.
+  Each dot and the part after it, the time, the auto pilot mark, Pilot's job and the reason line,
+  are one group of the wrap (`Dotted`), so that no row ends on a dot (D197); a part wider than the row
+  wraps, or a job's title is cut, behind its dot.
   At 600px and below the "for" chip stands on a line of its own under the rest of the head, led by
   a person icon, and Discuss stays at the end of the head's first row however the rest wraps
   (D166). The text's prose is GFM
@@ -246,8 +264,8 @@ timeline's place ([`chats.md`](chats.md)).
   <title>" its tooltip, or while `pre_ruling` to the pass's session log, "Open the session log of
   Pilot’s job: <title>"; while `work` is null its words stand still, "Pilot is working on this: it
   comes to you once Pilot is done". At 900px and below it takes a row of its own under the title.
-  The line takes no answer and is not open: it is neither tinted urgent nor a concept and "N open
-  above" leaves it out, while its urgent banner stands. No job's button stands beside what Pilot
+  The line takes no answer and is not open: it is neither tinted urgent nor a concept, "N open
+  above" leaves it out, and no urgent banner stands for it until Pilot's work ends. No job's button stands beside what Pilot
   does: the pass's job shows in the opened document's head ([`documents.md`](documents.md)).
 - **An open wait** (`wait.tsx`) is its head, its title and what it waits on
   ([`waits.md`](waits.md)). Its head's kind is "Wait", with the ticket for a card wait and the
@@ -294,12 +312,24 @@ timeline's place ([`chats.md`](chats.md)).
   three dots, one at a time brightening, end the open item, every kind but the opening. The save
   that makes the turn the text's writer and the turn's end each raise `project_changed`, so the
   dots come and go as they happen.
-- **Urgent.** An open urgent item is tinted, its kind's label in the urgent colour. Each has a
-  banner pinned at the top of the timeline, in their order, "Urgent · <title> · Show", whose click
-  scrolls the item to the middle and flashes it; a finished project's timeline pins none.
-- **"N open above"**, a chip under the banners, counts the open items whose end is scrolled out
-  above them, the other person's included, never a done line or the opening; its click scrolls the
-  nearest of them to the top.
+- **Urgent.** An open urgent item is tinted, its kind's label in the urgent colour. One banner at
+  most is pinned at the top of the timeline (`UrgentBanner`, D185), for the first open urgent item in
+  their order that Pilot is not working on: the triangle, "Urgent", the item's title, "+<n>" after
+  it while n more such items are open, "<n> more urgent item(s)" its tooltip, and "Show", with no
+  dot between them. The title takes the room the other parts leave, cut with an ellipsis, and Show
+  has 16px on its left; at 600px and below "Urgent" is a screen reader's alone, the triangle saying
+  it, as in an item's head. Its click scrolls that item to the middle and flashes it. The banner
+  passes to the next item once its own is answered, and an urgent item Pilot is working on gets
+  none until Pilot's work on it ends, each through the timeline's read; a finished project's
+  timeline pins none.
+- **"N open above"**, a chip under the banner, counts the items to act on whose end is scrolled out
+  above them (D186; `isActionable`, `hooks/use-timeline.ts`; each item's article carries it as
+  `data-actionable`): an open prose item but the opening that Pilot is not working on, a notice
+  urgent or not and an item for whichever member alike, and a work item stopped or failed, until it
+  is retried and not while its nudge is owed. A done line, work that runs, starts, is held or is
+  idle, and a wait never count. Its click scrolls the nearest of them to the top. The chip counts
+  what anyone could act on; the project's badge, its status and the notification count what waits
+  on the person ([`projects.md`](projects.md), [`notifications.md`](notifications.md)).
 
 ## Documents and reviews
 
@@ -314,10 +344,12 @@ answer moves the count, so a document stays as it stands while it is answered.
   block.
 - **A card** is its head over a box: the title, the summary, the count chips, the segment bar, or "N
   min read" (`read_minutes`) for a text with no block, as every review is, the attachments, and
-  Open, which reads Continue while the document is *Unsent*, beside Reviewed on a review; Pilot's
+  Open, its word whether the document is *Unsent* or not (D188), beside Reviewed on a review; Pilot's
   dots follow the box. The chips count the blocks by kind, a confirmation as a decision, an action
   Pilot claimed among the actions while it is open, but for Pilot's answers: "N settled by Pilot",
   and "N deferred" for its deferrals; a count of none has no chip. The auto pilot chip comes last.
+  The count chips set their words a pixel higher in their pills than the shared chip does, the
+  pills as high, as the project head's Draft chip does (`.draft-chip`, `project-head.css`).
   Open goes to the document's address, which opens it, off a phone in its tab
   ([`documents.md`](documents.md)); none of the text shows on the card. Reviewed (`POST reviewed`)
   makes the review a done line.
@@ -357,7 +389,10 @@ proposal, an action's Done), a chevron, and the note as a second muted line, eac
 consecutive lines are one list. A click on it, a segment of its document's bar or the block's
 address opens it, under a head of its own in its heading's place, Pilot's mark, the heading's words
 and a chevron up ("Show only the line"), whose click folds it back to its line (D165); the
-section's address opens it once, so that a section folded back there stays folded. Opened, it
+section's address opens it once, so that a section folded back there stays folded. A press on the
+line or on the head hands the keyboard focus to the head or the line that takes its place
+(`hooks/use-handed-focus.ts`); a segment or an address that opens a section leaves the focus where
+it is. Opened, it
 stays open on that page, the timeline or the opened document, each its own, while the page is
 shown, until it is folded back. A person's answer is not Pilot's, so it opens the section for good, and Undo,
 which never gives Pilot its answer back, leaves it open. A block with no section never collapses.
@@ -382,10 +417,11 @@ draft's routes (`DraftBlock`, `useDraftAnswer`, [`documents.md`](documents.md)).
 becomes its done line once the screens read it back; a document's block stays, answered, until *Send
 answers*.
 
-- **A decision** (`decision.tsx`): its options as full-width rows, each its label, its line and
-  Recommended on the recommendation; a proposal is one row, tinted as recommended, that answers
-  `Agree`; Other comes last, "Something else", and opens a console. While an answer saves, its row
-  fills and the others fade, disabled.
+- **A decision** (`decision.tsx`): its options as full-width rows, each its label, Recommended at
+  the label's end on the recommendation, and its line under the label at every width (D187); a proposal is
+  one row, tinted as recommended, that answers `Agree`; Other comes last, "Something else", and
+  opens a console. While an answer saves, its row fills and the others fade, disabled, Other among
+  them; Other is absent only from a done item's block.
 - **A question** (`question.tsx`): the field, "Your answer", or "Default: …" where the block has a
   default, and Send. Send with the field empty answers the default; with no default it is disabled
   while the field is blank. The answer shows boxed while it saves.
@@ -399,12 +435,17 @@ answers*.
   (`claim.undone`) reads nothing of the claim: its head, drawn in a one-ask item too, says "Pilot’s
   work left it undone", "<work item> ended without doing it: it is yours again" its tooltip, and its
   controls are a person's, whose Done is answered as any person's is.
-- **A confirmation** (`confirmation.tsx`) is a card: its head with the reason line, plain words by
-  the reason's code with the ground as its tooltip (`item-head.tsx`'s `WHY`: "Auto pilot off",
-  "Always asks: cannot be undone", and so on; a code without words of its own shows `because.name`);
-  the title and the proposal beside the check, Yes, and the cross, No, which opens a console for the
-  reason that sends empty too, "Send No"; and Details, which unfolds the prose, and Less. Inside a
-  document a confirmation is a block, its proposal beside the same Yes and No. A standing grant, a
+- **A confirmation** (`confirmation.tsx`, `confirm-answer.tsx`) is drawn as an action is, on a card:
+  its head with the reason line, plain words by the reason's code with the ground as its tooltip
+  (`item-head.tsx`'s `WHY`: "Auto pilot off", "Always asks: cannot be undone", and so on; a code
+  without words of its own shows `because.name`); the title; the proposal as its text, full width;
+  and under it its block, an action's panel holding Yes and No, plain buttons in an action's row, Yes
+  the primary, neither tinted, chosen or not, with no paste-back and no Other. No opens a console for
+  the reason that sends empty too, "Send No". Answered, the block reads "Yes" or "No", the reason
+  under it, as an action's option reads, and while it saves that line stands in the buttons' place;
+  answered by Pilot it reads closed, that line alone, and opens on its chevron to its buttons. Under
+  the block, Details, on the left, unfolds the prose, and Less folds it. Inside a document a
+  confirmation is a block, its proposal inside it over the same Yes and No. A standing grant, a
   permission meant to outlast the project or reach past it, is a reason of its own,
   `standing-grant`, which asks under auto pilot too, so the switch never answers it (D086): "Always
   asks: a lasting permission", its tooltip "The permission would outlast the project or reach past
@@ -428,7 +469,9 @@ the controls stand under that line with nothing chosen. A note stands under its 
 icon. In a document every block has that head, its kind named, once answered Answered, and at its
 end Discuss, quoting the block into the chat; a one-ask item's block has no Discuss of its own, its
 item's head quoting the item. In a done item, as Open shows it, every answered block reads closed, a
-person's answer too, and a decision and an action open to their controls, all disabled.
+person's answer too, and a decision, an action and a confirmation open on their chevron to their
+controls, all disabled, a confirmation to its proposal, Yes and No. A done question has no chevron,
+since opening it would show no more than its answer.
 
 ## Done lines and Undo
 
@@ -481,7 +524,8 @@ an idle project, and an Undo before then withdraws that job ([`work.md`](work.md
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
 opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". Under that divider
-stands the archive question its latest finish put (`archive-question.tsx`;
+stands the archive question its latest finish put, the one the read names, `archive_question`, and
+none after a Finish and archive (`archive-question.tsx`;
 [`projects.md`](projects.md)): open, its head "Question" with the archive box, "Archive the
 project?", and two buttons, Archive, primary, and Keep, both disabled from a click until the answer
 is read back; answered, its done line, the answer under its title. No line offers Undo while the
@@ -490,7 +534,7 @@ project is finished, a line answered before Finish included (D028); Reopen bring
 **Archived.** An archived project takes Bring back alone (D012), so its timeline reads as it was
 left: every close of an open item stands disabled, not hidden, as a work item's Resume does
 ([`work.md`](work.md)): a decision's options, a question's field and Send, an action's
-paste-back, Done, options and Other…, a confirmation's check and cross, a notice's Read, a
+paste-back, Done, options and Other…, a confirmation's Yes and No, a notice's Read, a
 review's Reviewed, a document's *Send answers*, and an opened document's foot's
 ([`documents.md`](documents.md)), each reading the head's `archived` (`useArchived`). No line
 offers Undo while the project is archived; Bring back gives every close and Undo back.
@@ -525,11 +569,11 @@ every width, and otherwise the item alone, going to the block. An address naming
 read that fails, reads "The item did not load". The Timeline
 tab under it is not gone to the item.
 
-**On a narrow window.** At 900px and below an option's line goes under its label, Recommended
-staying at the label's end. At 600px and below a block's head wraps, and Answered shows its icon
+**On a narrow window.** At 600px and below a block's head wraps, and Answered shows its icon
 alone, as *In the chat* does, their words left to a screen reader. An item's head, at 600px and
 below, sets its parts 4px apart, a work item's running time 8px from what precedes it, as off a
-phone, Urgent shows its triangle alone and *Edited* a pencil in place of
+phone, Urgent shows its triangle alone, at the chip's size and centred on the capitals of the
+head's text as the kind's icon is, and *Edited* a pencil in place of
 its word, Pilot's mark and the time staying, in an opened document's head too, the words again left to a
 screen reader; a work item's env chip is its icon ([`work.md`](work.md)). At 390px a document's head
 with Urgent, *Edited* and its count, and a work item's with its env chip, its running time and
@@ -557,7 +601,8 @@ has the testing endpoints they call). A text with one block makes its item that 
 spec's document carries two blocks or more. The `timeline` page object
 (`tests/support/page-objects/timeline-page.ts`) opens a project's timeline (`open`), or an
 address (`openAt`), and reads its items, blocks, segments, cards, settled lines, attachments,
-the item alone's as the timeline's (`item(id, overlay.alone)`), banners and done lines, their
+the item alone's as the timeline's (`item(id, overlay.alone)`), the urgent banner (`banners`, one or
+none, and `bannerMore`) and done lines, their
 title (`lineTitle`, a link), Open, Undo and Discuss, shown in a desktop spec only after
 `item.line.hover()` or the focus in the line, and *In the chat*, Pilot's job on an item
 (`item(id).job`: `root`, `pulse`, `retry`; on a phone a line's menu, `lineMenu`, `lineMenuJob` and
@@ -571,5 +616,10 @@ marks and chip
 (`autopilotMark`, `autopilotChip`, `tests/timeline/autopilot-mark.spec.ts`), the archive question's
 buttons (`archiveQuestion`, `archive-question.spec.ts`), the ready line (`ready`) and a wait's
 button, what it waits on, its firings, its note and its phone menu (`item(id).wait`); `slowNetwork`
-(`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. A spec
+(`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. Whether an
+item counts for "N open above" is its article's `data-actionable`; `dotsEndingARow(head)` finds the
+dots a wrapped head ends a row on, `lift` (`tests/support/chips.ts`) a chip's words against its
+pill's middle, `allowClipboard(context)` and `copied(page)` (`tests/support/clipboard.ts`) what a
+copy button copied, and `headingOf` and `scaleOf` (`tests/support/prose.ts`) a prose heading's size
+and space against the type scale (`copy.spec.ts`, `prose.spec.ts`). A spec
 asserting a live update waits for the stream first (`deploymentSse.ensureConnected()`).

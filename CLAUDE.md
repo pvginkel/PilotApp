@@ -104,8 +104,9 @@ backend's OpenAPI cache into the `pilot-ui` build context, where `frontend/opena
 symlink to `backend/openapi-cache`, and which writes the commit to `frontend/git-rev` at checkout,
 where the template wrote it for the image alone, so that the suite's tree, which holds no `.git`,
 has it too; the page head of
-`frontend/index.html`, which links the PWA's `/manifest.json`, sets `theme-color`, and gives the
-viewport `interactive-widget=resizes-content`, so that a phone's keyboard shrinks the app rather
+`frontend/index.html`, which names the page "Pilot — AI powered work orchestration", links the PWA's
+`/manifest.json`, sets three `theme-color`s by `media`, the bottom tabs' tint in each scheme on a
+phone and the top bar's blue off one, and gives the viewport `interactive-widget=resizes-content`, so that a phone's keyboard shrinks the app rather
 than panning it, which no app-owned file can; the cache rule of `frontend/nginx.conf`, which keeps the year-long immutable
 cache to the build's hashed `/assets/` and has the root's files — the icons, the logo, the manifest,
 the worker — revalidated on every load, so that a changed icon shows under its name; the `/api/`

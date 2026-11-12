@@ -371,10 +371,16 @@ closed.
 - **Pilot's reply** (`PilotReply`, `pilot-reply.tsx`) is a reply's body as the session log draws
   it, bare in the column, the cue under it while its turn runs; an ended turn closes on Pilot's
   avatar and its time, " · Stopped" after an interrupted one or one stopped before it was sent, as
-  a Stop while its chat came up leaves it, and " · Failed" after a failed one. The cue's "Thinking ·
+  a Stop while its chat came up leaves it, and " · Failed" after a failed one. After the time stands
+  a copy button, "Copy the reply" (`CopyButton`, [`ui.md`](ui.md)): what Pilot said in the turn, its
+  texts as written, a blank line apart; a running reply has none, nor one that said nothing, and
+  the row keeps its height. The cue's "Thinking ·
   N s" counts from the press of Send, by this page's clock where this page sent the message, a new
   project's first aside, else from the message's record, else from the turn's first record.
-- **It sticks to its end** while it grows (`useStickyBottom`): only the reader's own scrolling up
+- **It sticks to its end** while it grows (`useStickyBottom`), and while its view gets shorter, as
+  under a phone's keyboard or in a window made shorter, so that it is at its end still when the view
+  grows back; a reader who scrolled away keeps their place, the top of their view where it stood.
+  Only the reader's own scrolling up
   lets go, and their message sent from the composer, or a Discuss, takes it back to the end. The
   reader's own open or close of a step list or a card never moves the top of what they read: at
   the end, the chat stops following its end once that is out of reach, and follows it again once
@@ -390,13 +396,27 @@ band, over a tint, the glass the composer's box, in a draft the column's width a
 `.composer .glass` in `panel.css`). The transcript is padded at its foot by the composer's height
 as measured, `--composer-h`, which a scroll into view keeps clear of too. It holds the growing
 text field (`TextField`, [`ui.md`](ui.md)) to five lines, Enter breaking the line and Ctrl+Enter, Cmd+Enter on a Mac,
-sending, and Send beside it, disabled while the field is empty; the field takes no typing while the
-message is on its way. A message with no chat open starts one, which the tab shows where it opens.
+sending, and Send beside it, disabled while the field is empty and while a message is on its way.
+A message with no chat open starts one, which the tab shows where it opens.
+
+**A sent message shows at once** (D200, `hooks/use-stand-ins.ts`). Send takes the words out of the field,
+and the quote off it, and the message stands at the chat's end as the person's own, a stand-in
+(`data-stand-in`, no `data-seq`): in the open chat it goes to, after Pilot's last reply, or, where it
+opens a chat, after the last one under its day's divider, the empty state gone. The chat goes to
+its end at the press. The message's record takes the stand-in's place where the chat's stream
+brings it, ahead of the server's answer to the send or after it, with no fade and never beside it:
+the earliest message of the person's with its words that the stream did not hold at the Send.
+Meanwhile the field takes the next words, and Send waits until the server has answered. A send the
+server refuses takes the stand-in away and puts the words back in the field, what was typed since
+under them on a new line, the quote back over it, the refusal the query client's toast in the API's
+words. Stand-ins are kept in the page by the project, and only the project's latest chat draws
+them.
 While Pilot answers in the latest chat (`answering`), Stop stands in Send's place, in every member's
 composer whoever sent the message, and the field stays open for the next message. Neither button
 takes the focus from the field, and Send and Stop put it back there for a keyboard press. Its words
-are kept in the browser until sent, by the project (`chat/<project id>`, [`ui.md`](ui.md)); a
-refused send keeps them, the refusal the query client's toast in the API's words. Each answer writes
+are kept in the browser, by the project (`chat/<project id>`, [`ui.md`](ui.md)), until the server
+takes the message they were sent in, before what is typed after them, so that a reload while a
+send is on its way finds them in the field (`useUnsentText`'s `leave()`). Each answer writes
 whether Pilot answers into the list as read. In an archived project the field and Send are disabled
 under "The project is archived: bring it back to message Pilot."
 
@@ -415,9 +435,9 @@ in the project's composer (`hooks/use-discuss.ts`) and shows the panel's Chat ta
 to the definition chat, the first tab of the tab line, showing it where a document's tab shows. On a phone it shows the Chat tab, a draft's Chat, every view taken off first. The quote
 stands over the field as a chip, with its remove, the field takes the focus once nothing covers it,
 and the transcript goes to its end. The message goes as the quote's tag, a space and the words, and
-the chip goes once the server took it. The quote is kept in the browser beside the words, by the
-project (`chat/<project id>/quote` in `pilot.unsent`, [`ui.md`](ui.md)), until sent or dropped, so
-that a reload keeps both (D171).
+the chip leaves the field at the Send. The quote is kept in the browser beside the words, by the
+project (`chat/<project id>/quote` in `pilot.unsent`, [`ui.md`](ui.md)), until the server took the
+message or it is dropped, so that a reload keeps both (D171).
 
 **The unread dot** (`useChatDot`) stands on the Chat tab, on a phone the
 Chat tab at the bottom, while the list's `unread` says Pilot replied after the person last saw the
@@ -484,7 +504,9 @@ value, handle, {note, toolUseId})` records a person's answer as the chat's brain
 of the open chat is in flight, through the record's testing route ([`projects.md`](projects.md)),
 the place *In the chat* goes to, a draft's ask by `project.md/<local id>`. The `chat` page object
 (`tests/support/page-objects/chat-page.ts`) reads the tab, its dot, the transcript and the composer,
-and `acted('send' | 'stop' | 'read')` waits for that write's success; the `definitionChat` fixture
+the stand-ins (`standIns`, `standInTexts`) and, with `watchMessages()`, the messages and the
+stand-ins among them at each change of the page, and `acted('send' | 'stop' | 'read')` waits for
+that write's success; the `definitionChat` fixture
 is the same page object on a draft's chat in the timeline's place, which reads Create project's box
 too (`createReady`, `createButton`, `createLine`), and whose `create()` presses it and waits for its
 success.

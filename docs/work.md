@@ -105,7 +105,7 @@ follows from ([below](#pilots-own-work)):
   an environment, but for Pilot's own work: the environment's name in the mono face, going nowhere,
   its full name the tooltip (D168); at 600px and below its server icon alone, a button named after
   the environment, whose tap opens the shared `Popover` under it with the full name, closed by a tap
-  outside it, Esc or the icon. Then, while its run is under way, `starting`, `running`, or `held`
+  outside it, which does nothing else ([`ui.md`](ui.md)), Esc or the icon. Then, while its run is under way, `starting`, `running`, or `held`
   with nothing holding it any more, a pulse, from its start, while it says "Preparing
   <environment>" or "Creating the session": on the timeline the work item's one motion (D167).
   Beside it, once `running` with a `started_at`, the running time, the figure alone, kept on one
@@ -127,7 +127,7 @@ follows from ([below](#pilots-own-work)):
   ("Preparing <environment>", "Starting <environment>", "Creating the session", the trailing "…" left
   out) or its environment restarts; the call it runs alone, in the phase's place, worded as the chat
   words a running call ([`chats.md`](chats.md)), "Reading `…/Example/README.md`", a command's
-  description, "Asking KubeCoder start session · <environment>", or "Working" while it names none;
+  description, "Asking kubecoder-fleet start session · <environment>", or "Working" while it names none;
   "Thinking" and "Writing" alone; "Waiting for the <type> agent" and, after a " · ", the
   sub-agent's description, which at 600px and below stands on a line of its own under the cue, the
   " · " dropped, indented to its text, so that each line is cut at most once and a phase as short as
@@ -139,15 +139,16 @@ follows from ([below](#pilots-own-work)):
   usage halt's hard stop, "Stopped at the week's limit · <time>", "Stopped at the five-hour limit ·
   <time>", or "Stopped at the usage limit · <time>" once neither halt holds, and for a job the
   store's update stopped, "Stopped for Pilot's update · <time>"; "Failed · <error>";
-  and nothing once `idle` or `ended`. A retried setup's line has a second under it, "Retried
-  as a new job below · <time>".
+  and nothing once `idle` or `ended`.
 - **The row under the line**: the progress button once its run has published steps
   ([below](#its-progress)), then Resume while `stopped` or `failed`, disabled while the project is
   archived, as its head's switch is (D012), the API refusing it until Bring back. The setup has no
   Stop or Resume: `stopped` or `failed`, not retried and owed no nudge, it offers Retry there,
   disabled while the project is archived. A tile with none of them has no row. Stop asks
   first in the row's place, the progress button going with the row, "Stop the session? Its turn
-  ends where it is; Resume sends it on.", with Stop it and Cancel, which takes the focus; Stop's
+  ends where it is; Resume sends it on." on a running item, and "Stop the session? Resume sends it
+  on." on one that starts, is held, or is idle with its nudge owed, whose turn is not running
+  (`stopQuestion()`), with Stop it and Cancel, which takes the focus; Stop's
   icon pressed again puts the focus back on Cancel, and Esc or Cancel puts it back on Stop's icon.
   The question goes as the item is offered Stop no more, and the row comes back once it goes.
 
@@ -161,7 +162,16 @@ Resume lands and swaps the two, the keyboard focus that was on the button that w
 other's resting button, Resume after a Stop and Stop's icon after a Resume (`useHandoff`,
 `work.tsx`); a swap another browser's act made, or one after the focus moved elsewhere meanwhile,
 moves no focus. Retry (`useRetry`) calls its route the same way, and once this browser's Retry
-lands, the focus that was on it goes to Session log's icon.
+lands, the focus that was on it goes to the title of the line that takes the tile's place (below).
+
+**A retried setup** stays open on the record, not done (D078), and reads as its line (D190)
+(`DoneLine`, `item.tsx`), quiet as a done work item's: an orange triangle in its kind's icon's place
+(`--warning-text`), "Retried as a new job" its tooltip; its title, the link to its session log;
+Open and Discuss under the mouse, and no Undo; and when it was retried as its time (`retriedOf()`,
+`hooks/use-timeline.ts`). On a phone a tap on it opens its log, as on a done work line. Its
+article reads `data-state` `retried`. Its session log's tail keeps how it stopped or failed and
+adds under it "Retried as a new job · <time>", the words a link that opens the retry's log in this
+one's place.
 
 ## Its progress
 
@@ -188,13 +198,17 @@ line what holds the nudge or "Waiting for its nudge" (D122); never on the done l
 active step's label, ", …" after it while more are active, or with none active "Not started", "N of
 M done" or "All steps done"; its tooltip is "N of M steps done", then " · in progress: a; b" while
 any step is active. It stands first in the row, so an open popover stays open across a Stop or a
-Resume. On a phone the label stays beside the donut.
+Resume. On a phone the label stays beside the donut. The donut and the label's capitals stand at
+the button's middle, as the head's step button's do, a top margin on its donut under
+`.progress-anchor` setting the button's baseline.
 
 **Its popover**, "Progress", lists the steps in order, a done one ticked and every active one
-highlighted, under the heading "Progress · N of M done", with no notes. It follows the list live,
-opens from the button's left edge, within the card's margins on a phone, and opens above the button
-where it does not fit below in the timeline and has more room there. A press outside it or Esc
-closes it.
+highlighted, under the heading "Progress · N of M done", with no notes. It opens with its first
+active step, or with none its first not started, at the middle of the list's box, as the plan
+popover does ([`ui.md`](ui.md)). It follows the list live, opens from the button's left edge,
+within the card's margins on a phone, and opens above the button where it does not fit below in
+the timeline and has more room there. A press outside it, which does nothing else, or Esc closes
+it.
 
 ## Pilot's own work
 
@@ -350,7 +364,7 @@ retry's brief consumes the item only if the job it retries did not. What the fai
 in the store and the record, and the new job's brief does not say so: a retried setup's reads as
 Create's, `The plan: plan.json, empty.` included. The one retried is marked retried by the new
 job before that one starts: it keeps its state, its open item and its session log, offers Retry no
-more, and leaves the badge. A person has to press it, but at the store's update's lift, which
+more, and leaves the badge; a retried setup reads as its line ([above](#on-the-timeline)). A person has to press it, but at the store's update's lift, which
 retries each job the update stopped once ([`store-update.md`](store-update.md)). A job
 withdrawn by an Undo, done, never ran, and takes no Retry; nor does a job whose turn died at the
 quota wall while its nudge is owed, which is not at its end until the run its nudge continues ends
@@ -452,8 +466,9 @@ handing the focus to the other (`Clamp`, `components/shared/clamp.tsx`): a work
   shows under "The turn ended · <time>" what its line shows, what holds the nudge or "Waiting for
   its nudge" (`nudgeCue()`).
 - **It follows the item's `work`** as the timeline holds it, live, so that a Resume carries the log
-  on, and it sticks to its end while it grows: only the reader's own scrolling up, by the wheel, a
-  key or a drag, lets go, and scrolling back down to the end picks it up again (`useStickyBottom`).
+  on, and it sticks to its end while it grows and while its view gets shorter: only the reader's
+  own scrolling up, by the wheel, a key or a drag, lets go, and scrolling back down to the end
+  picks it up again (`useStickyBottom`, as the chat's, [`chats.md`](chats.md)).
 
 The records come through `useChatStream` on `sessionTransport`
 (`frontend/src/lib/chat/transport.ts`, `hooks/use-session-transport.ts`): it subscribes a view of
@@ -485,16 +500,26 @@ colour, its step line's in the chat and the session log and the cue's in a work 
 failed one red throughout; what it names as code, a command without a description, a path, a glob
 or an environment's name, is set in the mono face, and a search's pattern keeps its quotes. A
 call's line opens on its verb, so that a running one reads as a status alone: "Reading
-`…/chat/tools.ts`", "Asking KubeCoder start session · <environment>", "Using Skill", "Starting
-the Explore agent", and once done "Read …", "Asked …", "Used …". A command's description, the
+`…/chat/tools.ts`", "Asking kubecoder-fleet start session · <environment>", "Using Skill",
+"Starting the Explore agent", and once done "Read …", "Asked …", "Used …". A call on an MCP server
+reads "Asking <server> <tool's words>", the server named as configured and none renamed (D204); Pilot's
+own server, `pilot`, keeps verbs of its own ("Adding an item", "Recording an answer"), a worker's
+`set_progress` reading "Publishing its steps" and `set_progress_step` "Moving a step", and a tool of
+it with no verb of its own "Using <tool>". A command's description, the
 model's own sentence, stands alone, without a verb, and so does an agent's, its type after it,
 "Find the chat's cue · Explore agent", its card's head in the chat and the session log too. A run
-of calls is one line in its usual colour, "Ran 3 commands, used a tool, asked KubeCoder 4 times · 8
-steps", its failures "· N failed" after its steps, the one red in it. Each text a run's line
-shows, its words and its count of steps, stands at least 200 ms: once the text differs from the
-one shown, the line waits 200 ms and shows the text as it then is, the wait never starting over,
-so that a call that came and went within it never shows (`useHeld`, `hooks/use-held.ts`); its
-spinner and its failures change at once.
+of calls is one line in its usual colour, "Ran 3 commands, used a tool, used gitblit 4 times · 8
+steps", an MCP server's calls counted under its own name, "used youtrack once", Pilot's as "changed
+the record N times" and a worker's progress calls as "updated its steps N times"; its failures "· N
+failed" after its steps, the one red in it. Each text a run's line shows, its words and its count
+of steps, stands at least 200 ms: once the text differs from the one shown, the line waits 200 ms
+and shows the text as it then is, the wait never starting over, so that a call that came and went
+within it never shows (`useHeld`, `hooks/use-held.ts`); its failures change at once. A running
+call's spinner shows once that call has run a second (D203), counted in the page from when it first shows
+the call running, on the call's own line, its run's line and an agent's card alike: a quick call
+shows its icon throughout, the next call waits a second of its own, and the spinner goes at once.
+A line stands 24px high, code in its words or not, its code's mono span set within the line's
+height; its icon, as the working cue's, stands on the middle of its words' capitals.
 
 **The chat's view code** is the chat mockup's, shared by the session log and the Chat tab
 ([`chats.md`](chats.md)): `frontend/src/lib/chat/` (the records on the API's record types,
