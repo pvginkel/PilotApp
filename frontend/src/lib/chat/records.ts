@@ -84,7 +84,8 @@ export type ChatRecord = SendRecord | ClaudeRecord | ResultRecord | ServerRecord
 /**
  * What a Session's stream gives the client: its records from an offset on, then each new one as
  * it is written; between them, live, the partial lines the server forwards and never stores: a
- * main-thread block's `content_block_start` and the `text_delta`s after it, verbatim.
+ * main-thread block's `content_block_start`, verbatim, and its text after it in `text_delta`
+ * lines, one of which may hold the text of several of `claude`'s deltas, joined.
  */
 export type ChatFrame =
   | { type: 'record'; record: ChatRecord }

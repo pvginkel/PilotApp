@@ -2,7 +2,7 @@
  * A reply's steps in order: text as Markdown, and between the texts what Pilot did — tool calls,
  * a sub-agent under its call (decisions 3 to 5). Thinking is left out once it has ended (ruling
  * 2); the cue shows it while it runs. A run of consecutive calls is one line that opens to them,
- * its spinner and its running call's words while one runs (ruling 3). A sub-agent is a card,
+ * its running call's words while one runs, and its spinner once that call has run a second (ruling 3). A sub-agent is a card,
  * collapsed until opened, its progress under it while it runs (ruling 4). A call that changed
  * something is its effects, in its own place, never inside a run (ruling 5); an effect whose call
  * no record shows stands in its record's place.
@@ -10,7 +10,7 @@
 
 import { useState } from 'react';
 import { Bot, Check, CircleAlert, Layers, Square } from 'lucide-react';
-import { summarizeRun, summarizeTool, type ToolKind, type Words } from '@/lib/chat/tools';
+import { summarizeRun, summarizeTool, type Words } from '@/lib/chat/tools';
 import { shownSteps, type AgentView, type Step, type ToolCallView } from '@/lib/chat/view';
 import { Markdown } from '@/components/shared/markdown';
 import { useHeld } from '@/hooks/use-held';
@@ -48,9 +48,7 @@ function blocksOf(steps: Step[], grouped: boolean): Block[] {
 }
 
 function runSummary(steps: Step[]): string {
-  const kinds: ToolKind[] = [];
-  for (const s of steps) if (s.kind === 'tool') kinds.push(summarizeTool(s.call.name, s.call.input).kind);
-  return summarizeRun(kinds);
+  return summarizeRun(steps.flatMap((s) => (s.kind === 'tool' ? [summarizeTool(s.call.name, s.call.input)] : [])));
 }
 
 function runningCall(steps: Step[]): ToolCallView | null {
@@ -63,8 +61,8 @@ function runningCall(steps: Step[]): ToolCallView | null {
 
 /**
  * A run's line: its running call's words while one runs, else what the run did, and its count of
- * steps, each text held for a moment; the spinner, and the count of failed calls, the one red
- * in the line, change at once.
+ * steps, each text held for a moment; the count of failed calls, the one red in the line, changes
+ * at once, and the spinner goes at once.
  */
 function RunLine({ steps, liveFrom }: { steps: Step[]; liveFrom: number | null }) {
   const [open, setOpen] = useState(false);
@@ -74,7 +72,7 @@ function RunLine({ steps, liveFrom }: { steps: Step[]; liveFrom: number | null }
   const said = useHeld({ words, count: steps.length }, `${steps.length} ${JSON.stringify(words)}`);
   return (
     <div data-testid="chat.run">
-      <StepLine icon={<Layers className="size-3.5" aria-hidden />} running={!!running} open={open} onToggle={() => setOpen(!open)}>
+      <StepLine icon={<Layers className="size-3.5" aria-hidden />} running={running?.id} open={open} onToggle={() => setOpen(!open)}>
         <StepWords words={said.words} />
         <span className="opacity-70"> · {said.count} steps</span>
         {failed > 0 && (
@@ -110,7 +108,7 @@ function AgentCard({ call, agent, liveFrom }: { call: ToolCallView; agent: Agent
     <div className="my-1 rounded-md border bg-muted/40" data-tool-use={call.id} data-testid="chat.agent">
       <StepLine
         icon={<Bot className="size-3.5" aria-hidden />}
-        running={running}
+        running={running ? call.id : null}
         open={open}
         onToggle={() => setOpen(!open)}
         className="px-2.5 py-1"

@@ -1,12 +1,12 @@
 /**
- * A tool call's line (decision 3): its icon, what it did in the line's one colour, a spinner
- * while it runs; it opens to its input and its result. A call that changed the record — a `pilot-store` call, or a worker's
- * `register_document` or `attach_file` — shows as its effect where it ran, in its step's place
- * (decision 5, ruled 2026-10-18).
+ * A tool call's line (decision 3): its icon, what it did in the line's one colour, a spinner once
+ * it has run a second; it opens to its input and its result. A call that changed the record — one
+ * of the brain's on Pilot's server, or a worker's `register_document` or `attach_file` — shows as
+ * its effect where it ran, in its step's place (decision 5, ruled 2026-10-18).
  */
 
 import { useState } from 'react';
-import { Bot, Check, CircleAlert, Database, FileText, Globe, ListTodo, Pencil, Search, Server, SquareTerminal, Wrench } from 'lucide-react';
+import { Bot, Check, CircleAlert, Database, FileText, Globe, ListChecks, ListTodo, Pencil, Search, Server, SquareTerminal, Wrench } from 'lucide-react';
 import { summarizeTool, type ToolKind } from '@/lib/chat/tools';
 import type { Effect } from '@/lib/chat/records';
 import type { ToolCallView } from '@/lib/chat/view';
@@ -22,7 +22,8 @@ const ICONS: Record<ToolKind, typeof FileText> = {
   agent: Bot,
   web: Globe,
   store: Database,
-  fleet: Server,
+  progress: ListChecks,
+  mcp: Server,
   todo: ListTodo,
   other: Wrench,
 };
@@ -94,7 +95,7 @@ export function ToolCallLine({ call }: { call: ToolCallView }) {
       <StepLine
         icon={failed ? <CircleAlert className="size-3.5" aria-hidden /> : <ToolIcon kind={sum.kind} />}
         tone={failed ? 'error' : 'muted'}
-        running={running}
+        running={running ? call.id : null}
         open={open}
         onToggle={() => setOpen(!open)}
       >

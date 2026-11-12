@@ -18,6 +18,7 @@
 import type { Locator, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { heightOf, iconOf } from '../support/lines';
 import type { People } from '../support/people';
 import { slugOf, type Projects } from '../support/projects';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
@@ -204,15 +205,32 @@ test.describe('An open work item', () => {
     await controller.play(environment, 'claude-1', [toolUse('toolu_grep', 'Grep', { pattern: 'badge' })]);
     await expect(item.line).toHaveText('Searching for “badge”');
 
-    // An MCP call asks its server, the tool named while its input streams in, its environment once it has come.
-    await controller.play(environment, 'claude-1', [toolResult('toolu_grep', 'Found.'), toolStart('toolu_fleet', 'mcp__kubecoder__get_environment')]);
-    await expect(item.line).toHaveText('Asking KubeCoder get environment');
-    await controller.play(environment, 'claude-1', [toolUse('toolu_fleet', 'mcp__kubecoder__get_environment', { name: 'example-1' })]);
-    await expect(item.line).toHaveText('Asking KubeCoder get environment · example-1');
+    // An MCP call asks its server, named as configured, the tool named while its input streams in, its environment once it has come.
+    await controller.play(environment, 'claude-1', [toolResult('toolu_grep', 'Found.'), toolStart('toolu_fleet', 'mcp__kubecoder-fleet__get_environment')]);
+    await expect(item.line).toHaveText('Asking kubecoder-fleet get environment');
+    await controller.play(environment, 'claude-1', [toolUse('toolu_fleet', 'mcp__kubecoder-fleet__get_environment', { name: 'example-1' })]);
+    await expect(item.line).toHaveText('Asking kubecoder-fleet get environment · example-1');
     await expect(item.cue.locator('.mono')).toHaveText('example-1');
+    const withCode = { height: await heightOf(item.cue), icon: await iconOf(item.cue) };
+    // The run's own progress calls, on Pilot's server, have words of their own.
+    await controller.play(environment, 'claude-1', [toolResult('toolu_fleet', 'Running.'), toolStart('toolu_steps', 'mcp__pilot__set_progress')]);
+    await expect(item.line).toHaveText('Publishing its steps');
+    await controller.play(environment, 'claude-1', [
+      toolUse('toolu_steps', 'mcp__pilot__set_progress', { steps: [] }),
+      toolResult('toolu_steps', '{"steps": []}'),
+      toolUse('toolu_step', 'mcp__pilot__set_progress_step', { code: 'a', state: 'done' }),
+    ]);
+    await expect(item.line).toHaveText('Moving a step');
     // A tool it has no words for is used by its name.
-    await controller.play(environment, 'claude-1', [toolResult('toolu_fleet', 'Running.'), toolUse('toolu_skill', 'Skill', { skill: 'survey' })]);
+    await controller.play(environment, 'claude-1', [toolResult('toolu_step', 'No such step.'), toolUse('toolu_skill', 'Skill', { skill: 'survey' })]);
     await expect(item.line).toHaveText('Using Skill');
+    // The line is as high without code in its words as with, its icon on the middle of their capitals in both.
+    await expect(item.cue.locator('.mono')).toHaveCount(0);
+    expect(await heightOf(item.cue)).toBe(withCode.height);
+    const plain = await iconOf(item.cue);
+    expect(Math.abs(plain.off)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(withCode.icon.off)).toBeLessThanOrEqual(0.5);
+    expect(withCode.icon.inLine).toBe(plain.inLine);
     // An agent is started, its type unknown while its input streams in.
     await controller.play(environment, 'claude-1', [toolResult('toolu_skill', 'Surveyed.'), toolStart('toolu_agent', 'Task')]);
     await expect(item.line).toHaveText('Starting an agent');

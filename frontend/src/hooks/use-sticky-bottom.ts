@@ -10,18 +10,22 @@
  * open or close of something in it (use-own-growth.ts) is not pinned: the view stays where it
  * stands, so what they opened grows downward, and it goes on pinning only if the end is still in
  * reach; their close that puts the view at the end again, of an open that let go of it, pins
- * again. A change of the wrapper's width is a reflow, never the reader's own. Only the reader's
- * own input lets go of the bottom: the wheel or a key moving up, a scroll while a finger or
- * pointer is down (a drag on the scrollbar, a selection), or an open that takes the end out of
- * reach. A scroll event alone is not taken as the reader's: when the content shrinks — a table's
- * columns rebalancing as a reply streams — the browser clamps the view, and the event for that
- * comes a frame later, often after the next delta has grown the content again, when it looks just
- * like a scroll up. DesignAssistant's hook let go there. A scroll down into the bottom picks the
- * pinning up again.
+ * again. A change of the wrapper's width is a reflow, never the reader's own. A second observer
+ * watches the container's own height: a pinned view that gets shorter — a phone's keyboard opening
+ * under `interactive-widget=resizes-content`, a window made shorter — keeps its scroll offset, which
+ * leaves its end below the view, so it is pinned again; a view not pinned keeps its place.
+ *
+ * Only the reader's own input lets go of the bottom: the wheel or a key moving up, a scroll while
+ * a finger or pointer is down (a drag on the scrollbar, a selection), or an open that takes the
+ * end out of reach. A scroll event alone is not taken as the reader's: when the content shrinks —
+ * a table's columns rebalancing as a reply streams — the browser clamps the view, and the event
+ * for that comes a frame later, often after the next delta has grown the content again, when it
+ * looks just like a scroll up. DesignAssistant's hook let go there. A scroll down into the bottom
+ * picks the pinning up again.
  *
  * It answers whether it pins now, `stuck`. In test mode each pin is the `ui_state`
- * `<scope>.scroll`, `{scrollTop, reason}`, the first `initial`, and each change of pinning
- * `<scope>.sticky`, `{stuck}`.
+ * `<scope>.scroll`, `{scrollTop, reason}`, the first `initial` and a shorter view's `shrink`, and
+ * each change of pinning `<scope>.sticky`, `{stuck}`.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -62,7 +66,7 @@ export function useStickyBottom(
   );
 
   const pinToBottom = useCallback(
-    (reason: 'initial' | 'resize' | 'stick') => {
+    (reason: 'initial' | 'resize' | 'shrink' | 'stick') => {
       const container = containerRef.current;
       if (!container) return;
       container.scrollTop = container.scrollHeight;
@@ -142,6 +146,13 @@ export function useStickyBottom(
       pinnedRef.current = true;
     });
     observer.observe(wrapper, { box: 'border-box' });
+    let height = container.clientHeight;
+    const view = new ResizeObserver(() => {
+      const shorter = container.clientHeight < height;
+      height = container.clientHeight;
+      if (shorter && stickToBottomRef.current) pinToBottom('shrink');
+    });
+    view.observe(container);
 
     return () => {
       container.removeEventListener('scroll', onScroll);
@@ -154,6 +165,7 @@ export function useStickyBottom(
       window.removeEventListener('touchcancel', release);
       window.removeEventListener('keydown', onKey);
       observer.disconnect();
+      view.disconnect();
     };
   }, [containerRef, wrapperRef, pinToBottom, setStuck, own]);
 

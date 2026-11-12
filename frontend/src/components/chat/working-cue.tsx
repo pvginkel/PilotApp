@@ -74,7 +74,7 @@ export function WorkingCue({ activity, words = null, animate = true }: WorkingCu
   const Icon = ICON[activity.kind];
   return (
     <div className="flex min-w-0 items-center gap-2 py-0.5 text-sm leading-5 text-muted-foreground" data-working data-testid="chat.cue">
-      <span className="flex size-4 flex-none translate-y-px items-center justify-center">
+      <span className="flex size-4 flex-none items-center justify-center">
         <Icon className="size-3.5" aria-hidden />
       </span>
       {words === null ? (

@@ -3,17 +3,21 @@
  * tool call's line in one colour, a failed one red throughout, with its code — a command without a
  * description, a path, a glob — in the mono face, a search's pattern in its quotes, a command's
  * description standing alone, without the verb, and an agent's description before its type (C4);
- * a call that is no status on its own by the verb it is given, running and done, an MCP call asking
- * its server, a tool with no words of its own used by its name, an agent with no description
- * started (W2).
- * A run of calls is one line whose failures are a count, the one red in it (C3); each text it
- * shows stands for a moment, one that came and went within that moment never shown, and it moves
- * on however fast its calls come, its spinner and its count of failures at once (C1).
+ * a call that is no status on its own by the verb it is given, running and done, a call on Pilot's
+ * own server by its verb, a worker's progress calls among them, any other MCP call asking its
+ * server, named as configured, a tool with no words of its own used by its name, an agent with no
+ * description started (W2). A line's icon stands on the middle of its words' capitals, the cue's
+ * under the step lines', and a line is as high with code in its words as without.
+ * A run of calls is one line whose failures are a count, the one red in it (C3), an MCP server's
+ * calls counted under its name; each text it shows stands for a moment, one that came and went
+ * within that moment never shown, and it moves on however fast its calls come, its count of
+ * failures at once (C1). A call's spinner shows once the call has run a second, and goes at once.
  */
 
 import type { Locator, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { heightOf, iconOf } from '../support/lines';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
 const CONVERSATION = '4f1c8a2e-7b3d-4e9f-a6c5-1d8e2b7f3a90';
@@ -31,6 +35,9 @@ const toolResult = (id: string, content: string, isError = false) =>
 
 /** How long a run's line holds a text it shows (`useHeld`'s `HOLD_MS`). */
 const HOLD = 200;
+
+/** How long a call runs before its line shows a spinner (`StepLine`'s `SPINNER_AFTER_MS`). */
+const SPINNER_AFTER = 1000;
 
 const colour = (part: Locator) => part.evaluate((element) => getComputedStyle(element).color);
 
@@ -103,7 +110,7 @@ test.describe('A reply’s step lines', () => {
     expect(await colour(failed)).toBe(red);
   });
 
-  test('words a call that is no status on its own by the verb it is given, running and done: an MCP call asks its server, a tool with no words of its own is used by its name, an agent with no description is started', async ({
+  test('words a call that is no status on its own by the verb it is given, running and done: a call on Pilot’s own server by its verb, a worker’s progress calls among them, any other MCP call asks its server, named as configured, a tool with no words of its own is used by its name, an agent with no description is started', async ({
     people,
     projects,
     controller,
@@ -117,8 +124,18 @@ test.describe('A reply’s step lines', () => {
     const { session } = await chats.start(project, 'What runs?');
     const tools = chat.root.getByTestId('chat.tool');
     const calls: [string, string, object, string, string][] = [
-      ['fleet', 'mcp__kubecoder__start_session', { name: 'example-1' }, 'Asking KubeCoder start session · example-1', 'Asked KubeCoder start session · example-1'],
-      ['store', 'mcp__pilot-store__ask_writer', { item: 'invented' }, 'Using ask_writer', 'Used ask_writer'],
+      [
+        'fleet',
+        'mcp__kubecoder-fleet__start_session',
+        { name: 'example-1' },
+        'Asking kubecoder-fleet start session · example-1',
+        'Asked kubecoder-fleet start session · example-1',
+      ],
+      ['tracker', 'mcp__youtrack__get_issue', { id: 'EX-1' }, 'Asking youtrack get issue', 'Asked youtrack get issue'],
+      ['add', 'mcp__pilot__add_item', { kind: 'notice' }, 'Adding an item', 'Added an item'],
+      ['writer', 'mcp__pilot__ask_writer', { item: 'invented' }, 'Using ask_writer', 'Used ask_writer'],
+      ['steps', 'mcp__pilot__set_progress', { steps: [] }, 'Publishing its steps', 'Published its steps'],
+      ['step', 'mcp__pilot__set_progress_step', { code: 'a', state: 'done' }, 'Moving a step', 'Moved a step'],
       ['skill', 'Skill', { skill: 'survey' }, 'Using Skill', 'Used Skill'],
       // An agent's card heads its steps with its call's words done, its spinner saying that it runs.
       ['agent', 'Agent', { subagent_type: 'Explore', prompt: 'Find it.' }, 'Started the Explore agent', 'Started the Explore agent'],
@@ -133,7 +150,137 @@ test.describe('A reply’s step lines', () => {
     await controller.finish(chats.store, session, 'success', 'Done.');
   });
 
-  test('holds each text of a run’s line for a moment, never showing one that came and went within it, and moves on however fast its calls come; its spinner and its failures at once', async ({
+  test('counts a run’s MCP calls by their server, each under its name as configured, and Pilot’s own by what they did', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Servers'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'What changed?');
+    const calls: [string, string, object][] = [
+      ['file_a', 'mcp__gitblit__read_file', { path: 'a.md' }],
+      ['issue', 'mcp__youtrack__get_issue', { id: 'EX-1' }],
+      ['file_b', 'mcp__gitblit__read_file', { path: 'b.md' }],
+      ['readme', 'Read', { file_path: '/work/Example/README.md' }],
+      ['fleet', 'mcp__kubecoder-fleet__get_environment', { name: 'example-1' }],
+      ['steps', 'mcp__pilot__set_progress', { steps: [] }],
+      ['step', 'mcp__pilot__set_progress_step', { code: 'a', state: 'done' }],
+      ['writer', 'mcp__pilot__ask_writer', { item: 'invented' }],
+    ];
+    await controller.play(
+      chats.store,
+      session,
+      calls.flatMap(([id, name, input]) => [toolUse(id, name, input), toolResult(id, 'Done.')]),
+    );
+    await controller.finish(chats.store, session, 'success', 'Done.');
+    await expect(headOf(chat.root.getByTestId('chat.run'))).toHaveText(
+      'Used gitblit 2 times, used youtrack once, read a file, used kubecoder-fleet once, updated its steps 2 times, changed the record · 8 steps',
+    );
+  });
+
+  test('a line’s icon stands on the middle of its words’ capitals, the cue’s under the step lines’ over it, and a line is as high with code in its words as without', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Lines'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'Where does the cue live?');
+    await controller.play(chats.store, session, [
+      text('look', 'Looking.'),
+      toolUse('read', 'Read', { file_path: '/work/Example/README.md' }),
+      toolResult('read', '# Example'),
+      text('next', 'And the tests.'),
+      toolUse('tests', 'Bash', { command: 'pnpm test', description: 'Run the backend tests' }),
+      toolResult('tests', 'Passed.'),
+    ]);
+    const lines = chat.root.getByTestId('chat.tool').getByRole('button');
+    await expect(lines).toHaveText(['Read …/Example/README.md', 'Run the backend tests']);
+    await expect(lines.first().locator('.mono')).toHaveCount(1);
+    await expect(chat.cue).toBeVisible();
+
+    expect(await heightOf(lines.first())).toBe(await heightOf(lines.last()));
+    const [code, plain, cue] = await Promise.all([iconOf(lines.first()), iconOf(lines.last()), iconOf(chat.cue)]);
+    for (const icon of [code, plain, cue]) expect(Math.abs(icon.off)).toBeLessThanOrEqual(0.5);
+    expect(cue.left).toBe(plain.left);
+    expect(cue.inLine).toBe(plain.inLine);
+    expect(code.inLine).toBe(plain.inLine);
+    expect(await heightOf(chat.cue)).toBe(await heightOf(lines.last()));
+    await controller.finish(chats.store, session, 'success', 'Done.');
+  });
+
+  test('shows a call’s spinner once the call has run a second, on its own line and its run’s, a quick call none, the next call waiting its own second; a failure shows at once', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Spinner'), members: [me.handle!] });
+    await page.clock.install();
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'What is in the folder?');
+    await controller.play(chats.store, session, [
+      toolUse('read_a', 'Read', { file_path: '/work/Example/a.md' }),
+      toolResult('read_a', 'A.'),
+      toolUse('list_b', 'Bash', { command: 'ls', description: 'List the files' }),
+      toolResult('list_b', 'a.md'),
+    ]);
+    const run = chat.root.getByTestId('chat.run');
+    const head = headOf(run);
+    await expect(head).toHaveText('Read a file, ran a command · 2 steps');
+    await head.click();
+    const tools = run.getByTestId('chat.tool');
+    await expect(tools).toHaveCount(2);
+    const spinners = chat.root.locator('.animate-spin');
+    // The page's clock stands still from here: a call's second passes only as the spec moves it on.
+    // eslint-disable-next-line no-restricted-properties -- The page's own clock, read to pause it.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+
+    // A call that fails within its second shows its failure at once, and never a spinner.
+    await controller.play(chats.store, session, [toolUse('grep_c', 'Grep', { pattern: 'cue' })]);
+    await expect(tools.last()).toHaveText('Searching for “cue”');
+    await expect(tools.last().locator('svg.lucide-search')).toHaveCount(1);
+    await expect(spinners).toHaveCount(0);
+    await page.clock.runFor(SPINNER_AFTER - 1);
+    await expect(spinners).toHaveCount(0);
+    await controller.play(chats.store, session, [toolResult('grep_c', 'No such directory.', true)]);
+    await expect(tools.last()).toHaveText('Searched for “cue” — failed');
+    await expect(tools.last().locator('svg.lucide-circle-alert')).toHaveCount(1);
+    await expect(spinners).toHaveCount(0);
+
+    // The next call waits a second of its own, whatever the one before it ran.
+    await controller.play(chats.store, session, [toolUse('read_d', 'Read', { file_path: '/work/Example/d.md' })]);
+    await expect(tools.last()).toHaveText('Reading …/Example/d.md');
+    await page.clock.runFor(SPINNER_AFTER - 1);
+    await expect(spinners).toHaveCount(0);
+    await page.clock.runFor(1);
+    // Its own line's, and its run's.
+    await expect(spinners).toHaveCount(2);
+    await expect(tools.last().locator('.animate-spin')).toHaveCount(1);
+    await expect(head.locator('.animate-spin')).toHaveCount(1);
+    await expect(tools.last().locator('svg.lucide-file-text')).toHaveCount(0);
+
+    // It ends: the spinners go at once, its icon back.
+    await controller.play(chats.store, session, [toolResult('read_d', 'D.')]);
+    await expect(tools.last()).toHaveText('Read …/Example/d.md');
+    await expect(spinners).toHaveCount(0);
+    await expect(tools.last().locator('svg.lucide-file-text')).toHaveCount(1);
+  });
+
+  test('holds each text of a run’s line for a moment, never showing one that came and went within it, and moves on however fast its calls come; its failures show at once, and its spinner goes at once', async ({
     page,
     people,
     projects,
@@ -187,8 +334,10 @@ test.describe('A reply’s step lines', () => {
     await page.clock.runFor(50);
     await expect(head).toHaveText('Running git status --short · 6 steps · 1 failed');
 
-    // The run ends: its spinner goes at once, its words at the wait's end.
+    // The run ends: its spinner, there since its call ran a second, goes at once, its words at the wait's end.
     const spinner = head.locator('.animate-spin');
+    await expect(spinner).toHaveCount(0);
+    await page.clock.runFor(SPINNER_AFTER);
     await expect(spinner).toHaveCount(1);
     await controller.play(chats.store, session, [toolResult('status_f', 'M a.ts'), text('end', 'Two files.')]);
     await expect(chat.texts.last()).toHaveText('Two files.');

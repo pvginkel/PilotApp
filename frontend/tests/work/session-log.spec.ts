@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
 import { rawTurn } from '../support/controller';
 import { makeUnique } from '../support/helpers';
+import { iconOf } from '../support/lines';
 import type { People } from '../support/people';
 import { projectAddress, type Projects } from '../support/projects';
 import { documentAddress } from '../support/page-objects/overlay-page';
@@ -110,6 +111,12 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.cue).toHaveText('Working');
     await controller.play(environment, 'claude-1', [toolResult('toolu_ls', 'README.md')]);
     await expect(sessionLog.runs).toHaveText('Read a file, ran a command · 2 steps');
+    // The cue's icon stands under the run's, each on the middle of its words' capitals.
+    const [run, cue] = await Promise.all([iconOf(sessionLog.runs.getByRole('button')), iconOf(sessionLog.cue.getByTestId('chat.cue'))]);
+    expect(Math.abs(run.off)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(cue.off)).toBeLessThanOrEqual(0.5);
+    expect(cue.left).toBe(run.left);
+    expect(cue.inLine).toBe(run.inLine);
     await expect(sessionLog.tools).toHaveCount(0);
     await sessionLog.runs.getByRole('button').click();
     await expect(sessionLog.tools).toHaveText(['Read …/Example/README.md', 'List the files']);
@@ -546,6 +553,45 @@ test.describe('A work item’s session log', () => {
     await controller.play(environment, 'claude-1', [text('three', long(3))]);
     await expect(sessionLog.texts).toHaveCount(3);
     await expect.poll(async () => (await sessionLog.scroll()).fromBottom).toBeLessThanOrEqual(1);
+  });
+
+  test('stays at its end when its view gets shorter, as under the keyboard or in a window made shorter; a reader who scrolled away keeps their place', async ({
+    page,
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await sessionLog.open(project, work);
+    const long = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of the survey.`).join('\n\n');
+    await controller.play(environment, 'claude-1', [text('one', long)]);
+    await expect(sessionLog.texts).toHaveCount(1);
+    const view = () => sessionLog.body.evaluate((body) => ({ height: body.clientHeight, top: body.scrollTop, fromBottom: body.scrollHeight - body.scrollTop - body.clientHeight }));
+    await expect.poll(async () => (await view()).fromBottom).toBeLessThanOrEqual(1);
+    const { width, height } = page.viewportSize()!;
+    const tall = (await view()).height;
+
+    await page.setViewportSize({ width, height: height - 200 });
+    await expect.poll(async () => (await view()).height).toBeLessThan(tall);
+    await expect.poll(async () => (await view()).fromBottom).toBeLessThanOrEqual(1);
+    await page.setViewportSize({ width, height });
+    await expect.poll(async () => (await view()).height).toBe(tall);
+    await expect.poll(async () => (await view()).fromBottom).toBeLessThanOrEqual(1);
+
+    await sessionLog.body.hover();
+    const unstuck = sessionLog.sticky(false);
+    await page.mouse.wheel(0, -600);
+    await unstuck;
+    const before = await view();
+    await page.setViewportSize({ width, height: height - 200 });
+    await expect.poll(async () => (await view()).height).toBeLessThan(tall);
+    await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+    const after = await view();
+    expect(after.top).toBe(before.top);
+    expect(after.fromBottom).toBe(before.fromBottom + (before.height - after.height));
   });
 
   test('an address that names no work item of the project reads "The session log did not load"', async ({

@@ -7,7 +7,7 @@ export function StepWords({ words }: { words: Words[] }) {
   return (
     <>
       {words.map((w, i) => (
-        <Fragment key={i}>{w.code ? <span className="mono">{w.text}</span> : w.text}</Fragment>
+        <Fragment key={i}>{w.code ? <span className="mono leading-none">{w.text}</span> : w.text}</Fragment>
       ))}
     </>
   );

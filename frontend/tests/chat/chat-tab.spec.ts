@@ -247,8 +247,7 @@ test.describe('The Chat tab', () => {
     await controller.finish(chats.store, session, 'success', 'The lake route it is.');
     const run = chat.root.getByTestId('chat.run');
     await expect(chat.replyEnds).toHaveCount(1);
-    // The line's running words, held a moment (C1), stand a pixel taller than these: measured while
-    // they stand, the view's place moves by that pixel once they go.
+    // The line's running words are held a moment (C1): what the run did stands before the view is measured.
     await expect(run.getByRole('button', { expanded: false })).toHaveText('Read 3 files · 3 steps');
     await expect(run).toBeInViewport();
     const fromBottom = () => chat.body.evaluate((body) => body.scrollHeight - body.scrollTop - body.clientHeight);
@@ -284,8 +283,7 @@ test.describe('The Chat tab', () => {
     ]);
     await controller.play(chats.store, session, [text('route', LONG), ...reads]);
     const run = chat.root.getByTestId('chat.run');
-    // The line's running words, held a moment (C1), stand a pixel taller than these: a click while
-    // they change finds the button moving, and Playwright's retry scrolls it to the view's foot.
+    // The line's running words are held a moment (C1): what the run did stands before the click.
     await expect(run.getByRole('button', { expanded: false })).toHaveText('Read 3 files · 3 steps');
     await expect(run).toBeInViewport();
     const fromBottom = () => chat.body.evaluate((body) => body.scrollHeight - body.scrollTop - body.clientHeight);
@@ -803,5 +801,52 @@ test.describe('The Chat tab on a phone', () => {
     expect(composer!.width).toBeCloseTo(await chat.body.evaluate((body) => body.clientWidth), 0);
     expect(composer!.y + composer!.height).toBeCloseTo(side.y + side.height, 0);
     expect(side.y + side.height).toBeCloseTo(tabs!.y, 0);
+  });
+
+  test('stays at its end when its view gets shorter, as under the keyboard, a reply read to its last line still in view; a reader who scrolled away keeps their place', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+    phoneTabs,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Keyboard'), members: [me.handle!] });
+    const { session } = await chats.start(project, 'Which route do we take?');
+    await controller.play(chats.store, session, [text('route', LONG), text('end', 'The lake route it is.')]);
+    await controller.finish(chats.store, session, 'success', 'The lake route it is.');
+    await timeline.open(project);
+    await phoneTabs.tab('chat').click();
+    await expect(chat.replyEnds).toHaveCount(1);
+    const view = () => chat.body.evaluate((body) => ({ height: body.clientHeight, top: body.scrollTop, fromBottom: body.scrollHeight - body.scrollTop - body.clientHeight }));
+    await expect.poll(async () => (await view()).fromBottom).toBeLessThanOrEqual(1);
+    const tall = (await view()).height;
+
+    // The keyboard opens: the page, and the chat's view with it, is 300 px shorter.
+    await page.setViewportSize({ width: 390, height: 544 });
+    await expect.poll(async () => (await view()).height).toBe(tall - 300);
+    await expect.poll(async () => (await view()).fromBottom).toBeLessThanOrEqual(1);
+    await expect(chat.replyEnds.last()).toBeInViewport({ ratio: 1 });
+    // It closes: the view, taller again, is at its end still.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(async () => (await view()).height).toBe(tall);
+    await expect.poll(async () => (await view()).fromBottom).toBeLessThanOrEqual(1);
+
+    // Scrolled away, the view keeps its place: its top line stays, and its end goes out of view.
+    await chat.body.hover();
+    const letGo = chat.sticky(false);
+    await page.mouse.wheel(0, -400);
+    await letGo;
+    const before = await view();
+    expect(before.fromBottom).toBeGreaterThan(300);
+    await page.setViewportSize({ width: 390, height: 544 });
+    await expect.poll(async () => (await view()).height).toBe(tall - 300);
+    await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+    const after = await view();
+    expect(after.top).toBe(before.top);
+    expect(after.fromBottom).toBe(before.fromBottom + 300);
   });
 });
