@@ -13,6 +13,8 @@ const FRONTEND_READY_PATH = '/';
 // Generous: workers start their services side by side on a loaded machine.
 const BACKEND_STARTUP_TIMEOUT_MS = 120_000;
 const FRONTEND_STARTUP_TIMEOUT_MS = 120_000;
+// The ports a frontend's start tries, each refused one replaced by a fresh pick.
+const FRONTEND_PORT_ATTEMPTS = 5;
 const POLL_INTERVAL_MS = 200;
 const HOSTNAME = '127.0.0.1';
 
@@ -80,21 +82,42 @@ export async function startBackend(
   });
 }
 
-export async function startFrontend(options: {
+type FrontendOptions = {
   workerIndex: number;
   backendUrl: string;
   logs: ServiceLogCollector;
   excludePorts?: number[];
   streamLogs?: boolean;
   port?: number;
-}): Promise<FrontendServerHandle> {
-  const port =
-    typeof options.port === 'number'
-      ? options.port
-      : await getPort({
-          exclude: options.excludePorts ?? [],
-        });
+  /** The port given or none: a start refused it fails rather than start on another. */
+  strictPort?: boolean;
+};
 
+/**
+ * A port is free when picked, and the dev server binds it only once it starts: in between another
+ * process can take it, another worker's service or an outgoing connection, `get-port`'s lock
+ * holding within one process. So a start refused its port, the given one or its own pick, picks
+ * another and starts again, up to `FRONTEND_PORT_ATTEMPTS` ports. A backend told the frontend's
+ * version URL keeps the first port's, which a local stage, the tests', never fetches.
+ */
+export async function startFrontend(options: FrontendOptions): Promise<FrontendServerHandle> {
+  const exclude = [...(options.excludePorts ?? [])];
+  let port = typeof options.port === 'number' ? options.port : await getPort({ exclude });
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await startFrontendOn(port, options);
+    } catch (error) {
+      const refused = error instanceof Error && error.message.includes(`Port ${port} is already in use`);
+      if (!refused || options.strictPort === true || attempt === FRONTEND_PORT_ATTEMPTS) throw error;
+      options.logs.log(`Port ${port} is taken; starting on another`);
+      exclude.push(port);
+      port = await getPort({ exclude });
+    }
+  }
+}
+
+async function startFrontendOn(port: number, options: FrontendOptions): Promise<FrontendServerHandle> {
   const scriptPath = resolve(getFrontendRepoRoot(), './scripts/testing-server.sh');
   // The server's own dependency cache, removed when it stops. Two dev servers
   // sharing one swap its deps/ under each other's pages on a cold start, which

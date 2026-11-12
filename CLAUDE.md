@@ -95,7 +95,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twenty-one stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -137,8 +137,12 @@ specs outrun on a node other environments load; a worker's service start in
 `frontend/tests/support/process/servers.ts` and `frontend/tests/support/fixtures-infrastructure.ts`,
 which attaches the service's output to the worker's log from the spawn on and puts it in a failed
 start's error, where the template attached it once the service was ready, so that a start that
-failed said nothing of why (`tests/infrastructure/server-start.spec.ts` pins it); a Playwright
-page's motion in `frontend/tests/support/fixtures-infrastructure.ts`, the reduced-motion setting
+failed said nothing of why (`tests/infrastructure/server-start.spec.ts` pins it); a worker's
+frontend start in `frontend/tests/support/process/servers.ts`, which, refused its port, picks
+another and starts again, up to five ports, where the template's failed, so that a port another
+process took between its pick and the dev server's bind, `get-port`'s lock holding within one
+process alone, failed the worker's specs unrun (`tests/infrastructure/server-start.spec.ts` pins
+it); a Playwright page's motion in `frontend/tests/support/fixtures-infrastructure.ts`, the reduced-motion setting
 alone, where the template also added a style tag setting every transition and animation to 0 s to
 the page before its first `goto`, which replaced the page and the tag with it, so that the tag
 reached no page; `run-suite`'s Playwright worker count,
