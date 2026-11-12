@@ -281,6 +281,10 @@ test.describe('Its popover', () => {
     expect(highlighted).not.toBe(await background(2));
     expect(await background(3)).toBe(highlighted);
     expect(await background(0)).toBe(await background(2));
+    // Every step's check is ringed in the primary colour, the done one's fill, one not started among them.
+    const mark = (index: number) => item.steps.items.nth(index).locator('.mark');
+    const primary = await mark(0).evaluate((element) => getComputedStyle(element).backgroundColor);
+    for (const index of [0, 1, 2]) expect(await mark(index).evaluate((element) => getComputedStyle(element).borderTopColor)).toBe(primary);
 
     // A step added where the work grew, a round a step of its own.
     await projects.setProgress(work, [step('a', 'done'), step('b', 'done'), step('d', 'active'), step('b-2')]);
