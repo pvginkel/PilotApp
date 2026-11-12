@@ -278,6 +278,15 @@ test.describe('A reply’s step lines', () => {
     await expect(tools.last()).toHaveText('Read …/Example/d.md');
     await expect(spinners).toHaveCount(0);
     await expect(tools.last().locator('svg.lucide-file-text')).toHaveCount(1);
+
+    // An agent's card waits its call's second the same way.
+    await controller.play(chats.store, session, [toolUse('agent_e', 'Agent', { subagent_type: 'Explore', description: 'Find the cue', prompt: 'Find it.' })]);
+    const agent = chat.root.getByTestId('chat.agent');
+    await expect(agent).toHaveText('Find the cue · Explore agent');
+    await page.clock.runFor(SPINNER_AFTER - 1);
+    await expect(agent.locator('.animate-spin')).toHaveCount(0);
+    await page.clock.runFor(1);
+    await expect(agent.locator('.animate-spin')).toHaveCount(1);
   });
 
   test('holds each text of a run’s line for a moment, never showing one that came and went within it, and moves on however fast its calls come; its failures show at once, and its spinner goes at once', async ({
