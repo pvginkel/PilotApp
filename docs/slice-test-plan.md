@@ -634,37 +634,39 @@ cluster, where both stages run, but cannot roll anything there (its kubeconfig i
 `development`), so the check rides the roll a push causes: a PilotApp push, whose build pins new
 images, and a push to PilotDeploy's `main` that changes dev's pod template
 (`chart/templates/deployment.yaml`, or a value of `config/dev/values.yaml` it reads). A PilotDeploy
-push that leaves dev's pod template alone rolls nothing and has no roll check. Start the check in
-the background, before the push:
+push that leaves dev's pod template alone rolls nothing and has no roll check. The check is one
+command, `scripts/roll-check.py`, and it makes the push itself, once it is measuring: run it in the
+background with the push after `--`, and follow the build beside it as above.
 
 ```bash
-SECONDS=0
-mkdir -p tmp/roll && rm -f tmp/roll/*
-cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o name | cut -d/ -f2 > tmp/roll/old
-[ "$(wc -l < tmp/roll/old)" -eq 1 ] || { echo "tmp/roll/old names $(wc -l < tmp/roll/old) pods, not one: no check"; exit 1; }
-probe() { while :; do echo "$(date -u +%T.%3N) $(curl -s -o /dev/null -m 5 -w '%{http_code}' "$1") $1"; sleep 0.5; done >> tmp/roll/probes; }
-probe https://pilot-dev.home/ & probe https://pilot-dev.home/api/auth/self &
-until [ $SECONDS -ge 1800 ] || { cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot --no-headers --request-timeout=10s > tmp/roll/now &&
-    sed "s/^/$(date -u +%T) /" tmp/roll/now >> tmp/roll/pods && ! grep -qwFf tmp/roll/old tmp/roll/now; }; do sleep 5; done
-kill $(jobs -p)
-grep -vwFf tmp/roll/old tmp/roll/now | cut -d' ' -f1 > tmp/roll/new
-grep -qwFf tmp/roll/old tmp/roll/now && echo "the old pod outlived the check"
-awk '{ print $3, $2 }' tmp/roll/probes | sort | uniq -c
+timeout 2100 scripts/roll-check.py -- git push origin main          # or: -- git -C ../PilotDeploy push origin main
 ```
 
-`tmp/roll/old` names the one pod that runs before the push, and the check stops at once unless it
-names exactly one: none means the listing failed, or `pilot-dev` is not deployed yet (a first
-deploy has no roll check); two, a roll already under way, so wait for it to end and start again. The
-check probes the site every half second, with reads that write nothing, lists the pods every 5 s,
-and ends on its own once the pod in `tmp/roll/old` is gone, its termination included, or after
-30 minutes. It prints how often each URL gave each status. `/` answers `200` (the UI's nginx) and
-`/api/auth/self` answers `401` (the backend, through that nginx, refusing a request with no
-session); any other status is a finding: a `502` or `504` is nothing answering behind a proxy, a
-`503` traffic that reached a pod while it was not ready, a draining one included, and a `000` no
-answer at all. `tmp/roll/probes` has each answer's time (UTC), and `tmp/roll/pods` the pods' states
-every 5 s to set beside it. "the old pod outlived the check" means the roll did not finish within
-30 minutes, which is a finding too. The pod the roll produced is named in `tmp/roll/new`. One roll
-at a time: a push waits until the check of the one before it has ended.
+It lists `pilot-dev`'s pods first, up to three tries of 10 s each, and writes the one pod that runs
+before the push to `tmp/roll/old`. It stops at once, the push not run, unless the listing names
+exactly one pod: none means the listing failed, or `pilot-dev` is not deployed yet (a first deploy
+has no roll check); two, a roll already under way, so wait for it to end and run it again. It then
+probes the site every half second, with reads that write nothing, and runs the push only once both
+URLs have answered, so the roll is measured from its start; a push that fails ends the check. It
+lists the pods every 5 s, and ends on its own once the pod in `tmp/roll/old` is gone, its
+termination included, or 30 minutes after the push (`--timeout`). It prints how often each URL gave
+each status. `/` answers `200` (the UI's nginx) and `/api/auth/self` answers `401` (the backend,
+through that nginx, refusing a request with no session); any other status is a finding: a `502` or
+`504` is nothing answering behind a proxy, a `503` traffic that reached a pod while it was not
+ready, a draining one included, and a `000` no answer at all. `tmp/roll/probes` has each answer's
+time (UTC), and `tmp/roll/pods` the pods' states every 5 s to set beside it. The pod the roll
+produced is named in `tmp/roll/new`. Its exit status says how the roll went:
+
+| Exit | Meaning |
+|------|---------|
+| `0` | The old pod is gone and every read answered as expected. |
+| `1` | A read failed: a finding; the summary gives the first and last failed read's time. |
+| `2` | The old pod outlived the check: the roll did not finish within 30 minutes, a finding too. |
+| `3` | Both `1` and `2`. |
+| `4` | No check, and no push: the listing failed three times, or named no pod or two. |
+| `5` | The push failed, and nothing was measured. Fix the push and run it again. |
+
+One roll at a time: a push waits until the check of the one before it has ended.
 
 ### A stage's first deploy
 
