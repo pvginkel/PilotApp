@@ -1984,6 +1984,36 @@ class TestRecordServiceSentAgain:
 
         assert _standing(session, item, document) == before
 
+    @pytest.mark.parametrize(
+        ("close", "kind", "text"), [each for each in RESENT if each[0] != "done_action"]
+    )
+    def test_the_same_close_through_the_chat_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        close: str,
+        kind: str,
+        text: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, kind, "Camp", text
+        )
+        records = container.record_service()
+        _close(records, close, item, document, person)
+        before = _standing(session, item, document)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            if close == "answer":
+                records.answer(document, "D1", person, "Tunnel", via=AnswerChannel.CHAT)
+            else:
+                getattr(records, close)(item, person, via=AnswerChannel.CHAT)
+
+        assert refused.value.cause == "the item is done"
+        assert _standing(session, item, document) == before
+
     def test_an_answer_sent_again_with_its_note_and_its_to_is_taken_as_done(
         self,
         session: DbSession,

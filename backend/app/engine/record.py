@@ -181,11 +181,15 @@ class RecordService:
         with `to`, a task in the plan or `plan` (decision 47). It replaces the
         block's answer, Pilot's included, while the item is not done (F32.2);
         the answer to a one-ask item is its done (DB 163). An archive question
-        takes Archive or Keep alone (DB 263). An answer a done item holds
-        from `user` already (`answered_so`) is taken as done and changes
-        nothing, ahead of every refusal."""
+        takes Archive or Keep alone (DB 263). An answer through the app that
+        a done item holds from `user` already (`answered_so`) is taken as done
+        and changes nothing, ahead of every refusal; the chat's is refused as
+        any answer to a done item, since its tool call would show as an
+        answer given."""
         project, item = self._closing(document)
-        if self.answered_so(document, local_id, user, answer, note=note, to=to):
+        if via is AnswerChannel.APP and self.answered_so(
+            document, local_id, user, answer, note=note, to=to
+        ):
             return
         operation = f"answer block {local_id} of {tree_path(project, document.path)}"
         _not_archived(project, operation)
@@ -399,9 +403,9 @@ class RecordService:
         action not yet done among them (DB 154). Pilot's Done is on a document
         it settled whole, every block answered (decision 42), and on a
         registered document of one block, which takes its block's kind, once
-        that block is answered, deferred, or claimed and done. Done on a
-        document `user`'s own Done closed is taken as done and changes
-        nothing, ahead of every refusal."""
+        that block is answered, deferred, or claimed and done. Done through
+        the app on a document `user`'s own Done closed is taken as done and
+        changes nothing, ahead of every refusal."""
         if self.references.form(self.db, item.kind_code) != PROSE:
             raise InvalidOperationException(
                 f"mark item {item.id} done",
@@ -409,7 +413,7 @@ class RecordService:
             )
         document = self.db.get_one(Document, item.id)
         project, _ = self._closing(document)
-        if _marked_by(item, user, DOCUMENT):
+        if via is AnswerChannel.APP and _marked_by(item, user, DOCUMENT):
             return
         operation = f"mark {tree_path(project, document.path)} done"
         _not_archived(project, operation)
@@ -452,8 +456,8 @@ class RecordService:
         self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP
     ) -> None:
         """Read on a notice, given through `via`: the item's mark, the text
-        untouched. Read on a notice `user`'s own Read closed is taken as done
-        and changes nothing, ahead of every refusal."""
+        untouched. Read through the app on a notice `user`'s own Read closed
+        is taken as done and changes nothing, ahead of every refusal."""
         self._mark_by_kind(item, user, NOTICE, "Read", via)
 
     def reviewed(
@@ -851,7 +855,7 @@ class RecordService:
             )
         document = self.db.get_one(Document, item.id)
         project, _ = self._closing(document)
-        if _marked_by(item, user, kind):
+        if via is AnswerChannel.APP and _marked_by(item, user, kind):
             return
         operation = f"mark {tree_path(project, document.path)} {mark}"
         _not_archived(project, operation)
