@@ -77,6 +77,8 @@ test.describe('A code block’s copy', () => {
     const code = item.text.locator('pre');
 
     await expect(item.codeCopies).toHaveCount(1);
+    // The block ends its part, before the ask, flush as any part's last line does.
+    expect(await item.text.locator('.code-block').evaluate((element) => getComputedStyle(element).marginBottom)).toBe('0px');
     const button = item.codeCopies.first();
     await page.mouse.move(0, 0);
     expect(await opacity(button)).toBe('0');

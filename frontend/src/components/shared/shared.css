@@ -199,6 +199,8 @@
   /* A code block's copy stands at its top right, on the block's ground: off a phone under the
      mouse or with the keyboard's focus, on a phone always, the code keeping clear of it. */
   .prose .code-block { position: relative; margin: 0 0 0.7em; }
+  /* The last-child rule above weighs no more than the block's margin, which comes after it. */
+  .prose > .code-block:last-child { margin-bottom: 0; }
   .prose .code-copy { position: absolute; top: 4px; right: 4px; background: hsl(var(--muted)); }
   @media (hover: hover) and (min-width: 901px) {
     .prose .code-block:not(:hover) .code-copy:not(:focus-visible) { opacity: 0; }
