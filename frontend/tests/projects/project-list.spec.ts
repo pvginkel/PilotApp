@@ -124,7 +124,8 @@ test.describe('The project list', () => {
     projectList,
   }) => {
     const me = await people.signIn();
-    const short = makeUnique('Short');
+    // Narrow whatever its random suffix: a name that fits stays on one line, so its width must not depend on the draw.
+    const short = makeUnique('Sh', 3);
     const shortId = await projects.make({ name: short, ticket: 'PILOT-1207', tasks: [step('a', 'pending')], members: [me.handle!] });
     const long = makeUnique('A rather long project name that wraps over its lines');
     await projects.make({ name: long, ticket: 'PILOT-1207', tasks: [step('a', 'pending')], members: [me.handle!] });
