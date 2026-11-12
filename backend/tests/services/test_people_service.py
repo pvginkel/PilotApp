@@ -1,4 +1,5 @@
-"""PeopleService: the person on the record, born at the handle step (F137)."""
+"""PeopleService: the person on the record, born at the handle step (F137),
+and a service user, made by its command and never a person (DB 338)."""
 
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +22,7 @@ from app.services.people_service import (
     PeopleService,
     handle_prefill,
     initials,
+    self_response,
     token_name,
 )
 
@@ -36,6 +38,12 @@ def _auth(
 def _people(session: Session) -> int:
     return session.scalar(
         select(func.count()).select_from(User).where(User.kind_code == UserKind.PERSON)
+    )
+
+
+def _service_users(session: Session) -> int:
+    return session.scalar(
+        select(func.count()).select_from(User).where(User.kind_code == UserKind.SERVICE)
     )
 
 
@@ -279,6 +287,169 @@ class TestPeopleService:
         assert raised.value.message == (
             "Cannot join the project because you have not chosen your handle yet"
         )
+
+
+FLEET = AuthContext(subject="subject-fleet", email=None, name=None, roles={"editor"})
+"""What a token of the service user's client carries."""
+
+
+class TestAServiceUserCalling:
+    def test_find_is_its_row(self, people: PeopleService, service_user: User) -> None:
+        assert people.find(FLEET) is service_user
+
+    def test_a_sign_in_rewrites_nothing_of_its_row(
+        self, people: PeopleService, session: Session, service_user: User
+    ) -> None:
+        """Neither with the claims a person's token carries."""
+        named = _auth(
+            subject="subject-fleet",
+            name="service-account-pilot",
+            email="fleet@example.com",
+        )
+
+        assert people.record_sign_in(named) is service_user
+
+        session.refresh(service_user)
+        assert (
+            service_user.handle,
+            service_user.name,
+            service_user.email,
+            service_user.last_seen_at,
+        ) == ("fleet", "KubeCoder fleet", None, None)
+
+    def test_the_handle_step_makes_it_no_person(
+        self, people: PeopleService, session: Session, service_user: User
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            people.choose_handle(FLEET, "ben")
+
+        assert raised.value.message == (
+            "Cannot choose the handle 'ben' because your handle is 'fleet' already, "
+            "and a handle never changes"
+        )
+        assert _people(session) == 0
+
+    def test_no_person_takes_its_handle(
+        self, people: PeopleService, session: Session, service_user: User
+    ) -> None:
+        with pytest.raises(InvalidOperationException):
+            people.choose_handle(_auth(), "fleet")
+
+        assert _people(session) == 0
+
+    def test_require_person_refuses_it(
+        self, people: PeopleService, service_user: User
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            people.require_person(FLEET, "join the project")
+
+        assert raised.value.message == (
+            "Cannot join the project because you call as the service user 'fleet', "
+            "which is no person"
+        )
+
+    def test_the_self_read_gives_it_no_slot_and_no_alarms_switch(
+        self, service_user: User
+    ) -> None:
+        assert self_response(service_user).model_dump() == {
+            "handle": "fleet",
+            "handle_prefill": None,
+            "name": "KubeCoder fleet",
+            "initials": "KC",
+            "avatar_slot": None,
+            "alarms": None,
+        }
+
+
+class TestMakeServiceUser:
+    def test_it_writes_a_user_of_kind_service(
+        self, people: PeopleService, session: Session
+    ) -> None:
+        made = people.make_service_user("fleet", "KubeCoder fleet", "subject-fleet")
+
+        session.refresh(made)
+        assert (made.kind_code, made.handle, made.name, made.subject) == (
+            UserKind.SERVICE,
+            "fleet",
+            "KubeCoder fleet",
+            "subject-fleet",
+        )
+        assert (made.email, made.avatar_slot, made.last_seen_at) == (None, None, None)
+        assert _people(session) == 0
+
+    def test_a_handle_out_of_the_pattern_is_refused(
+        self, people: PeopleService, session: Session
+    ) -> None:
+        with pytest.raises(ValidationException) as raised:
+            people.make_service_user("Fleet", "KubeCoder fleet", "subject-fleet")
+
+        assert raised.value.message == (
+            "Cannot make the service user 'Fleet' because a handle holds only "
+            "lower-case letters, digits and hyphens"
+        )
+        assert _service_users(session) == 0
+
+    @pytest.mark.parametrize(
+        ("name", "subject", "blank"),
+        [("  ", "subject-fleet", "name"), ("KubeCoder fleet", "", "subject")],
+    )
+    def test_a_blank_name_or_subject_is_refused(
+        self,
+        people: PeopleService,
+        session: Session,
+        name: str,
+        subject: str,
+        blank: str,
+    ) -> None:
+        with pytest.raises(ValidationException) as raised:
+            people.make_service_user("fleet", name, subject)
+
+        assert raised.value.message == (
+            f"Cannot make the service user 'fleet' because its {blank} is blank"
+        )
+        assert _service_users(session) == 0
+
+    def test_agent_is_refused_as_pilots(
+        self, people: PeopleService, session: Session
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            people.make_service_user("agent", "KubeCoder fleet", "subject-fleet")
+
+        assert raised.value.message == (
+            "Cannot make the service user 'agent' because the handle is Pilot's"
+        )
+        assert _service_users(session) == 0
+
+    def test_a_handle_taken_is_refused(
+        self, people: PeopleService, session: Session, person: User
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            people.make_service_user("ada", "KubeCoder fleet", "subject-fleet")
+
+        assert raised.value.message == (
+            "Cannot make the service user 'ada' because the handle is taken"
+        )
+        assert _service_users(session) == 0
+
+    def test_a_subject_that_is_a_users_is_refused(
+        self, people: PeopleService, session: Session, person: User
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            people.make_service_user("fleet", "KubeCoder fleet", "subject-ada")
+
+        assert raised.value.message == (
+            "Cannot make the service user 'fleet' because 'ada' holds the subject "
+            "'subject-ada' already"
+        )
+        assert _service_users(session) == 0
+
+    def test_a_second_one_of_the_same_subject_is_refused(
+        self, people: PeopleService, session: Session, service_user: User
+    ) -> None:
+        with pytest.raises(InvalidOperationException):
+            people.make_service_user("fleet-two", "KubeCoder fleet", "subject-fleet")
+
+        assert _service_users(session) == 1
 
 
 def _choose(container: ServiceContainer, subject: str, handle: str) -> int | None:

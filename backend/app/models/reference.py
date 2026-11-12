@@ -15,8 +15,13 @@ from app.extensions import db
 
 
 class UserKind(StrEnum):
+    """A kind of party that acts in Pilot: a person who signs in, Pilot
+    itself, or a service user, the party a session outside Pilot calls as
+    (DB decision 77)."""
+
     PERSON = "person"
     AGENT = "agent"
+    SERVICE = "service"
 
 
 class OverruleKind(StrEnum):

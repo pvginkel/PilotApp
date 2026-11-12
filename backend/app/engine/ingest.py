@@ -39,7 +39,7 @@ from app.models import (
     User,
 )
 from app.models import Session as AgentSession
-from app.models.reference import DocumentRole, ErrorKind, ProjectState
+from app.models.reference import DocumentRole, ErrorKind, ProjectState, UserKind
 
 _NOT_TEXT = (
     "the file is not UTF-8 text: each sequence that is not, and each NUL,"
@@ -413,7 +413,12 @@ class IngestService:
         ).all()
         return dsl.Facts(
             document=kind,
-            handles=set(self.db.scalars(select(User.handle))),
+            # A service user answers nothing, and no item is for it (DB 338).
+            handles=set(
+                self.db.scalars(
+                    select(User.handle).where(User.kind_code != UserKind.SERVICE)
+                )
+            ),
             plan_task_ids={task for task, removed_at in tasks if removed_at is None},
             removed_task_ids={
                 task for task, removed_at in tasks if removed_at is not None

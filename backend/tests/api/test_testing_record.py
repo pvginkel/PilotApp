@@ -50,6 +50,7 @@ from app.models.reference import (
     ProgressState,
     ProjectState,
     SessionState,
+    UserKind,
     VersionCause,
     WorkTrigger,
 )
@@ -77,6 +78,8 @@ from tests.support.supervisor import Supervise
 from tests.support.youtrack import youtrack_delivery
 
 PEOPLE = "/api/testing/people"
+SERVICE_USERS = "/api/testing/service-users"
+FLEET = {"handle": "fleet", "name": "KubeCoder fleet", "subject": "subject-fleet"}
 ENVIRONMENTS = "/api/testing/environments"
 PROJECTS = "/api/testing/projects"
 STORE_UPDATE = "/api/testing/store-update"
@@ -250,6 +253,79 @@ def _within(actual: Any, expected: Any) -> bool:
 @pytest.fixture
 def ben(container: ServiceContainer) -> User:
     return container.test_data_service().person("ben", "Ben Example")
+
+
+class TestCreateServiceUser:
+    def test_it_makes_the_row_the_command_makes(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        response = client.post(SERVICE_USERS, json=FLEET)
+
+        assert response.status_code == 201
+        assert response.get_json() == FLEET
+        made = session.scalars(select(User).where(User.handle == "fleet")).one()
+        assert (made.kind_code, made.name, made.subject, made.avatar_slot) == (
+            UserKind.SERVICE,
+            "KubeCoder fleet",
+            "subject-fleet",
+            None,
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(FLEET | {"handle": "Fleet"}, id="a handle out of the pattern"),
+            pytest.param(FLEET | {"name": " "}, id="a blank name"),
+            pytest.param(FLEET | {"subject": ""}, id="a blank subject"),
+            pytest.param(
+                {"handle": "fleet", "name": "KubeCoder fleet"}, id="no subject"
+            ),
+        ],
+    )
+    def test_what_names_no_service_user_is_refused(
+        self, client: FlaskClient, session: Session, body: dict[str, str]
+    ) -> None:
+        before = _count(session, User)
+
+        assert client.post(SERVICE_USERS, json=body).status_code == 400
+        assert _count(session, User) == before
+
+    @pytest.mark.parametrize(
+        ("body", "cause"),
+        [
+            pytest.param(
+                FLEET | {"handle": "agent"}, "the handle is Pilot's", id="agent"
+            ),
+            pytest.param(
+                FLEET | {"handle": "ada"}, "the handle is taken", id="a handle taken"
+            ),
+            pytest.param(
+                FLEET | {"subject": "subject-ada"},
+                "'ada' holds the subject 'subject-ada' already",
+                id="a subject that is a User's",
+            ),
+        ],
+    )
+    def test_what_the_command_refuses_conflicts(
+        self,
+        client: FlaskClient,
+        session: Session,
+        person: User,
+        body: dict[str, str],
+        cause: str,
+    ) -> None:
+        response = client.post(SERVICE_USERS, json=body)
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot make the service user {body['handle']!r} because {cause}"
+        )
+        assert (
+            session.scalars(
+                select(User.handle).where(User.kind_code == UserKind.SERVICE)
+            ).all()
+            == []
+        )
 
 
 class TestCreatePerson:
@@ -1830,6 +1906,7 @@ NO_ROW = uuid.UUID("00000000-0000-4000-8000-000000000000")
 
 ENDPOINTS = [
     (PEOPLE, {"handle": "ben"}),
+    (SERVICE_USERS, FLEET),
     (ENVIRONMENTS, {"id": "example-env-2", "name": "Example-2"}),
     (PROJECTS, {"members": ["ada"]}),
     (_items_path(NO_ROW), {"kind": "notice", "title": "Camp", "text": "Hi"}),

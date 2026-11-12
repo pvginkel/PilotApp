@@ -556,6 +556,26 @@ class TestIngestServiceGate:
             )
         ]
 
+    def test_a_service_users_handle_names_no_one(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        service_user: User,
+    ) -> None:
+        """No item is for a service user, and it answers nothing (DB 338)."""
+        _bear_draft(container, project, DRAFT)
+        save = "---\nfor: fleet\n---\n\n```question id=Q1\nby: fleet\n```\n"
+
+        answer = _ingest(
+            container, f"draft-{project.number}/project.md", save, environment
+        )
+
+        assert answer.faults == (
+            dsl.Fault(2, "front matter: `for: fleet` names no handle"),
+            dsl.Fault(6, "block Q1: `by: fleet` names no handle"),
+        )
+
     def test_every_fault_of_a_held_save_stands(
         self,
         session: DbSession,

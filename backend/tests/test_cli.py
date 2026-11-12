@@ -1,5 +1,6 @@
-"""The CLI: its database announcement keeps the password out of the log, and
-`update-store` makes the store's update and reports it to the lift (F144.1)."""
+"""The CLI: its database announcement keeps the password out of the log,
+`update-store` makes the store's update and reports it to the lift (F144.1),
+and `create-service-user` makes a service user's row (DB 338)."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -14,6 +15,7 @@ from app import cli, models
 from app.app import App
 from app.models import Item, Project, StoreUpdate, User, Work
 from app.models.reference import ProjectState, UserKind
+from app.service_user_cli import create_service_user, handle_create_service_user
 from app.services.container import ServiceContainer
 from app.services.store_update_service import unlifted, utc_time
 from app.store_update_cli import POLL_SECONDS, handle_update_store, update_store
@@ -364,3 +366,99 @@ class TestUpdateStore:
         update = session.scalars(select(StoreUpdate)).one()
         assert (update.lift_requested_at is not None) is asked
         assert update.lifted_at is None
+
+
+def _service_users(session: Session) -> list[tuple[str, str, str | None]]:
+    return [
+        (user.handle, user.name, user.subject)
+        for user in session.scalars(
+            select(User).where(User.kind_code == UserKind.SERVICE)
+        )
+    ]
+
+
+class TestCreateServiceUser:
+    def test_it_takes_a_handle_a_name_and_a_subject(self, cli_app: App) -> None:
+        result = CliRunner().invoke(create_service_user, [], obj={"app": cli_app})
+
+        assert result.exit_code == 2
+        assert "Missing option '--handle'" in result.output
+        assert {option.name for option in create_service_user.params} == {
+            "handle",
+            "name",
+            "subject",
+        }
+
+    def test_the_command_makes_the_row(self, cli_app: App, session: Session) -> None:
+        result = CliRunner().invoke(
+            create_service_user,
+            [
+                "--handle",
+                "fleet",
+                "--name",
+                "KubeCoder fleet",
+                "--subject",
+                "subject-fleet",
+            ],
+            obj={"app": cli_app},
+        )
+
+        assert result.exit_code == 0
+        assert result.output == (
+            "Made the service user 'fleet', named 'KubeCoder fleet', of subject "
+            "'subject-fleet'.\n"
+        )
+        assert _service_users(session) == [
+            ("fleet", "KubeCoder fleet", "subject-fleet")
+        ]
+
+    @pytest.mark.parametrize(
+        ("handle", "subject", "refusal"),
+        [
+            pytest.param(
+                "agent",
+                "subject-fleet",
+                "Cannot make the service user 'agent' because the handle is Pilot's",
+                id="the agent's handle",
+            ),
+            pytest.param(
+                "ada",
+                "subject-fleet",
+                "Cannot make the service user 'ada' because the handle is taken",
+                id="a handle taken",
+            ),
+            pytest.param(
+                "fleet",
+                "subject-ada",
+                "Cannot make the service user 'fleet' because 'ada' holds the "
+                "subject 'subject-ada' already",
+                id="a subject that is a User's",
+            ),
+            pytest.param(
+                "Fleet",
+                "subject-fleet",
+                "Cannot make the service user 'Fleet' because a handle holds only "
+                "lower-case letters, digits and hyphens",
+                id="a handle out of the pattern",
+            ),
+        ],
+    )
+    def test_a_refusal_exits_1_and_writes_nothing(
+        self,
+        cli_app: App,
+        session: Session,
+        person: User,
+        capsys: pytest.CaptureFixture[str],
+        handle: str,
+        subject: str,
+        refusal: str,
+    ) -> None:
+        with pytest.raises(SystemExit) as exited:
+            handle_create_service_user(
+                cli_app, handle=handle, name="KubeCoder fleet", subject=subject
+            )
+
+        assert exited.value.code == 1
+        captured = capsys.readouterr()
+        assert (captured.out, captured.err) == ("", refusal + "\n")
+        assert _service_users(session) == []

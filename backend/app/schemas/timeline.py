@@ -123,16 +123,24 @@ DoneCauseCode = Literal[
 
 
 class UserSchema(BaseModel):
-    """A person, or Pilot, as an avatar draws them (F106, F132)."""
+    """A person, Pilot or a service user, as an avatar draws them (F106, F132)."""
 
-    kind: UserKind = Field(description="A person, or Pilot itself")
+    kind: UserKind = Field(
+        description=(
+            "A person, Pilot itself, or a service user, the party a call from "
+            "outside Pilot is made as"
+        )
+    )
     handle: str = Field(description="The handle; Pilot's is `agent`", examples=["ada"])
     name: str = Field(
         description="The full name, the avatar's tooltip", examples=["Ada Example"]
     )
     initials: str = Field(description="The avatar's initials", examples=["AE"])
     avatar_slot: int | None = Field(
-        description="The avatar's palette slot, from 1; null for Pilot", examples=[1]
+        description=(
+            "The avatar's palette slot, from 1; null for Pilot and a service user"
+        ),
+        examples=[1],
     )
 
 

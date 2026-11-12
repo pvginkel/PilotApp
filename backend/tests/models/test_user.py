@@ -1,5 +1,6 @@
 """User: Pilot's row, written by the revisions, and what a row must hold,
-when a person was last shown the conditions that alarm among it."""
+when a person was last shown the conditions that alarm among it, and a
+service user's (DB 338)."""
 
 from datetime import UTC, datetime
 
@@ -142,3 +143,67 @@ class TestUserAlarm:
         pilot.alarm_seen_at = _SEEN
 
         assert violated_constraint(session) == "ck_users_agent"
+
+
+def _service_user(**overrides: object) -> User:
+    values: dict[str, object] = {
+        "kind_code": UserKind.SERVICE,
+        "subject": "subject-fleet",
+        "handle": "fleet",
+        "name": "KubeCoder fleet",
+    }
+    values.update(overrides)
+    return User(**values)
+
+
+class TestServiceUser:
+    def test_the_revisions_write_none(self, session: Session) -> None:
+        assert (
+            session.scalars(
+                select(User).where(User.kind_code == UserKind.SERVICE)
+            ).all()
+            == []
+        )
+
+    def test_a_service_user_is_written(self, session: Session) -> None:
+        service_user = _service_user()
+        session.add(service_user)
+        session.flush()
+        session.refresh(service_user)
+
+        assert service_user.id is not None
+        assert service_user.created_at is not None
+        assert (
+            service_user.email,
+            service_user.avatar_slot,
+            service_user.alarm_seen_at,
+            service_user.last_seen_at,
+        ) == (None, None, None, None)
+
+    @pytest.mark.parametrize(
+        "broken",
+        [
+            pytest.param({"subject": None}, id="no subject"),
+            pytest.param({"email": "fleet@example.com"}, id="an email"),
+            pytest.param({"avatar_slot": 4}, id="a palette slot"),
+            pytest.param({"alarm_seen_at": _SEEN}, id="a showing of the alarms"),
+        ],
+    )
+    def test_it_holds_its_clients_subject_and_nothing_of_a_person(
+        self, session: Session, broken: dict[str, object]
+    ) -> None:
+        session.add(_service_user(**broken))
+
+        assert violated_constraint(session) == "ck_users_service"
+
+    def test_it_never_takes_the_agent_handle(self, session: Session) -> None:
+        session.add(_service_user(handle="agent"))
+
+        assert violated_constraint(session) == "ck_users_agent_handle"
+
+    def test_its_subject_is_no_other_users(
+        self, session: Session, person: User
+    ) -> None:
+        session.add(_service_user(subject=person.subject))
+
+        assert violated_constraint(session) == "users_subject_key"

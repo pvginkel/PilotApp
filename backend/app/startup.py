@@ -116,10 +116,13 @@ def register_root_blueprints(app: Flask) -> None:
 
 def register_cli_commands(cli: click.Group) -> None:
     """Register app-specific CLI commands: `update-store`, the operator's
-    update of the store while Pilot runs (F144.1)."""
+    update of the store while Pilot runs (F144.1), and `create-service-user`,
+    which makes a service user's row (DB 338)."""
+    from app.service_user_cli import create_service_user
     from app.store_update_cli import update_store
 
     cli.add_command(update_store)
+    cli.add_command(create_service_user)
 
 
 def post_migration_hook(app: Flask) -> None:

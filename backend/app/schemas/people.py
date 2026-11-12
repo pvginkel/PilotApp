@@ -33,7 +33,7 @@ class SelfResponseSchema(BaseModel):
     avatar_slot: int | None = Field(
         description=(
             "The avatar's palette slot, from 1, the same on every screen (F132); "
-            "null until the handle is chosen"
+            "null until the handle is chosen, and for a service user"
         ),
         examples=[1, None],
     )
@@ -41,7 +41,7 @@ class SelfResponseSchema(BaseModel):
         description=(
             "The alarms switch (F142.1): on, the conditions that alarm are pushed "
             "to the person's browsers while they are offline; on by default; null "
-            "until the handle is chosen"
+            "until the handle is chosen, and for a service user"
         ),
         examples=[True, None],
     )

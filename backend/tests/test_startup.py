@@ -12,6 +12,7 @@ from app.app import App
 from app.engine.bus import EngineEvent, TreeHashMoved
 from app.extensions import db
 from app.models import Project
+from app.service_user_cli import create_service_user
 from app.services.container import ServiceContainer
 from app.startup import load_test_data_hook, register_cli_commands
 from app.store_update_cli import update_store
@@ -76,9 +77,12 @@ class TestLoadTestDataHook:
 
 
 class TestRegisterCliCommands:
-    def test_it_registers_update_store(self) -> None:
+    def test_it_registers_update_store_and_create_service_user(self) -> None:
         group = click.Group()
 
         register_cli_commands(group)
 
-        assert group.commands == {"update-store": update_store}
+        assert group.commands == {
+            "update-store": update_store,
+            "create-service-user": create_service_user,
+        }

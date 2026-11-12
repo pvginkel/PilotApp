@@ -1,5 +1,6 @@
 """Schemas for the testing endpoints that make the record's states the UI
-cannot make: people, environments, projects, their items, their work items,
+cannot make: people, a service user, environments, projects, their items,
+their work items,
 an agent's saves of them, the files hung on them, a worker's registrations and
 attachments, the pre-ruling pass's questions to a writer, an answer the brain
 records in the chat, the store's update and its lift, and the brain's waits,
@@ -45,6 +46,22 @@ class InventedPersonSchema(BaseModel):
     name: str = Field(examples=["Ben Example"])
     avatar_slot: int = Field(
         description="The palette slot the person took", examples=[2]
+    )
+
+
+class ServiceUserSchema(BaseModel):
+    """A service user as `create-service-user` makes its row (DB 338)."""
+
+    handle: str = Field(
+        description="Its handle: lower-case letters, digits and hyphens",
+        examples=["fleet"],
+    )
+    name: str = Field(description="Its name", examples=["KubeCoder fleet"])
+    subject: str = Field(
+        description=(
+            "The `sub` claim of its client's tokens: the client's service account"
+        ),
+        examples=["3f0c9a52-6a1e-4a57-9a53-0d6d0e1f5e2d"],
     )
 
 

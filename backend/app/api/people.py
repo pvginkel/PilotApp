@@ -48,7 +48,9 @@ def get_self(
 
     A person with a row has its name (unless the token carries none), email
     and last seen refreshed. One without is at their first sign-in: the
-    answer has no handle and no slot, and the prefill for the handle step.
+    answer has no handle and no slot, and the prefill for the handle step. A
+    service user's row is read and never written: its handle and its name,
+    with no slot and no alarms switch.
 
     Returns:
         200: The signed-in person
@@ -92,7 +94,8 @@ def choose_handle(
         400: The handle is not lower-case letters, digits and hyphens
         401: No one is signed in
         403: The caller lacks the editor role
-        409: The handle is Pilot's or another person's, or the caller has one
+        409: The handle is Pilot's or another person's, or the caller has
+            one, a service user's included
     """
     choice = HandleChoiceSchema.model_validate(request.get_json())
     person = people_service.choose_handle(caller(), choice.handle)

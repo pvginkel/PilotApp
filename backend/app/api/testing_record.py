@@ -1,5 +1,6 @@
 """Testing endpoints that make the record's states the UI cannot make
-(TEST-6): people who never signed in, environments, projects in every
+(TEST-6): people who never signed in, a service user's row as
+`create-service-user` makes it (DB 338), environments, projects in every
 standing, with members, a plan, their opening and open items, the items a
 project's session adds, an agent's saves of them and of the project's draft
 and handbook, the files it attaches, a draft's on no item, Pilot's Done, and
@@ -73,9 +74,11 @@ from app.schemas.testing_record import (
     InventedWorkerAttachmentsSchema,
     InventedWriterQuestionsCreateSchema,
     InventedWriterQuestionsSchema,
+    ServiceUserSchema,
 )
 from app.schemas.tracker_events import TrackerEventReplySchema
 from app.services.container import ServiceContainer
+from app.services.people_service import PeopleService
 from app.services.store_update_service import StoreUpdateService
 from app.services.test_data_service import TestDataService
 from app.services.tracker_event_service import TrackerEventService
@@ -131,6 +134,37 @@ def create_person(
     assert person.avatar_slot is not None
     return InventedPersonSchema(
         handle=person.handle, name=person.name, avatar_slot=person.avatar_slot
+    ).model_dump(), 201
+
+
+@testing_record_bp.route("/service-users", methods=["POST"])
+@api.validate(
+    json=ServiceUserSchema,
+    resp=SpectreeResponse(
+        HTTP_201=ServiceUserSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_service_user(
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+) -> Any:
+    """Make a service user's row as `create-service-user` does (DB 338), on a
+    stage where no one runs the command.
+
+    Returns:
+        201: The service user
+        400: The handle is not lower-case letters, digits and hyphens, the
+            name or the subject is blank, or the stage is prd
+        409: The handle is Pilot's or a User's, or the subject is a User's
+    """
+    data = ServiceUserSchema.model_validate(request.get_json())
+    made = people_service.make_service_user(data.handle, data.name, data.subject)
+    # A service user's row has a subject (`ck_users_service`).
+    assert made.subject is not None
+    return ServiceUserSchema(
+        handle=made.handle, name=made.name, subject=made.subject
     ).model_dump(), 201
 
 

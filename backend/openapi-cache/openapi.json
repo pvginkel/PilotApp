@@ -4385,15 +4385,17 @@
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.UserKind": {
+        "description": "A kind of party that acts in Pilot: a person who signs in, Pilot\nitself, or a service user, the party a session outside Pilot calls as\n(DB decision 77).",
         "enum": [
           "person",
-          "agent"
+          "agent",
+          "service"
         ],
         "title": "UserKind",
         "type": "string"
       },
       "ItemDocumentSchema.1fdd8ae.UserSchema": {
-        "description": "A person, or Pilot, as an avatar draws them (F106, F132).",
+        "description": "A person, Pilot or a service user, as an avatar draws them (F106, F132).",
         "properties": {
           "avatar_slot": {
             "anyOf": [
@@ -4404,7 +4406,7 @@
                 "type": "null"
               }
             ],
-            "description": "The avatar's palette slot, from 1; null for Pilot",
+            "description": "The avatar's palette slot, from 1; null for Pilot and a service user",
             "examples": [
               1
             ],
@@ -4428,7 +4430,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.UserKind",
-            "description": "A person, or Pilot itself"
+            "description": "A person, Pilot itself, or a service user, the party a call from outside Pilot is made as"
           },
           "name": {
             "description": "The full name, the avatar's tooltip",
@@ -5810,15 +5812,17 @@
         "type": "object"
       },
       "ProjectDocumentSchema.1fdd8ae.UserKind": {
+        "description": "A kind of party that acts in Pilot: a person who signs in, Pilot\nitself, or a service user, the party a session outside Pilot calls as\n(DB decision 77).",
         "enum": [
           "person",
-          "agent"
+          "agent",
+          "service"
         ],
         "title": "UserKind",
         "type": "string"
       },
       "ProjectDocumentSchema.1fdd8ae.UserSchema": {
-        "description": "A person, or Pilot, as an avatar draws them (F106, F132).",
+        "description": "A person, Pilot or a service user, as an avatar draws them (F106, F132).",
         "properties": {
           "avatar_slot": {
             "anyOf": [
@@ -5829,7 +5833,7 @@
                 "type": "null"
               }
             ],
-            "description": "The avatar's palette slot, from 1; null for Pilot",
+            "description": "The avatar's palette slot, from 1; null for Pilot and a service user",
             "examples": [
               1
             ],
@@ -5853,7 +5857,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.UserKind",
-            "description": "A person, or Pilot itself"
+            "description": "A person, Pilot itself, or a service user, the party a call from outside Pilot is made as"
           },
           "name": {
             "description": "The full name, the avatar's tooltip",
@@ -6840,7 +6844,7 @@
                 "type": "null"
               }
             ],
-            "description": "The alarms switch (F142.1): on, the conditions that alarm are pushed to the person's browsers while they are offline; on by default; null until the handle is chosen",
+            "description": "The alarms switch (F142.1): on, the conditions that alarm are pushed to the person's browsers while they are offline; on by default; null until the handle is chosen, and for a service user",
             "examples": [
               true,
               null
@@ -6856,7 +6860,7 @@
                 "type": "null"
               }
             ],
-            "description": "The avatar's palette slot, from 1, the same on every screen (F132); null until the handle is chosen",
+            "description": "The avatar's palette slot, from 1, the same on every screen (F132); null until the handle is chosen, and for a service user",
             "examples": [
               1,
               null
@@ -6935,6 +6939,42 @@
           "alarms"
         ],
         "title": "SelfResponseSchema",
+        "type": "object"
+      },
+      "ServiceUserSchema.6d6b324": {
+        "description": "A service user as `create-service-user` makes its row (DB 338).",
+        "properties": {
+          "handle": {
+            "description": "Its handle: lower-case letters, digits and hyphens",
+            "examples": [
+              "fleet"
+            ],
+            "title": "Handle",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name",
+            "examples": [
+              "KubeCoder fleet"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The `sub` claim of its client's tokens: the client's service account",
+            "examples": [
+              "3f0c9a52-6a1e-4a57-9a53-0d6d0e1f5e2d"
+            ],
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle",
+          "name",
+          "subject"
+        ],
+        "title": "ServiceUserSchema",
         "type": "object"
       },
       "SessionRecordPageSchema.01118bb": {
@@ -9844,15 +9884,17 @@
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.UserKind": {
+        "description": "A kind of party that acts in Pilot: a person who signs in, Pilot\nitself, or a service user, the party a session outside Pilot calls as\n(DB decision 77).",
         "enum": [
           "person",
-          "agent"
+          "agent",
+          "service"
         ],
         "title": "UserKind",
         "type": "string"
       },
       "TimelineSchema.1fdd8ae.UserSchema": {
-        "description": "A person, or Pilot, as an avatar draws them (F106, F132).",
+        "description": "A person, Pilot or a service user, as an avatar draws them (F106, F132).",
         "properties": {
           "avatar_slot": {
             "anyOf": [
@@ -9863,7 +9905,7 @@
                 "type": "null"
               }
             ],
-            "description": "The avatar's palette slot, from 1; null for Pilot",
+            "description": "The avatar's palette slot, from 1; null for Pilot and a service user",
             "examples": [
               1
             ],
@@ -9887,7 +9929,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.UserKind",
-            "description": "A person, or Pilot itself"
+            "description": "A person, Pilot itself, or a service user, the party a call from outside Pilot is made as"
           },
           "name": {
             "description": "The full name, the avatar's tooltip",
@@ -11028,15 +11070,17 @@
         "type": "string"
       },
       "WorkSchema.1fdd8ae.UserKind": {
+        "description": "A kind of party that acts in Pilot: a person who signs in, Pilot\nitself, or a service user, the party a session outside Pilot calls as\n(DB decision 77).",
         "enum": [
           "person",
-          "agent"
+          "agent",
+          "service"
         ],
         "title": "UserKind",
         "type": "string"
       },
       "WorkSchema.1fdd8ae.UserSchema": {
-        "description": "A person, or Pilot, as an avatar draws them (F106, F132).",
+        "description": "A person, Pilot or a service user, as an avatar draws them (F106, F132).",
         "properties": {
           "avatar_slot": {
             "anyOf": [
@@ -11047,7 +11091,7 @@
                 "type": "null"
               }
             ],
-            "description": "The avatar's palette slot, from 1; null for Pilot",
+            "description": "The avatar's palette slot, from 1; null for Pilot and a service user",
             "examples": [
               1
             ],
@@ -11071,7 +11115,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/WorkSchema.1fdd8ae.UserKind",
-            "description": "A person, or Pilot itself"
+            "description": "A person, Pilot itself, or a service user, the party a call from outside Pilot is made as"
           },
           "name": {
             "description": "The full name, the avatar's tooltip",
@@ -12254,7 +12298,7 @@
     },
     "/api/people/self": {
       "get": {
-        "description": "A person with a row has its name (unless the token carries none), email and last seen refreshed. One without is at their first sign-in: the answer has no handle and no slot, and the prefill for the handle step.\n\nReturns:     200: The signed-in person     401: No one is signed in     403: The caller lacks the editor role",
+        "description": "A person with a row has its name (unless the token carries none), email and last seen refreshed. One without is at their first sign-in: the answer has no handle and no slot, and the prefill for the handle step. A service user's row is read and never written: its handle and its name, with no slot and no alarms switch.\n\nReturns:     200: The signed-in person     401: No one is signed in     403: The caller lacks the editor role",
         "operationId": "get__api_people_self",
         "parameters": [],
         "responses": {
@@ -12637,7 +12681,7 @@
     },
     "/api/people/self/handle": {
       "post": {
-        "description": "Returns:     201: The person, with their handle and avatar slot     400: The handle is not lower-case letters, digits and hyphens     401: No one is signed in     403: The caller lacks the editor role     409: The handle is Pilot's or another person's, or the caller has one",
+        "description": "Returns:     201: The person, with their handle and avatar slot     400: The handle is not lower-case letters, digits and hyphens     401: No one is signed in     403: The caller lacks the editor role     409: The handle is Pilot's or another person's, or the caller has         one, a service user's included",
         "operationId": "post__api_people_self_handle",
         "parameters": [],
         "requestBody": {
@@ -17313,6 +17357,63 @@
           }
         ],
         "summary": "The fake push service's answer to its route at `path`.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/service-users": {
+      "post": {
+        "description": "Returns:     201: The service user     400: The handle is not lower-case letters, digits and hyphens, the         name or the subject is blank, or the stage is prd     409: The handle is Pilot's or a User's, or the subject is a User's",
+        "operationId": "post__api_testing_service-users",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceUserSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUserSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Make a service user's row as `create-service-user` does (DB 338), on a stage where no one runs the command.",
         "tags": [],
         "x-required-role": "editor"
       }

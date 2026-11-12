@@ -1,5 +1,7 @@
 """The signed-in person on the record: the User row, born at the handle step
-(F137, DB decision 30), refreshed at every later sign-in."""
+(F137, DB decision 30), refreshed at every later sign-in; and a service user,
+the party a call from outside Pilot is made as, whose row its command makes
+(DB 338)."""
 
 import re
 import unicodedata
@@ -52,7 +54,7 @@ def self_response(person: User) -> SelfResponseSchema:
         name=person.name,
         initials=initials(person.name),
         avatar_slot=person.avatar_slot,
-        alarms=person.alarms,
+        alarms=person.alarms if person.kind_code is UserKind.PERSON else None,
     )
 
 
@@ -64,22 +66,25 @@ def token_name(auth: AuthContext) -> str | None:
 
 
 class PeopleService:
-    """Who is signed in, as a User of kind person, keyed by the token's subject."""
+    """Who is signed in, as a User of kind person or service, keyed by the
+    token's subject."""
 
     def __init__(self, db: Session) -> None:
         self.db = db
 
     def find(self, auth: AuthContext) -> User | None:
-        """The caller's row; none before they chose their handle."""
+        """The caller's row, a person's or a service user's; none before a
+        person chose their handle."""
         return self.db.scalars(select(User).where(User.subject == auth.subject)).first()
 
     def record_sign_in(self, auth: AuthContext) -> User | None:
         """Refresh the caller's row from the token: the name, unless the token
         carries none, the email and the last seen. None before the row exists,
-        and nothing is written then."""
+        and nothing is written then, nor on a service user's row, which is its
+        command's (DB 338)."""
         person = self.find(auth)
-        if person is None:
-            return None
+        if person is None or person.kind_code is not UserKind.PERSON:
+            return person
         person.name = token_name(auth) or person.name
         person.email = auth.email
         person.last_seen_at = datetime.now(UTC)
@@ -143,11 +148,64 @@ class PeopleService:
         """The caller's row, for a write attributed to them.
 
         Raises:
-            InvalidOperationException: the caller has not chosen a handle yet.
+            InvalidOperationException: the caller has not chosen a handle yet,
+                or is a service user, which is no person (DB 338).
         """
         person = self.find(auth)
         if person is None:
             raise InvalidOperationException(
                 operation, "you have not chosen your handle yet"
             )
+        if person.kind_code is not UserKind.PERSON:
+            raise InvalidOperationException(
+                operation,
+                f"you call as the service user {person.handle!r}, which is no person",
+            )
         return person
+
+    def make_service_user(self, handle: str, name: str, subject: str) -> User:
+        """Put a service user on the record: a User of kind `service` with
+        `handle` and `name`, which no sign-in rewrites, its `subject` the
+        service account of the client whose credential it calls with (DB 180,
+        338).
+
+        Raises:
+            ValidationException: the handle is not lower-case letters, digits
+                and hyphens, or the name or the subject is blank.
+            InvalidOperationException: the handle is Pilot's or a User's, or
+                the subject is a User's.
+        """
+        operation = f"make the service user {handle!r}"
+        if not HANDLE_PATTERN.fullmatch(handle):
+            raise ValidationException(
+                f"Cannot {operation} because a handle holds only lower-case "
+                "letters, digits and hyphens"
+            )
+        for field, value in (("name", name), ("subject", subject)):
+            if not value.strip():
+                raise ValidationException(
+                    f"Cannot {operation} because its {field} is blank"
+                )
+        if handle == AGENT_HANDLE:
+            raise InvalidOperationException(operation, "the handle is Pilot's")
+
+        # The checks see every row a handle step before this committed, and
+        # none is written between them and the insert.
+        self.db.execute(text("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"))
+
+        if self.db.scalars(select(User.id).where(User.handle == handle)).first():
+            raise InvalidOperationException(operation, "the handle is taken")
+        holder = self.db.scalars(
+            select(User.handle).where(User.subject == subject)
+        ).first()
+        if holder is not None:
+            raise InvalidOperationException(
+                operation, f"{holder!r} holds the subject {subject!r} already"
+            )
+
+        service_user = User(
+            kind_code=UserKind.SERVICE, subject=subject, handle=handle, name=name
+        )
+        self.db.add(service_user)
+        self.db.flush()
+        return service_user

@@ -11,9 +11,12 @@ from app.models.reference import USER_KIND, UserKind
 
 
 class User(db.Model):  # type: ignore[name-defined]
-    """A person who signs in, or Pilot itself: the one row of kind `agent`.
+    """A person who signs in, Pilot itself: the one row of kind `agent`, or
+    a service user, whose subject is the service account of the client whose
+    credential it calls with (DB 338).
 
-    Pilot's row is the first revision's. A condition that alarms, begun
+    Pilot's row is the first revision's, a service user's its command's
+    (`create-service-user`). A condition that alarms, begun
     after `alarm_seen_at`, is one the person has not been shown (DB 238): the
     alarm push that names it, or their going offline, moves it forward.
     """
@@ -34,6 +37,11 @@ class User(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             "kind_code <> 'person' OR (subject IS NOT NULL AND avatar_slot IS NOT NULL)",
             name="ck_users_person",
+        ),
+        CheckConstraint(
+            "kind_code <> 'service' OR (subject IS NOT NULL AND email IS NULL"
+            " AND avatar_slot IS NULL AND alarm_seen_at IS NULL)",
+            name="ck_users_service",
         ),
     )
 

@@ -164,6 +164,20 @@ def person(session: DbSession) -> User:
 
 
 @pytest.fixture
+def service_user(session: DbSession) -> User:
+    """A service user, as `create-service-user` makes its row (DB 338)."""
+    user = User(
+        kind_code=UserKind.SERVICE,
+        subject="subject-fleet",
+        handle="fleet",
+        name="KubeCoder fleet",
+    )
+    session.add(user)
+    session.flush()
+    return user
+
+
+@pytest.fixture
 def project(session: DbSession, person: User) -> Project:
     """A draft, created by ``person``."""
     draft = Project(created_by_user_id=person.id)
