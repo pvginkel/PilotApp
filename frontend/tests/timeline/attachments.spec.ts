@@ -152,6 +152,9 @@ test.describe('Attachments', () => {
     await expect(overlay.foot).toHaveCount(0);
     expect(await docTabs.keys()).toEqual([`document ${trip}`, `attachment ${map}`]);
 
+    // A link that goes somewhere underlines under the mouse.
+    await overlay.documentLink.hover();
+    expect(await overlay.documentLink.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe('underline');
     await overlay.documentLink.click();
     await expect(page).toHaveURL(documentAddress(id, trip));
     await expect(overlay.title).toHaveText('The trip');

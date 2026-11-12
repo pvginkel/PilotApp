@@ -71,7 +71,8 @@
   .btn-danger { border-color: hsl(var(--destructive) / 0.6); color: hsl(var(--destructive-text)); }
   .btn-danger:hover:not(:disabled) { background: hsl(var(--destructive) / 0.1); }
 
-  /* A button that reads as a link: Show more. */
+  /* A button that reads as a link: Show more. It never underlines; a link that goes somewhere
+     does, as any link (app-theme.css). */
   .link {
     padding: 0;
     border: 0;
@@ -80,7 +81,6 @@
     font: inherit;
     cursor: pointer;
   }
-  .link:hover { text-decoration: underline; }
 
   /* ---- Text fields (text-field.tsx) ------------------------------------------------------ */
 

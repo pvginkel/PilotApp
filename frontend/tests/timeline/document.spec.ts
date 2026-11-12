@@ -302,7 +302,7 @@ test.describe('A short document', () => {
 });
 
 test.describe('A confirmation block in a document', () => {
-  test('is answered Yes through its check, the document staying open and Unsent', async ({ people, projects, timeline }) => {
+  test('is answered Yes through its button, its proposal over Yes and No, the document staying open and Unsent', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Block yes'), members: [me.handle!] });
     const release = await projects.place(id, { kind: 'document', title: 'The release', text: CONFIRMING });
@@ -311,17 +311,22 @@ test.describe('A confirmation block in a document', () => {
     const confirm = item.blockAt('C1');
 
     await expect(confirm.kind).toHaveText('Confirm');
-    await expect(confirm.root.getByTestId('timeline.confirm.proposal')).toHaveText('Push the release to production');
+    await expect(confirm.proposal).toHaveText('Push the release to production');
+    await expect(confirm.yes).toHaveClass('btn btn-primary');
+    await expect(confirm.no).toHaveClass('btn');
+    const text = (await confirm.proposal.boundingBox())!;
+    expect((await confirm.yes.boundingBox())!.y).toBeGreaterThanOrEqual(text.y + text.height);
     await confirm.yes.click();
-    await expect(confirm.yes).toHaveClass(/\bchosen\b/);
+    await expect(confirm.said.locator('.said')).toHaveText('Yes');
     await expect(confirm.answered).toBeVisible();
+    await expect(confirm.proposal).toBeVisible();
     await expect(item.unsent).toBeVisible();
     await expect(item.root).toHaveAttribute('data-state', 'open');
     await expect(confirm.no).toBeEnabled();
     expect(await blockOf(projects, id, release, 'C1')).toMatchObject({ answer: 'Yes', note: null, by: { kind: 'person', handle: me.handle } });
   });
 
-  test('is answered No through its cross, with the reason its console takes as the note', async ({ people, projects, timeline }) => {
+  test('is answered No through its button, with the reason its console takes as the note', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Block no'), members: [me.handle!] });
     const release = await projects.place(id, { kind: 'document', title: 'The release', text: CONFIRMING });
@@ -332,9 +337,9 @@ test.describe('A confirmation block in a document', () => {
     await confirm.no.click();
     await confirm.noField.fill('Wait for the freeze to end.');
     await confirm.noSend.click();
-    await expect(confirm.no).toHaveClass(/\bchosen\b/);
+    await expect(confirm.said.locator('.said')).toHaveText('No');
     await expect(confirm.note).toHaveText('Wait for the freeze to end.');
-    // The console closes once the reason is saved: the cross takes answers again, and none reopens it.
+    // The console closes once the reason is saved: No takes answers again, and none reopens it.
     await expect(confirm.no).toBeEnabled();
     await expect(confirm.no).toHaveAttribute('aria-expanded', 'false');
     await expect(confirm.root.getByTestId('timeline.confirm.console')).toHaveCount(0);

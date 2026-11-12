@@ -251,10 +251,9 @@ export class TimelinePage {
     };
   }
 
-  /** An open confirmation's card: its proposal, the check and the cross, No's console, Details. */
+  /** An open confirmation's card: its proposal, Yes and No in its block, No's console, Details. */
   private confirm(item: Locator) {
     return {
-      root: item.getByTestId('timeline.confirm'),
       proposal: item.getByTestId('timeline.confirm.proposal'),
       yes: item.getByTestId('timeline.confirm.yes'),
       no: item.getByTestId('timeline.confirm.no'),
@@ -335,8 +334,8 @@ export function settledHeadParts(within: Locator, blockId: string) {
 /**
  * An open item's block, its head, its answer; a decision's options, a question's field and Send,
  * an action's paste-back, Done and its options as buttons, and Pilot's claim on it, or the mark of
- * Pilot's work that left it undone; Other and its console; a confirmation block's check and cross,
- * and No's console; a block Pilot's work holds as its section's line (F31.7).
+ * Pilot's work that left it undone; Other and its console; a confirmation block's proposal, Yes
+ * and No, and No's console; a block Pilot's work holds as its section's line (F31.7).
  */
 export function blockParts(page: Page, root: Locator) {
   return {
@@ -390,6 +389,7 @@ export function blockParts(page: Page, root: Locator) {
     field: root.getByTestId('timeline.block.console.field'),
     send: root.getByTestId('timeline.block.console.send'),
     cancel: root.getByTestId('timeline.block.console.cancel'),
+    proposal: root.getByTestId('timeline.confirm.proposal'),
     yes: root.getByTestId('timeline.confirm.yes'),
     no: root.getByTestId('timeline.confirm.no'),
     noField: root.getByTestId('timeline.confirm.console.field'),

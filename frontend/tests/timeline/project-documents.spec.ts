@@ -354,7 +354,7 @@ test.describe('Its asks', () => {
     const confirm = overlay.blockAt('C1');
     await expect(confirm.root).toHaveAttribute('data-closed', 'false');
     await expect(confirm.kind).toHaveText('Confirm');
-    await expect(confirm.root.getByTestId('timeline.confirm.proposal')).toHaveText('Book the night train');
+    await expect(confirm.proposal).toHaveText('Book the night train');
     await expect(confirm.yes).toBeDisabled();
     await expect(confirm.no).toBeDisabled();
 

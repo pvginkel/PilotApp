@@ -3,7 +3,8 @@
  * Send, Enter breaking the line and Ctrl+Enter sending (F110), what was typed kept in the browser
  * until sent (F133), its window whole lines once it scrolls and its height its text's again when
  * its width changes; the answer boxed (F20.2) and saved as given, the item's done (F32.1, F32.3);
- * and either person answering one meant for the other (F107.1).
+ * done, its answer with no chevron, which would open to nothing more (F31.2); and either person
+ * answering one meant for the other (F107.1).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -209,6 +210,31 @@ test.describe('A question', () => {
     await block.answerField.press('Meta+Enter');
     await expect(item.said).toHaveText('Lake Como');
     expect(await projects.block(id, question)).toMatchObject({ answer: 'Lake Como', note: null, by: { handle: me.handle } });
+  });
+
+  test('done, reads its answer boxed with no chevron, since it opens to nothing more', async ({ people, projects, timeline, overlay }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Done'), members: [me.handle!] });
+    const own = await projects.place(id, { kind: 'question', title: 'Which lake?', text: QUESTION });
+    const pilots = await projects.place(id, { kind: 'question', title: 'Which month?', text: PILOTS });
+    await projects.answer(own, 'Q1', 'Lake Como');
+    await projects.transition(id, 'finished');
+
+    for (const [question, answer] of [
+      [own, 'Lake Como'],
+      [pilots, 'Lake Garda'],
+    ] as const) {
+      await timeline.open(id);
+      await timeline.item(question).lineTitle.click();
+      const block = overlay.blockAt('Q1');
+      await expect(overlay.doneChip).toHaveText('Done');
+      await expect(block.root).toHaveAttribute('data-closed', 'true');
+      await expect(block.answered).toBeVisible();
+      await expect(block.said.locator('.said')).toHaveText(answer);
+      await expect(block.said.locator('.said')).toHaveClass(/\bboxed\b/);
+      await expect(block.toggle).toHaveCount(0);
+      await expect(block.answerField).toHaveCount(0);
+    }
   });
 
   test('meant for the other person is answered by either', async ({ people, projects, timeline }) => {

@@ -140,8 +140,8 @@
   .attachments .btn { max-width: 100%; }
   .attachments .name, .line .menu-item .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-  /* ---- A confirmation: a compact card in a soft yellow, Yes and No as a check and a cross, grey
-     until hovered --------------------------------------------------------------------------- */
+  /* ---- A confirmation: a compact card in a soft yellow, drawn as an action is: its proposal the
+     text, Yes and No an action's row of buttons in its block --------------------------------- */
 
   .item.confirm.open:not(.urgent) {
     border-color: hsl(var(--warning) / 0.55);
@@ -152,34 +152,12 @@
   }
   .item.confirm .item-body { padding: 6px 14px 10px; }
   .item.confirm:not(.urgent) .item-head .kind, .item-head .why { color: hsl(var(--warning-text)); }
-  .confirm-row { display: flex; align-items: center; gap: 12px; border-radius: 6px; scroll-margin: 90px; }
-  .confirm-row.flash { animation: fresh 1.6s ease-out; }
-  .confirm-text { flex: 1; min-width: 0; }
-  .confirm-row .item-title { margin: 0; }
-  .proposal { font-size: var(--text-base); line-height: 1.45; color: hsl(var(--muted-foreground)); }
-  .confirm-text .note, .confirm-text .answer { margin-top: 4px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
-  .yes-no { display: flex; flex: none; gap: 6px; }
-  .yn {
-    display: grid;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border: 1px solid hsl(var(--border));
-    border-radius: var(--radius);
-    background: hsl(var(--background));
-    color: hsl(var(--muted-foreground));
-    font-size: 18px;
-    cursor: pointer;
-  }
-  .yn.yes:hover:not(:disabled), .yn.yes.chosen { border-color: hsl(var(--success) / 0.6); background: hsl(var(--success) / 0.12); color: hsl(var(--success-text)); }
-  .yn.no:hover:not(:disabled), .yn.no.chosen { border-color: hsl(var(--destructive) / 0.6); background: hsl(var(--destructive) / 0.1); color: hsl(var(--destructive-text)); }
-  .yn:disabled { cursor: default; }
-  .yn:disabled:not(.chosen) { opacity: 0.4; }
+  .proposal { font-size: var(--text-base); overflow-wrap: break-word; }
+  .item-actions.yes-no { margin-top: 0; }
   .confirm-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-top: 6px; font-size: var(--text-base); }
-  .link.details { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; font-size: var(--text-base); }
+  .link.details { display: inline-flex; align-items: center; gap: 2px; font-size: var(--text-base); }
   .confirm-prose { margin-top: 8px; }
-  .item.confirm .console, .block .console.no { margin-top: 8px; }
+  .block .console.no { margin-top: 8px; }
   .console.no { border-color: hsl(var(--destructive) / 0.6); }
   .console.no:focus-within { box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.15); }
 
@@ -268,8 +246,9 @@
   /* A chosen option keeps its colour under the mouse; only the others react to hover. */
   .option:hover:not(:disabled):not(.chosen) { border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary-muted) / 0.6); }
   .option:disabled { cursor: default; }
-  .option .label { flex: none; max-width: 40%; font-weight: 600; }
-  .option .desc { flex: 1; color: hsl(var(--muted-foreground)); }
+  /* An option's line goes under its label, Recommended staying at the label's end. */
+  .option .label { flex: 1; font-weight: 600; }
+  .option .desc { order: 1; flex-basis: 100%; color: hsl(var(--muted-foreground)); }
   .option .rec {
     flex: none;
     padding: 0 7px;
@@ -284,7 +263,7 @@
   .option.chosen .desc { color: hsl(var(--primary-foreground) / 0.85); }
   .option.chosen .rec { background: hsl(var(--primary-foreground)); color: hsl(var(--primary-strong)); }
   .option.faded { opacity: 0.5; }
-  .option.single .label { flex: 1; max-width: none; font-weight: 500; }
+  .option.single .label { font-weight: 500; }
   .option.other { border-style: dashed; border-right-width: 1px; border-bottom-width: 1px; }
   .option.other .label { color: hsl(var(--primary-muted-foreground)); }
   .option.other .desc { white-space: pre-wrap; }
@@ -331,7 +310,7 @@
   .answer { font-size: var(--text-base); }
   .answer .said { white-space: pre-wrap; }
   .answer .said.boxed { padding: 6px 10px; border-radius: 6px; background: hsl(var(--muted)); }
-  .block-controls > .answer + * { margin-top: 10px; }
+  .block-controls > :is(.answer, .proposal) + * { margin-top: 10px; }
 
   /* An action Pilot claimed (F21.6): Pilot's mark, its words and the work item that does it. */
   .claimed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -344,16 +323,16 @@
   .paste-back .item-actions { margin-top: 8px; }
 
   /* A note under its answer, led by a note's icon; its lines after the first align with its words. */
-  .block .note, .confirm-text .note {
+  .block .note {
     display: block;
     padding-left: calc(1em + 6px);
     text-indent: calc(-1em - 6px);
     color: hsl(var(--muted-foreground));
     white-space: pre-wrap;
   }
-  .block .note .icon, .confirm-text .note .icon { margin-right: 6px; }
+  .block .note .icon { margin-right: 6px; }
   .answer .note { margin-top: 6px; }
-  .option .note { flex-basis: 100%; }
+  .option .note { order: 2; flex-basis: 100%; }
   .option.chosen .note { color: hsl(var(--primary-foreground) / 0.85); }
 
   /* ---- A document inline: its prose and blocks, its bar beside Send answers, its chips ------ */
@@ -644,11 +623,6 @@
        the title, the dot 4px in from the title's left edge. */
     .line .pilots-slot { display: flex; order: 9; flex-basis: 100%; gap: 4px; margin: 0 0 2px 22px; }
     .pinned { padding: 8px 12px 0; }
-    /* On the phone an option's line goes under its label, Recommended staying at the label's end
-       (F98.3). */
-    .option .label { flex: 1; max-width: none; }
-    .option .desc { order: 1; flex-basis: 100%; }
-    .option .note { order: 2; }
     /* A tap on a done line opens its view, or the menu of a line with nothing behind it, its
        actions in a row under the line (F13.9). */
     .item.collapsed .line { cursor: pointer; }

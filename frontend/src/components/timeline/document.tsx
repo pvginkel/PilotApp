@@ -40,6 +40,7 @@ import { isSettled, piecesOf, SectionsContext, underHeading, type Fold } from '@
 import { SettledHead, SettledLines } from '@/components/timeline/settled';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
+import { useHandedFocus } from '@/hooks/use-handed-focus';
 import { useReviewed, useSend } from '@/hooks/use-marks';
 import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
@@ -191,12 +192,14 @@ export function UnsentChip() {
 /**
  * A document's prose and its blocks in their order, every block answered in place, each section
  * Pilot settled, while not opened, its line in its block's place, consecutive lines one list, and
- * opened, under its head in its heading's place; and each block Pilot's work holds its section's
- * line, unless the document is Pilot's (F28.9).
+ * opened, under its head in its heading's place, the line or the head pressed handing the keyboard
+ * focus to the one that replaces it; and each block Pilot's work holds its section's line, unless
+ * the document is Pilot's (F28.9).
  */
 export function DocumentParts({ item }: { item: TimelineItem }) {
   const { opened, open, close } = useContext(SectionsContext);
   const locked = useContext(LockedContext);
+  const focus = useHandedFocus();
   const foldOf = (block: BlockData): Fold => {
     if (!locked && block.held !== null) return 'held';
     if (!isSettled(block)) return null;
@@ -209,12 +212,26 @@ export function DocumentParts({ item }: { item: TimelineItem }) {
         <SettledLines
           key={`settled ${piece.blocks[0].id}`}
           blocks={piece.blocks}
-          onOpen={(block) => open(blockKey(item.id, block.id))}
+          onOpen={(block) => {
+            focus.hand(`head ${block.id}`);
+            open(blockKey(item.id, block.id));
+          }}
+          button={(block) => focus.keep(`line ${block.id}`)}
         />
       );
     }
     if (piece.type === 'head') {
-      return <SettledHead key={`head ${piece.block.id}`} block={piece.block} onClose={() => close(blockKey(item.id, piece.block.id))} />;
+      return (
+        <SettledHead
+          key={`head ${piece.block.id}`}
+          block={piece.block}
+          onClose={() => {
+            focus.hand(`line ${piece.block.id}`);
+            close(blockKey(item.id, piece.block.id));
+          }}
+          button={focus.keep(`head ${piece.block.id}`)}
+        />
+      );
     }
     if (piece.type === 'held') {
       return <Block key={`block ${piece.block.id}`} item={item} block={piece.block} section={piece.section} />;

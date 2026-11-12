@@ -1,12 +1,12 @@
 /**
- * The phone's option rows, block heads and item heads (F98.3): on a narrow window an option's line
- * goes under its label, Recommended staying at the label's end; a block head wraps what does not
+ * The option rows, at every width, and the phone's block heads and item heads (F98.3): an option's
+ * line goes under its label, Recommended staying at the label's end; on a narrow window a block
+ * head wraps what does not
  * fit, and Answered keeps its icon alone; an item's head keeps to its card on one line, Urgent its
  * triangle and *Edited* a pencil, their words kept for a screen reader, and the page scrolls no
  * wider than itself; on the narrowest an item's head, a work item's with its Session log and Stop
  * icons too, wraps rather than leave its card, Discuss staying at the end of its first row. A wide
- * window keeps the line beside the label and
- * every word.
+ * window keeps every word.
  */
 
 import type { Locator } from '@playwright/test';
@@ -56,6 +56,21 @@ async function expectOneLineInside(card: Locator, head: Locator): Promise<void> 
   expect(await head.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
 }
 
+/** The option's line stands under its label, at its left edge, and Recommended on the label's line, at the row's end. */
+async function expectLineUnderLabel(option: Locator): Promise<void> {
+  await expect(option).toBeVisible();
+  const row = (await option.boundingBox())!;
+  const label = (await option.locator('.label').boundingBox())!;
+  const desc = (await option.locator('.desc').boundingBox())!;
+  const rec = (await option.locator('.rec').boundingBox())!;
+  expect(desc.y).toBeGreaterThanOrEqual(label.y + label.height - 1);
+  expect(Math.abs(desc.x - label.x)).toBeLessThan(1);
+  expect(rec.y).toBeLessThan(label.y + label.height);
+  expect(rec.y + rec.height).toBeGreaterThan(label.y);
+  expect(rec.x).toBeGreaterThan(label.x);
+  expect(row.x + row.width - (rec.x + rec.width)).toBeLessThan(16);
+}
+
 /** A project with one decision on it, opened; answers the decision's id. */
 async function opened(people: People, projects: Projects, timeline: TimelinePage, text: string): Promise<string> {
   const me = await people.signIn();
@@ -70,19 +85,7 @@ test.describe('On a phone', () => {
 
   test('an option’s line sits under its label, Recommended at the label’s end', async ({ people, projects, timeline }) => {
     const decision = await opened(people, projects, timeline, DECISION);
-    const dome = timeline.item(decision).block.option('Dome');
-    await expect(dome).toBeVisible();
-
-    const row = (await dome.boundingBox())!;
-    const label = (await dome.locator('.label').boundingBox())!;
-    const desc = (await dome.locator('.desc').boundingBox())!;
-    const rec = (await dome.locator('.rec').boundingBox())!;
-    expect(desc.y).toBeGreaterThanOrEqual(label.y + label.height - 1);
-    expect(Math.abs(desc.x - label.x)).toBeLessThan(1);
-    expect(rec.y).toBeLessThan(label.y + label.height);
-    expect(rec.y + rec.height).toBeGreaterThan(label.y);
-    expect(rec.x).toBeGreaterThan(label.x);
-    expect(row.x + row.width - (rec.x + rec.width)).toBeLessThan(16);
+    await expectLineUnderLabel(timeline.item(decision).block.option('Dome'));
   });
 
   test('a block head shows Answered as its icon, its word kept for a screen reader', async ({ people, projects, timeline }) => {
@@ -183,15 +186,14 @@ test.describe('On the narrowest phone', () => {
 });
 
 test.describe('On a wide window', () => {
-  test('an option’s line stands beside its label, and Answered keeps its word', async ({ people, projects, timeline }) => {
+  test('an option’s line sits under its label as on a phone, Recommended at the label’s end', async ({ people, projects, timeline }) => {
+    const decision = await opened(people, projects, timeline, DECISION);
+    await expectLineUnderLabel(timeline.item(decision).block.option('Dome'));
+  });
+
+  test('Answered keeps its word', async ({ people, projects, timeline }) => {
     const decision = await opened(people, projects, timeline, PILOTS);
     const { block } = timeline.item(decision);
-    await block.toggle.click();
-    const dome = block.option('Dome');
-    const label = (await dome.locator('.label').boundingBox())!;
-    const desc = (await dome.locator('.desc').boundingBox())!;
-    expect(Math.abs(desc.y - label.y)).toBeLessThan(2);
-    expect(desc.x).toBeGreaterThanOrEqual(label.x + label.width);
 
     const word = block.answered.locator('.chip-label');
     await expect(word).toBeVisible();

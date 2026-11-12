@@ -80,7 +80,7 @@ test.describe('A decision', () => {
     }
   });
 
-  test('saves the option picked as given, the row filling and the others fading while it saves, then reads as its done line', async ({
+  test('saves the option picked as given, the row filling and the others fading while it saves, Other among them, then reads as its done line', async ({
     page,
     people,
     projects,
@@ -99,7 +99,11 @@ test.describe('A decision', () => {
     await expect(block.option('Tunnel')).toBeDisabled();
     await expect(block.option('Dome')).toHaveClass(/\bfaded\b/);
     await expect(block.option('Dome')).toBeDisabled();
-    await expect(block.other).toHaveCount(0);
+    // Read at once, while the write is on its way: Other stays, faded and disabled as the rest.
+    expect(await block.other.count()).toBe(1);
+    await expect(block.other).toHaveClass(/\bfaded\b/);
+    await expect(block.other).toBeDisabled();
+    await expect(block.other.locator('.desc')).toHaveText('Something else');
     await restore();
 
     await expect(item.root).toHaveAttribute('data-state', 'done');

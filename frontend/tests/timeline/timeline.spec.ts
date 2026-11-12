@@ -259,6 +259,9 @@ test.describe('An open item', () => {
     const last = item.text.getByText('Paragraph 30.');
     await expect(item.more).toHaveText('Show more');
     await expect(timeline.item(short).more).toHaveCount(0);
+    // A button drawn as a link never underlines.
+    await item.more.hover();
+    expect(await item.more.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe('none');
     await item.text.scrollIntoViewIfNeeded();
     await expect(last).not.toBeInViewport();
     await item.more.click();

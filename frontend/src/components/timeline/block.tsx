@@ -1,7 +1,7 @@
 /**
  * A block (F31), in a panel of its own under the prose that asks, in a one-ask item and in a
  * document alike: a decision's options, a question's field, an action's paste-back and buttons, a
- * confirmation's check and cross. Its head names its kind in a document, where the item's head does
+ * confirmation's proposal over Yes and No. Its head names its kind in a document, where the item's head does
  * not, the auto pilot mark beside it on a confirmation the switch would answer (F4.4), then, where
  * Pilot asked the registered document's writer about it, "Pilot asked the writer", a button that
  * opens the document at the questions and the reply (F52.2; writer-asked.tsx); answered,
@@ -9,7 +9,8 @@
  * Pilot settled (F31.1, F31.3), *In the chat* before them on an answer given in the
  * chat, going to its message (F42.3). An answer that is not a person's, and every
  * answer in a done item, reads closed: the answer only, which opens, as the chevron does, to the
- * block's controls, live while the item is not done (F31.2). In a document its head ends in
+ * block's controls, live while the item is not done (F31.2); a done question has no chevron, since
+ * it opens to nothing more than its answer. In a document its head ends in
  * Discuss, quoting the block (F39.1); a one-ask item's is its head's, quoting the item. A deferred block reads "Deferred to
  * <task>", or to the project's end, its note under it; opened, its controls, nothing chosen, stand
  * under that line (F31.4). A note sits under its answer with its icon (F17.4). Gone to at its
@@ -36,14 +37,13 @@ import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
 import { AutopilotMark } from '@/components/timeline/autopilot-mark';
-import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
+import { ConfirmAnswer } from '@/components/timeline/confirm-answer';
 import { DecisionOptions, EXPAND } from '@/components/timeline/decision';
 import { blockKey, useBlockFlash } from '@/components/timeline/flash';
 import { HeldBody, HeldLine, type Hold } from '@/components/timeline/held';
 import { blockKindOf } from '@/components/timeline/kinds';
 import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
-import { Note } from '@/components/timeline/note';
 import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { SectionsContext } from '@/components/timeline/sections';
@@ -207,21 +207,23 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
   const off = disabled || answering === null;
   const own = deferred ? null : block.answer;
   const undone = block.claim?.undone ?? false;
+  // A done question opens to nothing more than its answer.
+  const opens = closable && answering !== null && !(settled && block.kind === 'question');
 
   const controls = () => {
     if (block.confirmation) {
       return (
-        <ConfirmControls
+        <ConfirmAnswer
           field={field}
           block={block}
-          chosen={saving === null ? own : saving.answer}
-          live={live && !closed}
+          bare={solo}
+          saving={saving}
+          closed={closed}
+          live={live}
+          settled={settled}
           disabled={off}
           onAnswer={answer}
-        >
-          <Proposal block={block} />
-          {saving === null && !deferred && block.note !== null && <Note text={block.note} />}
-        </ConfirmControls>
+        />
       );
     }
     switch (block.kind) {
@@ -233,6 +235,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
             chosen={saving === null ? own : saving.answer}
             closed={closed}
             live={live}
+            settled={settled}
             disabled={off}
             onOpen={answering === null ? null : () => setOpened(true)}
             onAnswer={answer}
@@ -304,7 +307,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
           undone={undone}
           answered={answered}
           closed={closed}
-          onToggle={closable && answering !== null ? () => setOpened(!opened) : null}
+          onToggle={opens ? () => setOpened(!opened) : null}
           quote={quote}
         />
       )}

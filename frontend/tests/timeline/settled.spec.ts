@@ -5,7 +5,8 @@
  * overlay's body and the done view, consecutive lines one list. A click opens the whole section
  * under its head, Pilot's mark and the heading's words, the block in it read closed; a segment
  * (F33) and the block's address (F97) open it too, a card's block address in the overlay at the
- * block; a click on its head folds it back to its line, at its address too (P-148's T6). A person's
+ * block; a click on its head folds it back to its line, at its address too (P-148's T6), the line
+ * or the head pressed handing the keyboard focus to the one that replaces it. A person's
  * replacement opens it for good, and Undo leaves it open; the counts, the bar and *Send answers*
  * count it as the answered block it is.
  */
@@ -209,6 +210,38 @@ test.describe('A section Pilot settled', () => {
     await timeline.refocus();
     await expect(item.settledLine('D1').root).toBeVisible();
     await expect(item.blockAt('D1').root).toHaveCount(0);
+  });
+
+  test('hands the keyboard focus from its line to its head as it opens, and back to its line as it folds', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Keys'), members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
+    await timeline.open(id);
+    const item = timeline.item(trip);
+
+    // A line among others in its list, then the last one left in it.
+    for (const section of ['Q1', 'D1']) {
+      await item.settledLine(section).root.focus();
+      await page.keyboard.press('Enter');
+      await expect(item.settledHead(section).root).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(item.settledLine(section).root).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(item.settledHead(section).root).toBeFocused();
+    }
+    await expect(item.settledLines).toHaveCount(1);
+
+    // A segment opens a section without taking the focus to its head.
+    await page.keyboard.press('Enter');
+    await expect(item.settledLine('D1').root).toBeFocused();
+    await item.segment('D1').click();
+    await expect(item.settledHead('D1').root).toBeVisible();
+    await expect(item.settledHead('D1').root).not.toBeFocused();
   });
 
   test('opens at its address and folds back there, the address standing', async ({ page, people, projects, timeline }) => {

@@ -4,9 +4,10 @@
  * recommendation (F19.3); and Other last, "Something else", which becomes a console: the growing
  * field with Send and a cross, Esc closing it as the cross does, and its words once saved (F17.2,
  * F19.4). An answer in free words is Other's row, chosen, with the words in it, and reopens the console with them; another
- * option chosen, the words stay there, unchosen. The chosen row fills; once the answer no longer
- * changes, the others fade and are disabled. Closed, the chosen row stands alone and opens its
- * block, or, read only, opens nothing.
+ * option chosen, the words stay there, unchosen. The chosen row fills; while the answer saves, and
+ * once it no longer changes, the others fade and are disabled, Other among them, which goes only
+ * from a done item's block that holds no words of it. Closed, the chosen row stands alone and
+ * opens its block, or, read only, opens nothing.
  */
 
 import { useState } from 'react';
@@ -47,6 +48,8 @@ interface DecisionOptionsProps {
   closed: boolean;
   /** Whether it takes an answer now. */
   live: boolean;
+  /** Its item is done. */
+  settled: boolean;
   /** An archived project's: the controls stand and take nothing (D012). */
   disabled?: boolean;
   /** Opens the closed block; none where it stays closed, its row taking nothing. */
@@ -54,7 +57,7 @@ interface DecisionOptionsProps {
   onAnswer: Answer;
 }
 
-export function DecisionOptions({ field, block, chosen, closed, live, disabled = false, onOpen, onAnswer }: DecisionOptionsProps) {
+export function DecisionOptions({ field, block, chosen, closed, live, settled, disabled = false, onOpen, onAnswer }: DecisionOptionsProps) {
   const [typing, setTyping] = useState(false);
   const rows = rowsOf(block);
   const single = block.options.length === 0;
@@ -127,7 +130,7 @@ export function DecisionOptions({ field, block, chosen, closed, live, disabled =
           onClose={() => setTyping(false)}
         />
       ) : (
-        (live || kept !== null) && (
+        (!settled || kept !== null) && (
           <button
             type="button"
             className={cn('option other', words !== null && 'chosen', !live && words === null && 'faded')}

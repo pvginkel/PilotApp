@@ -172,19 +172,19 @@ test.describe('A block’s address', () => {
     expect(await timeline.fromEnd()).toBeGreaterThan(100);
   });
 
-  test('of a confirmation goes to its card’s row', async ({ people, projects, timeline }) => {
+  test('of a confirmation goes to its card’s block', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Confirm'), members: [me.handle!] });
     const confirmation = await projects.place(id, { kind: 'confirmation', title: 'Push it?', text: CONFIRMATION });
     await notices(projects, id);
 
     await timeline.openAt(id, confirmation, 'C1');
-    const { confirm, root } = timeline.item(confirmation);
-    await expect(confirm.root).toHaveAttribute('data-block-id', 'C1');
-    await expect(confirm.root).toHaveClass(/\bflash\b/);
-    await expect(confirm.root).toBeInViewport();
+    const { block, confirm, root } = timeline.item(confirmation);
+    await expect(block.root).toHaveAttribute('data-block-id', 'C1');
+    await expect(block.root).toHaveClass(/\bflash\b/);
+    await expect(confirm.yes).toBeInViewport();
     await expect(root).not.toHaveClass(/\bfresh\b/);
-    await expect(confirm.root).not.toHaveClass(/\bflash\b/);
+    await expect(block.root).not.toHaveClass(/\bflash\b/);
   });
 
   test('goes to its item where the timeline draws no such block: a done item’s line, a block the item lacks', async ({

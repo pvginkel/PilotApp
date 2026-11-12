@@ -1,69 +1,46 @@
 /**
- * A confirmation (F22): Pilot's ask for the go on one act. Its item is a compact yellow card: the
- * head with the auto pilot mark while the switch would answer it (F4.4) and its reason line, whose
- * tooltip says the ground (F22.1); the title and the proposal beside a check, Yes, and a cross, No
- * (F22.2); No opening a console for the reason, which may stay
- * empty and is the note, closing once it is saved (F22.3); the prose folded under Details, which Less folds again (F22.4).
- * The check and the cross, with No's console, are the block's controls inside a document too
- * (F22.7). The answer given, or being saved, stays coloured. On the card the row is the block, and
- * gone to at its address, it flashes (F97). A registered one whose writer Pilot asked about its
- * block carries the block's mark in its head (F52.2; writer-asked.tsx). Its attachments follow
- * (F17.5), and Pilot's dots end
- * the card while Pilot writes it (F35). In an archived project the check and the cross stand
- * disabled, which the API refuses until Bring back (D012).
+ * A confirmation (F22): Pilot's ask for the go on one act. Its item is a compact yellow card, drawn
+ * as an action is: the head with the auto pilot mark while the switch would answer it (F4.4) and
+ * its reason line, whose tooltip says the ground (F22.1); the title; the proposal as its text, full
+ * width; and its block under it, Yes and No in an action's row of buttons (F22.2;
+ * confirm-answer.tsx), which is the block's controls inside a document too (F22.7); the prose
+ * folded under Details, which Less folds again (F22.4). Gone to at its address, its block flashes
+ * (F97). A registered one whose writer Pilot asked about its block carries the block's mark in its
+ * head (F52.2; writer-asked.tsx). Its attachments follow (F17.5), and Pilot's dots end the card
+ * while Pilot writes it (F35). In an archived project Yes and No stand disabled, which the API
+ * refuses until Bring back (D012).
  */
 
-import { useState, type ReactNode } from 'react';
-import { Check, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Attachments } from '@/components/timeline/attachments';
-import { Console } from '@/components/timeline/console';
-import { blockKey, useBlockFlash } from '@/components/timeline/flash';
+import { Block } from '@/components/timeline/block';
+import { Proposal } from '@/components/timeline/confirm-answer';
 import { ItemHead } from '@/components/timeline/item-head';
 import { autopilotMayTake } from '@/components/timeline/may-take';
-import { Note } from '@/components/timeline/note';
-import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { PilotWriting } from '@/components/timeline/writing';
-import { useAnswer, type Answer } from '@/hooks/use-answer';
 import { useShownProject } from '@/hooks/use-project-address';
-import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
-import { blocksOf, isProse, titleOf, type Block, type TimelineItem } from '@/hooks/use-timeline';
-import { cn } from '@/lib/utils';
-
-const YES = 'Yes';
-const NO = 'No';
+import { useAutopilotOff } from '@/hooks/use-projects';
+import { blocksOf, isProse, titleOf, type TimelineItem } from '@/hooks/use-timeline';
 
 /** An open confirmation item's card. */
 export function Confirmation({ item }: { item: TimelineItem }) {
   const { id: projectId } = useShownProject();
   const [block] = blocksOf(item);
-  const { answer, saving } = useAnswer(item.id, block.id);
-  const flash = useBlockFlash(item.id, block.id);
-  const archived = useArchived(projectId);
   const autopilotOff = useAutopilotOff(projectId);
   const [details, setDetails] = useState(false);
   // The API gives every prose item but the opening its text.
   const prose = item.body!.filter(isProse);
-  const deferred = saving === null && block.answer === DEFERRED;
   return (
     <div className="item-body">
       <ItemHead item={item} because={block.because} mayTake={autopilotMayTake(item, block, autopilotOff)} asked={block.writer_asked} />
-      <ConfirmControls
-        field={blockKey(item.id, block.id)}
-        block={block}
-        chosen={saving === null ? block.answer : saving.answer}
-        live={saving === null}
-        disabled={archived}
-        address={flash}
-        onAnswer={answer}
-      >
-        <div className="item-title" data-testid="timeline.item.title">
-          <LinkedText text={titleOf(item)} />
-        </div>
-        <Proposal block={block} />
-        {deferred ? <Deferral block={block} /> : saving === null && block.note !== null && <Note text={block.note} />}
-      </ConfirmControls>
+      <div className="item-title" data-testid="timeline.item.title">
+        <LinkedText text={titleOf(item)} />
+      </div>
+      <Proposal block={block} />
+      <Block item={item} block={block} solo />
       {prose.length > 0 && (
         <div className="confirm-foot">
           <button
@@ -88,97 +65,5 @@ export function Confirmation({ item }: { item: TimelineItem }) {
       <Attachments item={item} />
       {item.writing && <PilotWriting />}
     </div>
-  );
-}
-
-/** What Yes does: a confirmation always carries its proposal. */
-export function Proposal({ block }: { block: Block }) {
-  return (
-    <div className="proposal" data-testid="timeline.confirm.proposal">
-      <LinkedText text={block.proposal!} />
-    </div>
-  );
-}
-
-interface ConfirmControlsProps {
-  /** The block's key, which its No's reason keeps its unsent words under. */
-  field: string;
-  block: Block;
-  /** The answer that shows chosen: the one being saved, else the block's own. */
-  chosen: string | null;
-  /** Whether it takes an answer now. */
-  live: boolean;
-  /** An archived project's: the controls stand and take nothing (D012). */
-  disabled?: boolean;
-  /** Its row carries the block's address, and flashes by it: on the card, where no block panel does. */
-  address?: ReturnType<typeof useBlockFlash>;
-  onAnswer: Answer;
-  /** What the row says beside the check and the cross. */
-  children: ReactNode;
-}
-
-export function ConfirmControls({ field, block, chosen, live, disabled = false, address, onAnswer, children }: ConfirmControlsProps) {
-  const [refusing, setRefusing] = useState(false);
-  const yes = () => {
-    setRefusing(false);
-    onAnswer(YES);
-  };
-  return (
-    <>
-      <div
-        className={cn('confirm-row', address?.flashing && 'flash')}
-        onAnimationEnd={address?.onAnimationEnd}
-        data-testid="timeline.confirm"
-        data-block-id={address === undefined ? undefined : block.id}
-      >
-        <div className="confirm-text">{children}</div>
-        <div className="yes-no">
-          <button
-            type="button"
-            className={cn('yn yes', chosen === YES && 'chosen')}
-            onClick={yes}
-            disabled={!live || disabled}
-            title={`Yes: ${block.proposal}`}
-            aria-label="Yes"
-            data-testid="timeline.confirm.yes"
-          >
-            <Check className="icon" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={cn('yn no', chosen === NO && 'chosen')}
-            onClick={() => setRefusing(!refusing)}
-            disabled={!live || disabled}
-            title="No, and say why"
-            aria-label="No"
-            aria-expanded={refusing}
-            data-testid="timeline.confirm.no"
-          >
-            <X className="icon" aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-      {live && refusing && (
-        <Console
-          className="no"
-          field={`${field}/no`}
-          label="No: why not"
-          placeholder="No: why not? (you may leave it empty)"
-          send="Send No"
-          blankSends
-          testId="timeline.confirm.console"
-          onSend={(reason, onSaved) =>
-            onAnswer(NO, {
-              note: reason,
-              onSaved: () => {
-                onSaved();
-                setRefusing(false);
-              },
-            })
-          }
-          onClose={() => setRefusing(false)}
-        />
-      )}
-    </>
   );
 }
