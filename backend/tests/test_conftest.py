@@ -6,7 +6,7 @@ Each runs a test of its own on a pytester run inside this one, which takes
 the two fixtures as they are, on the guard and the cap this run's session
 fixtures installed. The app's code that nests or sends is a module compiled
 as one of app/, none on disk, so that `backend_stack()` reads its frames as
-the app's: no route of the app's nests."""
+the app's, on an engine of the inner run's own: that run has no app."""
 
 from collections.abc import Callable
 

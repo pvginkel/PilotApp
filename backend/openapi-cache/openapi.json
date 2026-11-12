@@ -16434,6 +16434,22 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/pool-guard/nest": {
+      "post": {
+        "description": "Returns:     204: Nested",
+        "operationId": "post__api_testing_pool-guard_nest",
+        "parameters": [],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Check out a second connection of the pool while the request's session holds one, for a spec of the guard: no route of the app's nests.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/pool-guard/take": {
       "post": {
         "description": "Refused where the guard is not installed, so that a backend without POOL_GUARD fails the spec rather than passing it unwatched.",

@@ -90,11 +90,12 @@ def pool_guard_installed() -> Generator[None]:
 
 
 @pytest.fixture(autouse=True)
-def pool_guard(pool_guard_installed: None) -> Generator[None]:
+def pool_guard(pool_guard_installed: None) -> Generator[PoolGuard]:
     """Fails the test where a thread checked out a second connection of a
     pool while it held one: in the test, its fixtures, or a thread a test
-    before it left running, whose stacks say so."""
-    yield
+    before it left running, whose stacks say so. A test that has the app
+    nest drains it from the guard this hands it."""
+    yield _POOL_GUARD
     nestings = _POOL_GUARD.drain()
     if nestings:
         pytest.fail("\n\n".join(n.describe() for n in nestings), pytrace=False)
