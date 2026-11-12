@@ -5,7 +5,8 @@
  * bar after the outage's, the week's first, its line giving the share, the reading's age and what
  * the halt does to running work by its window's setting (F135.6) — a badge in the top bar off a
  * phone, the week's a button opening its line in a popover, the five-hour's and the outage's their
- * line their title; a line on a phone. A reading under the limit lifts it, and the held start goes
+ * line their title; on a phone a line with the badge's words alone, opening its whole line in a flyout,
+ * the week's with its overrule. A reading under the limit lifts it, and the held start goes
  * on. The reading is the fake controller's, on the backend's fleet stream.
  */
 
@@ -115,7 +116,9 @@ test.describe('The usage halts', () => {
     await expect(shell.goldBadge('five_hour_halt')).toHaveAttribute('title', fiveHourLine(80));
 
     await page.setViewportSize(PHONE);
-    await expect(shell.goldLine('five_hour_halt')).toHaveText(fiveHourLine(80));
+    await expect(shell.goldLine('five_hour_halt')).toHaveText('Halted at the five-hour limit');
+    await shell.goldLine('five_hour_halt').click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(fiveHourLine(80));
   });
 
   test('both show, the outage’s first, then the week’s, then the five-hour’s, and a held start says the week’s', async ({
@@ -160,8 +163,18 @@ test.describe('The usage halts', () => {
       'week_halt',
       'five_hour_halt',
     ]);
-    await expect(shell.goldText(shell.goldLine('week_halt'))).toHaveText(weekLine(90));
-    await expect(shell.goldOverrule(shell.goldLine('week_halt'))).toBeVisible();
-    for (const code of ['outage', 'five_hour_halt'] as const) await expect(shell.goldOverrule(shell.goldLine(code))).toHaveCount(0);
+    // Each opens its whole line in its flyout; the week's alone carries an overrule.
+    await expect(shell.goldBar.getByRole('button')).toHaveCount(3);
+    await shell.goldLine('week_halt').click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(weekLine(90));
+    await expect(shell.goldOverrule(shell.goldFlyout)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await shell.goldLine('five_hour_halt').click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(fiveHourLine(75));
+    await expect(shell.goldFlyout.getByRole('button')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await shell.goldLine('outage').click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(/^The controller has been unreachable since /);
+    await expect(shell.goldFlyout.getByRole('button')).toHaveCount(0);
   });
 });

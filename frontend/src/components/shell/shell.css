@@ -176,7 +176,35 @@
   /* ---- The gold bar on a phone, across the page's top: a line per condition that holds all
      work, none while nothing does; off a phone the top bar's badges have them ----------------- */
 
-  .gold-bar { grid-area: 1 / 1 / 2 / 2; min-width: 0; }
+  .gold-bar { grid-area: 1 / 1 / 2 / 2; position: relative; min-width: 0; }
+  /* A condition's line on the bar: the badge's icon and words on one line, without the time, the
+     words cut where they do not fit, a chevron at its end; a button, which opens the condition's
+     flyout. */
+  .gold-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 14px 8px 18px;
+    border: 0;
+    border-bottom: 1px solid hsl(var(--gold-edge));
+    background: hsl(var(--gold));
+    color: hsl(var(--gold-foreground));
+    font: inherit;
+    font-size: var(--text-base);
+    font-weight: 600;
+    line-height: 1.45;
+    text-align: left;
+    cursor: pointer;
+  }
+  .gold-strip .words { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The ring inside the line, which runs to the page's edges. */
+  .gold-strip:focus-visible { outline-color: hsl(var(--gold-foreground)); outline-offset: -2px; }
+  /* Its flyout: the top bar's popover, placed in the bar and so under its last line, every line
+     in sight beside it, within the page's width. */
+  .gold-bar .popover-anchor { position: static; }
+  .gold-bar .popover.gold-pop { top: calc(100% + 6px); left: 8px; width: min(380px, calc(100% - 16px)); }
+  /* A condition's whole line, in the popover and the flyout, and the notifications' offer. */
   .gold-line {
     display: flex;
     gap: 8px;

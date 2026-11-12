@@ -4,9 +4,11 @@
  * condition in the top bar, after Pilot's name, its full line its title; the week's halt's, which
  * carries its overrule (F135.2), a button opening a popover that holds its line and the overrule,
  * so that a stray click on the top bar spends no quota. On a phone a line per condition across the
- * page's top, over the screen's head, the drawer opening under it, the overrule on the halt's line. Each
- * stands while its condition holds and goes when it ends; nothing dismisses it. The time a
- * condition began carries its date once that is an earlier day than the viewer's today.
+ * page's top, over the screen's head, the drawer opening under it: the badge's icon and words on
+ * one line, without the time, cut where they do not fit, a button that opens a flyout holding the
+ * condition's whole line and the overrule it offers. Each stands while its condition holds and goes when it ends;
+ * nothing dismisses it. The time a condition began carries its date once that is an earlier day
+ * than the viewer's today.
  */
 
 import { ChevronDown } from 'lucide-react';
@@ -93,9 +95,40 @@ export function GoldBar({ conditions }: GoldProps) {
     // A live region from the first render on, so that a line coming in is announced.
     <div className="gold-bar" role="status" aria-label="What holds all work" data-testid="shell.gold-bar">
       {conditions.map((condition) => (
-        <GoldLine key={condition.code} condition={condition} today={today} testId="shell.gold-bar.line" />
+        <GoldStrip key={condition.code} condition={condition} today={today} />
       ))}
     </div>
+  );
+}
+
+/** A condition's one line on the phone's bar, the badge's words, and the flyout it opens. */
+function GoldStrip({ condition, today }: { condition: Condition; today: string }) {
+  const { badge, icon: Icon } = conditionLine(condition, today);
+  return (
+    <Popover
+      label={badge}
+      className="gold-pop"
+      testId="shell.gold-bar.popover"
+      trigger={({ open, toggle }) => (
+        <button
+          type="button"
+          className="gold-strip"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onClick={toggle}
+          data-condition={condition.code}
+          data-testid="shell.gold-bar.line"
+        >
+          <Icon className="icon" aria-hidden="true" />
+          <span className="words" data-testid="shell.gold-bar.line.words">
+            {badge}
+          </span>
+          <ChevronDown className="icon chev" aria-hidden="true" />
+        </button>
+      )}
+    >
+      {(close) => <GoldLine condition={condition} today={today} testId="shell.gold-bar.popover.line" onOverrule={close} />}
+    </Popover>
   );
 }
 
@@ -107,7 +140,7 @@ interface GoldLineProps {
   onOverrule?: () => void;
 }
 
-/** A condition's line, with the overrule it offers: on the phone's bar, and in the week's halt's popover. */
+/** A condition's whole line, with the overrule it offers: in the week's halt's popover, and in a phone's flyout. */
 function GoldLine({ condition, today, testId, onOverrule }: GoldLineProps) {
   const { title, detail, icon: Icon } = conditionLine(condition, today);
   return (

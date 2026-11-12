@@ -3,8 +3,9 @@
  * browser, at once and with no reload. Off a phone it is a badge in the top bar, left-aligned after
  * Pilot's name, the buttons' corner radius, its full line its title, the light theme's gold in both
  * themes at 4.5:1 or better; at 900px and below, with no top bar, it is a line across the page's
- * top, in gold tokens of its own, light and dark, the drawer opening under it. It goes when the controller
- * answers again, and nothing dismisses it. The time it began carries its date once that is an
+ * top, in gold tokens of its own, light and dark, the drawer opening under it: the badge's words on
+ * one line, without the time, cut where they do not fit, a tap opening a flyout with the
+ * condition's whole line and the overrule it offers (R26). It goes when the controller answers again, and nothing dismisses it. The time it began carries its date once that is an
  * earlier day than the viewer's today (R9). A stream that comes back up reads it again, covering a
  * turn missed while it was down (design 2 §6.2). A controller that answers about one environment
  * turns nothing on (review O2). While the store's update holds, it shows Pilot updating its store
@@ -27,6 +28,11 @@ const BADGE = badgeOf(CLOCK);
 const updatingLine = (since: string) =>
   `Pilot is updating its store since ${since}. No chat answers and no job of Pilot’s starts until it is done; work items go on.`;
 const PHONE = { width: 390, height: 844 };
+const NARROW = { width: 280, height: 700 };
+const WEEK_LINE = new RegExp(String.raw`^Work items have been halted at the week’s usage limit since ${CLOCK}\. 92% of the week’s quota is used\. .+ go on\.$`);
+const FIVE_HOUR_LINE = new RegExp(
+  String.raw`^Work items have been halted at the five-hour usage limit since ${CLOCK}\. 80% of the five-hour window’s quota is used\. .+ go on\.$`,
+);
 
 async function wideBoxes(shell: ShellPage) {
   const [top, brand, badge, side, centre] = await Promise.all(
@@ -112,13 +118,19 @@ test.describe('The gold bar', () => {
     }
     expect(new Set(badgeBackgrounds).size).toBe(1);
 
-    // On a phone: no top bar and no badge, a line across the page's top, the centre and the
-    // drawer under it.
+    // On a phone: no top bar and no badge, a line across the page's top with the badge's words,
+    // the centre and the drawer under it; its whole line in the flyout a tap opens.
     await page.setViewportSize(PHONE);
     await expect.poll(async () => (await shell.goldBar.boundingBox())?.width).toBe(PHONE.width);
     await expect(shell.topBar).toHaveCount(0);
     await expect(shell.goldBadges).toHaveCount(0);
-    await expect(shell.goldLine('outage')).toHaveText(LINE);
+    await expect(shell.goldLine('outage')).toHaveText('Controller unreachable');
+    await shell.goldLine('outage').click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(LINE);
+    await expect(shell.goldFlyout.getByRole('button')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(shell.goldFlyout).toHaveCount(0);
+    await expect(shell.goldLine('outage')).toBeVisible();
     const bar = (await shell.goldBar.boundingBox())!;
     const centre = (await shell.centre.boundingBox())!;
     expect(bar).toMatchObject({ x: 0, y: 0 });
@@ -147,7 +159,7 @@ test.describe('The gold bar', () => {
     for (const each of [other, late]) await expect(each.goldBadge('outage')).toHaveCount(0);
   });
 
-  test('gives the date with the time it began once that is an earlier day, on the badge, its title and the line', async ({
+  test('gives the date with the time it began once that is an earlier day, on the badge, its title and a phone’s flyout', async ({
     page,
     people,
     shell,
@@ -182,7 +194,8 @@ test.describe('The gold bar', () => {
     await expect(shell.goldBadge('outage')).toHaveAttribute('title', lineOf(dated));
 
     await page.setViewportSize(PHONE);
-    await expect(shell.goldLine('outage')).toHaveText(lineOf(dated));
+    await shell.goldLine('outage').click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(lineOf(dated));
 
     // A page opened on a later day reads it dated as it opens.
     const later = await page.context().newPage();
@@ -267,11 +280,95 @@ test.describe('The gold bar', () => {
     ]);
 
     await page.setViewportSize(PHONE);
-    await expect(shell.goldLine('store_update')).toHaveText(updatingLine(since));
+    await expect(shell.goldLine('store_update')).toHaveText('Pilot is updating');
+    await shell.goldLine('store_update').click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(updatingLine(since));
 
+    // Its flyout goes with it.
     await storeUpdate.lift();
     await expect(shell.goldLine('store_update')).toHaveCount(0);
+    await expect(shell.goldFlyout).toHaveCount(0);
     await expect(shell.goldLine('week_halt')).toBeVisible();
+  });
+
+  test('on a phone keeps each condition to one line, its words cut where the width runs out, and opens its whole line in a flyout on a tap', async ({
+    page,
+    people,
+    shell,
+    profile,
+    controller,
+    deploymentSse,
+  }) => {
+    await people.signIn();
+    await controller.usage({ seven_day: 0.92, five_hour: 0.8 });
+    await shell.open('/profile');
+    await deploymentSse.ensureConnected();
+    await page.setViewportSize(PHONE);
+
+    // A line each across the page's width, the badge's words on it, one line high.
+    const week = shell.goldLine('week_halt');
+    const fiveHour = shell.goldLine('five_hour_halt');
+    await expect(week).toHaveText('Halted at the week’s limit');
+    await expect(fiveHour).toHaveText('Halted at the five-hour limit');
+    const oneLine = await shell.goldLineWords(week).evaluate((words) => parseFloat(getComputedStyle(words).lineHeight));
+    const lineBoxes = async () => {
+      const boxes = await Promise.all([week, fiveHour].map((line) => line.boundingBox()));
+      return boxes.map((box) => box!);
+    };
+    for (const box of await lineBoxes()) {
+      expect(box).toMatchObject({ x: 0, width: PHONE.width });
+      // The words' one line, the line's 8px above and under it and its rule.
+      expect(box.height).toBeCloseTo(oneLine + 17, 0);
+    }
+    const [first, second] = await lineBoxes();
+    expect(second.y).toBeCloseTo(first.y + first.height, 0);
+    for (const line of [week, fiveHour]) {
+      expect(await shell.goldLineWords(line).evaluate((words) => words.scrollWidth <= words.clientWidth)).toBe(true);
+    }
+
+    // Narrower than its words: they are cut with an ellipsis, the line as high, its chevron inside it.
+    await page.setViewportSize(NARROW);
+    await expect.poll(async () => (await fiveHour.boundingBox())?.width).toBe(NARROW.width);
+    await expect(shell.goldLineWords(fiveHour)).toHaveCSS('text-overflow', 'ellipsis');
+    expect(await shell.goldLineWords(fiveHour).evaluate((words) => words.scrollWidth > words.clientWidth)).toBe(true);
+    for (const box of await lineBoxes()) expect(box.height).toBeCloseTo(first.height, 0);
+    const chevron = (await fiveHour.locator('.chev').boundingBox())!;
+    expect(chevron.x + chevron.width).toBeLessThanOrEqual(NARROW.width - 14);
+    await page.setViewportSize(PHONE);
+    await expect.poll(async () => (await fiveHour.boundingBox())?.width).toBe(PHONE.width);
+
+    // A tap opens the line's flyout under the bar, within the page: the whole line, and the week's overrule.
+    await week.click();
+    await expect(week).toHaveAttribute('aria-expanded', 'true');
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(WEEK_LINE);
+    await expect(shell.goldOverrule(shell.goldFlyout)).toHaveText('Go on to 97%');
+    const flyout = (await shell.goldFlyout.boundingBox())!;
+    expect(flyout.x).toBeGreaterThanOrEqual(0);
+    expect(flyout.x + flyout.width).toBeLessThanOrEqual(PHONE.width);
+    expect(flyout.y).toBeGreaterThanOrEqual(second.y + second.height);
+    // The lines stand as they stood.
+    expect(await lineBoxes()).toEqual([first, second]);
+
+    // A tap on the other line closes it and does nothing else; the next opens that line's own,
+    // which has no button.
+    await fiveHour.click();
+    await expect(shell.goldFlyout).toHaveCount(0);
+    await fiveHour.click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(FIVE_HOUR_LINE);
+    await expect(shell.goldFlyout.getByRole('button')).toHaveCount(0);
+    await expect(week).toHaveAttribute('aria-expanded', 'false');
+
+    // A tap outside it closes it and does nothing else, here on the alarms' switch; its line's own
+    // tap closes it too.
+    await expect(profile.alarms).toBeChecked();
+    await profile.alarms.click();
+    await expect(shell.goldFlyout).toHaveCount(0);
+    await expect(profile.alarms).toBeChecked();
+    await fiveHour.click();
+    await expect(shell.goldFlyout).toHaveCount(1);
+    await fiveHour.click();
+    await expect(shell.goldFlyout).toHaveCount(0);
+    await expect(fiveHour).toBeVisible();
   });
 
   test('stays away while the controller answers about one environment alone', async ({

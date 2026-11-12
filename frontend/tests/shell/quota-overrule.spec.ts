@@ -1,8 +1,8 @@
 /**
  * The week's halt's overrule on the gold bar (F135.2, F135.7; UC *The gold bar*): off a phone the
  * halt's badge is a button with a chevron that opens a popover under it, holding its line and the
- * overrule, so that a stray click on the top bar spends no quota; on a phone the overrule sits on the
- * halt's line. One at a time, as the halt offers it: under the second limit the allowance, its
+ * overrule, so that a stray click on the top bar spends no quota; on a phone the halt's line opens a
+ * flyout that holds them (R26). One at a time, as the halt offers it: under the second limit the allowance, its
  * target the share plus 5% and at most the second limit; at it, run-out. A toast says what it did,
  * and every open browser's bar follows. The overrule ends at its target, and the halt holds there
  * again. A browser that missed the reading that changed the offer is refused, with the reason. The
@@ -105,22 +105,28 @@ test.describe('The week’s overrule', () => {
     await expect(button).toHaveText('Go on to 98%');
   });
 
-  test('at the second limit runs the quota out, on a phone from the halt’s line', async ({ page, people, controller, shell, deploymentSse }) => {
+  test('at the second limit runs the quota out, on a phone from the flyout of the halt’s line', async ({ page, people, controller, shell, deploymentSse }) => {
     await people.signIn();
     await controller.usage({ seven_day: 0.98, five_hour: 0.1 });
     await shell.open('/profile');
     await deploymentSse.ensureConnected();
     await page.setViewportSize(PHONE);
 
+    // The line carries no overrule itself: a tap on it opens its flyout, and spends no quota.
     const line = shell.goldLine('week_halt');
-    await expect(shell.goldText(line)).toHaveText(weekLine(98));
-    const button = shell.goldOverrule(line);
+    await expect(line).toHaveText('Halted at the week’s limit');
+    await expect(shell.goldOverrule(shell.goldBar)).toHaveCount(0);
+    await line.click();
+    await expect(shell.goldText(shell.goldFlyout)).toHaveText(weekLine(98));
+    const button = shell.goldOverrule(shell.goldFlyout);
     await expect(button).toHaveText('Run it out');
     await expect(button).toHaveAttribute('title', RUN_OUT);
-    const textColour = await shell.goldText(line).evaluate((text) => getComputedStyle(text).color);
+    const textColour = await shell.goldText(shell.goldFlyout).evaluate((text) => getComputedStyle(text).color);
     await expect(button).toHaveCSS('border-top-color', textColour);
 
+    // The overrule's tap closes the flyout, and the halt's line goes as it lifts.
     await button.click();
+    await expect(shell.goldFlyout).toHaveCount(0);
     await expect(page.getByTestId('app-shell.toast.item').getByText(RUN_OUT, { exact: true })).toBeVisible();
     await expect(line).toHaveCount(0);
   });

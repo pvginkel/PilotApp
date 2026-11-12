@@ -8,8 +8,8 @@ type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCo
 
 /**
  * The frame every screen sits in: the offer of the browser's notifications, the top bar, its gold
- * badges, the week's halt's popover and its profile menu, the gold bar, the side column, on a phone
- * the drawer with its head and its button, the keys list.
+ * badges, the week's halt's popover and its profile menu, the gold bar, its lines and their flyout,
+ * the side column, on a phone the drawer with its head and its button, the keys list.
  */
 export class ShellPage {
   /** The offer of the browser's notifications, across the page's top, and its two buttons. */
@@ -27,6 +27,8 @@ export class ShellPage {
   readonly goldPopover: Locator;
   readonly app: Locator;
   readonly goldBar: Locator;
+  /** A condition's flyout on a phone, under its line: its whole line, with the overrule it offers. */
+  readonly goldFlyout: Locator;
   readonly side: Locator;
   readonly scrim: Locator;
   readonly centre: Locator;
@@ -58,6 +60,7 @@ export class ShellPage {
     this.goldPopover = page.getByTestId('shell.gold-badges.popover');
     this.app = page.getByTestId('shell.app');
     this.goldBar = page.getByTestId('shell.gold-bar');
+    this.goldFlyout = page.getByTestId('shell.gold-bar.popover');
     this.side = page.getByTestId('shell.side');
     this.scrim = page.getByTestId('shell.scrim');
     this.centre = page.getByTestId('shell.centre');
@@ -80,17 +83,22 @@ export class ShellPage {
     return this.goldBadges.locator(`[data-testid="shell.gold-badges.badge"][data-condition="${code}"]`);
   }
 
-  /** The gold bar's line for a condition on a phone, by its code. */
+  /** The gold bar's line for a condition on a phone, by its code: the button that opens its flyout. */
   goldLine(code: ConditionCode): Locator {
     return this.goldBar.locator(`[data-testid="shell.gold-bar.line"][data-condition="${code}"]`);
   }
 
-  /** A gold line's words, the phone's (`goldLine()`) or the popover's (`goldPopover`), without its button. */
+  /** The words on a phone's line (`goldLine()`), which are cut where they do not fit. */
+  goldLineWords(line: Locator): Locator {
+    return line.getByTestId('shell.gold-bar.line.words');
+  }
+
+  /** A condition's whole line, in the popover (`goldPopover`) or a phone's flyout (`goldFlyout`), without its button. */
   goldText(line: Locator): Locator {
     return line.getByTestId('shell.gold-line.text');
   }
 
-  /** A gold line's overrule button, the phone's (`goldLine()`) or the popover's (`goldPopover`). */
+  /** The overrule button of a condition's whole line, in the popover (`goldPopover`) or a phone's flyout (`goldFlyout`). */
   goldOverrule(line: Locator): Locator {
     return line.getByTestId('shell.gold-line.overrule');
   }
