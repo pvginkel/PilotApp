@@ -245,7 +245,14 @@ test.describe('Pilot’s job on an open card', () => {
     // On a narrow phone the job goes to the head's second row, its dot with it.
     const wide = page.viewportSize()!;
     await page.setViewportSize({ width: 280, height: 653 });
-    await expect.poll(async () => (await box(item.job.root)).y - (await box(item.time)).y).toBeGreaterThan(20);
+    // At this width the page mounts the phone's project in the desk's place, and a head read while
+    // the desk's is taken down has no box.
+    await expect
+      .poll(async () => {
+        const [job, at] = await Promise.all([item.job.root.boundingBox(), item.time.boundingBox()]);
+        return job && at ? job.y - at.y : Number.NaN;
+      })
+      .toBeGreaterThan(20);
     expect(await dotsEndingARow(item.head)).toBe(0);
     await page.setViewportSize(wide);
 
