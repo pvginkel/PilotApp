@@ -2,11 +2,13 @@
  * The screens kept live (F80.2): the server's `project_changed` reads again what the screens show
  * of the project it names — its timeline, its head and the tabs' badges — leaving a read under way
  * to land first, and a stream that comes back up reads them all again, covering whatever it missed
- * while it was down. The page whose write the event is reads nothing on it: its write reads every
- * query again, once.
+ * while it was down. A timeline no screen shows is read again once its project is shown, a work
+ * item's move written into it after the change notwithstanding. The page whose write the event is
+ * reads nothing on it: its write reads every query again, once.
  */
 
 import type { Request } from '@playwright/test';
+import type { TestEvent } from '@/lib/test/test-events';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { createDeploymentSseHelper } from '../support/helpers/deployment-sse';
@@ -125,6 +127,50 @@ test.describe('Live updates', () => {
       expect([...reads].filter(([, count]) => count > 1)).toEqual([]);
     });
   }
+
+  test('a timeline left while an item of it is done is read again on the switch back, a work item’s move written into it after the change notwithstanding', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    timeline,
+    deploymentSse,
+    testEvents,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Left');
+    const other = makeUnique('Elsewhere');
+    const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    const otherId = await projects.make({ name: other, members: [me.handle!] });
+    const route = await projects.place(id, { kind: 'document', title: 'The route', text: 'We leave on Friday.\n' });
+    const work = await projects.startWork(id, { title: 'Surveying the stylesheets', brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
+    await timeline.open(id);
+    await deploymentSse.ensureConnected();
+    await expect(timeline.item(work).work.running).toBeVisible();
+    await expect(timeline.item(route).root).not.toHaveAttribute('data-state', 'done');
+
+    // The project's timeline stays in the cache, no screen showing it.
+    await projectList.tab(other).click();
+    await expect(page).toHaveURL(projectAddress(otherId));
+    await testEvents.clearEvents();
+    const heard = (stream: string, item?: string) => (event: TestEvent) => {
+      const data = event.kind === 'sse' && event.streamId === stream ? (event.data as { project_id: string; item_id?: string }) : undefined;
+      return data?.project_id === id && (item === undefined || data.item_id === item);
+    };
+
+    // The document is done: the project's change marks its timeline to be read again ...
+    await projects.doneByPilot(route);
+    await testEvents.waitForEvent(heard('project_changed'));
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    // ... and the work item's move, heard after it, is written into the timeline as read.
+    await projects.setProgress(work, [{ code: 'a', label: 'Step a', state: 'active' }]);
+    await testEvents.waitForEvent(heard('work_moved', work));
+
+    await projectList.tab(name).click();
+    await expect(page).toHaveURL(projectAddress(id));
+    await expect(timeline.item(route).root).toHaveAttribute('data-state', 'done');
+  });
 
   test('a second tab follows the head the first one changes', async ({ context, people, projects, projectHead }) => {
     const me = await people.signIn();

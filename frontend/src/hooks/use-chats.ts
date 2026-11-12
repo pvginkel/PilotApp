@@ -29,6 +29,7 @@ import {
   usePutProjectsChatReadByProjectId,
 } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
+import { patchQueryData } from '@/lib/patch-query';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
@@ -52,7 +53,7 @@ export function useProjectChats(projectId: string): { read: ChatRead; reading: b
 
 /** Whether Pilot answers in the chat, into the project's list as read; a chat it does not hold yet comes with its next read. */
 function setAnswering(queryClient: QueryClient, projectId: string, chatId: string, answering: boolean): void {
-  queryClient.setQueryData<ChatList>(chatsOf(projectId), (list) =>
+  patchQueryData<ChatList>(queryClient, chatsOf(projectId), (list) =>
     list === undefined ? undefined : { ...list, chats: list.chats.map((chat) => (chat.id === chatId ? { ...chat, answering } : chat)) },
   );
 }
@@ -189,7 +190,7 @@ export function useChatSeen(projectId: string, atEnd: boolean, unread: boolean):
       (place) => {
         trackFormSuccess('chat.read', fields);
         tried.current = false;
-        queryClient.setQueryData<ChatList>(chatsOf(projectId), (list) => (list === undefined ? undefined : { ...list, ...place }));
+        patchQueryData<ChatList>(queryClient, chatsOf(projectId), (list) => (list === undefined ? undefined : { ...list, ...place }));
       },
       () => trackFormError('chat.read', fields),
     );

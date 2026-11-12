@@ -26,6 +26,7 @@ import { useSseContext } from '@/contexts/sse-context';
 import type { ItemDocument } from '@/hooks/use-document';
 import { SENDER } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
+import { patchQueryData } from '@/lib/patch-query';
 
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
@@ -106,12 +107,13 @@ const timelineOf = (project_id: string) => [TIMELINE, { path: { project_id } }];
 /**
  * Writes `work` into the item's in its project's timeline as read, and into each item's job and job
  * after its turn that is the item; given `from`, only where the session there is still in one of
- * those states, so that a move heard first is not undone.
+ * those states, so that a move heard first is not undone. A timeline an event marked to be read
+ * again while no screen showed it stays marked, and is read when one shows it again.
  */
 export function moveWork(queryClient: QueryClient, project: string, item: string, work: Work, from?: readonly Work['state'][]): void {
   const moves = (current: Work | null) => from === undefined || (current !== null && from.includes(current.state));
   const moveJob = (job: Job | null) => (job !== null && job.id === item && moves(job.work) ? { ...job, work } : job);
-  queryClient.setQueryData<Timeline>(timelineOf(project), (timeline) =>
+  patchQueryData<Timeline>(queryClient, timelineOf(project), (timeline) =>
     timeline === undefined
       ? undefined
       : {
