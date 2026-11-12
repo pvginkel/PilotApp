@@ -418,10 +418,17 @@ test.describe('The Chat tab’s composer', () => {
     await expect(chat.messageTexts).toHaveText(['Which stove?']);
     await controller.finish(chats.store, session, 'success', 'The gas one.');
 
+    // Sent again, the same words stand in at the chat's end until their own record comes, never on the first's.
+    const shown = await chat.watchMessages();
     const sent = chat.acted('send');
     await chat.send.click();
     await sent;
     await expect(chat.messageTexts).toHaveText(['Which stove?', 'Which stove?']);
+    await expect.poll(shown).toEqual([
+      [1, 0],
+      [2, 1],
+      [2, 0],
+    ]);
     await expect(chat.field).toHaveValue('');
     expect(await kept()).toEqual({});
     await chats.working(session);
