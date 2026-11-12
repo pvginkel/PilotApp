@@ -22,6 +22,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique, waitTestEvent } from '../support/helpers';
 import { PageFetches } from '../support/network';
 import { projectAddress, type Projects } from '../support/projects';
+import { heardClicks, scrolled, underMiddle } from '../support/steps';
 
 type Status = 'pending' | 'in_progress' | 'done';
 type Note = { id: string; summary: string; content: string };
@@ -165,6 +166,20 @@ test.describe('The plan popover', () => {
     await expect(projectHead.planStep('Step b').root.locator('.mark')).toHaveAccessibleName('In progress');
     await expect(projectHead.planStep('Step a').root.locator('.mark svg')).toHaveCount(1);
     await expect(projectHead.planSteps.locator('.mark svg')).toHaveCount(1);
+    // A step not started is marked in the others' colour, unfilled.
+    const mark = (title: string) =>
+      projectHead
+        .planStep(title)
+        .root.locator('.mark')
+        .evaluate((element) => {
+          const { borderTopColor, backgroundColor } = getComputedStyle(element);
+          return { border: borderTopColor, fill: backgroundColor };
+        });
+    const [done, now, pending] = [await mark('Step a'), await mark('Step b'), await mark('Step c')];
+    expect(pending.border).toBe(done.border);
+    expect(now.border).toBe(done.border);
+    expect(done.fill).toBe(done.border);
+    expect(pending.fill).toBe('rgba(0, 0, 0, 0)');
 
     const background = (title: string) => projectHead.planStep(title).root.evaluate((element) => getComputedStyle(element).backgroundColor);
     const highlighted = await background('Step b');
@@ -213,6 +228,99 @@ test.describe('The plan popover', () => {
     await expect(projectHead.plan.getByRole('link', { name: 'pvginkel/Example' })).toHaveAttribute('href', 'https://github.com/pvginkel/Example');
     await expect(projectHead.plan.getByRole('link', { name: 'PL-7' })).toHaveAttribute('href', `${backendUrl}/tickets/PL-7`);
     await expect(projectHead.plan.getByRole('link', { name: lab.name })).toHaveAttribute('href', opens);
+  });
+
+  test('opens with its first step in progress, or with none its first not started, at its middle; a step near an end of the list stays at that end', async ({
+    people,
+    projects,
+    projectHead,
+  }) => {
+    const me = await people.signIn();
+    const title = (index: number) => `Step ${String(index + 1).padStart(2, '0')}`;
+    // Sixty steps: those before `done` done, those of `going` in progress.
+    const plan = (done: number, going: number[]) =>
+      projects.make({
+        name: makeUnique('Long'),
+        members: [me.handle!],
+        tasks: Array.from({ length: 60 }, (_, index) => ({
+          ...step(String(index + 1).padStart(2, '0'), going.includes(index) ? 'in_progress' : index < done ? 'done' : 'pending'),
+        })),
+      });
+    const opened = async (id: string) => {
+      await projectHead.open(id);
+      await projectHead.step.click();
+      await expect(projectHead.planSteps).toHaveCount(60);
+      return scrolled(projectHead.plan);
+    };
+
+    // The first of two in progress, with done steps after it.
+    let place = await opened(await plan(40, [30, 50]));
+    expect(place.furthest).toBeGreaterThan(600);
+    expect(Math.abs(await underMiddle(projectHead.plan, projectHead.planStep(title(30)).root))).toBeLessThanOrEqual(1);
+    expect(place.top).toBeGreaterThan(0);
+    expect(place.top).toBeLessThan(place.furthest);
+
+    // None in progress: the first not started.
+    place = await opened(await plan(25, []));
+    expect(Math.abs(await underMiddle(projectHead.plan, projectHead.planStep(title(25)).root))).toBeLessThanOrEqual(1);
+
+    // Near the list's start and near its end, the list stands at that end.
+    place = await opened(await plan(1, [1]));
+    expect(place.top).toBe(0);
+    await expect(projectHead.planStep(title(1)).root).toBeInViewport({ ratio: 1 });
+    place = await opened(await plan(58, [58]));
+    expect(Math.abs(place.top - place.furthest)).toBeLessThanOrEqual(1);
+    await expect(projectHead.planStep(title(58)).root).toBeInViewport({ ratio: 1 });
+
+    // Every step done: at its top.
+    place = await opened(await plan(60, []));
+    expect(place.top).toBe(0);
+  });
+
+  test('a press outside it that closes it does nothing else, on a button or a link, a menu’s the same; a press that ends in no click leaves the next one its own', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    projectList,
+    shell,
+  }) => {
+    const me = await people.signIn();
+    const other = makeUnique('Other');
+    const next = await projects.make({ name: other, members: [me.handle!] });
+    const id = await projects.make({ name: makeUnique('Closing'), members: [me.handle!], tasks: [step('a', 'in_progress')] });
+    await projectHead.open(id);
+    const clicks = await heardClicks(page);
+
+    // The popover's closing press, on the menu's button: the menu stays shut until the next.
+    await projectHead.step.click();
+    await expect(projectHead.plan).toBeVisible();
+    expect(await clicks()).toBe(1);
+    await projectHead.menuButton.click();
+    await expect(projectHead.plan).toHaveCount(0);
+    expect(await clicks()).toBe(1);
+    await expect(projectHead.menuButton).toHaveAttribute('aria-expanded', 'false');
+    await projectHead.menuButton.click();
+    await expect(projectHead.menu).toBeVisible();
+    expect(await clicks()).toBe(2);
+
+    // The menu's closing press, on a link: the address stays until the next.
+    await projectList.tab(other).click();
+    await expect(projectHead.menu).toHaveCount(0);
+    expect(await clicks()).toBe(2);
+    await expect(page).toHaveURL(projectAddress(id));
+    await projectList.tab(other).click();
+    await expect(page).toHaveURL(projectAddress(next));
+    await page.goBack();
+    await expect(page).toHaveURL(projectAddress(id));
+
+    // The right button's press closes the popover and has no click: the next press is heard.
+    await projectHead.step.click();
+    await expect(projectHead.plan).toBeVisible();
+    await shell.centre.click({ button: 'right', position: { x: 300, y: 400 } });
+    await expect(projectHead.plan).toHaveCount(0);
+    await projectHead.menuButton.click();
+    await expect(projectHead.menu).toBeVisible();
   });
 
   test('closes on a click outside it, on Esc and on its button', async ({ page, people, projects, projectHead, shell }) => {

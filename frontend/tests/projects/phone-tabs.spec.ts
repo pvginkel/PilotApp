@@ -21,6 +21,7 @@ import { isOnTop } from '../support/page-objects/panel-page';
 import type { PhoneTabsPage } from '../support/page-objects/phone-tabs-page';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import { projectAddress } from '../support/projects';
+import { scrolled, underMiddle } from '../support/steps';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
 const CONVERSATION = '4d7a2e91-6b3c-4f05-8e1d-9c2b5a7f3e64';
@@ -220,6 +221,40 @@ test.describe('The tabs at the bottom on a phone', () => {
     await expect(phoneTabs.plan.heading).toHaveText('The plan');
     await expect(phoneTabs.plan.steps).toHaveCount(0);
     await expect(phoneTabs.plan.none).toHaveText('No steps yet.');
+  });
+
+  test('Plan opens with its first step in progress, or with none its first not started, at its middle; a step near the list’s end stays at that end', async ({
+    people,
+    projects,
+    timeline,
+    phoneTabs,
+  }) => {
+    const me = await people.signIn();
+    const code = (index: number) => String(index + 1).padStart(2, '0');
+    // Sixty steps: those before `done` done, those of `going` in progress.
+    const opened = async (done: number, going: number[]) => {
+      const id = await projects.make({
+        name: makeUnique('Long'),
+        members: [me.handle!],
+        tasks: Array.from({ length: 60 }, (_, index) => step(code(index), going.includes(index) ? 'in_progress' : index < done ? 'done' : 'pending')),
+      });
+      await timeline.open(id);
+      await phoneTabs.tab('plan').tap();
+      await expect(phoneTabs.plan.steps).toHaveCount(60);
+      return scrolled(phoneTabs.plan.root);
+    };
+
+    let place = await opened(40, [30, 50]);
+    expect(place.furthest).toBeGreaterThan(600);
+    expect(Math.abs(await underMiddle(phoneTabs.plan.root, phoneTabs.plan.steps.nth(30)))).toBeLessThanOrEqual(1);
+
+    place = await opened(25, []);
+    expect(Math.abs(await underMiddle(phoneTabs.plan.root, phoneTabs.plan.steps.nth(25)))).toBeLessThanOrEqual(1);
+
+    place = await opened(1, [1]);
+    expect(place.top).toBe(0);
+    place = await opened(58, [58]);
+    expect(Math.abs(place.top - place.furthest)).toBeLessThanOrEqual(1);
   });
 
   test('Back from Chat, Plan or Documents shows the Timeline, leaving it the one entry, and Back there leaves the project; a reload keeps the tab; switching projects is an entry, opening on the Timeline', async ({

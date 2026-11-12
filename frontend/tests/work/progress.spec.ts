@@ -18,6 +18,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
+import { scrolled, underMiddle } from '../support/steps';
 
 type State = 'pending' | 'active' | 'done';
 
@@ -300,6 +301,46 @@ test.describe('Its popover', () => {
     await projects.setProgress(work, []);
     await expect(item.progress).toHaveCount(0);
     await expect(item.steps.root).toHaveCount(0);
+  });
+
+  test('opens with its first active step, or with none its first not started, at its middle; a step near the list’s end stays at that end', async ({
+    people,
+    projects,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, work } = await running({ people, projects });
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(work).work;
+    const code = (index: number) => String(index + 1).padStart(2, '0');
+    // Sixty steps: those before `done` done, those of `active` active.
+    const opened = async (done: number, active: number[]) => {
+      await projects.setProgress(
+        work,
+        Array.from({ length: 60 }, (_, index) => step(code(index), active.includes(index) ? 'active' : index < done ? 'done' : 'pending')),
+      );
+      await expect(item.progress).toHaveAttribute('title', new RegExp(`^${done - active.filter((index) => index < done).length} of 60 steps done`));
+      await item.progress.click();
+      await expect(item.steps.items).toHaveCount(60);
+      return scrolled(item.steps.root);
+    };
+    const shut = async () => {
+      await item.progress.click();
+      await expect(item.steps.root).toHaveCount(0);
+    };
+
+    let place = await opened(40, [30, 50]);
+    expect(place.furthest).toBeGreaterThan(600);
+    expect(Math.abs(await underMiddle(item.steps.root, item.steps.items.nth(30)))).toBeLessThanOrEqual(1);
+    await shut();
+
+    place = await opened(25, []);
+    expect(Math.abs(await underMiddle(item.steps.root, item.steps.items.nth(25)))).toBeLessThanOrEqual(1);
+    await shut();
+
+    place = await opened(58, [58]);
+    expect(Math.abs(place.top - place.furthest)).toBeLessThanOrEqual(1);
   });
 
   test('at the timeline’s end, opens above its button, within the timeline', async ({ people, projects, timeline, deploymentSse }) => {

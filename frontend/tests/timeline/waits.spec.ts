@@ -332,6 +332,16 @@ test.describe('A wait’s done line on a phone', () => {
     await timeline.root.tap({ position: { x: 4, y: 4 } });
     await expect(item.lineMenu).toHaveCount(0);
 
+    // The tap that closes it does nothing else: the tab under it takes the next one.
+    await item.lineTitle.tap();
+    await expect(item.lineMenu).toBeVisible();
+    await phoneTabs.tab('plan').tap();
+    await expect(item.lineMenu).toHaveCount(0);
+    await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
+    await phoneTabs.tab('plan').tap();
+    await expect(phoneTabs.tab('plan')).toHaveAttribute('aria-selected', 'true');
+    await phoneTabs.tab('timeline').tap();
+
     await item.wait.note.tap();
     await item.lineMenuDiscuss.tap();
     await expect(phoneTabs.tab('chat')).toHaveAttribute('aria-selected', 'true');

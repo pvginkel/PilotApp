@@ -372,10 +372,9 @@
   .plan-step .step-title { flex: 1; min-width: 0; }
   /* The mark has no text, so its baseline is its bottom edge; it is lifted to centre on the
      step's capitals. */
-  .plan-step .mark { position: relative; top: calc(9px - 0.5cap); flex: none; width: 18px; height: 18px; border-radius: 999px; border: 1.5px solid hsl(var(--border)); }
+  .plan-step .mark { position: relative; top: calc(9px - 0.5cap); flex: none; width: 18px; height: 18px; border-radius: 999px; border: 1.5px solid hsl(var(--primary)); }
   .plan-step .mark .icon { position: absolute; inset: 0; margin: auto; width: 11px; height: 11px; }
-  .plan-step.done .mark { border-color: hsl(var(--primary)); background: hsl(var(--primary)); color: #fff; }
-  .plan-step.now .mark { border-color: hsl(var(--primary)); }
+  .plan-step.done .mark { background: hsl(var(--primary)); color: #fff; }
   .plan-step.now .mark::after { content: ''; position: absolute; inset: 3.5px; border-radius: 999px; background: hsl(var(--primary) / 0.45); }
   .plan-step .step-notes { flex: none; padding: 0; border: 0; background: none; color: hsl(var(--muted-foreground)); font: inherit; cursor: pointer; }
   .plan-step .step-notes:hover, .plan-step .step-notes[aria-expanded="true"] { color: hsl(var(--foreground)); }

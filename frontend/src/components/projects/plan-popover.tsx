@@ -1,10 +1,12 @@
 /**
  * The step button (F2.2) and the plan it opens (F3.1): the plan's steps behind the steps' button,
  * each step's open notes beside it (F3.6). On the phone the head's donut alone stands for the button,
- * a tap on it showing the Plan tab, the plan as a page, its rows a thumb's height (F3.7).
+ * a tap on it showing the Plan tab, the plan as a page, its rows a thumb's height (F3.7), opened
+ * as the popover is, at its step in progress.
  */
 
-import { StepRing, StepRow, StepsButton, stepsTooltip, type Step } from '@/components/shared/steps-button';
+import { useLayoutEffect, useRef } from 'react';
+import { showCurrentStep, StepRing, StepRow, StepsButton, stepsTooltip, type Step } from '@/components/shared/steps-button';
 import type { ProjectHead } from '@/hooks/use-projects';
 import { planStepMark } from '@/lib/utils/status-labels';
 
@@ -34,8 +36,10 @@ export function PlanDonut({ tasks, onShow }: { tasks: Task[]; onShow: () => void
 export function PlanPage({ tasks }: { tasks: Task[] }) {
   const steps = stepsOf(tasks);
   const done = steps.filter((step) => step.mark === 'done').length;
+  const page = useRef<HTMLElement>(null);
+  useLayoutEffect(() => showCurrentStep(page.current!), []);
   return (
-    <section className="plan-page" aria-label="The plan" data-testid="project.plan-page">
+    <section ref={page} className="plan-page" aria-label="The plan" data-testid="project.plan-page">
       <h2 data-testid="project.plan-page.heading">{`The plan${steps.length > 0 ? ` · ${done} of ${steps.length} done` : ''}`}</h2>
       {steps.length > 0 ? (
         <ol>

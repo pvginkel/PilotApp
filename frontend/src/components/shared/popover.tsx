@@ -17,6 +17,8 @@ interface PopoverProps {
   className: string;
   testId: string;
   trigger: (state: { open: boolean; toggle: () => void }) => ReactNode;
+  /** Called with the popover once it has opened and has its height. */
+  onOpened?: (popover: HTMLElement) => void;
   children: ReactNode | ((close: () => void) => ReactNode);
 }
 
@@ -25,11 +27,15 @@ const GAP = 6;
 const EDGE = 12;
 
 /** The head's popovers stand in Esc's order where the plan does. */
-export function Popover({ label, anchorClassName, className, testId, trigger, children }: PopoverProps) {
+export function Popover({ label, anchorClassName, className, testId, trigger, onOpened, children }: PopoverProps) {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const anchor = useDismiss('plan', open, close);
   const pop = useRef<HTMLDivElement>(null);
+  const opened = useRef(onOpened);
+  useLayoutEffect(() => {
+    opened.current = onOpened;
+  });
 
   // It runs to 12px short of its bounds' edge, and scrolls past that.
   useLayoutEffect(() => {
@@ -44,6 +50,7 @@ export function Popover({ label, anchorClassName, className, testId, trigger, ch
       own.style.bottom = `calc(100% + ${GAP}px)`;
     }
     own.style.maxHeight = `${up ? above : below}px`;
+    opened.current?.(own);
   }, [open]);
 
   return (

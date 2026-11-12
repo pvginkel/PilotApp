@@ -4,7 +4,8 @@
  * first step in progress by name, its ticket ids plain text, ", …" when more are; with none in
  * progress "Not started", "N of M done" or "All steps done". Its popover lists the steps in order, done ones ticked, every
  * step in progress highlighted, side by side (F3.4), how many are done in its heading, and beside a
- * step with open notes the sticky-note icon, listing them on hover and on a tap (F3.6).
+ * step with open notes the sticky-note icon, listing them on hover and on a tap (F3.6). It opens
+ * with its first step in progress, or with none its first not started, at its middle.
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
@@ -62,6 +63,7 @@ export function StepsButton({ steps, name, anchorClassName, testId, popoverTestI
       anchorClassName={cn('steps-anchor', anchorClassName)}
       className="plan-pop"
       testId={popoverTestId}
+      onOpened={showCurrentStep}
       trigger={({ open, toggle }) => (
         <button
           ref={button}
@@ -92,6 +94,18 @@ export function StepsButton({ steps, name, anchorClassName, testId, popoverTestI
       </ol>
     </Popover>
   );
+}
+
+/**
+ * Scrolls a list of steps so that its first step in progress, or with none its first not started,
+ * stands at the middle of `scroller`, the box the list scrolls in; a step too near an end of the
+ * list for that stays as near the middle as the list's end lets it.
+ */
+export function showCurrentStep(scroller: HTMLElement): void {
+  const step = scroller.querySelector('.plan-step.now') ?? scroller.querySelector('.plan-step.pending');
+  if (step === null) return;
+  const [box, own] = [scroller.getBoundingClientRect(), step.getBoundingClientRect()];
+  scroller.scrollTop += own.top + own.height / 2 - (box.top + scroller.clientTop + scroller.clientHeight / 2);
 }
 
 /** The button's title: how many steps are done and which are in progress. */
