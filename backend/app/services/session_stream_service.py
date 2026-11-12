@@ -51,7 +51,8 @@ EVENT_NAME = "session"
 """The SSE event every frame of a session stream travels as."""
 
 PARTIAL_WINDOW_SECONDS = 0.2
-"""The least time between two text frames of one Session's stream."""
+"""The least time between two text frames of one Session's stream, unless a record,
+the next block's start or the stream's end flushes the held text sooner."""
 
 _PAGE = 200
 

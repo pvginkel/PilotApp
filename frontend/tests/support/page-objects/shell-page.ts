@@ -27,7 +27,7 @@ export class ShellPage {
   readonly goldPopover: Locator;
   readonly app: Locator;
   readonly goldBar: Locator;
-  /** A condition's flyout on a phone, under its line: its whole line, with the overrule it offers. */
+  /** A condition's flyout on a phone, under the bar's last line: its whole line, with the overrule it offers. */
   readonly goldFlyout: Locator;
   readonly side: Locator;
   readonly scrim: Locator;

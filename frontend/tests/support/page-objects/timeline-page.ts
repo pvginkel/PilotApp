@@ -310,7 +310,6 @@ export class TimelinePage {
   }
 }
 
-/** An attachment's address under its item's (F28.5). */
 /**
  * The dots of an item's head that end a row: each with nothing of the part after it on its row,
  * to its right.
@@ -327,6 +326,7 @@ export function dotsEndingARow(head: Locator): Promise<number> {
   );
 }
 
+/** An attachment's address under its item's (F28.5). */
 export function attachmentAddress(projectId: string, itemId: string, attachmentId: string): string {
   return `${projectAddress(projectId)}/items/${itemId}/attachments/${attachmentId}`;
 }
