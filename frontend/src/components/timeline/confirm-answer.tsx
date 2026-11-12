@@ -3,8 +3,9 @@
  * No in an action's row of buttons, plain, Yes the primary, neither tinted, chosen or not; No
  * opening a console for the reason, which may stay empty and is the note, closing once it is saved
  * (F22.3). Answered, it reads Yes or No, the reason under it, as an action reads its option; closed,
- * that line alone; opened in a done item, its proposal and its buttons stand with it and take
- * nothing (F31.2). On its card the proposal is the item's text, over the block (confirmation.tsx).
+ * that line alone, under its proposal where it is read only and cannot open; opened in a done item,
+ * its proposal and its buttons stand with it and take nothing (F31.2). On its card the proposal is
+ * the item's text, over the block (confirmation.tsx).
  */
 
 import { useState } from 'react';
@@ -34,6 +35,8 @@ interface ConfirmAnswerProps {
   bare: boolean;
   saving: Saving | null;
   closed: boolean;
+  /** Closed, it opens again; one read only does not, and so keeps its proposal closed. */
+  opens: boolean;
   /** Whether it takes an answer now. */
   live: boolean;
   /** Its item is done: opened, its buttons stand and take nothing (F31.2). */
@@ -43,7 +46,7 @@ interface ConfirmAnswerProps {
   onAnswer: Answer;
 }
 
-export function ConfirmAnswer({ field, block, bare, saving, closed, live, settled, disabled = false, onAnswer }: ConfirmAnswerProps) {
+export function ConfirmAnswer({ field, block, bare, saving, closed, opens, live, settled, disabled = false, onAnswer }: ConfirmAnswerProps) {
   const [refusing, setRefusing] = useState(false);
   const answer = saving === null ? block.answer : saving.answer;
   const off = disabled || !live;
@@ -53,7 +56,7 @@ export function ConfirmAnswer({ field, block, bare, saving, closed, live, settle
   };
   return (
     <>
-      {!bare && !closed && <Proposal block={block} />}
+      {!bare && (!closed || !opens) && <Proposal block={block} />}
       {answer !== null && answer !== DEFERRED && <Said words={answer} note={saving === null ? block.note : saving.note} boxed={false} />}
       {(live || settled) && !closed && (
         <div className="item-actions yes-no">

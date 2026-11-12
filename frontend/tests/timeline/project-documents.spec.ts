@@ -377,6 +377,33 @@ test.describe('Its asks', () => {
 
     await expect(overlay.body.locator(PRESSABLE)).toHaveCount(0);
   });
+
+  test('a confirmation answered in the project document reads closed under its proposal, the answer and who gave it, with no chevron to open it', async ({
+    people,
+    projects,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Confirmed');
+    const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    await projects.saveProjectDocument(
+      id,
+      'draft',
+      [`# ${name}`, '', '```decision id=C1', 'type: confirmation', 'proposal: Book the night train', 'because: auto-pilot-off', '```', ''].join('\n'),
+    );
+    await projects.endTurn(id);
+    await projects.answerProjectDocument(id, 'draft', 'C1', 'Yes', me.handle!);
+    await overlay.openProjectDocument(id, 'draft');
+
+    const confirm = overlay.blockAt('C1');
+    await expect(confirm.root).toHaveAttribute('data-closed', 'true');
+    await expect(confirm.kind).toHaveText('Confirm');
+    await expect(confirm.proposal).toHaveText('Book the night train');
+    await expect(confirm.said).toContainText('Yes');
+    await expect(confirm.toggle).toHaveCount(0);
+    await expect(confirm.yes).toHaveCount(0);
+    await expect(overlay.body.locator(PRESSABLE)).toHaveCount(0);
+  });
 });
 
 test.describe('Live', () => {

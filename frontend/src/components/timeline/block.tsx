@@ -219,6 +219,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
           bare={solo}
           saving={saving}
           closed={closed}
+          opens={opens}
           live={live}
           settled={settled}
           disabled={off}
