@@ -16,6 +16,7 @@
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { slowNetwork } from '../support/network';
 import { ChatPage } from '../support/page-objects/chat-page';
 import { attachmentAddress, TimelinePage } from '../support/page-objects/timeline-page';
 import { projectAddress } from '../support/projects';
@@ -46,7 +47,8 @@ const itemTag = (id: string, title: string) => `<quoted_item id="${id}">${title}
 const pathTag = (path: string, title: string) => `<quoted_path path="${path}">${title}</quoted_path path="${path}">`;
 
 test.describe('Discuss', () => {
-  test('on an item’s head shows the Chat tab, the item quoted over the field, the focus in it; the quote can be dropped, and the message sent carries it as its tag before the words', async ({
+  test('on an item’s head shows the Chat tab, the item quoted over the field, the focus in it; the quote can be dropped, and the message sent carries it as its tag before the words, the quote over it in the chat from its Send', async ({
+    page,
     people,
     projects,
     controller,
@@ -80,9 +82,19 @@ test.describe('Discuss', () => {
     await expect(chat.quoteLabel).toHaveText('Which tent?');
     await chat.field.fill('Dome or tunnel?');
     const opened = await chats.opening(project);
+    // On its way, the quote stands over the message in the chat, off the field, in the browser still.
+    const restore = await slowNetwork(page, 2_000);
     const sent = chat.acted('send');
     await chat.send.click();
+    await expect(chat.standIns.getByTestId('chat.quote')).toHaveText('Which tent?');
+    await expect(chat.standInTexts).toHaveText(['Dome or tunnel?']);
+    await expect(chat.quote).toHaveCount(0);
+    expect(await page.evaluate(() => Object.keys(JSON.parse(localStorage.getItem('pilot.unsent')!) as object).sort())).toEqual([
+      `chat/${project}`,
+      `chat/${project}/quote`,
+    ]);
     await sent;
+    await restore();
     const session = await opened();
     await expect(chat.quote).toHaveCount(0);
     await expect(chat.field).toHaveValue('');

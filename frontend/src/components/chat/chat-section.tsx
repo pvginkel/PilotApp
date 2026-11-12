@@ -4,6 +4,9 @@
  * Pilot answers — a date divider over its first message and over each the day turns at, the
  * phantom on its turn in flight, and the line where it closed (F130.1). What comes live
  * fades in, what loads does not. A turn its records leave open ended when Pilot no longer answers.
+ * The project's latest chat is given the messages sent from this page that no record shows yet
+ * (use-stand-ins.ts): open, it shows them at its end, and a record that brings one takes its place,
+ * with no fade.
  * Asked to go to one of its records, it finds the message of the turn holding it once its stream has
  * read that far: the latest message at or before it (F42.3).
  */
@@ -12,12 +15,13 @@ import { Fragment, useLayoutEffect, useMemo, useRef } from 'react';
 import { useSseContext } from '@/contexts/sse-context';
 import { useChatStream } from '@/hooks/use-chat-stream';
 import type { Chat } from '@/hooks/use-chats';
+import { landings, standInLanded, streamHolds, tookStandInsPlace, type StandIn } from '@/hooks/use-stand-ins';
 import { useSessionTransport } from '@/hooks/use-session-transport';
 import { day, dayKey } from '@/lib/chat/format';
 import { buildChatView } from '@/lib/chat/view';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 import type { ChatPeople } from './people';
-import { PersonMessage } from './person-message';
+import { PersonMessage, StandIns } from './person-message';
 import { PilotReply } from './pilot-reply';
 import { DateDivider, SessionSeparator } from './session-separator';
 
@@ -30,12 +34,16 @@ interface ChatSectionProps {
   /** The messages flashing, by `messageKey`, and the end of one's flash. */
   flashing?: ReadonlySet<string>;
   onFlashed?: (key: string) => void;
+  /** The project's stand-ins, where the chat is its latest. */
+  standIns?: readonly StandIn[];
 }
+
+const NO_STAND_INS: readonly StandIn[] = [];
 
 /** The key a message of a chat flashes by. */
 export const messageKey = (chatId: string, seq: number) => `${chatId}:${seq}`;
 
-export function ChatSection({ chat, people, goTo, onFound, flashing, onFlashed }: ChatSectionProps) {
+export function ChatSection({ chat, people, goTo, onFound, flashing, onFlashed, standIns = NO_STAND_INS }: ChatSectionProps) {
   const { isConnected } = useSseContext();
   const stream = useChatStream(useSessionTransport(), chat.id);
   useUiStateInstrumentation('chat.section', {
@@ -48,6 +56,15 @@ export function ChatSection({ chat, people, goTo, onFound, flashing, onFlashed }
   );
   const last = items.at(-1);
   const fresh = (seq: number) => stream.liveFrom !== null && seq >= stream.liveFrom;
+
+  const landing = useMemo(() => landings(standIns, chat.id, stream.records, people.me), [standIns, chat.id, stream.records, people.me]);
+  // Before the paint, so that no frame shows a message twice.
+  useLayoutEffect(() => {
+    streamHolds(chat.id, stream.lastSeq);
+    for (const [seq, standIn] of landing) standInLanded(standIn.id, chat.id, seq);
+  }, [chat.id, stream.lastSeq, landing]);
+  const stoodIn = (seq: number) => landing.has(seq) || tookStandInsPlace(chat.id, seq);
+  const waiting = standIns.filter((standIn) => ![...landing.values()].includes(standIn));
 
   let target: number | null = null;
   if (goTo !== undefined && stream.lastSeq >= goTo) {
@@ -70,35 +87,40 @@ export function ChatSection({ chat, people, goTo, onFound, flashing, onFlashed }
     shownDay = turnDay;
   }
 
-  return items.map((item) => {
-    if (item.kind === 'closed') return <SessionSeparator key={item.key} at={item.at} cause={item.cause} />;
-    const { turn } = item;
-    const { person } = turn;
-    const at = person?.at ?? turn.startedAt;
-    const replied = turn.steps.length > 0 || turn.state !== 'done' || turn.comingUp !== null;
-    return (
-      <Fragment key={item.key}>
-        {dividers.has(item.key) && <DateDivider label={day(at)} />}
-        {person && (
-          <PersonMessage
-            ref={person.seq === target ? targetMessage : undefined}
-            record={person}
-            fresh={fresh(person.seq)}
-            people={people}
-            flash={flashing?.has(messageKey(chat.id, person.seq))}
-            onFlashed={() => onFlashed?.(messageKey(chat.id, person.seq))}
-          />
-        )}
-        {replied && (
-          <PilotReply
-            sessionId={chat.id}
-            turn={turn}
-            phantom={item === last && turn.state === 'running' ? stream.phantom : null}
-            liveFrom={stream.liveFrom}
-            streamed={stream.streamed}
-          />
-        )}
-      </Fragment>
-    );
-  });
+  return (
+    <>
+      {items.map((item) => {
+        if (item.kind === 'closed') return <SessionSeparator key={item.key} at={item.at} cause={item.cause} />;
+        const { turn } = item;
+        const { person } = turn;
+        const at = person?.at ?? turn.startedAt;
+        const replied = turn.steps.length > 0 || turn.state !== 'done' || turn.comingUp !== null;
+        return (
+          <Fragment key={item.key}>
+            {dividers.has(item.key) && <DateDivider label={day(at)} />}
+            {person && (
+              <PersonMessage
+                ref={person.seq === target ? targetMessage : undefined}
+                record={person}
+                fresh={fresh(person.seq) && !stoodIn(person.seq)}
+                people={people}
+                flash={flashing?.has(messageKey(chat.id, person.seq))}
+                onFlashed={() => onFlashed?.(messageKey(chat.id, person.seq))}
+              />
+            )}
+            {replied && (
+              <PilotReply
+                sessionId={chat.id}
+                turn={turn}
+                phantom={item === last && turn.state === 'running' ? stream.phantom : null}
+                liveFrom={stream.liveFrom}
+                streamed={stream.streamed}
+              />
+            )}
+          </Fragment>
+        );
+      })}
+      {chat.closed_at === null && <StandIns standIns={waiting} people={people} after={shownDay} />}
+    </>
+  );
 }

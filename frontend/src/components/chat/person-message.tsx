@@ -5,18 +5,22 @@
  * (the chat mockup's decision 13). A quote it opens with stands over it, and one inside it is a chip
  * where it stands (F39.3). Its words show as written, ticket ids, repos and environments linked
  * (F91, F93). Gone to by *In the chat*, it flashes (F42.3): its words, or a message of quotes alone
- * whole.
+ * whole. A message sent from this page stands so from its Send, before its record, which has its
+ * number, takes its place (use-stand-ins.ts).
  */
 
-import type { AnimationEvent, Ref } from 'react';
+import { Fragment, type AnimationEvent, type Ref } from 'react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
+import type { StandIn } from '@/hooks/use-stand-ins';
+import { day, dayKey } from '@/lib/chat/format';
 import { splitQuotes, type QuotePart, type QuoteRef } from '@/lib/chat/quotes';
 import type { SendRecord } from '@/lib/chat/records';
 import { cn } from '@/lib/utils';
 import type { ChatPeople } from './people';
 import { QuoteChip, QuoteLine } from './quote-chip';
+import { DateDivider } from './session-separator';
 
 /** The quotes a text opens with, and the rest, trimmed. */
 function leadOf(text: string): { lead: QuoteRef[]; rest: QuotePart[] } {
@@ -34,7 +38,8 @@ function leadOf(text: string): { lead: QuoteRef[]; rest: QuotePart[] } {
 }
 
 interface PersonMessageProps {
-  record: SendRecord;
+  /** The message's record; a stand-in's has no number. */
+  record: Pick<SendRecord, 'message' | 'author' | 'at'> & { seq?: number };
   fresh: boolean;
   people: ChatPeople;
   /** It flashes, until `onFlashed`. */
@@ -59,6 +64,7 @@ export function PersonMessage({ record, fresh, people, flash = false, onFlashed,
       )}
       onAnimationEnd={flashed}
       data-seq={record.seq}
+      data-stand-in={record.seq === undefined || undefined}
       data-testid="chat.person"
     >
       {lead.map((quote, index) => (
@@ -88,4 +94,26 @@ export function PersonMessage({ record, fresh, people, flash = false, onFlashed,
       </div>
     </section>
   );
+}
+
+interface StandInsProps {
+  standIns: readonly StandIn[];
+  people: ChatPeople;
+  /** The day of the message they stand after, by `dayKey`; none where they open a chat. */
+  after: string | null;
+}
+
+/** The person's messages whose records the chat does not show yet, as the records will stand: a date divider over one the day turns at. */
+export function StandIns({ standIns, people, after }: StandInsProps) {
+  let shownDay = after;
+  return standIns.map((standIn) => {
+    const turned = dayKey(standIn.at) !== shownDay;
+    shownDay = dayKey(standIn.at);
+    return (
+      <Fragment key={standIn.id}>
+        {turned && <DateDivider label={day(standIn.at)} />}
+        <PersonMessage record={{ message: standIn.message, author: people.me, at: standIn.at }} fresh={false} people={people} />
+      </Fragment>
+    );
+  });
 }

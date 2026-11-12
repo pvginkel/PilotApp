@@ -7,7 +7,8 @@ import { waitTestEvent } from '../helpers';
  * chats shown with each person's message — its quotes, words, the name of another person, the time
  * and the avatar — and Pilot's reply to it, its steps, the phantom, the cue, a failure and its end;
  * the date dividers, the line where a chat closed, "Load previous" at the top, the empty
- * state, and the line in its place where the tab's read failed; and over the transcript's foot the
+ * state, and the line in its place where the tab's read failed; a message standing from its Send,
+ * before its record shows (R21); and over the transcript's foot the
  * composer (F44) and its glass: the quote Discuss put over its field and its remove (F39.3), its
  * field, Send or Stop in its place, and why an archived project's takes no message. The tab
  * carries the unread dot (F43). A draft's definition chat is the same, standing in the timeline's place (`feed`, F46.1),
@@ -21,6 +22,9 @@ export class ChatPage {
   readonly body: Locator;
   readonly messages: Locator;
   readonly messageTexts: Locator;
+  /** The person's messages standing from their Send, no record of them shown yet, and their words. */
+  readonly standIns: Locator;
+  readonly standInTexts: Locator;
   readonly names: Locator;
   readonly messageEnds: Locator;
   readonly quotes: Locator;
@@ -65,6 +69,8 @@ export class ChatPage {
     this.body = this.root.getByTestId('chat.body');
     this.messages = this.root.getByTestId('chat.person');
     this.messageTexts = this.root.getByTestId('chat.person.text');
+    this.standIns = this.root.locator('[data-testid="chat.person"][data-stand-in]');
+    this.standInTexts = this.standIns.getByTestId('chat.person.text');
     this.names = this.root.getByTestId('chat.person.name');
     this.messageEnds = this.root.getByTestId('chat.person.end');
     this.quotes = this.root.getByTestId('chat.quote');
@@ -128,6 +134,28 @@ export class ChatPage {
   /** The next change of the transcript's pinning to its end. */
   sticky(stuck: boolean): Promise<UiStateTestEvent> {
     return waitTestEvent<UiStateTestEvent>(this.page, 'ui_state', (event) => event.scope === 'chat.sticky' && event.metadata?.stuck === stuck);
+  }
+
+  /**
+   * How many messages of a person's the page shows, and how many of them stand from their Send with
+   * no record yet, from the call on: the two at the call and after each change of either, looked at
+   * at each change of the page's DOM, so that a message shown twice or gone between two looks is in
+   * it; read by the answer.
+   */
+  async watchMessages(): Promise<() => Promise<[number, number][]>> {
+    await this.page.evaluate(() => {
+      const shown: [number, number][] = [];
+      const look = () => {
+        const messages = document.querySelectorAll('[data-testid="chat.person"]').length;
+        const standIns = document.querySelectorAll('[data-testid="chat.person"][data-stand-in]').length;
+        const last = shown.at(-1);
+        if (last === undefined || last[0] !== messages || last[1] !== standIns) shown.push([messages, standIns]);
+      };
+      look();
+      new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-stand-in'] });
+      (window as unknown as { messagesShown: [number, number][] }).messagesShown = shown;
+    });
+    return () => this.page.evaluate(() => (window as unknown as { messagesShown: [number, number][] }).messagesShown);
   }
 
   /** Where an element stands from the top of the transcript's view. */

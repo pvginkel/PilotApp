@@ -15,7 +15,9 @@
  * its top. Sticky scroll keeps a streaming reply in view while the reader is at the bottom; only
  * their own scrolling lets go, or their own open of a step list or a card that takes the end out of
  * reach, which grows downward (use-sticky-bottom.ts); their message sent from the composer over its
- * foot, or a quote Discuss put there, goes back to the bottom. Shown at its
+ * foot, or a quote Discuss put there, goes back to the bottom. That message stands at the
+ * transcript's end from its Send, in the open chat it goes to, or after the last chat where it
+ * opens one, until its record takes its place (use-stand-ins.ts). Shown at its
  * end, and not lying under a tab or the overlay, the chat is seen (F43). *In the chat* takes it to the
  * message that gave an answer (F42.3): the chats before loaded until the one holding it, the
  * pinning let go, the message scrolled into the middle of the view and flashed, and kept in its
@@ -30,6 +32,7 @@ import { useChatReach } from '@/hooks/use-chat-reach';
 import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
 import { useChatPlace, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePerson } from '@/hooks/use-self';
+import { useStandIns } from '@/hooks/use-stand-ins';
 import { useStickyBottom } from '@/hooks/use-sticky-bottom';
 import type { components } from '@/lib/api/generated/types';
 import { cn } from '@/lib/utils';
@@ -37,6 +40,7 @@ import { ChatEmptyState, type ChatHome } from './chat-empty-state';
 import { ChatSection, messageKey } from './chat-section';
 import { Composer } from './composer';
 import { chatPeople } from './people';
+import { StandIns } from './person-message';
 
 type Member = components['schemas']['ProjectHeadSchema.e86ccd6.MemberSchema'];
 
@@ -59,6 +63,10 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
   const people = useMemo(() => chatPeople(person, members), [person, members]);
   const chats = typeof read === 'string' ? null : read.chats;
   const { from, setFrom } = useChatReach(projectId, chats, reading);
+  const standIns = useStandIns(projectId);
+  // A message goes to the project's latest chat while it is open, and opens one otherwise.
+  const latest = chats?.at(-1);
+  const opens = latest === undefined || latest.closed_at !== null;
   const container = useRef<HTMLDivElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
   const { stick, unstick, stuck } = useStickyBottom(container, wrapper, 'chat');
@@ -171,7 +179,7 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
               Load previous
             </button>
           )}
-          {chats?.length === 0 && <ChatEmptyState home={home} />}
+          {chats?.length === 0 && standIns.length === 0 && <ChatEmptyState home={home} />}
           {shown.map((chat) => (
             <ChatSection
               key={chat.id}
@@ -181,8 +189,10 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
               onFound={found}
               flashing={flashing}
               onFlashed={flashed}
+              standIns={chat === latest ? standIns : undefined}
             />
           ))}
+          {chats !== null && opens && <StandIns standIns={standIns} people={people} after={null} />}
           {chats !== null && end}
         </>
       )}

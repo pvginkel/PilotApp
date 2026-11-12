@@ -5,15 +5,20 @@
  * panel's Draft and Documents, both empty; on a phone the tabs at the bottom, a draft's. The first
  * message sent makes the draft (`useStartProject`), which the page then shows at its address,
  * `draft-<number>`, in this entry's place, the focus in its chat's field, its composer waiting until
- * the draft's chats are read and the route shows them (`screen-reads.ts`). Until then the server holds
+ * the draft's chats are read and the route shows them (`screen-reads.ts`). From its Send the message
+ * stands in the chat, here and then in the draft's until the draft's chat has streamed it
+ * (use-stand-ins.ts), its words out of the field. Until the draft is made the server holds
  * nothing of it, so leaving leaves nothing behind; a message the server refuses makes nothing
- * either, its words left in the field. They are kept in the browser until sent (F133).
+ * either, its words back in the field. They are kept in the browser until the server takes them
+ * (F133, D171).
  */
 
-import { useEffect, useRef, useState, type Ref } from 'react';
+import { useEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { ChatEmptyState } from '@/components/chat/chat-empty-state';
 import { ComposerBox } from '@/components/chat/composer';
+import { chatPeople } from '@/components/chat/people';
+import { StandIns } from '@/components/chat/person-message';
 import { ChatColumn } from '@/components/chat/project-chat';
 import { NewPanel, NewPhonePanel, type NewPanelTab } from '@/components/panel/panel';
 import { PanelDivider } from '@/components/panel/panel-divider';
@@ -24,6 +29,8 @@ import { discussIn } from '@/hooks/use-discuss';
 import { usePhone } from '@/hooks/use-phone';
 import { usePhoneTab } from '@/hooks/use-phone-tab';
 import { knowAt } from '@/hooks/use-project-address';
+import { usePerson } from '@/hooks/use-self';
+import { NEW_PROJECT, standInFor, standInRefused, standInTaken, useStandIns } from '@/hooks/use-stand-ins';
 import { useUnsentText } from '@/hooks/use-unsent-text';
 
 /** The words not sent yet, as the browser keeps them. */
@@ -82,19 +89,29 @@ function NewHead({ phone = false, ref }: { phone?: boolean; ref?: Ref<HTMLElemen
 }
 
 function NewChat({ covered }: { covered: boolean }) {
+  const person = usePerson();
+  const people = useMemo(() => chatPeople(person, []), [person]);
+  /** The draft the first message made, which the page shows next. */
+  const [draft, setDraft] = useState<string | null>(null);
+  const standIns = useStandIns(draft ?? NEW_PROJECT);
   return (
-    <ChatColumn home="feed" covered={covered} composer={<NewComposer />}>
-      <ChatEmptyState home="feed" />
+    <ChatColumn home="feed" covered={covered} composer={<NewComposer moving={draft !== null} onDraft={setDraft} />}>
+      {standIns.length === 0 ? <ChatEmptyState home="feed" /> : <StandIns standIns={standIns} people={people} after={null} />}
     </ChatColumn>
   );
 }
 
-function NewComposer() {
-  const { text, change } = useUnsentText(UNSENT);
+interface NewComposerProps {
+  /** The draft is made, and the page is on its way to it. */
+  moving: boolean;
+  onDraft: (id: string) => void;
+}
+
+function NewComposer({ moving, onDraft }: NewComposerProps) {
+  const { text, change, leave } = useUnsentText(UNSENT);
   const start = useStartProject();
   const navigate = useNavigate();
   const field = useRef<HTMLTextAreaElement>(null);
-  const [moving, setMoving] = useState(false);
   const words = text.trim();
   const sendable = !start.pending && !moving && words !== '';
 
@@ -103,13 +120,20 @@ function NewComposer() {
   const send = () => {
     field.current!.focus();
     if (!sendable) return;
+    const standIn = standInFor(NEW_PROJECT, words, null);
+    const left = leave();
     void start.act(words).then((draft) => {
-      if (draft === null) return;
-      change('');
+      if (draft === null) {
+        left.refused();
+        standInRefused(standIn);
+        return;
+      }
+      left.taken();
+      standInTaken(standIn, draft.id);
       knowAt(draft.address, draft.id);
       // As Discuss asks for it, with nothing quoted: the draft's composer takes the focus once drawn.
       discussIn(draft.id, null);
-      setMoving(true);
+      onDraft(draft.id);
       void navigate({ to: '/projects/$address', params: { address: draft.address }, replace: true });
     });
   };

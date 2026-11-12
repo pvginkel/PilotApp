@@ -2,13 +2,16 @@
  * The Chat tab's composer (F44; the chat mockup's decision 7), over the transcript's foot with no
  * divider, the transcript scrolling under its frosted glass and padded by its height, the glass in
  * a draft the column's width (mockup M3): the growing field to five lines (F115), Enter breaking the line and Ctrl+Enter sending (F110), Send disabled
- * while the field is empty and the field waiting while the message is on its way; a message with no
- * chat open starts one, shown in the tab. While Pilot answers Send's place is Stop, in every member's
+ * while the field is empty and while a message is on its way; a message with no
+ * chat open starts one, shown in the tab. A message sent stands at the chat's end from its Send,
+ * its words out of the field, which takes the next ones, until its record takes its place, shown
+ * once throughout and with no fade; a send the server refuses takes it away and puts the words back,
+ * over what was typed since (R21). While Pilot answers Send's place is Stop, in every member's
  * composer whoever sent the message, the field not waiting; Stop ends the turn where it is, one
  * stopped before it was sent "· Stopped" too (C13). The focus stays in the field after Send and
  * after Stop, and a message sent takes the chat back to its
- * end, wherever the reader had scrolled. The words are kept in the browser until sent,
- * keyed by the project (F133). In an archived project it takes no message and says why (F128.5).
+ * end, wherever the reader had scrolled. The words are kept in the browser until the server takes
+ * them, keyed by the project (F133, D171). In an archived project it takes no message and says why (F128.5).
  * While Pilot updates its store it takes none, the refusal toasted in the API's words and the words
  * kept, and after the update's lift the message starts the chat (F144.2).
  */
@@ -114,7 +117,7 @@ test.describe('The Chat tab’s composer', () => {
     expect(Math.abs(grown.clear - 16)).toBeLessThanOrEqual(1);
   });
 
-  test('sends with Ctrl+Enter and with Send, Enter breaking the line; the first message starts the chat in the tab; Send waits while the field is empty, the field while the message is on its way; the field grows to five lines; the focus stays in it', async ({
+  test('sends with Ctrl+Enter and with Send, Enter breaking the line; the first message starts the chat in the tab, standing in it from its Send under its day, its words out of the field; Send waits while the field is empty and while the message is on its way; the field grows to five lines; the focus stays in it', async ({
     page,
     people,
     projects,
@@ -149,20 +152,33 @@ test.describe('The Chat tab’s composer', () => {
     await expect(chat.send).toBeEnabled();
 
     const opened = await chats.opening(project);
+    // The list of chats, which brings the one the message opens, is read a second after it changes.
     const restore = await slowNetwork(page, 1_000);
+    const shown = await chat.watchMessages();
     const sent = chat.acted('send');
     await chat.field.press('Control+Enter');
-    await expect(chat.field).toHaveJSProperty('readOnly', true);
-    await expect(chat.field).toHaveValue('Which tent\ndo we take?');
+    await expect(chat.standInTexts).toHaveText(['Which tent do we take?']);
+    await expect(chat.empty).toHaveCount(0);
+    await expect(chat.days).toHaveCount(1);
+    await expect(chat.field).toHaveValue('');
+    await expect(chat.field).toHaveJSProperty('readOnly', false);
+    await expect(chat.field).toBeFocused();
     await expect(chat.send).toBeDisabled();
     await sent;
     await restore();
     const session = await opened();
-    await expect(chat.field).toHaveValue('');
-    await expect(chat.field).toHaveJSProperty('readOnly', false);
-    await expect(chat.field).toBeFocused();
-    await expect(chat.empty).toHaveCount(0);
+    await expect(chat.standIns).toHaveCount(0);
     await expect(chat.messageTexts).toHaveText(['Which tent do we take?']);
+    await expect(chat.days).toHaveCount(1);
+    await expect(chat.empty).toHaveCount(0);
+    // On the page from the Send on, once: the stand-in, then its record.
+    expect(await shown()).toEqual([
+      [0, 0],
+      [1, 1],
+      [1, 0],
+    ]);
+    await expect(chat.field).toHaveValue('');
+    await expect(chat.field).toBeFocused();
     const [started] = (await chats.list(project)).chats;
     const send = (await projects.records(started!.id)).records.find((record) => record.kind === 'send')!;
     expect(send).toMatchObject({ message: 'Which tent\ndo we take?' });
@@ -271,6 +287,61 @@ test.describe('The Chat tab’s composer', () => {
     await expect(chat.cue).toHaveCount(0);
   });
 
+  test('shows a message at the chat’s end from its Send, after Pilot’s last reply, and its record in its place with no fade, ahead of the server’s answer to the send, the message shown once throughout; the field takes the next words meanwhile, kept in the browser after the ones on their way, and Send waits', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('At once'), members: [me.handle!] });
+    const kept = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>, UNSENT_KEY);
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const { chat: id, session } = await chats.start(project, 'Plan the route.');
+    const live = chat.live(id);
+    await controller.play(chats.store, session, [text('route', 'By the lake.')]);
+    await controller.finish(chats.store, session, 'success', 'By the lake.');
+    await expect(chat.send).toBeVisible();
+    await live;
+
+    // The server's answer to the send comes two seconds after the record its stream brings.
+    const restore = await slowNetwork(page, 2_000);
+    const shown = await chat.watchMessages();
+    await chat.field.fill('And the tent?');
+    const sent = chat.acted('send');
+    await chat.send.click();
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+    await expect(chat.field).toHaveValue('');
+    await chat.field.pressSequentially('And the stove?');
+    await expect(chat.send).toBeDisabled();
+    expect(await kept()).toEqual({ [`chat/${project}`]: 'And the tent?\nAnd the stove?' });
+    await expect(chat.standIns).toHaveCount(0);
+    await expect(chat.messages.last()).toHaveAttribute('data-seq', /^\d+$/);
+    await expect(chat.messages.last()).not.toHaveClass(/animate-fade-in/);
+    await expect(chat.days).toHaveCount(1);
+
+    await sent;
+    await restore();
+    await expect(chat.field).toHaveValue('And the stove?');
+    await expect(chat.field).toBeFocused();
+    await expect.poll(kept).toEqual({ [`chat/${project}`]: 'And the stove?' });
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+    // After Pilot's reply from the Send on, once: the stand-in, then its record.
+    expect(await shown()).toEqual([
+      [1, 0],
+      [2, 1],
+      [2, 0],
+    ]);
+    await chats.working(session);
+    await controller.finish(chats.store, session, 'success', 'The dome.');
+    await expect(chat.send).toBeEnabled();
+  });
+
   test('takes the chat back to its end with a message sent, where the reader had scrolled up', async ({
     page,
     people,
@@ -309,7 +380,7 @@ test.describe('The Chat tab’s composer', () => {
     await expect(chat.send).toBeVisible();
   });
 
-  test('keeps the words not sent in the browser, keyed by the project, after a reload too, until they are sent', async ({
+  test('keeps the words not sent in the browser, keyed by the project, after a reload too, one while their send is on its way among them, until the server takes them', async ({
     page,
     people,
     projects,
@@ -333,15 +404,32 @@ test.describe('The Chat tab’s composer', () => {
     await timeline.open(project);
     await expect(chat.field).toHaveValue('Which stove?');
 
+    // A send on its way, the server's answer two seconds off: out of the field, in the browser still.
     const opened = await chats.opening(project);
+    const restore = await slowNetwork(page, 2_000);
     await chat.send.click();
+    await expect(chat.standInTexts).toHaveText(['Which stove?']);
+    await expect(chat.field).toHaveValue('');
+    expect(await kept()).toEqual({ [`chat/${project}`]: 'Which stove?' });
+    await restore();
+    await page.reload();
+    await expect(chat.field).toHaveValue('Which stove?');
     const session = await opened();
+    await expect(chat.messageTexts).toHaveText(['Which stove?']);
+    await controller.finish(chats.store, session, 'success', 'The gas one.');
+
+    const sent = chat.acted('send');
+    await chat.send.click();
+    await sent;
+    await expect(chat.messageTexts).toHaveText(['Which stove?', 'Which stove?']);
     await expect(chat.field).toHaveValue('');
     expect(await kept()).toEqual({});
+    await chats.working(session);
     await controller.finish(chats.store, session, 'success', 'The gas one.');
   });
 
-  test('takes no message while Pilot updates its store, the refusal toasted and the words kept; after the update’s lift the message starts the chat', async ({
+  test('takes no message while Pilot updates its store: the refusal toasted, the message that stood in the chat gone from it and its words back in the field, over what was typed since, and kept; after the update’s lift the message starts the chat', async ({
+    page,
     people,
     projects,
     controller,
@@ -358,11 +446,23 @@ test.describe('The Chat tab’s composer', () => {
     await timeline.open(project);
     await read;
     await storeUpdate.make();
+    const kept = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>, UNSENT_KEY);
 
+    // The refusal comes two seconds after the Send.
+    const restore = await slowNetwork(page, 2_000);
     await chat.field.fill('Which stove?');
     await chat.send.click();
+    await expect(chat.standInTexts).toHaveText(['Which stove?']);
+    await expect(chat.empty).toHaveCount(0);
+    await expect(chat.field).toHaveValue('');
+    await chat.field.pressSequentially('And which pan?');
+    await expect(chat.field).toHaveValue('And which pan?');
     await toastHelper.expectErrorToast(`Cannot send a message to Pilot in ${name} because Pilot is updating`);
-    await expect(chat.field).toHaveValue('Which stove?');
+    await expect(chat.standIns).toHaveCount(0);
+    await expect(chat.messages).toHaveCount(0);
+    await expect(chat.field).toHaveValue('Which stove?\nAnd which pan?');
+    expect(await kept()).toEqual({ [`chat/${project}`]: 'Which stove?\nAnd which pan?' });
+    await restore();
     await expect(chat.empty).toBeVisible();
     expect((await chats.list(project)).chats).toEqual([]);
 
@@ -372,7 +472,7 @@ test.describe('The Chat tab’s composer', () => {
     await chat.send.click();
     const session = await opened();
     await expect(chat.field).toHaveValue('');
-    await expect(chat.messageTexts).toHaveText(['Which stove?']);
+    await expect(chat.messageTexts).toHaveText(['Which stove? And which pan?']);
     await controller.finish(chats.store, session, 'success', 'The gas one.');
   });
 

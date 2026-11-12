@@ -25,7 +25,7 @@ interface Shown {
   items: number;
   /** A document's tab drawn without its title. */
   untitled: boolean;
-  /** The new project's empty chat, "Tell Pilot what to manage". */
+  /** The new project's screen: a head with no members. */
   fresh: boolean;
   /** The loading bar. */
   bar: boolean;
@@ -51,7 +51,7 @@ async function watch(page: Page): Promise<() => Promise<Watched>> {
         name: one('project.name')?.textContent ?? null,
         items: document.querySelectorAll('[data-testid="timeline.item"]').length,
         untitled: Array.from(document.querySelectorAll('[data-testid="overlay"]')).some((tab) => !tab.querySelector('[data-testid="overlay.title"]')?.textContent),
-        fresh: one('chat.empty') !== null,
+        fresh: one('project.head') !== null && one('project.members') === null,
         bar: one('shell.loading') !== null,
       };
       const last = record.shown.at(-1);

@@ -5,13 +5,15 @@
  * on a phone the tabs at the bottom, a draft's. Its first message makes the draft (slice 037's asks
  * D1), which then stands in the person's list as "New project" and "Draft" until its title names it
  * (F46.1, F1.2, F47.1), at its address, `draft-<number>`; leaving before sending, or a first message
- * the server refuses, makes none. A draft's definition chat stands in the timeline's place, its
+ * the server refuses, makes none. The first message stands in the chat from its Send, through the
+ * switch to the draft, until the draft's chat has streamed it (R42). A draft's definition chat stands in the timeline's place, its
  * transcript and its composer as the Chat tab has them (F38, F40, F44), the lines of what Pilot's
  * tools changed included (F41). Beside it the panel stands on its Draft tab (draft-panel.spec.ts).
  */
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique, waitForUiState } from '../support/helpers';
+import { slowNetwork } from '../support/network';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
 const CONVERSATION = '7d3f1b28-6e4a-4c95-8a0d-5b2e9f7c1a46';
@@ -81,7 +83,7 @@ test.describe('The plus', () => {
     expect((await projects.list()).filter((tab) => tab.member)).toEqual([]);
   });
 
-  test('makes the draft with its first message and shows it at its address in the entry’s place: “New project” and “Draft” in the person’s list, the message in its definition chat, Pilot answering, the focus in its field', async ({
+  test('makes the draft with its first message and shows it at its address in the entry’s place: “New project” and “Draft” in the person’s list, the message in its definition chat, Pilot answering, the focus in its field; the message stands in the chat from its Send, its words out of the field and kept in the browser until the draft is made, and shows through the switch until the draft’s chat has streamed it', async ({
     page,
     people,
     projects,
@@ -98,10 +100,23 @@ test.describe('The plus', () => {
     await expect(page).toHaveURL('/projects/draft-new');
 
     const opened = await chats.openingNew();
+    const kept = () => page.evaluate(() => JSON.parse(localStorage.getItem('pilot.unsent') ?? '{}') as Record<string, string>);
+    // The server's answer, the draft, comes two seconds after the Send.
+    const restore = await slowNetwork(page, 2_000);
+    const shown = await definitionChat.watchMessages();
     await definitionChat.field.fill('Let us plan the summer trip.');
     const created = projectList.created();
     await definitionChat.send.click();
+    await expect(definitionChat.standInTexts).toHaveText(['Let us plan the summer trip.']);
+    await expect(definitionChat.days).toHaveCount(1);
+    await expect(definitionChat.empty).toHaveCount(0);
+    await expect(definitionChat.field).toHaveValue('');
+    await expect(definitionChat.field).toHaveJSProperty('readOnly', true);
+    await expect(page).toHaveURL('/projects/draft-new');
+    expect(await kept()).toEqual({ 'chat/new-project': 'Let us plan the summer trip.' });
     const id = (await created).fields!.project as string;
+    await restore();
+    expect(await kept()).toEqual({});
 
     const head = await projects.head(id);
     expect([head.state, head.name, head.members.map((member) => member.handle)]).toEqual(['draft', null, [me.handle]]);
@@ -113,7 +128,16 @@ test.describe('The plus', () => {
     await expect(tab.getByTestId('projects.tab.status')).toHaveText('Draft');
     await expect(projectHead.name).toHaveText('New project');
     await expect(projectHead.draft).toHaveText('Draft');
+    await expect(definitionChat.messages).toHaveAttribute('data-seq', /^\d+$/);
+    await expect(definitionChat.messages).not.toHaveClass(/animate-fade-in/);
     await expect(definitionChat.messageTexts).toHaveText(['Let us plan the summer trip.']);
+    await expect(definitionChat.days).toHaveCount(1);
+    // Shown from the Send on, once: on the new project's screen, on the draft's before its chat's stream, and by its record.
+    expect(await shown()).toEqual([
+      [0, 0],
+      [1, 1],
+      [1, 0],
+    ]);
     await expect(definitionChat.empty).toHaveCount(0);
     await expect(definitionChat.stop).toBeVisible();
     await expect(definitionChat.field).toHaveValue('');
@@ -130,7 +154,7 @@ test.describe('The plus', () => {
     await controller.finish(chats.store, session, 'success', 'Noted.');
   });
 
-  test('makes no draft of a first message the server refuses: the refusal toasted, the words kept in the field, the page where it was', async ({
+  test('makes no draft of a first message the server refuses: the refusal toasted, the message that stood in the chat gone from it, its words back in the field, the page where it was', async ({
     page,
     people,
     projects,
@@ -145,10 +169,18 @@ test.describe('The plus', () => {
     await projectList.newProject.click();
     await storeUpdate.make();
 
+    // The refusal comes two seconds after the Send.
+    const restore = await slowNetwork(page, 2_000);
     await definitionChat.field.fill('Which stove?');
     await definitionChat.send.click();
+    await expect(definitionChat.standInTexts).toHaveText(['Which stove?']);
+    await expect(definitionChat.field).toHaveValue('');
     await toastHelper.expectErrorToast('Cannot send a message to Pilot in the untitled project because Pilot is updating');
+    await restore();
+    await expect(definitionChat.standIns).toHaveCount(0);
     await expect(definitionChat.field).toHaveValue('Which stove?');
+    await expect(definitionChat.field).toBeEditable();
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pilot.unsent')!) as object)).toEqual({ 'chat/new-project': 'Which stove?' });
     await expect(page).toHaveURL('/projects/draft-new');
     await expect(definitionChat.empty).toBeVisible();
     expect((await projects.list()).filter((tab) => tab.member)).toEqual([]);

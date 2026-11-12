@@ -87,7 +87,7 @@ export function useSendMessage(projectId: string) {
       },
     );
   };
-  return { act, pending: mutation.isPending };
+  return { act };
 }
 
 /**

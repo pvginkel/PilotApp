@@ -1,18 +1,22 @@
 /**
  * The Chat tab's composer (F44; the chat mockup's decision 7): the growing field (F115), to five
  * lines, Enter breaking the line and Ctrl+Enter (Cmd+Enter) sending (F110), and Send beside it,
- * disabled while the field is empty, the field waiting while the message is on its way. A message
- * with no chat open starts one, which the tab shows where it opens. While Pilot answers, Send's
- * place is Stop, in every member's composer whoever sent the message, ending the turn where it is;
- * the field does not wait, so the next message can be written meanwhile. The focus stays in the
- * field after Send and after Stop. Its words are kept in the browser until sent, keyed by the
- * project (F133). What Discuss quoted stands over the field as a chip, with its remove, kept in the
- * browser beside the words, and goes out as its tag before the words (F38.3, F39.3); Discuss puts
+ * disabled while the field is empty and while a message is on its way. Send takes the words out of
+ * the field at once, and the quote off it, to stand at the chat's end as the message
+ * (use-stand-ins.ts); the field takes the next message meanwhile. A send the server refuses puts
+ * them back, what was typed since under the words. A message with no chat open starts one, which
+ * the tab shows where it opens. While Pilot answers, Send's place is Stop, in every member's
+ * composer whoever sent the message, ending the turn where it is; the field does not wait. The
+ * focus stays in the field after Send and after Stop. Its words are kept in the browser until the
+ * server takes them, keyed by the project (F133, D171). What Discuss quoted stands over the field
+ * as a chip, with its remove, kept in the browser beside the words until the server takes its
+ * message, and goes out as its tag before the words (F38.3, F39.3); Discuss puts
  * the focus in the field, once nothing lies over it. In an archived project it takes no message,
  * and says why (F128.5); the server refuses one all the same. It lies over the chat's foot with no
  * divider, the chat scrolling under its frosted glass (mockup M3;
  * `ChatColumn`, panel.css). In a draft it lies over the definition chat, in the timeline's column
- * (F46.1), and so does a new project's, whose box its first send wires (`new-project.tsx`).
+ * (F46.1), and so does a new project's, whose box its first send wires (`new-project.tsx`), its
+ * field waiting from that send until the draft shows.
  */
 
 import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from 'react';
@@ -21,6 +25,7 @@ import { TextField } from '@/components/shared/text-field';
 import { useSendMessage, useStopChat } from '@/hooks/use-chats';
 import { composerField, focusTaken, useDiscussed } from '@/hooks/use-discuss';
 import { useArchived } from '@/hooks/use-projects';
+import { standInFor, standInRefused, standInTaken, useSendOnWay } from '@/hooks/use-stand-ins';
 import { useUnsentText } from '@/hooks/use-unsent-text';
 import { quoteTag } from '@/lib/chat/quotes';
 import { cn } from '@/lib/utils';
@@ -38,7 +43,7 @@ interface ComposerProps {
   home: ChatHome;
   /** Whether Pilot answers in the project's chat. */
   answering: boolean;
-  /** The server took a message of this browser's. */
+  /** A message of this browser's left for the server. */
   onSent: () => void;
   /** Discuss put the focus in the field. */
   onDiscussed: () => void;
@@ -47,14 +52,18 @@ interface ComposerProps {
 }
 
 export function Composer({ projectId, home, answering, onSent, onDiscussed, covered }: ComposerProps) {
-  const { text, change } = useUnsentText(composerField(projectId));
-  const { quote, focus, drop } = useDiscussed(projectId);
+  const { text, change, leave } = useUnsentText(composerField(projectId));
+  const discussed = useDiscussed(projectId);
+  const { focus, drop } = discussed;
   const sending = useSendMessage(projectId);
   const stopping = useStopChat(projectId);
   const archived = useArchived(projectId);
+  const onWay = useSendOnWay(projectId);
   const field = useRef<HTMLTextAreaElement>(null);
   const words = text.trim();
-  const sendable = !archived && !answering && !sending.pending && words !== '';
+  const sendable = !archived && !answering && onWay === undefined && words !== '';
+  // The quote of the message on its way stands with it.
+  const quote = discussed.quote === onWay?.quote ? null : discussed.quote;
 
   useEffect(() => {
     if (!focus || covered) return;
@@ -66,12 +75,19 @@ export function Composer({ projectId, home, answering, onSent, onDiscussed, cove
   const send = () => {
     field.current!.focus();
     if (!sendable) return;
-    const sent = quote;
-    void sending.act(sent === null ? words : `${quoteTag(sent)} ${words}`).then((took) => {
-      if (!took) return;
-      change('');
-      if (sent !== null) drop(sent);
-      onSent();
+    const message = quote === null ? words : `${quoteTag(quote)} ${words}`;
+    const standIn = standInFor(projectId, message, quote);
+    const left = leave();
+    onSent();
+    void sending.act(message).then((took) => {
+      if (took) {
+        left.taken();
+        if (quote !== null) drop(quote);
+        standInTaken(standIn);
+      } else {
+        left.refused();
+        standInRefused(standIn);
+      }
     });
   };
   const leaveOut = () => {
@@ -91,7 +107,6 @@ export function Composer({ projectId, home, answering, onSent, onDiscussed, cove
       onChange={change}
       onSend={send}
       sendable={sendable}
-      waiting={sending.pending}
       disabled={archived}
       stop={answering ? { pending: stopping.pending, onStop: stopIt } : null}
     >
@@ -113,8 +128,8 @@ interface ComposerBoxProps {
   onSend: () => void;
   /** Send takes the words now. */
   sendable: boolean;
-  /** The message is on its way: the field waits. */
-  waiting: boolean;
+  /** The field waits: it takes no typing. */
+  waiting?: boolean;
   /** The field takes no message. */
   disabled?: boolean;
   /** Stop in Send's place, while Pilot answers. */
@@ -124,7 +139,7 @@ interface ComposerBoxProps {
 }
 
 /** The composer as it stands: the field and Send, or Stop in Send's place, what stands over the field above them. */
-export function ComposerBox({ home, field, text, onChange, onSend, sendable, waiting, disabled = false, stop = null, children }: ComposerBoxProps) {
+export function ComposerBox({ home, field, text, onChange, onSend, sendable, waiting = false, disabled = false, stop = null, children }: ComposerBoxProps) {
   return (
     <div className="composer" data-testid="chat.composer">
       {/* In the timeline's column as the transcript is, its glass the column's width. */}
