@@ -2,7 +2,10 @@ import type { Locator, Page } from '@playwright/test';
 import { waitTestEvent } from '../helpers';
 import type { FormTestEvent } from '@/lib/test/test-events';
 
-/** The profile page (F134): the person and their handle, this browser's notifications switch and the alarms switch. */
+/**
+ * The profile page (F134): the person and their handle, this browser's notifications switch, the alarms switch and the
+ * switch *Join projects started on my behalf*.
+ */
 export class ProfilePage {
   readonly root: Locator;
   readonly heading: Locator;
@@ -13,6 +16,8 @@ export class ProfilePage {
   readonly deviceNote: Locator;
   readonly alarms: Locator;
   readonly alarmsNote: Locator;
+  readonly joinCalls: Locator;
+  readonly joinCallsNote: Locator;
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('profile');
@@ -24,6 +29,8 @@ export class ProfilePage {
     this.deviceNote = page.getByTestId('profile.device.note');
     this.alarms = page.getByTestId('profile.alarms');
     this.alarmsNote = page.getByTestId('profile.alarms.note');
+    this.joinCalls = page.getByTestId('profile.join-calls');
+    this.joinCallsNote = page.getByTestId('profile.join-calls.note');
   }
 
   /** Turns this browser's notifications switch; returns once its turn has ended, as `outcome` expects. */
@@ -37,6 +44,13 @@ export class ProfilePage {
   async turnAlarms(): Promise<void> {
     const ended = this.formEvent('people.alarms', 'success');
     await this.alarms.click();
+    await ended;
+  }
+
+  /** Turns the switch *Join projects started on my behalf*; returns once the page reads the person again, the switch turned. */
+  async turnJoinCalls(): Promise<void> {
+    const ended = this.formEvent('people.join-calls', 'success');
+    await this.joinCalls.click();
     await ended;
   }
 

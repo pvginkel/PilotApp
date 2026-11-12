@@ -48,13 +48,15 @@ def handle_prefill(name: str | None) -> str:
 
 def self_response(person: User) -> SelfResponseSchema:
     """`person` as the self read answers."""
+    is_person = person.kind_code is UserKind.PERSON
     return SelfResponseSchema(
         handle=person.handle,
         handle_prefill=None,
         name=person.name,
         initials=initials(person.name),
         avatar_slot=person.avatar_slot,
-        alarms=person.alarms if person.kind_code is UserKind.PERSON else None,
+        alarms=person.alarms if is_person else None,
+        join_calls=person.join_calls if is_person else None,
     )
 
 
@@ -162,6 +164,12 @@ class PeopleService:
                 f"you call as the service user {person.handle!r}, which is no person",
             )
         return person
+
+    def switch_join_calls(self, person: User, on: bool) -> None:
+        """Turn `person`'s switch *Join projects started on my behalf*: on,
+        they are a member of every project a call starts from now on, and of
+        none a call started while it was off (F134.2; DB 339)."""
+        person.join_calls = on
 
     def make_service_user(self, handle: str, name: str, subject: str) -> User:
         """Put a service user on the record: a User of kind `service` with

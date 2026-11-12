@@ -12,13 +12,14 @@ export type Self = components['schemas']['SelfResponseSchema.d1d9f70'];
 
 /**
  * The signed-in person once their handle is chosen: on the record, with their avatar slot and where
- * their alarms switch stands.
+ * their two switches stand.
  */
 type Person = Self & {
   handle: string;
   name: string;
   avatar_slot: number;
   alarms: boolean;
+  join_calls: boolean;
 };
 
 /** The API answers a person with a handle with all of these, as the record holds them. */

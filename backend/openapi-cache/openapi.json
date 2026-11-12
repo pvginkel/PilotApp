@@ -4909,6 +4909,24 @@
         "title": "WriterQuestionSchema",
         "type": "object"
       },
+      "JoinCallsSwitchSchema.d1d9f70": {
+        "description": "Where a person turns their switch *Join projects started on my\nbehalf* (F134.2).",
+        "properties": {
+          "join_calls": {
+            "description": "On: the person is a member of every project a call starts from now on; off: of none but one whose call names them",
+            "examples": [
+              false
+            ],
+            "title": "Join Calls",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "join_calls"
+        ],
+        "title": "JoinCallsSwitchSchema",
+        "type": "object"
+      },
       "LinkSettingsSchema.fb10421": {
         "description": "The link settings the deployment's environment sets (F91, F93); a\nsetting left out or null is unset.",
         "properties": {
@@ -6914,6 +6932,22 @@
             ],
             "title": "Initials"
           },
+          "join_calls": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The switch *Join projects started on my behalf* (F134.2): on, the person is a member of every project a call starts, from its start; on by default; null until the handle is chosen, and for a service user",
+            "examples": [
+              true,
+              null
+            ],
+            "title": "Join Calls"
+          },
           "name": {
             "anyOf": [
               {
@@ -6936,7 +6970,8 @@
           "name",
           "initials",
           "avatar_slot",
-          "alarms"
+          "alarms",
+          "join_calls"
         ],
         "title": "SelfResponseSchema",
         "type": "object"
@@ -12298,7 +12333,7 @@
     },
     "/api/people/self": {
       "get": {
-        "description": "A person with a row has its name (unless the token carries none), email and last seen refreshed. One without is at their first sign-in: the answer has no handle and no slot, and the prefill for the handle step. A service user's row is read and never written: its handle and its name, with no slot and no alarms switch.\n\nReturns:     200: The signed-in person     401: No one is signed in     403: The caller lacks the editor role",
+        "description": "A person with a row has its name (unless the token carries none), email and last seen refreshed. One without is at their first sign-in: the answer has no handle and no slot, and the prefill for the handle step. A service user's row is read and never written: its handle and its name, with no slot and neither switch.\n\nReturns:     200: The signed-in person     401: No one is signed in     403: The caller lacks the editor role",
         "operationId": "get__api_people_self",
         "parameters": [],
         "responses": {
@@ -12752,6 +12787,83 @@
           }
         ],
         "summary": "Choose the signed-in person's handle, which puts them on the record.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/people/self/join-calls": {
+      "put": {
+        "description": "On makes them a member of every project a call starts from now on; off keeps them out of those, but for one whose call names them. A project a call started before the turn keeps its members.\n\nReturns:     200: The person, with the switch as turned     400: The switch is not true or false     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle",
+        "operationId": "put__api_people_self_join-calls",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinCallsSwitchSchema.d1d9f70"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfResponseSchema.d1d9f70"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Turn the signed-in person's switch *Join projects started on my behalf* (F134.2).",
         "tags": [],
         "x-required-role": "editor"
       }

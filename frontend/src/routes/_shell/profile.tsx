@@ -1,10 +1,11 @@
 /**
  * The profile page (F134, opened from the profile menu, F126): who the person is and their
  * handle, shown and not editable (F137); the switch of this browser's notifications (F146.1) and,
- * beside it, the alarms switch (F142.1).
+ * beside it, the alarms switch (F142.1) and the switch *Join projects started on my behalf* (F134.2).
  */
 
 import { createFileRoute } from '@tanstack/react-router';
+import { JoinCallsSwitch } from '@/components/people/profile-membership';
 import { AlarmsSwitch, DeviceSwitch } from '@/components/people/profile-notifications';
 import { Avatar } from '@/components/shared/avatar';
 import { usePerson } from '@/hooks/use-self';
@@ -38,6 +39,10 @@ function Profile() {
           <dt>Alarms</dt>
           <dd>
             <AlarmsSwitch on={person.alarms} />
+          </dd>
+          <dt>Projects</dt>
+          <dd>
+            <JoinCallsSwitch on={person.join_calls} />
           </dd>
         </dl>
       </section>

@@ -1,6 +1,6 @@
 """/api/people/self: the signed-in person, the handle step (F137), and on
-their profile the alarms switch and a browser's subscription (F142.1,
-F146)."""
+their profile the alarms switch, the switch *Join projects started on my
+behalf* and a browser's subscription (F142.1, F134.2, F146)."""
 
 import secrets
 from typing import Any
@@ -24,6 +24,7 @@ BROWSER_AUTH = b64(secrets.token_bytes(16))
 SELF = "/api/people/self"
 HANDLE = "/api/people/self/handle"
 ALARMS = "/api/people/self/alarms"
+JOIN_CALLS = "/api/people/self/join-calls"
 SUBSCRIPTIONS = "/api/people/self/push-subscriptions"
 PHONE = "https://push.example.com/send/phone-of-ada"
 
@@ -72,6 +73,7 @@ class TestGetSelf:
             "initials": "BE",
             "avatar_slot": None,
             "alarms": None,
+            "join_calls": None,
         }
         assert _people(session) == 0
 
@@ -87,6 +89,7 @@ class TestGetSelf:
             "initials": None,
             "avatar_slot": None,
             "alarms": None,
+            "join_calls": None,
         }
 
     def test_the_local_user_goes_through_the_same_step(
@@ -100,6 +103,7 @@ class TestGetSelf:
             "initials": "LA",
             "avatar_slot": None,
             "alarms": None,
+            "join_calls": None,
         }
 
     def test_a_person_reads_their_row(self, client: FlaskClient, person: User) -> None:
@@ -115,6 +119,7 @@ class TestGetSelf:
             "initials": "AE",
             "avatar_slot": 1,
             "alarms": True,
+            "join_calls": True,
         }
 
     def test_a_person_reads_their_alarms_switch_as_turned(
@@ -125,6 +130,17 @@ class TestGetSelf:
         _sign_in(client, subject="subject-ada", name="Ada Example")
 
         assert client.get(SELF).get_json()["alarms"] is False
+
+    def test_a_person_reads_their_join_switch_as_turned(
+        self, client: FlaskClient, person: User, session: Session
+    ) -> None:
+        person.join_calls = False
+        session.flush()
+        _sign_in(client, subject="subject-ada", name="Ada Example")
+
+        body = client.get(SELF).get_json()
+
+        assert (body["join_calls"], body["alarms"]) == (False, True)
 
     def test_a_later_sign_in_refreshes_the_row(
         self, client: FlaskClient, person: User
@@ -174,6 +190,7 @@ class TestChooseHandle:
             "initials": "BE",
             "avatar_slot": 1,
             "alarms": True,
+            "join_calls": True,
         }
         person = _row(session, "subject-ben")
         assert (person.handle, person.email) == ("ben", "ben@example.com")
@@ -336,6 +353,82 @@ class TestSwitchAlarms:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.put(ALARMS, json={"alarms": False}).status_code == 401
+
+
+class TestSwitchJoinCalls:
+    def test_off_and_on_again(
+        self, client: FlaskClient, person: User, session: Session
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+
+        off = client.put(JOIN_CALLS, json={"join_calls": False})
+
+        assert off.status_code == 200
+        assert (off.get_json()["join_calls"], off.get_json()["alarms"]) == (False, True)
+        session.refresh(person)
+        assert (person.join_calls, person.alarms) == (False, True)
+
+        on = client.put(JOIN_CALLS, json={"join_calls": True})
+
+        assert on.get_json()["join_calls"] is True
+        session.refresh(person)
+        assert person.join_calls is True
+
+    def test_it_turns_the_callers_alone(
+        self, client: FlaskClient, person: User, session: Session
+    ) -> None:
+        _sign_in(client)
+        assert client.post(HANDLE, json={"handle": "ben"}).status_code == 201
+
+        assert client.put(JOIN_CALLS, json={"join_calls": False}).status_code == 200
+
+        session.refresh(person)
+        assert person.join_calls is True
+        assert _row(session, "subject-ben").join_calls is False
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({}, id="missing"),
+            pytest.param({"join_calls": None}, id="null"),
+            pytest.param({"join_calls": "maybe"}, id="not-a-switch"),
+            pytest.param({"join_calls": 7}, id="a-number"),
+            pytest.param({"alarms": False}, id="another-switch"),
+        ],
+    )
+    def test_a_request_without_a_switch_is_refused(
+        self, client: FlaskClient, person: User, body: dict[str, Any]
+    ) -> None:
+        _sign_in(client, subject="subject-ada")
+
+        assert client.put(JOIN_CALLS, json=body).status_code == 400
+        assert (person.join_calls, person.alarms) == (True, True)
+
+    def test_before_the_handle_it_is_refused(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        response = client.put(JOIN_CALLS, json={"join_calls": False})
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot turn your switch for projects started on your behalf because"
+            " you have not chosen your handle yet"
+        )
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, person: User
+    ) -> None:
+        _sign_in(client, subject="subject-ada", roles=())
+
+        assert client.put(JOIN_CALLS, json={"join_calls": False}).status_code == 403
+        assert person.join_calls is True
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.put(JOIN_CALLS, json={"join_calls": False})
+
+        assert response.status_code == 401
 
 
 def _subscription(endpoint: str = PHONE, **keys: object) -> dict[str, object]:

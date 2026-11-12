@@ -1,5 +1,5 @@
-"""Schemas for /api/people: the signed-in person, their handle and their
-alarms switch."""
+"""Schemas for /api/people: the signed-in person, their handle, their alarms
+switch and their switch *Join projects started on my behalf*."""
 
 from pydantic import BaseModel, Field
 
@@ -45,6 +45,14 @@ class SelfResponseSchema(BaseModel):
         ),
         examples=[True, None],
     )
+    join_calls: bool | None = Field(
+        description=(
+            "The switch *Join projects started on my behalf* (F134.2): on, the "
+            "person is a member of every project a call starts, from its start; "
+            "on by default; null until the handle is chosen, and for a service user"
+        ),
+        examples=[True, None],
+    )
 
 
 class HandleChoiceSchema(BaseModel):
@@ -66,6 +74,19 @@ class AlarmsSwitchSchema(BaseModel):
         description=(
             "On: a condition that comes to hold alarms the person's browsers "
             "while they are offline; off: no alarm is pushed to them"
+        ),
+        examples=[False],
+    )
+
+
+class JoinCallsSwitchSchema(BaseModel):
+    """Where a person turns their switch *Join projects started on my
+    behalf* (F134.2)."""
+
+    join_calls: bool = Field(
+        description=(
+            "On: the person is a member of every project a call starts from now "
+            "on; off: of none but one whose call names them"
         ),
         examples=[False],
     )

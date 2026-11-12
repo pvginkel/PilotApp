@@ -289,6 +289,38 @@ class TestPeopleService:
         )
 
 
+class TestSelfResponse:
+    def test_a_person_is_read_with_both_switches_as_they_stand(
+        self, person: User
+    ) -> None:
+        person.join_calls = False
+
+        assert self_response(person).model_dump() == {
+            "handle": "ada",
+            "handle_prefill": None,
+            "name": "Ada Example",
+            "initials": "AE",
+            "avatar_slot": 1,
+            "alarms": True,
+            "join_calls": False,
+        }
+
+
+class TestSwitchJoinCalls:
+    def test_it_turns_the_switch_and_nothing_else(
+        self, people: PeopleService, session: Session, person: User
+    ) -> None:
+        people.switch_join_calls(person, False)
+        session.flush()
+        session.refresh(person)
+        assert (person.join_calls, person.alarms) == (False, True)
+
+        people.switch_join_calls(person, True)
+        session.flush()
+        session.refresh(person)
+        assert person.join_calls is True
+
+
 FLEET = AuthContext(subject="subject-fleet", email=None, name=None, roles={"editor"})
 """What a token of the service user's client carries."""
 
@@ -348,7 +380,7 @@ class TestAServiceUserCalling:
             "which is no person"
         )
 
-    def test_the_self_read_gives_it_no_slot_and_no_alarms_switch(
+    def test_the_self_read_gives_it_no_slot_and_neither_switch(
         self, service_user: User
     ) -> None:
         assert self_response(service_user).model_dump() == {
@@ -358,6 +390,7 @@ class TestAServiceUserCalling:
             "initials": "KC",
             "avatar_slot": None,
             "alarms": None,
+            "join_calls": None,
         }
 
 

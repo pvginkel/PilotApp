@@ -51,9 +51,11 @@ class TestUser:
         assert person.created_at is not None
         assert person.last_seen_at is None
         assert person.alarms is True
+        assert person.join_calls is True
 
-    def test_the_database_turns_the_alarms_on(self, session: Session) -> None:
-        """A row the revisions or raw SQL write has the switch on (F142.1)."""
+    def test_the_database_turns_the_switches_on(self, session: Session) -> None:
+        """A row the revisions or raw SQL write has both switches on (F142.1,
+        F134.2)."""
         session.execute(
             text(
                 "INSERT INTO users (id, kind_code, subject, handle, name, avatar_slot)"
@@ -62,8 +64,10 @@ class TestUser:
             )
         )
 
-        alarms = session.scalars(select(User.alarms).where(User.handle == "hal")).one()
-        assert alarms is True
+        switches = session.execute(
+            select(User.alarms, User.join_calls).where(User.handle == "hal")
+        ).one()
+        assert tuple(switches) == (True, True)
 
     def test_a_second_agent_is_refused(self, session: Session) -> None:
         session.add(User(kind_code=UserKind.AGENT, handle="pilot-two", name="Pilot"))

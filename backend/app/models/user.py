@@ -52,6 +52,9 @@ class User(db.Model):  # type: ignore[name-defined]
     name: Mapped[str] = mapped_column(Text)
     email: Mapped[str | None] = mapped_column(Text)
     alarms: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    join_calls: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true()
+    )
     alarm_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     avatar_slot: Mapped[int | None] = mapped_column(Integer, unique=True)
     created_at: Mapped[datetime] = mapped_column(

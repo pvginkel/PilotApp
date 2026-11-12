@@ -136,6 +136,7 @@ def _writes(
         ("PUT", f"/api/people/self/app-pages/{NO_ROW}", {"project_id": None}),
         ("POST", f"/api/people/self/app-pages/{NO_ROW}/away", None),
         ("PUT", "/api/people/self/alarms", {"alarms": False}),
+        ("PUT", "/api/people/self/join-calls", {"join_calls": False}),
         (
             "POST",
             "/api/people/self/push-subscriptions",
@@ -188,7 +189,11 @@ class TestAPersonsWrites:
         assert [_count(session, model) for model in written] == before
         session.refresh(item)
         assert item.done_at is None
-        assert (service_user.alarms, service_user.last_seen_at) == (True, None)
+        assert (
+            service_user.alarms,
+            service_user.join_calls,
+            service_user.last_seen_at,
+        ) == (True, True, None)
 
     def test_a_read_answers_it_and_writes_nothing_of_it(
         self,

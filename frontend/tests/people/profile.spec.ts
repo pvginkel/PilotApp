@@ -1,8 +1,9 @@
 /**
  * The profile page (F134), opened from the profile menu (F126): the person and their handle,
  * shown and not editable (F137); the switch of this browser's notifications, its subscription
- * from the worker's fake push service (F146.1), which Sign out removes (F146.3); and the alarms
- * switch, the person's on every browser (F142.1).
+ * from the worker's fake push service (F146.1), which Sign out removes (F146.3); the alarms
+ * switch, the person's on every browser (F142.1); and the switch *Join projects started on my
+ * behalf* (F134.2).
  */
 
 import type { Page, Request } from '@playwright/test';
@@ -201,5 +202,50 @@ test.describe("The profile page's alarms switch", () => {
     await profile.turnAlarms();
     await expect(profile.alarms).toHaveAttribute('aria-checked', 'true');
     expect((await people.self()).alarms).toBe(true);
+  });
+});
+
+test.describe("The profile page's switch Join projects started on my behalf", () => {
+  test('is the third switch, under the alarms switch, on by default, and says whose projects it joins', async ({ people, shell, profile }) => {
+    await people.signIn();
+    await shell.open('/profile');
+
+    await expect(profile.root.getByRole('switch')).toHaveCount(3);
+    await expect(profile.root.getByRole('switch').nth(1)).toHaveAccessibleName('Send me alarms');
+    await expect(profile.root.getByRole('switch').nth(2)).toHaveAccessibleName('Join projects started on my behalf');
+    await expect(profile.joinCalls).toHaveAttribute('role', 'switch');
+    await expect(profile.joinCalls).toHaveAttribute('aria-checked', 'true');
+    await expect(profile.joinCalls).toBeEnabled();
+    await expect(profile.joinCallsNote).toHaveText(
+      'A member, from its start, of every project a session outside Pilot starts here. Off, only of one started for you by name.',
+    );
+  });
+
+  test('turns off and on again, stays as turned, and leaves the alarms switch as it stood', async ({ page, people, shell, profile }) => {
+    await people.signIn();
+    await shell.open('/profile');
+
+    await profile.turnJoinCalls();
+    await expect(profile.joinCalls).toHaveAttribute('aria-checked', 'false');
+    await expect(profile.alarms).toHaveAttribute('aria-checked', 'true');
+    expect(await people.self()).toMatchObject({ join_calls: false, alarms: true });
+    await page.reload();
+    await expect(profile.joinCalls).toHaveAttribute('aria-checked', 'false');
+
+    await profile.turnJoinCalls();
+    await expect(profile.joinCalls).toHaveAttribute('aria-checked', 'true');
+    expect((await people.self()).join_calls).toBe(true);
+  });
+
+  test('the alarms switch turned leaves it as it stood', async ({ people, shell, profile }) => {
+    await people.signIn();
+    await shell.open('/profile');
+    await profile.turnJoinCalls();
+
+    await profile.turnAlarms();
+
+    await expect(profile.alarms).toHaveAttribute('aria-checked', 'false');
+    await expect(profile.joinCalls).toHaveAttribute('aria-checked', 'false');
+    expect(await people.self()).toMatchObject({ join_calls: false, alarms: false });
   });
 });

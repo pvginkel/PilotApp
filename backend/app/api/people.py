@@ -1,7 +1,7 @@
 """The signed-in person: who they are on the record, the handle they choose
-at their first sign-in (F137), on their profile their alarms switch (F142.1),
-and a browser's notifications, its subscription turned on and off there
-(F146)."""
+at their first sign-in (F137), on their profile their alarms switch (F142.1)
+and their switch *Join projects started on my behalf* (F134.2), and a
+browser's notifications, its subscription turned on and off there (F146)."""
 
 from typing import Any
 
@@ -14,6 +14,7 @@ from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.people import (
     AlarmsSwitchSchema,
     HandleChoiceSchema,
+    JoinCallsSwitchSchema,
     SelfResponseSchema,
 )
 from app.schemas.web_push import PushEndpointQuerySchema, PushSubscriptionSchema
@@ -50,7 +51,7 @@ def get_self(
     and last seen refreshed. One without is at their first sign-in: the
     answer has no handle and no slot, and the prefill for the handle step. A
     service user's row is read and never written: its handle and its name,
-    with no slot and no alarms switch.
+    with no slot and neither switch.
 
     Returns:
         200: The signed-in person
@@ -69,6 +70,7 @@ def get_self(
         initials=None if name is None else initials(name),
         avatar_slot=None,
         alarms=None,
+        join_calls=None,
     ).model_dump()
 
 
@@ -214,4 +216,41 @@ def switch_alarms(
     choice = AlarmsSwitchSchema.model_validate(request.get_json())
     person = people_service.require_person(caller(), "turn your alarms switch")
     notification_settings_service.switch_alarms(person, choice.alarms)
+    return self_response(person).model_dump()
+
+
+@people_bp.route("/self/join-calls", methods=["PUT"])
+@api.validate(
+    json=JoinCallsSwitchSchema,
+    resp=SpectreeResponse(
+        HTTP_200=SelfResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def switch_join_calls(
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+) -> Any:
+    """Turn the signed-in person's switch *Join projects started on my
+    behalf* (F134.2).
+
+    On makes them a member of every project a call starts from now on; off
+    keeps them out of those, but for one whose call names them. A project a
+    call started before the turn keeps its members.
+
+    Returns:
+        200: The person, with the switch as turned
+        400: The switch is not true or false
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The caller has not chosen a handle
+    """
+    choice = JoinCallsSwitchSchema.model_validate(request.get_json())
+    person = people_service.require_person(
+        caller(), "turn your switch for projects started on your behalf"
+    )
+    people_service.switch_join_calls(person, choice.join_calls)
     return self_response(person).model_dump()
