@@ -69,17 +69,33 @@ export class Device {
   /**
    * Resolves once the page, as loaded, reads none of its notifications to close them: the last of
    * its `shell.closing` states is ready (`use-app-page.ts`), each visible load closing the alarms'
-   * as it starts.
+   * as it starts. A visible page at a project's address closes the project's too, but only once it
+   * has resolved the address, which can come after the alarms' are closed: a closing that read the
+   * project's tag must have started.
    */
   private async closed(): Promise<void> {
-    const load = await this.page.evaluate(() => performance.timeOrigin);
+    const { load, visible } = await this.page.evaluate(() => ({ load: performance.timeOrigin, visible: document.visibilityState === 'visible' }));
+    const project = visible ? await this.projectAt() : undefined;
     const buffer = getTestEventBuffer(this.page);
-    const state = () =>
-      buffer
+    const state = () => {
+      const states = buffer
         .snapshot(0)
-        .events.filter((event): event is UiStateTestEvent => event.kind === 'ui_state' && event.scope === 'shell.closing' && event.metadata?.load === load)
-        .at(-1)?.phase;
+        .events.filter((event): event is UiStateTestEvent => event.kind === 'ui_state' && event.scope === 'shell.closing' && event.metadata?.load === load);
+      if (project !== undefined && !states.some((each) => (each.metadata?.tags as string[] | undefined)?.includes(project))) return 'unread';
+      return states.at(-1)?.phase;
+    };
     await expect.poll(state, { message: 'the page reads none of its notifications to close them' }).toBe('ready');
+  }
+
+  /** The id of the project at the page's address, as the page resolves it; none off a project's address or where none is. */
+  private async projectAt(): Promise<string | undefined> {
+    const url = new URL(this.page.url());
+    const address = /^\/projects\/([^/]+)/.exec(url.pathname)?.[1];
+    if (address === undefined) return undefined;
+    const response = await this.page.request.get(new URL('/api/projects/lookup', url).href, { params: { address: decodeURIComponent(address) } });
+    if (response.status() === 404) return undefined;
+    expect(response.status(), await response.text()).toBe(200);
+    return ((await response.json()) as { id: string }).id;
   }
 
   /** The notifications standing on the device, in the order they first showed. */

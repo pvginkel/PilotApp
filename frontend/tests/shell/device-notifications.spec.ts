@@ -127,6 +127,20 @@ test.describe("A device's notifications", () => {
       await expect.poll(() => device.tags()).toEqual([other]);
     });
 
+    test("a push on a project's page just after its load stands, the page's closing of the project done before it", async ({ page, people, projects, shell, device }) => {
+      const me = await people.signIn();
+      const shown = await projects.make({ name: makeUnique('Shown'), members: [me.handle!] });
+      const other = randomUUID();
+      // The device set up before the load, so that a deliver goes as soon as the page lets it.
+      await shell.open('/profile');
+      await device.deliver(pushUnder(page, other));
+
+      await shell.open(projectAddress(shown));
+      await device.deliver(pushUnder(page, shown));
+
+      await expect.poll(() => device.tags()).toEqual([shown, other].sort());
+    });
+
     test("opening Pilot lands on the project last open, closing its notification", async ({ page, people, projects, projectList, shell, device }) => {
       const me = await people.signIn();
       const last = await projects.make({ name: makeUnique('Last'), members: [me.handle!] });

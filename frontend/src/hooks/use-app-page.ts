@@ -14,8 +14,9 @@
  * gets out as the page hides; the server's ninety seconds end a page whose away is lost. Only a
  * person with a handle beats: the server refuses a page before it. Its ui state, `shell.app-page`,
  * is ready once the page hears its person's input; `shell.closing` is loading while the page reads
- * its device's notifications to close them, and ready once it reads none, each under the page's
- * load, `performance.timeOrigin`: Chromium drops a push it is displaying as a page reads them.
+ * its device's notifications to close them, each reading's loading naming the tags it reads, and
+ * ready once it reads none, each under the page's load, `performance.timeOrigin`: Chromium drops a
+ * push it is displaying as a page reads them.
  */
 
 import { useEffect, useRef } from 'react';
@@ -47,13 +48,15 @@ function visible(): boolean {
 /** The closings in flight. */
 let closing = 0;
 
-function closingState(phase: 'loading' | 'ready'): void {
-  emitTestEvent({ kind: 'ui_state', scope: 'shell.closing', phase, metadata: { load: performance.timeOrigin } });
+/** Loading as each closing starts, with the tags it reads; ready once none is in flight. */
+function closingState(phase: 'loading' | 'ready', tags?: readonly string[]): void {
+  emitTestEvent({ kind: 'ui_state', scope: 'shell.closing', phase, metadata: { load: performance.timeOrigin, ...(tags && { tags }) } });
 }
 
 /** Closes this device's notifications under `tags`; none stands before the service worker is registered. */
 async function closeNotifications(tags: readonly string[]): Promise<void> {
-  if (closing++ === 0) closingState('loading');
+  closing++;
+  closingState('loading', tags);
   try {
     const registration = await navigator.serviceWorker.getRegistration();
     if (registration === undefined) return;

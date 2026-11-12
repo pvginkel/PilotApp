@@ -349,10 +349,14 @@ subscription in `PushSubscription.toJSON()`'s shape, its endpoint the fake's; `p
   service; `subscription()`, `pushes()` and `prompts()` read what it holds. A spec that does not
   install it never sees the offer, the headless shell's permission being denied. The fixture
   `device` (`frontend/tests/support/device.ts`) hands a push to the page's service worker once the
-  page's closing of its notifications is done, the ui state `shell.closing` of its current load
-  ready (`useAppPage` reports it `loading` while any closing is in flight, each event carrying the
-  load's `performance.timeOrigin`), since headless Chromium drops a notification
-  `getNotifications()` reads while it is being displayed, and waits until it is displayed, reads the notifications standing there, and sets the page's visibility
+  page's closing of its notifications is done, since headless Chromium drops a notification
+  `getNotifications()` reads while it is being displayed: the ui state `shell.closing` of its
+  current load ready (`useAppPage` reports it `loading` as each closing starts, with the tags it
+  reads, and `ready` once none is in flight, each event carrying the load's
+  `performance.timeOrigin`), and, on a visible page at a project's address, a closing that read the
+  project's tag started, the page closing the project's only once it has resolved its address,
+  which can come after the alarms' are closed. It waits until the push is displayed, reads the
+  notifications standing there, and sets the page's visibility
   (`hide()`, `foreground()`); a push shows only in a file under `test.use({ channel: 'chromium',
   permissions: ['notifications'] })`, Chromium's full build. The record's testing read
   `GET /api/testing/projects/<id>/sightings?handle=<handle>` ([`projects.md`](projects.md)) says
