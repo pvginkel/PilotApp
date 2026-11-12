@@ -50,6 +50,9 @@ export class SessionLogPage {
   /** The cue's dancing dots. */
   readonly dots: Locator;
   readonly tail: Locator;
+  /** Under the tail of a job retried: that it was, and its words, the link to the retry's log. */
+  readonly retried: Locator;
+  readonly retriedLink: Locator;
   readonly failed: Locator;
   readonly discuss: Locator;
 
@@ -88,6 +91,8 @@ export class SessionLogPage {
     this.cue = this.log.getByTestId('session-log.cue');
     this.dots = this.cue.getByTestId('chat.cue.dots');
     this.tail = this.log.getByTestId('session-log.tail');
+    this.retried = this.log.getByTestId('session-log.retried');
+    this.retriedLink = this.log.getByTestId('session-log.retried.link');
     this.failed = this.overlay.getByTestId('overlay.failed');
     this.discuss = this.overlay.getByTestId('overlay.discuss');
   }

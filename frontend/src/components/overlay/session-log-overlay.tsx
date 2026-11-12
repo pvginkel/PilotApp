@@ -14,13 +14,15 @@
  * ended: "Stopped by you · <time>", by whom else, by Pilot at the usage limit, the environment
  * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6);
  * a run whose turn ended under a halt or a pause adds, under its end, what holds its nudge, as its
- * line does (F135.3, F141.3). The cue's dots dance while a turn runs or comes up, and it stands
+ * line does (F135.3, F141.3); a job retried adds, under how it ended, "Retried as a new job ·
+ * <time>", its words the link to the retry's log, which takes this one's place (F26.4). The cue's dots dance while a turn runs or comes up, and it stands
  * still while the gate holds the start or a nudge is owed (D167). The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
  * log on. An address that names no work item of the project reads "The session log did not load".
  */
 
 import { useMemo, useRef, type RefObject } from 'react';
-import { Check, CircleAlert, ScrollText, Square } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { Check, CircleAlert, RotateCw, ScrollText, Square } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { ReplyBody, ReplyCue } from '@/components/chat/pilot-reply';
@@ -34,8 +36,10 @@ import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { useSseContext } from '@/contexts/sse-context';
 import { useChatStream } from '@/hooks/use-chat-stream';
+import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useOverlayClose } from '@/hooks/use-overlay-close';
 import { usePhone } from '@/hooks/use-phone';
+import { useShownProject } from '@/hooks/use-project-address';
 import { usePerson } from '@/hooks/use-self';
 import { useSessionTransport } from '@/hooks/use-session-transport';
 import { useSessionTurns, type SessionTurn } from '@/hooks/use-session-turns';
@@ -188,6 +192,7 @@ function SessionLog({ item, work, body }: SessionLogProps) {
               )}
             </span>
           </div>
+          {work.retried !== null && <Retried retried={work.retried} />}
           {work.state === 'idle' && work.nudge_owed && (
             <div className="log-cue mx-1.5" data-testid="session-log.cue">
               <WorkingCue activity={nudgeCue(work)} animate={false} />
@@ -195,6 +200,29 @@ function SessionLog({ item, work, body }: SessionLogProps) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** That a Retry placed a new job for this one, and when: its words open the new job's log in this one's place. */
+function Retried({ retried }: { retried: NonNullable<Work['retried']> }) {
+  const { address } = useShownProject();
+  const replace = useTabReplace();
+  return (
+    <div className="log-tail" data-testid="session-log.retried">
+      <RotateCw className="icon" aria-hidden="true" />
+      <span>
+        <Link
+          to="/projects/$address/sessions/$sessionId"
+          params={{ address, sessionId: retried.id }}
+          replace={replace}
+          data-testid="session-log.retried.link"
+        >
+          Retried as a new job
+        </Link>
+        {' · '}
+        <Time at={retried.at} format="clock" />
+      </span>
     </div>
   );
 }

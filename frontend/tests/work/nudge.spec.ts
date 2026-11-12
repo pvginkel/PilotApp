@@ -153,6 +153,8 @@ test.describe("A run halted at its turn’s end", () => {
     await expect(carried.cue).toHaveText("Halted at the week’s limit");
 
     await item.stop.click();
+    // Its turn ended already: the question does not say that it ends where it is.
+    await expect(item.stopConfirm.text).toHaveText("Stop the session? Resume sends it on.");
     await item.stopConfirm.yes.click();
     await expect(item.line).toHaveAttribute("data-state", "stopped");
     await expect(item.line).toHaveText(/^Stopped · \d\d:\d\d$/);

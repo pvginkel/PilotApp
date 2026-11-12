@@ -214,9 +214,8 @@ export class TimelinePage {
           items: root.getByTestId('timeline.work.steps.step'),
         },
         resume: root.getByTestId('timeline.work.resume'),
-        /** A job's Retry, once it stopped or failed, and the line saying a Retry placed a new one. */
+        /** A job's Retry, once it stopped or failed. */
         retry: root.getByTestId('timeline.work.retry'),
-        retried: root.getByTestId('timeline.work.retried'),
         /** Stop's question, in the row's place: its words, Stop it and Cancel. */
         stopConfirm: {
           root: root.getByTestId('timeline.work.stop-confirm'),

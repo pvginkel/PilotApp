@@ -13,8 +13,9 @@
  * waits its turn behind it, on the worker's line, its session log saying so, and goes on once the
  * setup's turn ends (F59.1, F59.2).
  * Failed, it offers Retry where a worker's Resume is: a fresh setup at the project's next place,
- * the failed line staying with its session log, saying it was retried and offering Retry no more;
- * a running or done job offers none (D2). Dead at the quota wall, it offers none while its nudge is
+ * the failed one its line from then on, quiet as a done work item's, an orange triangle before its
+ * title, the focus on that title, and its session log's tail saying how it failed and that it was
+ * retried, the words opening the retry's log; a running or done job offers none (D2, F26.4). Dead at the quota wall, it offers none while its nudge is
  * owed, and once a reading brings the quota back the nudge carries it on (F135.3; D078). Create pauses the new project, its setup let through: it
  * is pausing while the setup runs, a work item placed meanwhile held, "Paused", and paused once the
  * setup's turn ends, Pilot's line under the setup saying the project is ready, gone at the status
@@ -98,6 +99,22 @@ async function boxes(definitionChat: ChatPage) {
   );
   return { box, button, line, column };
 }
+
+/** The warning's text colour, as the page computes it. */
+async function warningText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.color = 'hsl(var(--warning-text))';
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  });
+}
+
+/** A time's clock in the browser's zone, as a line shows it. */
+const clock = (page: Page, at: string) =>
+  page.evaluate((time) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(new Date(time)), at);
 
 /**
  * Create project's box, the last thing in the transcript and so scrolling with it, with a border, as
@@ -512,7 +529,7 @@ test.describe('The setup', () => {
     await expect(job.root).toHaveAttribute('data-state', 'running');
   });
 
-  test('failed, it offers Retry; pressed, a fresh setup at the next place takes it on, the failed line saying so and offering Retry no more', async ({
+  test('failed, it offers Retry; pressed, a fresh setup at the next place takes it on, the failed one its quiet line under an orange triangle, its log’s tail saying it was retried and opening the retry’s', async ({
     page,
     people,
     projects,
@@ -521,6 +538,7 @@ test.describe('The setup', () => {
     chats,
     definitionChat,
     timeline,
+    sessionLog,
   }) => {
     const me = await people.signIn();
     const { id, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
@@ -536,34 +554,57 @@ test.describe('The setup', () => {
     await expect(setup.work.line).toHaveText('Failed · The model is overloaded.');
     await expect(setup.work.row).toHaveText('Retry');
     await expect(setup.work.resume).toHaveCount(0);
-    await expect(setup.work.retried).toHaveCount(0);
+    await expect(setup.root).toHaveAttribute('data-state', 'open');
     // Failed, it can be acted on, which "N open above" counts; retried, no more.
     await expect(setup.root).toHaveAttribute('data-actionable', 'true');
 
     const restarted = await chats.opening(id, slug);
     await setup.work.retry.click();
     const again = await restarted();
-    await expect(setup.work.retry).toHaveCount(0);
-    await expect(setup.work.row).toHaveCount(0);
-    await expect(setup.work.sessionLog).toBeFocused();
-    await expect(setup.work.retried).toContainText('Retried as a new job below');
-    await expect(setup.work.line).toHaveText('Failed · The model is overloaded.');
-    await expect(setup.root).toHaveAttribute('data-state', 'open');
+    // Retried, the tile is its line, as a done work item's: quiet, the triangle in the warning's
+    // colour its icon, its title the link to its session log, with the focus Retry had.
+    await expect(setup.root).toHaveAttribute('data-state', 'retried');
+    await expect(setup.root).toHaveClass(/\bcollapsed\b/);
+    await expect(setup.root).toHaveClass(/\bquiet\b/);
     await expect(setup.root).toHaveAttribute('data-actionable', 'false');
+    for (const gone of [setup.work.retry, setup.work.row, setup.work.line, setup.work.sessionLog, setup.undo]) await expect(gone).toHaveCount(0);
+    await expect(setup.lineTitle).toHaveText(SETUP);
+    await expect(setup.lineTitle).toBeFocused();
+    await expect(setup.lineKind).toHaveAttribute('title', 'Retried as a new job');
+    await expect(setup.lineKind.locator('svg')).toHaveClass(/lucide-triangle-alert/);
+    await expect(setup.lineKind).toHaveCSS('color', await warningText(page));
 
     const items = (await projects.timeline(id)).items;
     const retryId = items.find((item) => item.work?.pilots_own && item.id !== setupId)!.id;
     expect(items.at(-1)!.id).toBe(retryId);
+    const { retried } = await projects.work(id, setupId);
+    expect(retried!.id).toBe(retryId);
+    await expect(setup.lineTime).toHaveText(await clock(page, retried!.at));
     const retry = timeline.item(retryId);
     await expect(retry.title).toHaveText(SETUP);
+    await expect(retry.root).toHaveAttribute('data-state', 'open');
     await expect(retry.work.running).toBeVisible();
     await expect(retry.work.retry).toHaveCount(0);
-    await expect(retry.work.retried).toHaveCount(0);
+
+    // Its session log keeps how it failed, and says under it that it was retried, the words the
+    // link to the retry's log, which takes its place.
+    await setup.lineTitle.click();
+    await expect(sessionLog.title).toHaveAttribute('title', `Session ${setupId}`);
+    await expect(sessionLog.tail).toHaveAttribute('data-mark', 'failed');
+    await expect(sessionLog.tail).toContainText('Failed');
+    await expect(sessionLog.retried).toHaveText(`Retried as a new job · ${await clock(page, retried!.at)}`);
+    await expect(sessionLog.retriedLink).toHaveText('Retried as a new job');
+    await sessionLog.retriedLink.click();
+    await expect(sessionLog.title).toHaveAttribute('title', `Session ${retryId}`);
+    await expect(sessionLog.retried).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(sessionLog.overlay).toHaveCount(0);
 
     await controller.finish(chats.store, again, 'success', 'The plan is written.');
     await expect(retry.root).toHaveAttribute('data-state', 'done');
     await expect(retry.work.retry).toHaveCount(0);
-    await expect(setup.work.retry).toHaveCount(0);
+    await expect(sessionLog.retried).toHaveCount(0);
+    await expect(setup.root).toHaveAttribute('data-state', 'retried');
   });
 
   test('dead at the quota wall, it offers no Retry while its nudge is owed; once there is quota again, the nudge carries it on, and it is done at that turn’s end', async ({

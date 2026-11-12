@@ -137,6 +137,10 @@
   /* A work item's progress button, in the row under its line: its steps open from its left edge,
      within the card's margins on a phone. */
   .progress-anchor .plan-pop { right: auto; left: 0; width: min(320px, calc(100vw - 58px)); }
+  /* Its donut's margin box, 13px + 0.5cap, sets the button's baseline 14px + 0.5cap under its top:
+     the capitals' middle, and the donut's on it, is the 28px button's, where a small button's own
+     text stands above it. */
+  .progress-anchor .plan-ring { margin-top: calc(0.5cap - 3px); }
   /* A question asked in the actions' place: Stop's, in a work item's row under its line. */
   .item-actions.confirm .confirm-text { flex: 1 1 260px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   /* The attachments hung on an item, a chip each (attachments.tsx). */
@@ -493,6 +497,8 @@
   .line .menu-pop { top: auto; right: 12px; max-width: calc(100% - 24px); margin-top: 6px; }
   .line .kind-icon.yes { color: hsl(var(--success-text)); }
   .line .kind-icon.no { color: hsl(var(--destructive-text)); }
+  /* A retried job's triangle, on its quiet line too. */
+  .line .kind-icon.retried, .quiet .line .kind-icon.retried { color: hsl(var(--warning-text)); }
   .line .title, .line .said-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .line .title { flex: 1; }
   /* The title opens what is behind the line, underlined under the mouse. */
@@ -599,15 +605,13 @@
   }
   /* Its one line: the working cue, a sub-agent's description after it past a " · ", in the cue's
      one colour, cut short where long, the description under the cue on a phone, its " · "
-     gone; a stop or a failure in the stopped chip's colour, an error wrapping whole; a job's Retry
-     muted under it. The " · " stands a space's width from either side. */
+     gone; a stop or a failure in the stopped chip's colour, an error wrapping whole. The " · "
+     stands a space's width from either side. */
   .work-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 2px 0 0; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .work-line .sep { margin: 0 -4px; }
   .work-line .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .work-line.ended { align-items: baseline; font-size: var(--text-sm); color: hsl(var(--warning-text)); }
   .work-line.ended .icon { position: relative; top: calc(0.5em - 0.5cap); }
-  /* A job's Retry placed a new one: said under its stop or its failure, no longer a warning. */
-  .work-line.ended.retried { color: hsl(var(--muted-foreground)); }
 
   /* ---- The opening ---------------------------------------------------------------------- */
 

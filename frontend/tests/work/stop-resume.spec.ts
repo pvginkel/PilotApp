@@ -1,7 +1,8 @@
 /**
  * Stop and Resume on a work item (F67, F26.8): Stop, on an item that runs, starts or is held, an
  * icon in the item's head after Session log's, before Discuss, its square red, asks first in the
- * row under the line, Esc and Cancel dismissing the question (UC, *Keys*); Stop it ends the session
+ * row under the line, Esc and Cancel dismissing the question (UC, *Keys*), which tells a running
+ * item alone that its turn ends where it is; Stop it ends the session
  * where it is, the item "Stopped · <time>" and waiting on you, Resume in the row under the line.
  * Resume, on a stopped item, a failed start or a turn ended in error, carries it on in the same
  * item through the gate, held while the project is paused, disabled while it is archived; a held
@@ -25,6 +26,8 @@ const clock = (at: string) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit'
 
 const TITLE = 'Surveying the stylesheets';
 const QUESTION = 'Stop the session? Its turn ends where it is; Resume sends it on.';
+/** Stop's question on an item that runs no turn: one that starts, or is held. */
+const QUESTION_NO_TURN = 'Stop the session? Resume sends it on.';
 
 interface Fixtures {
   people: People;
@@ -182,6 +185,7 @@ test.describe('Stop', () => {
     await expect(item.cue).toHaveText(`Preparing ${environment.name}`);
 
     await item.stop.click();
+    await expect(item.stopConfirm.text).toHaveText(QUESTION_NO_TURN);
     await item.stopConfirm.yes.click();
     await expect(item.line).toHaveAttribute('data-state', 'stopped');
     const { stopped_at } = await projects.work(project, work);
@@ -212,6 +216,7 @@ test.describe('Stop', () => {
     await expect(item.cue).toHaveText('Paused');
 
     await item.stop.click();
+    await expect(item.stopConfirm.text).toHaveText(QUESTION_NO_TURN);
     await item.stopConfirm.yes.click();
     await expect(item.line).toHaveAttribute('data-state', 'stopped');
     const { stopped_at } = await projects.work(project, work);

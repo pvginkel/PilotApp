@@ -149,6 +149,8 @@
   .log-tail { display: flex; align-items: baseline; gap: 8px; margin: 12px 6px 0; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .log-tail .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .log-tail.failed { color: hsl(var(--destructive-text)); }
+  /* That it was retried, under how it ended. */
+  .log-tail + .log-tail { margin-top: 2px; }
   .log-cue { margin-top: 6px; }
   /* The head's environment link and the dot before it, on one line. */
   .log-env { display: inline-flex; align-items: baseline; gap: inherit; }

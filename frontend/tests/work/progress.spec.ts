@@ -8,7 +8,8 @@
  * timeline's own; an emptied list takes the button away. It shows on every open item that
  * published a list, stopped, held, failed or halted at its turn's end, beside Resume where it has
  * one, goes with the row while Stop asks, and the done line never has it. At the timeline's end
- * its popover opens above it; on a phone it keeps its label.
+ * its popover opens above it; on a phone it keeps its label. Its donut and its step's capitals
+ * stand at the button's middle, as the head's step button's do, on a phone too (W9).
  */
 
 import type { Locator } from '@playwright/test';
@@ -41,6 +42,26 @@ async function running({ people, projects }: Fixtures, { paused = false } = {}):
 /** The donut's parts, in order. */
 async function ringParts(ring: Locator): Promise<(string | null)[]> {
   return ring.locator('circle').evaluateAll((circles) => circles.map((circle) => circle.getAttribute('class')));
+}
+
+/**
+ * Where a steps button's donut and the capitals of its step's name stand under the button's middle,
+ * in pixels, negative above it: the capitals' middle is half a capital's height over the name's
+ * baseline.
+ */
+async function offMiddle(button: Locator): Promise<{ ring: number; capitals: number }> {
+  return button.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const middle = (box.top + box.bottom) / 2;
+    const ring = element.querySelector('.plan-ring')!.getBoundingClientRect();
+    const name = element.querySelector('.step-name')!;
+    const probe = document.createElement('span');
+    probe.style.cssText = 'display: inline-block; width: 0; height: 1cap;';
+    name.append(probe);
+    const capital = probe.getBoundingClientRect();
+    probe.remove();
+    return { ring: (ring.top + ring.bottom) / 2 - middle, capitals: (capital.top + capital.bottom) / 2 - middle };
+  });
 }
 
 /** The test ids of the row's buttons, in order. */
@@ -99,6 +120,38 @@ test.describe('The progress button', () => {
     await expect(item.progress).toHaveCount(0);
     await expect(item.row).toHaveCount(0);
     expect(reads).toBe(0);
+  });
+
+  test('holds its donut and its step’s capitals at its middle, as the head’s step button does', async ({
+    people,
+    projects,
+    timeline,
+    projectHead,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({
+      name: makeUnique('Progress'),
+      members: [me.handle!],
+      tasks: [{ id: 'a', title: 'Plan the Port', status: 'in_progress', notes: [] }],
+    });
+    const work = await projects.startWork(project, { title: 'Running slice 034', brief: 'Run the slice.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(work).work;
+    await projects.setProgress(work, [step('a', 'done'), { code: 'b', label: 'P5 · Cancel: a Person ends a run', state: 'active' }]);
+    await expect(item.progressName).toHaveText('P5 · Cancel: a Person ends a run');
+
+    const tile = await offMiddle(item.progress);
+    expect(Math.abs(tile.ring)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(tile.capitals)).toBeLessThanOrEqual(0.5);
+    const head = await offMiddle(projectHead.step);
+    expect(Math.abs(head.ring)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(head.capitals)).toBeLessThanOrEqual(0.5);
+    // The donut is on the capitals, in both.
+    expect(Math.abs(tile.ring - tile.capitals)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(head.ring - head.capitals)).toBeLessThanOrEqual(0.5);
   });
 
   test('goes with the row while Stop asks and comes back with it; stays on the stopped item beside Resume, on its held start and on the run resumed', async ({
@@ -278,7 +331,7 @@ test.describe('Its popover', () => {
 test.describe('On the phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-  test('the progress button keeps its label beside the donut, and its popover stays within the window', async ({
+  test('the progress button keeps its label beside the donut, both at its middle, and its popover stays within the window', async ({
     people,
     projects,
     timeline,
@@ -297,6 +350,9 @@ test.describe('On the phone', () => {
     const [card, button] = await Promise.all([tile.root, item.progress].map(async (locator) => (await locator.boundingBox())!));
     expect(button.x).toBeGreaterThanOrEqual(card.x);
     expect(button.x + button.width).toBeLessThanOrEqual(card.x + card.width);
+    const off = await offMiddle(item.progress);
+    expect(Math.abs(off.ring)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(off.capitals)).toBeLessThanOrEqual(0.5);
 
     await item.progress.tap();
     const pop = (await item.steps.root.boundingBox())!;

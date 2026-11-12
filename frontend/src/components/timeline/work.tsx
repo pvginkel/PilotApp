@@ -19,14 +19,15 @@
  * project is archived, as its head's switch is (D012). Pilot's own work, the setup, the one job
  * drawn here (every other shows on the item it follows from, job.tsx), has no env chip and no Stop
  * or Resume (F26.3, F59.1), and Retry where Resume is once it stopped or failed: a fresh job for
- * the same trigger at the project's next place, disabled while the project is archived. Retried, its line says so under its stop or its failure, and
- * offers Retry no more. The row leads with the progress button once its run published its steps,
+ * the same trigger at the project's next place, disabled while the project is archived. Retried, it
+ * is drawn here no more: its line stands for it (item.tsx, F26.4). The row leads with the progress button once its run published its steps,
  * the plan's donut and the first step in progress, opening their list (F145.2, F145.3), until the
  * list is emptied; a job publishes none. A tile with nothing for the row has no row. Once this
  * browser's Stop or Resume swaps the two, the keyboard focus on the button that went goes to the
- * other, Resume or Stop's icon, and once its Retry lands, to Session log's icon; a swap another
- * browser's act made moves no focus, and a refused act gives it back to the button pressed, Resume,
- * Retry or Stop it.
+ * other, Resume or Stop's icon, and once its Retry lands, to the line that takes the tile's place
+ * (item.tsx); a swap another browser's act made moves no focus, and a refused act gives it back to
+ * the button pressed, Resume, Retry or Stop it. Stop's question tells a running item that its turn
+ * ends where it is, and no other (status-labels.ts).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
@@ -46,7 +47,7 @@ import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
 import { offersRetry, offersStop, RESUMABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
 import { useEscape } from '@/lib/keys';
-import { progressStepMark, workLine } from '@/lib/utils/status-labels';
+import { progressStepMark, stopQuestion, workLine } from '@/lib/utils/status-labels';
 
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 
@@ -61,7 +62,15 @@ function actionsOf(work: Work): Actions {
   return offersStop(work) ? 'stop' : RESUMABLE.includes(work.state) ? 'resume' : 'log';
 }
 
-export function WorkItem({ item }: { item: TimelineItem }) {
+/** This browser's Retry, told to the item, whose line takes the tile's place once it lands (item.tsx). */
+export interface RetryFocus {
+  /** Retry is pressed, `from` its button. */
+  start: (from: HTMLElement) => void;
+  /** The act's answer: the item's session as it stands, or none where it was refused. */
+  land: (work: Work | null) => void;
+}
+
+export function WorkItem({ item, retryFocus }: { item: TimelineItem; retryFocus: RetryFocus }) {
   // The API gives every work item its session.
   const work = item.work!;
   const actions = actionsOf(work);
@@ -81,7 +90,7 @@ export function WorkItem({ item }: { item: TimelineItem }) {
         {/* A job's environment is the store's once its start takes it. */}
         {!work.pilots_own && work.environment !== null && <EnvironmentChip name={work.environment.name} />}
         {underWay(work) && <Live since={work.state === 'running' ? work.started_at : null} />}
-        <SessionLog item={item} rest={actions === 'log' ? handoff.button : undefined} />
+        <SessionLog item={item} />
         {actions === 'stop' && (
           <button
             ref={(element) => {
@@ -103,7 +112,6 @@ export function WorkItem({ item }: { item: TimelineItem }) {
         <LinkedText text={titleOf(item)} />
       </div>
       <Line work={work} />
-      {work.retried !== null && <Retried at={work.retried.at} />}
       {asking ? (
         <StopQuestion
           item={item}
@@ -115,7 +123,7 @@ export function WorkItem({ item }: { item: TimelineItem }) {
           }}
         />
       ) : (
-        <Row item={item} actions={actions} handoff={handoff} steps={work.progress} />
+        <Row item={item} actions={actions} handoff={handoff} retryFocus={retryFocus} steps={work.progress} />
       )}
     </div>
   );
@@ -156,7 +164,7 @@ function EnvironmentChip({ name }: { name: string }) {
 }
 
 interface Handoff {
-  /** The ref of the actions' resting element: Stop's icon, Resume's or Retry's button, else Session log's icon. */
+  /** The ref of the actions' resting element: Stop's icon, or Resume's button. */
   button: (element: HTMLElement | null) => void;
   /** This browser's act starts from `from`, to swap the actions for the `to` ones. */
   start: (from: HTMLElement, to: Actions) => void;
@@ -201,8 +209,9 @@ interface StopQuestionProps {
 }
 
 /**
- * Stop's question, in the row's place under the line: Stop it ends the session; Cancel, focused as
- * the question opens so that Enter pressed again cancels, and Esc dismiss it.
+ * Stop's question, in the row's place under the line, worded by the item's state: Stop it ends the
+ * session; Cancel, focused as the question opens so that Enter pressed again cancels, and Esc
+ * dismiss it.
  */
 function StopQuestion({ item, handoff, cancelButton, onCancel }: StopQuestionProps) {
   const { act, pending } = useStop(item.id);
@@ -213,7 +222,7 @@ function StopQuestion({ item, handoff, cancelButton, onCancel }: StopQuestionPro
   return (
     <div className="item-actions confirm" data-testid="timeline.work.stop-confirm">
       <span className="confirm-text" data-testid="timeline.work.stop-confirm.text">
-        Stop the session? Its turn ends where it is; Resume sends it on.
+        {stopQuestion(item.work!)}
       </span>
       <button
         type="button"
@@ -246,17 +255,18 @@ interface RowProps {
   item: TimelineItem;
   actions: Actions;
   handoff: Handoff;
+  retryFocus: RetryFocus;
   steps: Work['progress'];
 }
 
 /** The row under the line, with the progress button and Resume or a job's Retry; none where it has neither. */
-function Row({ item, actions, handoff, steps }: RowProps) {
+function Row({ item, actions, handoff, retryFocus, steps }: RowProps) {
   if (steps.length === 0 && actions !== 'resume' && actions !== 'retry') return null;
   return (
     <div className="item-actions" data-testid="timeline.work.row">
       {steps.length > 0 && <Progress steps={steps} />}
       {actions === 'resume' && <Resume item={item} handoff={handoff} />}
-      {actions === 'retry' && <Retry item={item} handoff={handoff} />}
+      {actions === 'retry' && <Retry item={item} focus={retryFocus} />}
     </div>
   );
 }
@@ -298,37 +308,24 @@ function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
 }
 
 /** A job's Retry, where a worker's Resume is; disabled while the project is archived, which the API refuses until Bring back. */
-function Retry({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
+function Retry({ item, focus }: { item: TimelineItem; focus: RetryFocus }) {
   const { id: projectId } = useShownProject();
   const { act, pending } = useRetry(item.id);
   const archived = useArchived(projectId);
   return (
     <button
-      ref={(element) => handoff.button(element)}
       type="button"
       className="btn btn-sm btn-primary"
       disabled={pending || archived}
       onClick={(event) => {
-        handoff.start(event.currentTarget, 'log');
-        void act(event.currentTarget).then(handoff.land);
+        focus.start(event.currentTarget);
+        void act(event.currentTarget).then(focus.land);
       }}
       data-testid="timeline.work.retry"
     >
       <RotateCw className="icon" aria-hidden="true" />
       Retry
     </button>
-  );
-}
-
-/** That a person's Retry placed a new job for this one, at the project's next place, and when. */
-function Retried({ at }: { at: string }) {
-  return (
-    <div className="work-line ended retried" data-testid="timeline.work.retried">
-      <RotateCw className="icon" aria-hidden="true" />
-      <span>
-        Retried as a new job below · <Time at={at} format="clock" />
-      </span>
-    </div>
   );
 }
 
@@ -419,16 +416,12 @@ function Line({ work }: { work: Work }) {
   }
 }
 
-/**
- * Session log's icon: the session log in the overlay, at its address under the project's, by the
- * item's id, its session's; `rest` takes it where it is the actions' resting element.
- */
-function SessionLog({ item, rest }: { item: TimelineItem; rest?: (element: HTMLElement | null) => void }) {
+/** Session log's icon: the session log in the overlay, at its address under the project's, by the item's id, its session's. */
+function SessionLog({ item }: { item: TimelineItem }) {
   const { address } = useShownProject();
   const replace = useTabReplace();
   return (
     <Link
-      ref={rest}
       to="/projects/$address/sessions/$sessionId"
       params={{ address, sessionId: item.id }}
       replace={replace}

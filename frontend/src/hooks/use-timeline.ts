@@ -69,6 +69,12 @@ export function isActionable(item: TimelineItem): boolean {
   }
 }
 
+/**
+ * The job a Retry of this entry placed, while the entry is not done: retried, it stays open on the
+ * record (D078) and reads as its line (F26.4). Null for every other entry.
+ */
+export const retriedOf = (item: TimelineItem) => (item.done === null ? (item.work?.retried ?? null) : null);
+
 /** A prose item's blocks, in their order. */
 export function blocksOf(item: TimelineItem): Block[] {
   return (item.body ?? []).flatMap((part) => (part.type === 'block' ? [part.block] : []));

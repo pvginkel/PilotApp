@@ -8,7 +8,9 @@
  * asked about its block carries the block's mark in its head (F52.2; writer-asked.tsx).
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
- * work item open is its session's (work.tsx, F26). An item Pilot is working on is one line in its
+ * work item open is its session's (work.tsx, F26); a job retried, the setup's, stays open on the
+ * record (D078) and reads as its line, quiet as a done work item's, an orange triangle its icon,
+ * when it was retried its time (F26.4). An item Pilot is working on is one line in its
  * place, its kind's icon a dashed circle, what Pilot does on it its button, its actions as a done
  * line's (F13.7, F12.1, F24.1). Done, an item is its line (F13.1, F13.2), its
  * title opening what is behind it, with its attachments' indicator (F13.6) and *In the chat* after a
@@ -21,9 +23,9 @@
  * with nothing behind it, a menu of its actions under it, its job and Discuss (F13.9).
  */
 
-import { useCallback, useState, type AnimationEvent, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type AnimationEvent, type MouseEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Check, CircleDashed, FileText, MessagesSquare, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
+import { Check, CircleDashed, FileText, MessagesSquare, ScrollText, StickyNote, TriangleAlert, Undo2, X } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { InChatButton } from '@/components/chat/in-chat-button';
@@ -43,7 +45,7 @@ import { kindOf } from '@/components/timeline/kinds';
 import { PilotsButton } from '@/components/timeline/pilots';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WaitItem } from '@/components/timeline/wait';
-import { WorkItem } from '@/components/timeline/work';
+import { WorkItem, type RetryFocus } from '@/components/timeline/work';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useDiscuss } from '@/hooks/use-discuss';
 import { useDismiss } from '@/hooks/use-dismiss';
@@ -52,7 +54,17 @@ import { useRead, useUndo } from '@/hooks/use-marks';
 import { usePhone } from '@/hooks/use-phone';
 import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
-import { blocksOf, isActionable, isProse, titleOf, type BodyPart, type PilotsWork, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
+import {
+  blocksOf,
+  isActionable,
+  isProse,
+  retriedOf,
+  titleOf,
+  type BodyPart,
+  type PilotsWork,
+  type TimelineItem,
+  type TimelineUser,
+} from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
 import { cn } from '@/lib/utils';
 import { jobForm } from '@/lib/utils/status-labels';
@@ -68,16 +80,19 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
   const done = item.done !== null;
   // The API gives what Pilot does only on an open item.
   const pilots = item.pilots_work;
-  const open = !done && pilots === null;
+  const retried = retriedOf(item) !== null;
+  const open = !done && !retried && pilots === null;
+  const { root, retryFocus } = useRetriedFocus(retried);
   const flashed = (event: AnimationEvent) => event.target === event.currentTarget && onFlashed();
   return (
     <article
+      ref={root}
       className={cn(
         'item',
         open ? 'open' : 'collapsed',
         pilots !== null && 'pilots',
         item.kind === 'confirmation' && 'confirm',
-        done && item.kind === 'work' && 'quiet',
+        (done || retried) && item.kind === 'work' && 'quiet',
         open && item.concept && 'concept',
         open && item.urgent && 'urgent',
         fresh && 'fresh',
@@ -86,17 +101,49 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
       data-testid="timeline.item"
       data-item-id={item.id}
       data-kind={item.kind}
-      data-state={done ? 'done' : pilots !== null ? 'pilots' : 'open'}
+      data-state={done ? 'done' : retried ? 'retried' : pilots !== null ? 'pilots' : 'open'}
       data-actionable={isActionable(item)}
       data-concept={item.concept}
     >
-      {done ? <DoneLine item={item} /> : pilots !== null ? <PilotsItem item={item} pilots={pilots} /> : <OpenItem item={item} />}
+      {done || retried ? (
+        <DoneLine item={item} />
+      ) : pilots !== null ? (
+        <PilotsItem item={item} pilots={pilots} />
+      ) : (
+        <OpenItem item={item} retryFocus={retryFocus} />
+      )}
     </article>
   );
 }
 
-function OpenItem({ item }: { item: TimelineItem }) {
-  if (item.kind === 'work') return <WorkItem item={item} />;
+/**
+ * The keyboard focus across this browser's Retry of a job with a tile of its own, whose line takes
+ * the tile's place once the Retry lands: onto the line's title, the link to its session log, where
+ * Retry had the focus as it was pressed and nothing has it once the line is drawn. A Retry another
+ * browser made moves no focus.
+ */
+function useRetriedFocus(retried: boolean) {
+  const root = useRef<HTMLElement>(null);
+  const awaited = useRef(false);
+  useLayoutEffect(() => {
+    if (!retried || !awaited.current) return;
+    awaited.current = false;
+    const focused = document.activeElement;
+    if (focused === null || focused === document.body) root.current?.querySelector<HTMLElement>('a.title')?.focus();
+  }, [retried]);
+  const retryFocus: RetryFocus = {
+    start: (from) => {
+      awaited.current = document.activeElement === from;
+    },
+    land: (work) => {
+      if (work === null) awaited.current = false;
+    },
+  };
+  return { root, retryFocus };
+}
+
+function OpenItem({ item, retryFocus }: { item: TimelineItem; retryFocus: RetryFocus }) {
+  if (item.kind === 'work') return <WorkItem item={item} retryFocus={retryFocus} />;
   if (item.form === 'wait') return <WaitItem item={item} />;
   if (item.kind === 'confirmation') return <Confirmation item={item} />;
   if (item.kind === 'archive_question') return <ArchiveQuestion item={item} />;
@@ -212,7 +259,8 @@ function inChatOf(item: TimelineItem) {
  * is, its actions, its attachments' indicator and when it was done; under the title the person's
  * answer to a one-ask item with its note, the other person's after their avatar, and *In the chat*
  * after it, kept whole, where it was given in the chat; under a wait's the note Pilot closed it
- * with (F27.4). A confirmation's Yes leads it with a green check, its No with a red cross (F22.5).
+ * with (F27.4). A confirmation's Yes leads it with a green check, its No with a red cross (F22.5),
+ * and a retried job's line with an orange triangle, its time when it was retried, with no Undo.
  * It does not expand. Its actions, the mark of Pilot's job on it once the job ended, Open where
  * something is behind it, Undo while the record offers it and Discuss, show while the mouse is on
  * it or the focus in it, and always where nothing hovers (timeline.css, F13.8); a job not ended
@@ -283,8 +331,8 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
   const title = titleOf(item);
   const said = saidIn(item);
   const place = inChatOf(item);
-  // An item's done line is drawn only once it is done.
-  const done = item.done!;
+  // The line is drawn for an item done, or for a job retried.
+  const at = item.done?.at ?? retriedOf(item)!.at;
   const job = item.job;
   const ended = job !== null && jobForm(job.work) === 'ended';
   const note = item.wait?.note ?? null;
@@ -303,12 +351,12 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
       <span className="line-acts">
         {!phone && ended && <JobMark job={job} />}
         {!phone && item.form !== 'wait' && <Open item={item} />}
-        {done.undo && <Undo itemId={item.id} testId="timeline.line.undo" />}
+        {item.done?.undo && <Undo itemId={item.id} testId="timeline.line.undo" />}
         {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       </span>
       <LineAttachments item={item} />
       {job !== null && !ended && <JobButton job={job} />}
-      <Time at={done.at} format="clock" testId="timeline.line.time" />
+      <Time at={at} format="clock" testId="timeline.line.time" />
       {(said || place) && (
         <span className="said" data-testid="timeline.line.said">
           {said && (
@@ -396,8 +444,15 @@ function PilotsLine({ item, pilots, onTap }: PilotsLineProps) {
   );
 }
 
-/** The line's icon: its kind's, or a confirmation's answer. */
+/** The line's icon: its kind's, a confirmation's answer, or a retried job's triangle. */
 function LineLead({ item }: { item: TimelineItem }) {
+  if (retriedOf(item) !== null) {
+    return (
+      <span className="kind-icon retried" title="Retried as a new job" data-testid="timeline.line.kind">
+        <TriangleAlert className="icon" aria-hidden="true" />
+      </span>
+    );
+  }
   const answer = item.kind === 'confirmation' ? blocksOf(item)[0].answer : null;
   if (answer === 'Yes' || answer === 'No') {
     const Icon = answer === 'Yes' ? Check : X;

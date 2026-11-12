@@ -486,6 +486,13 @@ const cue = (activity: Activity, step: Words[] | null = null, detail: string | n
 });
 
 /**
+ * Stop's question on a work item (F67): a running one's turn ends where it is; one that starts, is
+ * held, or is idle with its nudge owed (D169) runs no turn to end.
+ */
+export const stopQuestion = (work: Work) =>
+  work.state === 'running' ? 'Stop the session? Its turn ends where it is; Resume sends it on.' : 'Stop the session? Resume sends it on.';
+
+/**
  * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
  * chat words its cue, the call it runs alone in the phase's place and Thinking or Writing with
  * nothing after it (D167), or that it starts, or waits for Pilot, before its session gives one;
