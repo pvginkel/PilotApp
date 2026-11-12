@@ -441,8 +441,8 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         ] = False,
     ) -> Recorded:
         """Finish the project, as the project menu's Finish does: only on the
-        operator's Yes to the decision you asked once the plan's last task was
-        done. Every open item is closed unanswered, auto pilot is switched off
+        operator's Finish, or Finish and archive, on the decision you asked
+        once the plan's last task was done. Every open item is closed unanswered, auto pilot is switched off
         and a pause lifted, and every session of the project that runs, is
         starting or is held is stopped, this one's turn among them once the
         call is recorded. The app then asks the operator whether to archive
