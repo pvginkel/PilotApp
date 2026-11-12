@@ -50,6 +50,15 @@ async function input(page: Page): Promise<void> {
   await page.mouse.move(100 + point, 100 + point);
 }
 
+/**
+ * Stands the page's clock still, a second on: its timers fire only as the spec moves the clock, and
+ * whatever they sent shows before the move returns.
+ */
+async function standStill(page: Page): Promise<void> {
+  // eslint-disable-next-line no-restricted-properties -- The page's own clock, read to pause it.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+}
+
 /** The page's id, as its first beat's answer gives it. */
 async function idOf(response: Response): Promise<string> {
   expect(response.status()).toBe(201);
@@ -80,11 +89,16 @@ test.describe("A page's beat", () => {
     await projectList.open(project);
     const first = firstBeat(page);
     await shell.listening();
+    await standStill(page);
     await input(page);
     const id = await idOf(await first);
+    const requests = sent(page);
 
+    // None at 29 seconds, the next at the thirtieth.
+    await page.clock.runFor(29_000);
+    expect(requests).toEqual([]);
     const beat = nextBeat(page, id);
-    await page.clock.fastForward(30_000);
+    await page.clock.runFor(1_000);
     const answered = await beat;
     expect(answered.status()).toBe(204);
     expect(answered.request().postDataJSON()).toEqual({ project_id: project });
@@ -160,11 +174,25 @@ test.describe("A page's beat", () => {
     await shell.open('/profile');
     const first = firstBeat(page);
     await shell.listening();
+    await standStill(page);
     await input(page);
     const id = await idOf(await first);
+    const requests = sent(page);
 
+    // It beats to 119 seconds, each beat answered before the next, so that an away its idle sent
+    // early goes out at once rather than behind a beat; and no away goes with them.
+    for (const beats of [1, 2, 3]) {
+      const beat = nextBeat(page, id);
+      await page.clock.runFor(30_000);
+      await expect.poll(() => [...requests]).toEqual(Array<string>(beats).fill(`PUT ${PAGES}/${id}`));
+      expect((await beat).status()).toBe(204);
+    }
+    await page.clock.runFor(29_000);
+    expect(requests).toEqual(Array<string>(3).fill(`PUT ${PAGES}/${id}`));
+
+    // Its away at the last second.
     const gone = away(page, id);
-    await page.clock.fastForward(120_000);
+    await page.clock.runFor(1_000);
     await gone;
 
     const again = firstBeat(page);
