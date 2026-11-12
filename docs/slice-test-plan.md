@@ -543,6 +543,13 @@ honouring any repo named in `plan.md`'s `## Push holds`, in an order that holds:
    `origin/main`, run their gate again from their root, then push. PilotDeploy's `prd` is the
    promotion job's: nothing here pushes it, but for its creation ([a stage's first
    deploy](#a-stages-first-deploy), step 2).
+
+   PilotApp's own `main` can have diverged from `origin/main` too: another slice pushed while this
+   one ran (`git fetch -q && git status -sb` reads `ahead <n>, behind <m>`). Then `dev:rebase-agent`
+   rebases `main` onto `origin/main`, renumbers the slice's alembic revisions after origin's head
+   (`backend/alembic/versions/`: the file's number, its `revision`, its `Revises:` and
+   `down_revision`, the first of them revising origin's head), and runs the gate of
+   [§1](#1-the-suites) again before the push. A revision clash is then no push blocker.
 4. **A registry entry only once what it names exists.** A producer's entry in Architecture's
    `pipeline-producers.yaml` once its `AaC/<Repo>` job has a green build: a registered producer
    with no artifact fails `AaC/Architecture`'s collector. A stage of Pilot's in ArgoCDDeploy's
