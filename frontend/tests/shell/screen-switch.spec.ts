@@ -277,7 +277,7 @@ test.describe('A switch of screens on a phone', () => {
     await read;
 
     const restore = await slowNetwork(page, 800);
-    await projectList.tab(c).tap();
+    await projectList.tabName(c).tap();
     await expect(shell.loading).toBeVisible();
     await expect(projectHead.name).toHaveText(a);
     const bar = (await shell.loading.boundingBox())!;

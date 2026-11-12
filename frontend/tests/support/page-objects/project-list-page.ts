@@ -52,6 +52,15 @@ export class ProjectListPage {
       .filter({ has: this.page.getByTestId('projects.tab.name').getByText(name, { exact: true }) });
   }
 
+  /**
+   * The name on the tab named `name`: where a touch that opens the project aims. The status icon
+   * stands after the name, by the tab's middle, and takes a tap that lands within a few pixels of
+   * it, so a tap at the tab's middle pauses the project where the name's width puts the icon there.
+   */
+  tabName(name: string): Locator {
+    return this.tab(name).getByTestId('projects.tab.name');
+  }
+
   /** The badge on the tab named `name` (F1.4). */
   badge(name: string): Locator {
     return this.tab(name).getByTestId('projects.tab.badge');

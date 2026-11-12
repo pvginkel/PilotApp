@@ -306,7 +306,7 @@ test.describe('The tabs at the bottom on a phone', () => {
 
     await phoneTabs.tab('chat').tap();
     await shell.drawerToggle.tap();
-    await projectList.tab(otherName).tap();
+    await projectList.tabName(otherName).tap();
     await expect(page).toHaveURL(projectAddress(other));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await page.goBack();
