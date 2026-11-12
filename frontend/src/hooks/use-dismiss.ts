@@ -18,7 +18,9 @@ export function useDismiss(layer: 'plan' | 'menu', open: boolean, close: () => v
     const onPress = (event: PointerEvent) => {
       if (anchor.current?.contains(event.target as Node)) return;
       close();
-      takeClick();
+      // Only the main button's press ends in a click: a right or middle one's would leave the
+      // take armed for the next click with no press before it, a key's on a focused button.
+      if (event.button === 0) takeClick();
     };
     document.addEventListener('pointerdown', onPress);
     return () => document.removeEventListener('pointerdown', onPress);
@@ -27,8 +29,8 @@ export function useDismiss(layer: 'plan' | 'menu', open: boolean, close: () => v
 }
 
 /**
- * Takes the click of the press in progress before anything hears it. A press that ends in no click,
- * a scroll's or another button's than the first, leaves the next press its own.
+ * Takes the click of the main button's press in progress before anything hears it. A press that
+ * ends in no click, a scroll's, leaves the next press its own.
  */
 function takeClick(): void {
   const drop = () => {

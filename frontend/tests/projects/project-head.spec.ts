@@ -316,12 +316,14 @@ test.describe('The plan popover', () => {
     await page.goBack();
     await expect(page).toHaveURL(projectAddress(id));
 
-    // The right button's press closes the popover and has no click: the next press is heard.
+    // The right button's press closes the popover and has no click: the next press is heard, a
+    // key's on a focused button too, which comes with no press before its click.
     await projectHead.step.click();
     await expect(projectHead.plan).toBeVisible();
     await shell.centre.click({ button: 'right', position: { x: 300, y: 400 } });
     await expect(projectHead.plan).toHaveCount(0);
-    await projectHead.menuButton.click();
+    await projectHead.menuButton.focus();
+    await page.keyboard.press('Enter');
     await expect(projectHead.menu).toBeVisible();
   });
 
