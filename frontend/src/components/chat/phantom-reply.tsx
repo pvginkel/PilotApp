@@ -16,7 +16,7 @@ export function PhantomReply({ phantom }: { phantom: Phantom }) {
   const text = cutOpenQuote(phantom.text);
   if (!text) return null;
   return (
-    <div className="my-0.5" data-phantom data-testid="chat.phantom">
+    <div className="reply-text my-0.5" data-phantom data-testid="chat.phantom">
       <Markdown text={text} deltas={deltaMarks(text, phantom.deltas)} />
     </div>
   );

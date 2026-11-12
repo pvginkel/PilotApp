@@ -2964,6 +2964,21 @@
             ],
             "title": "Summary"
           },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The text the read is drawn from, as written: its front matter, its prose and its blocks; as Done fixed it where Done did, else as last published. Null for the opening and for a registered document with no text",
+            "examples": [
+              "---\ntitle: Camp plan\n---\n\nFood and nights.\n"
+            ],
+            "title": "Text"
+          },
           "title": {
             "anyOf": [
               {
@@ -3069,7 +3084,8 @@
           "cancel",
           "job",
           "after_turn",
-          "project_id"
+          "project_id",
+          "text"
         ],
         "title": "ItemDocumentSchema",
         "type": "object"

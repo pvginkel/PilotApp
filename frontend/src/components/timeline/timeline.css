@@ -108,8 +108,10 @@
      as a kind's icon is. */
   .ap-may { display: inline-flex; align-items: baseline; color: hsl(var(--muted-foreground)); cursor: help; }
   .item-head .ap-may .icon, .block-head .ap-may .icon { position: relative; top: calc(0.5em - 0.5cap); }
-  /* Discuss at the head's end, pushed there by its margin, which costs no gap as a spacer would. */
-  .item-head .item-discuss { margin-left: auto; }
+  /* Discuss at the head's end, pushed there by its margin, which costs no gap as a spacer would;
+     an action's copy before it takes the push and touches it, the head's gap taken back. */
+  .item-head .item-discuss, .item-head .item-copy { margin-left: auto; }
+  .item-head .item-copy + .item-discuss { margin-left: -8px; }
   .item-head .btn { align-self: center; }
   /* A work item's Session log and Stop stand with Discuss at the head's end, pushed there in its
      place; Stop's square is the red of the session log's failed turn end. */
@@ -648,12 +650,14 @@
     .block-head { flex-wrap: wrap; }
     /* An item head's parts 4px apart, and Urgent its triangle bare, so that a document's head with
        Urgent, Edited and its asks' count holds one line at 390px in the scale's sm. Discuss stands
-       at the end of its first line however the rest wraps, in room kept for it; a wait's request
-       still touches it. The "for" chip takes a line of its own under the rest, led by its icon.
+       at the end of its first line however the rest wraps, in room kept for it, an action's copy
+       beside it in room of its own; a wait's request still touches it. The "for" chip takes a line of its own under the rest, led by its icon.
        The triangle, at the chip's size, is centred on the capitals of the head's text: its chip,
        the word out of the flow, takes its baseline from the triangle's foot, in the head's font. */
     .item-head { position: relative; column-gap: 4px; padding-right: 32px; }
     .item-head .item-discuss { position: absolute; top: 0; right: 0; }
+    .item-head:has(.item-copy) { padding-right: 60px; }
+    .item-head .item-copy { position: absolute; top: 0; right: 28px; }
     .item-head .wait-request { margin-right: -4px; }
     .item-head .for-line { display: block; order: 1; flex-basis: 100%; }
     .chip.for .icon { display: inline-block; }

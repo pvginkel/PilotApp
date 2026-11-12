@@ -5,11 +5,12 @@
  * Urgent and "for <user>" chips (F10.1, F107); the mark of Pilot's question to a registered
  * document's writer, where the head is its one block's (F52.2); after them what a document's head
  * adds; at its end
+ * an action's copy, its prose as Pilot wrote it, and
  * Discuss, quoting the item (F39.1). A document Pilot changed in a turn after the text it was first
  * shown with says so, *Edited <time>* beside Pilot's mark (F28.7). On a phone Urgent is its
  * triangle and *Edited* a pencil, their words left to a screen reader; the kind never wraps, and
- * the head wraps where its parts still do not fit, so that none leaves the card, Discuss staying at
- * the end of its first line; the "for" chip takes a line of its own under it, led by its icon. A
+ * the head wraps where its parts still do not fit, so that none leaves the card, the copy and
+ * Discuss staying at the end of its first line; the "for" chip takes a line of its own under it, led by its icon. A
  * dot goes with the part after it, so that no row of a wrapping head ends on one.
  */
 
@@ -18,12 +19,13 @@ import { Pencil, TriangleAlert, UserRound } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { Avatar } from '@/components/shared/avatar';
+import { CopyButton } from '@/components/shared/copy-button';
 import { Time } from '@/components/shared/time';
 import { AutopilotMark } from '@/components/timeline/autopilot-mark';
 import { JobOn } from '@/components/timeline/job';
 import { kindOf } from '@/components/timeline/kinds';
 import { WriterAsked } from '@/components/timeline/writer-asked';
-import type { Block, TimelineItem } from '@/hooks/use-timeline';
+import { proseOf, type Block, type TimelineItem } from '@/hooks/use-timeline';
 
 type Reason = NonNullable<Block['because']>;
 
@@ -78,6 +80,7 @@ interface ItemHeadProps {
 export function ItemHead({ item, because = null, mayTake = false, asked = false, children }: ItemHeadProps) {
   const { icon: Icon, label } = kindOf(item);
   const why = because === null ? null : whyOf(because);
+  const prose = item.kind === 'action' ? proseOf(item) : '';
   return (
     <div className="item-head" data-testid="timeline.item.head">
       <span className="kind" data-testid="timeline.item.kind">
@@ -120,6 +123,7 @@ export function ItemHead({ item, because = null, mayTake = false, asked = false,
       )}
       {asked && <WriterAsked documentId={item.id} testId="timeline.item.writer-asked" />}
       {children}
+      {prose !== '' && <CopyButton text={prose} title="Copy the action’s text" className="item-copy" testId="timeline.item.copy" />}
       <DiscussButton quote={quoteOfItem(item)} className="item-discuss" testId="timeline.item.discuss" />
     </div>
   );

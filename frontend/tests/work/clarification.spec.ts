@@ -20,6 +20,7 @@ import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
+import { headingOf, scaleOf } from '../support/prose';
 import { clarificationAddress, documentAddress } from '../support/page-objects/overlay-page';
 
 const ZONE = 'Europe/Amsterdam';
@@ -54,6 +55,7 @@ const CHAIN = 'Does “chain” mean the lock or the tow chain?';
 const SPLIT = '## D2\nThe camping stove, not the van’s.\n\n## D4\nThe tow chain.';
 const SHORE = 'Is the shore path open in spring?';
 const WHOLE = 'It opens in April; only the ridge path stays shut until May.';
+const HEADED = 'It opens in April.\n\n### The ridge\n\nShut until May.';
 // Each block in a section of its own, so that the one Pilot settles is its section's line.
 const STOVES_PATH = '/work/Example/stoves.md';
 const STOVES = `# The stoves\n\n## Which stove?\n\n${decision('D1', 'Gas', 'Wood')}\n## How many?\n\n${decision('D2', 'One', 'Two')}`;
@@ -178,6 +180,30 @@ test.describe('Pilot asking the writer', () => {
     await expect(overlay.clarificationBox).toBeInViewport();
     await expect(overlay.clarificationBox).toHaveClass(/\bflash\b/);
     await expect(page).toHaveURL(documentAddress(project, route));
+  });
+
+  test('a heading in the writer’s reply reads as one: a step of the type scale over the reply’s words, bold, its space above it', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    overlay,
+  }) => {
+    const {
+      project,
+      documents: [route],
+    } = await written({ people, projects, controller, chats }, [[ROUTE_PATH, ROUTE]]);
+    await projects.askWriter(route, [{ block: 'D1', question: SHORE }]);
+    await projects.clarify(route, HEADED);
+    await overlay.open(project, route);
+    const { reply } = overlay.clarification();
+
+    const [base, lg] = await Promise.all(['--text-base', '--text-lg'].map((name) => scaleOf(reply, name)));
+    await expect(reply.getByText('Shut until May.')).toHaveCSS('font-size', `${base}px`);
+    const ridge = await headingOf(reply.getByRole('heading', { name: 'The ridge' }));
+    expect(ridge).toMatchObject({ size: lg, weight: '600', opens: false });
+    expect(lg).toBeGreaterThan(base);
+    expect(ridge.above).toBeCloseTo(1.2 * lg, 1);
   });
 
   test('a section the pass after the writer’s reply settled is its line, with no mark of the writer asked, its note quoting the writer; opened, its block’s head carries the mark', async ({

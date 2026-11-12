@@ -43,6 +43,7 @@ type ProgressStep = components['schemas']['SetProgressRequestSchema.ce33d8b.Prog
 type Progress = components['schemas']['ProgressSchema.ce33d8b'];
 type WriterQuestion = components['schemas']['InventedWriterQuestionsCreateSchema.6d6b324.InventedWriterQuestionSchema'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
+type ItemDocument = components['schemas']['ItemDocumentSchema.1fdd8ae'];
 type TimelineItem = Timeline['items'][number];
 type Work = NonNullable<TimelineItem['work']>;
 type Environment = NonNullable<Work['environment']>;
@@ -228,6 +229,13 @@ export class Projects {
   async undo(itemId: string): Promise<void> {
     const response = await this.page.request.post(`${this.backendUrl}/api/items/${itemId}/undo`);
     expect(response.status(), await response.text()).toBe(204);
+  }
+
+  /** An item's document read on its own, as the signed-in person reads it. */
+  async document(itemId: string): Promise<ItemDocument> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/items/${itemId}/document`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as ItemDocument;
   }
 
   /** A project's timeline, as the signed-in person reads it. */

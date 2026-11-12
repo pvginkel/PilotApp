@@ -36,6 +36,8 @@ export class ChatPage {
   readonly dots: Locator;
   readonly failures: Locator;
   readonly replyEnds: Locator;
+  /** An ended reply's copy of what Pilot said in it, beside its time. */
+  readonly replyCopies: Locator;
   readonly days: Locator;
   readonly closed: Locator;
   readonly before: Locator;
@@ -81,6 +83,7 @@ export class ChatPage {
     this.dots = this.cue.getByTestId('chat.cue.dots');
     this.failures = this.root.getByTestId('chat.failure');
     this.replyEnds = this.root.getByTestId('chat.pilot.end');
+    this.replyCopies = this.replyEnds.getByTestId('chat.pilot.copy');
     this.days = this.root.getByTestId('chat.day');
     this.closed = this.root.getByTestId('chat.closed');
     this.before = this.root.getByTestId('chat.before');

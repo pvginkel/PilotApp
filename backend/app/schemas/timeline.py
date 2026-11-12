@@ -1083,6 +1083,15 @@ class ItemDocumentSchema(TimelineItemSchema):
     from the text of its `done` Version."""
 
     project_id: uuid.UUID = Field(description="The project whose timeline holds it")
+    text: str | None = Field(
+        description=(
+            "The text the read is drawn from, as written: its front matter, its "
+            "prose and its blocks; as Done fixed it where Done did, else as last "
+            "published. Null for the opening and for a registered document with "
+            "no text"
+        ),
+        examples=["---\ntitle: Camp plan\n---\n\nFood and nights.\n"],
+    )
 
 
 class ProjectDocumentSchema(BaseModel):

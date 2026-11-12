@@ -200,7 +200,7 @@ export function ReplySteps({
         return (
           <div
             key={key}
-            className={cn(s.kind === 'text' && 'my-0.5', fresh(s.seq) && !streamed?.has(s.seq) && fadeIn)}
+            className={cn(s.kind === 'text' && 'reply-text my-0.5', fresh(s.seq) && !streamed?.has(s.seq) && fadeIn)}
             data-testid={`chat.${s.kind}`}
           >
             {body}

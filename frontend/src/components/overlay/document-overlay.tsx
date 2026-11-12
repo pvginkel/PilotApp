@@ -8,7 +8,8 @@
  * (F28.3), and over the text, where Pilot asked a registered document's writer about its blocks,
  * the box of the questions and the writer's reply (F52.2), which an asked block's mark goes to, as
  * the box's address opens the document at it. Its head's buttons are Pilot's job on the item, its
- * Undo while it lasts and Discuss (F28.10): the job opens its session log, off a phone the popover
+ * Undo while it lasts, the copy of its text as written, front matter, prose and blocks, as the read
+ * is drawn from it, and Discuss (F28.10): the job opens its session log, off a phone the popover
  * over the tab, which closing shows again, on a phone a view pushed over the document's. *Edited* and the dots tell of the text as it
  * stands, so a document read as Done fixed it has neither; its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
  * Reviewed on an open review, or *Send answers* on an open document, which closes its tab or its
@@ -33,6 +34,7 @@ import { Clarifications } from '@/components/overlay/clarification';
 import { useClarificationBox } from '@/components/overlay/clarification-box';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { PilotStrip } from '@/components/overlay/pilot-strip';
+import { CopyButton } from '@/components/shared/copy-button';
 import { RunCancel } from '@/components/overlay/run-cancel';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
@@ -115,12 +117,13 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
   );
 }
 
-/** The head's buttons: Pilot's job on the item in whichever form it stands, its Undo while the record offers it, Discuss (F28.10). */
+/** The head's buttons: Pilot's job on the item in whichever form it stands, its Undo while the record offers it, its text's copy, Discuss (F28.10). */
 function Acts({ item }: { item: ItemDocument }) {
   return (
     <>
       {item.job !== null && <JobOn job={item.job} testId="overlay.job" />}
       {item.done?.undo && <Undo itemId={item.id} testId="overlay.undo" />}
+      {item.text !== null && <CopyButton text={item.text} title="Copy the document’s text" testId="overlay.copy" />}
       <DiscussButton quote={quoteOfItem(item)} testId="overlay.discuss" />
     </>
   );

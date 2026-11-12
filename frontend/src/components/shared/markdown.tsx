@@ -8,15 +8,17 @@
  * draws each link through its own component, and links nothing else. A text that opens the
  * project's attached material, as the project document and the handbook do (F29.3), draws each link
  * to a path in the project's `attachments/` through its own component, and every other link as the
- * rest of the record's words.
+ * rest of the record's words. A code block has its copy at its top right, its source as written
+ * (copy-button.tsx).
  */
 
-import { memo, useMemo, type ComponentType, type ReactNode } from 'react';
-import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from 'react-markdown';
+import { memo, useMemo, type ComponentProps, type ComponentType, type ReactNode } from 'react';
+import ReactMarkdown, { defaultUrlTransform, type Components, type ExtraProps, type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ElementContent, Root } from 'hast';
 import { rehypeDeltas, type DeltaMarks } from '@/components/chat/delta-fade';
 import { QuoteChip } from '@/components/chat/quote-chip';
+import { CopyButton } from '@/components/shared/copy-button';
 import { NestedLink } from '@/components/shared/linked-text';
 import { useLinker } from '@/components/shared/links-context';
 import { linksMaterial } from '@/hooks/use-timeline';
@@ -74,7 +76,24 @@ function RecordLink({ href, title, className, children }: LinkProps) {
   );
 }
 
-const components: Components = { a: RecordLink };
+function textOf(node: ElementContent): string {
+  if (node.type === 'text') return node.value;
+  return node.type === 'element' ? node.children.map(textOf).join('') : '';
+}
+
+/** A code block under its copy, which takes its source without the newline that ends it. */
+function CodeBlock({ node, children, ...props }: ComponentProps<'pre'> & ExtraProps) {
+  // The renderer hands every element it draws its node.
+  const source = textOf(node!).replace(/\n$/, '');
+  return (
+    <div className="code-block">
+      <pre {...props}>{children}</pre>
+      <CopyButton text={source} title="Copy the code" className="code-copy" testId="prose.code.copy" />
+    </div>
+  );
+}
+
+const components: Components = { a: RecordLink, pre: CodeBlock };
 
 const urlTransform = (url: string) => (url.startsWith(QUOTE_SCHEME) ? url : defaultUrlTransform(url));
 
@@ -150,6 +169,7 @@ export const Markdown = memo(function Markdown({
           // A link's address is never unset: the Markdown that makes the link gives it one.
           return <DocumentLink href={href!}>{children}</DocumentLink>;
         },
+        pre: CodeBlock,
       };
     }
     if (MaterialLink !== undefined) {
@@ -162,6 +182,7 @@ export const Markdown = memo(function Markdown({
               {children}
             </RecordLink>
           ),
+        pre: CodeBlock,
       };
     }
     return components;

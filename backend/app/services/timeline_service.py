@@ -629,6 +629,7 @@ class TimelineService:
         fixed it (F13.3): the text of its latest `done` Version. Only Done
         cuts one; an open item, and one done any other way, reads as last
         published. A registered document with no text reads with no body.
+        The read carries that text as written, null where it has none.
 
         Raises:
             RecordNotFoundException: no item has the id, or it has no
@@ -646,14 +647,16 @@ class TimelineService:
         project = self.db.get_one(Project, item.project_id)
         fixed = self._fixed_at_done(item)
         text = document.published_text if fixed is None else fixed
-        texts = {} if item.kind_code == OPENING or text is None else {item.id: text}
+        if item.kind_code == OPENING:
+            text = None
+        texts = {} if text is None else {item.id: text}
         (entry,) = self._items(project, [(item, document, form)], texts)
         if fixed is not None:
             parsed = dsl.parse(fixed)
             entry = entry.model_copy(
                 update={"title": parsed.title, "summary": parsed.front_matter.summary}
             )
-        return ItemDocumentSchema(project_id=project.id, **dict(entry))
+        return ItemDocumentSchema(project_id=project.id, text=text, **dict(entry))
 
     def project_document(
         self, project_id: uuid.UUID, role: DocumentRole

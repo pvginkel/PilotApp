@@ -103,6 +103,10 @@ export class TimelinePage {
       head: root.getByTestId('timeline.item.head'),
       /** The head's Discuss, quoting the item (F39.1). */
       discuss: root.getByTestId('timeline.item.discuss'),
+      /** The head's copy of an action's prose; `data-copy-state` says once it is copied. */
+      copy: root.getByTestId('timeline.item.copy'),
+      /** The copy of each code block in the item's prose. */
+      codeCopies: root.getByTestId('prose.code.copy'),
       kind: root.getByTestId('timeline.item.kind'),
       time: root.getByTestId('timeline.item.time'),
       urgent: root.getByTestId('timeline.item.urgent'),

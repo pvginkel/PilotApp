@@ -7,7 +7,8 @@
  * Pilot's reply bare in the column, the server's lines while the session comes up in the cue alone
  * (F40.2), its dots dancing, its Thinking counted from the press of Send, by the page's clock where
  * the page sent the message and by the message's record where it did not (C2), the phantom while a block streams (F40.4), then its time and avatar, "· Stopped" by a
- * stopped turn's and its reason in red and "· Failed" by a failed one's (F44); a date divider over
+ * stopped turn's and its reason in red and "· Failed" by a failed one's (F44), and beside the time the copy of what Pilot said
+ * in the turn, as written (D7), on a reply that said something; a date divider over
  * each day's first message. A chat shorter than its column stands at its top; at its end, a step
  * list the reader opens grows downward, the view where it stood. A chat that opens while the tab
  * shows comes in; another person's turn streams to every viewer alike. With no chat open the latest closed one shows above "Chat closed ·
@@ -23,6 +24,7 @@
 import type { Page } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
 import { test, expect } from '../support/fixtures';
+import { allowClipboard, copied } from '../support/clipboard';
 import { coloursOf, cssColour, hue, lightness } from '../support/contrast';
 import { expectConsoleError, makeUnique } from '../support/helpers';
 import type { Chats } from '../support/chats';
@@ -416,6 +418,56 @@ test.describe('The Chat tab', () => {
     const failed = (await projects.records(id)).records.at(-1)!;
     await expect(chat.replyEnds.last()).toHaveText(`${clock(failed.at)}· Failed`);
     await expect(chat.replyEnds.last().getByText('· Failed')).toHaveClass(/text-destructive-text/);
+  });
+
+  test('an ended reply has its copy beside its time, in the row’s own height: what Pilot said in it as written, its texts a blank line apart, a check showing for a moment; a running reply has none, nor one that said nothing', async ({
+    context,
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    await allowClipboard(context);
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Said'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'Which tent do we take?');
+    const first = 'The **dome** is lighter:\n\n- 2 kg\n- one pole';
+    const second = 'Take `the dome`.';
+    await controller.play(chats.store, session, [
+      text('one', first),
+      toolUse('read', 'Read', { file_path: '/work/Example/tents.md' }),
+      toolResult('read', '# Tents'),
+      text('two', second),
+    ]);
+    await expect(chat.texts).toHaveCount(2);
+    await expect(chat.replyCopies).toHaveCount(0);
+
+    await controller.finish(chats.store, session, 'success', 'Take the dome.');
+    await expect(chat.replyCopies).toHaveCount(1);
+    const copy = chat.replyCopies.first();
+    await expect(copy).toHaveAttribute('title', 'Copy the reply');
+    const [time, at] = await Promise.all([chat.replyEnds.locator('time'), copy].map(async (each) => (await each.boundingBox())!));
+    expect(at.x).toBeGreaterThanOrEqual(time.x + time.width);
+    expect(at.y + at.height / 2).toBeCloseTo(time.y + time.height / 2, 0);
+
+    await copy.click();
+    await expect(copy).toHaveAttribute('data-copy-state', 'success');
+    await expect(copy.locator('.lucide-check')).toBeVisible();
+    expect(await copied(page)).toBe(`${first}\n\n${second}`);
+    await expect(copy).toHaveAttribute('data-copy-state', 'idle');
+
+    await chats.send(project, 'Check the pegs.');
+    await chats.working(session);
+    await controller.play(chats.store, session, [toolUse('pegs', 'Read', { file_path: '/work/Example/pegs.md' }), toolResult('pegs', '# Pegs')]);
+    await controller.finish(chats.store, session, 'success', '');
+    await expect(chat.replyEnds).toHaveCount(2);
+    await expect(chat.replyCopies).toHaveCount(1);
+    const [said, silent] = await Promise.all([chat.replyEnds.first(), chat.replyEnds.last()].map(async (each) => (await each.boundingBox())!));
+    expect(said.height).toBe(silent.height);
   });
 
   test('counts Thinking from the press of Send, by this page’s clock where this page sent the message and by the message’s record where it did not, never again from a later block; its dots dancing, “Waiting for Pilot” among them', async ({

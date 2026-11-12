@@ -38,6 +38,15 @@ export function useTimelineItem(projectId: string, itemId: string | undefined): 
 
 export const isProse = (part: BodyPart): part is ProsePart => part.type === 'prose';
 
+/** An item's prose as it was written, its parts a blank line apart, without its blocks; empty where it has none. */
+export function proseOf(item: TimelineItem): string {
+  return (item.body ?? [])
+    .filter(isProse)
+    .map((part) => part.markdown.trim())
+    .filter((markdown) => markdown !== '')
+    .join('\n\n');
+}
+
 /**
  * Whether an entry of the read is a line of the timeline: every one but Pilot's jobs, each of which
  * shows on the item it follows from, the setup aside (F59.1). A job keeps its entry, where its

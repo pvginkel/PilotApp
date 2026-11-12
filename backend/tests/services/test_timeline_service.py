@@ -4004,7 +4004,11 @@ class TestItemDocument:
 
         read = _read(container, item)
 
-        assert read == {**_items(container, project)[2], "project_id": str(project.id)}
+        assert read == {
+            **_items(container, project)[2],
+            "project_id": str(project.id),
+            "text": None,
+        }
         assert (read["body"], read["awaiting_read"]) == (None, True)
 
     def test_an_open_document_reads_as_its_timeline_entry_with_its_project(
@@ -4021,7 +4025,11 @@ class TestItemDocument:
 
         read = _read(container, item)
 
-        assert read == {**_items(container, project)[1], "project_id": str(project.id)}
+        assert read == {
+            **_items(container, project)[1],
+            "project_id": str(project.id),
+            "text": _document(session, item).published_text,
+        }
         assert (read["writing"], len(read["attachments"])) == (True, 1)
         assert [
             part["block"]["section"] for part in read["body"] if part["type"] == "block"
@@ -4056,11 +4064,28 @@ class TestItemDocument:
 
         read = _read(container, opening)
 
-        assert (read["kind"], read["words"], read["body"]) == (
+        assert (read["kind"], read["words"], read["body"], read["text"]) == (
             "opening",
             "Let's camp.\n",
             None,
+            None,
         )
+
+    def test_an_open_document_carries_its_text_as_written(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", CAMP_PLAN)
+
+        read = _read(container, item)
+
+        assert read["text"] == CAMP_PLAN
+        assert read["text"].startswith("---\ntitle: Camp plan\n")
+        assert "```decision id=D1\nproposal: Cook on the fire.\n```" in read["text"]
 
     def test_a_document_done_by_a_person_reads_as_done_fixed_it(
         self,
@@ -4082,6 +4107,7 @@ class TestItemDocument:
 
         (done,) = _versions(session, item, VersionCause.DONE)
         assert _text_of(read) == _text_of(at_done)
+        assert read["text"] == done.text
         assert (read["title"], read["summary"]) == ("Camp plan", "Food and nights.")
         assert [part["type"] for part in read["body"]] == ["prose", "block", "block"]
         assert read["done"] == {**at_done["done"], "undo": True}
@@ -4198,7 +4224,11 @@ class TestItemDocument:
 
         assert read["done"] is not None
         assert _versions(session, item, VersionCause.DONE) == []
-        assert read == {**_items(container, project)[1], "project_id": str(project.id)}
+        assert read == {
+            **_items(container, project)[1],
+            "project_id": str(project.id),
+            "text": _document(session, item).published_text,
+        }
 
 
 @pytest.mark.usefixtures("person")

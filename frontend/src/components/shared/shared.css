@@ -166,6 +166,11 @@
 
   .prose { font-size: var(--text-base); overflow-wrap: break-word; }
   .prose > :first-child { margin-top: 0; }
+  /* Only a text's first part starts flush: a heading that opens a later one keeps its space, the
+     part its container's child or alone in a box after others, as an item's text after its ask
+     and a reply's after its steps. */
+  .prose:not(:first-child) > :is(h1, h2, h3, h4, h5, h6):first-child,
+  :is(.item-after, .reply-text):not(:first-child) > .prose > :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: var(--above); }
   .prose > :last-child { margin-bottom: 0; }
   .prose p { margin: 0 0 0.7em; }
   .prose ul, .prose ol { margin: 0 0 0.7em; padding-left: 1.4em; }
@@ -174,10 +179,14 @@
   .prose li { margin: 0.15em 0; }
   .prose li > input[type="checkbox"] { margin: 0 0.4em 0 -1.2em; vertical-align: -0.1em; }
   .prose li:has(> input[type="checkbox"]) { list-style: none; }
-  .prose h1 { font-size: var(--text-xl); margin: 1.4em 0 0.5em; line-height: 1.35; }
-  .prose h2 { font-size: var(--text-lg); margin: 1.4em 0 0.5em; line-height: 1.35; }
-  .prose h3 { font-size: var(--text-base); margin: 1.2em 0 0.4em; }
-  .prose h1, .prose h2, .prose h3 { font-weight: 600; }
+  /* The headings, the three steps of the scale over the body's, then the body's size. */
+  .prose h1 { font-size: var(--text-2xl); }
+  .prose h2 { font-size: var(--text-xl); }
+  .prose h3 { font-size: var(--text-lg); }
+  .prose :is(h1, h2) { --above: 1.4em; margin: var(--above) 0 0.5em; }
+  .prose :is(h3, h4, h5, h6) { --above: 1.2em; margin: var(--above) 0 0.4em; }
+  .prose :is(h1, h2, h3) { line-height: 1.35; }
+  .prose :is(h1, h2, h3, h4, h5, h6) { font-weight: 600; }
   .prose strong { font-weight: 600; }
   .prose blockquote { margin: 0 0 0.7em; padding: 2px 12px; border-left: 3px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
   .prose table { border-collapse: collapse; margin: 0 0 1em; font-size: var(--text-base); display: block; overflow-x: auto; }
@@ -185,8 +194,18 @@
   .prose th { background: hsl(var(--muted)); font-weight: 600; }
   .prose hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 1.4em 0; }
   .prose del { color: hsl(var(--muted-foreground)); }
-  .prose pre { margin: 0 0 0.7em; }
+  .prose pre { margin: 0; }
   .prose pre code { font-size: inherit; overflow-wrap: normal; }
+  /* A code block's copy stands at its top right, on the block's ground: off a phone under the
+     mouse or with the keyboard's focus, on a phone always, the code keeping clear of it. */
+  .prose .code-block { position: relative; margin: 0 0 0.7em; }
+  .prose .code-copy { position: absolute; top: 4px; right: 4px; background: hsl(var(--muted)); }
+  @media (hover: hover) and (min-width: 901px) {
+    .prose .code-block:not(:hover) .code-copy:not(:focus-visible) { opacity: 0; }
+  }
+  @media (max-width: 900px) {
+    .prose .code-block pre { padding-right: 36px; }
+  }
 
   /* A streamed text's new deltas fading in (delta-fade.ts, FADE_MS). */
   .delta-fresh { animation: delta-in 300ms ease-out; }

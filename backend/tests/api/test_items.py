@@ -185,6 +185,7 @@ class TestGetItemDocument:
         self,
         client: FlaskClient,
         container: ServiceContainer,
+        session: Session,
         camp: Project,
         run: models.Session,
     ) -> None:
@@ -197,6 +198,7 @@ class TestGetItemDocument:
         assert response.get_json() == {
             **_entry(client, camp, item),
             "project_id": str(camp.id),
+            "text": session.get_one(Document, item.id).published_text,
         }
 
     def test_a_document_done_by_done_reads_as_done_fixed_it(
@@ -225,6 +227,8 @@ class TestGetItemDocument:
         read = client.get(f"{ITEMS}/{item.id}/document").get_json()
 
         assert read["body"] == at_done["body"]
+        assert read["text"] == at_done["text"]
+        assert "A lantern too." not in read["text"]
         assert _entry(client, camp, item)["body"][-1]["markdown"] == "A lantern too."
         assert read["done"]["cause"] == "marked"
 

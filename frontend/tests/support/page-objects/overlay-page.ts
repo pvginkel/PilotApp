@@ -46,6 +46,8 @@ export class OverlayPage {
   readonly close: Locator;
   /** The head's Discuss (F39.1). */
   readonly discuss: Locator;
+  /** The head's copy of the document's text as written; `data-copy-state` says once it is copied. */
+  readonly copy: Locator;
   /**
    * Pilot's job on the document's item in its head (F28.10), in whichever form it stands, as
    * `TimelinePage.item(id).job` has it, `data-form` and `data-state` on its root.
@@ -114,6 +116,7 @@ export class OverlayPage {
     this.maximize = this.root.getByTestId('overlay.maximize');
     this.close = this.root.getByTestId('overlay.close');
     this.discuss = this.head.getByTestId('overlay.discuss');
+    this.copy = this.head.getByTestId('overlay.copy');
     this.job = {
       root: this.head.getByTestId('overlay.job'),
       pulse: this.head.getByTestId('overlay.job.pulse'),
