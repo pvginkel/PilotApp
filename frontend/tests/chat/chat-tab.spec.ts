@@ -598,9 +598,10 @@ test.describe('The Chat tab’s closed chats', () => {
     await controller.finish(chats.store, second.session, 'success', TENT);
     await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
     await expect(chat.lines.and(chat.root.getByTestId('chat.closed').or(chat.messages))).toHaveCount(3);
-    const [above, line, below] = await Promise.all(
-      [chat.messages.first(), chat.closed, chat.messages.last()].map(async (each) => (await each.boundingBox())!.y),
-    );
+    // Read in one layout: the view still follows the reply to its end, and three reads apart
+    // straddle a scroll.
+    const parts = await Promise.all([chat.messages.first(), chat.closed, chat.messages.last()].map((each) => each.elementHandle()));
+    const [above, line, below] = await page.evaluate((each) => each.map((part) => part!.getBoundingClientRect().y), parts);
     expect(above).toBeLessThan(line!);
     expect(line).toBeLessThan(below!);
     await expect(chat.before).toHaveCount(0);
