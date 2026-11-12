@@ -94,6 +94,8 @@ test.describe("A project's address", () => {
     await panel.documentsTab.click();
     await panel.document(trip).root.click();
     await expect(page).toHaveURL(documentAddress(id, trip));
+    // The address changes before the document's screen is drawn, and the line is kept as it draws.
+    await expect(docTabs.document(trip).show).toHaveAttribute('aria-selected', 'true');
     await chat.tab.click();
     await chat.field.fill('Which stove?');
 
