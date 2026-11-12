@@ -283,8 +283,8 @@ it, and, for a trigger that came while the project was paused, `Paused <stamp> t
 job's trigger happened while the project was paused; the record moved on meanwhile.`, that pause
 from its start to the resume that let the job go on, which the setup's never carries, since the
 pause holds no setup. The setup's carries instead, while Create's pause stands, the project paused
-and never resumed (D083), `Create project paused the project: every work item you add is held until
-a person resumes it.` Then by trigger:
+and its latest pause Pilot's (D083), never a person's, `Create project paused the project: every
+work item you add is held until a person resumes it.` Then by trigger:
 
 - **The setup**: `/plan`, kind `the setup`; `The project was created <stamp> from draft-<number>;
   its folder is now /work/Projects/<slug>.`, `The draft: project.md (the opening item <id> holds

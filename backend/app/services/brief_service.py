@@ -57,6 +57,7 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     TransitionKind,
+    UserKind,
     WorkTrigger,
 )
 from app.services.clarification_service import Clarification, of_pass
@@ -804,17 +805,22 @@ class BriefService:
 
     def _create_paused(self, project: Project) -> str | None:
         """The setup's line while Create's pause stands: the project paused,
-        and never resumed, since Pilot pauses a project at its Create alone
-        and a resume ends that pause for good (D083); None otherwise."""
+        its latest pause Pilot's, since Pilot pauses a project at its Create
+        alone and a resume ends that pause for good (D083); None otherwise,
+        a person's pause included."""
         if not project.paused:
             return None
-        resumed = self.db.scalar(
-            select(func.count(ProjectTransition.id)).where(
+        by = self.db.scalars(
+            select(User.kind_code)
+            .join(ProjectTransition, ProjectTransition.by_user_id == User.id)
+            .where(
                 ProjectTransition.project_id == project.id,
-                ProjectTransition.kind_code == TransitionKind.RESUMED,
+                ProjectTransition.kind_code == TransitionKind.PAUSED,
             )
-        )
-        if resumed:
+            .order_by(ProjectTransition.id.desc())
+            .limit(1)
+        ).one_or_none()
+        if by is not UserKind.AGENT:
             return None
         return (
             "Create project paused the project: every work item you add is held"

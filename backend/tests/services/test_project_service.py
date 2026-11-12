@@ -1645,8 +1645,8 @@ class TestCreateProjectPaused:
         starts: SessionStartService,
     ) -> None:
         """The failed setup shows no line; its Retry goes on under the pause,
-        briefed as the setup is, and once its turn ends the line stands under
-        it, the Retry's."""
+        briefed as the setup is, Create's pause said, and once its turn ends
+        the line stands under it, the Retry's."""
         draft = _drafted(container, session, person)
         _create(container, draft.id)
         failed = _setup_running(session, draft)
@@ -1663,7 +1663,10 @@ class TestCreateProjectPaused:
         assert (retry.state_code, draft.paused) == (SessionState.STARTING, True)
         (turn,) = session.scalars(select(Turn).where(Turn.session_id == retry.id))
         assert turn.message.startswith("/plan\n\nPilot's brief · the setup ·")
-        assert "paused" not in turn.message
+        assert (
+            "Create project paused the project: every work item you add is held"
+            " until a person resumes it."
+        ) in turn.message
         assert _ready_after(container, draft) is None
 
         _turn_ended(container, session, session.get_one(Item, retry.id))

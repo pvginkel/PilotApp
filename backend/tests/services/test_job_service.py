@@ -238,7 +238,8 @@ class TestSetup:
         by_pilot: bool,
     ) -> None:
         """Create's pause, Pilot's at its instant, and a person's alike: the
-        setup goes on as a Chat does (D083)."""
+        setup goes on as a Chat does (D083), its brief saying Create's pause
+        and never a person's."""
         pilot = session.scalars(
             select(User).where(User.kind_code == UserKind.AGENT)
         ).one()
@@ -252,7 +253,13 @@ class TestSetup:
         assert starts.held(session, opened, job) is None
         turn = _brief(container, job)
         assert (job.turns, turn.started_at) == (1, AT)
-        assert "paused" not in turn.message
+        if by_pilot:
+            assert (
+                "Create project paused the project: every work item you add is"
+                " held until a person resumes it."
+            ) in turn.message
+        else:
+            assert "paused" not in turn.message
         status = work_status(
             session,
             [job.id],
