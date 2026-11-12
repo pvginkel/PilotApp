@@ -1,7 +1,7 @@
 /**
  * The desktop's documents in tabs (F28.1, F28.4, F28.5, F28.8, F97, F110): what opens as a
  * document opens as a tab in the timeline's place, the side panel beside it, the tab line the
- * head's last row while one is open — the timeline first and never closed, a tab per document at
+ * head's last row while one is open, on the head's tint — the timeline first and never closed, a tab per document at
  * the line's end in the order opened, a document already open showing its tab, each tab's cross
  * and the middle button closing it, *Close all* at its far right, the line scrolling where the
  * tabs do not fit — and hidden once the last one closes. Closing the tab showing shows the one
@@ -16,6 +16,7 @@
  * the row of the project on screen, which goes to the project's own address (F1.6).
  */
 
+import { cssColour } from '../support/contrast';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress, documentAttachmentAddress, handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
@@ -65,6 +66,11 @@ test.describe('Documents in tabs', () => {
     const head = (await projectHead.root.boundingBox())!;
     const line = (await docTabs.root.boundingBox())!;
     expect(line.y).toBeCloseTo(head.y + head.height, 0);
+    // The line stands on the head's tint, the project list's, and the tab showing on the page's colour.
+    const tint = await cssColour(page, 'hsl(var(--side))');
+    await expect(projectHead.root).toHaveCSS('background-color', tint);
+    await expect(docTabs.root).toHaveCSS('background-color', tint);
+    await expect(docTabs.document(trip).root).toHaveCSS('background-color', await cssColour(page, 'hsl(var(--background))'));
     const tab = (await overlay.root.boundingBox())!;
     const side = (await panel.root.boundingBox())!;
     expect(tab.x).toBe(feed.x);

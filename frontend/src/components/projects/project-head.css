@@ -11,6 +11,7 @@
     min-height: 52px;
     padding: 11.5px 24px;
     border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--side));
   }
   .feed-head .head-row { display: contents; }
   .feed-head h1 { min-width: var(--name-floor, 0px); margin: 0; overflow: hidden; font-size: var(--text-xl); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
@@ -42,9 +43,9 @@
   /* Icon buttons side by side touch: the row's gap stands only between them and the rest. */
   .feed-head .head-icon + .head-icon { margin-left: -12px; }
 
-  /* The members: avatars overlapping by 2px, each ringed in the page's colour. */
+  /* The members: avatars overlapping by 2px, each ringed in the head's colour. */
   .members { display: flex; align-self: center; }
-  .members .avatar { box-shadow: 0 0 0 2px hsl(var(--background)); }
+  .members .avatar { box-shadow: 0 0 0 2px hsl(var(--side)); }
   .members .avatar + .avatar { margin-left: -2px; }
 
   /* Beside the switch while work briefed under its other setting runs (F4.3). */
@@ -73,9 +74,9 @@
      documents"): the head's rule moves under the tabs, running from the sides of the tab showing to
      the page's edges, and the head keeps less room under its controls. The timeline first, which
      does not close; then a tab per document, in the order they opened, each with its cross; Close
-     all at the far right. Every tab is a tab's shape: the one showing on the page's colour with the
-     primary across its top, the others muted. Where the tabs do not fit they narrow, then the line
-     scrolls. */
+     all at the far right. The line stands on the head's tint. Every tab is a tab's shape: the one
+     showing on the page's colour with the primary across its top, the others muted. Where the tabs
+     do not fit they narrow, then the line scrolls. */
   .feed-head:has(+ .doc-tabs) { min-height: 0; padding-bottom: 4px; border-bottom: 0; }
   .doc-tabs {
     flex: none;
@@ -84,6 +85,7 @@
     gap: 8px;
     height: 36px;
     padding: 0 16px 0 18px;
+    background: hsl(var(--side));
     box-shadow: inset 0 -1px 0 hsl(var(--border));
   }
   .doc-tabs-row { position: relative; flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 4px; height: 100%; padding-top: 2px; overflow-x: auto; scrollbar-width: none; }
@@ -168,12 +170,12 @@
   .phone-head .members { flex: none; }
   .phone-head .switch, .phone-head .chip { align-self: center; }
   /* The Archived and Finished chips show their icon alone, their word left to the tooltip and a
-     screen reader, so that an archived head with its ticket, three members and the notes' button
-     holds one line at 390px. */
+     screen reader, so that an archived head with three members and the notes' button holds one
+     line at 390px. */
   .phone-head .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .phone-head .head-icon + .head-icon { margin-left: -10px; }
   /* The second circle is the count of the rest, where there are more than two. */
-  .phone-head .members .more { font-size: 12.5px; letter-spacing: -0.02em; }
+  .phone-head .members .rest { font-size: 12.5px; letter-spacing: -0.02em; }
   .phone-head .notes-pop { width: min(340px, calc(100vw - 28px)); }
   /* The donut alone: no button's chrome, no step's name; its ring's outer edge 25px, a little under
      the members' avatars beside it. */

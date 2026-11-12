@@ -1,7 +1,7 @@
 /**
  * The project list (F1): the person's projects, then Other projects and Finished, each group with
- * its count and a remembered chevron; a tab's name, ticket id and status line, every step in
- * progress in it, at most two lines; each project at its own address, the bare address opening the
+ * its count and a remembered chevron; a tab's name, its status icon after it, its ticket id on one
+ * line and its status line, every step in progress in it, at most two lines; each project at its own address, the bare address opening the
  * one the browser remembers; the archived projects (D012).
  */
 
@@ -116,6 +116,55 @@ test.describe('The project list', () => {
     expect(badge.x + badge.width).toBeLessThanOrEqual(box.x + box.width);
     // A short line is one line, and nothing is cut.
     expect(await lines(projectList.tab(short).getByTestId('projects.tab.step'))).toEqual({ lines: 1, cut: false });
+  });
+
+  test('a tab’s status icon stands after its name’s last word, on that word’s line however the name wraps, and its ticket id on one line', async ({
+    people,
+    projects,
+    projectList,
+  }) => {
+    const me = await people.signIn();
+    const short = makeUnique('Short');
+    const shortId = await projects.make({ name: short, ticket: 'PILOT-1207', tasks: [step('a', 'pending')], members: [me.handle!] });
+    const long = makeUnique('A rather long project name that wraps over its lines');
+    await projects.make({ name: long, ticket: 'PILOT-1207', tasks: [step('a', 'pending')], members: [me.handle!] });
+    await projectList.open(shortId);
+    await expect(projectList.statusIcon(long).root).toBeVisible();
+
+    /** The tab read at each width from its own down by `span`, a pixel at a time: what does not hold at any of them. */
+    const faults = (name: string, span: number) =>
+      projectList.tab(name).evaluate((tab: HTMLElement, narrower) => {
+        const part = (id: string) => tab.querySelector(`[data-testid="projects.tab.${id}"]`)!;
+        const textOf = (element: Element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return Array.from(range.getClientRects());
+        };
+        const found: string[] = [];
+        const own = tab.getBoundingClientRect().width;
+        let most = 0;
+        for (let width = own; width >= own - narrower; width -= 1) {
+          tab.style.width = `${width}px`;
+          const words = textOf(part('name'));
+          const last = words.at(-1)!;
+          most = Math.max(most, new Set(words.map((line) => line.top)).size);
+          const icon = part('status-icon').getBoundingClientRect();
+          const middle = icon.top + icon.height / 2;
+          if (icon.left < last.right - 0.5 || icon.left > last.right + 8) found.push(`${width}: the icon stands ${icon.left - last.right}px after the name`);
+          if (middle < last.top || middle > last.bottom) found.push(`${width}: the icon is off the name’s last line`);
+          if (icon.bottom > part('status').getBoundingClientRect().top + 2) found.push(`${width}: the icon reaches into the status line`);
+          if (textOf(part('ticket')).length !== 1) found.push(`${width}: the ticket id wraps`);
+          if (part('ticket').getBoundingClientRect().right > tab.getBoundingClientRect().right) found.push(`${width}: the ticket id leaves the tab`);
+        }
+        tab.style.width = '';
+        return { found, most };
+      }, span);
+
+    expect(await faults(short, 0)).toEqual({ found: [], most: 1 });
+    // Down to the drawer's width on a phone 240px wide, the name breaking at another word every few pixels.
+    const wrapped = await faults(long, 60);
+    expect(wrapped.found).toEqual([]);
+    expect(wrapped.most).toBeGreaterThan(2);
   });
 
   test('the tab of the project on screen is the current one', async ({ people, projects, projectList }) => {

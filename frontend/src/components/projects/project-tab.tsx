@@ -1,8 +1,8 @@
 /**
- * A project's tab (F1.1, F1.2): its name, its ticket id and its status line, at most two lines,
- * opening the project at its own address, which off a phone moves on to the tab it was left on
- * (F1.6); its status icon, the pause (F1.3, F141); and the badge counting the items waiting on the
- * person, orange when one of them is urgent (F1.4). The tab of the project on screen, at its own
+ * A project's tab (F1.1, F1.2): its name, its ticket id on one line and its status line, at most
+ * two lines, opening the project at its own address, which off a phone moves on to the tab it was
+ * left on (F1.6); its status icon after its name's last word, the pause (F1.3, F141); and the
+ * badge counting the items waiting on the person, orange when one of them is urgent (F1.4). The tab of the project on screen, at its own
  * address or an item's under it, is the current page's. An <a> itself, its repos and environments
  * link through spans (F91, F93), and its ticket ids are plain text, so that a tap on the tab never
  * opens the tracker. Under the mouse or a finger it reads what its project's screen shows first
@@ -32,8 +32,11 @@ export function ProjectTab({ project, archived = false }: { project: Project; ar
       data-testid="projects.tab"
     >
       <div className="tab-name">
-        <span data-testid="projects.tab.name">
-          <LinkedText text={project.name ?? 'New project'} nested tickets={false} />
+        <span className="tab-title">
+          <span data-testid="projects.tab.name">
+            <LinkedText text={project.name ?? 'New project'} nested tickets={false} />
+          </span>
+          <StatusIcon project={project} archived={archived} />
         </span>
         {project.ticket && (
           <span className="card-id mono" data-testid="projects.tab.ticket">
@@ -42,7 +45,6 @@ export function ProjectTab({ project, archived = false }: { project: Project; ar
         )}
       </div>
       <div className="tab-status" data-testid="projects.tab.status">
-        <StatusIcon project={project} archived={archived} />
         <span className="tab-step" title={status.text} data-testid="projects.tab.step">
           <LinkedText text={status.text} nested tickets={false} />
           {status.at && (

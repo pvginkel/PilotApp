@@ -1,7 +1,8 @@
 /**
  * The theme (F109): system, light or dark, following the OS live under System, and remembered in
  * the browser (F133). The dark theme's dividers stand at 26 % lightness and its fields' edge, a
- * token of its own, at 36 %; the light theme's both at 91 % (mockup M3).
+ * token of its own, at 36 %; the light theme's both at 91 % (mockup M3). A theme chosen over the
+ * OS's paints a phone's browser bar in its own tint.
  */
 
 import { cssColour } from '../support/contrast';
@@ -61,6 +62,48 @@ test.describe('The theme', () => {
 
     await shell.theme.selectOption('system');
     await expect(html).toHaveAttribute('data-theme', 'light');
+  });
+
+  test('a theme chosen over the OS’s paints a phone’s browser bar in its own tabs’ tint, from the app’s start, and System in the OS’s again', async ({
+    page,
+    people,
+    shell,
+  }) => {
+    const phone = { width: 390, height: 844 };
+    const desk = { width: 1280, height: 720 };
+    const html = page.locator('html');
+    const tint = () => cssColour(page, 'hsl(var(--side))');
+    /** Chosen off a phone, where the profile menu is the top bar's; read on one. */
+    const choose = async (theme: 'light' | 'dark' | 'system', reads: 'light' | 'dark') => {
+      await page.setViewportSize(desk);
+      await shell.user.click();
+      await shell.theme.selectOption(theme);
+      await expect(html).toHaveAttribute('data-theme', reads);
+      await page.setViewportSize(phone);
+      await expect(shell.topBar).toHaveCount(0);
+    };
+    await page.emulateMedia({ colorScheme: 'light' });
+    await people.signIn();
+    await shell.open();
+
+    await choose('dark', 'dark');
+    const dark = await tint();
+    expect(await shell.browserBarColour()).toBe(dark);
+    await shell.open();
+    await expect(html).toHaveAttribute('data-theme', 'dark');
+    expect(await shell.browserBarColour()).toBe(dark);
+
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await choose('light', 'light');
+    const light = await tint();
+    expect(light).not.toBe(dark);
+    expect(await shell.browserBarColour()).toBe(light);
+
+    await choose('system', 'dark');
+    expect(await shell.browserBarColour()).toBe(dark);
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(html).toHaveAttribute('data-theme', 'light');
+    expect(await shell.browserBarColour()).toBe(light);
   });
 
   test('Dark draws the dividers at 26 % and a field’s edge, a token of its own, at 36 %; Light both at 91 %', async ({

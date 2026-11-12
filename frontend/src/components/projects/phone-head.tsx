@@ -1,6 +1,6 @@
 /**
- * A project's head on a phone (F2.8, F98.3), one line: the drawer's button; the name, its chip and
- * the ticket, the repo hidden; the auto pilot switch without its label, its warning triangle after
+ * A project's head on a phone (F2.8, F98.3), one line: the drawer's button; the name and its chip,
+ * with no ticket and no repo; the auto pilot switch without its label, its warning triangle after
  * it (F4.3), or the Finished chip in its place, the Archived and Finished chips their icon alone,
  * their word the tooltip's and a screen reader's; the plan's donut alone, a tap on it showing the Plan
  * tab (F3.7); the members, two circles at most (F2.5); the plan's notes button while it shows (F2.7);
@@ -45,11 +45,6 @@ export function PhoneHead({ project, onPlan }: PhoneHeadProps) {
           <span className="chip-label">Archived</span>
         </span>
       )}
-      {project.ticket && (
-        <span className="ticket mono" data-testid="project.ticket">
-          <LinkedText text={project.ticket} />
-        </span>
-      )}
       <div className="grow" />
       {!draft && <Autopilot project={project} phone />}
       {!draft && <PlanDonut tasks={project.tasks} onShow={onPlan} />}
@@ -75,7 +70,7 @@ function Members({ members }: { members: Project['members'] }) {
         <Avatar key={member.handle} who={{ name: member.name, initials: member.initials, slot: member.avatar_slot }} size="sm" />
       ))}
       {rest.length > 0 && (
-        <span className="avatar sm more" role="img" title={names} aria-label={`${rest.length} more: ${names}`} data-testid="project.members.more">
+        <span className="avatar sm rest" role="img" title={names} aria-label={`${rest.length} more: ${names}`} data-testid="project.members.more">
           +{rest.length}
         </span>
       )}

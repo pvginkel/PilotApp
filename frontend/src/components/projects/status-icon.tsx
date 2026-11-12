@@ -1,6 +1,6 @@
 /**
- * A project's status as one icon on its tab, in the mockup's live dot's place (F1.3, F141.1), the
- * running glyph pulsing as the dot did; and the pause (F141.2). A click, or a tap on the phone,
+ * A project's status as one icon on its tab, after the project's name (F1.3, F141.1), the running
+ * glyph the mockup's live dot, pulsing; and the pause (F141.2). A click, or a tap on the phone,
  * pauses a project that is not paused, the pause glyph showing under the pointer, and resumes one
  * paused or pausing, the play glyph showing there. There is no dialog: the icon takes the glyph
  * it asked for at once and holds it until the list is read again. An archived project's icon

@@ -9,19 +9,22 @@
  * opening the profile menu; it stands on the project list's tint with no rule at its edge, and the
  * page behind it darkens as it slides in, 30% black in the light theme and 80% in the dark, the
  * scrim's opacity the share of its way the drawer has come; under reduced motion it comes and goes
- * at once. The browser's own bar takes the page's colour on a phone and the top bar's off it. The
+ * at once. The browser's own bar takes the bottom tabs' tint on a phone, one colour with a project's
+ * head and its tabs, by the theme-colors the page is served with, and the top bar's off it. The
  * project list's head is at base size and its icons 16px at every width. On a phone, the keyboard
  * shrinks the app rather than panning it.
  */
 
 import type { Locator, Page } from '@playwright/test';
+import { barColour, servedThemeColours } from '../support/browser-bar';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import type { ShellPage } from '../support/page-objects/shell-page';
 import { projectAddress } from '../support/projects';
 
 const PHONE = { width: 390, height: 844 };
-const TOP_BAR_COLOUR = '#568ed2';
+/** The top bar's blue, #568ed2, as the browser computes it. */
+const TOP_BAR_COLOUR = 'rgb(86, 142, 210)';
 
 /** A colour as the browser computes it, from the page's tokens: `hsl(var(--side))`. */
 function colourOf(page: Page, colour: string): Promise<string> {
@@ -337,24 +340,55 @@ test.describe('The frame on a phone', () => {
     await expect(shell.side).toHaveCSS('visibility', 'hidden');
   });
 
-  test('paints the browser’s own bar in the page’s colour, in either theme, and the top bar’s again off a phone', async ({
+  test('paints the browser’s own bar in the bottom tabs’ tint, in either scheme, one colour with a project’s head and its tabs, and in the top bar’s again off a phone', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    phoneTabs,
+    shell,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Bar'), members: [me.handle!] });
+    await projectHead.open(project);
+
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+      const tint = await colourOf(page, 'hsl(var(--side))');
+      await expect.poll(() => shell.browserBarColour()).toBe(tint);
+      await expect(projectHead.root).toHaveCSS('background-color', tint);
+      await expect(phoneTabs.root).toHaveCSS('background-color', tint);
+    }
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(shell.topBar).toBeVisible();
+    await expect.poll(() => shell.browserBarColour()).toBe(TOP_BAR_COLOUR);
+  });
+
+  test('the page as served names the bar’s colours, before any script runs: the tabs’ tint of each scheme on a phone, the top bar’s off it', async ({
     page,
     people,
     shell,
   }) => {
     await people.signIn();
     await shell.open('/profile');
+    const served = await servedThemeColours(page);
+    expect(served).toHaveLength(3);
 
     for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme });
       await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
-      const background = await colourOf(page, 'hsl(var(--background))');
-      await expect.poll(() => shell.browserBarColour()).toBe(background);
+      expect(await barColour(page, served)).toBe(await colourOf(page, 'hsl(var(--side))'));
     }
 
     await page.setViewportSize({ width: 1280, height: 720 });
     await expect(shell.topBar).toBeVisible();
-    await expect.poll(() => shell.browserBarColour()).toBe(TOP_BAR_COLOUR);
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+      expect(await barColour(page, served)).toBe(TOP_BAR_COLOUR);
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
+import { barColour, pageThemeColours } from '../browser-bar';
 import { waitTestEvent } from '../helpers';
 
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
@@ -119,9 +120,9 @@ export class ShellPage {
     );
   }
 
-  /** The colour the page asks the browser to paint its own bar in. */
+  /** The colour the page asks the browser to paint its own bar in, as the browser computes it. */
   async browserBarColour(): Promise<string | null> {
-    return this.page.locator('meta[name="theme-color"]').getAttribute('content');
+    return barColour(this.page, await pageThemeColours(this.page));
   }
 
   /** The page's theme, as app-theme.css reads it. */

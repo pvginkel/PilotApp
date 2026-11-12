@@ -4,8 +4,9 @@
  * them the drawer lies over the centre, the screen's head included, behind its scrim, and opens on
  * the top bar's block of colour: Pilot's icon and name, white on the primary, and the avatar,
  * which opens the profile menu (F126). The drawer's button is the screen's own (`DrawerButton`).
- * The browser's own bar takes the page's colour. At a first sign-in the handle step stands under
- * the block of colour, which opens no drawer (F137). The loading bar lies at the page's top.
+ * The browser's own bar takes the bottom tabs' tint, by `index.html`'s theme-colors. At a first
+ * sign-in the handle step stands under the block of colour, which opens no drawer (F137). The
+ * loading bar lies at the page's top.
  */
 
 import type { ReactNode } from 'react';
@@ -19,7 +20,6 @@ import { NotificationsOffer } from '@/components/shell/notifications-offer';
 import { ProfileMenu } from '@/components/shell/profile-menu';
 import type { Condition } from '@/hooks/use-conditions';
 import { isPerson, PersonProvider, type Self } from '@/hooks/use-self';
-import { useBrowserBarInPageColour } from '@/lib/theme';
 
 interface PhoneFrameProps {
   self: Self | undefined;
@@ -29,7 +29,6 @@ interface PhoneFrameProps {
 }
 
 export function PhoneFrame({ self, drawer, conditions, children }: PhoneFrameProps) {
-  useBrowserBarInPageColour();
   if (self === undefined) return null;
   if (!isPerson(self)) {
     return (

@@ -7,9 +7,10 @@
  * beside the side panel giving way in one order, the repo, the name, the step's name to its floor,
  * then the members folding to a count, then standing in two rows, its menu clear of the panel,
  * a tab open or not;
- * everything it opens closed on another project (F1.6); on a phone one line (F2.8): the switch
- * without its label, the donut alone showing the Plan tab (F3.7), the members two circles at most,
- * the name giving way, a draft's, a finished and an archived project's, their chips their icon alone.
+ * everything it opens closed on another project (F1.6); on a phone one line (F2.8): no ticket, the
+ * switch without its label, the donut alone showing the Plan tab (F3.7), the members two circles at
+ * most, level, the name giving way, a draft's, a finished and an archived project's, their chips
+ * their icon alone. The head stands on the project list's tint, its members ringed in it.
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -18,6 +19,7 @@ import type { People } from '../support/people';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import type { TimelinePage } from '../support/page-objects/timeline-page';
 import { lift } from '../support/chips';
+import { cssColour } from '../support/contrast';
 import { test, expect } from '../support/fixtures';
 import { makeUnique, waitTestEvent } from '../support/helpers';
 import { PageFetches } from '../support/network';
@@ -423,7 +425,12 @@ test.describe('The plan’s notes', () => {
 });
 
 test.describe('The members', () => {
-  test('show as avatars in the order they joined, overlapping by 2px', async ({ people, projects, projectHead }) => {
+  test('show as avatars in the order they joined, overlapping by 2px, each ringed in the head’s colour, the project list’s tint', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+  }) => {
     const me = await people.signIn({ name: 'Test Person' });
     const id = await projects.make({ name: makeUnique('Members'), members: ['ben', me.handle!, 'ada'] });
     await projectHead.open(id);
@@ -442,6 +449,14 @@ test.describe('The members', () => {
     ]);
     const [first, second] = [(await avatars.nth(0).boundingBox())!, (await avatars.nth(1).boundingBox())!];
     expect(second.x).toBeCloseTo(first.x + first.width - 2, 1);
+
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+      const tint = await cssColour(page, 'hsl(var(--side))');
+      await expect(projectHead.root).toHaveCSS('background-color', tint);
+      await expect(avatars.nth(1)).toHaveCSS('box-shadow', `${tint} 0px 0px 0px 2px`);
+    }
   });
 });
 
@@ -1097,7 +1112,7 @@ test.describe('Switching projects', () => {
 test.describe('The head on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('is one line: the drawer’s button, the name and the ticket, the switch without its label, the donut alone, the members, the notes’ button and the menu, with no repo or step button', async ({
+  test('is one line: the drawer’s button, the name, the switch without its label, the donut alone, the members, the notes’ button and the menu, with no ticket, repo or step button', async ({
     people,
     projects,
     projectHead,
@@ -1114,7 +1129,7 @@ test.describe('The head on a phone', () => {
     });
     await projectHead.open(id);
 
-    for (const absent of [projectHead.repo, projectHead.step]) await expect(absent).toHaveCount(0);
+    for (const absent of [projectHead.ticket, projectHead.repo, projectHead.step]) await expect(absent).toHaveCount(0);
     await expect(projectHead.autopilot).toHaveText('');
     await expect(projectHead.autopilot).toHaveAccessibleName('Auto pilot');
     await expect(projectHead.donut).toHaveText('');
@@ -1129,7 +1144,6 @@ test.describe('The head on a phone', () => {
     const parts = [
       shell.drawerToggle,
       projectHead.name,
-      projectHead.ticket,
       projectHead.autopilot,
       projectHead.donut,
       projectHead.members,
@@ -1164,7 +1178,7 @@ test.describe('The head on a phone', () => {
     await expect(phoneTabs.tab('plan')).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('the members are two circles at most: the first member’s avatar, then the second’s, or a “+N” naming the rest on its tooltip and to a screen reader', async ({
+  test('the members are two circles at most: the first member’s avatar, then the second’s, or a “+N” level with it, naming the rest on its tooltip and to a screen reader', async ({
     people,
     projects,
     projectHead,
@@ -1182,6 +1196,7 @@ test.describe('The head on a phone', () => {
     const [first, more] = [await boxOf(projectHead.memberAvatars.first()), await boxOf(projectHead.membersMore)];
     expect(more.x).toBeCloseTo(first.x + first.width - 2, 1);
     expect(more.width).toBe(first.width);
+    expect([more.y, more.height]).toEqual([first.y, first.height]);
 
     await projectHead.open(two);
     await expect(projectHead.memberAvatars).toHaveText(['AE', 'BE']);
@@ -1225,7 +1240,7 @@ test.describe('The head on a phone', () => {
     await projectHead.open(id);
 
     await expect(projectHead.menuButton).toBeVisible();
-    const kept = [shell.drawerToggle, projectHead.ticket, projectHead.autopilot, projectHead.donut, projectHead.members, projectHead.notesButton, projectHead.menuButton];
+    const kept = [shell.drawerToggle, projectHead.autopilot, projectHead.donut, projectHead.members, projectHead.notesButton, projectHead.menuButton];
     const widths = async () => Promise.all(kept.map(async (locator) => (await boxOf(locator)).width));
     const whole = await widths();
     expect(whole[0]).toBe(36);
@@ -1287,13 +1302,13 @@ test.describe('The head on a phone', () => {
     expect((await boxOf(projectHead.archived)).x).toBeGreaterThan((await boxOf(projectHead.name)).x);
   });
 
-  test('an archived and a finished head with a ticket, three members and the notes’ button hold one line, the menu inside the head', async ({
+  test('an archived and a finished head with three members and the notes’ button hold one line, the menu inside the head', async ({
     people,
     projects,
     projectHead,
   }) => {
     const me = await people.signIn();
-    const parts = { ticket: 'PL-1234', members: [me.handle!, 'ada', 'ben'], tasks: [step('a', 'done')], notes: [note('one')] };
+    const parts = { members: [me.handle!, 'ada', 'ben'], tasks: [step('a', 'done')], notes: [note('one')] };
     const archived = await projects.make({ name: makeUnique('Shelved'), archived: true, ...parts });
     const finished = await projects.make({ name: makeUnique('Ended'), state: 'finished', ...parts });
 

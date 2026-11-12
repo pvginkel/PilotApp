@@ -1,5 +1,6 @@
 /**
- * The PWA shell (F95): the manifest the page head names and its icons, and the service worker that
+ * The PWA shell (F95): the page's title; the manifest the page head names and its icons, with no
+ * colour for the browser's bar, the page head's own (layout.spec.ts); and the service worker that
  * caches nothing, answers a navigation the network does not with one line, and never answers a
  * request under /api/.
  */
@@ -39,8 +40,11 @@ test.describe('The PWA shell', () => {
     await shell.open('/profile');
   });
 
-  test('serves the manifest the page head names, with its icons', async ({ page }) => {
-    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#568ed2');
+  test('is titled “Pilot — AI powered work orchestration”', async ({ page }) => {
+    await expect(page).toHaveTitle('Pilot — AI powered work orchestration');
+  });
+
+  test('serves the manifest the page head names, with its icons and no colour for the browser’s bar', async ({ page }) => {
     const href = await page.locator('link[rel="manifest"]').getAttribute('href');
     const manifestUrl = new URL(href!, page.url());
     const response = await page.request.get(manifestUrl.href);
@@ -48,6 +52,7 @@ test.describe('The PWA shell', () => {
     const manifest = await response.json();
 
     expect(manifest).toMatchObject({ name: 'Pilot', short_name: 'Pilot', display: 'standalone' });
+    expect(manifest).not.toHaveProperty('theme_color');
     const root = new URL('/', page.url()).href;
     expect(new URL(manifest.start_url, manifestUrl).href).toBe(root);
     expect(new URL(manifest.scope, manifestUrl).href).toBe(root);

@@ -3,14 +3,27 @@
  * is what app-theme.css reads; under `system` it follows the OS, live.
  */
 
-import { useEffect } from 'react';
 import { browserState, rememberInBrowser, useBrowserState, type Theme } from '@/lib/browser-state';
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
 
+/**
+ * A phone's two `theme-color`s in `index.html`, the bottom tabs' tint in each scheme. The browser
+ * paints its own bar in the first whose `media` holds: the dark one's under a dark OS, else the
+ * light one's.
+ */
+const bar = {
+  dark: document.querySelector<HTMLMetaElement>('meta[name="theme-color"][data-scheme="dark"]')!,
+  light: document.querySelector<HTMLMetaElement>('meta[name="theme-color"][data-scheme="light"]')!,
+};
+const tint = { dark: bar.dark.content, light: bar.light.content };
+
 function applyTheme(theme: Theme): void {
   const dark = theme === 'dark' || (theme === 'system' && systemDark.matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  // A theme chosen over the OS's gives both its own tint, so that the OS's scheme picks it either way.
+  bar.dark.content = tint[theme === 'light' ? 'light' : 'dark'];
+  bar.light.content = tint[theme === 'dark' ? 'dark' : 'light'];
 }
 
 /** Sets the remembered theme on the page and follows the OS's; runs once, before the first render. */
@@ -26,25 +39,4 @@ export function useTheme(): [Theme, (theme: Theme) => void] {
     applyTheme(chosen);
   };
   return [theme, choose];
-}
-
-/**
- * While mounted, the browser's own bar takes the page's colour, in either theme (F98.3); after, it
- * has `index.html`'s `theme-color` back, the top bar's.
- */
-export function useBrowserBarInPageColour(): void {
-  useEffect(() => {
-    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')!;
-    const topBar = meta.content;
-    const paint = () => {
-      meta.content = getComputedStyle(document.body).backgroundColor;
-    };
-    paint();
-    const themed = new MutationObserver(paint);
-    themed.observe(document.documentElement, { attributeFilter: ['data-theme'] });
-    return () => {
-      themed.disconnect();
-      meta.content = topBar;
-    };
-  }, []);
 }
