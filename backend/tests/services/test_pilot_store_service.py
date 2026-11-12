@@ -1493,6 +1493,31 @@ class TestPilotStoreServiceFinish:
         assert project.archived is True
         assert _archived_by(session, project) == [_pilot(session).id]
 
+    def test_with_archive_a_pass_on_a_line_a_person_closed_archives_as_pilot(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """Only a close places a job as the person's: the job after a worker's
+        turn whose line a person marked done is Pilot's own."""
+        _opened(session, project)
+        worker = _work(session, container, project, SessionState.IDLE)
+        line = session.get_one(Item, worker.id)
+        line.done_at = datetime.now(UTC)
+        line.done_cause_code = "marked"
+        line.done_by_user_id = person.id
+        session.flush()
+        job = _pass(session, container, project, environment, worker)
+
+        _service(container).finish(_admitted(job), TOOL_USE_ID, archive=True)
+        clear_after_commit_callbacks()
+
+        assert project.archived is True
+        assert _archived_by(session, project) == [_pilot(session).id]
+
     def test_with_archive_a_refused_finish_archives_nothing(
         self,
         session: DbSession,
