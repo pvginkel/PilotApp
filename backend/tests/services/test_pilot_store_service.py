@@ -1242,6 +1242,9 @@ class TestPilotStoreServiceCancelAsk:
         assert (item.done_at, theirs.done_at) == (None, None)
 
 
+CLOSE_REASON = "Replaced by the pitching that takes the groundsheet in"
+
+
 class TestPilotStoreServiceStopWork:
     @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.HELD])
     def test_a_work_items_session_is_stopped_by_pilot(
@@ -1359,6 +1362,102 @@ class TestPilotStoreServiceStopWork:
         )
         assert job.state_code is SessionState.RUNNING
         assert _effects(session) == []
+
+    @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.STOPPED])
+    def test_with_a_reason_it_is_stopped_and_closed_for_good_in_one_act(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+        state: SessionState,
+    ) -> None:
+        """DB 345, 346, 350: one a Stop takes is stopped by Pilot first; one
+        stopped earlier is closed as it stands. The reason is its Work's
+        `done_note`, and the call's one Effect stays of kind `stopped`."""
+        run = _brain(session, project, environment)
+        work = _work(session, container, project, state)
+        if state is SessionState.STOPPED:
+            work.stopped_by_user_id = person.id
+        pilot = _pilot(session)
+
+        line = _service(container).stop_work(
+            _admitted(run), work.id, TOOL_USE_ID, reason=CLOSE_REASON
+        )
+        clear_after_commit_callbacks()
+
+        assert work.state_code == SessionState.STOPPED
+        assert work.stopped_by_user_id == (
+            pilot.id if state is SessionState.RUNNING else person.id
+        )
+        item = session.get_one(Item, work.id)
+        assert (item.done_cause_code, item.done_by_user_id) == ("cancelled", pilot.id)
+        assert session.get_one(Work, work.id).done_note == CLOSE_REASON
+        assert (line.verb, line.label) == ("Closed", "Pitching the tent")
+        assert _effect_record(session, run)["effect"] == {
+            "verb": "Closed",
+            "label": "Pitching the tent",
+            "itemId": str(work.id),
+        }
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.item_id) == (EffectKind.STOPPED, work.id)
+
+    def test_without_a_reason_one_stopped_already_is_refused_and_stays_open(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        work = _work(session, container, project, SessionState.STOPPED)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).stop_work(_admitted(run), work.id, TOOL_USE_ID)
+
+        assert refused.value.message == (
+            "Cannot stop Pitching the tent because it is stopped already"
+        )
+        assert session.get_one(Item, work.id).done_at is None
+
+    def test_with_a_reason_a_failed_one_is_refused_and_records_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        work = _work(session, container, project, SessionState.FAILED)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).stop_work(
+                _admitted(run), work.id, TOOL_USE_ID, reason=CLOSE_REASON
+            )
+
+        assert refused.value.message == (
+            "Cannot close Pitching the tent because it has failed, and keeps its Resume"
+        )
+        assert session.get_one(Item, work.id).done_at is None
+        assert _effects(session) == []
+
+    def test_with_a_reason_an_item_that_is_no_work_item_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "decision", "Which tent?", DECISION)
+
+        with pytest.raises(RecordNotFoundException):
+            _service(container).stop_work(
+                _admitted(run), item.id, TOOL_USE_ID, reason=CLOSE_REASON
+            )
+
+        assert item.done_at is None
 
     def test_a_work_item_of_another_project_is_not_found(
         self,

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.models import Environment, ProgressStep, Project, Turn, User
+from app.models import Environment, Item, ProgressStep, Project, Turn, User
 from app.models.reference import ProgressState, RecordKind, SessionState, WorkTrigger
 from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.services.chat_close_service import ChatCloseService
@@ -925,6 +925,186 @@ class TestStopSession:
         assert response.status_code == 401
 
 
+class TestCloseSession:
+    """`POST /api/sessions/<id>/close`: a stopped work item closed for good
+    (DB 345 to 350)."""
+
+    def test_it_closes_the_stopped_work_item_for_good_and_answers_its_status(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.STOPPED
+        )
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/close")
+
+        assert response.status_code == 200, response.get_json()
+        body = response.get_json()
+        assert (body["state"], body["note"]) == ("stopped", None)
+        item = session.get_one(Item, run.id, populate_existing=True)
+        assert (item.done_cause_code, item.done_by_user_id) == ("cancelled", person.id)
+        entry = next(
+            entry
+            for entry in client.get(f"/api/projects/{project.id}/timeline").get_json()[
+                "items"
+            ]
+            if entry["id"] == str(run.id)
+        )
+        assert (
+            entry["done"]["cause"],
+            entry["done"]["by"]["handle"],
+            entry["done"]["undo"],
+        ) == ("cancelled", "ada", False)
+
+    @pytest.mark.parametrize(
+        ("state", "refusal"),
+        [
+            (SessionState.RUNNING, "it is running, and its Stop comes first"),
+            (
+                SessionState.HELD,
+                "its start waits at the gate, and its Stop comes first",
+            ),
+            (SessionState.FAILED, "it has failed, and keeps its Resume"),
+        ],
+    )
+    def test_a_work_item_that_is_not_stopped_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+        state: SessionState,
+        refusal: str,
+    ) -> None:
+        run = _work_item(container, session, project, project_session, state)
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/close")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot close Build the camp because {refusal}"
+        )
+        assert session.get_one(Item, run.id, populate_existing=True).done_at is None
+
+    def test_one_closed_already_and_one_of_an_archived_project_are_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.STOPPED
+        )
+        sign_in(client, SUBJECT)
+        project.archived = True
+        session.flush()
+
+        archived = client.post(f"/api/sessions/{run.id}/close")
+
+        project.archived = False
+        session.flush()
+        assert client.post(f"/api/sessions/{run.id}/close").status_code == 200
+        again = client.post(f"/api/sessions/{run.id}/close")
+
+        assert (archived.status_code, again.status_code) == (409, 409)
+        assert archived.get_json()["error"] == (
+            "Cannot close Build the camp because its project is archived"
+        )
+        assert again.get_json()["error"] == (
+            "Cannot close Build the camp because it is closed for good"
+        )
+
+    def test_a_session_with_no_work_item_is_409(
+        self,
+        client: FlaskClient,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{project_session.id}/close")
+
+        assert response.status_code == 409
+
+    def test_pilots_own_work_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        job = _job(container, session, project, project_session, SessionState.STOPPED)
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{job.id}/close")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot close Setting up the project because it is Pilot's own work"
+        )
+
+    def test_a_caller_without_a_handle_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.STOPPED
+        )
+        sign_in(client, "subject-newcomer")
+
+        response = client.post(f"/api/sessions/{run.id}/close")
+
+        assert response.status_code == 409
+        assert "you have not chosen your handle yet" in response.get_json()["error"]
+        assert session.get_one(Item, run.id, populate_existing=True).done_at is None
+
+    def test_an_unknown_session_is_404(self, client: FlaskClient, person: User) -> None:
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{uuid.uuid4()}/close")
+
+        assert response.status_code == 404
+
+    def test_without_the_editor_role_it_is_403(
+        self, client: FlaskClient, project_session: models.Session
+    ) -> None:
+        response = client.post(
+            "/api/testing/auth/session", json={"subject": SUBJECT, "roles": []}
+        )
+        assert response.status_code == 201
+
+        response = client.post(f"/api/sessions/{project_session.id}/close")
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(f"/api/sessions/{uuid.uuid4()}/close")
+
+        assert response.status_code == 401
+
+
 @pytest.mark.usefixtures("starts")
 class TestResumeSession:
     def test_it_resumes_the_work_item_through_the_gate(
@@ -1083,6 +1263,32 @@ class TestResumeSession:
         assert response.get_json()["error"] == (
             "Cannot resume Build the camp because it is running"
         )
+
+    def test_a_work_item_closed_for_good_is_409_saying_so(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """A second browser still showing the stopped row's Resume: the
+        server refuses it (DB 347)."""
+        run = _work_item(
+            container, session, project, project_session, SessionState.STOPPED
+        )
+        sign_in(client, SUBJECT)
+        assert client.post(f"/api/sessions/{run.id}/close").status_code == 200
+
+        response = client.post(f"/api/sessions/{run.id}/resume")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot resume Build the camp because it is closed for good"
+        )
+        run = session.get_one(models.Session, run.id, populate_existing=True)
+        assert (run.state_code, run.turns) == (SessionState.STOPPED, 1)
 
     def test_pilots_own_work_is_409(
         self,

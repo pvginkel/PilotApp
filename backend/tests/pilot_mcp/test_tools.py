@@ -981,6 +981,64 @@ class TestStopWork:
         assert json.loads(request.content) == {"item": str(run.id)}
         session.refresh(run)
         assert run.state_code == SessionState.STOPPED
+        assert session.get_one(models.Item, run.id).done_at is None
+
+    async def test_with_a_reason_the_work_item_is_closed_for_good(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        brain: models.Session,
+    ) -> None:
+        run = models.Session(
+            project_id=project.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.STOPPED,
+            turns=1,
+            turn_started_at=datetime.now(UTC),
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            Turn(session_id=run.id, seq=1, message="Go.", started_at=datetime.now(UTC))
+        )
+        container.record_service().place_work(project, run, "Pitching the tent")
+        session.commit()
+        reason = "Replaced by the pitching that takes the groundsheet in"
+
+        result = await call(
+            mcp_app,
+            "stop_work",
+            {"item": str(run.id), "reason": reason},
+            path=STORE_PATH,
+        )
+
+        assert result.structuredContent == {"effect": "Closed · Pitching the tent"}
+        [(request, _)] = routes.calls
+        assert json.loads(request.content) == {"item": str(run.id), "reason": reason}
+        item = session.get_one(models.Item, run.id, populate_existing=True)
+        assert item.done_cause_code == "cancelled"
+        assert session.get_one(models.Work, run.id).done_note == reason
+
+    async def test_an_empty_reason_is_refused_before_the_api(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        brain: models.Session,
+    ) -> None:
+        result = await call(
+            mcp_app,
+            "stop_work",
+            {"item": str(uuid.uuid4()), "reason": ""},
+            path=STORE_PATH,
+        )
+
+        assert result.isError
+        assert routes.calls == []
 
 
 @pytest.mark.anyio

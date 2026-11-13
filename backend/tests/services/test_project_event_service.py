@@ -318,6 +318,7 @@ class TestProjectEventService:
                     "setup": False,
                     "held_reason": None,
                     "held_running": None,
+                    "note": None,
                     "stopped_at": None,
                     "stopped_by": None,
                     "stopped_cause": None,

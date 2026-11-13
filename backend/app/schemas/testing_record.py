@@ -29,6 +29,7 @@ from app.schemas.pilot_store import (
     BlockId,
     CancelAskRequestSchema,
     FinishRequestSchema,
+    StopRequestSchema,
 )
 
 OPENING_WORDS = "An invented project, started for a test."
@@ -251,6 +252,13 @@ class InventedChatAnswerCreateSchema(AnswerRequestSchema):
 class InventedChatCancelCreateSchema(CancelAskRequestSchema):
     """An ask Pilot added, which the project's brain calls off in the chat on
     a person's word as its `cancel_ask` call does."""
+
+    tool_use_id: str | None = _tool_use_id()
+
+
+class InventedChatStopCreateSchema(StopRequestSchema):
+    """A work item the project's brain stops in the chat as its `stop_work`
+    call does, and with a reason closes for good."""
 
     tool_use_id: str | None = _tool_use_id()
 

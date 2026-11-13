@@ -581,6 +581,158 @@ class TestTurnEndReadServiceRunEnded:
         assert _jobs_after(session, run) == [NEXT_TITLE]
 
 
+def _close(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    run: models.Session,
+    person: User,
+    *,
+    turn_ended: bool = True,
+) -> None:
+    """The run stopped under its turn and its work item closed for good by
+    `person` (DB 345), its stopped turn ended, as its relay ends it, or still
+    in flight."""
+    now = datetime.now(UTC)
+    turn = Turn(session_id=run.id, seq=1, message="Refine the camp.", started_at=now)
+    db.add(turn)
+    run.state_code = SessionState.STOPPED
+    run.stopped_at = now
+    run.stopped_by_user_id = person.id
+    if turn_ended:
+        turn.ended_at = now
+        run.turn_ended_at = now
+    db.flush()
+    container.record_service().close_work(
+        project, run.id, person, "close Refining the camp"
+    )
+    db.flush()
+
+
+class TestTurnEndReadServiceRunClosed:
+    """A stopped run's documents, read at its work item's close for good (DB
+    349)."""
+
+    def test_a_closed_runs_documents_are_read_once_the_close_commits(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        project: Project,
+        person: User,
+        run: models.Session,
+    ) -> None:
+        _register(container, project, run)
+        _close(session, container, project, run, person)
+
+        reads.run_closed(session, run)
+
+        assert "_ReadStart" in _pending()
+
+    def test_one_whose_stopped_turn_is_still_ending_reads_nothing_yet(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        person: User,
+        run: models.Session,
+    ) -> None:
+        item = _register(container, project, run)
+        _close(session, container, project, run, person, turn_ended=False)
+
+        reads.run_closed(session, run)
+        _read(reads, run.id)
+
+        assert "_ReadStart" not in _pending()
+        assert _file_reads(fake_controller) == []
+        assert awaits_read(item, _document(session, item))
+
+        # Its relay ends the stopped turn, and tells the reads.
+        run.turn_ended_at = datetime.now(UTC)
+        reads.run_closed(session, run)
+
+        assert "_ReadStart" in _pending()
+
+    def test_a_stopped_run_still_open_reads_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        project: Project,
+        run: models.Session,
+    ) -> None:
+        _register(container, project, run)
+        run.state_code = SessionState.STOPPED
+        run.turn_ended_at = datetime.now(UTC)
+        session.flush()
+
+        reads.run_closed(session, run)
+
+        assert "_ReadStart" not in _pending()
+
+    def test_a_closed_run_that_registered_none_reads_nothing_and_gets_no_job(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        project: Project,
+        person: User,
+        run: models.Session,
+    ) -> None:
+        _close(session, container, project, run, person)
+
+        reads.run_closed(session, run)
+
+        assert "_ReadStart" not in _pending()
+        assert _jobs_after(session, run) == []
+
+    def test_its_documents_are_published_as_their_files_read_and_no_job_follows(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        person: User,
+        run: models.Session,
+    ) -> None:
+        """Read, a document is the person's: open, with its text. The run did
+        not end its turn, so no pass follows the read (DB 348, 349)."""
+        fake_controller.put_file(ENV, OTHER, SURVEY.encode())
+        first = _register(container, project, run)
+        second = _register(container, project, run, OTHER)
+        _close(session, container, project, run, person)
+
+        _read(reads, run.id)
+
+        assert _document(session, first).published_text == TEXT
+        assert _document(session, second).published_text == SURVEY
+        assert (first.done_at, second.done_at) == (None, None)
+        assert not awaits_read(first, _document(session, first))
+        assert _jobs_after(session, run) == []
+
+    def test_a_file_the_controller_refuses_fails_its_read_and_no_job_follows(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        person: User,
+        run: models.Session,
+    ) -> None:
+        item = _register(container, project, run, OTHER)
+        _close(session, container, project, run, person)
+
+        _read(reads, run.id)
+
+        document = _document(session, item)
+        assert document.published_text is None and document.read_failed_at is not None
+        assert _jobs_after(session, run) == []
+
+
 def _pending() -> set[str]:
     """The kinds of the after-commit callbacks the transaction holds."""
     return {

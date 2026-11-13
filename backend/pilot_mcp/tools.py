@@ -509,16 +509,36 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
     async def stop_work(
         item: Annotated[uuid.UUID, Field(description="The work item's id")],
         ctx: Call,
+        reason: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description=(
+                    "Why the work item is closed for good, in a line its done"
+                    " line carries: give it for a work item you replaced, and"
+                    " leave it out to stop one a person may resume"
+                ),
+            ),
+        ] = None,
     ) -> Recorded:
         """Stop a work item's session that runs, is starting or is held at the
         gate, or one whose turn ended under a usage halt or the project's
         pause, to be carried on once it lifts: a runaway session, or one a
         correction makes moot. A turn in flight is interrupted and the
         conversation kept; the item shows it stopped by Pilot, and a person can
-        resume it. An item not of your project, one that is no work item, a job
-        of yours, or one whose session is none of these is refused with the
-        reason. Answers `{effect}`, the call's effect line."""
-        return await api.stop_work(_authorization(ctx), _tool_use_id(ctx), item=item)
+        resume it. With `reason`, the work item is closed for good in the same
+        act: one you replaced with another, which nobody is to resume. It is
+        stopped where it was not, one stopped earlier included, and done as
+        cancelled, by you: its line shows the cancelled mark and your reason,
+        it waits on nobody, and it takes no Resume and no undo. The documents
+        its run put to a person stay open. An item not of your project, one
+        that is no work item, a job of yours, or one whose session is none of
+        these is refused with the reason; so is, with `reason`, one that is
+        done, one that failed, which keeps its Resume, and one of an archived
+        project. Answers `{effect}`, the call's effect line."""
+        return await api.stop_work(
+            _authorization(ctx), _tool_use_id(ctx), item=item, reason=reason
+        )
 
     @mcp.tool()
     async def finish(

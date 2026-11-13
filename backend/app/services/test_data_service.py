@@ -1304,6 +1304,35 @@ class TestDataService:
             tool_use_id,
         )
 
+    def stop_in_chat(
+        self,
+        project_id: uuid.UUID,
+        item_id: uuid.UUID,
+        *,
+        reason: str | None,
+        tool_use_id: str | None,
+    ) -> EffectLine:
+        """The work item `item_id` stopped by Pilot through the project's open
+        chat as its brain's `stop_work` stops it (F86.4) and, with `reason`,
+        closes it for good (DB 345): the call `tool_use_id`'s effect in the
+        chat's Turn in flight.
+
+        Raises:
+            RecordNotFoundException: no project has the id, or the item is
+                not of it.
+            InvalidOperationException: the project has no chat open, its chat
+                has no turn in flight, or the stop or the close is refused.
+        """
+        return self.pilot_store_service.stop_work(
+            self._chats_brain(
+                project_id,
+                f"stop item {item_id} in the chat of project {project_id}",
+            ),
+            item_id,
+            tool_use_id,
+            reason=reason,
+        )
+
     def finish_in_chat(
         self, project_id: uuid.UUID, *, archive: bool, tool_use_id: str | None
     ) -> EffectLine:

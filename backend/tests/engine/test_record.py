@@ -4085,7 +4085,12 @@ class TestRecordServiceWorkDone:
             ProjectChanged(project.id),
         ]
         (entry,) = json.loads(container.view_service().timeline(project).text)["items"]
-        assert entry["done"] == {"at": _z(self.AT), "cause": "turn_ended", "by": None}
+        assert entry["done"] == {
+            "at": _z(self.AT),
+            "cause": "turn_ended",
+            "by": None,
+            "note": None,
+        }
 
     def test_it_waits_for_the_items_row(self, committed_app: Flask) -> None:
         """What Finish's close holds while it closes the open items."""
@@ -4118,6 +4123,260 @@ class TestRecordServiceWorkDone:
 
 
 REVIEW = "---\ntitle: The camp survey\n---\n\nThe lake and the forest compared.\n"
+
+
+def _stopped_work(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    environment: Environment,
+    conversation: str | None = None,
+) -> models.Session:
+    """A worker's run placed and stopped, on `conversation` where given."""
+    run = _work_session(session, project, environment)
+    run.state_code = SessionState.STOPPED
+    run.conversation_id = conversation
+    container.record_service().place_work(project, run, "Renaming")
+    return run
+
+
+class TestRecordServiceCloseWork:
+    """A work item's close for good (DB 345 to 350)."""
+
+    REASON = "Replaced by the renaming that takes the badge in"
+
+    def test_a_persons_close_is_done_cancelled_by_them_with_no_note(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _stopped_work(session, container, project, environment)
+        records = container.record_service()
+
+        records.close_work(project, run.id, person, "close Renaming")
+
+        item = session.get_one(Item, run.id)
+        assert item.done_at is not None
+        assert _done(item) == (item.done_at, "cancelled", person.id)
+        assert session.get_one(Work, run.id).done_note is None
+        assert not records.offers_undo(item)
+
+    def test_pilots_close_holds_its_reason_which_the_stores_timeline_carries(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 346, 350: `timeline.json` carries the Work's `done_note` as it
+        carries a Wait's."""
+        run = _stopped_work(session, container, project, environment)
+        pilot = _agent(session)
+
+        container.record_service().close_work(
+            project, run.id, pilot, "close Renaming", note=self.REASON
+        )
+
+        item = session.get_one(Item, run.id)
+        assert _done(item) == (item.done_at, "cancelled", pilot.id)
+        assert session.get_one(Work, run.id).done_note == self.REASON
+        (entry,) = json.loads(container.view_service().timeline(project).text)["items"]
+        assert entry["done"] == {
+            "at": _z(item.done_at),
+            "cause": "cancelled",
+            "by": pilot.handle,
+            "note": self.REASON,
+        }
+
+    def test_it_moves_the_timeline(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        with scoped_session(container):
+            run = _stopped_work(session, container, project, environment)
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.record_service().close_work(
+                project, run.id, person, "close Renaming"
+            )
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]
+
+    def test_a_folded_one_is_closed_unfolded(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 318: the close sets the item's `done_at` and nothing more for
+        its fold."""
+        run = _stopped_work(session, container, project, environment)
+        records = container.record_service()
+        item = session.get_one(Item, run.id)
+        records.fold(project, item, True)
+
+        records.close_work(project, run.id, person, "close Renaming")
+        session.flush()
+
+        session.refresh(item)
+        assert (item.done_cause_code, item.folded) == ("cancelled", False)
+
+    def test_it_waits_on_nobody_once_closed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 225: a stopped Work waits on a person only while it is open."""
+        run = _stopped_work(session, container, project, environment)
+        assert _waiting(session, project, person) == [run.id]
+
+        container.record_service().close_work(project, run.id, person, "close Renaming")
+
+        assert _waiting(session, project, person) == []
+
+    def test_an_archived_project_refuses_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _stopped_work(session, container, project, environment)
+        project.archived = True
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().close_work(
+                project, run.id, person, "close Renaming"
+            )
+
+        assert refused.value.message == (
+            "Cannot close Renaming because its project is archived"
+        )
+        assert _done(session.get_one(Item, run.id)) == (None, None, None)
+
+    @pytest.mark.parametrize(
+        ("closed", "reason"),
+        [("for good", "it is closed for good"), ("at its turn's end", "it is done")],
+    )
+    def test_a_done_one_is_refused_and_stays_as_it_was_closed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+        closed: str,
+        reason: str,
+    ) -> None:
+        run = _stopped_work(session, container, project, environment)
+        records = container.record_service()
+        if closed == "for good":
+            records.close_work(project, run.id, person, "close Renaming")
+        else:
+            records.work_done(run.id, datetime.now(UTC))
+        before = _done(session.get_one(Item, run.id))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            records.close_work(
+                project, run.id, _agent(session), "close Renaming", note=self.REASON
+            )
+
+        assert refused.value.message == f"Cannot close Renaming because {reason}"
+        assert _done(session.get_one(Item, run.id)) == before
+        assert session.get_one(Work, run.id).done_note is None
+
+    def test_it_closes_no_document_and_the_close_of_its_own_continues_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 348, 349: a document the closed item registered stays open, the
+        person's once read; its close owes its write-back and continues
+        nothing."""
+        run = _stopped_work(session, container, project, environment, "conv-1")
+        decision, document = _registered(session, container, project, run, DECISION)
+        records = container.record_service()
+
+        records.close_work(project, run.id, person, "close Renaming")
+
+        assert decision.done_at is None
+
+        with scoped_session(container):
+            records.answer(document, "D1", person, "Tunnel")
+
+        assert decision.done_cause_code == "answered"
+        assert _owed_events(engine_events) == [WriteBackOwed(run.id)]
+        assert _continuations(session, project) == []
+        assert decision.consumed_at is None
+
+    def test_it_ends_the_run_whose_conversation_it_was_the_latest_of(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 348: a later run of the conversation, a clarification run among
+        them, closed while an earlier one's documents are open: their last
+        close continues nothing."""
+        run = _ended_run(container, project, project_session)
+        decision, document = _registered(session, container, project, run, DECISION)
+        later = _stopped_work(session, container, project, environment, "conv-1")
+        records = container.record_service()
+
+        records.close_work(project, later.id, person, "close Renaming")
+        records.answer(document, "D1", person, "Tunnel")
+
+        assert decision.done_cause_code == "answered"
+        assert _continuations(session, project) == []
+        assert decision.consumed_at is None
+
+    def test_a_closed_run_of_another_conversation_ends_no_other(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        _, document = _registered(session, container, project, run, DECISION)
+        other = _stopped_work(session, container, project, environment, "conv-2")
+        records = container.record_service()
+
+        records.close_work(project, other.id, person, "close Renaming")
+        records.answer(document, "D1", person, "Tunnel")
+
+        (work,) = _continuations(session, project)
+        assert session.get_one(models.Session, work.id).conversation_id == "conv-1"
 
 
 def _brain(db: DbSession, project: Project) -> models.Session:

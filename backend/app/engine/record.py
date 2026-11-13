@@ -6,8 +6,9 @@ a work item's place and its done at its turn's end (DB Work, decision 44);
 the claimed actions a work item is named for at its `add_item` (DB
 decision 64); an item of Pilot's own done at the save that writes its last
 open block's `done` (DB 163); a person's fold of an open item and their
-unfold (DB decision 75); and the chat's cancel of an ask Pilot added, on a
-person's word (DB 297).
+unfold (DB decision 75); the chat's cancel of an ask Pilot added, on a
+person's word (DB 297); and a stopped work item's close for good, a person's
+or Pilot's (DB decision 78).
 
 Each is a write of the caller's transaction, under the document's row lock
 (TD §8.5), a close and an Undo under its project's row first, and refused
@@ -82,6 +83,9 @@ from app.models.reference import (
 NOTICE = "notice"
 WORK = "work"
 
+WORKERS_RUN = "work"
+"""The Session Kind of a worker's run, as its Work carries it."""
+
 ANSWERED = "answered"
 MARKED = "marked"
 SETTLED = "settled"
@@ -102,6 +106,10 @@ REGISTERED_CANCEL = (
     " page, which ends that run"
 )
 """Why the chat's cancel takes no registered document (DB 297)."""
+
+CLOSED_FOR_GOOD = "it is closed for good"
+"""Why a work item closed for good takes no Resume and no second close (DB
+347)."""
 
 YES = "Yes"
 
@@ -636,6 +644,40 @@ class RecordService:
         item.done_by_user_id = user.id
         self.view_service.timeline_moved(project)
 
+    def close_work(
+        self,
+        project: Project,
+        work_id: uuid.UUID,
+        user: User,
+        operation: str,
+        *,
+        note: str | None = None,
+    ) -> None:
+        """A work item's close for good (DB 345 to 350), in the caller's
+        transaction, which holds the project's row exclusively and the work
+        item's Session, `stopped`: the item done at once by `user`, its Done
+        Cause `cancelled`, which offers no undo, and `note`, Pilot's reason,
+        its Work's `done_note`, none for a person's Close. No document is
+        closed, no job is placed and nothing continues its conversation
+        (`_release`).
+
+        Raises:
+            InvalidOperationException: the project is archived, or the item
+                is done.
+        """
+        _not_archived(project, operation)
+        item = self.db.get_one(
+            Item, work_id, with_for_update=True, populate_existing=True
+        )
+        refusal = done_refusal(item)
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        item.done_at = _now()
+        item.done_cause_code = CANCELLED
+        item.done_by_user_id = user.id
+        self.db.get_one(Work, work_id).done_note = note
+        self.view_service.timeline_moved(project)
+
     def close_archive_question(
         self,
         project: Project,
@@ -1076,12 +1118,15 @@ class RecordService:
         closed by Finish or a Cancel, which continue nothing (review 4; DB
         299), the run's conversation continues as a new work item, released
         by `item` (`Continuations`), and every document of the run is
-        consumed by it: no Undo from now (review 1)."""
+        consumed by it: no Undo from now (review 1). A conversation whose
+        latest work item was closed for good continues no more (DB 348)."""
         run_id = item.created_by_session_id
         # A registered document is its Session's.
         assert run_id is not None
         run = self.db.get(Item, run_id, populate_existing=True)
         if run is None or run.done_cause_code != TURN_ENDED:
+            return
+        if self._closed_for_good(run_id):
             return
         registered = self.db.execute(
             select(Item, Document)
@@ -1118,6 +1163,38 @@ class RecordService:
             each.consumed_session_id = continuation.id
         self.db.flush()
         self.engine_bus.emit(ProjectChanged(project.id))
+
+    def _closed_for_good(self, run_id: uuid.UUID) -> bool:
+        """Whether a close for good ended the conversation of the work item
+        `run_id` (DB 348): the latest worker's run on it, the one whose Item
+        has the highest `seq`, is done `cancelled`."""
+        conversation = (
+            select(AgentSession.conversation_id)
+            .where(AgentSession.id == run_id)
+            .scalar_subquery()
+        )
+        latest = self.db.scalar(
+            select(Item.done_cause_code)
+            .join(AgentSession, AgentSession.id == Item.id)
+            .join(Work, Work.id == Item.id)
+            .where(
+                Work.session_kind_code == WORKERS_RUN,
+                AgentSession.conversation_id == conversation,
+            )
+            .order_by(Item.seq.desc())
+            .limit(1)
+        )
+        return latest == CANCELLED
+
+
+def done_refusal(item: Item) -> str | None:
+    """Why a work item takes no Resume and no close: it is done, closed for
+    good or otherwise (DB 347); None while it is open."""
+    if item.done_at is None:
+        return None
+    if item.done_cause_code == CANCELLED:
+        return CLOSED_FOR_GOOD
+    return "it is done"
 
 
 def resume_message(written: list[str], unread: list[str]) -> str:

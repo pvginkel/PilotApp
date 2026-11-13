@@ -236,17 +236,16 @@ def _work_rows() -> Select[
     AgentSession,
     str,
     str,
+    Work,
     bool,
-    bool,
-    WorkTrigger | None,
     User,
     uuid.UUID,
     datetime,
 ]:
     """`work_status`'s rows, built once, of the work items bound as `ids`:
-    each Session with its Environment's id and name, its Work's autopilot,
-    its Project's pause, its Work's trigger, the User who stopped it and the
-    id and creation of the job its Retry placed."""
+    each Session with its Environment's id and name, its Work, its Project's
+    pause, the User who stopped it and the id and creation of the job its
+    Retry placed."""
     stopper = aliased(User)
     retry = aliased(AgentSession)
     return (
@@ -254,9 +253,8 @@ def _work_rows() -> Select[
             AgentSession,
             Environment.id,
             Environment.name,
-            Work.autopilot,
+            Work,
             Project.paused,
-            Work.trigger_code,
             stopper,
             retry.id,
             retry.created_at,
@@ -299,7 +297,8 @@ def work_status(
     none (DB 107). A job's is Pilot's own (F59.1), the setup's and its
     Retries' the setup (F49); a retried one's names the job its Retry
     placed, created at the press. Its progress is its list of
-    steps, in order (F145.1)."""
+    steps, in order (F145.1). One Pilot closed for good has its reason as
+    its note (DB 346)."""
     if not item_ids:
         return {}
     rows = db.execute(_work_rows(), {"ids": list(item_ids)}).all()
@@ -401,7 +400,7 @@ def work_status(
         ],
     )
     held: dict[uuid.UUID, Held] = {}
-    for session, _, _, _, paused, trigger, *_ in rows:
+    for session, _, _, work, paused, *_ in rows:
         if session.id in halted_ends:
             reason = held_reason(
                 halted=halted,
@@ -419,7 +418,7 @@ def work_status(
                 halted=halted,
                 paused=paused,
                 kind_code=session.kind_code,
-                setup=trigger is WorkTrigger.SETUP,
+                setup=work.trigger_code is WorkTrigger.SETUP,
                 updating=updating,
                 unreachable=unreachable,
                 filled=filled.get(session.project_id),
@@ -443,11 +442,12 @@ def work_status(
                 if session.state_code is SessionState.FAILED
                 else None
             ),
-            autopilot=autopilot,
+            autopilot=work.autopilot,
             pilots_own=session.kind_code == JOB_KIND,
-            setup=trigger is WorkTrigger.SETUP,
+            setup=work.trigger_code is WorkTrigger.SETUP,
             held_reason=held[session.id].reason if session.id in held else None,
             held_running=held[session.id].running if session.id in held else None,
+            note=work.done_note,
             stopped_at=(
                 session.stopped_at
                 if session.state_code is SessionState.STOPPED
@@ -473,9 +473,8 @@ def work_status(
             session,
             env_id,
             name,
-            autopilot,
+            work,
             _,
-            trigger,
             stopped_by,
             retry_id,
             retried_at,

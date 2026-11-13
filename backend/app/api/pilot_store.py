@@ -313,21 +313,30 @@ def stop_work(
         ServiceContainer.pilot_store_service
     ],
 ) -> Any:
-    """`stop_work(item)` (F86.4): a work item's session stopped by Pilot.
+    """`stop_work(item, reason)` (F86.4; DB 345): a work item's session
+    stopped by Pilot; with `reason`, the work item closed for good in the
+    same act, done `cancelled` by Pilot, the reason on its done line, one
+    stopped already included.
 
     Returns:
         200: The call's effect line
-        400: The body is not an item's id
+        400: The body is not an item's id, with or without a reason that is
+            not empty
         401: No bearer, or one no session has
         403: The bearer's session is not a chat's or a job's, or has no turn
             running
         404: The item is not of the session's project
-        409: It is no work item, or its session is neither running, starting,
-            held nor idle with its nudge owed: the reason
+        409: It is no work item, it is a job of Pilot's own, or its session
+            is neither running, starting, held nor idle with its nudge owed;
+            with `reason`, it is done, its project is archived, or its
+            session is none of those nor stopped: the reason
     """
     body = StopRequestSchema.model_validate(request.get_json())
     line = pilot_store_service.stop_work(
-        g.brain, body.item, request.headers.get(TOOL_USE_ID_HEADER)
+        g.brain,
+        body.item,
+        request.headers.get(TOOL_USE_ID_HEADER),
+        reason=body.reason,
     )
     return _recorded(line), 200
 

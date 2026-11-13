@@ -630,14 +630,55 @@ class TestTake:
         self,
         environments: EnvironmentService,
         session: Session,
+        container: ServiceContainer,
         project: Project,
         state: SessionState,
     ) -> None:
         # A stopped or failed work item may resume there (refinement D1).
         _own(session)
-        _agent_session(session, project, state)
+        run = _agent_session(session, project, state)
+        container.record_service().place_work(project, run, "Renaming the badge")
 
         assert _taken(environments, session) is None
+
+    @pytest.mark.parametrize("state", [SessionState.STOPPED, SessionState.FAILED])
+    def test_one_whose_stopped_or_failed_work_item_is_done_is_free(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        state: SessionState,
+    ) -> None:
+        """DB 347: a done work item takes no Resume, so its Session holds its
+        environment no more, one Finish closed among them."""
+        _own(session)
+        run = _agent_session(session, project, state)
+        container.record_service().place_work(project, run, "Renaming the badge")
+        assert _taken(environments, session) is None
+
+        container.record_service().close_unanswered(project, person, datetime.now(UTC))
+
+        assert _taken(environments, session) == ENV
+
+    def test_one_whose_stopped_work_item_was_closed_for_good_is_free(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        _own(session)
+        run = _agent_session(session, project, SessionState.STOPPED)
+        container.record_service().place_work(project, run, "Renaming the badge")
+
+        container.record_service().close_work(
+            project, run.id, person, "close Renaming the badge"
+        )
+
+        assert _taken(environments, session) == ENV
 
     @pytest.mark.parametrize("state", [SessionState.IDLE, SessionState.ENDED])
     def test_one_whose_sessions_are_done_is_free(
@@ -2146,6 +2187,7 @@ class TestDeleteTimer:
         environments: EnvironmentService,
         fake_controller: ServedFakeController,
         session: Session,
+        container: ServiceContainer,
         project: Project,
         state: SessionState,
     ) -> None:
@@ -2153,7 +2195,8 @@ class TestDeleteTimer:
         # (refinement D1).
         _own(session)
         _agent_session(session, project, SessionState.IDLE)
-        _agent_session(session, project, state)
+        run = _agent_session(session, project, state)
+        container.record_service().place_work(project, run, "Renaming the badge")
 
         environments.run_delete_timer(session)
 

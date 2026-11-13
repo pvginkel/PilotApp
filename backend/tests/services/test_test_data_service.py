@@ -2338,6 +2338,82 @@ class TestCancelInChat:
         assert raised.value.cause == "the project has no chat open"
 
 
+class TestStopInChat:
+    def _stopped_work(
+        self, session: DbSession, container: ServiceContainer, camp: Project
+    ) -> models.Session:
+        now = datetime.now(UTC)
+        run = models.Session(
+            project_id=camp.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash=uuid.uuid4().hex,
+            state_code=SessionState.STOPPED,
+            turns=1,
+            turn_started_at=now,
+            turn_ended_at=now,
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            Turn(session_id=run.id, seq=1, message="Go.", started_at=now, ended_at=now)
+        )
+        container.record_service().place_work(camp, run, "Pitching the tent")
+        return run
+
+    def test_with_a_reason_the_work_item_is_closed_through_the_chat_its_effect_in_the_turn_in_flight(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        person: User,
+    ) -> None:
+        run = self._stopped_work(session, container, camp)
+        chat, writer = _chat_in_flight(container, camp, person)
+
+        line = container.test_data_service().stop_in_chat(
+            camp.id, run.id, reason="Replaced by another", tool_use_id="toolu_01"
+        )
+
+        assert (line.verb, line.label, line.item_id) == (
+            "Closed",
+            "Pitching the tent",
+            run.id,
+        )
+        assert session.get_one(Item, run.id).done_cause_code == "cancelled"
+        assert session.get_one(Work, run.id).done_note == "Replaced by another"
+        [effect] = session.scalars(select(Effect).where(Effect.item_id == run.id))
+        assert writer.turn is not None
+        assert effect.turn_id == writer.turn.id
+
+    def test_without_one_a_stop_the_record_refuses_is_refused(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        person: User,
+    ) -> None:
+        run = self._stopped_work(session, container, camp)
+        _chat_in_flight(container, camp, person)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().stop_in_chat(
+                camp.id, run.id, reason=None, tool_use_id=None
+            )
+
+        assert raised.value.cause == "it is stopped already"
+
+    def test_a_project_with_no_chat_open_is_refused(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().stop_in_chat(
+                camp.id, uuid.uuid4(), reason="Replaced", tool_use_id=None
+            )
+
+        assert raised.value.cause == "the project has no chat open"
+
+
 class TestFinishInChat:
     def test_with_archive_the_chats_brain_finishes_and_the_turns_author_archives(
         self,

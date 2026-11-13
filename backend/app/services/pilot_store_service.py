@@ -130,6 +130,7 @@ MARKED: dict[Mark, str] = {
 }
 CANCELLED = "Cancelled"
 STOPPED = "Stopped"
+CLOSED = "Closed"
 FINISHED = "Finished"
 FINISHED_AND_ARCHIVED = "Finished and archived"
 """The verbs of the tools' effect lines (F41)."""
@@ -577,26 +578,42 @@ class PilotStoreService:
         return line
 
     def stop_work(
-        self, brain: Brain, item_id: uuid.UUID, tool_use_id: str | None
+        self,
+        brain: Brain,
+        item_id: uuid.UUID,
+        tool_use_id: str | None,
+        *,
+        reason: str | None = None,
     ) -> EffectLine:
         """The work item's Session stopped by Pilot where it is, as a Stop
         stops it (F86.4, F67.1). The call `tool_use_id`'s effect is "Stopped ·
-        <title>".
+        <title>". With `reason`, the work item is closed for good in the same
+        act, by Pilot, `reason` on its done line (DB 345, 346): one stopped
+        already as it stands, one a Stop takes stopped first. Its effect is
+        "Closed · <title>", of kind `stopped` as the stop's is (DB 350).
 
         Raises:
             RecordNotFoundException: the item is not of the brain's project.
             InvalidOperationException: it is no work item, it is a job of
                 Pilot's own (F26.3), or its Session is neither running,
-                starting, held nor idle with its nudge owed.
+                starting, held nor idle with its nudge owed; with `reason`,
+                it is done, its project is archived, or its Session is none
+                of those nor stopped.
         """
         self._project(brain)
         item = self._item(brain, item_id)
-        if self.db.get(Work, item.id) is None:
+        pilot = self._pilot()
+        if reason is not None:
+            self.session_start_service.close(self.db, item.id, pilot, reason=reason)
+        elif self.db.get(Work, item.id) is None:
             raise InvalidOperationException(
                 f"stop {self._title(item)}", "it is no work item"
             )
-        self.session_start_service.stop(self.db, item.id, self._pilot())
-        line = EffectLine(STOPPED, self._title(item), item_id=item.id)
+        else:
+            self.session_start_service.stop(self.db, item.id, pilot)
+        line = EffectLine(
+            STOPPED if reason is None else CLOSED, self._title(item), item_id=item.id
+        )
         self.effect_service.record(
             brain.session_id,
             tool_use_id,

@@ -2170,6 +2170,7 @@ class TestTimeline:
             "setup": False,
             "held_reason": None,
             "held_running": None,
+            "note": None,
             "stopped_at": None,
             "stopped_by": None,
             "stopped_cause": None,
@@ -3031,6 +3032,51 @@ class TestWorkStatus:
 
         assert work.stopped_cause is None
         assert work.stopped_by is not None and work.stopped_by.kind == "agent"
+
+    @pytest.mark.parametrize(
+        "reason", ["Replaced by the filing that takes the badge in", None]
+    )
+    def test_one_closed_for_good_carries_pilots_reason_as_its_note(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+        reason: str | None,
+    ) -> None:
+        """DB 346: Pilot's close has its reason; a person's Close none. It
+        waits on nobody: it leaves the badge."""
+        project = _make(container)
+        stopped = _hard_stopped(session, project, environment)
+        session.get_one(models.Session, stopped.id).nudge_owed_at = None
+        badges = container.timeline_service().badges
+        assert badges(person, [project.id], Reading(session))[project.id].count == 1
+
+        container.record_service().close_work(
+            project,
+            stopped.id,
+            person if reason is None else _pilot(session),
+            "close the run",
+            note=reason,
+        )
+        session.flush()
+
+        work = work_status(
+            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[stopped.id]
+        assert (work.state, work.note) == (SessionState.STOPPED, reason)
+        assert project.id not in badges(person, [project.id], Reading(session))
+        entry = next(
+            entry
+            for entry in container.timeline_service().timeline(project.id).items
+            if entry.id == stopped.id
+        )
+        assert entry.done is not None and entry.work is not None
+        assert (entry.done.cause, entry.done.undo, entry.work.note) == (
+            "cancelled",
+            False,
+            reason,
+        )
 
     @pytest.mark.parametrize("lifted", [False, True], ids=["standing", "lifted"])
     def test_a_job_the_stores_update_stopped_names_it(

@@ -157,6 +157,10 @@ def _chat_cancellations_path(project_id: uuid.UUID | str) -> str:
     return f"/api/testing/projects/{project_id}/chat/cancellations"
 
 
+def _chat_stops_path(project_id: uuid.UUID | str) -> str:
+    return f"/api/testing/projects/{project_id}/chat/stops"
+
+
 def _chat_finish_path(project_id: uuid.UUID | str) -> str:
     return f"/api/testing/projects/{project_id}/chat/finish"
 
@@ -1935,6 +1939,7 @@ ENDPOINTS = [
         {"block": f"{NO_ROW}/D1", "value": "Yes", "for": "ada"},
     ),
     (_chat_cancellations_path(NO_ROW), {"item": str(NO_ROW), "for": "ada"}),
+    (_chat_stops_path(NO_ROW), {"item": str(NO_ROW), "reason": "Replaced"}),
     (_chat_finish_path(NO_ROW), {"archive": True}),
     (STORE_UPDATE, {}),
     (_waits_path(NO_ROW), {"kind": "card_wait", "title": "SR-4", "cards": ["SR-4"]}),
@@ -2951,6 +2956,147 @@ class TestCreateChatCancellation:
         body = {**body, "item": body["item"].replace("{item}", item_id)}
 
         response = client.post(_chat_cancellations_path(project_id), json=body)
+
+        assert response.status_code == 400
+
+
+class TestCreateChatStop:
+    REASON = "Replaced by the building that takes the latrine in"
+
+    def _placed(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+        *,
+        chat: bool = True,
+    ) -> tuple[str, str]:
+        """A project with a stopped work item, its chat open with a message
+        of `person`'s in flight, committed so that a refused call's rollback
+        keeps them; the project's id and the work item's."""
+        project_id = _make(client, environment_id=environment.id)
+        project = session.get_one(Project, uuid.UUID(project_id))
+        now = datetime.now(UTC)
+        run = models.Session(
+            project_id=project.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash=uuid.uuid4().hex,
+            state_code=SessionState.STOPPED,
+            turns=1,
+            turn_started_at=now,
+            turn_ended_at=now,
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            Turn(session_id=run.id, seq=1, message="Go.", started_at=now, ended_at=now)
+        )
+        container.record_service().place_work(project, run, "Building the camp")
+        if chat:
+            opened = open_chat(session, project)
+            ChatWriter(session, container.session_record_service(), opened).message(
+                person, "The other one builds it."
+            )
+            opened.state_code = SessionState.RUNNING
+        session.commit()
+        return project_id, str(run.id)
+
+    def test_with_a_reason_the_work_item_is_closed_for_good_through_the_chat(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project_id, work_id = self._placed(
+            client, session, container, person, environment
+        )
+
+        response = client.post(
+            _chat_stops_path(project_id),
+            json={"item": work_id, "reason": self.REASON, "tool_use_id": "toolu_01"},
+        )
+
+        assert response.status_code == 201, response.get_json()
+        assert response.get_json() == {"effect": "Closed · Building the camp"}
+        entry = _timeline_item(client, project_id, work_id)
+        assert (
+            entry["done"]["cause"],
+            entry["done"]["by"]["kind"],
+            entry["done"]["undo"],
+            entry["work"]["note"],
+        ) == ("cancelled", "agent", False, self.REASON)
+
+    def test_an_unknown_project_or_item_is_not_found(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project_id, work_id = self._placed(
+            client, session, container, person, environment
+        )
+        body = {"item": work_id, "reason": self.REASON}
+
+        unknown = client.post(_chat_stops_path(uuid.uuid4()), json=body)
+        no_item = client.post(
+            _chat_stops_path(project_id), json={**body, "item": str(uuid.uuid4())}
+        )
+
+        assert (unknown.status_code, no_item.status_code) == (404, 404)
+
+    def test_a_project_with_no_chat_open_and_a_stop_the_record_refuses_conflict(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        closed_id, closed_work = self._placed(
+            client, session, container, person, environment, chat=False
+        )
+        project_id, work_id = self._placed(
+            client, session, container, person, environment
+        )
+
+        closed = client.post(
+            _chat_stops_path(closed_id), json={"item": closed_work, "reason": "Moot"}
+        )
+        refused = client.post(_chat_stops_path(project_id), json={"item": work_id})
+
+        assert (closed.status_code, refused.status_code) == (409, 409)
+        assert closed.get_json()["error"].endswith(
+            "because the project has no chat open"
+        )
+        assert refused.get_json()["error"].endswith("because it is stopped already")
+
+    @pytest.mark.parametrize(
+        "body",
+        [{"item": "W1"}, {"item": "{item}", "reason": ""}],
+        ids=["not-an-items-id", "an-empty-reason"],
+    )
+    def test_a_body_that_is_not_an_item_and_a_reason_is_invalid(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+        body: dict[str, Any],
+    ) -> None:
+        project_id, work_id = self._placed(
+            client, session, container, person, environment
+        )
+        body = {**body, "item": body["item"].replace("{item}", work_id)}
+
+        response = client.post(_chat_stops_path(project_id), json=body)
 
         assert response.status_code == 400
 

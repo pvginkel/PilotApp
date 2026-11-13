@@ -849,6 +849,7 @@ class RelayService:
             self._slots.left(session, SessionState.RUNNING)
         self._container.document_service().turn_ended(session)
         self._closes.turn_ended(db, session)
+        self._reads.run_closed(db, session)
         self._environments.arm_shutdown_timer(db, _environment_id(session))
         logger.info("Session %s stopped under its turn: %s", session.id, reason)
 
@@ -949,6 +950,7 @@ class RelayService:
             self._moved(session)
             self._container.document_service().turn_ended(session)
             self._closes.turn_ended(db, session)
+            self._reads.run_closed(db, session)
             self._environments.arm_shutdown_timer(db, _environment_id(session))
 
     def _relay_turn(self, opening: _Opening, handle: LoopHandle) -> bool:
@@ -1053,7 +1055,9 @@ class RelayService:
         """The Turn's end, in one transaction (§9.2): the `result` record at the
         offset of the stream's last raw frame, the Turn ended, the Session
         `idle` (`stopped` when interrupted, by no one) with no current line,
-        and the engine's turn end. A work item's Session whose turn ended in
+        and the engine's turn end. A worker's run closed for good under its
+        stopped turn has the documents it registered read from here on
+        (`TurnEndReadService.run_closed`). A work item's Session whose turn ended in
         error is `failed` instead, the error the Turn's (F125), as is one
         whose restart's turn came back empty, and one that ended otherwise,
         neither interrupted nor in error, makes the work item done (decision
@@ -1112,6 +1116,8 @@ class RelayService:
                     _refresh_turns(db, session, turn)
                     if before != SessionState.STOPPED:
                         self._ended(db, session, turn, frame, ended_at, follows_up)
+                    else:
+                        self._reads.run_closed(db, session)
                     session.current_line = None
                 else:
                     session.current_line = at_send(None, following.started_at)

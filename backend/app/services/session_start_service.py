@@ -131,6 +131,7 @@ from sqlalchemy.orm import Session
 
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
+from app.engine.record import ARCHIVED, done_refusal
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
@@ -266,6 +267,17 @@ _CHAT_STOP_REFUSALS = {
     SessionState.ENDED: "its chat's session has ended",
     SessionState.FAILED: "its chat failed to start",
 }
+
+_CLOSE_REFUSALS = {
+    SessionState.HELD: "its start waits at the gate, and its Stop comes first",
+    SessionState.STARTING: "it is starting, and its Stop comes first",
+    SessionState.RUNNING: "it is running, and its Stop comes first",
+    SessionState.IDLE: "its turn has ended",
+    SessionState.ENDED: "its session has ended",
+    SessionState.FAILED: "it has failed, and keeps its Resume",
+}
+"""Why a work item that is not `stopped` takes no close for good (DB 345);
+Pilot's close meets the last three alone, stopping what a Stop takes."""
 
 _RESUMABLE = (SessionState.STOPPED, SessionState.FAILED)
 
@@ -1013,6 +1025,79 @@ class SessionStartService:
             )
         return session
 
+    def close(
+        self,
+        db: Session,
+        session_id: uuid.UUID,
+        user: User,
+        *,
+        reason: str | None = None,
+    ) -> AgentSession:
+        """A work item's close for good, in the caller's transaction (DB 345
+        to 350): a person's Close, taken while its Session is `stopped`,
+        whoever stopped it; or, with `reason`, Pilot's, which closes one
+        stopped already as it stands and first stops, by Pilot, one its Stop
+        takes (`stop`). The item is done `cancelled` by `user`, with `reason`
+        its Work's `done_note` (`RecordService.close_work`). The Session
+        stays `stopped`, its stop as it was written, owed its nudge no more,
+        and holds its environment no more (`EnvironmentService`). The
+        documents it registered are read once this commits, or once its
+        stopped turn has ended (`TurnEndReadService.run_closed`).
+
+        The project's row is locked exclusively, as an item's close locks it,
+        so the close and a Resume, an Archive, or the close of a document of
+        its run, which reads whether its conversation goes on, never
+        interleave.
+
+        Returns:
+            The Session, `stopped`
+
+        Raises:
+            RecordNotFoundException: No Session has the id
+            InvalidOperationException: The Session is no work item's or is a
+                job's, Pilot's own (F26.3); its item is done; its project is
+                archived; or it is not stopped, and `reason` is none or its
+                Stop would not take it: it failed, its turn ended, or its
+                session ended
+        """
+        operation = f"close {_work_named(db, session_id)}"
+        records = self._records(db)
+        project = _standing(
+            db, records.require_session(session_id).project_id, births=True
+        )
+        session = records.lock_session(session_id)
+        if db.get(Work, session_id) is None:
+            raise InvalidOperationException(operation, "it is no work item")
+        if session.kind_code == JOB_KIND:
+            raise InvalidOperationException(operation, PILOTS_OWN)
+        refusal = done_refusal(db.get_one(Item, session_id, populate_existing=True))
+        if refusal is None and project.archived:
+            refusal = ARCHIVED
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        before = session.state_code
+        at = datetime.now(UTC)
+        if before != SessionState.STOPPED:
+            if reason is not None and before in STOPPABLE:
+                self._stop(db, session, user, at)
+            elif (
+                reason is not None
+                and before == SessionState.IDLE
+                and session.nudge_owed_at is not None
+            ):
+                self._stop_at_rest(session, user, at)
+            else:
+                raise InvalidOperationException(operation, _CLOSE_REFUSALS[before])
+        self._container.record_service().close_work(
+            project, session_id, user, operation, note=reason
+        )
+        session.nudge_owed_at = None
+        self._container.turn_end_read_service().run_closed(db, session)
+        logger.info(
+            "Session %s closed for good by %s, %s", session_id, user.handle, before
+        )
+        return session
+
     def take_over(
         self, db: Session, work_ids: Collection[uuid.UUID], person: User
     ) -> None:
@@ -1101,7 +1186,9 @@ class SessionStartService:
         """A work item's Resume, stopped or failed, in the caller's
         transaction (F67.2): carried on by "continue" (`_carry_on`). The item
         stays one item (F26.7). A nudge owed to it, the hard stop's, is owed
-        no more: the Resume stands in for it (DB 232).
+        no more: the Resume stands in for it (DB 232). A done work item's is
+        refused, one closed for good among them, whose Session stays
+        `stopped` (DB 347).
 
         The project's row is read under a share lock, so a Resume and a
         Finish or an Archive never interleave, and the slot is counted under
@@ -1115,8 +1202,8 @@ class SessionStartService:
             InvalidOperationException: No controller is configured; the
                 Session is no work item's, is a job's, Pilot's own (F26.3), is
                 neither stopped nor failed, runs in an environment Pilot did
-                not create, or has its stopped turn still in flight; or the
-                project is finished or archived
+                not create, or has its stopped turn still in flight; its item
+                is done; or the project is finished or archived
         """
         operation = f"resume {_work_named(db, session_id)}"
         if not self._controller_configured:
@@ -1130,6 +1217,9 @@ class SessionStartService:
             raise InvalidOperationException(operation, "it is no work item")
         if session.kind_code == JOB_KIND:
             raise InvalidOperationException(operation, PILOTS_OWN)
+        done = done_refusal(db.get_one(Item, session_id, populate_existing=True))
+        if done is not None:
+            raise InvalidOperationException(operation, done)
         if session.state_code not in _RESUMABLE:
             raise InvalidOperationException(
                 operation, _RESUME_REFUSALS[session.state_code]

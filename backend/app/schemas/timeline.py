@@ -699,6 +699,14 @@ class WorkSchema(BaseModel):
             "gate; null unless `held_reason` is `slot` (F143.4)"
         )
     )
+    note: str | None = Field(
+        description=(
+            "Pilot's reason for closing it for good through `stop_work`, which "
+            "its done line carries under its title; null while it is open, "
+            "after a person's Close and after any other close"
+        ),
+        examples=["Replaced by the filing that takes P-191 in"],
+    )
     stopped_at: datetime | None = Field(
         description=(
             'When it was stopped, its "Stopped · <time>"; null unless `state` is '

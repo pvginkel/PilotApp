@@ -42,6 +42,11 @@ class Work(db.Model):  # type: ignore[name-defined]
     `retried_by_id` is the job a person's Retry of this failed or stopped
     job placed, set once and never changed: a recursive list, a job retried
     at most once and a retry retrying one job.
+
+    `done_note` is Pilot's reason for closing the Work for good, the words
+    `stop_work` gave, none for a Work a person closed, for one done any other
+    way and for an open one (DB 346): a rule across `items` and `work` the
+    server keeps.
     """
 
     __tablename__ = "work"
@@ -94,6 +99,7 @@ class Work(db.Model):  # type: ignore[name-defined]
     repo: Mapped[str | None] = mapped_column(Text)
     autopilot: Mapped[bool] = mapped_column(Boolean)
     retried_by_id: Mapped[uuid.UUID | None]
+    done_note: Mapped[str | None] = mapped_column(Text)
 
 
 class ClaimAssignment(db.Model):  # type: ignore[name-defined]

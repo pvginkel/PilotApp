@@ -50,6 +50,7 @@ from app.schemas.testing_record import (
     InventedChatAnswerCreateSchema,
     InventedChatCancelCreateSchema,
     InventedChatFinishCreateSchema,
+    InventedChatStopCreateSchema,
     InventedClarificationCreateSchema,
     InventedClarificationSchema,
     InventedEnvironmentSchema,
@@ -820,6 +821,43 @@ def create_chat_cancellation(
     data = InventedChatCancelCreateSchema.model_validate(request.get_json())
     line = test_data_service.cancel_in_chat(
         project_id, data.item, data.for_, tool_use_id=data.tool_use_id
+    )
+    return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(
+        mode="json"
+    ), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/chat/stops", methods=["POST"])
+@api.validate(
+    json=InventedChatStopCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=RecordedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_chat_stop(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Stop a work item through the project's open chat, as its brain's
+    `stop_work` stops it (F86.4), and with a reason close it for good (DB
+    345): the effect of the call `tool_use_id` names in the chat's turn in
+    flight.
+
+    Returns:
+        201: The call's effect line
+        400: The body is not an item's id and an optional reason and call
+            id, or the stage is prd
+        404: No project has the id, or the item is not of it
+        409: The project has no chat open, its chat has no turn in flight, or
+            the stop or the close is refused: the reason
+    """
+    data = InventedChatStopCreateSchema.model_validate(request.get_json())
+    line = test_data_service.stop_in_chat(
+        project_id, data.item, reason=data.reason, tool_use_id=data.tool_use_id
     )
     return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(
         mode="json"

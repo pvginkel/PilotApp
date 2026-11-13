@@ -202,13 +202,24 @@ class CancelAskRequestSchema(BaseModel):
 
 
 class StopRequestSchema(BaseModel):
-    """A work item whose session to stop."""
+    """A work item whose session to stop, and with a reason to close for
+    good."""
 
     model_config = ConfigDict(extra="forbid")
 
     item: uuid.UUID = Field(
         description="The work item's id",
         examples=["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"],
+    )
+    reason: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Why the work item is closed for good, which its done line carries:"
+            " with it the item is stopped, where it was not, and closed in the"
+            " same act; without it the item is stopped and stays open"
+        ),
+        examples=["Replaced by the filing that takes P-191 in"],
     )
 
 

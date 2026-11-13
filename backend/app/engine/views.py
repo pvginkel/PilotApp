@@ -35,6 +35,7 @@ from app.models import (
     User,
     Wait,
     WaitFiring,
+    Work,
 )
 from app.models import Session as AgentSession
 from app.models.reference import ChatKind, RecordKind, SessionState, TaskStatus
@@ -132,7 +133,8 @@ class ViewService:
         """The project's timeline: the project's state, its items in order,
         and its attachments, in the files' vocabulary; a wait in `add_item`'s
         shape, with its firings in order and, once marked, its note (TD
-        §7.1)."""
+        §7.1); a done work item with its note, Pilot's reason for closing it
+        for good, none after any other close (DB 350)."""
         rows = self.db.execute(
             select(Item, Document.path, Document.summary, Document.published_hash)
             .outerjoin(Document, Document.id == Item.id)
@@ -160,6 +162,12 @@ class ViewService:
                 select(Wait)
                 .join(Item, Item.id == Wait.id)
                 .where(Item.project_id == project.id)
+            )
+        }
+        works = {
+            work.id: work
+            for work in self.db.scalars(
+                select(Work).where(Work.project_id == project.id)
             )
         }
         firings: dict[uuid.UUID, list[tuple[WaitFiring, CardTransition | None]]] = {}
@@ -206,6 +214,7 @@ class ViewService:
                         hung.get(item.id, []),
                         waits.get(item.id),
                         firings.get(item.id, []),
+                        works.get(item.id),
                     )
                     for item, path, summary, published_hash in rows
                 ],
@@ -461,6 +470,7 @@ def _item(
     attachments: list[dict[str, str]],
     wait: Wait | None,
     firings: list[tuple[WaitFiring, CardTransition | None]],
+    work: Work | None,
 ) -> dict[str, Any]:
     done: dict[str, Any] | None = None
     if item.done_at is not None:
@@ -473,6 +483,8 @@ def _item(
         }
         if wait is not None:
             done["note"] = wait.done_note
+        elif work is not None:
+            done["note"] = work.done_note
     entry = {
         "id": str(item.id),
         "seq": item.seq,

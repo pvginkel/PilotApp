@@ -3175,6 +3175,26 @@ def _stopped(run: models.Session, person: User | None = None) -> datetime:
     return at
 
 
+def _closed_for_good(
+    container: ServiceContainer,
+    project: Project,
+    run: models.Session,
+    person: User,
+) -> None:
+    """`run`'s work item closed for good by `person` (DB 345)."""
+    container.record_service().close_work(
+        project, run.id, person, "close Renaming the badge"
+    )
+
+
+def _read_requested(relays: RelayService, run: models.Session) -> bool:
+    """Whether the run's read loop was requested: it waits for a STARTUP that
+    never fires here, and a second request of it is none."""
+    return not relays._supervisor.start_loop(
+        READ_JOB, lambda handle: None, key=str(run.id)
+    )
+
+
 class TestStoppedUnderTheTurn:
     """A Session stopped under its turn keeps its relay to the turn's end
     (F67.1; V04)."""
@@ -3271,6 +3291,62 @@ class TestStoppedUnderTheTurn:
             turn.ended_at,
             None,
         )
+
+    @pytest.mark.parametrize("closed", [True, False], ids=["closed", "open"])
+    def test_a_run_closed_for_good_has_its_documents_read_once_its_turn_ends(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        person: User,
+        closed: bool,
+    ) -> None:
+        """DB 349: a stopped run reads nothing; closed for good, its documents
+        are read at the end of its stopped turn, and no job follows."""
+        container.document_service().register(project, work_item, NOTES)
+        _send(relays, session, work_item)
+        _stopped(work_item, person)
+        if closed:
+            _closed_for_good(container, project, work_item, person)
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
+        )
+
+        _relay(relays, work_item)
+
+        assert _read_requested(relays, work_item) is closed
+        assert _jobs_after(session, work_item.id) == []
+
+    def test_a_closed_runs_turn_the_controller_never_got_ends_and_is_read(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        project: Project,
+        work_item: models.Session,
+        person: User,
+    ) -> None:
+        container.document_service().register(project, work_item, NOTES)
+        session.add(
+            Turn(
+                session_id=work_item.id,
+                seq=1,
+                message=CONTINUE,
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+        _stopped(work_item, person)
+        _closed_for_good(container, project, work_item, person)
+
+        _relay(relays, work_item)
+
+        assert work_item.turn_ended_at is not None
+        assert _read_requested(relays, work_item)
 
     def test_a_turn_the_controller_never_got_ends_unsent(
         self,
@@ -3524,6 +3600,29 @@ class TestEnvironmentUnderATurn:
             WorkMoved(project.id, work_item.id),
             ProjectChanged(project.id),
         ]
+
+    def test_a_closed_runs_turn_its_environment_stopped_under_is_read(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        project: Project,
+        work_item: models.Session,
+        turn: Turn,
+        person: User,
+    ) -> None:
+        """DB 349: stopped and closed for good under its turn, which its
+        environment's stop then ends with no `result`."""
+        container.document_service().register(project, work_item, NOTES)
+        _stopped(work_item, person)
+        _closed_for_good(container, project, work_item, person)
+        fake_controller.set_status(ENV, "stopped")
+
+        _relay(relays, work_item)
+
+        assert turn.ended_at is not None
+        assert _read_requested(relays, work_item)
 
     def test_a_stop_made_elsewhere_opens_the_slot_once_it_commits(
         self,

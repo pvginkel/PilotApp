@@ -1745,6 +1745,59 @@
         "title": "InventedChatFinishCreateSchema",
         "type": "object"
       },
+      "InventedChatStopCreateSchema.6d6b324": {
+        "additionalProperties": false,
+        "description": "A work item the project's brain stops in the chat as its `stop_work`\ncall does, and with a reason closes for good.",
+        "properties": {
+          "item": {
+            "description": "The work item's id",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why the work item is closed for good, which its done line carries: with it the item is stopped, where it was not, and closed in the same act; without it the item is stopped and stays open",
+            "examples": [
+              "Replaced by the filing that takes P-191 in"
+            ],
+            "title": "Reason"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id Claude Code gives the call, which its effect's record names; none for a call whose client sent none",
+            "examples": [
+              "toolu_01"
+            ],
+            "title": "Tool Use Id"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "title": "InventedChatStopCreateSchema",
+        "type": "object"
+      },
       "InventedClarificationCreateSchema.6d6b324": {
         "description": "The clarification run of the pre-ruling pass that asked about a\nregistered document's blocks, with the writer's reply or to run.",
         "properties": {
@@ -4936,6 +4989,21 @@
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's reason for closing it for good through `stop_work`, which its done line carries under its title; null while it is open, after a person's Close and after any other close",
+            "examples": [
+              "Replaced by the filing that takes P-191 in"
+            ],
+            "title": "Note"
+          },
           "nudge_owed": {
             "description": "Whether its nudge is owed, which carries it on once nothing holds it, and it waits on nobody: a usage halt's hard stop stopped it, `stopped`, or its turn ended under a cooperative usage halt or its project's pause, `idle` and not done, its line saying why (`held_reason`) (F135.3, F135.6, F141.3)",
             "title": "Nudge Owed",
@@ -5034,6 +5102,7 @@
           "setup",
           "held_reason",
           "held_running",
+          "note",
           "stopped_at",
           "stopped_by",
           "stopped_cause",
@@ -7944,7 +8013,7 @@
       },
       "StopRequestSchema.4ff8b5e": {
         "additionalProperties": false,
-        "description": "A work item whose session to stop.",
+        "description": "A work item whose session to stop, and with a reason to close for\ngood.",
         "properties": {
           "item": {
             "description": "The work item's id",
@@ -7954,6 +8023,23 @@
             "format": "uuid",
             "title": "Item",
             "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why the work item is closed for good, which its done line carries: with it the item is stopped, where it was not, and closed in the same act; without it the item is stopped and stays open",
+            "examples": [
+              "Replaced by the filing that takes P-191 in"
+            ],
+            "title": "Reason"
           }
         },
         "required": [
@@ -10804,6 +10890,21 @@
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's reason for closing it for good through `stop_work`, which its done line carries under its title; null while it is open, after a person's Close and after any other close",
+            "examples": [
+              "Replaced by the filing that takes P-191 in"
+            ],
+            "title": "Note"
+          },
           "nudge_owed": {
             "description": "Whether its nudge is owed, which carries it on once nothing holds it, and it waits on nobody: a usage halt's hard stop stopped it, `stopped`, or its turn ended under a cooperative usage halt or its project's pause, `idle` and not done, its line saying why (`held_reason`) (F135.3, F135.6, F141.3)",
             "title": "Nudge Owed",
@@ -10902,6 +11003,7 @@
           "setup",
           "held_reason",
           "held_running",
+          "note",
           "stopped_at",
           "stopped_by",
           "stopped_cause",
@@ -11439,6 +11541,21 @@
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's reason for closing it for good through `stop_work`, which its done line carries under its title; null while it is open, after a person's Close and after any other close",
+            "examples": [
+              "Replaced by the filing that takes P-191 in"
+            ],
+            "title": "Note"
+          },
           "nudge_owed": {
             "description": "Whether its nudge is owed, which carries it on once nothing holds it, and it waits on nobody: a usage halt's hard stop stopped it, `stopped`, or its turn ended under a cooperative usage halt or its project's pause, `idle` and not done, its line saying why (`held_reason`) (F135.3, F135.6, F141.3)",
             "title": "Nudge Owed",
@@ -11537,6 +11654,7 @@
           "setup",
           "held_reason",
           "held_running",
+          "note",
           "stopped_at",
           "stopped_by",
           "stopped_cause",
@@ -15619,6 +15737,94 @@
         "x-required-role": "editor"
       }
     },
+    "/api/sessions/{session_id}/close": {
+      "post": {
+        "description": "Returns:     200: The work item's status, stopped     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: The caller has not chosen a handle; the session is no work         item's or is Pilot's own; its item is done; its project is         archived; or it is not stopped: it runs, starts or is held, its         turn has ended, or it has failed, which keeps its Resume",
+        "operationId": "post__api_sessions_{session_id}_close",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Close the stopped work item for good, as the signed-in person: its item is done, cancelled by them, with no Undo, and it takes no Resume again. Its session stays stopped and holds its environment no more. Nothing continues its conversation, and its run holds no block. The documents its run put to a person stay open; those it registered before it stopped are read once the request commits, and are then theirs.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/sessions/{session_id}/records": {
       "get": {
         "description": "",
@@ -18214,6 +18420,84 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/projects/{project_id}/chat/stops": {
+      "post": {
+        "description": "Returns:     201: The call's effect line     400: The body is not an item's id and an optional reason and call         id, or the stage is prd     404: No project has the id, or the item is not of it     409: The project has no chat open, its chat has no turn in flight, or         the stop or the close is refused: the reason",
+        "operationId": "post__api_testing_projects_{project_id}_chat_stops",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedChatStopCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Stop a work item through the project's open chat, as its brain's `stop_work` stops it (F86.4), and with a reason close it for good (DB 345): the effect of the call `tool_use_id` names in the chat's turn in flight.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/projects/{project_id}/draft/saves": {
       "post": {
         "description": "Returns:     200: Whether the save is held, and its faults     400: The text is missing     404: No project has the id, or it is archived     409: The project has no session",
@@ -20494,7 +20778,7 @@
     },
     "/tools/pilot-store/stops": {
       "post": {
-        "description": "Returns:     200: The call's effect line     400: The body is not an item's id     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project     409: It is no work item, or its session is neither running, starting,         held nor idle with its nudge owed: the reason",
+        "description": "Returns:     200: The call's effect line     400: The body is not an item's id, with or without a reason that is         not empty     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project     409: It is no work item, it is a job of Pilot's own, or its session         is neither running, starting, held nor idle with its nudge owed;         with `reason`, it is done, its project is archived, or its         session is none of those nor stopped: the reason",
         "operationId": "post__tools_pilot-store_stops",
         "parameters": [],
         "requestBody": {
@@ -20569,7 +20853,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "`stop_work(item)` (F86.4): a work item's session stopped by Pilot.",
+        "summary": "`stop_work(item, reason)` (F86.4; DB 345): a work item's session stopped by Pilot; with `reason`, the work item closed for good in the same act, done `cancelled` by Pilot, the reason on its done line, one stopped already included.",
         "tags": []
       }
     },

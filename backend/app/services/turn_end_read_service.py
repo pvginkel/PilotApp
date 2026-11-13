@@ -27,7 +27,10 @@ holds the project's row before the Session's. The job commits with the write
 that owed it, so a restart between two reads leaves it to the reconcile's.
 
 A run that stops or fails reads nothing: its documents await their reads until
-its Resume's run ends. At STARTUP the job's reconcile runs the reads of every
+its Resume's run ends, or until its work item is closed for good (DB 349). The
+close is the end of that run, so its documents are read then, once its stopped
+turn has ended, as at a turn's end, and no job follows them: the run did not
+end its turn (DB 348). At STARTUP the job's reconcile runs the reads of every
 Session that owes one, from the rows.
 """
 
@@ -37,12 +40,12 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ColumnElement, and_, exists, select
+from sqlalchemy import ColumnElement, and_, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.database import scoped_session
 from app.engine.documents import awaiting_read, awaits_read, listed
-from app.engine.record import TURN_ENDED
+from app.engine.record import CANCELLED, TURN_ENDED
 from app.engine.views import ViewService
 from app.models import Document, Item, Project
 from app.models import Session as AgentSession
@@ -59,6 +62,7 @@ from app.services.refusal_waits import (
 )
 from app.services.session_record_service import SessionRecordService
 from app.services.session_stream_service import SessionStreamService
+from app.services.start_gate import WORK_KIND
 from app.services.supervisor import LoopHandle, Supervisor
 from app.utils.after_commit import after_commit
 
@@ -157,6 +161,15 @@ class TurnEndReadService:
         self._container.job_service().worker_turn_ended(
             db.get_one(Project, session.project_id), session.id
         )
+
+    def run_closed(self, db: Session, session: AgentSession) -> None:
+        """The Session's work item closed for good, or its turn ended since,
+        in the caller's transaction, which holds the Session: where it is a
+        worker's run so closed whose stopped turn has ended, the documents it
+        registered are read once that commits (DB 349). No job follows them
+        (`_settled`)."""
+        if session.kind_code == WORK_KIND and _owed(db, session.id):
+            after_commit(_ReadStart(self, session.id))
 
     def read(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
         """The read loop's run: each document the Session registered that is
@@ -314,8 +327,11 @@ class TurnEndReadService:
 
     def _settled(self, db: Session, project: Project, session_id: uuid.UUID) -> None:
         """Under the project's row, a document of the Session's run read: once
-        none awaits its read, the job after its turn placed (D2)."""
-        if not _owed(db, session_id):
+        none awaits its read, the job after its turn placed (D2), and none
+        after a run closed for good (DB 348)."""
+        if _owed(db, session_id):
+            return
+        if db.get_one(Item, session_id).done_cause_code == TURN_ENDED:
             self._container.job_service().worker_turn_ended(project, session_id)
 
     def _client(self) -> ControllerClient:
@@ -326,13 +342,25 @@ class TurnEndReadService:
 def _owed_read() -> ColumnElement[bool]:
     """A registered document owed its turn-end read, on a query of Documents
     joined to their Items: awaiting it, the run that registered it ended, its
-    work item done at its turn's end (decision 44)."""
+    work item done at its turn's end (decision 44), or closed for good with
+    its Session's latest Turn ended (DB 349)."""
     work = aliased(Item)
+    run = aliased(AgentSession)
     return and_(
         awaiting_read(),
-        exists().where(
-            work.id == Item.created_by_session_id, work.done_cause_code == TURN_ENDED
-        ),
+        select(work.id)
+        .join(run, run.id == work.id)
+        .where(
+            work.id == Item.created_by_session_id,
+            or_(
+                work.done_cause_code == TURN_ENDED,
+                and_(
+                    work.done_cause_code == CANCELLED,
+                    run.turn_ended_at.is_not(None),
+                ),
+            ),
+        )
+        .exists(),
     )
 
 

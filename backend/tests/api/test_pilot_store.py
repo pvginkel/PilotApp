@@ -28,6 +28,7 @@ from app.models import (
     Turn,
     User,
     Wait,
+    Work,
     WriterQuestion,
 )
 from app.models.reference import AnswerChannel, ChatKind, ProjectState, SessionState
@@ -822,7 +823,7 @@ class TestCancelAsk:
 
 
 class TestStopWork:
-    """`POST /tools/pilot-store/stops`: `stop_work(item)`."""
+    """`POST /tools/pilot-store/stops`: `stop_work(item, reason)`."""
 
     def test_a_stop_is_200_with_its_effect_line(
         self,
@@ -842,18 +843,80 @@ class TestStopWork:
         session.refresh(work)
         assert work.state_code == SessionState.STOPPED
 
-    def test_a_body_that_is_not_an_item_is_400(
+    def test_with_a_reason_it_is_closed_for_good_and_200_with_its_effect_line(
         self,
         client: FlaskClient,
         session: DbSession,
+        container: ServiceContainer,
         project: Project,
         environment: Environment,
     ) -> None:
         _brain(session, project, environment)
+        work = _work(session, container, project)
+        reason = "Replaced by the pitching that takes the groundsheet in"
 
-        response = client.post(STOPS, json={"item": "work"}, headers=_bearer())
+        response = client.post(
+            STOPS, json={"item": str(work.id), "reason": reason}, headers=_bearer()
+        )
+
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json() == {"effect": "Closed · Pitching the tent"}
+        session.refresh(work)
+        assert work.state_code == SessionState.STOPPED
+        item = session.get_one(Item, work.id, populate_existing=True)
+        assert item.done_cause_code == "cancelled"
+        assert session.get_one(Work, work.id, populate_existing=True).done_note == (
+            reason
+        )
+
+    def test_a_close_the_record_refuses_is_409_with_the_reason(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _brain(session, project, environment)
+        work = _work(session, container, project)
+        work.state_code = SessionState.FAILED
+        # Committed, so that the refused call's rollback keeps it.
+        session.commit()
+
+        response = client.post(
+            STOPS,
+            json={"item": str(work.id), "reason": "Replaced"},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot close Pitching the tent because it has failed, and keeps its Resume"
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        [{"item": "work"}, {"item": "{item}", "reason": ""}],
+        ids=["not-an-items-id", "an-empty-reason"],
+    )
+    def test_a_body_that_is_not_an_item_and_a_reason_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, str],
+    ) -> None:
+        _brain(session, project, environment)
+        work = _work(session, container, project)
+        body = {**body, "item": body["item"].replace("{item}", str(work.id))}
+
+        response = client.post(STOPS, json=body, headers=_bearer())
 
         assert response.status_code == 400
+        session.refresh(work)
+        assert work.state_code == SessionState.HELD
 
     def test_an_unknown_item_is_404_and_a_prose_item_409(
         self,

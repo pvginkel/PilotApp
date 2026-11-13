@@ -4885,6 +4885,473 @@ class TestResume:
             starts.resume(session, uuid.uuid4())
 
 
+REASON = "Replaced by the filing that takes the badge's colour in"
+
+
+def _done(db: DbSession, run_id: uuid.UUID) -> tuple[Any, Any, Any, Any]:
+    """How the work item stands done: whether, its cause, by whom and its
+    Work's note."""
+    item = db.get_one(Item, run_id, populate_existing=True)
+    work = db.get_one(Work, run_id, populate_existing=True)
+    return (
+        item.done_at is not None,
+        item.done_cause_code,
+        item.done_by_user_id,
+        work.done_note,
+    )
+
+
+class TestClose:
+    """A work item's close for good (DB 345 to 350; slice 042's D1)."""
+
+    def test_a_persons_close_closes_a_stopped_work_item_for_good(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        stop = (stopped.stopped_at, stopped.stopped_by_user_id)
+        turns = len(_turns(session, stopped.id))
+
+        closed = starts.close(session, stopped.id, person)
+
+        assert _done(session, stopped.id) == (True, "cancelled", person.id, None)
+        # The Session stays as its stop left it, and no Turn is sent to it.
+        assert closed.state_code == SessionState.STOPPED
+        assert (closed.stopped_at, closed.stopped_by_user_id) == stop
+        assert len(_turns(session, stopped.id)) == turns
+        assert "_LoopStart" not in _callbacks()
+
+    def test_a_close_of_one_no_one_stopped_is_taken(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """Whoever stopped it: its turn interrupted elsewhere, by no one."""
+        run = _running(starts, session, project)
+        _named(fake, run)
+        _turn_ends(starts, fake, run, "interrupted")
+        assert _read(session, run.id).stopped_by_user_id is None
+
+        starts.close(session, run.id, person)
+
+        assert _done(session, run.id) == (True, "cancelled", person.id, None)
+
+    def test_it_moves_the_timeline_and_folds_nothing(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        container.record_service().fold(
+            project, session.get_one(Item, stopped.id), True
+        )
+        engine_events.clear()
+
+        with scoped_session(container) as db:
+            starts.close(db, stopped.id, person)
+
+        assert ProjectChanged(project.id) in engine_events
+        item = session.get_one(Item, stopped.id, populate_existing=True)
+        assert (item.done_cause_code, item.folded) == ("cancelled", False)
+
+    def test_a_nudge_owed_to_it_is_owed_no_more(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """DB 232: a nudge is owed to no done Work, the hard stop's among
+        them."""
+        stopped = _stopped_item(starts, fake, session, project, person)
+        stopped.nudge_owed_at = datetime.now(UTC)
+        session.flush()
+
+        closed = starts.close(session, stopped.id, person)
+
+        assert closed.nudge_owed_at is None
+
+    def test_its_environment_is_free_for_the_next_start(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """DB 347: closed, it holds its environment no more, and the next
+        start of its repository takes it."""
+        first = _stopped_item(starts, fake, session, project, person)
+        bound = _env(session, first.id)
+        fake.set_status(bound, "stopped")
+        _row(session, bound).last_state = "stopped"
+        session.flush()
+
+        starts.close(session, first.id, person)
+        second = _start(starts, session, project)
+        _run(starts, second)
+
+        assert len(fake.created) == 1
+        assert _env(session, second.id) == bound
+
+    def test_the_documents_it_registered_are_read_once_it_commits(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """DB 349: a stopped run has read nothing, and the close is the end
+        of its run. None is closed."""
+        stopped = _stopped_item(starts, fake, session, project, person)
+        registered = (
+            container.document_service()
+            .register(project, stopped, "/work/Example/docs/refinement.md")
+            .item
+        )
+
+        starts.close(session, stopped.id, person)
+
+        assert "_ReadStart" in _callbacks()
+        assert registered.done_at is None
+
+    def test_one_closed_under_its_stopped_turn_is_read_once_that_turn_ends(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _running(starts, session, project)
+        _named(fake, run)
+        container.document_service().register(
+            project, run, "/work/Example/docs/refinement.md"
+        )
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+
+        starts.close(session, run.id, person)
+
+        assert "_ReadStart" not in _callbacks()
+
+        _turn_ends(starts, fake, run, "interrupted")
+
+        # Its read loop waits for a STARTUP that never fires here, and a
+        # second request of it is none.
+        assert not starts._supervisor.start_loop(
+            READ_JOB, lambda handle: None, key=str(run.id)
+        )
+        assert _done(session, run.id) == (True, "cancelled", person.id, None)
+        assert _jobs_after(session, run.id) == []
+
+    @pytest.mark.parametrize("state", ["running", "held"])
+    def test_pilots_close_stops_what_a_stop_takes_and_closes_it_with_its_reason(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+        state: str,
+    ) -> None:
+        if state == "held":
+            controller_outage.call_unanswered()
+            run = _read(session, _held(starts, session, project).id)
+        else:
+            run = _running(starts, session, project)
+        pilot = _pilot_id(session)
+
+        closed = starts.close(
+            session, run.id, session.get_one(User, pilot), reason=REASON
+        )
+
+        assert closed.state_code == SessionState.STOPPED
+        assert closed.stopped_by_user_id == pilot
+        assert _done(session, run.id) == (True, "cancelled", pilot, REASON)
+        assert ("_InterruptStart" in _callbacks()) == (state == "running")
+
+    def test_pilots_close_stops_one_idle_with_its_nudge_owed(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        pilot = _pilot_id(session)
+
+        closed = starts.close(
+            session, halted.id, session.get_one(User, pilot), reason=REASON
+        )
+
+        assert (closed.state_code, closed.stopped_by_user_id, closed.nudge_owed_at) == (
+            SessionState.STOPPED,
+            pilot,
+            None,
+        )
+        assert _done(session, halted.id) == (True, "cancelled", pilot, REASON)
+
+    def test_pilots_close_takes_one_stopped_already_as_it_stands(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """An item stopped earlier, by a person or by Pilot: its stop stays
+        whose it was."""
+        stopped = _stopped_item(starts, fake, session, project, person)
+        stop = (stopped.stopped_at, stopped.stopped_by_user_id)
+        pilot = _pilot_id(session)
+
+        closed = starts.close(
+            session, stopped.id, session.get_one(User, pilot), reason=REASON
+        )
+
+        assert (closed.stopped_at, closed.stopped_by_user_id) == stop
+        assert _done(session, stopped.id) == (True, "cancelled", pilot, REASON)
+
+    def test_a_persons_close_of_one_not_stopped_is_refused(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _running(starts, session, project)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.close(session, run.id, person)
+
+        assert raised.value.message == (
+            "Cannot close Renaming the badge because it is running, and its Stop"
+            " comes first"
+        )
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert _done(session, run.id) == (False, None, None, None)
+
+    @pytest.mark.parametrize("pilots", [False, True], ids=["a person's", "Pilot's"])
+    def test_a_failed_one_keeps_its_resume(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        pilots: bool,
+    ) -> None:
+        failed = _failed_before_its_first_line(starts, fake, session, project)
+        user = session.get_one(User, _pilot_id(session)) if pilots else person
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.close(session, failed.id, user, reason=REASON if pilots else None)
+
+        assert raised.value.message == (
+            "Cannot close Renaming the badge because it has failed, and keeps its"
+            " Resume"
+        )
+        assert _done(session, failed.id) == (False, None, None, None)
+
+    def test_pilots_close_of_one_whose_turn_ended_is_refused(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+        _named(fake, run)
+        _turn_ends(starts, fake, run, "success")
+        clear_after_commit_callbacks()
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.close(
+                session,
+                run.id,
+                session.get_one(User, _pilot_id(session)),
+                reason=REASON,
+            )
+
+        assert raised.value.message == (
+            "Cannot close Renaming the badge because it is done"
+        )
+
+    def test_one_closed_already_is_refused(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        starts.close(session, stopped.id, person)
+        at = session.get_one(Item, stopped.id).done_at
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.close(
+                session,
+                stopped.id,
+                session.get_one(User, _pilot_id(session)),
+                reason=REASON,
+            )
+
+        assert raised.value.message == (
+            "Cannot close Renaming the badge because it is closed for good"
+        )
+        assert _done(session, stopped.id) == (True, "cancelled", person.id, None)
+        assert session.get_one(Item, stopped.id).done_at == at
+
+    def test_an_archived_project_refuses_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.close(session, stopped.id, person)
+
+        assert raised.value.message == (
+            "Cannot close Renaming the badge because its project is archived"
+        )
+        assert _done(session, stopped.id) == (False, None, None, None)
+
+    def test_an_archived_project_refuses_pilots_before_it_stops_anything(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException, match="is archived"):
+            starts.close(
+                session,
+                run.id,
+                session.get_one(User, _pilot_id(session)),
+                reason=REASON,
+            )
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+
+    def test_a_session_with_no_work_item_is_refused(
+        self,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        chat = _chat(session, project, environment, SessionState.STOPPED)
+
+        with pytest.raises(InvalidOperationException, match="it is no work item"):
+            starts.close(session, chat.id, person)
+
+    def test_a_job_pilots_own_work_is_refused(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 345: a job is never closed so, its Retry being its way on."""
+        job = _job(container, session, project, environment, SessionState.STOPPED)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.close(session, job.id, person)
+
+        assert raised.value.message == (
+            "Cannot close Setting up the project because it is Pilot's own work"
+        )
+        assert _done(session, job.id) == (False, None, None, None)
+
+    def test_an_unknown_session_is_not_found(
+        self, starts: SessionStartService, session: DbSession, person: User
+    ) -> None:
+        with pytest.raises(RecordNotFoundException):
+            starts.close(session, uuid.uuid4(), person)
+
+
+class TestResumeOfADoneItem:
+    """DB 347: a Resume is taken only on a work item that is open."""
+
+    def test_one_closed_for_good_takes_no_resume(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """Its Session stays `stopped`, the state a Resume is taken from: a
+        second browser's Resume, still drawn, is refused."""
+        stopped = _stopped_item(starts, fake, session, project, person)
+        starts.close(session, stopped.id, person)
+        clear_after_commit_callbacks()
+        turns = len(_turns(session, stopped.id))
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.resume(session, stopped.id)
+
+        assert raised.value.message == (
+            "Cannot resume Renaming the badge because it is closed for good"
+        )
+        run = _read(session, stopped.id)
+        assert run.state_code == SessionState.STOPPED
+        assert len(_turns(session, stopped.id)) == turns
+        assert "_LoopStart" not in _callbacks()
+
+    def test_one_finish_closed_takes_none_once_its_project_is_reopened(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        container.record_service().close_unanswered(project, person, datetime.now(UTC))
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.resume(session, stopped.id)
+
+        assert raised.value.message == (
+            "Cannot resume Renaming the badge because it is done"
+        )
+
+
 class TestStopLoop:
     """A Stop's commit interrupts the turn, and its relay records it to its
     end (F67.1)."""

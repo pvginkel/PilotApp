@@ -15,11 +15,11 @@ start; the claim's three columns, its deadline `stop_due_at` among them, end
 together. The fleet consumer writes none of them (§13.1).
 
 An environment of Pilot's own is free while it is neither gone nor deleting and
-no Session there is `running`, `starting` or `held`, nor `stopped` or `failed`,
-a work item that may resume (DB 240, as slice 020's refinement D1 rules it),
-nor `idle` an open work item owed its nudge (DB 232), nor is a document a run
-registered there still open: derived wherever it is
-read, no column. A start takes a free one of its Work's
+no Session there is `running`, `starting` or `held`, nor an open work item's
+`stopped` or `failed`, which may resume (DB 240, as slice 020's refinement D1
+rules it; a done one's holds it no more, DB 347), nor `idle` an open work item
+owed its nudge (DB 232), nor is a document a run registered there still open:
+derived wherever it is read, no column. A start takes a free one of its Work's
 repository, renamed after the taking Project. A start on a new conversation
 runs in a tree made anew: a created one as it is, any other reset, its reset's
 `202` taking the claim as a start's does. The delete timer's tick clears
@@ -67,15 +67,16 @@ GONE = "gone"
 
 _BUSY_STATES = (SessionState.RUNNING, SessionState.STARTING)
 _START_STATES = (SessionState.HELD, SessionState.STARTING)
-_BINDING_STATES = (
+_UNDER_WAY_STATES = (
     SessionState.RUNNING,
     SessionState.STARTING,
     SessionState.HELD,
-    SessionState.STOPPED,
-    SessionState.FAILED,
 )
-"""The states of a Session that holds its environment: under way, or a work
-item that may resume (refinement D1)."""
+"""The states of a Session that holds its environment whatever its item: it
+is under way there."""
+_RESUMABLE_STATES = (SessionState.STOPPED, SessionState.FAILED)
+"""The states of a Session that holds its environment while its work item is
+open: it may resume there (refinement D1; DB 347)."""
 _LEAVING = ("deleting", GONE)
 """The statuses of an environment on its way out, or out: never free."""
 _FAILED_SETTLES = ("error", "stopped", "deleting")
@@ -716,19 +717,24 @@ def _labelled(
 
 
 def _bound(env_id: InstrumentedAttribute[str] | str) -> ColumnElement[bool]:
-    """Whether a Session holds the environment (refinement D1), an open work
-    item's run there owed its nudge, which goes on there (DB 232), or a
+    """Whether a Session holds the environment (refinement D1): one under
+    way there; an open work item's run there stopped or failed, which may
+    resume there, or owed its nudge, which goes on there (DB 232), a done
+    one's holding it no more, closed for good or by Finish (DB 347); or a
     document a work item's run registered there is still open, the
     conversation to go on there once each is closed (DB 240; design 2
     §13.5)."""
     return or_(
         exists().where(
             AgentSession.environment_id == env_id,
-            AgentSession.state_code.in_(_BINDING_STATES),
+            AgentSession.state_code.in_(_UNDER_WAY_STATES),
         ),
         exists().where(
             AgentSession.environment_id == env_id,
-            AgentSession.nudge_owed_at.is_not(None),
+            or_(
+                AgentSession.state_code.in_(_RESUMABLE_STATES),
+                AgentSession.nudge_owed_at.is_not(None),
+            ),
             Item.id == AgentSession.id,
             Item.done_at.is_(None),
         ),

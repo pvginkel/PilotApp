@@ -642,6 +642,30 @@ class TestACancel:
             )
         ]
 
+    def test_a_close_for_good_ends_the_run_which_holds_nothing_and_offers_no_cancel(
+        self, camp: Camp, person: User
+    ) -> None:
+        """DB 348, 349: the run's latest work item closed for good, the run
+        holds no block, a claimed one the person's again, as after a Cancel;
+        the document it put to them stays open, with no Cancel."""
+        cut_over, doing, asked = self._asking(camp)
+        camp.stopped(doing, by=person)
+
+        camp.container.record_service().close_work(
+            camp.project, doing.id, person, "close the run"
+        )
+        camp.session.flush()
+
+        assert (camp.line(doing).done_cause_code, asked.done_at) == ("cancelled", None)
+        assert camp.of(cut_over) is None
+        assert camp.of(asked) is None
+        assert holds(Reading(camp.session), [cut_over.id]).undone == {
+            camp.block(cut_over, "A1").id
+        }
+        found = cancels(Reading(camp.session), [asked.id])
+        assert found == {asked.id: Cancel(doing.id, (), False, False)}
+        assert not found[asked.id].offered
+
     def test_a_researched_block_whose_work_asked_first_is_open_again(
         self, camp: Camp, person: User
     ) -> None:

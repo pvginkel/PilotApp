@@ -1,7 +1,8 @@
 """A Session's records by REST, and its live frames on the browser's SSE
 connection (design 2 §11.1; F40.3's stream); its Turns, what each was sent,
 which its session log shows (F69); a work item's Stop and Resume
-(F67), and Retry on a job of Pilot's own that failed or stopped.
+(F67), a stopped one's Close, which closes it for good (DB 345), and Retry on
+a job of Pilot's own that failed or stopped.
 
 Access is the API's `editor` gate. The stream routes subscribe only the
 caller's own connection (SSE-6).
@@ -239,6 +240,52 @@ def resume_session(
             turn still ending; or its project is finished or archived
     """
     session_starts.resume(db, session_id)
+    return timeline_service.work(session_id).model_dump(mode="json")
+
+
+@sessions_bp.route("/<uuid:session_id>/close", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=WorkSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    )
+)
+@inject
+def close_session(
+    session_id: uuid.UUID,
+    record_service: SessionRecordService = Provide[
+        ServiceContainer.session_record_service
+    ],
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+    session_starts: SessionStartService = Provide[
+        ServiceContainer.session_start_service
+    ],
+    timeline_service: TimelineService = Provide[ServiceContainer.timeline_service],
+    db: Session = Provide[ServiceContainer.db_session],
+) -> Any:
+    """Close the stopped work item for good, as the signed-in person: its
+    item is done, cancelled by them, with no Undo, and it takes no Resume
+    again. Its session stays stopped and holds its environment no more.
+    Nothing continues its conversation, and its run holds no block. The
+    documents its run put to a person stay open; those it registered before
+    it stopped are read once the request commits, and are then theirs.
+
+    Returns:
+        200: The work item's status, stopped
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No session has the id
+        409: The caller has not chosen a handle; the session is no work
+            item's or is Pilot's own; its item is done; its project is
+            archived; or it is not stopped: it runs, starts or is held, its
+            turn has ended, or it has failed, which keeps its Resume
+    """
+    record_service.require_session(session_id)
+    person = people_service.require_person(caller(), f"close work item {session_id}")
+    session_starts.close(db, session_id, person)
     return timeline_service.work(session_id).model_dump(mode="json")
 
 
