@@ -1,9 +1,12 @@
 """Pilot's MCP server (F83): its two surfaces pinned, `pilot-work`'s and
 `pilot-store`'s, as a contract the sessions they are handed to are written
 against, the bearer it requires, the probes that answer without one, and a
-script's lone call with no MCP client (F84.1)."""
+script's lone call with no MCP client (F84.1); and its third,
+`pilot-projects` (F150.1 to F150.4), pinned with its words, its door and the
+two headers that name its caller."""
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -11,11 +14,15 @@ import pytest
 from starlette.applications import Starlette
 
 from app import models
-from pilot_mcp.server import STORE_PATH, WORK_PATH
+from pilot_mcp.api import ENVIRONMENT_HEADER, SESSION_HEADER
+from pilot_mcp.server import PROJECTS_PATH, STORE_PATH, WORK_PATH
 from tests.support.pilot_mcp import (
     BEARER,
+    PROJECTS_HEADERS,
+    PROJECTS_TOKEN,
     TOKEN,
     ApiRoutes,
+    TokenEndpoint,
     http_client,
     mcp_session,
 )
@@ -1090,3 +1097,498 @@ class TestAScriptsCall:
             "Invalid Content-Type header",
         )
         assert routes.calls == []
+
+
+_PROJECT = {
+    "description": (
+        "The project's id or its folder: `draft-<number>` while it is a draft, its"
+        " slug once it is created. A draft's folder does not survive Create"
+        " project, which gives the project its slug: hold a draft by its id across"
+        " it"
+    ),
+    "minLength": 1,
+    "title": "Project",
+    "type": "string",
+}
+
+_ID = {
+    **_UUID,
+    "description": "Its id, which names it for good",
+    "title": "Id",
+}
+
+_FOLDER = {
+    "description": (
+        "Its folder, the first segment of its files' paths: `draft-<number>` while"
+        " a draft, its slug once created"
+    ),
+    "title": "Folder",
+    "type": "string",
+}
+
+_NAME = {
+    "anyOf": [{"type": "string"}, {"type": "null"}],
+    "description": "Its name; none while a draft has no title",
+    "title": "Name",
+}
+
+_STATE = {
+    "description": (
+        "`draft` until Create project, then `open`, and `finished` once finished"
+    ),
+    "enum": ["draft", "open", "finished"],
+    "title": "State",
+    "type": "string",
+}
+
+_STATUS = {
+    "anyOf": [
+        {
+            "enum": [
+                "running",
+                "waiting_on_you",
+                "waiting_on_event",
+                "done",
+                "idle",
+                "pausing",
+                "paused",
+            ],
+            "type": "string",
+        },
+        {"type": "null"},
+    ],
+    "description": (
+        "`paused`, or `pausing` while a turn of its work still runs; else"
+        " `running` while Pilot or a work item of the project works,"
+        " `waiting_on_you` while an open item waits on a member,"
+        " `waiting_on_event` while it waits on a card or a time, `done` once every"
+        " step of its plan is done, `idle` otherwise; none for a draft and a"
+        " finished project"
+    ),
+    "title": "Status",
+}
+
+# Each tool: its parameters, its result and its description, the words as a
+# session anywhere in the fleet reads them (F150.3, F150.4, F150.6, F150.7).
+PROJECTS_SURFACE = {
+    "list_projects": (
+        {
+            "properties": {
+                "archived": {
+                    "default": False,
+                    "description": (
+                        "True for the archived projects; false, the default, for"
+                        " every other"
+                    ),
+                    "title": "Archived",
+                    "type": "boolean",
+                }
+            },
+            "title": "list_projectsArguments",
+            "type": "object",
+        },
+        {
+            "$defs": {
+                "ListedProject": {
+                    "description": "A project Pilot manages, as the list shows it.",
+                    "properties": {
+                        "id": _ID,
+                        "folder": _FOLDER,
+                        "name": _NAME,
+                        "state": _STATE,
+                        "status": _STATUS,
+                    },
+                    "required": ["id", "folder", "name", "state", "status"],
+                    "title": "ListedProject",
+                    "type": "object",
+                }
+            },
+            "description": "The projects Pilot manages, of one list.",
+            "properties": {
+                "projects": {
+                    "description": "A row per project, in the order they were started",
+                    "items": {"$ref": "#/$defs/ListedProject"},
+                    "title": "Projects",
+                    "type": "array",
+                }
+            },
+            "required": ["projects"],
+            "title": "Projects",
+            "type": "object",
+        },
+        "List the projects Pilot manages, drafts included, in the order they were"
+        " started: each one's id, folder, name, state and status. Without"
+        " `archived` it lists every project that is not archived; with it, the"
+        " archived ones alone. A project's `id` or `folder` is what every other"
+        " tool takes as `project`.",
+    ),
+    "get_project": (
+        {
+            "properties": {"project": _PROJECT},
+            "required": ["project"],
+            "title": "get_projectArguments",
+            "type": "object",
+        },
+        {
+            "$defs": {
+                "PlanProgress": {
+                    "description": "Where the project's plan stands.",
+                    "properties": {
+                        "done": {
+                            "description": "The plan's steps done",
+                            "title": "Done",
+                            "type": "integer",
+                        },
+                        "total": {
+                            "description": "The plan's steps",
+                            "title": "Total",
+                            "type": "integer",
+                        },
+                        "in_progress": {
+                            "description": (
+                                "The titles of the steps in progress, in the plan's"
+                                " order"
+                            ),
+                            "items": {"type": "string"},
+                            "title": "In Progress",
+                            "type": "array",
+                        },
+                    },
+                    "required": ["done", "total", "in_progress"],
+                    "title": "PlanProgress",
+                    "type": "object",
+                },
+                "RunningWork": {
+                    "description": (
+                        "A work item of the project that runs or waits to start."
+                    ),
+                    "properties": {
+                        "seq": {
+                            "description": "Its number among the project's items",
+                            "title": "Seq",
+                            "type": "integer",
+                        },
+                        "title": {
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
+                            "description": "Its title",
+                            "title": "Title",
+                        },
+                        "environment": {
+                            "anyOf": [{"type": "string"}, {"type": "null"}],
+                            "description": (
+                                "The name of the environment it runs in; none while"
+                                " it waits to start"
+                            ),
+                            "title": "Environment",
+                        },
+                    },
+                    "required": ["seq", "title", "environment"],
+                    "title": "RunningWork",
+                    "type": "object",
+                },
+            },
+            "description": "The head of a project Pilot manages.",
+            "properties": {
+                "id": _ID,
+                "folder": _FOLDER,
+                "name": _NAME,
+                "state": _STATE,
+                "archived": {
+                    "description": (
+                        "Whether it is archived: an archived project's files are"
+                        " not read"
+                    ),
+                    "title": "Archived",
+                    "type": "boolean",
+                },
+                "status": _STATUS,
+                "autopilot": {
+                    "description": "Whether auto pilot is on",
+                    "title": "Autopilot",
+                    "type": "boolean",
+                },
+                "members": {
+                    "description": "Its members' handles, in the order they joined",
+                    "items": {"type": "string"},
+                    "title": "Members",
+                    "type": "array",
+                },
+                "progress": {"$ref": "#/$defs/PlanProgress"},
+                "running_work": {
+                    "description": (
+                        "Its work items that run or wait to start, in their order"
+                    ),
+                    "items": {"$ref": "#/$defs/RunningWork"},
+                    "title": "Running Work",
+                    "type": "array",
+                },
+                "open_items": {
+                    "description": (
+                        "The count of its open items, `running_work` not counted"
+                    ),
+                    "title": "Open Items",
+                    "type": "integer",
+                },
+                "url": {
+                    "description": "Its page in Pilot's app",
+                    "title": "Url",
+                    "type": "string",
+                },
+            },
+            "required": [
+                "id",
+                "folder",
+                "name",
+                "state",
+                "archived",
+                "status",
+                "autopilot",
+                "members",
+                "progress",
+                "running_work",
+                "open_items",
+                "url",
+            ],
+            "title": "ProjectHead",
+            "type": "object",
+        },
+        "Read the head of a project Pilot manages, by its id or its folder: its"
+        " state and status, whether auto pilot is on, its members' handles, where"
+        " its plan stands, its work items that run, each with its number, title"
+        " and environment, the count of its open items and its page in Pilot's"
+        " app. It answers no step or note of the plan and no file's content. A"
+        " project no id or folder names is refused.",
+    ),
+}
+
+PROJECTS_INSTRUCTIONS = (
+    "Pilot, the project manager, and its projects. These tools read a project"
+    " Pilot manages, its documents and its items, and start one. Load the skill"
+    " `kubecoder:pilot-usage` before you use them: it maps a project's files and"
+    " says which of them answers which question."
+)
+
+_INSIDE_WORDS = re.compile(r"\b(brain|stor(e|es|ed|ing)|record\w*|trees?)\b", re.I)
+"""Pilot's own words for its inside, which mean nothing outside it (F150.3)."""
+
+
+def _texts(value: Any) -> list[str]:
+    """Every string of a schema: its descriptions, titles and names."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for key, item in value.items() for text in [key, *_texts(item)]]
+    if isinstance(value, list):
+        return [text for item in value for text in _texts(item)]
+    return []
+
+
+@pytest.mark.anyio
+class TestTheProjectsSurface:
+    async def test_the_tools_are_pinned(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        async with mcp_session(projects_app, PROJECTS_HEADERS, PROJECTS_PATH) as (
+            session,
+            _,
+        ):
+            tools = (await session.list_tools()).tools
+
+        surface = {
+            tool.name: (
+                tool.inputSchema,
+                tool.outputSchema,
+                _words(tool.description or ""),
+            )
+            for tool in tools
+        }
+        assert surface == PROJECTS_SURFACE
+        assert gated_routes.calls == []
+        assert token_endpoint.forms == []
+
+    async def test_the_server_is_pilot_projects_with_its_instructions(
+        self, projects_app: Starlette
+    ) -> None:
+        async with mcp_session(projects_app, PROJECTS_HEADERS, PROJECTS_PATH) as (
+            _,
+            initialized,
+        ):
+            pass
+
+        assert initialized.serverInfo.name == "pilot-projects"
+        assert initialized.instructions == PROJECTS_INSTRUCTIONS
+
+    @pytest.mark.parametrize("path", [WORK_PATH, STORE_PATH])
+    async def test_no_other_server_of_the_app_has_its_name(
+        self, projects_app: Starlette, path: str
+    ) -> None:
+        async with mcp_session(projects_app, path=path) as (_, initialized):
+            pass
+
+        assert initialized.serverInfo.name == "pilot"
+
+    def test_the_instructions_say_what_the_surface_is_before_they_name_the_skill(
+        self,
+    ) -> None:
+        opening, skill = PROJECTS_INSTRUCTIONS.split(" Load the skill ")
+
+        assert opening == (
+            "Pilot, the project manager, and its projects. These tools read a"
+            " project Pilot manages, its documents and its items, and start one."
+        )
+        assert skill.startswith("`kubecoder:pilot-usage`")
+
+    @pytest.mark.parametrize("tool", sorted(PROJECTS_SURFACE))
+    def test_a_tools_description_names_pilots_projects_in_its_first_words(
+        self, tool: str
+    ) -> None:
+        _, _, description = PROJECTS_SURFACE[tool]
+        first, _, _ = description.partition(",")
+
+        assert re.search(r"\bprojects? Pilot manages\b", first), first
+
+    def test_the_words_are_the_outsides(self) -> None:
+        said = [PROJECTS_INSTRUCTIONS]
+        for arguments, result, description in PROJECTS_SURFACE.values():
+            said += [description, *_texts(arguments), *_texts(result)]
+
+        assert [text for text in said if _INSIDE_WORDS.search(text)] == []
+
+    def test_the_callers_two_headers_are_pinned(self) -> None:
+        """The operator's entry in `~/.claude.json` is written against them
+        (F150.1)."""
+        assert (ENVIRONMENT_HEADER, SESSION_HEADER) == (
+            "X-Pilot-Environment",
+            "X-Pilot-Session",
+        )
+
+
+_NOT_THE_TOKEN = {
+    "error": (
+        "Cannot call Pilot's projects because the request does not carry their token"
+    ),
+    "details": {
+        "message": "Send PILOT_PROJECTS_TOKEN as `Authorization: Bearer <token>`"
+    },
+    "code": "AUTHENTICATION_REQUIRED",
+}
+
+
+@pytest.mark.anyio
+class TestTheProjectsDoor:
+    """The surface's shared token at its door (ruling D1)."""
+
+    @pytest.mark.parametrize(
+        "authorization",
+        [
+            None,
+            "Bearer ",
+            f"bearer {PROJECTS_TOKEN}",
+            f"Basic {PROJECTS_TOKEN}",
+            "Bearer another-token",
+            f"Bearer {PROJECTS_TOKEN}x",
+            f"Bearer {PROJECTS_TOKEN[:-1]}",
+            f"Bearer {TOKEN}",
+            "Bearer t\u00f6ken".encode("latin-1"),
+        ],
+    )
+    @pytest.mark.parametrize("path", [PROJECTS_PATH, f"{PROJECTS_PATH}/"])
+    async def test_a_request_without_the_token_is_refused_and_reaches_nothing(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        authorization: str | bytes | None,
+        path: str,
+    ) -> None:
+        headers = [(b"accept", _ACCEPT["Accept"].encode())]
+        if authorization is not None:
+            raw = (
+                authorization.encode()
+                if isinstance(authorization, str)
+                else authorization
+            )
+            headers.append((b"authorization", raw))
+        async with http_client(projects_app) as http:
+            response = await http.post(path, json=_INITIALIZE, headers=headers)
+
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"] == "Bearer"
+        assert response.json() == _NOT_THE_TOKEN
+        assert gated_routes.calls == []
+        assert token_endpoint.forms == []
+
+    async def test_the_token_is_let_in(self, projects_app: Starlette) -> None:
+        headers = {"Authorization": f"Bearer {PROJECTS_TOKEN}"}
+        async with mcp_session(projects_app, headers, PROJECTS_PATH) as (session, _):
+            tools = (await session.list_tools()).tools
+
+        assert {tool.name for tool in tools} == set(PROJECTS_SURFACE)
+
+    @pytest.mark.parametrize(
+        "authorization", [None, f"Bearer {PROJECTS_TOKEN}", f"Bearer {TOKEN}"]
+    )
+    @pytest.mark.parametrize("path", [PROJECTS_PATH, f"{PROJECTS_PATH}/"])
+    async def test_a_surface_not_configured_refuses_every_request(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        authorization: str | None,
+        path: str,
+    ) -> None:
+        headers = {} if authorization is None else {"Authorization": authorization}
+        async with http_client(mcp_app, headers) as http:
+            response = await http.post(path, json=_INITIALIZE, headers=_ACCEPT)
+
+        assert response.status_code == 503
+        assert response.json() == {
+            "error": (
+                "Cannot call Pilot's projects because this Pilot is not set up to"
+                " serve them"
+            ),
+            "details": {
+                "message": (
+                    "Its token or the client it calls its API with is missing from"
+                    " its deployment"
+                )
+            },
+            "code": "SERVICE_UNAVAILABLE",
+        }
+        assert routes.calls == []
+
+    @pytest.mark.parametrize(("path", "pinned", "instructions"), _SURFACES)
+    async def test_the_other_servers_door_is_as_it_was(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        path: str,
+        pinned: dict[str, Any],
+        instructions: str,
+    ) -> None:
+        """Beside a configured surface a bearer is admitted there without
+        its check, the surface's token no more than another, and a request
+        with none refused."""
+        async with http_client(projects_app) as http:
+            refused = await http.post(path, json=_INITIALIZE, headers=_ACCEPT)
+        headers = {"Authorization": "Bearer a-token-no-session-has"}
+        async with mcp_session(projects_app, headers, path) as (session, _):
+            tools = (await session.list_tools()).tools
+
+        assert refused.status_code == 401
+        assert refused.json()["error"] == (
+            "Cannot call Pilot's MCP server because the request carries no bearer"
+        )
+        assert {tool.name for tool in tools} == set(pinned)
+        assert gated_routes.calls == []
+
+    @pytest.mark.parametrize("path", ["/health/healthz", "/health/readyz"])
+    async def test_the_probes_answer_beside_it(
+        self, projects_app: Starlette, path: str
+    ) -> None:
+        async with http_client(projects_app) as http:
+            response = await http.get(path)
+
+        assert response.status_code == 200

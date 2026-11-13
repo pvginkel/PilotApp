@@ -1,5 +1,6 @@
-"""Schemas for /api/projects: the project list's tabs, a project's head, the
-project an address names, and the changes of its standing."""
+"""Schemas for /api/projects: the project list's tabs, a project's head, by its
+id or its address, the project an address names, and the changes of its
+standing."""
 
 import uuid
 from datetime import datetime
@@ -169,8 +170,18 @@ class RunningWorkSchema(BaseModel):
     """A work item whose session runs, starts or waits at the gate."""
 
     id: uuid.UUID = Field(description="The work item's id, its session's")
+    seq: int = Field(
+        description="The work item's number on the project's timeline", examples=[12]
+    )
     title: str | None = Field(
         description="The work item's title", examples=["Renaming the badge"]
+    )
+    environment: str | None = Field(
+        description=(
+            "The name of the environment its session runs in; null while the "
+            "session has none, its start waiting at the gate"
+        ),
+        examples=["Recipe box 2"],
     )
 
 
@@ -234,6 +245,10 @@ class ProjectHeadSchema(BaseModel):
             "when it can be pressed; an ask the draft leaves open is no reason"
         ),
         examples=["Pilot is writing"],
+    )
+    url: str = Field(
+        description="The project's page in the app",
+        examples=["https://pilot.example.com/projects/recipe-box"],
     )
 
 

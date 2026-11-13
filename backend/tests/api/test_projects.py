@@ -49,6 +49,9 @@ from tests.support.supervisor import Supervise
 
 PROJECTS = "/api/projects"
 
+BASE_URL = "http://localhost:3500"
+"""The app's public address in the suite's settings (`baseurl`)."""
+
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
 )
@@ -499,6 +502,7 @@ class TestGetProject:
             "open_items": 2,
             "autopilot_may_take": 0,
             "create_refusal": "it is no draft",
+            "url": f"{BASE_URL}/projects/{session.get_one(Project, recipes).slug}",
         }
 
     def test_the_running_work_is_named_for_the_finish_dialog(
@@ -519,10 +523,36 @@ class TestGetProject:
 
         body = client.get(f"{PROJECTS}/{recipes}").get_json()
 
+        work = session.get_one(Item, run.id)
         assert body["running_work"] == [
-            {"id": str(run.id), "title": "Building the card page"}
+            {
+                "id": str(run.id),
+                "seq": work.seq,
+                "title": "Building the card page",
+                "environment": environment.name,
+            }
         ]
         assert body["open_items"] == 1
+
+    def test_a_work_item_held_at_the_gate_has_no_environment(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        recipes = _make(container, name="Recipe box", environment_id=environment.id)
+        project = session.get_one(Project, recipes)
+        run = _run(session, project, environment)
+        run.state_code = SessionState.HELD
+        run.environment_id = None
+        container.record_service().place_work(project, run, "Building the card page")
+        _sign_in(client)
+
+        body = client.get(f"{PROJECTS}/{recipes}").get_json()
+
+        [work] = body["running_work"]
+        assert (work["title"], work["environment"]) == ("Building the card page", None)
 
     def test_an_archived_project_reads_as_it_was_left(
         self, client: FlaskClient, container: ServiceContainer
@@ -564,6 +594,122 @@ class TestGetProject:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}").status_code == 401
+
+
+HEAD = f"{PROJECTS}/head"
+
+
+@pytest.mark.usefixtures("person")
+class TestGetProjectAtAddress:
+    def test_a_slug_reads_its_projects_head(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        recipes = session.get_one(Project, _make(container, name="Recipe box"))
+        _make(container, name="Bike log")
+        _sign_in(client)
+
+        response = client.get(HEAD, query_string={"address": recipes.slug})
+
+        assert response.status_code == 200
+        assert response.get_json() == client.get(f"{PROJECTS}/{recipes.id}").get_json()
+        assert response.get_json()["url"] == f"{BASE_URL}/projects/{recipes.slug}"
+
+    def test_an_id_reads_its_projects_head(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client)
+
+        response = client.get(HEAD, query_string={"address": str(recipes)})
+
+        assert response.status_code == 200
+        assert response.get_json()["id"] == str(recipes)
+
+    def test_a_drafts_folder_reads_its_head(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        draft = session.get_one(Project, _make(container, state="draft"))
+        _sign_in(client)
+
+        response = client.get(HEAD, query_string={"address": f"draft-{draft.number}"})
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert (body["id"], body["address"], body["state"]) == (
+            str(draft.id),
+            f"draft-{draft.number}",
+            "draft",
+        )
+        assert body["url"] == f"{BASE_URL}/projects/draft-{draft.number}"
+
+    def test_a_drafts_folder_goes_on_reading_its_project_once_created(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        recipes = session.get_one(Project, _make(container, name="Recipe box"))
+        _sign_in(client)
+
+        response = client.get(HEAD, query_string={"address": f"draft-{recipes.number}"})
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert (body["id"], body["address"]) == (str(recipes.id), recipes.slug)
+
+    def test_an_archived_projects_head_is_read(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        album = session.get_one(
+            Project, _make(container, name="Photo album", archived=True)
+        )
+        _sign_in(client)
+
+        response = client.get(HEAD, query_string={"address": album.slug})
+
+        assert response.status_code == 200
+        assert response.get_json()["archived"] is True
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            pytest.param("recipe-box", id="slug"),
+            pytest.param("draft-999999", id="draft"),
+            pytest.param(str(uuid.UUID(int=7)), id="id"),
+        ],
+    )
+    def test_an_address_no_project_is_at_is_not_found(
+        self, client: FlaskClient, container: ServiceContainer, address: str
+    ) -> None:
+        _make(container, name="Bike log")
+        _sign_in(client)
+
+        response = client.get(HEAD, query_string={"address": address})
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Project {address} was not found"
+
+    @pytest.mark.parametrize("query", [{}, {"address": ""}])
+    def test_no_address_is_refused(
+        self, client: FlaskClient, query: dict[str, str]
+    ) -> None:
+        _sign_in(client)
+
+        assert client.get(HEAD, query_string=query).status_code == 400
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        recipes = session.get_one(Project, _make(container, name="Recipe box"))
+        _sign_in(client, roles=())
+
+        response = client.get(HEAD, query_string={"address": recipes.slug})
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.get(HEAD, query_string={"address": "recipe-box"})
+
+        assert response.status_code == 401
 
 
 _DECISION = """---
@@ -1837,6 +1983,7 @@ class TestCreateProject:
             "open_items": 0,
             "autopilot_may_take": 0,
             "create_refusal": "Pilot is writing",
+            "url": f"{BASE_URL}/projects/draft-{draft.number}",
         }
         (chat,) = session.scalars(select(Chat)).all()
         assert (chat.project_id, chat.kind_code) == (draft.id, ChatKind.DEFINITION)

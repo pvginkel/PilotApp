@@ -738,6 +738,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         attach_service=attach_service,
         job_service=job_service,
         halt_file_service=halt_file_service,
+        base_url=config.provided.baseurl,
     )
     # What a person does to an item: its answers and marks (F14, F32.4)
     item_service = providers.Factory(

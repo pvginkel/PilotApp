@@ -23,13 +23,14 @@ from app.engine.documents import (
     OPENING,
     DocumentService,
 )
-from app.engine.paths import DRAFT_FOLDER, DRAFT_NUMBER_MAX
+from app.engine.paths import DRAFT_FOLDER, DRAFT_NUMBER_MAX, folder
 from app.engine.record import RecordService, autopilot_may_take
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Chat,
     Document,
+    Environment,
     Item,
     ItemKind,
     PlanNote,
@@ -100,7 +101,10 @@ class RunningWork:
     """A work item whose Session Finish and Archive stop."""
 
     id: uuid.UUID
+    seq: int
     title: str | None
+    environment: str | None
+    """Its Session's environment, by name; none while the Session has none."""
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,8 @@ class ProjectHead:
     """The open confirmations the switch answers (F4.2; DB decision 58)."""
     create_refusal: str | None
     """Why Create project cannot be pressed now; none when it can (F48.1)."""
+    url: str
+    """The project's page in the app."""
 
 
 @dataclass(frozen=True)
@@ -243,7 +249,13 @@ class ProjectService:
         attach_service: AttachService,
         job_service: JobService,
         halt_file_service: HaltFileService,
+        base_url: str,
     ) -> None:
+        """
+        Args:
+            base_url: The app's public address, which a project's `url`
+                starts with
+        """
         self.db = db
         self.engine_bus = engine_bus
         self.people_service = people_service
@@ -256,6 +268,7 @@ class ProjectService:
         self.attach_service = attach_service
         self.job_service = job_service
         self.halt_file_service = halt_file_service
+        self.base_url = base_url
 
     def tabs(self, auth: AuthContext, archived: bool) -> list[ProjectTab]:
         """The archived projects, or every other, in the order they were
@@ -368,10 +381,15 @@ class ProjectService:
         ):
             notes.setdefault(note.plan_task_id, []).append(note)
         running_work = tuple(
-            RunningWork(id=row.id, title=row.title)
+            RunningWork(
+                id=row.id, seq=row.seq, title=row.title, environment=row.environment
+            )
             for row in self.db.execute(
-                select(Item.id, Item.title)
+                select(
+                    Item.id, Item.seq, Item.title, Environment.name.label("environment")
+                )
                 .join(AgentSession, AgentSession.id == Item.id)
+                .outerjoin(Environment, Environment.id == AgentSession.environment_id)
                 .where(
                     Item.project_id == project.id,
                     Item.done_at.is_(None),
@@ -413,6 +431,7 @@ class ProjectService:
             open_items=open_items or 0,
             autopilot_may_take=may_take or 0,
             create_refusal=creation if isinstance(creation, str) else None,
+            url=f"{self.base_url}/projects/{folder(project)}",
         )
 
     def create(self, auth: AuthContext) -> Project:

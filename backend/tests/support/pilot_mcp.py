@@ -1,12 +1,17 @@
 """Pilot's MCP server driven as the pod runs it: a real MCP client over its
 Streamable-HTTP transport, the app served in process, and its calls to the API
-answered by the test app's own routes, in the test's database session."""
+answered by the test app's own routes, in the test's database session; the
+projects surface with its token endpoint, a fake of Keycloak's."""
 
-from collections.abc import AsyncIterator
+import time
+import uuid
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import parse_qsl
 
 import httpx
+import jwt
 from flask.testing import FlaskClient
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -15,17 +20,42 @@ from sqlalchemy.orm import Session as DbSession
 from starlette.applications import Starlette
 
 from app import models
+from app.config import Settings
 from app.models import Environment, Project
 from app.models.reference import SessionState
 from app.services.container import ServiceContainer
 from app.services.pilot_server import token_hash
-from pilot_mcp.server import WORK_PATH
+from pilot_mcp.api import (
+    ENVIRONMENT_HEADER,
+    SESSION_HEADER,
+    PilotProjectsApi,
+    PilotStoreApi,
+    PilotWorkApi,
+)
+from pilot_mcp.credential import ServiceCredential
+from pilot_mcp.server import WORK_PATH, ProjectsSurface, build_app
 
 API_URL = "http://localhost:3501"
 
 TOKEN = "worker-token"
 
 BEARER = {"Authorization": f"Bearer {TOKEN}"}
+
+PROJECTS_TOKEN = "projects-token-of-the-suite"
+
+CALLER_ENVIRONMENT = "example-recipebox-1a2b3c"
+CALLER_SESSION = "refine-the-cards"
+
+PROJECTS_HEADERS = {
+    "Authorization": f"Bearer {PROJECTS_TOKEN}",
+    ENVIRONMENT_HEADER: CALLER_ENVIRONMENT,
+    SESSION_HEADER: CALLER_SESSION,
+}
+"""What a session's entry for `pilot-projects` sends on every request."""
+
+TOKEN_URL = "https://auth.example.com/realms/test/protocol/openid-connect/token"
+CLIENT_ID = "pilot-test-service"
+CLIENT_SECRET = "client-secret-of-the-suite"
 
 _MCP_URL = "http://pilot-mcp.test"
 
@@ -69,6 +99,7 @@ class ApiRoutes(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         answer = self._client.open(
             request.url.path,
+            query_string=request.url.query.decode(),
             method=request.method,
             headers={
                 name: value
@@ -84,6 +115,92 @@ class ApiRoutes(httpx.AsyncBaseTransport):
         )
         self.calls.append((request, response))
         return response
+
+
+def service_token(
+    settings: Settings, private_key: Any, subject: str, roles: tuple[str, ...]
+) -> str:
+    """A client-credentials token of the service user's client as Keycloak
+    issues one: the client's service account its subject, the stage's client
+    its audience, `roles` that client's, and no name or email. Signed with
+    the suite's key, which the OIDC app's JWKS holds."""
+    now = int(time.time())
+    token: str = jwt.encode(
+        {
+            "sub": subject,
+            "iss": settings.oidc_issuer_url,
+            "aud": settings.oidc_audience,
+            "iat": now,
+            "exp": now + 300,
+            "jti": uuid.uuid4().hex,
+            "resource_access": {settings.oidc_audience: {"roles": list(roles)}},
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "test-key-id"},
+    )
+    return token
+
+
+class TokenEndpoint(httpx.AsyncBaseTransport):
+    """Keycloak's token endpoint, faked: a client-credentials request of
+    `CLIENT_ID` with `CLIENT_SECRET` is answered with a token `mint` makes,
+    expiring in `expires_in` seconds, any other refused as Keycloak refuses
+    it. `forms` holds each request's form and `minted` each token issued."""
+
+    def __init__(self, mint: Callable[[], str], expires_in: int = 300) -> None:
+        self._mint = mint
+        self.expires_in = expires_in
+        self.forms: list[dict[str, str]] = []
+        self.minted: list[str] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        assert (request.method, str(request.url)) == ("POST", TOKEN_URL)
+        form = dict(parse_qsl((await request.aread()).decode()))
+        self.forms.append(form)
+        if form != {
+            "grant_type": "client_credentials",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        }:
+            return httpx.Response(
+                401,
+                json={
+                    "error": "unauthorized_client",
+                    "error_description": "Invalid client or Invalid client credentials",
+                },
+            )
+        token = self._mint()
+        self.minted.append(token)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": token,
+                "expires_in": self.expires_in,
+                "token_type": "Bearer",
+            },
+        )
+
+
+def credential(endpoint: httpx.AsyncBaseTransport) -> ServiceCredential:
+    """The service user's credential, minted at `endpoint`."""
+    return ServiceCredential(TOKEN_URL, CLIENT_ID, CLIENT_SECRET, transport=endpoint)
+
+
+def app_with_projects(
+    routes: httpx.AsyncBaseTransport, endpoint: httpx.AsyncBaseTransport
+) -> Starlette:
+    """The app the pod serves with its projects surface configured: its door's
+    token `PROJECTS_TOKEN`, its credential minted at `endpoint`, and its API
+    `routes`."""
+    return build_app(
+        PilotWorkApi(API_URL, transport=routes),
+        PilotStoreApi(API_URL, transport=routes),
+        ProjectsSurface(
+            token=PROJECTS_TOKEN,
+            api=PilotProjectsApi(API_URL, credential(endpoint), transport=routes),
+        ),
+    )
 
 
 def http_client(

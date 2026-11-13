@@ -97,12 +97,18 @@ def _head(head: ProjectHead) -> dict[str, Any]:
         ],
         notes=[_note(note) for note in head.notes],
         running_work=[
-            RunningWorkSchema(id=work.id, title=work.title)
+            RunningWorkSchema(
+                id=work.id,
+                seq=work.seq,
+                title=work.title,
+                environment=work.environment,
+            )
             for work in head.running_work
         ],
         open_items=head.open_items,
         autopilot_may_take=head.autopilot_may_take,
         create_refusal=head.create_refusal,
+        url=head.url,
     ).model_dump(mode="json")
 
 
@@ -218,6 +224,36 @@ def lookup_project(
     return ProjectAddressSchema(id=project.id, address=folder(project)).model_dump(
         mode="json"
     )
+
+
+@projects_bp.route("/head", methods=["GET"])
+@api.validate(
+    query=ProjectLookupQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=ProjectHeadSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_project_at_address(
+    project_service: ProjectService = Provide[ServiceContainer.project_service],
+) -> Any:
+    """Read the head of the project an address names: its slug, a draft's
+    `draft-<number>`, still its project's after Create project, or its id.
+
+    Returns:
+        200: The project's head
+        400: No address is given
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project is at the address
+    """
+    query = ProjectLookupQuerySchema.model_validate(request.args.to_dict())
+    project = project_service.at_address(query.address)
+    return _head(project_service.head(caller(), project.id))
 
 
 @projects_bp.route("/<uuid:project_id>", methods=["GET"])

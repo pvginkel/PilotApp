@@ -6078,6 +6078,14 @@
               "RB-12"
             ],
             "title": "Ticket"
+          },
+          "url": {
+            "description": "The project's page in the app",
+            "examples": [
+              "https://pilot.example.com/projects/recipe-box"
+            ],
+            "title": "Url",
+            "type": "string"
           }
         },
         "required": [
@@ -6098,7 +6106,8 @@
           "running_work",
           "open_items",
           "autopilot_may_take",
-          "create_refusal"
+          "create_refusal",
+          "url"
         ],
         "title": "ProjectHeadSchema",
         "type": "object"
@@ -6289,11 +6298,34 @@
       "ProjectHeadSchema.e86ccd6.RunningWorkSchema": {
         "description": "A work item whose session runs, starts or waits at the gate.",
         "properties": {
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the environment its session runs in; null while the session has none, its start waiting at the gate",
+            "examples": [
+              "Recipe box 2"
+            ],
+            "title": "Environment"
+          },
           "id": {
             "description": "The work item's id, its session's",
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "seq": {
+            "description": "The work item's number on the project's timeline",
+            "examples": [
+              12
+            ],
+            "title": "Seq",
+            "type": "integer"
           },
           "title": {
             "anyOf": [
@@ -6313,7 +6345,9 @@
         },
         "required": [
           "id",
-          "title"
+          "seq",
+          "title",
+          "environment"
         ],
         "title": "RunningWorkSchema",
         "type": "object"
@@ -13152,6 +13186,90 @@
           }
         ],
         "summary": "Start a new project with the signed-in person's first message to it (F46.1): a draft, its creator its one member and its draft, `project.md`, empty, and its definition chat started with the words, as a message to a draft with no chat starts it. A message refused leaves no draft.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/head": {
+      "get": {
+        "description": "Returns:     200: The project's head     400: No address is given     401: No one is signed in     403: The caller lacks the editor role     404: No project is at the address",
+        "operationId": "get__api_projects_head",
+        "parameters": [
+          {
+            "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+            "in": "query",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+              "examples": [
+                "recipe-box",
+                "draft-7"
+              ],
+              "minLength": 1,
+              "title": "Address",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the head of the project an address names: its slug, a draft's `draft-<number>`, still its project's after Create project, or its id.",
         "tags": [],
         "x-required-role": "editor"
       }

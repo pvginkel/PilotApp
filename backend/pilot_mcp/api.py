@@ -1,7 +1,13 @@
-"""The MCP process's clients of the tools' routes, `pilot-work`'s
-(`app/api/pilot_work.py`) and `pilot-store`'s (`app/api/pilot_store.py`): one
-call per tool, under the bearer the tool's caller presented, which the API
-resolves to its Session, with the call's tool-use id where it has one.
+"""The MCP process's clients of the API, one call per tool.
+
+- `pilot-work`'s (`app/api/pilot_work.py`) and `pilot-store`'s
+  (`app/api/pilot_store.py`) call the tools' routes under the bearer the
+  tool's caller presented, which the API resolves to its Session, with the
+  call's tool-use id where it has one.
+- `pilot-projects`' calls the API's own routes under `/api/`, under the
+  service user's token (`credential.py`) and never the caller's bearer, which
+  its door has checked (F150.13), with the caller's environment and session
+  as the call's two headers carried them.
 
 An answer outside 2xx is a `ToolError` carrying the API's `error`, its reason
 whole, or the answer's status where it is not the API's envelope; an API that
@@ -9,11 +15,14 @@ does not answer is one naming that.
 """
 
 import uuid
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 import httpx
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+
+from pilot_mcp.credential import ServiceCredential
 
 TOOL_USE_ID_HEADER = "Tool-Use-Id"
 """The header the routes read a call's tool-use id from
@@ -326,6 +335,121 @@ class Progress(BaseModel):
     steps: list[PublishedStep] = Field(description="Its steps, in order")
 
 
+ENVIRONMENT_HEADER = "X-Pilot-Environment"
+SESSION_HEADER = "X-Pilot-Session"
+"""The two headers of a call to `pilot-projects` that name its caller: the
+id of the environment it calls from, and its session's name there. The
+operator's entry in `~/.claude.json` is written against them (F150.1)."""
+
+
+@dataclass(frozen=True)
+class Caller:
+    """Who calls `pilot-projects`: the environment's id and the session's
+    name, each none where its header is absent or empty (DB decision 77)."""
+
+    environment: str | None
+    session: str | None
+
+    def headers(self) -> dict[str, str]:
+        """The caller as the two headers, one that is none not sent."""
+        return _given(
+            **{ENVIRONMENT_HEADER: self.environment, SESSION_HEADER: self.session}
+        )
+
+
+ProjectState = Literal["draft", "open", "finished"]
+
+ProjectStatus = Literal[
+    "running",
+    "waiting_on_you",
+    "waiting_on_event",
+    "done",
+    "idle",
+    "pausing",
+    "paused",
+]
+
+_STATE = "`draft` until Create project, then `open`, and `finished` once finished"
+
+_STATUS = (
+    "`paused`, or `pausing` while a turn of its work still runs; else `running`"
+    " while Pilot or a work item of the project works, `waiting_on_you` while"
+    " an open item waits on a member, `waiting_on_event` while it waits on a"
+    " card or a time, `done` once every step of its plan is done, `idle`"
+    " otherwise; none for a draft and a finished project"
+)
+
+_FOLDER = (
+    "Its folder, the first segment of its files' paths: `draft-<number>` while"
+    " a draft, its slug once created"
+)
+
+
+class ListedProject(BaseModel):
+    """A project Pilot manages, as the list shows it."""
+
+    id: uuid.UUID = Field(description="Its id, which names it for good")
+    folder: str = Field(description=_FOLDER)
+    name: str | None = Field(description="Its name; none while a draft has no title")
+    state: ProjectState = Field(description=_STATE)
+    status: ProjectStatus | None = Field(description=_STATUS)
+
+
+class Projects(BaseModel):
+    """The projects Pilot manages, of one list."""
+
+    projects: list[ListedProject] = Field(
+        description="A row per project, in the order they were started"
+    )
+
+
+class PlanProgress(BaseModel):
+    """Where the project's plan stands."""
+
+    done: int = Field(description="The plan's steps done")
+    total: int = Field(description="The plan's steps")
+    in_progress: list[str] = Field(
+        description="The titles of the steps in progress, in the plan's order"
+    )
+
+
+class RunningWork(BaseModel):
+    """A work item of the project that runs or waits to start."""
+
+    seq: int = Field(description="Its number among the project's items")
+    title: str | None = Field(description="Its title")
+    environment: str | None = Field(
+        description=(
+            "The name of the environment it runs in; none while it waits to start"
+        )
+    )
+
+
+class ProjectHead(BaseModel):
+    """The head of a project Pilot manages."""
+
+    id: uuid.UUID = Field(description="Its id, which names it for good")
+    folder: str = Field(description=_FOLDER)
+    name: str | None = Field(description="Its name; none while a draft has no title")
+    state: ProjectState = Field(description=_STATE)
+    archived: bool = Field(
+        description="Whether it is archived: an archived project's files are not read"
+    )
+    status: ProjectStatus | None = Field(description=_STATUS)
+    autopilot: bool = Field(description="Whether auto pilot is on")
+    members: list[str] = Field(
+        description="Its members' handles, in the order they joined"
+    )
+    progress: PlanProgress
+    running_work: list[RunningWork] = Field(
+        description="Its work items that run or wait to start, in their order"
+    )
+    open_items: int = Field(
+        description="The count of its open items, `running_work` not counted"
+    )
+    url: str = Field(description="Its page in Pilot's app")
+
+
 class _Routes:
     """One surface's routes, under `/tools/<surface>/`."""
 
@@ -503,6 +627,80 @@ class PilotStoreApi(_Routes):
         body = {"block": block, "question": question}
         answer = await self._post("writer-questions", authorization, tool_use_id, body)
         return Asked.model_validate(answer)
+
+
+class PilotProjectsApi:
+    def __init__(
+        self,
+        base_url: str,
+        credential: ServiceCredential,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        """`transport` answers in place of the network, in the suite."""
+        self._base_url = base_url
+        self._credential = credential
+        self._http = httpx.AsyncClient(
+            base_url=base_url, timeout=_TIMEOUT, transport=transport
+        )
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+        await self._credential.aclose()
+
+    async def list_projects(self, caller: Caller, archived: bool) -> Projects:
+        answer = await self._get(
+            "/api/projects", caller, {"archived": "true" if archived else "false"}
+        )
+        return Projects(
+            projects=[
+                ListedProject(
+                    id=row["id"],
+                    folder=row["address"],
+                    name=row["name"],
+                    state=row["state"],
+                    status=row["status"],
+                )
+                for row in answer["projects"]
+            ]
+        )
+
+    async def get_project(self, caller: Caller, project: str) -> ProjectHead:
+        head = await self._get("/api/projects/head", caller, {"address": project})
+        return ProjectHead(
+            id=head["id"],
+            folder=head["address"],
+            name=head["name"],
+            state=head["state"],
+            archived=head["archived"],
+            status=head["status"],
+            autopilot=head["autopilot"],
+            members=[member["handle"] for member in head["members"]],
+            progress=PlanProgress.model_validate(head["progress"]),
+            running_work=[
+                RunningWork(
+                    seq=work["seq"],
+                    title=work["title"],
+                    environment=work["environment"],
+                )
+                for work in head["running_work"]
+            ],
+            open_items=head["open_items"],
+            url=head["url"],
+        )
+
+    async def _get(self, path: str, caller: Caller, query: dict[str, str]) -> Any:
+        headers = {"Authorization": await self._credential.authorization()}
+        headers |= caller.headers()
+        try:
+            response = await self._http.get(path, params=query, headers=headers)
+        except httpx.RequestError as exc:
+            raise ToolError(
+                "Cannot call pilot-projects because Pilot's API at"
+                f" {self._base_url} did not answer ({type(exc).__name__})"
+            ) from exc
+        if response.is_error:
+            raise ToolError(_refusal(response))
+        return response.json()
 
 
 def _given(**values: str | None) -> dict[str, str]:

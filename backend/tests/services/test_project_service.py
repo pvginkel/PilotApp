@@ -20,6 +20,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.config import Settings
 from app.database import scoped_session
 from app.engine.attachments import Copy
 from app.engine.bus import (
@@ -920,7 +921,16 @@ class TestHead:
         head = container.project_service().head(ADA, made.id)
 
         assert head.running_work == tuple(
-            RunningWork(id=run.id, title="Build the camp") for run in running
+            RunningWork(
+                id=run.id,
+                seq=session.get_one(Item, run.id).seq,
+                title="Build the camp",
+                environment=environment.name,
+            )
+            for run in running
+        )
+        assert [work.seq for work in head.running_work] == sorted(
+            work.seq for work in head.running_work
         )
         # The stopped work item waits on you, and closes unanswered.
         assert head.open_items == 3
@@ -939,6 +949,32 @@ class TestHead:
             0,
         )
         assert head.progress == PlanProgress(done=0, total=0, in_progress=())
+
+    def test_a_work_item_whose_session_has_no_environment_names_none(
+        self, container: ServiceContainer, session: DbSession, environment: Environment
+    ) -> None:
+        made = _make(container, name="Busy", environment_id=environment.id)
+        held = _run(container, session, made, environment, SessionState.HELD)
+        held.environment_id = None
+        session.flush()
+
+        [work] = container.project_service().head(ADA, made.id).running_work
+
+        assert (work.id, work.environment) == (held.id, None)
+
+    def test_the_url_is_the_projects_page_at_its_address(
+        self, container: ServiceContainer, test_settings: Settings
+    ) -> None:
+        draft = _make(container, state="draft")
+        camp = _make(container, name="Camp")
+        service = container.project_service()
+
+        assert service.head(ADA, draft.id).url == (
+            f"{test_settings.baseurl}/projects/draft-{draft.number}"
+        )
+        assert service.head(ADA, camp.id).url == (
+            f"{test_settings.baseurl}/projects/{camp.slug}"
+        )
 
     def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
         unknown = uuid.uuid4()

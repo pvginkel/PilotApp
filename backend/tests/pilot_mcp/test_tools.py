@@ -1,7 +1,9 @@
 """`pilot-work`'s tools (F85, ruling D1, F85.3, F85.4) and `pilot-store`'s
 (F86) driven through a real MCP client to the API's routes: each one REST call
 under the caller's bearer as it came, its answer the route's, and the route's
-refusal the tool's error, its reason whole."""
+refusal the tool's error, its reason whole. And `pilot-projects`' (F150.6,
+F150.7), each one REST call to a route under `/api/`, behind the sign-in gate,
+under the service user's token and never the caller's bearer (F150.13)."""
 
 import json
 import uuid
@@ -15,6 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 from starlette.applications import Starlette
 
 from app import models
+from app.config import Settings
 from app.models import (
     Attachment,
     Block,
@@ -37,20 +40,29 @@ from app.models.reference import (
     TaskStatus,
     UsageWindow,
 )
+from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_record_service import read_records
-from pilot_mcp.server import STORE_PATH
+from pilot_mcp.api import ENVIRONMENT_HEADER, SESSION_HEADER
+from pilot_mcp.server import PROJECTS_PATH, STORE_PATH
 from pilot_mcp.tools import TOOL_USE_ID_META
 from tests.support.fake_controller import ServedFakeController
 from tests.support.pilot_mcp import (
     API_URL,
     BEARER,
+    CALLER_ENVIRONMENT,
+    CALLER_SESSION,
+    PROJECTS_HEADERS,
+    PROJECTS_TOKEN,
     ApiRoutes,
+    TokenEndpoint,
+    app_with_projects,
     call,
     error_text,
     mcp_session,
     running_session,
+    service_token,
 )
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
@@ -1351,3 +1363,369 @@ def _job(
     )
     session.commit()
     return job
+
+
+def _make(container: ServiceContainer, **spec: Any) -> models.Project:
+    spec.setdefault("members", ["ada"])
+    return container.test_data_service().project(
+        InventedProjectCreateSchema.model_validate(spec)
+    )
+
+
+async def _ask(app: Starlette, tool: str, arguments: dict[str, Any]) -> Any:
+    """One call to `pilot-projects` as a session's entry makes it."""
+    return await call(app, tool, arguments, PROJECTS_HEADERS, path=PROJECTS_PATH)
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestListProjects:
+    async def test_the_projects_are_listed_through_the_list_route(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        container: ServiceContainer,
+    ) -> None:
+        draft = _make(container, state="draft")
+        recipes = _make(container, name="Recipe box")
+        bikes = _make(container, name="Bike log", paused=True)
+        album = _make(container, name="Photo album", state="finished")
+        _make(container, name="Old camp", archived=True)
+
+        result = await _ask(projects_app, "list_projects", {})
+
+        assert not result.isError
+        assert result.structuredContent == {
+            "projects": [
+                {
+                    "id": str(draft.id),
+                    "folder": f"draft-{draft.number}",
+                    "name": None,
+                    "state": "draft",
+                    "status": None,
+                },
+                {
+                    "id": str(recipes.id),
+                    "folder": recipes.slug,
+                    "name": "Recipe box",
+                    "state": "open",
+                    "status": "idle",
+                },
+                {
+                    "id": str(bikes.id),
+                    "folder": bikes.slug,
+                    "name": "Bike log",
+                    "state": "open",
+                    "status": "paused",
+                },
+                {
+                    "id": str(album.id),
+                    "folder": album.slug,
+                    "name": "Photo album",
+                    "state": "finished",
+                    "status": None,
+                },
+            ]
+        }
+        [(request, answer)] = gated_routes.calls
+        assert (request.method, str(request.url)) == (
+            "GET",
+            f"{API_URL}/api/projects?archived=false",
+        )
+        assert answer.status_code == 200
+
+    async def test_archived_lists_the_archived_projects_alone(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+    ) -> None:
+        _make(container, name="Recipe box")
+        camp = _make(container, name="Old camp", state="finished", archived=True)
+
+        result = await _ask(projects_app, "list_projects", {"archived": True})
+
+        assert [row["id"] for row in result.structuredContent["projects"]] == [
+            str(camp.id)
+        ]
+        [(request, _)] = gated_routes.calls
+        assert str(request.url) == f"{API_URL}/api/projects?archived=true"
+
+    async def test_the_call_goes_under_the_minted_token_never_the_callers_bearer(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        await _ask(projects_app, "list_projects", {})
+
+        [(request, answer)] = gated_routes.calls
+        [minted] = token_endpoint.minted
+        assert request.headers["authorization"] == f"Bearer {minted}"
+        assert PROJECTS_TOKEN not in request.headers["authorization"]
+        assert answer.status_code == 200
+
+    async def test_one_token_serves_the_calls_while_it_lasts(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        async with mcp_session(projects_app, PROJECTS_HEADERS, PROJECTS_PATH) as (
+            session,
+            _,
+        ):
+            await session.call_tool("list_projects", {})
+            await session.call_tool("list_projects", {"archived": True})
+
+        [minted] = token_endpoint.minted
+        assert [
+            request.headers["authorization"] for request, _ in gated_routes.calls
+        ] == [f"Bearer {minted}"] * 2
+
+    async def test_the_caller_travels_on_as_its_two_headers(
+        self, projects_app: Starlette, gated_routes: ApiRoutes
+    ) -> None:
+        await _ask(projects_app, "list_projects", {})
+
+        [(request, _)] = gated_routes.calls
+        assert (
+            request.headers[ENVIRONMENT_HEADER],
+            request.headers[SESSION_HEADER],
+        ) == (CALLER_ENVIRONMENT, CALLER_SESSION)
+
+    @pytest.mark.parametrize(
+        "session_header", [{}, {SESSION_HEADER: ""}], ids=["absent", "empty"]
+    )
+    async def test_a_headless_callers_session_is_none(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session_header: dict[str, str],
+    ) -> None:
+        headers = {
+            "Authorization": PROJECTS_HEADERS["Authorization"],
+            ENVIRONMENT_HEADER: CALLER_ENVIRONMENT,
+            **session_header,
+        }
+
+        result = await call(
+            projects_app, "list_projects", {}, headers, path=PROJECTS_PATH
+        )
+
+        assert not result.isError
+        [(request, _)] = gated_routes.calls
+        assert request.headers[ENVIRONMENT_HEADER] == CALLER_ENVIRONMENT
+        assert SESSION_HEADER not in request.headers
+
+    @pytest.mark.parametrize(
+        ("roles", "signed_by_the_issuer", "refusal"),
+        [
+            ((), True, 403),
+            (("editor",), False, 401),
+        ],
+        ids=["no-editor-role", "another-issuers-key"],
+    )
+    async def test_a_token_the_gate_refuses_is_the_tools_error(
+        self,
+        gated_routes: ApiRoutes,
+        test_settings: Settings,
+        generate_test_jwt: Any,
+        roles: tuple[str, ...],
+        signed_by_the_issuer: bool,
+        refusal: int,
+    ) -> None:
+        """The call is behind the sign-in gate (F150.13): the door's token
+        opens nothing there."""
+        token = (
+            service_token(
+                test_settings, generate_test_jwt.private_key, "subject-fleet", roles
+            )
+            if signed_by_the_issuer
+            else generate_test_jwt(roles=list(roles), invalid_signature=True)
+        )
+        app = app_with_projects(gated_routes, TokenEndpoint(lambda: token))
+
+        result = await _ask(app, "list_projects", {})
+
+        [(_, answer)] = gated_routes.calls
+        assert answer.status_code == refusal
+        assert error_text(result) == _refusal(gated_routes, "list_projects")
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestGetProject:
+    async def test_the_head_is_read_through_its_route_without_the_plans_content(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        test_settings: Settings,
+    ) -> None:
+        container.test_data_service().person("ben", "Ben Example")
+        recipes = _make(
+            container,
+            name="Recipe box",
+            autopilot=True,
+            members=["ben", "ada"],
+            tasks=[
+                {"id": "scope", "title": "Agree the scope", "status": "done"},
+                {
+                    "id": "build",
+                    "title": "Build the card page",
+                    "status": "in_progress",
+                    "notes": [
+                        {
+                            "id": "card-layout",
+                            "summary": "Cards are one column",
+                            "content": "Ben chose one column.",
+                        }
+                    ],
+                },
+            ],
+            notes=[
+                {
+                    "id": "print-view",
+                    "summary": "A print view is the plan's question",
+                    "content": "No task covers printing yet.",
+                }
+            ],
+            open_items=2,
+            environment_id=environment.id,
+        )
+        run = running_session(session, container, recipes, environment)
+        work = session.get_one(Item, run.id)
+
+        result = await _ask(projects_app, "get_project", {"project": recipes.slug})
+
+        assert not result.isError
+        assert result.structuredContent == {
+            "id": str(recipes.id),
+            "folder": recipes.slug,
+            "name": "Recipe box",
+            "state": "open",
+            "archived": False,
+            "status": "running",
+            "autopilot": True,
+            "members": ["ben", "ada"],
+            "progress": {"done": 1, "total": 2, "in_progress": ["Build the card page"]},
+            "running_work": [
+                {
+                    "seq": work.seq,
+                    "title": "Refining the camp",
+                    "environment": environment.name,
+                }
+            ],
+            "open_items": 2,
+            "url": f"{test_settings.baseurl}/projects/{recipes.slug}",
+        }
+        [(request, answer)] = gated_routes.calls
+        assert (request.method, str(request.url)) == (
+            "GET",
+            f"{API_URL}/api/projects/head?address={recipes.slug}",
+        )
+        assert answer.status_code == 200
+        assert {"tasks", "notes"} <= set(answer.json())
+
+    async def test_a_work_item_that_waits_to_start_names_no_environment(
+        self,
+        projects_app: Starlette,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        run = running_session(session, container, recipes, environment)
+        run.state_code = SessionState.HELD
+        run.environment_id = None
+        session.commit()
+
+        result = await _ask(projects_app, "get_project", {"project": recipes.slug})
+
+        [work] = result.structuredContent["running_work"]
+        assert (work["title"], work["environment"]) == ("Refining the camp", None)
+
+    async def test_a_project_is_named_by_its_id(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+
+        result = await _ask(projects_app, "get_project", {"project": str(recipes.id)})
+
+        assert result.structuredContent["folder"] == recipes.slug
+        [(request, _)] = gated_routes.calls
+        assert str(request.url) == f"{API_URL}/api/projects/head?address={recipes.id}"
+
+    async def test_a_draft_is_named_by_its_folder(
+        self,
+        projects_app: Starlette,
+        container: ServiceContainer,
+        test_settings: Settings,
+    ) -> None:
+        draft = _make(container, state="draft")
+        folder = f"draft-{draft.number}"
+
+        result = await _ask(projects_app, "get_project", {"project": folder})
+
+        head = result.structuredContent
+        assert (head["id"], head["folder"], head["state"], head["status"]) == (
+            str(draft.id),
+            folder,
+            "draft",
+            None,
+        )
+        assert head["url"] == f"{test_settings.baseurl}/projects/{folder}"
+
+    async def test_an_archived_projects_head_is_read(
+        self, projects_app: Starlette, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Old camp", state="finished", archived=True)
+
+        result = await _ask(projects_app, "get_project", {"project": camp.slug})
+
+        head = result.structuredContent
+        assert (head["id"], head["archived"]) == (str(camp.id), True)
+
+    async def test_the_service_user_is_no_member(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+
+        result = await _ask(projects_app, "get_project", {"project": recipes.slug})
+
+        assert result.structuredContent["members"] == ["ada"]
+        [(_, answer)] = gated_routes.calls
+        assert answer.json()["member"] is False
+
+    async def test_a_project_nothing_names_is_the_routes_refusal(
+        self, projects_app: Starlette, gated_routes: ApiRoutes
+    ) -> None:
+        result = await _ask(projects_app, "get_project", {"project": "recipe-box"})
+
+        assert error_text(result) == (
+            "Error executing tool get_project: Project recipe-box was not found"
+        )
+        [(_, answer)] = gated_routes.calls
+        assert answer.status_code == 404
+
+    async def test_no_project_is_refused_before_any_call(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        result = await _ask(projects_app, "get_project", {"project": ""})
+
+        assert result.isError
+        assert gated_routes.calls == []
+        assert token_endpoint.forms == []

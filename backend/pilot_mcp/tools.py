@@ -1,12 +1,15 @@
-"""`pilot-work`'s tools (F85, FM §5 step 1), a worker's, and `pilot-store`'s
-(F86, TD §4.5), the brain's, each one call to its route.
+"""`pilot-work`'s tools (F85, FM §5 step 1), a worker's, `pilot-store`'s
+(F86, TD §4.5), the brain's, and `pilot-projects`' (F150), any session's, each
+one call to its route.
 
 A tool's docstring is the description the session reads, and each parameter's
 is in its annotation: they are the surface, not commentary
-(`tests/pilot_mcp/test_server.py` pins them). The bearer a call carries is the
-API's to resolve; a tool passes it on as it came, with the tool-use id Claude
-Code sends in the call's `_meta`, which the call's effect names, where it
-records one.
+(`tests/pilot_mcp/test_server.py` pins them). The bearer a call to the first
+two carries is the API's to resolve; a tool passes it on as it came, with the
+tool-use id Claude Code sends in the call's `_meta`, which the call's effect
+names, where it records one. A call to `pilot-projects` hands on its caller,
+never its bearer (`api.py`), and its words are the outside's (F150.3): Pilot,
+a project, its items and documents.
 """
 
 import functools
@@ -21,18 +24,24 @@ from starlette.requests import Request
 
 from pilot_mcp.api import (
     BLOCK_ID,
+    ENVIRONMENT_HEADER,
     MAX_STEP_CODE,
     MAX_STEPS,
+    SESSION_HEADER,
     SOURCE,
     Added,
     Asked,
     AttachedFiles,
     AttachedMaterial,
+    Caller,
     Mark,
     NewItem,
+    PilotProjectsApi,
     PilotStoreApi,
     PilotWorkApi,
     Progress,
+    ProjectHead,
+    Projects,
     Recorded,
     RegisteredDocument,
     Step,
@@ -60,6 +69,33 @@ def _tool_use_id(ctx: Call) -> str | None:
     meta = ctx.request_context.meta
     value = None if meta is None else (meta.model_extra or {}).get(TOOL_USE_ID_META)
     return value if isinstance(value, str) else None
+
+
+def _caller(ctx: Call) -> Caller:
+    """Who calls `pilot-projects`, from the call's two headers; an empty one
+    is none."""
+    request = ctx.request_context.request
+    # Streamable HTTP hands every call its request.
+    assert request is not None
+    return Caller(
+        environment=request.headers.get(ENVIRONMENT_HEADER) or None,
+        session=request.headers.get(SESSION_HEADER) or None,
+    )
+
+
+ProjectRef = Annotated[
+    str,
+    Field(
+        min_length=1,
+        description=(
+            "The project's id or its folder: `draft-<number>` while it is a"
+            " draft, its slug once it is created. A draft's folder does not"
+            " survive Create project, which gives the project its slug: hold a"
+            " draft by its id across it"
+        ),
+    ),
+]
+"""A tool's `project` (F150.4)."""
 
 
 ANSWERED_BLOCK = r"^(?:[0-9A-Fa-f-]{36}|project\.md)/\S+$"
@@ -490,3 +526,35 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         return await api.ask_writer(
             _authorization(ctx), _tool_use_id(ctx), block=block, question=question
         )
+
+
+def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
+    @mcp.tool()
+    async def list_projects(
+        ctx: Call,
+        archived: Annotated[
+            bool,
+            Field(
+                description=(
+                    "True for the archived projects; false, the default, for"
+                    " every other"
+                )
+            ),
+        ] = False,
+    ) -> Projects:
+        """List the projects Pilot manages, drafts included, in the order they
+        were started: each one's id, folder, name, state and status. Without
+        `archived` it lists every project that is not archived; with it, the
+        archived ones alone. A project's `id` or `folder` is what every other
+        tool takes as `project`."""
+        return await api.list_projects(_caller(ctx), archived)
+
+    @mcp.tool()
+    async def get_project(ctx: Call, project: ProjectRef) -> ProjectHead:
+        """Read the head of a project Pilot manages, by its id or its folder:
+        its state and status, whether auto pilot is on, its members' handles,
+        where its plan stands, its work items that run, each with its number,
+        title and environment, the count of its open items and its page in
+        Pilot's app. It answers no step or note of the plan and no file's
+        content. A project no id or folder names is refused."""
+        return await api.get_project(_caller(ctx), project)
