@@ -132,8 +132,8 @@ import type { paths, components } from './types';
 
 /**
  * This page, named in the \`X-Sender\` header of every write a mutation hook sends. A hook's success
- * reads every query again; a caller's \`onSuccess\` replaces that read, and reads every query again
- * itself where the server's live events leave a page's own write to it.
+ * reads every query again, where the server's live events leave a page's own write to it; a caller's
+ * \`onSuccess\` runs beside that read, and the write stays pending until both have ended.
  */
 export const SENDER = makeUniqueToken(32);
 
@@ -273,6 +273,7 @@ function generateMutationHook(path, method, operation, operationId, summary, spe
  */
 export function ${hookName}(options?: Omit<Parameters<typeof useMutation>[0], 'mutationFn'>): ReturnType<typeof useMutation<${responseType}, Error, ${variablesType}>> {
   const queryClient = useQueryClient();
+  const { onSuccess, ...rest } = options ?? {};
 
   // @ts-ignore
   return useMutation({
@@ -281,11 +282,12 @@ export function ${hookName}(options?: Omit<Parameters<typeof useMutation>[0], 'm
       if (result.error) throw toApiError(result.error, result.response.status);
       return result.data;
     },
-    onSuccess: () => {
+    ...rest,
+    onSuccess: (...args) => {
       // Invalidate relevant queries after successful mutation
-      queryClient.invalidateQueries();
+      const read = queryClient.invalidateQueries();
+      return onSuccess === undefined ? undefined : Promise.all([read, onSuccess(...args)]);
     },
-    ...options
   });
 }`;
 }
