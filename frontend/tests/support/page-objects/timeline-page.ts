@@ -15,7 +15,7 @@ import { projectAddress } from '../projects';
  * and a done line's indicator of them (F17.5, F13.6), Pilot's dots (F35), the
  * urgent banner with its "+<n>" and the "N open above" chip
  * (F10.2, F11), a finished timeline's end (F5.3) with the archive question under it (F5.6), a new
- * project's ready line under its setup (D083), and where it stands scrolled; opened at its
+ * project's ready box at its foot (F48.3), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97). A work item open shows its env
  * chip, its running time, Session log's and Stop's icons in its head, its one line — the working
  * cue and the latest step — and the row under it, with Stop's question, or the progress button and
@@ -32,7 +32,6 @@ export class TimelinePage {
   readonly opening: Locator;
   readonly openingWho: Locator;
   readonly openingWords: Locator;
-  readonly openingMore: Locator;
   /** The opening's attachments' chips. */
   readonly openingAttachments: Locator;
   /** The urgent banners drawn: one at most. */
@@ -42,8 +41,8 @@ export class TimelinePage {
   readonly openAbove: Locator;
   readonly finishedEnd: Locator;
   readonly finishedTime: Locator;
-  /** Pilot's line under a new project's setup while Create's pause holds its work (D083). */
-  readonly ready: Locator;
+  /** The ready box at the foot of a new project's timeline while Create's pause holds its work, with its Resume (F48.3). */
+  readonly ready: { root: Locator; resume: Locator; line: Locator };
   /** *Send answers*' dialog over unanswered recommended blocks. */
   readonly sendDialog: { root: Locator; lines: Locator; note: Locator; cancel: Locator; confirm: Locator };
 
@@ -54,14 +53,14 @@ export class TimelinePage {
     this.opening = this.root.getByTestId('timeline.opening');
     this.openingWho = this.opening.getByTestId('timeline.opening.who');
     this.openingWords = this.opening.getByTestId('timeline.opening.words');
-    this.openingMore = this.opening.getByTestId('timeline.opening.words.more');
     this.openingAttachments = this.opening.getByTestId('timeline.attachment');
     this.banners = this.root.getByTestId('timeline.banner');
     this.bannerMore = this.banners.getByTestId('timeline.banner.more');
     this.openAbove = this.root.getByTestId('timeline.open-above');
     this.finishedEnd = this.root.getByTestId('timeline.divider.finished');
     this.finishedTime = this.root.getByTestId('timeline.divider.finished.time');
-    this.ready = this.root.getByTestId('timeline.ready');
+    const ready = this.root.getByTestId('timeline.ready');
+    this.ready = { root: ready, resume: ready.getByTestId('timeline.ready.resume'), line: ready.getByTestId('timeline.ready.line') };
     const dialog = page.getByTestId('timeline.send-dialog');
     this.sendDialog = {
       root: dialog,
@@ -116,7 +115,6 @@ export class TimelinePage {
       forUser: root.getByTestId('timeline.item.for'),
       title: root.getByTestId('timeline.item.title'),
       text: root.getByTestId('timeline.item.text'),
-      more: root.getByTestId('timeline.item.text.more'),
       read: root.getByTestId('timeline.item.read'),
       line: root.getByTestId('timeline.line'),
       lineKind: root.getByTestId('timeline.line.kind'),

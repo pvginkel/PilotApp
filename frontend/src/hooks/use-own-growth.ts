@@ -2,9 +2,8 @@
  * Whether what a scrolling view's content laid out last is the reader's own: a press of a control
  * inside it — a button, a summary, an element in a button's role — opens or closes something there,
  * and a change of the content's size up to the second frame after the press is that press's. Any
- * other growth is an arrival: an item, streamed text, a fold settling. Only an arrival takes a view
- * at its end with it; the reader's own expand or collapse leaves the top of what they read where it
- * stands.
+ * other growth is an arrival: an item, streamed text. Only an arrival takes a view at its end with
+ * it; the reader's own expand or collapse leaves the top of what they read where it stands.
  */
 
 import { useCallback, useEffect, useRef, type RefObject } from 'react';

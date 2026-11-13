@@ -79,7 +79,7 @@ test.describe('Auto pilot turning on', () => {
     for (const confirmation of [off, rider]) {
       const item = timeline.item(confirmation);
       await expect(item.root).toHaveAttribute('data-state', 'done');
-      await expect(item.lineKind).toHaveClass(/\byes\b/);
+      await expect(item.lineKind).toHaveAttribute('title', 'Yes');
       expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'Yes', via: 'autopilot', by: { handle: me.handle } });
     }
     await expect(timeline.item(release).blockAt('C1').answered).toBeVisible();

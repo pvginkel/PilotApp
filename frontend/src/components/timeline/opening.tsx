@@ -1,11 +1,10 @@
 /**
  * The opening (F18.1, F18.2): the words that started the project, verbatim, as a bubble beside its
- * author's avatar, "<who> started this project · <time>" over them, folding with Show more, and
- * under them what it carries attached. It has no head and never collapses. Arrived, or gone to at its address, its bubble flashes.
+ * author's avatar, "<who> started this project · <time>" over them, whole, and under them what it
+ * carries attached. It has no head and never collapses. Arrived, or gone to at its address, its bubble flashes.
  */
 
 import type { AnimationEvent } from 'react';
-import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { Attachments } from '@/components/timeline/attachments';
@@ -33,11 +32,9 @@ export function Opening({ item, fresh, onFlashed }: OpeningProps) {
           <b>{author.handle === me.handle ? 'You' : author.name}</b> started this project ·{' '}
           <Time at={item.created_at} format="clock" testId="timeline.opening.time" />
         </div>
-        <Fold testId="timeline.opening.words">
-          <div className="said">
-            <LinkedText text={item.words!} />
-          </div>
-        </Fold>
+        <div className="said" data-testid="timeline.opening.words">
+          <LinkedText text={item.words!} />
+        </div>
         <Attachments item={item} />
       </div>
     </div>

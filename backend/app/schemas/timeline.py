@@ -1093,11 +1093,11 @@ class TimelineSchema(BaseModel):
     items: list[TimelineItemSchema] = Field(description="The items, in their order")
     ready_after: uuid.UUID | None = Field(
         description=(
-            "The setup's work item, under which the line \"The project is ready — "
-            'resume the project to start it." stands: while the project is open '
-            "and paused by the pause Create project wrote, Pilot's `paused` right "
+            "The setup's work item while the ready box, with its Resume, stands "
+            "at the timeline's foot: while the project is open, not archived and "
+            "paused by the pause Create project wrote, Pilot's `paused` right "
             "after `opened` with no `resumed` since, and its setup, its latest "
-            "Retry's where it was retried, is done at its turn's end (D083); null "
+            "Retry's where it was retried, is done at its turn's end (F48.3); null "
             "otherwise, a person's pause included"
         )
     )

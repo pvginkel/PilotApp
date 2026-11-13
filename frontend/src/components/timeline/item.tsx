@@ -1,7 +1,7 @@
 /**
  * An item on the timeline. A prose item open is its head (F12), its title and its text, the prose
- * drawn as GFM (F29.1), the prose before its first block folding when long (F12.2), a one-ask
- * item's block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23),
+ * drawn as GFM (F29.1) and whole, a one-ask item's block answered in its place (F19.1, F20, F21)
+ * and a notice's Read alone under its text (F23),
  * and Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
  * (F24.2, F25.1); the archive question is its two buttons (F5.6). A one-ask item whose writer Pilot
@@ -29,13 +29,13 @@ import { Check, CircleDashed, FileText, MessagesSquare, ScrollText, StickyNote, 
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { InChatButton } from '@/components/chat/in-chat-button';
-import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Time } from '@/components/shared/time';
 import { ArchiveQuestion } from '@/components/timeline/archive-question';
 import { Attachments, LineAttachments } from '@/components/timeline/attachments';
 import { Block } from '@/components/timeline/block';
+import { CancelledMark } from '@/components/timeline/cancelled-mark';
 import { Confirmation } from '@/components/timeline/confirmation';
 import { DocumentCard, InlineDocument } from '@/components/timeline/document';
 import { isCard } from '@/components/timeline/document-state';
@@ -199,7 +199,7 @@ function Read({ item }: { item: TimelineItem }) {
   );
 }
 
-/** The prose before the first block folds, the ask stands in that block's place, and what comes after shows whole. */
+/** The prose before the first block, the ask in that block's place, and the prose after it. */
 function ItemText({ body, ask }: { body: BodyPart[]; ask: ReactNode }) {
   const first = body.findIndex((part) => part.type === 'block');
   const lead = (first < 0 ? body : body.slice(0, first)).filter(isProse);
@@ -207,11 +207,11 @@ function ItemText({ body, ask }: { body: BodyPart[]; ask: ReactNode }) {
   return (
     <>
       {lead.length > 0 && (
-        <Fold testId="timeline.item.text">
+        <div data-testid="timeline.item.text">
           {lead.map((part, index) => (
             <Markdown key={index} text={part.markdown} />
           ))}
-        </Fold>
+        </div>
       )}
       {ask}
       {after.map((part, index) => (
@@ -260,8 +260,10 @@ function inChatOf(item: TimelineItem) {
  * is, its actions, its attachments' indicator and when it was done; under the title the person's
  * answer to a one-ask item with its note, the other person's after their avatar, and *In the chat*
  * after it, kept whole, where it was given in the chat; under a wait's the note Pilot closed it
- * with (F27.4). A confirmation's Yes leads it with a green check, its No with a red cross (F22.5),
- * and a retried job's line with an orange triangle, its time when it was retried, with no Undo.
+ * with (F27.4). A confirmation's Yes leads it with a check, its No with a cross, both in the
+ * primary as a kind's icon is (F22.5); an item done `cancelled`, of any kind, with the cancelled
+ * mark, its kind's icon in the time's grey with a small cross at its foot (F13.1); and a retried
+ * job's line with an orange triangle, its time when it was retried, with no Undo.
  * It does not expand. Its actions, the mark of Pilot's job on it once the job ended, Open where
  * something is behind it, Undo while the record offers it and Discuss, show while the mouse is on
  * it or the focus in it, and always where nothing hovers (timeline.css, F13.8); a job not ended
@@ -445,7 +447,7 @@ function PilotsLine({ item, pilots, onTap }: PilotsLineProps) {
   );
 }
 
-/** The line's icon: its kind's, a confirmation's answer, or a retried job's triangle. */
+/** The line's icon: its kind's, a cancelled item's mark, a confirmation's answer, or a retried job's triangle. */
 function LineLead({ item }: { item: TimelineItem }) {
   if (retriedOf(item) !== null) {
     return (
@@ -454,16 +456,23 @@ function LineLead({ item }: { item: TimelineItem }) {
       </span>
     );
   }
-  const answer = item.kind === 'confirmation' ? blocksOf(item)[0].answer : null;
-  if (answer === 'Yes' || answer === 'No') {
-    const Icon = answer === 'Yes' ? Check : X;
+  const { icon: Icon } = kindOf(item);
+  if (item.done?.cause === 'cancelled') {
     return (
-      <span className={cn('kind-icon', answer === 'Yes' ? 'yes' : 'no')} title={answer} data-testid="timeline.line.kind">
-        <Icon className="icon" aria-hidden="true" />
+      <span className="kind-icon cancelled" title="Cancelled" data-testid="timeline.line.kind">
+        <CancelledMark icon={Icon} />
       </span>
     );
   }
-  const { icon: Icon } = kindOf(item);
+  const answer = item.kind === 'confirmation' ? blocksOf(item)[0].answer : null;
+  if (answer === 'Yes' || answer === 'No') {
+    const Answer = answer === 'Yes' ? Check : X;
+    return (
+      <span className="kind-icon" title={answer} data-testid="timeline.line.kind">
+        <Answer className="icon" aria-hidden="true" />
+      </span>
+    );
+  }
   return (
     <span className="kind-icon" data-testid="timeline.line.kind">
       <Icon className="icon" aria-hidden="true" />

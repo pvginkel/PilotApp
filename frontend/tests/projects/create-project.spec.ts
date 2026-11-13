@@ -18,19 +18,24 @@
  * retried, the words opening the retry's log; a running or done job offers none (D2, F26.4). Dead at the quota wall, it offers none while its nudge is
  * owed, and once a reading brings the quota back the nudge carries it on (F135.3; D078). Create pauses the new project, its setup let through: it
  * is pausing while the setup runs, a work item placed meanwhile held, "Paused", and paused once the
- * setup's turn ends, Pilot's line under the setup saying the project is ready, gone at the status
- * icon's resume, which lets the held work item go on (D083).
+ * setup's turn ends, the ready box, Create project's with Resume, at the timeline's foot, stuck there
+ * over what scrolls under it and at the timeline's end once scrolled there, on the phone as off it,
+ * gone for good at its Resume, which lets the held work item go on; a person's pause shows none
+ * (F48.3).
  */
 
 import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import type { Chats } from '../support/chats';
 import { rawTurn, type Controller } from '../support/controller';
-import { expectConsoleError, makeUnique, makeUniqueToken } from '../support/helpers';
+import { cssColour } from '../support/contrast';
+import { expectConsoleError, makeUnique, makeUniqueToken, waitTestEvent } from '../support/helpers';
 import { slowNetwork } from '../support/network';
 import type { ChatPage } from '../support/page-objects/chat-page';
+import type { TimelinePage } from '../support/page-objects/timeline-page';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import type { Projects } from '../support/projects';
+import type { FormTestEvent } from '@/lib/test/test-events';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
 const CONVERSATION = '5c8e2a17-9b4d-4e63-a1f0-7d2b6c9e3f58';
@@ -655,8 +660,16 @@ test.describe('The setup', () => {
   });
 });
 
+/** The ready box and what it holds, and the timeline it stands in, where they stand on the page. */
+async function readyBoxes(timeline: TimelinePage) {
+  const [box, button, line, feed] = await Promise.all(
+    [timeline.ready.root, timeline.ready.resume, timeline.ready.line, timeline.root].map(async (each) => (await each.boundingBox())!),
+  );
+  return { box, button, line, feed };
+}
+
 test.describe('The pause at Create', () => {
-  test('pausing while the setup runs, a work item placed meanwhile held; paused once its turn ends, the ready line under the setup, gone at the resume, which lets the work item go on', async ({
+  test('pausing while the setup runs, a work item placed meanwhile held; paused once its turn ends, the ready box at the timeline’s foot, gone at its Resume, which lets the work item go on; a person’s pause shows none', async ({
     page,
     people,
     projects,
@@ -682,21 +695,114 @@ test.describe('The pause at Create', () => {
     const work = timeline.item(workId);
     await expect(work.work.line).toHaveAttribute('data-state', 'held');
     await expect(work.work.cue).toHaveText('Paused');
-    await expect(timeline.ready).toHaveCount(0);
+    await expect(timeline.ready.root).toHaveCount(0);
 
     await controller.finish(chats.store, session, 'success', 'The plan is written.');
     await expect(setup.root).toHaveAttribute('data-state', 'done');
     await expect(icon.root).toHaveAttribute('data-status', 'paused');
-    await expect(timeline.ready).toHaveText('The project is ready — resume the project to start it.');
-    await expect(timeline.ready.getByRole('button')).toHaveCount(0);
-    await expect(setup.root.locator('xpath=following-sibling::*[1]')).toHaveAttribute('data-testid', 'timeline.ready');
+    // Create project's box, the last thing in the timeline: a border, as wide as what it holds and
+    // centred, a small primary Resume with a play icon left of a muted line.
+    await expect(timeline.rows.last()).toHaveAttribute('data-testid', 'timeline.ready');
+    await expect(timeline.ready.resume).toHaveText('Resume');
+    await expect(timeline.ready.resume).toHaveClass('btn btn-primary btn-sm');
+    await expect(timeline.ready.resume.locator('svg')).toHaveClass(/\blucide-play\b/);
+    await expect(timeline.ready.line).toHaveText('The project is set up and ready to start.');
+    await expect(timeline.ready.line).toHaveCSS('color', await cssColour(page, 'hsl(var(--muted-foreground))'));
+    await expect(timeline.ready.root).toHaveCSS('border-top-style', 'solid');
+    await expect(timeline.ready.root).toHaveCSS('border-top-width', '1px');
+    const { box, button, line, feed } = await readyBoxes(timeline);
+    const column = (await timeline.root.locator('.feed-inner').boundingBox())!;
+    expect(Math.abs(box.x + box.width / 2 - (column.x + column.width / 2))).toBeLessThan(1);
+    expect(button.x + button.width).toBeLessThanOrEqual(line.x);
+    expect(box.width).toBeLessThan(line.x + line.width - button.x + 40);
+    // A timeline shorter than the page: the box stands at its end, under the last item, not at the page's foot.
+    expect(box.y + box.height).toBeLessThan(feed.y + feed.height - 100);
+    expect(box.y).toBeGreaterThanOrEqual((await work.root.boundingBox())!.y + (await work.root.boundingBox())!.height);
     expect((await projects.list()).find((tab) => tab.id === id)!.badge.count).toBe(0);
 
-    const resumed = projectList.written(id, 'resumed');
-    await icon.root.click();
+    const resumed = waitTestEvent<FormTestEvent>(
+      page,
+      'form',
+      (event) => event.formId === 'timeline.ready.resume' && event.phase === 'success' && event.fields?.project === id,
+    );
+    await timeline.ready.resume.click();
     await resumed;
-    await expect(timeline.ready).toHaveCount(0);
+    await expect(timeline.ready.root).toHaveCount(0);
     await expect(work.work.running).toBeVisible();
+    await expect(icon.root).not.toHaveAttribute('data-status', 'paused');
     expect((await projects.timeline(id)).ready_after).toBeNull();
+
+    // The first resume took the box away for good: a person's pause shows none.
+    const paused = projectList.written(id, 'paused');
+    await icon.root.click();
+    await paused;
+    await expect(icon.root).toHaveAttribute('data-status', /^paus/);
+    expect((await projects.timeline(id)).ready_after).toBeNull();
+    await expect(timeline.ready.root).toHaveCount(0);
+  });
+
+  test('the ready box sticks to the timeline’s foot, lifted by a shadow over what scrolls under it, and stands at the timeline’s end once scrolled there; on a phone too, its button above its line', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    controller,
+    chats,
+    definitionChat,
+    timeline,
+    phoneTabs,
+  }) => {
+    const me = await people.signIn();
+    const { id, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    const started = await chats.opening(id, slug);
+    await definitionChat.create();
+    const session = await started();
+    await controller.finish(chats.store, session, 'success', 'The plan is written.');
+    await expect(timeline.ready.root).toBeVisible();
+    const notices: string[] = [];
+    for (let index = 0; index < 12; index += 1) {
+      notices.push(await projects.place(id, { kind: 'notice', title: `Notice ${index + 1}`, text: 'A notice that takes\n\na few lines\n\nof the timeline.\n' }));
+    }
+    const last = timeline.item(notices[11]);
+    await expect(last.root).toBeAttached();
+
+    // At the timeline's end the box stands there, under the last item, over the column's padding.
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+    await expect(timeline.rows.last()).toHaveAttribute('data-testid', 'timeline.ready');
+    let { box, feed } = await readyBoxes(timeline);
+    let under = (await last.root.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(under.y + under.height);
+    expect(Math.abs(feed.y + feed.height - (box.y + box.height) - 20)).toBeLessThan(1.5);
+    await expect(timeline.ready.root).not.toHaveCSS('box-shadow', 'none');
+    await expect(timeline.ready.root).toHaveCSS('background-color', await cssColour(page, 'hsl(var(--background))'));
+
+    // Scrolled away from the end it stays at the foot, 12px up, over the items that scroll under it.
+    await timeline.scrollToTop();
+    await expect.poll(async () => (await readyBoxes(timeline)).box.y + (await readyBoxes(timeline)).box.height).toBeCloseTo(feed.y + feed.height - 12, 0);
+    await expect(timeline.ready.resume).toBeInViewport();
+    await expect(last.root).not.toBeInViewport();
+    ({ box } = await readyBoxes(timeline));
+    const covered = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('[data-testid="timeline.ready"]') !== null,
+      [box.x + box.width / 2, box.y + box.height / 2],
+    );
+    expect(covered).toBe(true);
+
+    // On a phone: the same box, its button above its line, 12px over the timeline's foot at its end and away from it.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(phoneTabs.root).toBeVisible();
+    await timeline.scrollToTop();
+    await expect.poll(async () => {
+      const now = await readyBoxes(timeline);
+      return now.feed.y + now.feed.height - (now.box.y + now.box.height);
+    }).toBeCloseTo(12, 0);
+    const phone = await readyBoxes(timeline);
+    expect(phone.button.y + phone.button.height).toBeLessThanOrEqual(phone.line.y);
+    await timeline.root.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+    ({ box, feed } = await readyBoxes(timeline));
+    under = (await last.root.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(under.y + under.height);
+    expect(Math.abs(feed.y + feed.height - (box.y + box.height) - 12)).toBeLessThan(1.5);
   });
 });

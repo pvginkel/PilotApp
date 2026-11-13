@@ -5,11 +5,12 @@
  * chosen, the one chosen a soft button, until the block's Send (F32.3), its answer read as an
  * action's; No opening a console whose reason may stay empty and is the note (F22.3), with no Send
  * of its own, in the growing field kept until sent (F115, F110, F133); Details / Less unfolding the prose, on the
- * left and never underlined (F22.4); its done line led by a green check or a red cross with the
- * reason (F22.5); and done, its answer alone, opening on its chevron to its proposal and Yes and No,
+ * left and never underlined (F22.4); its done line led by a check or a cross, both in the primary
+ * as a kind's icon is, with the reason (F22.5); and done, its answer alone, opening on its chevron to its proposal and Yes and No,
  * standing and taking nothing (F31.2).
  */
 
+import { cssColour } from '../support/contrast';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { slowNetwork } from '../support/network';
@@ -153,7 +154,7 @@ test.describe('A confirmation', () => {
     await expect(timeline.item(bare).confirm.details).toHaveCount(0);
   });
 
-  test('chooses Yes on its button, a soft one then, and saves it on Send, reading Yes in its block, not boxed, while it saves, and its line leads with a green check', async ({
+  test('chooses Yes on its button, a soft one then, and saves it on Send, reading Yes in its block, not boxed, while it saves, and its line leads with a check in the primary', async ({
     page,
     people,
     projects,
@@ -186,17 +187,17 @@ test.describe('A confirmation', () => {
     await restore();
 
     await expect(item.root).toHaveAttribute('data-state', 'done');
-    await expect(item.lineKind).toHaveClass(/\byes\b/);
     await expect(item.lineKind).toHaveAttribute('title', 'Yes');
     await expect(item.lineKind.locator('svg')).toHaveClass(/\blucide-check\b/);
-    expect(await item.lineKind.evaluate((element) => getComputedStyle(element).color)).not.toBe(
-      await item.lineTitle.evaluate((element) => getComputedStyle(element).color),
-    );
+    // In the primary, as every other done line's kind icon: no class of its own tints it.
+    await expect(item.lineKind).toHaveClass('kind-icon');
+    await expect(item.lineKind).toHaveCSS('color', await cssColour(page, 'hsl(var(--primary))'));
     await expect(item.said).toHaveCount(0);
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'Yes', note: null, via: 'app', by: { handle: me.handle } });
   });
 
-  test('opens a reason console on No, which is chosen while it stands open; Enter breaks the line, Ctrl+Enter, the block’s Send, sends No with the reason, and the line leads with a red cross and the reason', async ({
+  test('opens a reason console on No, which is chosen while it stands open; Enter breaks the line, Ctrl+Enter, the block’s Send, sends No with the reason, and the line leads with a cross in the primary and the reason', async ({
+    page,
     people,
     projects,
     timeline,
@@ -225,8 +226,11 @@ test.describe('A confirmation', () => {
     await confirm.field.press('Control+Enter');
 
     await expect(item.root).toHaveAttribute('data-state', 'done');
-    await expect(item.lineKind).toHaveClass(/\bno\b/);
+    await expect(item.lineKind).toHaveAttribute('title', 'No');
     await expect(item.lineKind.locator('svg')).toHaveClass(/\blucide-x\b/);
+    // A No is no cancel and no error: the cross in the primary, neither grey nor red.
+    await expect(item.lineKind).toHaveClass('kind-icon');
+    await expect(item.lineKind).toHaveCSS('color', await cssColour(page, 'hsl(var(--primary))'));
     await expect(item.said).toHaveText('Wait for the tests, they run tonight.');
     await expect(item.note.locator('svg')).toHaveClass(/\blucide-sticky-note\b/);
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'No', note: 'Wait for the tests,\nthey run tonight.' });
@@ -266,7 +270,7 @@ test.describe('A confirmation', () => {
     await confirm.answerSend.click();
 
     await expect(item.root).toHaveAttribute('data-state', 'done');
-    await expect(item.lineKind).toHaveClass(/\bno\b/);
+    await expect(item.lineKind).toHaveAttribute('title', 'No');
     await expect(item.said).toHaveCount(0);
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'No', note: null });
     expect(await kept()).not.toHaveProperty(`${confirmation}/C1/no`);
@@ -305,7 +309,7 @@ test.describe('A confirmation', () => {
     await timeline.open(id);
     await expect(confirm.yes).toHaveAttribute('data-chosen', 'true');
     await confirm.answerSend.click();
-    await expect(item.lineKind).toHaveClass(/\byes\b/);
+    await expect(item.lineKind).toHaveAttribute('title', 'Yes');
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'Yes', note: null, by: { handle: me.handle } });
   });
 
@@ -361,7 +365,7 @@ test.describe('A confirmation', () => {
     await confirm.no.click();
     await confirm.field.fill('Hold it');
     await confirm.answerSend.click();
-    await expect(item.lineKind).toHaveClass(/\bno\b/);
+    await expect(item.lineKind).toHaveAttribute('title', 'No');
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'No', note: 'Hold it', by: { handle: me.handle } });
   });
 });

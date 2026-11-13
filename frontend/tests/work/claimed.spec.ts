@@ -15,6 +15,7 @@
  */
 
 import type { Locator } from '@playwright/test';
+import { cssColour } from '../support/contrast';
 import { test, expect } from '../support/fixtures';
 import type { Chats } from '../support/chats';
 import type { Controller } from '../support/controller';
@@ -363,6 +364,14 @@ test.describe('A claimed action', () => {
     await docTabs.closeAll.click();
     await expect(timeline.item(asking).root).toHaveAttribute('data-state', 'done');
     await expect(timeline.item(asking).undo).toHaveCount(0);
+    // Its line leads with the cancelled mark: its kind's icon in the time's grey, a cross at its foot.
+    const mark = timeline.item(asking).lineKind;
+    await expect(mark).toHaveAttribute('title', 'Cancelled');
+    await expect(mark).toHaveClass('kind-icon cancelled');
+    await expect(mark.locator('g[mask] > svg')).toHaveClass(/\blucide-message-circle-question\b/);
+    await expect(mark.locator('svg.icon > path')).toHaveAttribute('d', 'm15 15 7 7M22 15l-7 7');
+    await expect(mark).toHaveCSS('color', await timeline.item(asking).lineTime.evaluate((time) => getComputedStyle(time).color));
+    await expect(mark).not.toHaveCSS('color', await cssColour(page, 'hsl(var(--primary))'));
     const item = timeline.item(document);
     await expect(item.root).toHaveAttribute('data-state', 'open');
     const action = item.blockAt('A1');

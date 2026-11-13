@@ -1,10 +1,10 @@
 /**
  * A project's timeline (F8): its items in their order under their date and step dividers (F9); the
- * opening (F18.1, F18.2); an item's head (F12, F10.1, F107, F114); its prose as GFM, linked, folding
- * when long (F29.1, F12.2); a concept (F78); the done line (F13.1, F13.2); a step's name in the
+ * opening (F18.1, F18.2); an item's head (F12, F10.1, F107, F114); its prose as GFM, linked, whole
+ * however long, as the opening's words are, with no Show more (F29.1, F18.1, F23); a concept (F78); the done line (F13.1, F13.2); a step's name in the
  * page's face, its long name cut on a phone with the line after it as long as the one before it; a short timeline at its top, no band under its last item; opened at its end, following
  * what arrives there, a new item flashing, and at its end on each project (F8.2, F1.6); the reader's
- * own Show more growing downward.
+ * own open growing downward.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -116,7 +116,6 @@ test.describe('The opening', () => {
     await expect(timeline.openingWords.locator('strong')).toHaveCount(0);
     await expect(timeline.opening.locator('.avatar')).toHaveText('AE');
     await expect(timeline.opening.getByTestId('timeline.item.head')).toHaveCount(0);
-    await expect(timeline.openingMore).toHaveCount(0);
   });
 
   test('carries the second user’s name and avatar when she started the project', async ({ people, projects, timeline }) => {
@@ -131,19 +130,22 @@ test.describe('The opening', () => {
     await expect(timeline.opening.locator('.avatar')).toHaveAttribute('title', 'Ben Example');
   });
 
-  test('folds long words with Show more, which unfolds them', async ({ people, projects, timeline }) => {
+  test('shows long words whole, with no Show more', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const words = Array.from({ length: 40 }, (_, index) => `Line ${index + 1} of what started it.`).join('\n');
     const id = await projects.makeWithSession({ name: makeUnique('Long'), members: [me.handle!], opening: words });
     await timeline.open(id);
 
-    const cut = () => timeline.openingWords.evaluate((box) => box.scrollHeight - box.clientHeight);
-    await expect(timeline.openingMore).toHaveText('Show more');
-    expect(await cut()).toBeGreaterThan(0);
-    await timeline.openingMore.click();
-    await expect(timeline.openingMore).toHaveCount(0);
-    expect(await cut()).toBe(0);
+    await expect(timeline.openingWords).toBeVisible();
     expect(await timeline.openingWords.innerText()).toBe(words);
+    await expect(timeline.root.getByRole('button', { name: 'Show more' })).toHaveCount(0);
+    // Nothing of them is cut: forty lines high, the bubble's end right under the last.
+    expect(await timeline.openingWords.evaluate((box) => box.scrollHeight - box.clientHeight)).toBe(0);
+    const [said, bubble] = await Promise.all(
+      [timeline.openingWords, timeline.opening.locator('.bubble')].map(async (each) => (await each.boundingBox())!),
+    );
+    expect(said.height).toBeGreaterThan(40 * 15);
+    expect(Math.abs(bubble.y + bubble.height - (said.y + said.height) - 10)).toBeLessThan(1);
   });
 });
 
@@ -247,27 +249,29 @@ test.describe('An open item', () => {
     await expect(prose.locator('code a')).toHaveCount(0);
   });
 
-  test('folds a long text with Show more, which unfolds it; a short one shows whole', async ({ people, projects, timeline }) => {
+  test('shows a long text whole, with no Show more, a notice’s Read alone under it', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
-    const id = await projects.makeWithSession({ name: makeUnique('Fold'), members: [me.handle!] });
+    const id = await projects.makeWithSession({ name: makeUnique('Whole'), members: [me.handle!] });
     const long = Array.from({ length: 30 }, (_, index) => `Paragraph ${index + 1}.`).join('\n\n');
-    const folded = await projects.place(id, { kind: 'notice', title: 'Long', text: long });
-    const short = await projects.place(id, { kind: 'notice', title: 'Short', text: 'Just this.\n' });
+    const whole = await projects.place(id, { kind: 'notice', title: 'Long', text: long });
     await timeline.open(id);
 
-    const item = timeline.item(folded);
+    const item = timeline.item(whole);
+    await expect(item.text.locator('p')).toHaveCount(30);
+    await expect(timeline.root.getByRole('button', { name: 'Show more' })).toHaveCount(0);
+    // Nothing of it is cut: its last paragraph is there to read, and its first once scrolled to.
+    expect(await item.text.evaluate((box) => box.scrollHeight - box.clientHeight)).toBe(0);
     const last = item.text.getByText('Paragraph 30.');
-    await expect(item.more).toHaveText('Show more');
-    await expect(timeline.item(short).more).toHaveCount(0);
-    // A button drawn as a link never underlines.
-    await item.more.hover();
-    expect(await item.more.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe('none');
-    await item.text.scrollIntoViewIfNeeded();
-    await expect(last).not.toBeInViewport();
-    await item.more.click();
-    await expect(item.more).toHaveCount(0);
-    await last.scrollIntoViewIfNeeded();
     await expect(last).toBeInViewport();
+    const first = item.text.getByText('Paragraph 1.', { exact: true });
+    await first.scrollIntoViewIfNeeded();
+    await expect(first).toBeInViewport();
+    // Read stands alone, right under the text, the one button of the item's body.
+    await expect(item.root.locator('.item-body > .item-actions button')).toHaveText(['Read']);
+    const [end, read, body] = await Promise.all([last, item.read, item.root.locator('.item-body')].map(async (each) => (await each.boundingBox())!));
+    expect(Math.abs(read.y - (end.y + end.height) - 12)).toBeLessThan(1);
+    expect(Math.abs(read.x - end.x)).toBeLessThan(1);
+    expect(Math.abs(body.y + body.height - (read.y + read.height) - 14)).toBeLessThan(1);
   });
 
   test('shows its last published text with a dashed border, a concept, while its latest save is held', async ({
@@ -422,7 +426,7 @@ test.describe('On a phone', () => {
 
 test.describe('Anchored to its end', () => {
   const NOTICE = 'A notice that takes\n\na few lines\n\nof the timeline.\n';
-  // Long enough to fold, its Show more under it.
+  // Taller than the page.
   const LONG = Array.from({ length: 24 }, (_, index) => `Paragraph ${index + 1} of the long notice.`).join('\n\n') + '\n';
 
   async function longProject(projects: Projects, member: string, name: string): Promise<string> {
@@ -458,7 +462,11 @@ test.describe('Anchored to its end', () => {
     expect(Math.abs(feed.y + feed.height - (last.y + last.height) - (20 + 8))).toBeLessThan(1.5);
   });
 
-  test('at its end, follows long items arriving to the end of their Show more, three in a row', async ({ people, projects, timeline }) => {
+  test('at its end, follows long items arriving to their end, their Read under their whole text, three in a row', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
     const me = await people.signIn();
     const id = await longProject(projects, me.handle!, makeUnique('Long arrivals'));
     await timeline.open(id);
@@ -468,28 +476,32 @@ test.describe('Anchored to its end', () => {
     for (let index = 0; index < 3; index += 1) {
       arrived.push(await projects.place(id, { kind: 'notice', title: `Long ${index + 1}`, text: LONG }));
     }
-    for (const each of arrived) await expect(timeline.item(each).more).toBeAttached();
-    await expect(timeline.item(arrived[2]).more).toBeInViewport();
+    for (const each of arrived) await expect(timeline.item(each).read).toBeAttached();
+    await expect(timeline.item(arrived[2]).read).toBeInViewport();
     await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
   });
 
-  test('the reader’s own Show more at its end unfolds downward, and the timeline no longer follows its end', async ({
+  test('the reader’s own Details at its end unfolds downward, and the timeline no longer follows its end', async ({
     people,
     projects,
     timeline,
   }) => {
     const me = await people.signIn();
     const id = await longProject(projects, me.handle!, makeUnique('Own'));
-    const long = await projects.place(id, { kind: 'notice', title: 'Long', text: LONG });
+    const confirmation = await projects.place(id, {
+      kind: 'confirmation',
+      title: 'Ship it?',
+      text: `${LONG}\n\`\`\`decision id=C1\ntype: confirmation\nproposal: Push the release\nbecause: auto-pilot-off\n\`\`\`\n`,
+    });
     await timeline.open(id);
-    const item = timeline.item(long);
-    await expect(item.more).toBeInViewport();
+    const item = timeline.item(confirmation);
+    await expect(item.confirm.details).toBeInViewport();
     await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
     const top = await timeline.scrollTop();
     const head = (await item.head.boundingBox())!;
 
-    await item.more.click();
-    await expect(item.more).toHaveCount(0);
+    await item.confirm.details.click();
+    await expect(item.confirm.prose.locator('p')).toHaveCount(24);
     await expect.poll(() => timeline.fromEnd()).toBeGreaterThan(100);
     expect(await timeline.scrollTop()).toBe(top);
     expect(Math.abs((await item.head.boundingBox())!.y - head.y)).toBeLessThan(1);

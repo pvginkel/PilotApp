@@ -1,10 +1,10 @@
 /**
  * A project's timeline (F8): its prose and work items in their order under their date and step
  * dividers (F9, F9.1), the opening first; one shorter than the page stands at its top. It opens at
- * its end, a project's own on each project (F1.6), and at its end it follows what arrives — an
- * item, a fold settling — unless the reader has scrolled away from it, or opened something that
- * took the end out of reach: the reader's own open or close never moves the top of what they read
- * (use-own-growth.ts). A new item flashes (F8.2).
+ * its end, a project's own on each project (F1.6), and at its end it follows what arrives unless
+ * the reader has scrolled away from it, or opened something that took the end out of reach: the
+ * reader's own open or close never moves the top of what they read (use-own-growth.ts). A new item
+ * flashes (F8.2).
  *
  * The first open urgent item that is not Pilot's has a banner pinned to the top, whose Show scrolls
  * to the item and flashes it, with "+<n>" for the other such items; a finished project's has none
@@ -12,8 +12,8 @@
  * above, a chip under the banner counts them and scrolls to the nearest (F11). A finished project's timeline ends in
  * "Finished · <stamp>", every item but the opening done by Finish (F5.3), and under it the archive
  * question its latest finish put, open or as its done line (F5.6). A new project paused by its
- * Create has, once its setup is done, Pilot's line under the setup saying it is ready to resume,
- * with nothing to press, gone at the resume (D083).
+ * Create has, once its setup is done, the ready box at its foot, gone at the resume (F48.3,
+ * project-ready.tsx).
  *
  * Pilot's jobs show on the items they follow from, not as lines of their own, the setup's aside
  * (F59.1, job.tsx).
@@ -30,12 +30,12 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowDown, ArrowUp, Flag, TriangleAlert } from 'lucide-react';
-import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { blockKey, FlashContext, GoToContext } from '@/components/timeline/flash';
 import { Item } from '@/components/timeline/item';
 import { Opening } from '@/components/timeline/opening';
+import { ProjectReady } from '@/components/timeline/project-ready';
 import { rowsOf, type Row } from '@/components/timeline/rows';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
 import { useOwnGrowth } from '@/hooks/use-own-growth';
@@ -69,7 +69,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const { data, refetch, isFetching } = useTimeline(projectId);
   const items = useMemo(() => data?.items.filter(isLine), [data]);
   const finishedAt = data?.finished_at ?? null;
-  const readyAfter = data?.ready_after ?? null;
+  const ready = (data?.ready_after ?? null) !== null;
   const question = items?.find((item) => item.id === data?.archive_question);
   const placed = question === undefined ? items : items?.filter((item) => item !== question);
   const urgent =
@@ -235,7 +235,8 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
         <FlashContext.Provider value={{ fresh, flashed }}>
           <GoToContext.Provider value={goToBlock}>
             <SectionsContext.Provider value={sections}>
-              {placed && rowsOf(placed, readyAfter).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+              {placed && rowsOf(placed).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+              {ready && <ProjectReady projectId={projectId} />}
               {finishedAt !== null && (
                 <div className="divider finished" data-testid="timeline.divider.finished">
                   <span>
@@ -302,14 +303,6 @@ function TimelineRow({ row, fresh, flashed }: TimelineRowProps) {
           <LinkedText text={row.title} />
         </span>
       </div>
-    );
-  }
-  if (row.type === 'ready') {
-    return (
-      <p className="project-ready" data-testid="timeline.ready">
-        <Avatar who="pilot" size="xs" />
-        <span>The project is ready — resume the project to start it.</span>
-      </p>
     );
   }
   return row.item.kind === 'opening' ? (

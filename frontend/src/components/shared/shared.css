@@ -213,18 +213,6 @@
   .delta-fresh { animation: delta-in 300ms ease-out; }
   @keyframes delta-in { from { opacity: 0; } }
 
-  /* ---- Long texts folded (fold.tsx) ----------------------------------------------------- */
-
-  .fold { position: relative; max-height: 13.5em; overflow: hidden; }
-  .fold.long::after {
-    content: "";
-    position: absolute;
-    inset: auto 0 0;
-    height: 3em;
-    background: linear-gradient(hsl(var(--card) / 0), hsl(var(--card)));
-  }
-  .link.more { margin-top: 4px; font-size: var(--text-sm); }
-
   /* ---- Long texts clamped (clamp.tsx) --------------------------------------------------- */
 
   /* Cut by its line count; Show more over the end of the last line shown, on --clamp-bg, the
