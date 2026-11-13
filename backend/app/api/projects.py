@@ -2,7 +2,8 @@
 archived projects, the project an address names, a project's head, its
 timeline, the index of its items (F150.8), its draft and its handbook (F1, F2,
 F3, F8, F37.4, F129.4, D012); a
-draft made with its first message (F46.1), and their answers to its asks in
+draft made with its first message (F46.1), or by a call with its brief
+(F150.9), and their answers to its asks in
 place (F47.4); and what they change of a project's standing: its transitions,
 Create project and its pause among them, and their membership (F4.1, F5, F6,
 F48, F127, F128, F141.2)."""
@@ -16,9 +17,9 @@ from spectree import Response as SpectreeResponse
 
 from app.api.caller import caller
 from app.engine.paths import folder
+from app.exceptions import ValidationException
 from app.models import PlanNote, User
-from app.models.reference import DocumentRole, TransitionKind
-from app.schemas.chats import ChatMessageRequestSchema
+from app.models.reference import DocumentRole, TransitionKind, UserKind
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.items import ActionDoneRequestSchema, AnswerRequestSchema
 from app.schemas.projects import (
@@ -28,6 +29,7 @@ from app.schemas.projects import (
     PlanProgressSchema,
     PlanTaskSchema,
     ProjectAddressSchema,
+    ProjectCreateRequestSchema,
     ProjectHeadSchema,
     ProjectListQuerySchema,
     ProjectListResponseSchema,
@@ -42,6 +44,11 @@ from app.schemas.timeline import (
     ItemIndexSchema,
     ProjectDocumentSchema,
     TimelineSchema,
+)
+from app.services.brief_service import Call
+from app.services.caller_environment_service import (
+    CALLER_ENVIRONMENT_HEADER,
+    CallerEnvironmentService,
 )
 from app.services.chat_service import ChatService
 from app.services.container import ServiceContainer
@@ -165,12 +172,13 @@ def list_projects(
 
 @projects_bp.route("", methods=["POST"])
 @api.validate(
-    json=ChatMessageRequestSchema,
+    json=ProjectCreateRequestSchema,
     resp=SpectreeResponse(
         HTTP_201=ProjectHeadSchema,
         HTTP_400=ApiErrorResponseSchema,
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
         HTTP_409=ApiErrorResponseSchema,
     ),
 )
@@ -179,25 +187,54 @@ def create_project(
     project_service: ProjectService = Provide[ServiceContainer.project_service],
     chat_service: ChatService = Provide[ServiceContainer.chat_service],
     people_service: PeopleService = Provide[ServiceContainer.people_service],
+    caller_environment_service: CallerEnvironmentService = Provide[
+        ServiceContainer.caller_environment_service
+    ],
 ) -> Any:
     """Start a new project with the signed-in person's first message to it
     (F46.1): a draft, its creator its one member and its draft, `project.md`,
     empty, and its definition chat started with the words, as a message to a
     draft with no chat starts it. A message refused leaves no draft.
 
+    Called as a service user, it is a call's draft (F150.9): the service user
+    its creator and no member, its members the person `for` names and every
+    person who joins the projects started on their behalf, `title` its name
+    until Pilot writes its own, and the words the call's brief, the service
+    user's message, under a brief that names the environment the call came
+    from, the request's `X-Pilot-Environment`, and `for`.
+
     Returns:
         201: The draft's head
-        400: The message has no words
+        400: The message has no words; the title is no one line of words; or
+            a person names a title or `for`
         401: No one is signed in
         403: The caller lacks the editor role
+        404: A call's `for` is no person's handle
         409: The caller has not chosen a handle; Pilot is updating its store;
             or no controller or store environment is configured
     """
-    words = ChatMessageRequestSchema.model_validate(request.get_json()).words
+    body = ProjectCreateRequestSchema.model_validate(request.get_json())
     auth = caller()
-    person = people_service.require_person(auth, "start a new project")
-    project = project_service.create(auth)
-    chat_service.send(project.id, person, words)
+    author = people_service.find(auth)
+    if author is not None and author.kind_code is UserKind.SERVICE:
+        environment = request.headers.get(CALLER_ENVIRONMENT_HEADER)
+        call = Call(
+            environment=(
+                caller_environment_service.name(environment) if environment else None
+            ),
+            for_handle=body.for_,
+        )
+        project = project_service.create_by_call(author, body.title, body.for_)
+    else:
+        if body.title is not None or body.for_ is not None:
+            raise ValidationException(
+                "Cannot start a new project with a title or for a person because"
+                " a call alone names them"
+            )
+        author = people_service.require_person(auth, "start a new project")
+        call = None
+        project = project_service.create(auth)
+    chat_service.send(project.id, author, body.words, call)
     return _head(project_service.head(auth, project.id)), 201
 
 

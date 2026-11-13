@@ -14,6 +14,7 @@ import pytest
 from starlette.applications import Starlette
 
 from app import models
+from app.services.caller_environment_service import CALLER_ENVIRONMENT_HEADER
 from pilot_mcp.api import ENVIRONMENT_HEADER, SESSION_HEADER
 from pilot_mcp.server import PROJECTS_PATH, STORE_PATH, WORK_PATH
 from tests.support.pilot_mcp import (
@@ -1169,7 +1170,7 @@ _STATUS = {
 }
 
 # Each tool: its parameters, its result and its description, the words as a
-# session anywhere in the fleet reads them (F150.3 to F150.8).
+# session anywhere in the fleet reads them (F150.3 to F150.9).
 PROJECTS_SURFACE = {
     "list_projects": (
         {
@@ -1898,6 +1899,82 @@ PROJECTS_SURFACE = {
             " remain past this page (page on with `offset`)."
         ),
     ),
+    "start_project": (
+        {
+            "properties": {
+                "brief": {
+                    "description": (
+                        "The project's brief, in your own words: what it is for"
+                        " and what it is to do. Pilot reads it verbatim, as the"
+                        " first message of the draft's chat"
+                    ),
+                    "pattern": "\\S",
+                    "title": "Brief",
+                    "type": "string",
+                },
+                "title": {
+                    "anyOf": [
+                        {"pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$", "type": "string"},
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                    "description": (
+                        "A title for the draft, one line, which names the project"
+                        " until Pilot writes its own. Omit to leave the draft"
+                        " untitled"
+                    ),
+                    "title": "Title",
+                },
+                "for": {
+                    "anyOf": [{"minLength": 1, "type": "string"}, {"type": "null"}],
+                    "default": None,
+                    "description": (
+                        "The handle of the person the project is started for, a"
+                        " member of it from its start. Omit when it is for no one"
+                        " person"
+                    ),
+                    "title": "For",
+                },
+            },
+            "required": ["brief"],
+            "title": "start_projectArguments",
+            "type": "object",
+        },
+        {
+            "description": "The draft a call started.",
+            "properties": {
+                "id": _ID,
+                "folder": {
+                    "description": (
+                        "Its folder, the first segment of its files' paths:"
+                        " `draft-<number>` until Create project gives the project"
+                        " its slug"
+                    ),
+                    "title": "Folder",
+                    "type": "string",
+                },
+                "url": {
+                    "description": "Its page in Pilot's app",
+                    "title": "Url",
+                    "type": "string",
+                },
+            },
+            "required": ["id", "folder", "url"],
+            "title": "StartedProject",
+            "type": "object",
+        },
+        "Start a project Pilot manages, as a draft: Pilot takes `brief` as the"
+        " first message of the draft's chat and writes the draft from it, asking"
+        " in it what it still has to know. A draft runs no work: a person reads"
+        " it in Pilot's app, answers what it asks and presses Create project. Its"
+        " members are the person `for` names and every person who joins the"
+        " projects started on their behalf; with neither, it has none and waits"
+        " in Pilot's project list. Answers `{id, folder, url}`: hold the draft by"
+        " its `id`, which `get_project` takes, and read what Pilot wrote of it"
+        " with `read_file`, at `<folder>/project.md`. A `for` that names no"
+        " person is refused, as is every call while Pilot is updating, and"
+        " nothing is started.",
+    ),
 }
 
 PROJECTS_INSTRUCTIONS = (
@@ -2003,6 +2080,11 @@ class TestTheProjectsSurface:
             "X-Pilot-Environment",
             "X-Pilot-Session",
         )
+
+    def test_the_create_route_reads_the_environment_from_the_header_the_process_sends(
+        self,
+    ) -> None:
+        assert CALLER_ENVIRONMENT_HEADER == ENVIRONMENT_HEADER
 
 
 _NOT_THE_TOKEN = {

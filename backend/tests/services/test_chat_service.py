@@ -48,6 +48,7 @@ from app.models.reference import (
 )
 from app.schemas.timeline import HeldReason
 from app.services.auth_service import AuthContext
+from app.services.brief_service import Call
 from app.services.chat_close_service import CLOSED, ChatCloseService
 from app.services.chat_service import (
     HANDBOOK_CHANGED_TOTAL,
@@ -374,6 +375,36 @@ class TestSendStartsTheChat:
         assert _sends(session, run.id) == [(1, WORDS)]
         assert "_LoopStart" in _callbacks()
         assert fake.calls == []
+
+    def test_a_calls_brief_starts_its_drafts_definition_chat_as_the_service_users_turn(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        service_user: User,
+        person: User,
+    ) -> None:
+        """F150.9; DB 339: the call's brief is the definition chat's first
+        Turn, the service user its author, under the brief by a call."""
+        draft = container.project_service().create_by_call(service_user, None, "ada")
+        call = Call(environment="Automation", for_handle="ada")
+
+        turn = chats.send(draft.id, service_user, WORDS, call)
+
+        (chat,) = _chat_rows(session, draft)
+        assert (chat.id, chat.kind_code) == (turn.session_id, ChatKind.DEFINITION)
+        assert (turn.seq, turn.author_user_id, turn.words) == (
+            1,
+            service_user.id,
+            WORDS,
+        )
+        assert turn.message == container.brief_service().definition_chat(
+            draft, service_user, WORDS, turn.started_at, call
+        )
+        assert "\nThe draft: project.md, empty. Started by a call from Automation," in (
+            turn.message
+        )
+        assert _read(session, chat.id).state_code is SessionState.STARTING
 
     def test_its_start_reaches_the_brain_in_the_store_with_the_brief(
         self,

@@ -1,8 +1,9 @@
 """/api/projects: the project list, the archived projects and a project's
 head, as the signed-in person reads them (F1, F2, F3, D012); a draft made
-with its first message (F46.1, F47.1), and their answers to its asks in
-place (F47.4); and what they change of a project's standing, its
-transitions and their membership (F4.1, F5, F6, F127, F128)."""
+with its first message (F46.1, F47.1), or by a call with its brief (F150.9),
+and their answers to its asks in place (F47.4); and what they change of a
+project's standing, its transitions and their membership (F4.1, F5, F6, F127,
+F128)."""
 
 import base64
 import uuid
@@ -40,10 +41,16 @@ from app.models.reference import (
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.schemas.timeline import TimelineSchema
 from app.services.auth_service import AuthContext
+from app.services.caller_environment_service import (
+    CALLER_ENVIRONMENT_HEADER,
+    CallerEnvironmentService,
+)
 from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerClient
 from app.services.job_service import SETUP_TITLE
 from app.services.session_scope import STORE_REPO
-from tests.support.fake_sidecar import FakeSidecar
+from tests.support.fake_controller import ServedFakeController
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
 from tests.support.starts import configured_starts
 from tests.support.store_updates import hold
 from tests.support.supervisor import Supervise
@@ -2272,6 +2279,301 @@ class TestCreateProject:
         response = oidc_client.post(PROJECTS, json={"words": "Hi"})
 
         assert response.status_code == 401
+
+
+BRIEF = "Sort the inbox.\n\nStart with the oldest card."
+
+CALLER = "example-recipebox-1a2b3c"
+"""The id of the environment a call comes from, which Pilot has no row of."""
+
+
+def _call(
+    client: FlaskClient, payload: dict[str, Any], environment: str | None = CALLER
+) -> Any:
+    """A call's create as Pilot's MCP process makes it: the plus's route, with
+    the calling environment's id in its header where the caller sent one."""
+    headers = {} if environment is None else {CALLER_ENVIRONMENT_HEADER: environment}
+    return client.post(PROJECTS, json=payload, headers=headers)
+
+
+def _members(session: Session, project_id: uuid.UUID) -> list[str]:
+    return list(
+        session.scalars(
+            select(User.handle)
+            .join(ProjectMember, ProjectMember.user_id == User.id)
+            .where(ProjectMember.project_id == project_id)
+            .order_by(ProjectMember.id)
+        )
+    )
+
+
+def _started(session: Session) -> str:
+    """Who started the one draft there is, as its definition chat's brief
+    says it: the sentence after the draft's own."""
+    message = session.scalars(select(Turn.message)).one()
+    (line,) = [line for line in message.splitlines() if line.startswith("The draft: ")]
+    return line.removeprefix("The draft: project.md, empty. ")
+
+
+@pytest.mark.usefixtures("person", "starts")
+class TestCreateProjectByCall:
+    """`POST /api/projects` as a service user: a call's draft (F150.9, F150.13;
+    DB 339; V18 to V20). The successor of the refusal `test_service_user.py`
+    pinned for this route until slice 045's P5."""
+
+    @pytest.fixture(autouse=True)
+    def _as_the_service_user(self, client: FlaskClient, service_user: User) -> None:
+        _sign_in(client, subject=service_user.subject)
+
+    def test_the_call_makes_the_service_users_draft_and_starts_its_chat_with_the_brief(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        service_user: User,
+    ) -> None:
+        fake_sidecar.connect()
+        fake_sidecar.drain()
+
+        response = _call(
+            client, {"words": BRIEF, "title": "Sort the inbox", "for": "ada"}
+        )
+        fake_sidecar.drain()
+
+        assert response.status_code == 201, response.get_json()
+        body = response.get_json()
+        draft = session.get_one(Project, uuid.UUID(body["id"]))
+        assert body == {
+            "id": body["id"],
+            "address": f"draft-{draft.number}",
+            "name": "Sort the inbox",
+            "ticket": None,
+            "repo": None,
+            "state": "draft",
+            "archived": False,
+            "autopilot": False,
+            "status": None,
+            "member": False,
+            "members": [
+                {
+                    "handle": "ada",
+                    "name": "Ada Example",
+                    "initials": "AE",
+                    "avatar_slot": 1,
+                }
+            ],
+            "progress": {"done": 0, "total": 0, "in_progress": []},
+            "tasks": [],
+            "notes": [],
+            "running_work": [],
+            "open_items": 0,
+            "autopilot_may_take": 0,
+            "create_refusal": "Pilot is writing",
+            "url": f"{BASE_URL}/projects/draft-{draft.number}",
+        }
+        assert draft.created_by_user_id == service_user.id
+        assert session.scalars(select(ProjectTransition)).all() == []
+        (chat,) = session.scalars(select(Chat)).all()
+        assert (chat.project_id, chat.kind_code) == (draft.id, ChatKind.DEFINITION)
+        turn = session.scalars(select(Turn)).one()
+        assert (turn.session_id, turn.seq, turn.author_user_id, turn.words) == (
+            chat.id,
+            1,
+            service_user.id,
+            BRIEF,
+        )
+        assert turn.message == (
+            "/create\n\n"
+            'Pilot\'s brief · the definition chat · project "Sort the inbox" ·'
+            f" /work/Projects/draft-{draft.number} · {utc_time(turn.started_at)}\n\n"
+            f"The draft: project.md. Started by a call from {CALLER}, for ada.\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            f"{BRIEF}"
+        )
+        assert session.get_one(models.Session, chat.id).state_code is (
+            SessionState.STARTING
+        )
+        assert fake_sidecar.tree[f"draft-{draft.number}/project.md"] == (
+            b"---\ntitle: Sort the inbox\n---\n"
+        )
+        tree = container.tree_service()
+        assert fake_sidecar.tree == {
+            entry.path: tree.read(entry.path).content for entry in tree.manifest()
+        }
+
+    def test_a_member_reads_the_calls_draft_and_its_chat_the_service_user_its_author(
+        self, client: FlaskClient
+    ) -> None:
+        draft = _call(client, {"words": BRIEF, "for": "ada"}).get_json()["id"]
+        _sign_in(client)
+
+        head = client.get(f"{PROJECTS}/{draft}")
+        timeline = client.get(f"{PROJECTS}/{draft}/timeline")
+        chats = client.get(f"{PROJECTS}/{draft}/chats")
+
+        assert (head.status_code, timeline.status_code, chats.status_code) == (
+            200,
+            200,
+            200,
+        )
+        assert head.get_json()["member"] is True
+        (chat,) = chats.get_json()["chats"]
+        assert chat["kind"] == "definition"
+
+    def test_its_members_are_the_person_for_names_and_everyone_whose_switch_is_on(
+        self, client: FlaskClient, session: Session, container: ServiceContainer
+    ) -> None:
+        people = container.people_service()
+        ben = container.test_data_service().person("ben", "Ben Example")
+        people.switch_join_calls(ben, False)
+        cy = container.test_data_service().person("cy", "Cy Example")
+        people.switch_join_calls(cy, False)
+
+        response = _call(client, {"words": BRIEF, "for": "cy"})
+
+        assert response.status_code == 201, response.get_json()
+        body = response.get_json()
+        assert [member["handle"] for member in body["members"]] == ["ada", "cy"]
+        assert _members(session, uuid.UUID(body["id"])) == ["ada", "cy"]
+
+    def test_a_call_with_nobody_to_join_still_makes_its_draft(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+    ) -> None:
+        container.people_service().switch_join_calls(person, False)
+
+        response = _call(client, {"words": BRIEF})
+
+        assert response.status_code == 201, response.get_json()
+        body = response.get_json()
+        assert (body["name"], body["member"], body["members"]) == (None, False, [])
+        assert _members(session, uuid.UUID(body["id"])) == []
+        assert session.scalars(select(Turn.words)).one() == BRIEF
+
+    def test_an_environment_neither_pilot_nor_the_controller_knows_is_named_by_its_id(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        response = _call(client, {"words": BRIEF})
+
+        assert response.status_code == 201, response.get_json()
+        assert _started(session) == f"Started by a call from {CALLER}."
+
+    def test_pilots_own_row_names_the_environment(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        response = _call(client, {"words": BRIEF, "for": "ada"}, STORE_ENVIRONMENT_ID)
+
+        assert response.status_code == 201, response.get_json()
+        assert _started(session) == "Started by a call from Example-1, for ada."
+
+    def test_the_controllers_report_names_an_environment_pilot_has_no_row_of(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        fake_controller.add_environment(CALLER, name="RecipeBox-2")
+        container.caller_environment_service.override(
+            providers.Factory(
+                CallerEnvironmentService,
+                db=container.db_session,
+                controller_client=container.controller_client.provider,
+                controller_configured=True,
+            )
+        )
+        try:
+            response = _call(client, {"words": BRIEF})
+        finally:
+            container.caller_environment_service.reset_last_overriding()
+
+        assert response.status_code == 201, response.get_json()
+        assert _started(session) == "Started by a call from RecipeBox-2."
+        assert session.scalars(select(Environment)).all() == []
+
+    @pytest.mark.parametrize("environment", [None, ""])
+    def test_a_call_that_names_no_environment_names_none_in_its_brief(
+        self, client: FlaskClient, session: Session, environment: str | None
+    ) -> None:
+        response = _call(client, {"words": BRIEF, "for": "ada"}, environment)
+
+        assert response.status_code == 201, response.get_json()
+        assert _started(session) == "Started by a call, for ada."
+
+    @pytest.mark.parametrize("handle", ["nobody", "fleet", "agent"])
+    def test_a_for_that_names_no_person_is_not_found_and_makes_no_draft(
+        self, client: FlaskClient, session: Session, handle: str
+    ) -> None:
+        response = _call(client, {"words": BRIEF, "for": handle})
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Person {handle} was not found"
+        assert session.scalars(select(Project)).all() == []
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"words": "  \n"},
+            {},
+            {"words": BRIEF, "title": "  "},
+            {"words": BRIEF, "title": "Sort\nthe inbox"},
+            {"words": BRIEF, "for": ""},
+        ],
+    )
+    def test_a_call_without_a_brief_or_with_a_title_or_for_that_is_none_is_400(
+        self, client: FlaskClient, session: Session, payload: dict[str, str]
+    ) -> None:
+        response = _call(client, payload)
+
+        assert response.status_code == 400
+        assert session.scalars(select(Project)).all() == []
+
+    def test_a_call_while_pilot_updates_its_store_is_a_conflict_and_leaves_no_draft(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        hold(session)
+
+        response = _call(client, {"words": BRIEF, "title": "Sort the inbox"})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot send a message to Pilot in Sort the inbox because Pilot is updating"
+        )
+        assert session.scalars(select(Project)).all() == []
+        assert session.scalars(select(Chat)).all() == []
+
+    @pytest.mark.parametrize(
+        "named", [{"title": "Sort the inbox"}, {"for": "ada"}], ids=["title", "for"]
+    )
+    def test_a_person_names_no_title_and_no_for(
+        self, client: FlaskClient, session: Session, named: dict[str, str]
+    ) -> None:
+        _sign_in(client)
+
+        response = client.post(PROJECTS, json={"words": "Hi"} | named)
+
+        assert response.status_code == 400
+        assert response.get_json()["error"] == (
+            "Cannot start a new project with a title or for a person because a"
+            " call alone names them"
+        )
+        assert session.scalars(select(Project)).all() == []
+
+    def test_a_persons_create_reads_no_calling_environment(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        _sign_in(client)
+
+        response = _call(client, {"words": "Plan the summer trip."})
+
+        assert response.status_code == 201, response.get_json()
+        assert _started(session) == "The person who started it: ada (member)."
 
 
 @pytest.mark.usefixtures("person")

@@ -53,6 +53,7 @@ from pilot_mcp.api import (
     Projects,
     Recorded,
     RegisteredDocument,
+    StartedProject,
     Step,
     StepState,
 )
@@ -776,3 +777,55 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         return await api.find_files(
             _caller(ctx), path_pattern, offset, min(limit, FIND_LIMIT_MAX)
         )
+
+    @mcp.tool()
+    @_taking_for
+    async def start_project(
+        ctx: Call,
+        brief: Annotated[
+            str,
+            Field(
+                pattern=r"\S",
+                description=(
+                    "The project's brief, in your own words: what it is for and"
+                    " what it is to do. Pilot reads it verbatim, as the first"
+                    " message of the draft's chat"
+                ),
+            ),
+        ],
+        title: Annotated[
+            str | None,
+            Field(
+                pattern=r"^[^\r\n]*\S[^\r\n]*$",
+                description=(
+                    "A title for the draft, one line, which names the project"
+                    " until Pilot writes its own. Omit to leave the draft"
+                    " untitled"
+                ),
+            ),
+        ] = None,
+        for_: Annotated[
+            str | None,
+            Field(
+                alias=_FOR,
+                min_length=1,
+                description=(
+                    "The handle of the person the project is started for, a"
+                    " member of it from its start. Omit when it is for no one"
+                    " person"
+                ),
+            ),
+        ] = None,
+    ) -> StartedProject:
+        """Start a project Pilot manages, as a draft: Pilot takes `brief` as
+        the first message of the draft's chat and writes the draft from it,
+        asking in it what it still has to know. A draft runs no work: a person
+        reads it in Pilot's app, answers what it asks and presses Create
+        project. Its members are the person `for` names and every person who
+        joins the projects started on their behalf; with neither, it has none
+        and waits in Pilot's project list. Answers `{id, folder, url}`: hold
+        the draft by its `id`, which `get_project` takes, and read what Pilot
+        wrote of it with `read_file`, at `<folder>/project.md`. A `for` that
+        names no person is refused, as is every call while Pilot is updating,
+        and nothing is started."""
+        return await api.start_project(_caller(ctx), brief, title, for_)

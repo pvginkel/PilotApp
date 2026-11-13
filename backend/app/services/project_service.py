@@ -6,12 +6,12 @@ standing, its transitions and their membership (F4.1, F5, F6, F127, F128,
 F141.2)."""
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pilot_dsl as dsl
-from sqlalchemy import exists, false, func, or_, select
+from sqlalchemy import ColumnElement, exists, false, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachService
@@ -445,15 +445,56 @@ class ProjectService:
             InvalidOperationException: the caller has not chosen a handle.
         """
         person = self.people_service.require_person(auth, "start a new project")
+        return self._draft(person, [person.id], "")
+
+    def create_by_call(
+        self, service_user: User, title: str | None, for_handle: str | None
+    ) -> Project:
+        """A call's draft, now, which its brief starts (F150.9; DB 339):
+        `service_user` its creator and no member of it; its members, from its
+        `created_at`, the person `for_handle` names and every person whose
+        `join_calls` is on, nobody where there is neither (DB 341 refuses
+        an unattended start alone); its draft born with `title` in its front
+        matter, the project's name until Pilot writes its own (F47.1). It is
+        in the project list and the store's tree as the plus's draft is.
+
+        Raises:
+            RecordNotFoundException: no person has the handle `for_handle`.
+        """
+        joining: ColumnElement[bool] = User.join_calls.is_(True)
+        if for_handle is not None:
+            named = self.db.scalar(
+                select(User.id).where(
+                    User.handle == for_handle, User.kind_code == UserKind.PERSON
+                )
+            )
+            if named is None:
+                raise RecordNotFoundException("Person", for_handle)
+            joining = or_(joining, User.id == named)
+        # `join_calls` is true on Pilot's row and a service user's too, and
+        # is read for a person alone (DB decision 77).
+        members = self.db.scalars(
+            select(User.id)
+            .where(User.kind_code == UserKind.PERSON, joining)
+            .order_by(User.handle)
+        ).all()
+        return self._draft(
+            service_user, members, "" if title is None else dsl.with_title("", title)
+        )
+
+    def _draft(self, creator: User, members: Sequence[uuid.UUID], text: str) -> Project:
+        """A draft by `creator`, now, `members` its members from its
+        `created_at`, its draft, `project.md`, born with `text`."""
         at = datetime.now(UTC)
-        project = Project(created_by_user_id=person.id, created_at=at)
+        project = Project(created_by_user_id=creator.id, created_at=at)
         self.db.add(project)
         self.db.flush()
-        self.db.add(
-            ProjectMember(project_id=project.id, user_id=person.id, joined_at=at)
+        self.db.add_all(
+            ProjectMember(project_id=project.id, user_id=member, joined_at=at)
+            for member in members
         )
         self.db.flush()
-        self.document_service.bear_draft(project)
+        self.document_service.bear_draft(project, text)
         self.engine_bus.emit(ProjectChanged(project.id))
         self.engine_bus.emit(ManifestChanged())
         return project

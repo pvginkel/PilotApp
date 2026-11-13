@@ -5392,6 +5392,54 @@
         "title": "ProjectAddressSchema",
         "type": "object"
       },
+      "ProjectCreateRequestSchema.e86ccd6": {
+        "description": "A new project's first message: a person's, from the plus (F46.1), or\nthe brief of a call made as a service user, with what a call alone names\n(F150.9).",
+        "properties": {
+          "for": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A call's alone: the handle of the person the project is started for, a member of it from its start",
+            "examples": [
+              "ada"
+            ],
+            "title": "For"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A call's alone: the draft's title, one line, which names the project until Pilot writes its own",
+            "examples": [
+              "Sort the inbox"
+            ],
+            "title": "Title"
+          },
+          "words": {
+            "description": "The person's words, sent verbatim, a quote travelling inside them as a tag: `<quoted_item id=\"<item id>\">…</quoted_item id=\"…\">`, `<quoted_block id=\"<item id>/<local id>\">…</quoted_block id=\"…\">` or `<quoted_path path=\"<path>\">…</quoted_path path=\"…\">`, the path the handbook's, `handbook.md`, the project document's, `project.md`, or an attachment's, `attachments/<batch>/<filename>`, in the project's folder; the title between the tags (F38.3)",
+            "title": "Words",
+            "type": "string"
+          }
+        },
+        "required": [
+          "words"
+        ],
+        "title": "ProjectCreateRequestSchema",
+        "type": "object"
+      },
       "ProjectDocumentSchema.1fdd8ae": {
         "description": "The project's draft, `project.md`, or its handbook, `handbook.md`,\nread only, as the overlay draws it (F37.4, F129.4).",
         "properties": {
@@ -13497,14 +13545,14 @@
         "x-required-role": "editor"
       },
       "post": {
-        "description": "Returns:     201: The draft's head     400: The message has no words     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle; Pilot is updating its store;         or no controller or store environment is configured",
+        "description": "Called as a service user, it is a call's draft (F150.9): the service user its creator and no member, its members the person `for` names and every person who joins the projects started on their behalf, `title` its name until Pilot writes its own, and the words the call's brief, the service user's message, under a brief that names the environment the call came from, the request's `X-Pilot-Environment`, and `for`.\n\nReturns:     201: The draft's head     400: The message has no words; the title is no one line of words; or         a person names a title or `for`     401: No one is signed in     403: The caller lacks the editor role     404: A call's `for` is no person's handle     409: The caller has not chosen a handle; Pilot is updating its store;         or no controller or store environment is configured",
         "operationId": "post__api_projects",
         "parameters": [],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChatMessageRequestSchema.f9d9b43"
+                "$ref": "#/components/schemas/ProjectCreateRequestSchema.e86ccd6"
               }
             }
           },
@@ -13550,6 +13598,16 @@
               }
             },
             "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "409": {
             "content": {

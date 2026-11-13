@@ -14,6 +14,7 @@ the worker having no tree (F129.5).
 
 import uuid
 from collections.abc import Collection, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 
 import pilot_dsl as dsl
@@ -108,6 +109,17 @@ type Group = Sequence[str | None]
 """Lines of a brief kept together; one that does not hold is None."""
 
 
+@dataclass(frozen=True)
+class Call:
+    """What a call of `start_project` says of itself (F150.9), which its
+    draft's brief alone holds (DB decision 77): the name of the environment
+    it came from and the handle of the person it starts the project for,
+    each none where the call gave none."""
+
+    environment: str | None
+    for_handle: str | None
+
+
 class BriefService:
     """Composes the briefs of the brain's sessions from the record."""
 
@@ -147,15 +159,32 @@ class BriefService:
         )
 
     def definition_chat(
-        self, project: Project, person: User, words: str, at: datetime
+        self,
+        project: Project,
+        person: User,
+        words: str,
+        at: datetime,
+        call: Call | None = None,
     ) -> str:
-        """The first Turn of a draft's definition chat, from the plus (§5.3),
-        sent at `at`: `/create`; no switch, no notes and no handbook, a
-        draft having none (F141.2, F129.2); the draft, the person who started
-        it and the attachments so far; then `person`'s `words` verbatim,
-        which it ends with, after the line naming them when another person
-        started the draft (DB decision 61)."""
+        """The first Turn of a draft's definition chat (§5.3), sent at `at`:
+        `/create`; no switch, no notes and no handbook, a draft having none
+        (F141.2, F129.2); the draft, who started it and the attachments so
+        far; then `person`'s `words` verbatim, which it ends with, after the
+        line naming them when another started the draft (DB decision 61).
+
+        From the plus, who started it is the person who did. By a call
+        (F150.9), `person` its service user and `words` its brief, it is
+        `call`: the environment it came from and the person it is for. A
+        later definition chat of a call's draft has a person's message and no
+        `call`, and says that a call started the draft."""
         creator = self.db.get_one(User, project.created_by_user_id)
+        if creator.kind_code is UserKind.SERVICE:
+            started = _by_a_call(call)
+        else:
+            started = (
+                f"The person who started it: {creator.handle}"
+                f" ({self._standing(project, creator)})."
+            )
         draft = self.db.scalar(
             select(Document.published_text).where(
                 Document.project_id == project.id,
@@ -174,8 +203,7 @@ class BriefService:
             at,
             [
                 f"The draft: project.md{'' if (draft or '').strip() else ', empty'}."
-                f" The person who started it: {creator.handle}"
-                f" ({self._standing(project, creator)}).",
+                f" {started}",
                 f"Attachments so far: {_files(attached or 0)}.",
             ],
             [
@@ -966,6 +994,18 @@ def _frame(
         if lines:
             blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+def _by_a_call(call: Call | None) -> str:
+    """Who started a call's draft, in place of the person who started one
+    from the plus (§5.3): the call, from its environment and for its person,
+    each as far as `call` names it."""
+    said = "Started by a call"
+    if call is not None and call.environment is not None:
+        said += f" from {call.environment}"
+    if call is not None and call.for_handle is not None:
+        said += f", for {call.for_handle}"
+    return f"{said}."
 
 
 def is_follow_up(turn: Turn) -> bool:

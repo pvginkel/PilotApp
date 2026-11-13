@@ -56,6 +56,7 @@ from app.services.brief_service import (
     FOLLOW_UP_END,
     RESTARTED,
     BriefService,
+    Call,
     is_follow_up,
     is_restarted,
 )
@@ -454,6 +455,90 @@ class TestDefinitionChat:
 
         assert briefs.definition_chat(draft, person, words, AT).endswith(
             f"The message:\n{words}"
+        )
+
+
+BRIEF = "Sort the inbox.\n\nStart with the oldest card."
+
+
+class TestDefinitionChatByACall:
+    """The definition chat's first Turn, by a call (design 3 §5.3; F150.9;
+    V20)."""
+
+    @pytest.fixture
+    def called(
+        self, container: ServiceContainer, service_user: User, person: User
+    ) -> Project:
+        """A call's draft, for `person`."""
+        return container.project_service().create_by_call(service_user, None, "ada")
+
+    def test_the_call_stands_in_place_of_the_person_who_started_it(
+        self, briefs: BriefService, called: Project, service_user: User
+    ) -> None:
+        call = Call(environment="Automation", for_handle="ada")
+
+        assert briefs.definition_chat(called, service_user, BRIEF, AT, call) == (
+            "/create\n\n"
+            "Pilot's brief · the definition chat ·"
+            f" /work/Projects/draft-{called.number} · 2026-10-26T09:30:15Z\n\n"
+            "The draft: project.md, empty. Started by a call from Automation,"
+            " for ada.\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            f"{BRIEF}"
+        )
+
+    @pytest.mark.parametrize(
+        ("call", "started"),
+        [
+            (Call("Automation", None), "Started by a call from Automation."),
+            (Call(None, "ada"), "Started by a call, for ada."),
+            (Call(None, None), "Started by a call."),
+        ],
+    )
+    def test_what_the_call_did_not_name_is_left_out(
+        self,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+        call: Call,
+        started: str,
+    ) -> None:
+        brief = briefs.definition_chat(called, service_user, BRIEF, AT, call)
+
+        assert f"\nThe draft: project.md, empty. {started}\n" in brief
+
+    def test_a_titled_draft_names_the_project(
+        self, container: ServiceContainer, briefs: BriefService, service_user: User
+    ) -> None:
+        titled = container.project_service().create_by_call(
+            service_user, "Sort the inbox", None
+        )
+
+        brief = briefs.definition_chat(
+            titled, service_user, BRIEF, AT, Call("Automation", None)
+        )
+
+        assert brief.startswith(
+            "/create\n\n"
+            'Pilot\'s brief · the definition chat · project "Sort the inbox" ·'
+            f" /work/Projects/draft-{titled.number} · 2026-10-26T09:30:15Z\n\n"
+            "The draft: project.md. Started by a call from Automation.\n"
+        )
+
+    def test_a_persons_later_message_is_named_under_a_call_that_names_nothing(
+        self, briefs: BriefService, called: Project, person: User
+    ) -> None:
+        """A definition chat started afresh, after a failed start or Archive
+        and Bring back, has no call: its environment was in the first brief's
+        words alone (DB decision 77)."""
+        brief = briefs.definition_chat(called, person, "Go on.", AT)
+
+        assert brief.endswith(
+            "The draft: project.md, empty. Started by a call.\n"
+            "Attachments so far: none.\n\n"
+            "The message, from ada (member):\n"
+            "Go on."
         )
 
 

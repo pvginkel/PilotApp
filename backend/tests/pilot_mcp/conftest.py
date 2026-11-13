@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from dependency_injector import providers
+from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy.orm import Session as DbSession
 from starlette.applications import Starlette
@@ -24,6 +26,8 @@ from tests.support.pilot_mcp import (
     running_session,
     service_token,
 )
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 
 
 @pytest.fixture
@@ -70,6 +74,16 @@ def projects_app(gated_routes: ApiRoutes, token_endpoint: TokenEndpoint) -> Star
     """The app the pod serves with its projects surface configured, its API
     the gated routes and its credential the service user's."""
     return app_with_projects(gated_routes, token_endpoint)
+
+
+@pytest.fixture
+def gated_starts(oidc_app: Flask, supervise: Supervise) -> None:
+    """The gated routes' session start with a controller and the store
+    configured, its loops never run: a call's draft starts its definition
+    chat through it."""
+    oidc_app.container.session_start_service.override(
+        providers.Object(configured_starts(oidc_app.container, supervise))
+    )
 
 
 @pytest.fixture

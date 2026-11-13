@@ -2,7 +2,9 @@
 of the API's own for `pilot-projects`: where they address them, an API that
 does not answer, and an error answer that is not its envelope."""
 
+import json
 import socket
+import uuid
 from typing import get_args
 
 import httpx
@@ -202,6 +204,55 @@ class TestPilotProjectsApi:
         [request] = asked
         assert str(request.url) == "http://localhost:3501/api/projects?archived=false"
         assert request.headers["authorization"] == "Bearer a-token"
+
+    @pytest.mark.parametrize(
+        ("title", "person", "sent"),
+        [
+            (None, None, {"words": "Sort the inbox."}),
+            (
+                "Sort the inbox",
+                "ada",
+                {"words": "Sort the inbox.", "title": "Sort the inbox", "for": "ada"},
+            ),
+        ],
+    )
+    async def test_start_project_posts_the_brief_as_the_pluss_words(
+        self, title: str | None, person: str | None, sent: dict[str, str]
+    ) -> None:
+        asked: list[httpx.Request] = []
+        draft = uuid.uuid4()
+
+        def answer(request: httpx.Request) -> httpx.Response:
+            asked.append(request)
+            return httpx.Response(
+                201,
+                json={
+                    "id": str(draft),
+                    "address": "draft-7",
+                    "url": "https://pilot.example.com/projects/draft-7",
+                    "name": title,
+                },
+            )
+
+        api = PilotProjectsApi(
+            API_URL, credential(_held_token()), transport=httpx.MockTransport(answer)
+        )
+
+        started = await api.start_project(_CALLER, "Sort the inbox.", title, person)
+        await api.aclose()
+
+        [request] = asked
+        assert (request.method, str(request.url)) == (
+            "POST",
+            "http://localhost:3501/api/projects",
+        )
+        assert json.loads(request.content) == sent
+        assert request.headers["authorization"] == "Bearer a-token"
+        assert started.model_dump(mode="json") == {
+            "id": str(draft),
+            "folder": "draft-7",
+            "url": "https://pilot.example.com/projects/draft-7",
+        }
 
     async def test_an_api_that_does_not_answer_is_a_tool_error_naming_it(
         self,

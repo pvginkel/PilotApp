@@ -68,7 +68,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
 )
-from app.services.brief_service import BriefService
+from app.services.brief_service import BriefService, Call
 from app.services.pilot_server import unheld_token_hash
 from app.services.project_service import project_name
 from app.services.relay_service import (
@@ -139,10 +139,18 @@ class ChatService:
         self.brain_model = brain_model
         self.brain_reasoning_effort = brain_reasoning_effort
 
-    def send(self, project_id: uuid.UUID, person: User, words: str) -> Turn:
+    def send(
+        self,
+        project_id: uuid.UUID,
+        person: User,
+        words: str,
+        call: Call | None = None,
+    ) -> Turn:
         """`person`'s message to the project's brain, `words` verbatim, in the
         caller's transaction: sent to the project's open chat, or a chat
-        started with it.
+        started with it. With `call`, it is the brief of a call's draft,
+        `person` the service user that made the draft (F150.9; DB 339), and
+        the draft's definition chat starts with it.
 
         With the chat's session up, the controller's send goes first, as
         `RelayService.send` makes it, under the chat's Session's lock. A start
@@ -179,7 +187,7 @@ class ChatService:
             locked = self._still_open(project, session.id)
             if locked is not None:
                 return self._send(project, locked, person, quoted)
-        return self._start(project_id, person, quoted, operation)
+        return self._start(project_id, person, quoted, operation, call)
 
     def stop(self, project_id: uuid.UUID, person: User) -> ListedChat:
         """`person`'s Stop of Pilot's answer in the project's open chat,
@@ -330,12 +338,18 @@ class ChatService:
         return None
 
     def _start(
-        self, project_id: uuid.UUID, person: User, words: Words, operation: str
+        self,
+        project_id: uuid.UUID,
+        person: User,
+        words: Words,
+        operation: str,
+        call: Call | None,
     ) -> Turn:
         """The project's chat started with `words`: a new one, or the open
         one whose start failed or was stopped before its brief went out,
-        afresh in a headless session of its own. The open chat's Session is
-        locked after the project's row (the start's lock order)."""
+        afresh in a headless session of its own, a definition chat's brief
+        naming `call`. The open chat's Session is locked after the project's
+        row (the start's lock order)."""
         project = self._locked(project_id)
         _refuse_message(project, operation)
         session = self._open_chat(project.id)
@@ -357,16 +371,17 @@ class ChatService:
         last = self.db.scalar(
             select(func.max(Turn.seq)).where(Turn.session_id == session.id)
         )
-        brief = (
-            self.brief_service.definition_chat
-            if self.db.get_one(Chat, session.id).kind_code is ChatKind.DEFINITION
-            else self.brief_service.project_chat
-        )
+        if self.db.get_one(Chat, session.id).kind_code is ChatKind.DEFINITION:
+            brief = self.brief_service.definition_chat(
+                project, person, words.text, now, call
+            )
+        else:
+            brief = self.brief_service.project_chat(project, person, words.text, now)
         turn = Turn(
             session_id=session.id,
             seq=(last or 0) + 1,
             author_user_id=person.id,
-            message=brief(project, person, words.text, now),
+            message=brief,
             words=words.text,
             quote_item_id=words.quote_item_id,
             quote_block_id=words.quote_block_id,

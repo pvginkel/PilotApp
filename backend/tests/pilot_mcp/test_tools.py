@@ -1,8 +1,8 @@
 """`pilot-work`'s tools (F85, ruling D1, F85.3, F85.4) and `pilot-store`'s
 (F86) driven through a real MCP client to the API's routes: each one REST call
 under the caller's bearer as it came, its answer the route's, and the route's
-refusal the tool's error, its reason whole. And `pilot-projects`' (F150.6,
-F150.7), each one REST call to a route under `/api/`, behind the sign-in gate,
+refusal the tool's error, its reason whole. And `pilot-projects`' (F150.5 to
+F150.9), each one REST call to a route under `/api/`, behind the sign-in gate,
 under the service user's token and never the caller's bearer (F150.13)."""
 
 import json
@@ -29,6 +29,8 @@ from app.models import (
     Item,
     ItemAttachment,
     PlanTask,
+    Project,
+    ProjectMember,
     Turn,
     UsageReading,
     User,
@@ -2458,6 +2460,173 @@ class TestReadFile:
 
         assert result.isError
         assert gated_routes.calls == []
+
+
+BRIEF = "Sort the inbox.\n\nStart with the oldest card."
+
+
+def _member_handles(session: DbSession, project: Project) -> list[str]:
+    return list(
+        session.scalars(
+            select(User.handle)
+            .join(ProjectMember, ProjectMember.user_id == User.id)
+            .where(ProjectMember.project_id == project.id)
+            .order_by(ProjectMember.id)
+        )
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person", "gated_starts")
+class TestStartProject:
+    """`start_project`, attended (F150.9; V18 to V20): the plus's create,
+    called as the service user through the sign-in gate. With
+    `tests/api/test_projects.py`, `TestCreateProjectByCall`, the successor of
+    the refusal `tests/test_service_user.py` pinned under a bearer token."""
+
+    async def test_the_draft_is_started_by_one_post_to_the_pluss_create_under_the_minted_token(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        session: DbSession,
+        service_user: User,
+        test_settings: Settings,
+    ) -> None:
+        result = await _ask(
+            projects_app,
+            "start_project",
+            {"brief": BRIEF, "title": "Sort the inbox", "for": "ada"},
+        )
+
+        assert not result.isError, result
+        [(request, answer)] = gated_routes.calls
+        [minted] = token_endpoint.minted
+        assert (request.method, str(request.url)) == (
+            "POST",
+            f"{API_URL}/api/projects",
+        )
+        assert json.loads(request.content) == {
+            "words": BRIEF,
+            "title": "Sort the inbox",
+            "for": "ada",
+        }
+        assert request.headers["authorization"] == f"Bearer {minted}"
+        assert (
+            request.headers[ENVIRONMENT_HEADER],
+            request.headers[SESSION_HEADER],
+        ) == (CALLER_ENVIRONMENT, CALLER_SESSION)
+        assert answer.status_code == 201
+        draft = session.scalars(select(Project)).one()
+        assert result.structuredContent == {
+            "id": str(draft.id),
+            "folder": f"draft-{draft.number}",
+            "url": f"{test_settings.baseurl}/projects/draft-{draft.number}",
+        }
+        assert (draft.state_code, draft.name, draft.created_by_user_id) == (
+            ProjectState.DRAFT,
+            "Sort the inbox",
+            service_user.id,
+        )
+        assert _member_handles(session, draft) == ["ada"]
+        (chat,) = session.scalars(select(Chat)).all()
+        assert (chat.project_id, chat.kind_code) == (draft.id, ChatKind.DEFINITION)
+        turn = session.scalars(select(Turn)).one()
+        assert (turn.session_id, turn.author_user_id, turn.words) == (
+            chat.id,
+            service_user.id,
+            BRIEF,
+        )
+        assert turn.message.endswith(
+            f"Started by a call from {CALLER_ENVIRONMENT}, for ada.\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            f"{BRIEF}"
+        )
+
+    async def test_a_brief_alone_sends_no_title_and_no_for(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        person: User,
+    ) -> None:
+        container.people_service().switch_join_calls(person, False)
+
+        result = await _ask(projects_app, "start_project", {"brief": BRIEF})
+
+        assert not result.isError, result
+        [(request, _)] = gated_routes.calls
+        assert json.loads(request.content) == {"words": BRIEF}
+        draft = session.scalars(select(Project)).one()
+        assert (draft.name, _member_handles(session, draft)) == (None, [])
+        assert session.scalars(select(Turn.words)).one() == BRIEF
+
+    async def test_the_draft_it_answers_is_read_by_its_id_and_its_folder(
+        self, projects_app: Starlette, session: DbSession
+    ) -> None:
+        async with mcp_session(projects_app, PROJECTS_HEADERS, PROJECTS_PATH) as (
+            calls,
+            _,
+        ):
+            started = (
+                await calls.call_tool(
+                    "start_project", {"brief": BRIEF, "title": "Sort the inbox"}
+                )
+            ).structuredContent
+            head = await calls.call_tool("get_project", {"project": started["id"]})
+            text = await calls.call_tool(
+                "read_file", {"path": f"{started['folder']}/project.md"}
+            )
+
+        assert (
+            head.structuredContent["id"],
+            head.structuredContent["folder"],
+            head.structuredContent["state"],
+            head.structuredContent["members"],
+            head.structuredContent["url"],
+        ) == (started["id"], started["folder"], "draft", ["ada"], started["url"])
+        assert text.structuredContent["content"] == _numbered(
+            ["---", "title: Sort the inbox", "---"]
+        )
+
+    async def test_a_for_that_names_no_person_is_the_routes_refusal(
+        self, projects_app: Starlette, gated_routes: ApiRoutes, session: DbSession
+    ) -> None:
+        result = await _ask(
+            projects_app, "start_project", {"brief": BRIEF, "for": "nobody"}
+        )
+
+        assert error_text(result) == (
+            "Error executing tool start_project: Person nobody was not found"
+        )
+        [(_, answer)] = gated_routes.calls
+        assert answer.status_code == 404
+        assert session.scalars(select(Project)).all() == []
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {},
+            {"brief": " \n"},
+            {"brief": BRIEF, "title": " "},
+            {"brief": BRIEF, "title": "Sort\nthe inbox"},
+            {"brief": BRIEF, "for": ""},
+        ],
+    )
+    async def test_no_brief_or_a_title_or_for_that_is_none_is_refused_before_any_call(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        arguments: dict[str, Any],
+    ) -> None:
+        result = await _ask(projects_app, "start_project", arguments)
+
+        assert result.isError
+        assert gated_routes.calls == []
+        assert token_endpoint.forms == []
 
 
 @pytest.mark.anyio

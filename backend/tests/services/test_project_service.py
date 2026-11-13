@@ -1101,6 +1101,188 @@ class TestCreate:
         assert session.scalars(select(Project)).all() == []
 
 
+BRIEF = "Sort the inbox.\n\nStart with the oldest card."
+
+
+def _members(db: DbSession, project: Project) -> list[tuple[str, datetime | None]]:
+    """The project's memberships, in the order they were made: the member's
+    handle and when they left."""
+    return [
+        (handle, left_at)
+        for handle, left_at in db.execute(
+            select(User.handle, ProjectMember.left_at)
+            .join(User, User.id == ProjectMember.user_id)
+            .where(ProjectMember.project_id == project.id)
+            .order_by(ProjectMember.id)
+        )
+    ]
+
+
+class TestCreateByCall:
+    """A call's draft (F150.9; DB 339, 155, 156; V18, V19, V21)."""
+
+    def test_the_service_user_is_its_creator_and_no_member(
+        self, session: DbSession, container: ServiceContainer, service_user: User
+    ) -> None:
+        draft = container.project_service().create_by_call(service_user, None, None)
+
+        assert (
+            draft.state_code,
+            draft.slug,
+            draft.name,
+            draft.archived,
+            draft.autopilot,
+            draft.paused,
+            draft.created_by_user_id,
+        ) == (ProjectState.DRAFT, None, None, False, False, False, service_user.id)
+        assert _members(session, draft) == []
+        assert _transitions(session, draft) == []
+        assert _draft_document(session, draft).published_text == ""
+
+    def test_its_members_are_the_person_for_names_and_everyone_whose_switch_is_on(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        service_user: User,
+        person: User,
+    ) -> None:
+        people = container.people_service()
+        ben = _ben(container)
+        people.switch_join_calls(ben, False)
+        cy = container.test_data_service().person("cy", "Cy Example")
+        people.switch_join_calls(cy, False)
+        container.test_data_service().person("dee", "Dee Example")
+        started = datetime.now(UTC)
+
+        draft = container.project_service().create_by_call(service_user, None, "cy")
+
+        assert _members(session, draft) == [("ada", None), ("cy", None), ("dee", None)]
+        assert {
+            membership.joined_at
+            for membership in session.scalars(
+                select(ProjectMember).where(ProjectMember.project_id == draft.id)
+            )
+        } == {draft.created_at}
+        assert started <= draft.created_at <= datetime.now(UTC)
+
+    def test_pilot_and_a_service_user_join_none_though_their_switch_reads_on(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        service_user: User,
+        person: User,
+    ) -> None:
+        assert (_pilot(session).join_calls, service_user.join_calls) == (True, True)
+
+        draft = container.project_service().create_by_call(service_user, None, None)
+
+        assert _members(session, draft) == [("ada", None)]
+
+    def test_a_switch_turned_on_joins_the_drafts_started_after_it_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        service_user: User,
+        person: User,
+    ) -> None:
+        people = container.people_service()
+        people.switch_join_calls(person, False)
+        while_off = container.project_service().create_by_call(service_user, None, None)
+        people.switch_join_calls(person, True)
+
+        after = container.project_service().create_by_call(service_user, None, None)
+
+        assert _members(session, while_off) == []
+        assert _members(session, after) == [("ada", None)]
+
+    def test_the_person_for_names_is_a_member_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        service_user: User,
+        person: User,
+    ) -> None:
+        draft = container.project_service().create_by_call(service_user, None, "ada")
+
+        assert _members(session, draft) == [("ada", None)]
+
+    @pytest.mark.parametrize("handle", ["nobody", "fleet", "agent"])
+    def test_a_for_that_names_no_person_is_refused_and_no_draft_made(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        service_user: User,
+        person: User,
+        handle: str,
+    ) -> None:
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.project_service().create_by_call(service_user, None, handle)
+
+        assert raised.value.message == f"Person {handle} was not found"
+        assert session.scalars(select(Project)).all() == []
+
+    def test_a_title_names_the_draft_in_its_front_matter(
+        self, session: DbSession, container: ServiceContainer, service_user: User
+    ) -> None:
+        draft = container.project_service().create_by_call(
+            service_user, "Sort: the inbox #12", None
+        )
+
+        assert draft.name == "Sort: the inbox #12"
+        text = _draft_document(session, draft).published_text
+        assert text == "---\ntitle: 'Sort: the inbox #12'\n---\n"
+
+    def test_it_is_in_the_project_list_as_a_draft_and_announced_to_the_store(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        service_user: User,
+        person: User,
+    ) -> None:
+        with scoped_session(container):
+            draft_id = (
+                container.project_service().create_by_call(service_user, None, None).id
+            )
+            assert engine_events == []
+
+        assert ProjectChanged(draft_id) in engine_events
+        assert ManifestChanged() in engine_events
+        (tab,) = container.project_service().tabs(ADA, archived=False)
+        assert (tab.project.id, tab.project.state_code, tab.member) == (
+            draft_id,
+            ProjectState.DRAFT,
+            True,
+        )
+
+    def test_at_create_project_its_opening_is_the_service_users_its_words_the_brief(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        service_user: User,
+        person: User,
+    ) -> None:
+        draft = container.project_service().create_by_call(
+            service_user, "Sort the inbox", "ada"
+        )
+        _definition_chat(session, draft, service_user, BRIEF)
+        container.document_service().publish(_draft_document(session, draft), DRAFTED)
+
+        _create(container, draft.id)
+
+        opening = _opening(session, draft)
+        assert (
+            opening.seq,
+            opening.title,
+            opening.created_by_user_id,
+            opening.created_by_session_id,
+        ) == (1, "KubeCoder fleet started this project", service_user.id, None)
+        assert session.get_one(Document, opening.id).published_text == BRIEF
+        ((kind, _, by), _) = _transitions(session, draft)
+        assert (kind, by) == (TransitionKind.OPENED, person.id)
+        assert _members(session, draft) == [("ada", None)]
+
+
 DRAFTED = """---
 title: Camp site
 slug: camp-site

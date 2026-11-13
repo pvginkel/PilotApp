@@ -7,9 +7,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.reference import ProjectState, TaskStatus
+from app.schemas.chats import ChatMessageRequestSchema
 
 
 class ProjectStatus(StrEnum):
@@ -49,6 +50,40 @@ class ProjectListQuerySchema(BaseModel):
         default=False,
         description="True for the archived projects; false for every other",
     )
+
+
+class ProjectCreateRequestSchema(ChatMessageRequestSchema):
+    """A new project's first message: a person's, from the plus (F46.1), or
+    the brief of a call made as a service user, with what a call alone names
+    (F150.9)."""
+
+    title: str | None = Field(
+        default=None,
+        description=(
+            "A call's alone: the draft's title, one line, which names the "
+            "project until Pilot writes its own"
+        ),
+        examples=["Sort the inbox"],
+    )
+    for_: str | None = Field(
+        default=None,
+        alias="for",
+        min_length=1,
+        description=(
+            "A call's alone: the handle of the person the project is started "
+            "for, a member of it from its start"
+        ),
+        examples=["ada"],
+    )
+
+    @field_validator("title")
+    @classmethod
+    def _one_line(cls, title: str | None) -> str | None:
+        if title is None:
+            return None
+        if not title.strip() or len(title.splitlines()) > 1:
+            raise ValueError("a title is one line of words")
+        return title.strip()
 
 
 class ProjectLookupQuerySchema(BaseModel):

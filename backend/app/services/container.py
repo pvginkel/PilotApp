@@ -24,6 +24,7 @@ from app.services.app_page_service import AppPageService
 from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
 from app.services.brief_service import BriefService
+from app.services.caller_environment_service import CallerEnvironmentService
 from app.services.chat_close_service import ChatCloseService
 from app.services.chat_read_service import ChatReadService
 from app.services.chat_service import ChatService
@@ -598,6 +599,17 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # The signed-in person on the record (F137), and what links in text (F93)
     people_service = providers.Factory(PeopleService, db=db_session)
+    # The environment a call to the projects surface came from, by its name
+    # (F150.1); the client is built at the call, so the service is built
+    # without a controller
+    caller_environment_service = providers.Factory(
+        CallerEnvironmentService,
+        db=db_session,
+        controller_client=controller_client.provider,
+        controller_configured=providers.Callable(
+            lambda url: url is not None, app_config.provided.controller_url
+        ),
+    )
     # A browser's subscription, written and deleted by its person (F146)
     push_subscription_service = providers.Factory(
         PushSubscriptionService, db=db_session

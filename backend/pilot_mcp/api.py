@@ -459,6 +459,19 @@ class ProjectHead(BaseModel):
     url: str = Field(description="Its page in Pilot's app")
 
 
+class StartedProject(BaseModel):
+    """The draft a call started."""
+
+    id: uuid.UUID = Field(description="Its id, which names it for good")
+    folder: str = Field(
+        description=(
+            "Its folder, the first segment of its files' paths: `draft-<number>`"
+            " until Create project gives the project its slug"
+        )
+    )
+    url: str = Field(description="Its page in Pilot's app")
+
+
 ItemKind = Literal[
     "opening",
     "decision",
@@ -844,6 +857,13 @@ class PilotProjectsApi:
             url=head["url"],
         )
 
+    async def start_project(
+        self, caller: Caller, brief: str, title: str | None, person: str | None
+    ) -> StartedProject:
+        body = {"words": brief} | _given(title=title, **{"for": person})
+        draft = await self._send("POST", "/api/projects", caller, body=body)
+        return StartedProject(id=draft["id"], folder=draft["address"], url=draft["url"])
+
     async def list_items(
         self,
         caller: Caller,
@@ -911,10 +931,23 @@ class PilotProjectsApi:
         return FileText.model_validate(await self._get("/api/tree/text", caller, query))
 
     async def _get(self, path: str, caller: Caller, query: dict[str, str]) -> Any:
+        return await self._send("GET", path, caller, query=query)
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        caller: Caller,
+        *,
+        query: dict[str, str] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> Any:
         headers = {"Authorization": await self._credential.authorization()}
         headers |= caller.headers()
         try:
-            response = await self._http.get(path, params=query, headers=headers)
+            response = await self._http.request(
+                method, path, params=query, json=body, headers=headers
+            )
         except httpx.RequestError as exc:
             raise ToolError(
                 "Cannot call pilot-projects because Pilot's API at"

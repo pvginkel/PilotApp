@@ -1,6 +1,9 @@
 """The service user at the API (DB 338): its token is admitted as a person's
 is, by the `editor` role and the subject, and it is the caller and nothing
-more: every write attributed to a person refuses it."""
+more: every write attributed to a person refuses it. The plus's create is
+none of them: called as the service user it is a call's draft (F150.9), which
+`tests/api/test_projects.py`, `TestCreateProjectByCall`, and
+`tests/pilot_mcp/test_tools.py`, `TestStartProject`, pin."""
 
 import secrets
 import time
@@ -96,17 +99,21 @@ class TestTheGate:
         assert [row["id"] for row in listed.get_json()["projects"]] == [str(project.id)]
 
     def test_a_persons_write_refuses_it(
-        self, oidc_client: FlaskClient, bearer: dict[str, str], session: Session
+        self,
+        oidc_client: FlaskClient,
+        bearer: dict[str, str],
+        session: Session,
+        project: Project,
     ) -> None:
         response = oidc_client.post(
-            "/api/projects", headers=bearer, json={"words": "Hello"}
+            f"/api/projects/{project.id}/membership", headers=bearer
         )
 
         assert response.status_code == 409
         assert response.get_json()["error"] == (
-            f"Cannot start a new project because {REFUSAL}"
+            f"Cannot join the untitled project because {REFUSAL}"
         )
-        assert _count(session, Project) == 0
+        assert _count(session, ProjectMember) == 0
 
 
 def _writes(
@@ -115,7 +122,6 @@ def _writes(
     """Every write of the API that names the person who made it: the method,
     the path and a body the route takes."""
     return [
-        ("POST", "/api/projects", {"words": "Hello"}),
         ("POST", f"/api/projects/{project}/transitions", {"kind": "paused"}),
         ("POST", f"/api/projects/{project}/membership", None),
         ("DELETE", f"/api/projects/{project}/membership", None),
