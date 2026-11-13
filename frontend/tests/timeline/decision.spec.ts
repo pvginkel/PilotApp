@@ -56,8 +56,8 @@ test.describe('A decision', () => {
     await expect(item.root.locator('.item-after')).toHaveText(AFTER);
     // The prose that asks, the block, the prose after it, in that order.
     expect(
-      await item.root.locator('.item-body > *').evaluateAll((parts) => parts.map((part) => part.className || part.tagName)),
-    ).toEqual(['item-head', 'item-title', 'fold', 'block solo open', 'item-after']);
+      await item.root.locator('.item-body > *').evaluateAll((parts) => parts.map((part) => part.className || part.getAttribute('data-testid'))),
+    ).toEqual(['item-head', 'item-title', 'timeline.item.text', 'block solo open', 'item-after']);
 
     await expect(block.head).toHaveCount(0);
     await expect(block.options).toHaveCount(2);
