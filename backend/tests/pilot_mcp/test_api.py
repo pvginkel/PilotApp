@@ -14,11 +14,12 @@ from app.models.reference import ProgressState
 from app.models.reference import ProjectState as RecordedProjectState
 from app.schemas import pilot_work
 from app.schemas.projects import ProjectStatus as ApiProjectStatus
-from app.schemas.timeline import HeldReason
+from app.schemas.timeline import HeldReason, ItemKindCode
 from pilot_mcp import api as pilot_mcp_api
 from pilot_mcp.api import (
     Added,
     Caller,
+    ItemKind,
     PilotProjectsApi,
     PilotStoreApi,
     PilotWorkApi,
@@ -65,6 +66,20 @@ def test_a_projects_state_and_status_take_every_value_the_api_answers() -> None:
         state.value for state in RecordedProjectState
     }
     assert set(get_args(ProjectStatus)) == {status.value for status in ApiProjectStatus}
+
+
+def test_a_listed_items_kind_takes_every_kind_the_api_indexes() -> None:
+    assert get_args(ItemKind) == get_args(ItemKindCode)
+
+
+def test_the_pages_are_the_fleets_file_tools() -> None:
+    """KubeCoder's `mcp-server/src/kubecoder_mcp/tools/file.py` (F150.5)."""
+    assert (
+        pilot_mcp_api.LIST_LIMIT_DEFAULT,
+        pilot_mcp_api.LIST_LIMIT_MAX,
+        pilot_mcp_api.FIND_LIMIT_DEFAULT,
+        pilot_mcp_api.FIND_LIMIT_MAX,
+    ) == (100, 1000, 50, 200)
 
 
 @pytest.mark.parametrize("limit", ["MAX_STEP_CODE", "MAX_STEP_LABEL", "MAX_STEPS"])

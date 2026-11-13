@@ -4909,6 +4909,189 @@
         "title": "WriterQuestionSchema",
         "type": "object"
       },
+      "ItemIndexQuerySchema.1fdd8ae": {
+        "description": "Which items of a project's index: the project by its address, the open\nitems or every one, and of one kind or of any.",
+        "properties": {
+          "address": {
+            "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+            "examples": [
+              "recipe-box",
+              "draft-7"
+            ],
+            "minLength": 1,
+            "title": "Address",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "opening",
+                  "decision",
+                  "confirmation",
+                  "question",
+                  "action",
+                  "notice",
+                  "document",
+                  "review",
+                  "archive_question",
+                  "work",
+                  "card_wait",
+                  "timed_wait"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The one kind to list; none for every kind",
+            "title": "Kind"
+          },
+          "open": {
+            "default": true,
+            "description": "True for the open items alone; false for every item",
+            "title": "Open",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "ItemIndexQuerySchema",
+        "type": "object"
+      },
+      "ItemIndexSchema.1fdd8ae": {
+        "description": "A project's items as `timeline.json` indexes them, in `seq` order.",
+        "properties": {
+          "items": {
+            "description": "A row per item",
+            "items": {
+              "$ref": "#/components/schemas/ItemIndexSchema.1fdd8ae.IndexedItemSchema"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ItemIndexSchema",
+        "type": "object"
+      },
+      "ItemIndexSchema.1fdd8ae.IndexedItemSchema": {
+        "description": "An item as its project's `timeline.json` indexes it (F150.8).",
+        "properties": {
+          "created_at": {
+            "description": "When it was made, to the second",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "done_cause": {
+            "anyOf": [
+              {
+                "enum": [
+                  "answered",
+                  "marked",
+                  "settled",
+                  "turn_ended",
+                  "finished",
+                  "cancelled",
+                  "withdrawn"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How it came to be done; null while it is open",
+            "title": "Done Cause"
+          },
+          "for_handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The handle of the person it is for; null for an item for no one",
+            "title": "For Handle"
+          },
+          "kind": {
+            "description": "The item's kind",
+            "enum": [
+              "opening",
+              "decision",
+              "confirmation",
+              "question",
+              "action",
+              "notice",
+              "document",
+              "review",
+              "archive_question",
+              "work",
+              "card_wait",
+              "timed_wait"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its file's path from the root of the store's tree; null for an item with no file: a work item, a wait, a registered document before its text arrives",
+            "examples": [
+              "recipe-box/items/3-the-palette.md"
+            ],
+            "title": "Path"
+          },
+          "seq": {
+            "description": "Its number among its project's items",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its title; null for an item without one",
+            "title": "Title"
+          },
+          "urgent": {
+            "description": "Whether it is urgent",
+            "title": "Urgent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "seq",
+          "kind",
+          "title",
+          "path",
+          "created_at",
+          "done_cause",
+          "for_handle",
+          "urgent"
+        ],
+        "title": "IndexedItemSchema",
+        "type": "object"
+      },
       "JoinCallsSwitchSchema.d1d9f70": {
         "description": "Where a person turns their switch *Join projects started on my\nbehalf* (F134.2).",
         "properties": {
@@ -10528,6 +10711,205 @@
         "title": "TransitionRequestSchema",
         "type": "object"
       },
+      "TreeEntriesQuerySchema.e8f3c31": {
+        "description": "The directory to list.",
+        "properties": {
+          "path": {
+            "default": "",
+            "description": "The directory's path from the tree's root, as `recipe-box/items/3-the-palette.md` is; one that starts with `/` or climbs above the root is refused; empty, the default, for the root",
+            "examples": [
+              "recipe-box/items"
+            ],
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "title": "TreeEntriesQuerySchema",
+        "type": "object"
+      },
+      "TreeEntriesSchema.e8f3c31": {
+        "description": "What a directory of the tree holds.",
+        "properties": {
+          "entries": {
+            "description": "Its directories, then its files, each group in case-insensitive name order",
+            "items": {
+              "$ref": "#/components/schemas/TreeEntriesSchema.e8f3c31.TreeEntrySchema"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "TreeEntriesSchema",
+        "type": "object"
+      },
+      "TreeEntriesSchema.e8f3c31.TreeEntrySchema": {
+        "description": "A file or a directory of the tree.",
+        "properties": {
+          "is_directory": {
+            "description": "Whether it is a directory",
+            "title": "Is Directory",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Its path from the tree's root; a directory's ends with `/`",
+            "examples": [
+              "recipe-box/items/"
+            ],
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "is_directory"
+        ],
+        "title": "TreeEntrySchema",
+        "type": "object"
+      },
+      "TreeMatchesQuerySchema.e8f3c31": {
+        "description": "The glob to match the tree's files against.",
+        "properties": {
+          "pattern": {
+            "description": "A glob matched against each file's path from the tree's root: `*` any characters but `/`, `**` any path segments, `?` one character, `{a,b}` either alternative",
+            "examples": [
+              "**/timeline.json",
+              "recipe-box/items/*.md"
+            ],
+            "minLength": 1,
+            "title": "Pattern",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "title": "TreeMatchesQuerySchema",
+        "type": "object"
+      },
+      "TreeMatchesSchema.e8f3c31": {
+        "description": "The files of the tree a glob matches.",
+        "properties": {
+          "paths": {
+            "description": "Each file's path from the tree's root, in path order",
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "title": "TreeMatchesSchema",
+        "type": "object"
+      },
+      "TreeTextQuerySchema.e8f3c31": {
+        "description": "The file to read, and the lines of it.",
+        "properties": {
+          "end_line": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The last line to read, inclusive",
+            "title": "End Line"
+          },
+          "path": {
+            "description": "The file's path from the tree's root, as `recipe-box/items/3-the-palette.md` is; one that starts with `/` or climbs above the root is refused",
+            "examples": [
+              "recipe-box/timeline.json"
+            ],
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "start_line": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The first line to read, from 1",
+            "title": "Start Line"
+          },
+          "tail_lines": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The count of the file's last lines to read; not with a range",
+            "title": "Tail Lines"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "TreeTextQuerySchema",
+        "type": "object"
+      },
+      "TreeTextSchema.e8f3c31": {
+        "description": "A file of the tree read as text.",
+        "properties": {
+          "content": {
+            "description": "The lines read, each `N: line` under its number in the file",
+            "examples": [
+              "1: # Recipe box\n"
+            ],
+            "title": "Content",
+            "type": "string"
+          },
+          "limit_hit": {
+            "description": "Whether a range or a tail was cut at 2,000 lines or 128 KB",
+            "title": "Limit Hit",
+            "type": "boolean"
+          },
+          "line_cut": {
+            "description": "Whether the content is one line cut short, a line over 128 KB on its own",
+            "title": "Line Cut",
+            "type": "boolean"
+          },
+          "sha256": {
+            "description": "The SHA-256 of the whole file's bytes, in hex",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "total_count": {
+            "description": "The count of the file's lines",
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content",
+          "sha256",
+          "total_count",
+          "limit_hit",
+          "line_cut"
+        ],
+        "title": "TreeTextSchema",
+        "type": "object"
+      },
       "UiSetupResponseSchema.630d3b9": {
         "description": "What the frontend needs to know about the deployment it runs against.",
         "properties": {
@@ -13270,6 +13652,135 @@
           }
         ],
         "summary": "Read the head of the project an address names: its slug, a draft's `draft-<number>`, still its project's after Create project, or its id.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/items": {
+      "get": {
+        "description": "Returns:     200: The items, in `seq` order     400: No address is given, or `open` or `kind` is none of its values     401: No one is signed in     403: The caller lacks the editor role     404: No project is at the address",
+        "operationId": "get__api_projects_items",
+        "parameters": [
+          {
+            "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+            "in": "query",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+              "examples": [
+                "recipe-box",
+                "draft-7"
+              ],
+              "minLength": 1,
+              "title": "Address",
+              "type": "string"
+            }
+          },
+          {
+            "description": "True for the open items alone; false for every item",
+            "in": "query",
+            "name": "open",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "True for the open items alone; false for every item",
+              "title": "Open",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "The one kind to list; none for every kind",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "opening",
+                    "decision",
+                    "confirmation",
+                    "question",
+                    "action",
+                    "notice",
+                    "document",
+                    "review",
+                    "archive_question",
+                    "work",
+                    "card_wait",
+                    "timed_wait"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The one kind to list; none for every kind",
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemIndexSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the index of the items of the project an address names, as its `timeline.json` holds it: the open items, or with `open` false every one, and with `kind` those of that kind alone. No screen reads it: the timeline's own route carries each item's body and no path.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -18284,6 +18795,326 @@
         },
         "summary": "A delivery of `tracker`'s, `youtrack` the one there is: the card waits the change of state it reports matches fire inside the request (F136.2).",
         "tags": []
+      }
+    },
+    "/api/tree/entries": {
+      "get": {
+        "description": "Returns:     200: The directory's entries, directories first     400: The path leaves the tree     401: No one is signed in     403: The caller lacks the editor role     404: Nothing is at the path     409: The path is a file's",
+        "operationId": "get__api_tree_entries",
+        "parameters": [
+          {
+            "description": "The directory's path from the tree's root, as `recipe-box/items/3-the-palette.md` is; one that starts with `/` or climbs above the root is refused; empty, the default, for the root",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "The directory's path from the tree's root, as `recipe-box/items/3-the-palette.md` is; one that starts with `/` or climbs above the root is refused; empty, the default, for the root",
+              "examples": [
+                "recipe-box/items"
+              ],
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TreeEntriesSchema.e8f3c31"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List what a directory of the tree holds: every project that is not archived has its folder at the root, beside `reference.json`.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/tree/matches": {
+      "get": {
+        "description": "Returns:     200: The matching files' paths, in path order     400: No pattern is given, it uses glob syntax that is not supported,         or it starts with `/`     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "get__api_tree_matches",
+        "parameters": [
+          {
+            "description": "A glob matched against each file's path from the tree's root: `*` any characters but `/`, `**` any path segments, `?` one character, `{a,b}` either alternative",
+            "in": "query",
+            "name": "pattern",
+            "required": true,
+            "schema": {
+              "description": "A glob matched against each file's path from the tree's root: `*` any characters but `/`, `**` any path segments, `?` one character, `{a,b}` either alternative",
+              "examples": [
+                "**/timeline.json",
+                "recipe-box/items/*.md"
+              ],
+              "minLength": 1,
+              "title": "Pattern",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TreeMatchesSchema.e8f3c31"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Find the tree's files whose path matches a glob.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/tree/text": {
+      "get": {
+        "description": "Returns:     200: The lines read, with the whole file's hash and line count     400: No path is given, a line number is under 1, a tail is asked with         a range, or the path leaves the tree     401: No one is signed in     403: The caller lacks the editor role     404: Nothing is at the path     409: The path is a directory's, the file is not UTF-8 text, or it is         read whole and is over 128 KB",
+        "operationId": "get__api_tree_text",
+        "parameters": [
+          {
+            "description": "The file's path from the tree's root, as `recipe-box/items/3-the-palette.md` is; one that starts with `/` or climbs above the root is refused",
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "The file's path from the tree's root, as `recipe-box/items/3-the-palette.md` is; one that starts with `/` or climbs above the root is refused",
+              "examples": [
+                "recipe-box/timeline.json"
+              ],
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The first line to read, from 1",
+            "in": "query",
+            "name": "start_line",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The first line to read, from 1",
+              "title": "Start Line"
+            }
+          },
+          {
+            "description": "The last line to read, inclusive",
+            "in": "query",
+            "name": "end_line",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The last line to read, inclusive",
+              "title": "End Line"
+            }
+          },
+          {
+            "description": "The count of the file's last lines to read; not with a range",
+            "in": "query",
+            "name": "tail_lines",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The count of the file's last lines to read; not with a range",
+              "title": "Tail Lines"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TreeTextSchema.e8f3c31"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a file of the tree as text, its lines numbered: whole up to 128 KB, or a line range or a tail of a file of any size, cut at 2,000 lines and 128 KB.",
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/ui-setup": {

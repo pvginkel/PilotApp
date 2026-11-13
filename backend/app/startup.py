@@ -63,6 +63,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         from app.api.quota_overrules import quota_overrules_bp
         from app.api.sessions import sessions_bp
         from app.api.testing_record import testing_record_bp
+        from app.api.tree import tree_bp
         from app.api.web_push import web_push_bp
 
         api_bp.register_blueprint(app_pages_bp)
@@ -76,6 +77,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         api_bp.register_blueprint(quota_overrules_bp)
         api_bp.register_blueprint(sessions_bp)
         api_bp.register_blueprint(testing_record_bp)
+        api_bp.register_blueprint(tree_bp)
         api_bp.register_blueprint(web_push_bp)
 
 

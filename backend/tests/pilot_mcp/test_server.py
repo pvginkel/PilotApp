@@ -1169,7 +1169,7 @@ _STATUS = {
 }
 
 # Each tool: its parameters, its result and its description, the words as a
-# session anywhere in the fleet reads them (F150.3, F150.4, F150.6, F150.7).
+# session anywhere in the fleet reads them (F150.3 to F150.8).
 PROJECTS_SURFACE = {
     "list_projects": (
         {
@@ -1358,6 +1358,545 @@ PROJECTS_SURFACE = {
         " and environment, the count of its open items and its page in Pilot's"
         " app. It answers no step or note of the plan and no file's content. A"
         " project no id or folder names is refused.",
+    ),
+    "list_items": (
+        {
+            "properties": {
+                "project": {
+                    "description": (
+                        "The project's id or its folder: `draft-<number>` while it is a"
+                        " draft, its slug once it is created. A draft's folder does not"
+                        " survive Create project, which gives the project its slug: hold a"
+                        " draft by its id across it"
+                    ),
+                    "minLength": 1,
+                    "title": "Project",
+                    "type": "string",
+                },
+                "open": {
+                    "default": True,
+                    "description": (
+                        "True, the default, for the open items alone; false for every item,"
+                        " the done ones included"
+                    ),
+                    "title": "Open",
+                    "type": "boolean",
+                },
+                "kind": {
+                    "anyOf": [
+                        {
+                            "enum": [
+                                "opening",
+                                "decision",
+                                "confirmation",
+                                "question",
+                                "action",
+                                "notice",
+                                "document",
+                                "review",
+                                "archive_question",
+                                "work",
+                                "card_wait",
+                                "timed_wait",
+                            ],
+                            "type": "string",
+                        },
+                        {
+                            "type": "null",
+                        },
+                    ],
+                    "default": None,
+                    "description": "The one kind of item to list. Omit for every kind.",
+                    "title": "Kind",
+                },
+                "offset": {
+                    "default": 0,
+                    "description": "Results to skip for pagination. Default: 0.",
+                    "minimum": 0,
+                    "title": "Offset",
+                    "type": "integer",
+                },
+                "limit": {
+                    "default": 100,
+                    "description": (
+                        "Maximum items to return. Default: 100, max: 1000 — a larger ask is"
+                        " clamped to the max."
+                    ),
+                    "minimum": 1,
+                    "title": "Limit",
+                    "type": "integer",
+                },
+            },
+            "required": [
+                "project",
+            ],
+            "title": "list_itemsArguments",
+            "type": "object",
+        },
+        {
+            "$defs": {
+                "ListedItem": {
+                    "description": (
+                        "An item of a project; a field with nothing to say is left out."
+                    ),
+                    "properties": {
+                        "seq": {
+                            "description": "Its number among the project's items",
+                            "title": "Seq",
+                            "type": "integer",
+                        },
+                        "kind": {
+                            "description": "Its kind, a code of `reference.json`'s `item_kinds`",
+                            "title": "Kind",
+                            "type": "string",
+                        },
+                        "title": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                },
+                                {
+                                    "type": "null",
+                                },
+                            ],
+                            "default": None,
+                            "description": "Its title",
+                            "title": "Title",
+                        },
+                        "path": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                },
+                                {
+                                    "type": "null",
+                                },
+                            ],
+                            "default": None,
+                            "description": (
+                                "Its file, a path `read_file` takes; left out for an item with no"
+                                " file, a work item and a wait among them"
+                            ),
+                            "title": "Path",
+                        },
+                        "created_at": {
+                            "description": "When it was added, in UTC",
+                            "title": "Created At",
+                            "type": "string",
+                        },
+                        "done_cause": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                },
+                                {
+                                    "type": "null",
+                                },
+                            ],
+                            "default": None,
+                            "description": (
+                                "How it came to be done: `answered`, `marked`, `settled`,"
+                                " `turn_ended`, `finished`, `cancelled` or `withdrawn`; left out"
+                                " while it is open"
+                            ),
+                            "title": "Done Cause",
+                        },
+                        "for": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                },
+                                {
+                                    "type": "null",
+                                },
+                            ],
+                            "default": None,
+                            "description": (
+                                "The handle of the person it is for; left out for one for no one"
+                            ),
+                            "title": "For",
+                        },
+                        "urgent": {
+                            "default": False,
+                            "description": "True for an urgent item; left out otherwise",
+                            "title": "Urgent",
+                            "type": "boolean",
+                        },
+                    },
+                    "required": [
+                        "seq",
+                        "kind",
+                        "created_at",
+                    ],
+                    "title": "ListedItem",
+                    "type": "object",
+                },
+            },
+            "description": "A page of a project's items.",
+            "properties": {
+                "items": {
+                    "description": "A row per item, in the order they were added",
+                    "items": {
+                        "$ref": "#/$defs/ListedItem",
+                    },
+                    "title": "Items",
+                    "type": "array",
+                },
+                "totalCount": {
+                    "description": "The count of every entry, on any page",
+                    "title": "Totalcount",
+                    "type": "integer",
+                },
+                "limitHit": {
+                    "description": "Whether more remain past this page: page on with `offset`",
+                    "title": "Limithit",
+                    "type": "boolean",
+                },
+            },
+            "required": [
+                "items",
+                "totalCount",
+                "limitHit",
+            ],
+            "title": "Items",
+            "type": "object",
+        },
+        (
+            "List the items of a project Pilot manages, by its id or its"
+            " folder, in the order they were added: the index of its"
+            " `timeline.json`. It lists the open items alone unless `open` is"
+            " false. Returns `{items, totalCount, limitHit}`: an item has its"
+            " `seq`, its number among the project's items, its `kind`, its"
+            " `title`, its `path`, the file `read_file` takes, `created_at`,"
+            " `done_cause`, `for` and `urgent`, and a field with nothing to say"
+            " is left out: an open item has no `done_cause`, an item with no"
+            " file no `path`. `totalCount` counts every item the call lists and"
+            " `limitHit` says whether more remain past this page (page on with"
+            " `offset`). A project no id or folder names is refused."
+        ),
+    ),
+    "list_files": (
+        {
+            "properties": {
+                "path": {
+                    "default": "",
+                    "description": (
+                        "The folder's path from the root of the projects' files (e.g."
+                        " `draft-7/items`). Default: the root."
+                    ),
+                    "title": "Path",
+                    "type": "string",
+                },
+                "offset": {
+                    "default": 0,
+                    "description": "Results to skip for pagination. Default: 0.",
+                    "minimum": 0,
+                    "title": "Offset",
+                    "type": "integer",
+                },
+                "limit": {
+                    "default": 100,
+                    "description": (
+                        "Maximum entries to return. Default: 100, max: 1000 — a larger ask"
+                        " is clamped to the max."
+                    ),
+                    "minimum": 1,
+                    "title": "Limit",
+                    "type": "integer",
+                },
+            },
+            "title": "list_filesArguments",
+            "type": "object",
+        },
+        {
+            "$defs": {
+                "FileEntry": {
+                    "description": "A file or a folder of a folder.",
+                    "properties": {
+                        "path": {
+                            "description": (
+                                "Its path from the root, which the other file tools take; a"
+                                " folder's ends with `/`"
+                            ),
+                            "title": "Path",
+                            "type": "string",
+                        },
+                        "isDirectory": {
+                            "description": "Whether it is a folder",
+                            "title": "Isdirectory",
+                            "type": "boolean",
+                        },
+                    },
+                    "required": [
+                        "path",
+                        "isDirectory",
+                    ],
+                    "title": "FileEntry",
+                    "type": "object",
+                },
+            },
+            "description": "A page of what a folder holds.",
+            "properties": {
+                "files": {
+                    "description": "Its folders first, then its files",
+                    "items": {
+                        "$ref": "#/$defs/FileEntry",
+                    },
+                    "title": "Files",
+                    "type": "array",
+                },
+                "totalCount": {
+                    "description": "The count of every entry, on any page",
+                    "title": "Totalcount",
+                    "type": "integer",
+                },
+                "limitHit": {
+                    "description": "Whether more remain past this page: page on with `offset`",
+                    "title": "Limithit",
+                    "type": "boolean",
+                },
+            },
+            "required": [
+                "files",
+                "totalCount",
+                "limitHit",
+            ],
+            "title": "FileListing",
+            "type": "object",
+        },
+        (
+            "List the files and folders in a folder of the projects Pilot"
+            " manages, by its path from the root of their files: the root holds"
+            " `reference.json` and the folder of every project that is not"
+            " archived. Folders come first, then files. Returns `{files: [{path,"
+            " isDirectory}], totalCount, limitHit}`: every `path` runs from the"
+            " root, so it passes straight to the other file tools, and a"
+            " folder's ends with `/`; `totalCount` counts every entry and"
+            " `limitHit` says whether more remain past this page (page on with"
+            " `offset`). A path that is not a folder is a `not-a-directory`"
+            " error, and one that starts with `/` or climbs above the root a"
+            " `path-outside-projects` error."
+        ),
+    ),
+    "read_file": (
+        {
+            "properties": {
+                "path": {
+                    "description": (
+                        "The file's path from the root of the projects' files (e.g."
+                        " `draft-7/timeline.json`): a project's folder, then the path in it."
+                        " A path that starts with `/` or climbs above the root is a"
+                        " `path-outside-projects` error."
+                    ),
+                    "minLength": 1,
+                    "title": "Path",
+                    "type": "string",
+                },
+                "start_line": {
+                    "anyOf": [
+                        {
+                            "minimum": 1,
+                            "type": "integer",
+                        },
+                        {
+                            "type": "null",
+                        },
+                    ],
+                    "default": None,
+                    "description": "1-based starting line. Omit to start from line 1.",
+                    "title": "Start Line",
+                },
+                "end_line": {
+                    "anyOf": [
+                        {
+                            "minimum": 1,
+                            "type": "integer",
+                        },
+                        {
+                            "type": "null",
+                        },
+                    ],
+                    "default": None,
+                    "description": (
+                        "1-based ending line (inclusive). Omit to read to end of file."
+                    ),
+                    "title": "End Line",
+                },
+                "tail_lines": {
+                    "anyOf": [
+                        {
+                            "minimum": 1,
+                            "type": "integer",
+                        },
+                        {
+                            "type": "null",
+                        },
+                    ],
+                    "default": None,
+                    "description": (
+                        "Read the last N lines of the file. Not with"
+                        " `start_line`/`end_line`."
+                    ),
+                    "title": "Tail Lines",
+                },
+            },
+            "required": [
+                "path",
+            ],
+            "title": "read_fileArguments",
+            "type": "object",
+        },
+        {
+            "description": "A text file as it was read.",
+            "properties": {
+                "content": {
+                    "description": "The lines read, each under its number in the file: `N: line`",
+                    "title": "Content",
+                    "type": "string",
+                },
+                "sha256": {
+                    "description": "The hash of the whole file's bytes",
+                    "title": "Sha256",
+                    "type": "string",
+                },
+                "totalCount": {
+                    "description": "The count of the file's lines",
+                    "title": "Totalcount",
+                    "type": "integer",
+                },
+                "limitHit": {
+                    "description": "Whether a range or a tail was cut at 2,000 lines or 128 KB",
+                    "title": "Limithit",
+                    "type": "boolean",
+                },
+                "lineCut": {
+                    "description": (
+                        "Whether the content is one line cut short, over 128 KB on its own"
+                    ),
+                    "title": "Linecut",
+                    "type": "boolean",
+                },
+            },
+            "required": [
+                "content",
+                "sha256",
+                "totalCount",
+                "limitHit",
+                "lineCut",
+            ],
+            "title": "FileText",
+            "type": "object",
+        },
+        (
+            "Read a text file of the projects Pilot manages, by its path from"
+            " the root of their files. Returns `{content, sha256, totalCount,"
+            " limitHit, lineCut}`: `content` has the file's own line numbers"
+            ' prefixed (e.g. `"1: line\\n2: line\\n"`), 1-indexed; `sha256` is the'
+            " hash of the whole file's bytes, whatever was read; `totalCount`"
+            " counts the file's lines. A read that names no range returns the"
+            " whole file, however many lines, up to 128 KB; a larger file is a"
+            " `file-too-large` error giving its line count. A line range"
+            " (`start_line`..`end_line`) or a tail (`tail_lines`, the last N"
+            " lines) reads a file of any size, and its answer holds at most"
+            " 2,000 lines and 128 KB of `content`. Past either limit it is cut"
+            " there and `limitHit` is true: a range keeps its start, so page on"
+            " from the line after the last one returned, and a tail keeps the"
+            " file's end. A line over 128 KB on its own comes back cut, as the"
+            " answer's only line, with `lineCut` true: its start for a range,"
+            " its end for a tail. `tail_lines` together with a range is an"
+            " error. A file that is not UTF-8 text, as an attachment may be, is"
+            " a `not-text` error. A folder is a `not-a-file` error. An archived"
+            " project's files are not read."
+        ),
+    ),
+    "find_files": (
+        {
+            "properties": {
+                "path_pattern": {
+                    "description": (
+                        "Glob matched against the files' paths from the root of the"
+                        " projects' files (e.g. `**/timeline.json`, `draft-7/items/*.md`,"
+                        " `**/{project.md,plan.json}`). Supports *, **, ?, {a,b}. A pattern"
+                        " that starts with `/`, where no path does, is a"
+                        " `path-outside-projects` error."
+                    ),
+                    "minLength": 1,
+                    "title": "Path Pattern",
+                    "type": "string",
+                },
+                "offset": {
+                    "default": 0,
+                    "description": "Results to skip for pagination. Default: 0.",
+                    "minimum": 0,
+                    "title": "Offset",
+                    "type": "integer",
+                },
+                "limit": {
+                    "default": 50,
+                    "description": (
+                        "Maximum files to return. Default: 50, max: 200 — a larger ask is"
+                        " clamped to the max."
+                    ),
+                    "minimum": 1,
+                    "title": "Limit",
+                    "type": "integer",
+                },
+            },
+            "required": [
+                "path_pattern",
+            ],
+            "title": "find_filesArguments",
+            "type": "object",
+        },
+        {
+            "description": "A page of the files a glob matches.",
+            "properties": {
+                "pattern": {
+                    "description": "The glob that was matched",
+                    "title": "Pattern",
+                    "type": "string",
+                },
+                "files": {
+                    "description": "The matching files' paths from the root, in path order",
+                    "items": {
+                        "type": "string",
+                    },
+                    "title": "Files",
+                    "type": "array",
+                },
+                "totalCount": {
+                    "description": "The count of every entry, on any page",
+                    "title": "Totalcount",
+                    "type": "integer",
+                },
+                "limitHit": {
+                    "description": "Whether more remain past this page: page on with `offset`",
+                    "title": "Limithit",
+                    "type": "boolean",
+                },
+            },
+            "required": [
+                "pattern",
+                "files",
+                "totalCount",
+                "limitHit",
+            ],
+            "title": "FoundFiles",
+            "type": "object",
+        },
+        (
+            "Find the files of the projects Pilot manages whose path matches a"
+            " glob, the path taken from the root of their files. Use it to"
+            " discover files by path or name; it does not search file contents."
+            " `*` matches any characters except `/`, `**` any path segments, `?`"
+            " a single character, `{a,b}` either alternative (`*`, `**`, `?`"
+            " work inside; no nesting). Other glob syntax (`[...]` classes, `\\`"
+            " escapes, nested or unbalanced braces) is a `validation-error`"
+            " naming it, not zero results. Returns `{pattern, files, totalCount,"
+            " limitHit}`: `files` are the matching paths in path order,"
+            " `totalCount` counts every match and `limitHit` says whether more"
+            " remain past this page (page on with `offset`)."
+        ),
     ),
 }
 

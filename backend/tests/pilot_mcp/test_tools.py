@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 import pytest
 from dependency_injector import providers
 from sqlalchemy import func, select
@@ -18,6 +19,7 @@ from starlette.applications import Starlette
 
 from app import models
 from app.config import Settings
+from app.engine.views import utc_time
 from app.models import (
     Attachment,
     Block,
@@ -29,11 +31,13 @@ from app.models import (
     PlanTask,
     Turn,
     UsageReading,
+    User,
     WindowShare,
     WriterQuestion,
 )
 from app.models.reference import (
     AnswerChannel,
+    AttachmentSource,
     ChatKind,
     ProjectState,
     SessionState,
@@ -1729,3 +1733,759 @@ class TestGetProject:
         assert result.isError
         assert gated_routes.calls == []
         assert token_endpoint.forms == []
+
+
+async def _ask_each(app: Starlette, tool: str, *asks: dict[str, Any]) -> list[Any]:
+    """Calls to one tool of `pilot-projects`, one after another, in one
+    session of the app, which serves one."""
+    async with mcp_session(app, PROJECTS_HEADERS, PROJECTS_PATH) as (session, _):
+        return [await session.call_tool(tool, arguments) for arguments in asks]
+
+
+def _numbered(lines: list[str], first: int = 1) -> str:
+    return "".join(f"{number}: {line}\n" for number, line in enumerate(lines, first))
+
+
+def _canned(answer: dict[str, Any], token_endpoint: TokenEndpoint) -> Starlette:
+    """The app with its projects surface, whose API answers every call with
+    `answer`: a list longer than a suite's project holds."""
+    return app_with_projects(
+        httpx.MockTransport(lambda request: httpx.Response(200, json=answer)),
+        token_endpoint,
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestListItems:
+    async def test_the_open_items_are_listed_with_no_empty_field(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        recipes = _make(
+            container, name="Recipe box", open_items=2, environment_id=environment.id
+        )
+        run = running_session(session, container, recipes, environment)
+        opening, first, second, work = session.scalars(
+            select(Item).where(Item.project_id == recipes.id).order_by(Item.seq)
+        )
+        first.urgent = True
+        first.for_user_id = person.id
+        second.done_at = datetime.now(UTC)
+        second.done_cause_code = "marked"
+        session.commit()
+
+        result = await _ask(projects_app, "list_items", {"project": recipes.slug})
+
+        assert not result.isError
+        assert result.structuredContent == {
+            "items": [
+                {
+                    "seq": 1,
+                    "kind": "opening",
+                    "title": "Recipe box",
+                    "path": f"{recipes.slug}/items/1-recipe-box.md",
+                    "created_at": utc_time(opening.created_at),
+                },
+                {
+                    "seq": 2,
+                    "kind": "notice",
+                    "title": "Notice 1",
+                    "path": f"{recipes.slug}/items/2-notice-1.md",
+                    "created_at": utc_time(first.created_at),
+                    "for": "ada",
+                    "urgent": True,
+                },
+                {
+                    "seq": 4,
+                    "kind": "work",
+                    "title": "Refining the camp",
+                    "created_at": utc_time(work.created_at),
+                },
+            ],
+            "totalCount": 3,
+            "limitHit": False,
+        }
+        assert work.id == run.id
+        [(request, answer)] = gated_routes.calls
+        assert (request.method, str(request.url)) == (
+            "GET",
+            f"{API_URL}/api/projects/items?address={recipes.slug}&open=true",
+        )
+        assert answer.status_code == 200
+
+    async def test_open_false_lists_the_done_items_too_with_their_cause(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        recipes = _make(
+            container, name="Recipe box", open_items=1, environment_id=environment.id
+        )
+        notice = session.scalars(
+            select(Item).where(Item.project_id == recipes.id, Item.seq == 2)
+        ).one()
+        notice.done_at = datetime.now(UTC)
+        notice.done_cause_code = "marked"
+        session.commit()
+
+        result = await _ask(
+            projects_app, "list_items", {"project": recipes.slug, "open": False}
+        )
+
+        assert [
+            (item["seq"], item.get("done_cause"))
+            for item in result.structuredContent["items"]
+        ] == [(1, None), (2, "marked")]
+        [(request, _)] = gated_routes.calls
+        assert request.url.params["open"] == "false"
+
+    async def test_a_kind_lists_its_items_alone(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+        environment: Environment,
+    ) -> None:
+        recipes = _make(
+            container, name="Recipe box", open_items=2, environment_id=environment.id
+        )
+
+        result = await _ask(
+            projects_app, "list_items", {"project": str(recipes.id), "kind": "notice"}
+        )
+
+        assert [item["seq"] for item in result.structuredContent["items"]] == [2, 3]
+        assert result.structuredContent["totalCount"] == 2
+        [(request, _)] = gated_routes.calls
+        assert str(request.url) == (
+            f"{API_URL}/api/projects/items?address={recipes.id}&open=true&kind=notice"
+        )
+
+    @pytest.mark.parametrize(
+        ("page", "seqs", "more"),
+        [
+            ({"limit": 2}, [1, 2], True),
+            ({"offset": 1, "limit": 2}, [2, 3], True),
+            ({"offset": 4, "limit": 2}, [5, 6], False),
+            ({"offset": 5}, [6], False),
+            ({"offset": 6}, [], False),
+            ({}, [1, 2, 3, 4, 5, 6], False),
+        ],
+    )
+    async def test_the_items_are_paged_as_the_files_are(
+        self,
+        projects_app: Starlette,
+        container: ServiceContainer,
+        environment: Environment,
+        page: dict[str, int],
+        seqs: list[int],
+        more: bool,
+    ) -> None:
+        recipes = _make(
+            container, name="Recipe box", open_items=5, environment_id=environment.id
+        )
+
+        result = await _ask(
+            projects_app, "list_items", {"project": recipes.slug} | page
+        )
+
+        listed = result.structuredContent
+        assert [item["seq"] for item in listed["items"]] == seqs
+        assert (listed["totalCount"], listed["limitHit"]) == (6, more)
+
+    async def test_a_page_is_a_hundred_items_and_a_thousand_at_most(
+        self, token_endpoint: TokenEndpoint
+    ) -> None:
+        rows = [
+            {
+                "seq": seq,
+                "kind": "notice",
+                "title": None,
+                "path": None,
+                "created_at": "2026-10-12T09:00:00Z",
+                "done_cause": None,
+                "for_handle": None,
+                "urgent": False,
+            }
+            for seq in range(1, 1501)
+        ]
+        app = _canned({"items": rows}, token_endpoint)
+
+        default, clamped = await _ask_each(
+            app,
+            "list_items",
+            {"project": "recipe-box"},
+            {"project": "recipe-box", "limit": 5000},
+        )
+
+        assert [
+            len(page.structuredContent["items"]) for page in (default, clamped)
+        ] == [
+            100,
+            1000,
+        ]
+        assert clamped.structuredContent["items"][-1] == {
+            "seq": 1000,
+            "kind": "notice",
+            "created_at": "2026-10-12T09:00:00Z",
+        }
+        assert (
+            clamped.structuredContent["totalCount"],
+            clamped.structuredContent["limitHit"],
+        ) == (1500, True)
+
+    async def test_a_draft_is_named_by_its_folder(
+        self,
+        projects_app: Starlette,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        draft = _make(container, state="draft")
+        run = running_session(session, container, draft, environment, kind="chat")
+        container.document_service().bear_item(draft, "notice", "The palette", run)
+        session.commit()
+        folder = f"draft-{draft.number}"
+
+        result = await _ask(projects_app, "list_items", {"project": folder})
+
+        assert [item["path"] for item in result.structuredContent["items"]] == [
+            f"{folder}/items/1-the-palette.md"
+        ]
+
+    async def test_a_project_nothing_names_is_the_routes_refusal(
+        self, projects_app: Starlette
+    ) -> None:
+        result = await _ask(projects_app, "list_items", {"project": "recipe-box"})
+
+        assert error_text(result) == (
+            "Error executing tool list_items: Project recipe-box was not found"
+        )
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"project": ""},
+            {"project": "recipe-box", "kind": "memo"},
+            {"project": "recipe-box", "limit": 0},
+            {"project": "recipe-box", "offset": -1},
+        ],
+    )
+    async def test_an_argument_out_of_its_values_is_refused_before_any_call(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        arguments: dict[str, Any],
+    ) -> None:
+        result = await _ask(projects_app, "list_items", arguments)
+
+        assert result.isError
+        assert gated_routes.calls == []
+
+
+@pytest.fixture
+def recipes(container: ServiceContainer, session: DbSession) -> models.Project:
+    """An open project with an attachment that is no text, committed."""
+    project = _make(container, name="Recipe box")
+    container.attachment_store().put(
+        Attachment(
+            project_id=project.id,
+            batch=1,
+            title="The badge",
+            filename="badge.png",
+            content_type="image/png",
+            source_code=AttachmentSource.DRAFT,
+            copied_at=datetime.now(UTC),
+        ),
+        b"\x89PNG\r\n\x1a\n",
+    )
+    session.commit()
+    return project
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestListFiles:
+    async def test_the_root_is_listed_without_a_path(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+        recipes: models.Project,
+    ) -> None:
+        draft = _make(container, state="draft")
+        _make(container, name="Old camp", state="finished", archived=True)
+
+        result = await _ask(projects_app, "list_files", {})
+
+        assert not result.isError
+        assert result.structuredContent == {
+            "files": [
+                {"path": f"draft-{draft.number}/", "isDirectory": True},
+                {"path": f"{recipes.slug}/", "isDirectory": True},
+                {"path": "reference.json", "isDirectory": False},
+            ],
+            "totalCount": 3,
+            "limitHit": False,
+        }
+        [(request, answer)] = gated_routes.calls
+        assert (request.method, str(request.url)) == (
+            "GET",
+            f"{API_URL}/api/tree/entries?path=",
+        )
+        assert answer.status_code == 200
+
+    async def test_a_listed_folder_is_listed_folders_first(
+        self, projects_app: Starlette, recipes: models.Project
+    ) -> None:
+        result = await _ask(projects_app, "list_files", {"path": f"{recipes.slug}/"})
+
+        assert result.structuredContent == {
+            "files": [
+                {"path": f"{recipes.slug}/attachments/", "isDirectory": True},
+                {"path": f"{recipes.slug}/items/", "isDirectory": True},
+                {"path": f"{recipes.slug}/chat.md", "isDirectory": False},
+                {"path": f"{recipes.slug}/handbook.md", "isDirectory": False},
+                {"path": f"{recipes.slug}/plan.json", "isDirectory": False},
+                {"path": f"{recipes.slug}/project.md", "isDirectory": False},
+                {"path": f"{recipes.slug}/timeline.json", "isDirectory": False},
+            ],
+            "totalCount": 7,
+            "limitHit": False,
+        }
+
+    @pytest.mark.parametrize(
+        ("page", "names", "more"),
+        [
+            ({"limit": 3}, ["attachments/", "items/", "chat.md"], True),
+            ({"offset": 2, "limit": 2}, ["chat.md", "handbook.md"], True),
+            ({"offset": 5, "limit": 2}, ["project.md", "timeline.json"], False),
+            ({"offset": 7}, [], False),
+        ],
+    )
+    async def test_a_listing_is_paged_by_offset_and_limit(
+        self,
+        projects_app: Starlette,
+        recipes: models.Project,
+        page: dict[str, int],
+        names: list[str],
+        more: bool,
+    ) -> None:
+        result = await _ask(projects_app, "list_files", {"path": recipes.slug} | page)
+
+        listed = result.structuredContent
+        assert [entry["path"] for entry in listed["files"]] == [
+            f"{recipes.slug}/{name}" for name in names
+        ]
+        assert (listed["totalCount"], listed["limitHit"]) == (7, more)
+
+    async def test_a_page_is_a_hundred_entries_and_a_thousand_at_most(
+        self, token_endpoint: TokenEndpoint
+    ) -> None:
+        entries = [
+            {"path": f"recipe-box/items/{n}-a.md", "is_directory": False}
+            for n in range(1500)
+        ]
+        app = _canned({"entries": entries}, token_endpoint)
+
+        default, clamped = await _ask_each(
+            app,
+            "list_files",
+            {"path": "recipe-box/items"},
+            {"path": "recipe-box/items", "limit": 1001},
+        )
+
+        assert [
+            len(page.structuredContent["files"]) for page in (default, clamped)
+        ] == [
+            100,
+            1000,
+        ]
+        assert (
+            clamped.structuredContent["totalCount"],
+            clamped.structuredContent["limitHit"],
+        ) == (1500, True)
+
+    @pytest.mark.parametrize(
+        ("path", "refusal"),
+        [
+            ("bike-log", "Folder 'bike-log' was not found"),
+            (
+                "reference.json",
+                "Cannot list 'reference.json' because it is a file, not a folder"
+                " [not-a-directory]",
+            ),
+            (
+                "/work",
+                "Path '/work' is outside the projects' files: a path runs from"
+                " their root, as `<folder>/timeline.json` does, never from `/` and"
+                " never above it [path-outside-projects]",
+            ),
+        ],
+    )
+    async def test_a_path_that_is_no_folder_is_the_routes_refusal(
+        self, projects_app: Starlette, recipes: models.Project, path: str, refusal: str
+    ) -> None:
+        result = await _ask(projects_app, "list_files", {"path": path})
+
+        assert error_text(result) == f"Error executing tool list_files: {refusal}"
+
+    async def test_an_archived_projects_folder_is_not_listed(
+        self, projects_app: Starlette, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Old camp", state="finished", archived=True)
+
+        result = await _ask(projects_app, "list_files", {"path": camp.slug})
+
+        assert error_text(result) == (
+            f"Error executing tool list_files: Folder '{camp.slug}' was not found"
+        )
+
+    async def test_the_tool_takes_no_environment(
+        self, projects_app: Starlette, gated_routes: ApiRoutes
+    ) -> None:
+        result = await _ask(projects_app, "list_files", {"env": "example-1a2b3c"})
+
+        assert not result.isError
+        [(request, _)] = gated_routes.calls
+        assert dict(request.url.params) == {"path": ""}
+        assert request.headers[ENVIRONMENT_HEADER] == CALLER_ENVIRONMENT
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestFindFiles:
+    async def test_the_files_a_glob_matches_are_found_in_path_order(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+        recipes: models.Project,
+    ) -> None:
+        _make(container, name="Old camp", state="finished", archived=True)
+
+        result = await _ask(
+            projects_app, "find_files", {"path_pattern": "**/{plan,timeline}.json"}
+        )
+
+        assert not result.isError
+        assert result.structuredContent == {
+            "pattern": "**/{plan,timeline}.json",
+            "files": [f"{recipes.slug}/plan.json", f"{recipes.slug}/timeline.json"],
+            "totalCount": 2,
+            "limitHit": False,
+        }
+        [(request, answer)] = gated_routes.calls
+        assert (request.method, request.url.path, dict(request.url.params)) == (
+            "GET",
+            "/api/tree/matches",
+            {"pattern": "**/{plan,timeline}.json"},
+        )
+        assert answer.status_code == 200
+
+    async def test_the_matches_are_paged_by_offset_and_limit(
+        self, projects_app: Starlette, recipes: models.Project
+    ) -> None:
+        pattern = f"{recipes.slug}/*"
+
+        first, last = await _ask_each(
+            projects_app,
+            "find_files",
+            {"path_pattern": pattern, "limit": 2},
+            {"path_pattern": pattern, "offset": 3, "limit": 2},
+        )
+
+        assert first.structuredContent == {
+            "pattern": pattern,
+            "files": [f"{recipes.slug}/chat.md", f"{recipes.slug}/handbook.md"],
+            "totalCount": 5,
+            "limitHit": True,
+        }
+        assert last.structuredContent == {
+            "pattern": pattern,
+            "files": [f"{recipes.slug}/project.md", f"{recipes.slug}/timeline.json"],
+            "totalCount": 5,
+            "limitHit": False,
+        }
+
+    async def test_a_page_is_fifty_files_and_two_hundred_at_most(
+        self, token_endpoint: TokenEndpoint
+    ) -> None:
+        paths = [f"recipe-box/items/{n}-a.md" for n in range(300)]
+        app = _canned({"paths": paths}, token_endpoint)
+
+        default, clamped = await _ask_each(
+            app,
+            "find_files",
+            {"path_pattern": "**"},
+            {"path_pattern": "**", "limit": 201},
+        )
+
+        assert [
+            len(page.structuredContent["files"]) for page in (default, clamped)
+        ] == [
+            50,
+            200,
+        ]
+        assert (
+            clamped.structuredContent["totalCount"],
+            clamped.structuredContent["limitHit"],
+        ) == (300, True)
+
+    @pytest.mark.parametrize(
+        ("pattern", "refusal"),
+        [
+            (
+                "**/[ab].md",
+                "Invalid glob pattern: character class '[' at index 3 is not"
+                " supported (supported: *, **, ?, {a,b}) [validation-error]",
+            ),
+            (
+                "/work/**",
+                "Pattern '/work/**' is outside the projects' files: a path runs"
+                " from their root, as `<folder>/timeline.json` does, never from"
+                " `/` and never above it [path-outside-projects]",
+            ),
+        ],
+    )
+    async def test_a_pattern_the_search_does_not_take_is_the_routes_refusal(
+        self, projects_app: Starlette, pattern: str, refusal: str
+    ) -> None:
+        result = await _ask(projects_app, "find_files", {"path_pattern": pattern})
+
+        assert error_text(result) == f"Error executing tool find_files: {refusal}"
+
+    async def test_a_glob_that_matches_nothing_finds_no_file(
+        self, projects_app: Starlette, recipes: models.Project
+    ) -> None:
+        result = await _ask(projects_app, "find_files", {"path_pattern": "*.md"})
+
+        assert result.structuredContent == {
+            "pattern": "*.md",
+            "files": [],
+            "totalCount": 0,
+            "limitHit": False,
+        }
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestReadFile:
+    async def test_a_file_is_read_whole_with_its_lines_numbered(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+        recipes: models.Project,
+    ) -> None:
+        path = f"{recipes.slug}/timeline.json"
+        rendering = container.view_service().timeline(recipes)
+
+        result = await _ask(projects_app, "read_file", {"path": path})
+
+        assert not result.isError
+        lines = rendering.text.splitlines()
+        assert result.structuredContent == {
+            "content": _numbered(lines),
+            "sha256": rendering.hash,
+            "totalCount": len(lines),
+            "limitHit": False,
+            "lineCut": False,
+        }
+        [(request, answer)] = gated_routes.calls
+        assert (request.method, request.url.path, dict(request.url.params)) == (
+            "GET",
+            "/api/tree/text",
+            {"path": path},
+        )
+        assert answer.status_code == 200
+
+    async def test_a_range_and_a_tail_read_their_lines(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        container: ServiceContainer,
+        recipes: models.Project,
+    ) -> None:
+        path = f"{recipes.slug}/timeline.json"
+        lines = container.view_service().timeline(recipes).text.splitlines()
+
+        ranged, tail = await _ask_each(
+            projects_app,
+            "read_file",
+            {"path": path, "start_line": 3, "end_line": 5},
+            {"path": path, "tail_lines": 2},
+        )
+
+        assert ranged.structuredContent["content"] == _numbered(lines[2:5], 3)
+        assert tail.structuredContent["content"] == _numbered(
+            lines[-2:], len(lines) - 1
+        )
+        assert [dict(request.url.params) for request, _ in gated_routes.calls] == [
+            {"path": path, "start_line": "3", "end_line": "5"},
+            {"path": path, "tail_lines": "2"},
+        ]
+
+    async def test_a_long_file_is_cut_at_the_line_limit(
+        self,
+        projects_app: Starlette,
+        container: ServiceContainer,
+        session: DbSession,
+        recipes: models.Project,
+    ) -> None:
+        lines = [f"line {n}" for n in range(1, 2502)]
+        container.attachment_store().put(
+            Attachment(
+                project_id=recipes.id,
+                batch=1,
+                title="The log",
+                filename="log.txt",
+                content_type="text/plain",
+                source_code=AttachmentSource.DRAFT,
+                copied_at=datetime.now(UTC),
+            ),
+            "".join(f"{line}\n" for line in lines).encode(),
+        )
+        session.commit()
+        path = f"{recipes.slug}/attachments/1/log.txt"
+
+        ranged, tail = await _ask_each(
+            projects_app,
+            "read_file",
+            {"path": path, "start_line": 1},
+            {"path": path, "tail_lines": 2501},
+        )
+
+        assert ranged.structuredContent | {"sha256": ""} == {
+            "content": _numbered(lines[:2000]),
+            "sha256": "",
+            "totalCount": 2501,
+            "limitHit": True,
+            "lineCut": False,
+        }
+        assert tail.structuredContent["content"] == _numbered(lines[501:], 502)
+        assert tail.structuredContent["limitHit"] is True
+
+    @pytest.mark.parametrize(
+        ("path", "refusal"),
+        [
+            (
+                "{folder}/attachments/1/badge.png",
+                "Cannot read '{folder}/attachments/1/badge.png' because it is not"
+                " UTF-8 text, and a read answers text alone [not-text]",
+            ),
+            (
+                "{folder}/items",
+                "Cannot read '{folder}/items' because it is a folder, not a file"
+                " [not-a-file]",
+            ),
+            ("{folder}/notes.md", "File '{folder}/notes.md' was not found"),
+            (
+                "/work/PilotProjects/{folder}/project.md",
+                "Path '/work/PilotProjects/{folder}/project.md' is outside the"
+                " projects' files: a path runs from their root, as"
+                " `<folder>/timeline.json` does, never from `/` and never above it"
+                " [path-outside-projects]",
+            ),
+        ],
+    )
+    async def test_a_path_that_is_no_text_file_is_the_routes_refusal(
+        self, projects_app: Starlette, recipes: models.Project, path: str, refusal: str
+    ) -> None:
+        result = await _ask(
+            projects_app, "read_file", {"path": path.format(folder=recipes.slug)}
+        )
+
+        assert error_text(result) == (
+            f"Error executing tool read_file: {refusal.format(folder=recipes.slug)}"
+        )
+
+    async def test_a_tail_with_a_range_is_the_routes_refusal(
+        self, projects_app: Starlette
+    ) -> None:
+        result = await _ask(
+            projects_app,
+            "read_file",
+            {"path": "reference.json", "start_line": 1, "tail_lines": 2},
+        )
+
+        assert error_text(result) == (
+            "Error executing tool read_file: Pass either `tail_lines` or"
+            " `start_line` and `end_line`, not both: a tail is the file's last"
+            " lines, a range the lines between two numbers"
+        )
+
+    async def test_an_archived_projects_file_is_not_read(
+        self, projects_app: Starlette, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Old camp", state="finished", archived=True)
+
+        result = await _ask(
+            projects_app, "read_file", {"path": f"{camp.slug}/project.md"}
+        )
+
+        assert error_text(result) == (
+            "Error executing tool read_file: File"
+            f" '{camp.slug}/project.md' was not found"
+        )
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {},
+            {"path": ""},
+            {"path": "reference.json", "start_line": 0},
+            {"path": "reference.json", "end_line": 0},
+            {"path": "reference.json", "tail_lines": 0},
+        ],
+    )
+    async def test_an_argument_out_of_its_values_is_refused_before_any_call(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        arguments: dict[str, Any],
+    ) -> None:
+        result = await _ask(projects_app, "read_file", arguments)
+
+        assert result.isError
+        assert gated_routes.calls == []
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("list_items", {"project": "recipe-box"}),
+        ("list_files", {}),
+        ("find_files", {"path_pattern": "**"}),
+        ("read_file", {"path": "reference.json"}),
+    ],
+)
+async def test_each_read_is_one_call_under_the_minted_token_with_the_callers_headers(
+    projects_app: Starlette,
+    gated_routes: ApiRoutes,
+    token_endpoint: TokenEndpoint,
+    tool: str,
+    arguments: dict[str, Any],
+) -> None:
+    await _ask(projects_app, tool, arguments)
+
+    [(request, _)] = gated_routes.calls
+    [minted] = token_endpoint.minted
+    assert request.method == "GET"
+    assert request.url.path.startswith("/api/")
+    assert request.headers["authorization"] == f"Bearer {minted}"
+    assert (request.headers[ENVIRONMENT_HEADER], request.headers[SESSION_HEADER]) == (
+        CALLER_ENVIRONMENT,
+        CALLER_SESSION,
+    )

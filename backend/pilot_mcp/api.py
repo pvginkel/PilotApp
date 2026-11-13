@@ -7,7 +7,8 @@
 - `pilot-projects`' calls the API's own routes under `/api/`, under the
   service user's token (`credential.py`) and never the caller's bearer, which
   its door has checked (F150.13), with the caller's environment and session
-  as the call's two headers carried them.
+  as the call's two headers carried them. Its lists are paged here, as
+  KubeCoder's fleet adapter pages its own: their routes answer a list whole.
 
 An answer outside 2xx is a `ToolError` carrying the API's `error`, its reason
 whole, or the answer's status where it is not the API's envelope; an API that
@@ -20,7 +21,15 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from mcp.server.fastmcp.exceptions import ToolError
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
+from pydantic.alias_generators import to_camel
 
 from pilot_mcp.credential import ServiceCredential
 
@@ -450,6 +459,153 @@ class ProjectHead(BaseModel):
     url: str = Field(description="Its page in Pilot's app")
 
 
+ItemKind = Literal[
+    "opening",
+    "decision",
+    "confirmation",
+    "question",
+    "action",
+    "notice",
+    "document",
+    "review",
+    "archive_question",
+    "work",
+    "card_wait",
+    "timed_wait",
+]
+"""An item's kinds, as `reference.json` lists them."""
+
+LIST_LIMIT_DEFAULT = 100
+LIST_LIMIT_MAX = 1000
+FIND_LIMIT_DEFAULT = 50
+FIND_LIMIT_MAX = 200
+"""The pages of `list_files` and `list_items`, and of `find_files`: KubeCoder's
+fleet adapter's (F150.5, F150.8)."""
+
+
+_PAGED = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+"""A page's and a read's fields in the fleet's file tools' names: `totalCount`,
+`limitHit`, `isDirectory`, `lineCut`."""
+
+TotalCount = Annotated[int, Field(description="The count of every entry, on any page")]
+
+LimitHit = Annotated[
+    bool,
+    Field(description="Whether more remain past this page: page on with `offset`"),
+]
+
+
+class ListedItem(BaseModel):
+    """An item of a project; a field with nothing to say is left out."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    seq: int = Field(description="Its number among the project's items")
+    kind: str = Field(description="Its kind, a code of `reference.json`'s `item_kinds`")
+    title: str | None = Field(default=None, description="Its title")
+    path: str | None = Field(
+        default=None,
+        description=(
+            "Its file, a path `read_file` takes; left out for an item with no"
+            " file, a work item and a wait among them"
+        ),
+    )
+    created_at: str = Field(description="When it was added, in UTC")
+    done_cause: str | None = Field(
+        default=None,
+        description=(
+            "How it came to be done: `answered`, `marked`, `settled`,"
+            " `turn_ended`, `finished`, `cancelled` or `withdrawn`; left out"
+            " while it is open"
+        ),
+    )
+    for_: str | None = Field(
+        default=None,
+        alias="for",
+        description="The handle of the person it is for; left out for one for no one",
+    )
+    urgent: bool = Field(
+        default=False, description="True for an urgent item; left out otherwise"
+    )
+
+    @model_serializer(mode="wrap")
+    def _said(self, fields: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """The fields that say something: one that is none or false is
+        dropped (F150.8)."""
+        return {
+            name: value
+            for name, value in fields(self).items()
+            if value is not None and value is not False
+        }
+
+
+class Items(BaseModel):
+    """A page of a project's items."""
+
+    model_config = _PAGED
+
+    items: list[ListedItem] = Field(
+        description="A row per item, in the order they were added"
+    )
+    total_count: TotalCount
+    limit_hit: LimitHit
+
+
+class FileEntry(BaseModel):
+    """A file or a folder of a folder."""
+
+    model_config = _PAGED
+
+    path: str = Field(
+        description=(
+            "Its path from the root, which the other file tools take; a"
+            " folder's ends with `/`"
+        )
+    )
+    is_directory: bool = Field(description="Whether it is a folder")
+
+
+class FileListing(BaseModel):
+    """A page of what a folder holds."""
+
+    model_config = _PAGED
+
+    files: list[FileEntry] = Field(description="Its folders first, then its files")
+    total_count: TotalCount
+    limit_hit: LimitHit
+
+
+class FoundFiles(BaseModel):
+    """A page of the files a glob matches."""
+
+    model_config = _PAGED
+
+    pattern: str = Field(description="The glob that was matched")
+    files: list[str] = Field(
+        description="The matching files' paths from the root, in path order"
+    )
+    total_count: TotalCount
+    limit_hit: LimitHit
+
+
+class FileText(BaseModel):
+    """A text file as it was read."""
+
+    model_config = _PAGED
+
+    content: str = Field(
+        description="The lines read, each under its number in the file: `N: line`"
+    )
+    sha256: str = Field(description="The hash of the whole file's bytes")
+    total_count: int = Field(description="The count of the file's lines")
+    limit_hit: bool = Field(
+        description="Whether a range or a tail was cut at 2,000 lines or 128 KB"
+    )
+    line_cut: bool = Field(
+        description="Whether the content is one line cut short, over 128 KB on its own"
+    )
+
+
 class _Routes:
     """One surface's routes, under `/tools/<surface>/`."""
 
@@ -688,6 +844,72 @@ class PilotProjectsApi:
             url=head["url"],
         )
 
+    async def list_items(
+        self,
+        caller: Caller,
+        project: str,
+        *,
+        open_only: bool,
+        kind: ItemKind | None,
+        offset: int,
+        limit: int,
+    ) -> Items:
+        query = {"address": project, "open": "true" if open_only else "false"}
+        answer = await self._get(
+            "/api/projects/items", caller, query | _given(kind=kind)
+        )
+        page, total, more = _page(answer["items"], offset, limit)
+        return Items(
+            items=[
+                ListedItem.model_validate({**row, "for": row["for_handle"]})
+                for row in page
+            ],
+            total_count=total,
+            limit_hit=more,
+        )
+
+    async def list_files(
+        self, caller: Caller, path: str, offset: int, limit: int
+    ) -> FileListing:
+        answer = await self._get("/api/tree/entries", caller, {"path": path})
+        page, total, more = _page(answer["entries"], offset, limit)
+        return FileListing(
+            files=[
+                FileEntry(path=entry["path"], is_directory=entry["is_directory"])
+                for entry in page
+            ],
+            total_count=total,
+            limit_hit=more,
+        )
+
+    async def find_files(
+        self, caller: Caller, pattern: str, offset: int, limit: int
+    ) -> FoundFiles:
+        answer = await self._get("/api/tree/matches", caller, {"pattern": pattern})
+        page, total, more = _page(answer["paths"], offset, limit)
+        return FoundFiles(
+            pattern=pattern, files=page, total_count=total, limit_hit=more
+        )
+
+    async def read_file(
+        self,
+        caller: Caller,
+        path: str,
+        *,
+        start_line: int | None,
+        end_line: int | None,
+        tail_lines: int | None,
+    ) -> FileText:
+        lines = {
+            "start_line": start_line,
+            "end_line": end_line,
+            "tail_lines": tail_lines,
+        }
+        query = {"path": path} | {
+            name: str(number) for name, number in lines.items() if number is not None
+        }
+        return FileText.model_validate(await self._get("/api/tree/text", caller, query))
+
     async def _get(self, path: str, caller: Caller, query: dict[str, str]) -> Any:
         headers = {"Authorization": await self._credential.authorization()}
         headers |= caller.headers()
@@ -701,6 +923,12 @@ class PilotProjectsApi:
         if response.is_error:
             raise ToolError(_refusal(response))
         return response.json()
+
+
+def _page[T](rows: list[T], offset: int, limit: int) -> tuple[list[T], int, bool]:
+    """The `limit` rows from `offset`, the count of them all, and whether
+    more remain past the page."""
+    return rows[offset : offset + limit], len(rows), offset + limit < len(rows)
 
 
 def _given(**values: str | None) -> dict[str, str]:

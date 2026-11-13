@@ -4,7 +4,7 @@ path names, the bytes it must hold, and their tree hash."""
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import ColumnElement, and_, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachmentStore
@@ -195,23 +195,37 @@ class TreeService:
             entries.extend(self._folder(project))
         return sorted(entries, key=lambda entry: entry.path)
 
+    def paths(self) -> list[str]:
+        """Every path the store syncs, in path order: the manifest's paths,
+        read without the hashes, so that no view is rendered for them."""
+        paths = [REFERENCE]
+        for project in self.db.scalars(select(Project).where(_SYNCING)).all():
+            paths.extend(
+                tree_path(project, path)
+                for path in (
+                    TIMELINE,
+                    CHAT,
+                    PLAN,
+                    *self.db.scalars(select(Document.path).where(_filed(project))),
+                    *(
+                        attachment_path(attachment)
+                        for attachment in self.db.scalars(
+                            select(Attachment).where(
+                                Attachment.project_id == project.id
+                            )
+                        )
+                    ),
+                )
+            )
+        return sorted(paths)
+
     def _folder(self, project: Project) -> list[ManifestEntry]:
         """Every path of the project's folder, from the tree's root, in path
         order; its `timeline.json`, `chat.md` and attachments are
         read-only."""
         documents = {
             tree_path(project, document.path): document
-            for document in self.db.scalars(
-                select(Document).where(
-                    _HAS_TEXT,
-                    or_(
-                        Document.project_id == project.id,
-                        Document.id.in_(
-                            select(Item.id).where(Item.project_id == project.id)
-                        ),
-                    ),
-                )
-            )
+            for document in self.db.scalars(select(Document).where(_filed(project)))
         }
         held = set(
             self.db.scalars(
@@ -272,6 +286,18 @@ class TreeService:
                 return None
             named = (Project.number == int(digits)) & Project.slug.is_(None)
         return self.db.scalars(select(Project).where(named, _SYNCING)).one_or_none()
+
+
+def _filed(project: Project) -> ColumnElement[bool]:
+    """The documents with a file in the project's folder: its Project
+    Documents' and its items'."""
+    return and_(
+        _HAS_TEXT,
+        or_(
+            Document.project_id == project.id,
+            Document.id.in_(select(Item.id).where(Item.project_id == project.id)),
+        ),
+    )
 
 
 def _file(rendering: Rendering) -> TreeFile:

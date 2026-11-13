@@ -307,6 +307,73 @@ class TestTreeServiceManifest:
             ManifestEntry("reference.json", views.reference().hash, True),
         ]
 
+    def test_the_paths_are_the_manifests_without_a_hash(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        documents.bear_draft(project, "# Badges\n")
+        documents.bear_item(project, "notice", "The palette", project_session)
+        container.record_service().place_work(project, project_session, "Refine")
+        _keep(container, project, 1, "survey/palette.md", b"# Palette\n")
+        opened = Project(created_by_user_id=project.created_by_user_id)
+        archived = Project(created_by_user_id=project.created_by_user_id)
+        session.add_all([opened, archived])
+        session.flush()
+        documents.bear_draft(opened, "# Recipes\n")
+        opened.slug = "recipe-box"
+        opened.state_code = ProjectState.OPEN
+        documents.bear_handbook(opened, "Keep it short.\n")
+        documents.bear_draft(archived, "# Old\n")
+        archived.archived = True
+        session.flush()
+        folder = f"draft-{project.number}"
+
+        paths = container.tree_service().paths()
+
+        assert paths == [
+            f"{folder}/attachments/1/survey/palette.md",
+            f"{folder}/chat.md",
+            f"{folder}/items/1-the-palette.md",
+            f"{folder}/plan.json",
+            f"{folder}/project.md",
+            f"{folder}/timeline.json",
+            "recipe-box/chat.md",
+            "recipe-box/handbook.md",
+            "recipe-box/plan.json",
+            "recipe-box/project.md",
+            "recipe-box/timeline.json",
+            "reference.json",
+        ]
+        assert paths == [entry.path for entry in container.tree_service().manifest()]
+
+    def test_a_registered_document_without_its_text_is_no_path(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        documents.bear_draft(project, "# Badges\n")
+        documents.register(project, project_session, "/work/Example/refinement.md")
+        folder = f"draft-{project.number}"
+
+        assert container.tree_service().paths() == [
+            f"{folder}/chat.md",
+            f"{folder}/plan.json",
+            f"{folder}/project.md",
+            f"{folder}/timeline.json",
+            "reference.json",
+        ]
+
+    def test_with_no_project_the_paths_are_the_reference(
+        self, container: ServiceContainer
+    ) -> None:
+        assert container.tree_service().paths() == ["reference.json"]
+
     def test_with_no_project_the_manifest_is_the_reference(
         self, container: ServiceContainer
     ) -> None:

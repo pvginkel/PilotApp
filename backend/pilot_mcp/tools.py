@@ -25,6 +25,10 @@ from starlette.requests import Request
 from pilot_mcp.api import (
     BLOCK_ID,
     ENVIRONMENT_HEADER,
+    FIND_LIMIT_DEFAULT,
+    FIND_LIMIT_MAX,
+    LIST_LIMIT_DEFAULT,
+    LIST_LIMIT_MAX,
     MAX_STEP_CODE,
     MAX_STEPS,
     SESSION_HEADER,
@@ -34,6 +38,11 @@ from pilot_mcp.api import (
     AttachedFiles,
     AttachedMaterial,
     Caller,
+    FileListing,
+    FileText,
+    FoundFiles,
+    ItemKind,
+    Items,
     Mark,
     NewItem,
     PilotProjectsApi,
@@ -96,6 +105,24 @@ ProjectRef = Annotated[
     ),
 ]
 """A tool's `project` (F150.4)."""
+
+
+Offset = Annotated[
+    int, Field(ge=0, description="Results to skip for pagination. Default: 0.")
+]
+
+FilePath = Annotated[
+    str,
+    Field(
+        min_length=1,
+        description=(
+            "The file's path from the root of the projects' files (e.g."
+            " `draft-7/timeline.json`): a project's folder, then the path in it."
+            " A path that starts with `/` or climbs above the root is a"
+            " `path-outside-projects` error."
+        ),
+    ),
+]
 
 
 ANSWERED_BLOCK = r"^(?:[0-9A-Fa-f-]{36}|project\.md)/\S+$"
@@ -558,3 +585,194 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         Pilot's app. It answers no step or note of the plan and no file's
         content. A project no id or folder names is refused."""
         return await api.get_project(_caller(ctx), project)
+
+    @mcp.tool()
+    async def list_items(
+        ctx: Call,
+        project: ProjectRef,
+        open: Annotated[
+            bool,
+            Field(
+                description=(
+                    "True, the default, for the open items alone; false for"
+                    " every item, the done ones included"
+                )
+            ),
+        ] = True,
+        kind: Annotated[
+            ItemKind | None,
+            Field(description="The one kind of item to list. Omit for every kind."),
+        ] = None,
+        offset: Offset = 0,
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                description=(
+                    f"Maximum items to return. Default: {LIST_LIMIT_DEFAULT}, max:"
+                    f" {LIST_LIMIT_MAX} — a larger ask is clamped to the max."
+                ),
+            ),
+        ] = LIST_LIMIT_DEFAULT,
+    ) -> Items:
+        """List the items of a project Pilot manages, by its id or its folder,
+        in the order they were added: the index of its `timeline.json`. It
+        lists the open items alone unless `open` is false. Returns `{items,
+        totalCount, limitHit}`: an item has its `seq`, its number among the
+        project's items, its `kind`, its `title`, its `path`, the file
+        `read_file` takes, `created_at`, `done_cause`, `for` and `urgent`, and
+        a field with nothing to say is left out: an open item has no
+        `done_cause`, an item with no file no `path`. `totalCount` counts
+        every item the call lists and `limitHit` says whether more remain past
+        this page (page on with `offset`). A project no id or folder names is
+        refused."""
+        return await api.list_items(
+            _caller(ctx),
+            project,
+            open_only=open,
+            kind=kind,
+            offset=offset,
+            limit=min(limit, LIST_LIMIT_MAX),
+        )
+
+    @mcp.tool()
+    async def list_files(
+        ctx: Call,
+        path: Annotated[
+            str,
+            Field(
+                description=(
+                    "The folder's path from the root of the projects' files (e.g."
+                    " `draft-7/items`). Default: the root."
+                )
+            ),
+        ] = "",
+        offset: Offset = 0,
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                description=(
+                    f"Maximum entries to return. Default: {LIST_LIMIT_DEFAULT}, max:"
+                    f" {LIST_LIMIT_MAX} — a larger ask is clamped to the max."
+                ),
+            ),
+        ] = LIST_LIMIT_DEFAULT,
+    ) -> FileListing:
+        """List the files and folders in a folder of the projects Pilot
+        manages, by its path from the root of their files: the root holds
+        `reference.json` and the folder of every project that is not archived.
+        Folders come first, then files. Returns `{files: [{path,
+        isDirectory}], totalCount, limitHit}`: every `path` runs from the
+        root, so it passes straight to the other file tools, and a folder's
+        ends with `/`; `totalCount` counts every entry and `limitHit` says
+        whether more remain past this page (page on with `offset`). A path
+        that is not a folder is a `not-a-directory` error, and one that starts
+        with `/` or climbs above the root a `path-outside-projects` error."""
+        return await api.list_files(
+            _caller(ctx), path, offset, min(limit, LIST_LIMIT_MAX)
+        )
+
+    @mcp.tool()
+    async def read_file(
+        ctx: Call,
+        path: FilePath,
+        start_line: Annotated[
+            int | None,
+            Field(
+                ge=1, description="1-based starting line. Omit to start from line 1."
+            ),
+        ] = None,
+        end_line: Annotated[
+            int | None,
+            Field(
+                ge=1,
+                description=(
+                    "1-based ending line (inclusive). Omit to read to end of file."
+                ),
+            ),
+        ] = None,
+        tail_lines: Annotated[
+            int | None,
+            Field(
+                ge=1,
+                description=(
+                    "Read the last N lines of the file. Not with"
+                    " `start_line`/`end_line`."
+                ),
+            ),
+        ] = None,
+    ) -> FileText:
+        r"""Read a text file of the projects Pilot manages, by its path from
+        the root of their files. Returns `{content, sha256, totalCount,
+        limitHit, lineCut}`: `content` has the file's own line numbers
+        prefixed (e.g. `"1: line\n2: line\n"`), 1-indexed; `sha256` is the
+        hash of the whole file's bytes, whatever was read; `totalCount` counts
+        the file's lines.
+
+        A read that names no range returns the whole file, however many lines,
+        up to 128 KB; a larger file is a `file-too-large` error giving its
+        line count.
+
+        A line range (`start_line`..`end_line`) or a tail (`tail_lines`, the
+        last N lines) reads a file of any size, and its answer holds at most
+        2,000 lines and 128 KB of `content`. Past either limit it is cut there
+        and `limitHit` is true: a range keeps its start, so page on from the
+        line after the last one returned, and a tail keeps the file's end. A
+        line over 128 KB on its own comes back cut, as the answer's only line,
+        with `lineCut` true: its start for a range, its end for a tail.
+        `tail_lines` together with a range is an error.
+
+        A file that is not UTF-8 text, as an attachment may be, is a
+        `not-text` error. A folder is a `not-a-file` error. An archived
+        project's files are not read."""
+        return await api.read_file(
+            _caller(ctx),
+            path,
+            start_line=start_line,
+            end_line=end_line,
+            tail_lines=tail_lines,
+        )
+
+    @mcp.tool()
+    async def find_files(
+        ctx: Call,
+        path_pattern: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description=(
+                    "Glob matched against the files' paths from the root of the"
+                    " projects' files (e.g. `**/timeline.json`,"
+                    " `draft-7/items/*.md`, `**/{project.md,plan.json}`). Supports"
+                    " *, **, ?, {a,b}. A pattern that starts with `/`, where no"
+                    " path does, is a `path-outside-projects` error."
+                ),
+            ),
+        ],
+        offset: Offset = 0,
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                description=(
+                    f"Maximum files to return. Default: {FIND_LIMIT_DEFAULT}, max:"
+                    f" {FIND_LIMIT_MAX} — a larger ask is clamped to the max."
+                ),
+            ),
+        ] = FIND_LIMIT_DEFAULT,
+    ) -> FoundFiles:
+        """Find the files of the projects Pilot manages whose path matches a
+        glob, the path taken from the root of their files. Use it to discover
+        files by path or name; it does not search file contents. `*` matches
+        any characters except `/`, `**` any path segments, `?` a single
+        character, `{a,b}` either alternative (`*`, `**`, `?` work inside; no
+        nesting). Other glob syntax (`[...]` classes, `\\` escapes, nested or
+        unbalanced braces) is a `validation-error` naming it, not zero
+        results. Returns `{pattern, files, totalCount, limitHit}`: `files` are
+        the matching paths in path order, `totalCount` counts every match and
+        `limitHit` says whether more remain past this page (page on with
+        `offset`)."""
+        return await api.find_files(
+            _caller(ctx), path_pattern, offset, min(limit, FIND_LIMIT_MAX)
+        )

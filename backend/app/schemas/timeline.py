@@ -1128,3 +1128,55 @@ class ProjectDocumentSchema(BaseModel):
             "event announces"
         )
     )
+
+
+class ItemIndexQuerySchema(BaseModel):
+    """Which items of a project's index: the project by its address, the open
+    items or every one, and of one kind or of any."""
+
+    address: str = Field(
+        min_length=1,
+        description=(
+            "The project's slug, a draft's `draft-<number>`, which goes on naming "
+            "its project once Create project has given it its slug, or the "
+            "project's id; an address that reads as an id is one"
+        ),
+        examples=["recipe-box", "draft-7"],
+    )
+    open: bool = Field(
+        default=True,
+        description="True for the open items alone; false for every item",
+    )
+    kind: ItemKindCode | None = Field(
+        default=None, description="The one kind to list; none for every kind"
+    )
+
+
+class IndexedItemSchema(BaseModel):
+    """An item as its project's `timeline.json` indexes it (F150.8)."""
+
+    seq: int = Field(description="Its number among its project's items")
+    kind: ItemKindCode = Field(description="The item's kind")
+    title: str | None = Field(description="Its title; null for an item without one")
+    path: str | None = Field(
+        description=(
+            "Its file's path from the root of the store's tree; null for an item "
+            "with no file: a work item, a wait, a registered document before its "
+            "text arrives"
+        ),
+        examples=["recipe-box/items/3-the-palette.md"],
+    )
+    created_at: datetime = Field(description="When it was made, to the second")
+    done_cause: DoneCauseCode | None = Field(
+        description="How it came to be done; null while it is open"
+    )
+    for_handle: str | None = Field(
+        description="The handle of the person it is for; null for an item for no one"
+    )
+    urgent: bool = Field(description="Whether it is urgent")
+
+
+class ItemIndexSchema(BaseModel):
+    """A project's items as `timeline.json` indexes them, in `seq` order."""
+
+    items: list[IndexedItemSchema] = Field(description="A row per item")

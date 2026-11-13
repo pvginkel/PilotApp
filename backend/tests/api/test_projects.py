@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
+from app.engine.views import utc_time
 from app.models import (
     Block,
     Chat,
@@ -728,6 +729,188 @@ options:
 recommend: Dome
 ```
 """
+
+
+ITEMS = f"{PROJECTS}/items"
+
+
+@pytest.mark.usefixtures("person")
+class TestListItemsAtAddress:
+    def test_the_open_items_are_indexed_in_seq_order(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        recipes = session.get_one(
+            Project,
+            _make(
+                container,
+                name="Recipe box",
+                open_items=2,
+                environment_id=environment.id,
+            ),
+        )
+        opening, first, second = session.scalars(
+            select(Item).where(Item.project_id == recipes.id).order_by(Item.seq)
+        )
+        first.urgent = True
+        first.for_user_id = recipes.created_by_user_id
+        second.done_at = datetime.now(UTC)
+        second.done_cause_code = "marked"
+        session.flush()
+        _sign_in(client)
+
+        response = client.get(ITEMS, query_string={"address": recipes.slug})
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "items": [
+                {
+                    "seq": 1,
+                    "kind": "opening",
+                    "title": "Recipe box",
+                    "path": f"{recipes.slug}/items/1-recipe-box.md",
+                    "created_at": utc_time(opening.created_at),
+                    "done_cause": None,
+                    "for_handle": None,
+                    "urgent": False,
+                },
+                {
+                    "seq": 2,
+                    "kind": "notice",
+                    "title": "Notice 1",
+                    "path": f"{recipes.slug}/items/2-notice-1.md",
+                    "created_at": utc_time(first.created_at),
+                    "done_cause": None,
+                    "for_handle": "ada",
+                    "urgent": True,
+                },
+            ]
+        }
+
+    def test_open_false_indexes_every_item(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        recipes = _make(
+            container, name="Recipe box", open_items=1, environment_id=environment.id
+        )
+        notice = session.scalars(
+            select(Item).where(Item.project_id == recipes, Item.seq == 2)
+        ).one()
+        notice.done_at = datetime.now(UTC)
+        notice.done_cause_code = "marked"
+        session.flush()
+        _sign_in(client)
+
+        opened = client.get(ITEMS, query_string={"address": str(recipes)})
+        every = client.get(
+            ITEMS, query_string={"address": str(recipes), "open": "false"}
+        )
+
+        assert [item["seq"] for item in opened.get_json()["items"]] == [1]
+        assert [
+            (item["seq"], item["done_cause"]) for item in every.get_json()["items"]
+        ] == [(1, None), (2, "marked")]
+
+    def test_a_kind_indexes_its_items_alone(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        environment: Environment,
+    ) -> None:
+        recipes = _make(
+            container, name="Recipe box", open_items=2, environment_id=environment.id
+        )
+        _sign_in(client)
+
+        notices = client.get(
+            ITEMS, query_string={"address": str(recipes), "kind": "notice"}
+        )
+        waits = client.get(
+            ITEMS, query_string={"address": str(recipes), "kind": "card_wait"}
+        )
+
+        assert [item["seq"] for item in notices.get_json()["items"]] == [2, 3]
+        assert (waits.status_code, waits.get_json()) == (200, {"items": []})
+
+    def test_a_drafts_folder_names_it_and_starts_its_paths(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        draft = session.get_one(Project, _make(container, state="draft"))
+        run = _run(session, draft, environment)
+        container.document_service().bear_item(draft, "notice", "The palette", run)
+        _sign_in(client)
+
+        response = client.get(ITEMS, query_string={"address": f"draft-{draft.number}"})
+
+        assert response.status_code == 200
+        assert [item["path"] for item in response.get_json()["items"]] == [
+            f"draft-{draft.number}/items/1-the-palette.md"
+        ]
+
+    def test_an_archived_projects_items_are_indexed(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        album = session.get_one(
+            Project,
+            _make(container, name="Photo album", state="finished", archived=True),
+        )
+        _sign_in(client)
+
+        response = client.get(ITEMS, query_string={"address": album.slug})
+
+        assert response.status_code == 200
+        assert [item["kind"] for item in response.get_json()["items"]] == ["opening"]
+
+    def test_an_address_no_project_is_at_is_not_found(
+        self, client: FlaskClient
+    ) -> None:
+        _sign_in(client)
+
+        response = client.get(ITEMS, query_string={"address": "bike-log"})
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == "Project bike-log was not found"
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            {},
+            {"address": ""},
+            {"address": "recipe-box", "open": "maybe"},
+            {"address": "recipe-box", "kind": "memo"},
+        ],
+    )
+    def test_no_address_or_a_value_that_is_none_of_its_own_is_refused(
+        self, client: FlaskClient, query: dict[str, str]
+    ) -> None:
+        _sign_in(client)
+
+        assert client.get(ITEMS, query_string=query).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        _sign_in(client, roles=())
+
+        response = client.get(ITEMS, query_string={"address": "recipe-box"})
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.get(ITEMS, query_string={"address": "recipe-box"})
+
+        assert response.status_code == 401
 
 
 def _stamped(body: dict[str, Any], path: tuple[str | int, ...]) -> datetime:

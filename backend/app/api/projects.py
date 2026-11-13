@@ -1,6 +1,7 @@
 """The projects as the signed-in person reads them, the project list, the
 archived projects, the project an address names, a project's head, its
-timeline, its draft and its handbook (F1, F2, F3, F8, F37.4, F129.4, D012); a
+timeline, the index of its items (F150.8), its draft and its handbook (F1, F2,
+F3, F8, F37.4, F129.4, D012); a
 draft made with its first message (F46.1), and their answers to its asks in
 place (F47.4); and what they change of a project's standing: its transitions,
 Create project and its pause among them, and their membership (F4.1, F5, F6,
@@ -35,13 +36,20 @@ from app.schemas.projects import (
     RunningWorkSchema,
     TransitionRequestSchema,
 )
-from app.schemas.timeline import ProjectDocumentSchema, TimelineSchema
+from app.schemas.timeline import (
+    IndexedItemSchema,
+    ItemIndexQuerySchema,
+    ItemIndexSchema,
+    ProjectDocumentSchema,
+    TimelineSchema,
+)
 from app.services.chat_service import ChatService
 from app.services.container import ServiceContainer
 from app.services.draft_service import DraftService
 from app.services.people_service import PeopleService, initials
 from app.services.project_service import PlanProgress, ProjectHead, ProjectService
 from app.services.timeline_service import TimelineService
+from app.services.tree_read_service import TreeReadService
 from app.utils.spectree_config import api
 
 projects_bp = Blueprint("projects", __name__, url_prefix="/projects")
@@ -254,6 +262,44 @@ def get_project_at_address(
     query = ProjectLookupQuerySchema.model_validate(request.args.to_dict())
     project = project_service.at_address(query.address)
     return _head(project_service.head(caller(), project.id))
+
+
+@projects_bp.route("/items", methods=["GET"])
+@api.validate(
+    query=ItemIndexQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=ItemIndexSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def list_items_at_address(
+    project_service: ProjectService = Provide[ServiceContainer.project_service],
+    tree_read_service: TreeReadService = Provide[ServiceContainer.tree_read_service],
+) -> Any:
+    """Read the index of the items of the project an address names, as its
+    `timeline.json` holds it: the open items, or with `open` false every one,
+    and with `kind` those of that kind alone. No screen reads it: the
+    timeline's own route carries each item's body and no path.
+
+    Returns:
+        200: The items, in `seq` order
+        400: No address is given, or `open` or `kind` is none of its values
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project is at the address
+    """
+    query = ItemIndexQuerySchema.model_validate(request.args.to_dict())
+    project = project_service.at_address(query.address)
+    return ItemIndexSchema(
+        items=[
+            IndexedItemSchema.model_validate(item, from_attributes=True)
+            for item in tree_read_service.items(project, query.open, query.kind)
+        ]
+    ).model_dump(mode="json")
 
 
 @projects_bp.route("/<uuid:project_id>", methods=["GET"])

@@ -80,6 +80,7 @@ from app.services.testing_service import TestingService
 from app.services.testing_sync_service import TestingSyncService
 from app.services.timeline_service import TimelineService
 from app.services.tracker_event_service import TrackerEventService
+from app.services.tree_read_service import TreeReadService
 from app.services.turn_end_read_service import TurnEndReadService
 from app.services.usage_halts import UsageHalts, UsageWatcher
 from app.services.usage_service import UsageService
@@ -489,6 +490,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         view_service=view_service,
         plan_service=plan_service,
         attachment_store=attachment_store,
+    )
+    tree_read_service = providers.Factory(
+        TreeReadService, tree_service=tree_service, view_service=view_service
     )
     attach_service = providers.Factory(
         AttachService,
