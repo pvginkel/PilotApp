@@ -61,9 +61,11 @@ def lock_waits(container: ServiceContainer) -> int:
 def turn_holders(
     container: ServiceContainer, first: int
 ) -> list[tuple[str, list[str]]]:
-    """Each backend holding a turn's lock of the first key `first`: its state,
-    `idle in transaction` while a transaction of its holds the lock, and the
-    tables it holds a lock on, read on a connection of its own."""
+    """Each backend of the app's database holding a turn's lock of the first
+    key `first`: its state, `idle in transaction` while a transaction of its
+    holds the lock, and the tables it holds a lock on, read on a connection of
+    its own. `pg_locks` lists the server's every database, another xdist
+    worker's among them."""
     with container.session_maker()() as db:
         return [
             (state, list(tables))
@@ -75,6 +77,7 @@ def turn_holders(
                     " FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid"
                     " WHERE l.locktype = 'advisory' AND l.classid = :first"
                     " AND l.objsubid = 2 AND l.granted"
+                    " AND a.datname = current_database()"
                 ),
                 {"first": first},
             )
