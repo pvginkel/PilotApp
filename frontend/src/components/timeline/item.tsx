@@ -39,6 +39,7 @@ import { Block } from '@/components/timeline/block';
 import { Confirmation } from '@/components/timeline/confirmation';
 import { DocumentCard, InlineDocument } from '@/components/timeline/document';
 import { isCard } from '@/components/timeline/document-state';
+import { blockKey } from '@/components/timeline/flash';
 import { ItemHead } from '@/components/timeline/item-head';
 import { JobButton, JobMark, JobMenuRow } from '@/components/timeline/job';
 import { isOneAsk, kindOf } from '@/components/timeline/kinds';
@@ -47,6 +48,7 @@ import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WaitItem } from '@/components/timeline/wait';
 import { WorkItem, type RetryFocus } from '@/components/timeline/work';
 import { PilotWriting } from '@/components/timeline/writing';
+import { useNoChoice } from '@/hooks/use-choice';
 import { useDiscuss } from '@/hooks/use-discuss';
 import { useDismiss } from '@/hooks/use-dismiss';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
@@ -78,6 +80,8 @@ interface ItemProps {
 
 export function Item({ item, fresh, onFlashed }: ItemProps) {
   const done = item.done !== null;
+  const [asked] = blocksOf(item);
+  useNoChoice(done && isOneAsk(item) && asked !== undefined ? blockKey(item.id, asked.id) : null);
   // The API gives what Pilot does only on an open item.
   const pilots = item.pilots_work;
   const retried = retriedOf(item) !== null;

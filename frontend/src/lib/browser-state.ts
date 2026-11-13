@@ -247,16 +247,21 @@ function isChoice(saved: unknown): saved is Choice {
   return (answer === null || typeof answer === 'string') && typeof typing === 'boolean';
 }
 
-/** What is chosen in the block `field` and not sent; none where nothing is. */
-export function unsentChoice(field: string): Choice | null {
-  const choice = readUnsent()[`${field}/choice`];
-  return isChoice(choice) ? choice : null;
+const CHOICE = '/choice';
+
+/** What is chosen and not sent, by its block's key. */
+export function unsentChoices(): Map<string, Choice> {
+  const choices = new Map<string, Choice>();
+  for (const [key, choice] of Object.entries(readUnsent())) {
+    if (key.endsWith(CHOICE) && isChoice(choice)) choices.set(key.slice(0, -CHOICE.length), choice);
+  }
+  return choices;
 }
 
 /** Keeps a block's choice beside its fields' words until it is sent, over what another tab keeps; none, nothing kept. */
 export function keepUnsentChoice(field: string, choice: Choice | null): void {
   const unsent = readUnsent();
-  if (choice === null) delete unsent[`${field}/choice`];
-  else unsent[`${field}/choice`] = choice;
+  if (choice === null) delete unsent[`${field}${CHOICE}`];
+  else unsent[`${field}${CHOICE}`] = choice;
   localStorage.setItem(UNSENT_KEY, JSON.stringify(unsent));
 }

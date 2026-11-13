@@ -54,7 +54,7 @@ import { SectionsContext } from '@/components/timeline/sections';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { useAnswer, useDraftAnswer, type Answering } from '@/hooks/use-answer';
-import { useChoice } from '@/hooks/use-choice';
+import { useChoice, useNoChoice } from '@/hooks/use-choice';
 import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { isAnswered, type Block as BlockData, type BodyPart, type TimelineItem } from '@/hooks/use-timeline';
@@ -78,6 +78,7 @@ export function Block({ item, block, solo = false, section = [{ type: 'block', b
   const locked = useContext(LockedContext);
   const autopilotOff = useAutopilotOff(projectId);
   const flash = useBlockFlash(item.id, block.id);
+  useNoChoice(isOneAsk(item) && item.done !== null ? blockKey(item.id, block.id) : null);
   const sections = useContext(SectionsContext);
   // Closed by its chevron after it was opened, by a click, a segment or its address.
   const [shut, setShut] = useState(false);

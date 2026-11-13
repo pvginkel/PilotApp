@@ -3,14 +3,15 @@
  * Other's or a No's, whose words are the choice while it stands open, and whose cross gives back
  * the option chosen before it. The browser keeps the choice as it keeps unsent words (F133), so a
  * reload shows it again, and every screen that draws the block shows the same one; the record sees
- * nothing of it until the block's Send.
+ * nothing of it until the block's Send. A done item keeps none: a choice made here on an item
+ * answered elsewhere since is dropped, so that an Undo brings the item back with nothing chosen.
  */
 
-import { useState, useSyncExternalStore } from 'react';
-import { keepUnsentChoice, unsentChoice, type Choice } from '@/lib/browser-state';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { keepUnsentChoice, unsentChoices, type Choice } from '@/lib/browser-state';
 
-/** Each block's choice as last read or kept, by the block's key. */
-const choices = new Map<string, Choice | null>();
+/** Each block's choice as the browser kept it at the page's load and as kept since, by the block's key. */
+const choices = unsentChoices();
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
@@ -18,13 +19,9 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-function chosenIn(field: string): Choice | null {
-  if (!choices.has(field)) choices.set(field, unsentChoice(field));
-  return choices.get(field)!;
-}
-
 function keep(field: string, choice: Choice | null): void {
-  choices.set(field, choice);
+  if (choice === null) choices.delete(field);
+  else choices.set(field, choice);
   keepUnsentChoice(field, choice);
   listeners.forEach((listener) => listener());
 }
@@ -48,7 +45,7 @@ export interface Choosing {
 
 /** `field` is the block's key, which its fields keep their unsent words under. */
 export function useChoice(field: string): Choosing {
-  const choice = useSyncExternalStore(subscribe, () => chosenIn(field));
+  const choice = useSyncExternalStore(subscribe, () => choices.get(field) ?? null);
   const [opened, setOpened] = useState(false);
   const answer = choice?.answer ?? null;
   return {
@@ -63,4 +60,11 @@ export function useChoice(field: string): Choosing {
     back: () => keep(field, answer === null ? null : { answer, typing: false }),
     sent: () => keep(field, null),
   };
+}
+
+/** Drops the choice kept for the block `field` of a done item; null where the item is open or holds no one ask. */
+export function useNoChoice(field: string | null): void {
+  useEffect(() => {
+    if (field !== null && choices.has(field)) keep(field, null);
+  }, [field]);
 }

@@ -238,6 +238,35 @@ test.describe('A one-ask item’s Send', () => {
     expect(await kept()).not.toHaveProperty(`${decision}/D1/other`);
   });
 
+  test('drops a choice once its item is answered elsewhere, so that an Undo brings the item back with nothing chosen', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Elsewhere'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    await timeline.open(id);
+    const item = timeline.item(decision);
+    const { block } = item;
+    const kept = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>, UNSENT_KEY);
+
+    await block.option('Tunnel').click();
+    expect(await kept()).toHaveProperty(`${decision}/D1/choice`);
+    // Answered through the API, as another page of the person's would.
+    await projects.answer(decision, 'D1', 'Dome');
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    expect(await kept()).not.toHaveProperty(`${decision}/D1/choice`);
+
+    await item.line.hover();
+    await item.undo.click();
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    await expect(block.options).toHaveCount(2);
+    await expect(block.root.locator('[data-chosen="true"]')).toHaveCount(0);
+    await expect(block.answerSend).toBeDisabled();
+  });
+
   test('is the block’s in the item’s tab too, which has no foot, and takes the choice made on the timeline', async ({
     page,
     people,
