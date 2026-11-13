@@ -1027,10 +1027,48 @@ def _pilots_in_runs(reading: Reading, run_ids: Collection[uuid.UUID]) -> set[uui
     )
 
 
+@cache
+def _open_documents() -> Select[uuid.UUID, uuid.UUID]:
+    """Each Work bound as `works`, once with each open registered document
+    of the run it begins, in timeline order."""
+    start = aliased(Work)
+    registered = aliased(Item)
+    document = aliased(Document)
+    return (
+        select(start.id, registered.id)
+        .select_from(start)
+        .join(
+            registered,
+            registered.created_by_session_id.in_(run_of(start.id).correlate(start)),
+        )
+        .join(document, document.id == registered.id)
+        .where(
+            start.id.in_(bindparam("works", expanding=True)),
+            registered.done_at.is_(None),
+            document.source_path.is_not(None),
+        )
+        .order_by(registered.seq)
+    )
+
+
+def runs_documents(
+    db: Session, run_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """The open registered documents of the run of each work item of
+    `run_ids`, by the work item's id, in timeline order: what its Cancel
+    closes (DB 298)."""
+    found: dict[uuid.UUID, list[uuid.UUID]] = {run_id: [] for run_id in run_ids}
+    if not found:
+        return found
+    for run_id, document_id in db.execute(_open_documents(), {"works": list(found)}):
+        found[run_id].append(document_id)
+    return found
+
+
 def run_documents(db: Session, run_id: uuid.UUID) -> list[uuid.UUID]:
     """The open registered documents of the run of the work item `run_id`,
     in timeline order: what its Cancel closes (DB 298)."""
-    return list(db.scalars(_documents_of(literal(run_id), aliased(Item))))
+    return runs_documents(db, [run_id])[run_id]
 
 
 def handed_back_in(

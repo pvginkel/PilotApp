@@ -128,7 +128,7 @@ from app.services.working_on import (
     holds,
     jobs_on,
     pilots_work,
-    run_documents,
+    runs_documents,
 )
 
 WORK = "work"
@@ -1039,10 +1039,7 @@ class TimelineService:
             if cancel.offered
         }
         taken = [each for cancel in offered.values() for each in cancel.takes_back]
-        closed = {
-            run_id: run_documents(self.db, run_id)
-            for run_id in {cancel.run_id for cancel in offered.values()}
-        }
+        closed = runs_documents(self.db, {cancel.run_id for cancel in offered.values()})
         named = set(reading.held) | reading.undone | {each.block_id for each in taken}
         blocks = (
             {
