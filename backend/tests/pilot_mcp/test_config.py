@@ -117,3 +117,15 @@ class TestTheProjectsSurfacesSettings:
 
         assert "a-shared-token" not in shown
         assert "a-client-secret" not in shown
+
+    def test_the_secrets_are_not_in_the_surfaces_settings_repr(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name, value in _PROJECTS.items():
+            monkeypatch.setenv(name, value)
+
+        shown = repr(McpSettings().projects())
+
+        assert "a-shared-token" not in shown
+        assert "a-client-secret" not in shown
+        assert "pilot-test-service" in shown

@@ -24,7 +24,7 @@ import hmac
 import json
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -193,10 +193,10 @@ class ProjectsDoor:
 
 @dataclass(frozen=True)
 class ProjectsSurface:
-    """`pilot-projects` as configured: its shared token and its client of the
-    API."""
+    """`pilot-projects` as configured: its shared token, out of its repr, and
+    its client of the API."""
 
-    token: str
+    token: str = field(repr=False)
     api: PilotProjectsApi
 
 

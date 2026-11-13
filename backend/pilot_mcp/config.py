@@ -14,7 +14,7 @@ is unset or empty the surface refuses every call, and the rest of the process
 serves.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import HttpUrl, SecretStr, field_validator
@@ -32,12 +32,13 @@ _PREFIX = "PILOT_MCP_"
 
 @dataclass(frozen=True)
 class ProjectsSettings:
-    """The projects surface's settings, each one set."""
+    """The projects surface's settings, each one set; the two secrets out of
+    its repr."""
 
-    token: str
+    token: str = field(repr=False)
     token_url: str
     client_id: str
-    client_secret: str
+    client_secret: str = field(repr=False)
 
 
 class McpSettings(BaseSettings):
