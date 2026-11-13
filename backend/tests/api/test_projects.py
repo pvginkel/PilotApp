@@ -1183,6 +1183,7 @@ class TestGetTimeline:
                     "input": {"file_path": "/work/Camp/plan.json"},
                 },
                 "agent": None,
+                "task": None,
                 "text": None,
             },
             "environment": {"id": environment.id, "name": "Example-1"},

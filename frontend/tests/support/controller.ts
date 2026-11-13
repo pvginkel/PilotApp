@@ -61,7 +61,7 @@ type FinishOutcome = 'success' | 'error' | 'interrupted' | 'spawn-failure' | 'en
 /** How a call goes unanswered while the controller is down: its connection closed with no answer, or an ingress's `502` page. */
 type Unanswered = 'none' | 'ingress';
 /** The backend suite's invented turns, in `backend/tests/fixtures/raw/`. */
-type RawTurn = 'turn_text' | 'turn_tool' | 'turn_subagent' | 'turn_wall';
+type RawTurn = 'turn_text' | 'turn_tool' | 'turn_subagent' | 'turn_wall' | 'turn_background';
 
 // The backend reads the controller answering again at its fleet stream's reconnect, whose
 // backoff doubles from 1 s to 30 s while the outage holds.
@@ -76,6 +76,21 @@ const BACKEND_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..', p
 export function rawTurn(name: RawTurn): string[] {
   const text = readFileSync(resolve(BACKEND_ROOT, 'tests/fixtures/raw', `${name}.jsonl`), 'utf-8');
   return text.split('\n').filter((line) => line !== '');
+}
+
+/**
+ * An invented turn's lines by the model's turns in it, each ending on `claude`'s own `result` line:
+ * a turn the worker holds open has several, as `turn_background`'s, the model's turn that left a
+ * command in the background, its answer to the worker's nudge, and the turn the command's
+ * notification starts.
+ */
+export function modelTurns(name: RawTurn): string[][] {
+  const turns: string[][] = [[]];
+  for (const line of rawTurn(name)) {
+    turns.at(-1)!.push(line);
+    if ((JSON.parse(line) as { type: string }).type === 'result') turns.push([]);
+  }
+  return turns.filter((turn) => turn.length > 0);
 }
 
 /** The conditions the backend reads, through a request context of the harness's own, signed in. */

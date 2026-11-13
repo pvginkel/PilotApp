@@ -304,6 +304,7 @@ class TestProjectEventService:
                         "since": "2026-10-24T09:00:00Z",
                         "step": None,
                         "agent": None,
+                        "task": None,
                         "text": None,
                     },
                     "environment": {

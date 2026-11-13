@@ -18,7 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
 import { cssColour } from '../support/contrast';
-import { rawTurn } from '../support/controller';
+import { modelTurns, rawTurn } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import { iconOf } from '../support/lines';
 import type { People } from '../support/people';
@@ -83,6 +83,7 @@ async function startIn(projects: Projects, project: string, state: string): Prom
 
 test.describe('A work item’s session log', () => {
   test('opened from a running item shows its head, then streams its records as the chat renders a reply — the cue, a run of calls, a sub-agent’s card, the phantom — to the turn’s end', async ({
+    page,
     people,
     projects,
     controller,
@@ -125,6 +126,11 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.tools).toHaveCount(0);
     await sessionLog.runs.getByRole('button').click();
     await expect(sessionLog.tools).toHaveText(['Read …/Example/README.md', 'List the files']);
+    // Opened, the run stands in its box away from the mouse, a divider under its line, as in the chat.
+    await page.mouse.move(0, 0);
+    await expect(sessionLog.runs).toHaveAttribute('data-open', 'true');
+    await expect(sessionLog.runs).not.toHaveCSS('border-top-color', 'rgba(0, 0, 0, 0)');
+    await expect(sessionLog.runs.getByTestId('chat.run.steps')).toHaveCSS('border-top-width', '1px');
 
     // A sub-agent is a card under its call, done once it reported.
     await controller.play(environment, 'claude-1', rawTurn('turn_subagent'));
@@ -170,6 +176,99 @@ test.describe('A work item’s session log', () => {
     await page.clock.setSystemTime(Date.parse(first!.at) + 2 * 60_000);
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await expect(sessionLog.cue).toHaveText('Thinking · 2 min');
+  });
+
+  test('says in its tail what the run waits on, and for how long, once the model ended its turn on a command it left in the background, whose call reads as running until its notification; the worker’s nudge and the model’s answer to it leave both', async ({
+    page,
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await page.clock.install();
+    await sessionLog.open(project, work);
+    await expect(sessionLog.cue).toHaveText('Creating the session');
+    const [yielded, nudged, delivered] = modelTurns('turn_background');
+    const WAITING = 'Waiting on a background command · Wait for the nightly import';
+    const spinner = sessionLog.tools.locator('.animate-spin');
+
+    // The page's clock stands still from here; the cue counts again once the page comes back into view.
+    // eslint-disable-next-line no-restricted-properties -- The page's own clock, read to pause it.
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+    await controller.play(environment, 'claude-1', yielded!);
+    await expect(sessionLog.texts).toHaveText(['The import is under way; I will carry on once it is done.']);
+    await expect(sessionLog.cue).toHaveText(new RegExp(`^${WAITING} · `));
+    await expect(sessionLog.cue.locator('svg')).toHaveClass(/\blucide-hourglass\b/);
+    // The call has its result, that the command runs in the background, and reads as running.
+    await expect(sessionLog.tools).toHaveText(['Wait for the nightly import']);
+    await page.clock.runFor(1_000);
+    await expect(spinner).toHaveCount(1);
+
+    // The wait counts from the model's turn's end, through the worker's nudge and the model's WAITING.
+    const { records } = await projects.records(work);
+    const ended = records.find((record) => record.kind === 'claude' && (record.payload as { type?: string }).type === 'result')!;
+    await controller.play(environment, 'claude-1', nudged!);
+    await expect(sessionLog.texts).toHaveText(['The import is under way; I will carry on once it is done.', 'WAITING']);
+    await page.clock.setSystemTime(Date.parse(ended.at) + 65 * 60_000);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(sessionLog.cue).toHaveText(`${WAITING} · 65 min`);
+    await expect(spinner).toHaveCount(1);
+
+    // The command's notification ends the wait and the call's run; the model carries on.
+    await controller.play(environment, 'claude-1', delivered!.slice(0, 2));
+    await expect(sessionLog.cue).toHaveText('Working');
+    await expect(spinner).toHaveCount(0);
+    await controller.play(environment, 'claude-1', delivered!.slice(2));
+    await expect(sessionLog.texts.last()).toHaveText('The import is done.');
+  });
+
+  test('shows the message of a turn the gate holds before it is sent, a Resume made elsewhere while the project is paused: in a log open through it, and in one opened again onto the Turns it read before', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await timeline.open(project);
+    const item = timeline.item(work);
+    await item.work.sessionLog.click();
+    await expect(sessionLog.sentTexts).toHaveText(['Survey the stylesheets.']);
+
+    // A Resume no hook of this page made, of a turn that had a reply, held by the pause: its Turn
+    // is stored and has no record.
+    const lastKind = async () => (await projects.records(work)).records.at(-1)?.kind;
+    const heldResume = async (reply: string) => {
+      await controller.play(environment, 'claude-1', [text(reply, reply)]);
+      await expect.poll(lastKind).toBe('claude');
+      await projects.stop(work);
+      await expect.poll(lastKind).toBe('result');
+      await projects.transition(project, 'paused');
+      await projects.resume(work);
+      expect((await projects.work(project, work)).state).toBe('held');
+    };
+    await heldResume('Looking at the stylesheets.');
+    await expect(sessionLog.cue).toHaveText('Paused');
+    await expect(sessionLog.sentTexts).toHaveText(['Survey the stylesheets.', 'continue']);
+    expect((await projects.records(work)).records.some((record) => record.turn === 2)).toBe(false);
+
+    // Closed, the project resumed and the Turn sent, then another Resume held: the log opened
+    // again reads its Turns again, though no record names the third and its state is the one it left.
+    await sessionLog.close.click();
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await projects.transition(project, 'resumed');
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    await heldResume('There are two stylesheets.');
+    await expect(item.work.cue).toHaveText('Paused');
+    expect((await projects.records(work)).records.some((record) => record.turn === 3)).toBe(false);
+    await item.work.sessionLog.click();
+    await expect(sessionLog.cue).toHaveText('Paused');
+    await expect(sessionLog.sentTexts).toHaveText(['Survey the stylesheets.', 'continue', 'continue']);
   });
 
   test('shows what the server sent each turn as Pilot’s message before its reply: the brief, cut after eight lines with Show more at the end of the last, opened whole with Show less after its last word, which cuts it again, and a Resume’s before the turn it starts', async ({

@@ -2,29 +2,47 @@
 DB assertion 221).
 
 The keys: `state`, one of `starting`, `thinking`, `writing` (a main-thread text
-block under way), `working` (a tool call without its result yet) and `waiting`
-(a sub-agent running); `since`, when that state began, or the latest step did;
-`step`, the latest tool call's `tool` and `input`, absent before the first, its
-`input` None while it streams in, until the call's line fills it in;
-`agent`, the sub-agent's `type` and `description` while `waiting`; `text`, the
-latest `server` record's words while `starting`.
+block under way), `working` (a tool call without its result yet), `waiting`
+(a sub-agent running) and `background` (the model's own turn ended with a task
+it left in the background still running); `since`, when that state began, or
+the latest step did; `step`, the latest tool call's `tool` and `input`, absent
+before the first, its `input` None while it streams in, until the call's line
+fills it in; `agent`, the sub-agent's `type` and `description` while `waiting`;
+`task`, the `type` and `description` of the background task started last of
+those still running, while `background`; `tasks`, the main thread's tasks that
+run, each with its `id`, `type`, `description` and whether it is
+`backgrounded`, absent while none runs; `text`, the latest `server` record's
+words while `starting`.
 
 The session start sets it from each `server` record it writes while the Session
 is `starting`; the send keeps that line, or sets `thinking`; and the relay
 rebuilds it from each line it records and from each partial it forwards, as the
 line implies; a sub-agent's line implies nothing of the main thread's.
+
+A task is `claude`'s own: a `system` `task_started` line starts one, in the
+background where its `is_backgrounded` is true or a later `task_updated` line's
+patch makes it so, as for a command moved there at its timeout, and its
+`task_notification` ends it. `claude`'s `result` line, the model's own turn
+ended, is `background` while a backgrounded task runs, the worker holding the
+Turn open for it. From there only a tool call's line or its block's start, or
+the notification of the last such task, moves the state: the worker's nudge and
+the model's answer to it leave it.
 """
 
 from datetime import datetime
 from typing import Any, Literal
 
 type CurrentLine = dict[str, Any]
-type LineState = Literal["starting", "thinking", "writing", "working", "waiting"]
+type LineState = Literal[
+    "starting", "thinking", "writing", "working", "waiting", "background"
+]
 
 _AGENT_TOOLS = ("Task", "Agent")
 TOOL_BLOCKS = ("tool_use", "server_tool_use", "mcp_tool_use")
 """The content blocks of an `assistant` line that are a tool call."""
 _THINKING_BLOCKS = ("thinking", "redacted_thinking")
+_CALL_STATES = ("working", "waiting")
+"""The states a tool call's line or its block's start implies."""
 
 
 def while_starting(text: str, at: datetime) -> CurrentLine:
@@ -46,13 +64,17 @@ def at_send(previous: CurrentLine | None, at: datetime) -> CurrentLine:
 def after_line(previous: CurrentLine | None, line: Any, at: datetime) -> CurrentLine:
     """The current line once the line `line` is recorded at `at`; `line` is the
     record's payload."""
+    tasks = _tasks_after(previous, line)
     state, step, agent = _implied_by_line(line)
-    if state is None:
-        if previous is None or previous["state"] == "starting":
+    yielded = _ends_the_models_turn(line) or _in_background(previous)
+    if yielded and state not in _CALL_STATES and _backgrounded(tasks):
+        state = "background"
+    elif state is None:
+        if previous is None or previous["state"] in ("starting", "background"):
             state = "thinking"
         else:
             state = previous["state"]
-    return _rebuilt(previous, state, at, step, agent)
+    return _rebuilt(previous, state, at, step, agent, tasks)
 
 
 def after_partial(
@@ -61,9 +83,10 @@ def after_partial(
     """The current line once the forwarded partial `line` arrived at `at`; None
     when it leaves the line as it is."""
     state, step = _implied_by_partial(line)
-    if state is None:
+    if state is None or (_in_background(previous) and state not in _CALL_STATES):
         return None
-    current = _rebuilt(previous, state, at, step, None)
+    tasks = previous.get("tasks", []) if previous is not None else []
+    current = _rebuilt(previous, state, at, step, None, tasks)
     return None if current == previous else current
 
 
@@ -73,6 +96,7 @@ def _rebuilt(
     at: datetime,
     step: dict[str, Any] | None,
     agent: dict[str, Any] | None,
+    tasks: list[dict[str, Any]],
 ) -> CurrentLine:
     before = previous or {}
     moved = before.get("state") != state or (
@@ -89,7 +113,57 @@ def _rebuilt(
         agent = agent or before.get("agent")
         if agent is not None:
             current["agent"] = agent
+    if state == "background":
+        task = _backgrounded(tasks)[-1]
+        current["task"] = {"type": task["type"], "description": task["description"]}
+    if tasks:
+        current["tasks"] = tasks
     return current
+
+
+def _in_background(line: CurrentLine | None) -> bool:
+    return line is not None and line["state"] == "background"
+
+
+def _backgrounded(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [task for task in tasks if task["backgrounded"]]
+
+
+def _ends_the_models_turn(line: Any) -> bool:
+    """Whether `line` is `claude`'s own `result`, which ends the model's turn
+    and not the Turn: the worker's `result` frame ends that."""
+    return isinstance(line, dict) and line.get("type") == "result"
+
+
+def _tasks_after(previous: CurrentLine | None, line: Any) -> list[dict[str, Any]]:
+    """The main thread's running tasks once `line` is recorded, in the order
+    they started."""
+    tasks: list[dict[str, Any]] = previous.get("tasks", []) if previous else []
+    if not isinstance(line, dict) or line.get("type") != "system":
+        return tasks
+    task_id = line.get("task_id")
+    if not isinstance(task_id, str):
+        return tasks
+    others = [task for task in tasks if task["id"] != task_id]
+    match line.get("subtype"):
+        case "task_started" if not line.get("owned_by_subagent"):
+            started = {
+                "id": task_id,
+                "type": line.get("task_type"),
+                "description": line.get("description"),
+                "backgrounded": line.get("is_backgrounded") is True,
+            }
+            return [*others, started]
+        case "task_updated":
+            patch = line.get("patch")
+            if isinstance(patch, dict) and patch.get("is_backgrounded") is True:
+                return [
+                    {**task, "backgrounded": True} if task["id"] == task_id else task
+                    for task in tasks
+                ]
+        case "task_notification":
+            return others
+    return tasks
 
 
 def _same_call(before: dict[str, Any] | None, step: dict[str, Any]) -> bool:

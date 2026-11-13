@@ -1500,6 +1500,7 @@ def _current_line(line: dict[str, Any] | None) -> CurrentLineSchema | None:
             "since": line["since"],
             "step": line.get("step"),
             "agent": line.get("agent"),
+            "task": line.get("task"),
             "text": line.get("text"),
         }
     )

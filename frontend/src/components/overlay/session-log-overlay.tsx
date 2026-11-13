@@ -10,13 +10,14 @@
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
  * (F69.2). Before a turn's reply stands what the server sent it, as Pilot's message, cut after its
  * first lines, Show more at the end of the last one and, once opened, Show less after its end:
- * the brief, a continuation, a Resume's; a turn sent and not yet answered shows its message alone. Its tail is the working cue while the session is held, starts or runs, else how it
+ * the brief, a continuation, a Resume's; a turn sent and not yet answered shows its message alone, one the gate holds unsent too. Its tail is the working cue while the session is held, starts or runs, else how it
  * ended: "Stopped by you · <time>", by whom else, by Pilot at the usage limit, the environment
  * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6);
  * a run whose turn ended under a halt or a pause adds, under its end, what holds its nudge, as its
  * line does (F135.3, F141.3); a job retried adds, under how it ended, "Retried as a new job ·
  * <time>", its words the link to the retry's log, which takes this one's place (F26.4). The cue's dots dance while a turn runs or comes up, and it stands
- * still while the gate holds the start or a nudge is owed (D167). The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
+ * still while the gate holds the start or a nudge is owed (D167); a turn whose model left a task in the
+ * background and ended its own turn reads "Waiting on a background command · <its description> · <how long>". The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
  * log on. An address that names no work item of the project reads "The session log did not load".
  */
 
@@ -141,7 +142,7 @@ function SessionLog({ item, work, body }: SessionLogProps) {
     () => buildChatView(item.id, stream.records, { running: live }).flatMap((entry) => (entry.kind === 'turn' ? [entry] : [])),
     [item.id, stream.records, live],
   );
-  const sentTurns = useSessionTurns(item.id, stream.records);
+  const sentTurns = useSessionTurns(item.id, stream.records, work.state);
   const entries = useMemo(() => logEntries(item.id, turns, sentTurns), [item.id, turns, sentTurns]);
   const last = turns.at(-1)?.turn;
   const endedAt = (work.state === 'idle' ? item.done?.at : undefined) ?? last?.endedAt ?? null;

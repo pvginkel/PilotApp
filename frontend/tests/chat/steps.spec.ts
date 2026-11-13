@@ -12,6 +12,8 @@
  * calls counted under its name; each text it shows stands for a moment, one that came and went
  * within that moment never shown, and it moves on however fast its calls come, its count of
  * failures at once (C1). A call's spinner shows once the call has run a second, and goes at once.
+ * A run's line stands in a rounded box under the mouse and in none away from it, the line where it
+ * stood; opened, the box stays, round the line and its calls, a divider under the line.
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -216,6 +218,88 @@ test.describe('A reply’s step lines', () => {
     expect(code.inLine).toBe(plain.inLine);
     expect(await heightOf(chat.cue)).toBe(await heightOf(lines.last()));
     await controller.finish(chats.store, session, 'success', 'Done.');
+  });
+
+  test('draws a rounded box round a run’s line under the mouse, the line and what follows it where they stood, and none away from it; opened, the box stays away from the mouse, round the line and its calls, a divider under the line, as an agent’s open card', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Box'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'What is in the folder?');
+    await controller.play(chats.store, session, [
+      toolUse('read_a', 'Read', { file_path: '/work/Example/a.md' }),
+      toolResult('read_a', 'A.'),
+      toolUse('list_b', 'Bash', { command: 'ls', description: 'List the files' }),
+      toolResult('list_b', 'a.md'),
+      text('found', 'One file.'),
+      toolUse('agent', 'Agent', { subagent_type: 'Explore', description: 'Find the cue', prompt: 'Find it.' }),
+    ]);
+    const run = chat.root.getByTestId('chat.run');
+    const head = headOf(run);
+    const after = chat.root.getByTestId('chat.text').last();
+    const card = chat.root.getByTestId('chat.agent');
+    await expect(head).toHaveText('Read a file, ran a command · 2 steps');
+    await expect(card).toBeVisible();
+    const edge = (part: Locator) => part.evaluate((element) => getComputedStyle(element).borderTopColor);
+    const ground = (part: Locator) => part.evaluate((element) => getComputedStyle(element).backgroundColor);
+    const boxOf = async (part: Locator) => (await part.boundingBox())!;
+    const NONE = 'rgba(0, 0, 0, 0)';
+    const drawn = { edge: await edge(card), ground: await ground(card) };
+    expect(drawn.edge).not.toBe(NONE);
+
+    // Away from the mouse the line has no box.
+    await away(page);
+    await expect(run).toHaveAttribute('data-open', 'false');
+    expect({ edge: await edge(run), ground: await ground(run) }).toEqual({ edge: NONE, ground: NONE });
+    const before = { head: await boxOf(head), icon: await iconOf(head), after: await boxOf(after) };
+
+    // Under it the box is the agent's card's: its border, its ground, its corners; nothing moves.
+    await head.hover();
+    await expect.poll(() => edge(run)).toBe(drawn.edge);
+    expect(await ground(run)).toBe(drawn.ground);
+    await expect(run).toHaveCSS('border-radius', await card.evaluate((element) => getComputedStyle(element).borderRadius));
+    expect(await boxOf(head)).toEqual(before.head);
+    expect(await boxOf(after)).toEqual(before.after);
+    // The box stands round the line, 6px out on either side.
+    const [box, line] = [await boxOf(run), await boxOf(head)];
+    expect(line.x - box.x).toBeCloseTo(6, 0);
+    expect(box.x + box.width - (line.x + line.width)).toBeCloseTo(6, 0);
+    expect(line.y - box.y).toBeCloseTo(1, 0);
+    expect(box.y + box.height - (line.y + line.height)).toBeCloseTo(1, 0);
+
+    // Opened, the box stays away from the mouse, round the line and its calls, a divider under the line.
+    await head.click();
+    const tools = run.getByTestId('chat.tool');
+    await expect(tools).toHaveCount(2);
+    await away(page);
+    await expect(run).toHaveAttribute('data-open', 'true');
+    expect({ edge: await edge(run), ground: await ground(run) }).toEqual(drawn);
+    expect(await boxOf(head)).toEqual(before.head);
+    expect((await iconOf(head)).left).toBe(before.icon.left);
+    const [opened, last, steps] = [await boxOf(run), await boxOf(tools.last()), await boxOf(run.getByTestId('chat.run.steps'))];
+    expect(opened.y + opened.height).toBeGreaterThan(last.y + last.height);
+    // The divider runs from one side of the box to the other, right under the line.
+    await expect(run.getByTestId('chat.run.steps')).toHaveCSS('border-top-width', '1px');
+    expect(await edge(run.getByTestId('chat.run.steps'))).toBe(drawn.edge);
+    expect(steps.x - opened.x).toBeCloseTo(1, 0);
+    expect(steps.width).toBeCloseTo(opened.width - 2, 0);
+    expect(steps.y).toBeCloseTo(before.head.y + before.head.height, 0);
+    // The calls' icons stand under the line's.
+    expect((await iconOf(tools.first().getByRole('button'))).left).toBe(before.icon.left);
+
+    // Closed again, away from the mouse, the box is gone and what follows is back where it stood.
+    await head.click();
+    await away(page);
+    await expect(run).toHaveAttribute('data-open', 'false');
+    expect({ edge: await edge(run), ground: await ground(run) }).toEqual({ edge: NONE, ground: NONE });
+    expect(await boxOf(after)).toEqual(before.after);
   });
 
   test('shows a call’s spinner once the call has run a second, on its own line and its run’s, a quick call none, the next call waiting its own second; a failure shows at once', async ({

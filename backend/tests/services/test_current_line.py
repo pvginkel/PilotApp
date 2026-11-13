@@ -1,6 +1,7 @@
 """A Session's current line, as the session start sets it and the relay
 rebuilds it (design 2 §9.5, Q5; V15)."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.services.current_line import (
     at_send,
     while_starting,
 )
+from tests.support.fake_controller import raw_turn
 
 AT = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 LATER = AT + timedelta(seconds=5)
@@ -276,3 +278,207 @@ class TestACallWhoseInputStreamsIn:
             "step": TASK,
             "agent": {"type": "Explore", "description": "Find the badge"},
         }
+
+
+IMPORT = {"type": "local_bash", "description": "Wait for the nightly import"}
+
+
+def _task_started(
+    task: str = "t1", description: str = "Wait for the nightly import", **keys: Any
+) -> dict[str, Any]:
+    return {
+        "type": "system",
+        "subtype": "task_started",
+        "task_id": task,
+        "tool_use_id": "toolu_example",
+        "description": description,
+        "is_backgrounded": True,
+        "task_type": "local_bash",
+        **keys,
+    }
+
+
+def _task_notification(task: str = "t1") -> dict[str, Any]:
+    return {
+        "type": "system",
+        "subtype": "task_notification",
+        "task_id": task,
+        "tool_use_id": "toolu_example",
+        "status": "completed",
+    }
+
+
+RESULT = {"type": "result", "subtype": "success"}
+INIT = {"type": "system", "subtype": "init"}
+
+
+def _after(previous: CurrentLine | None, *lines: Any) -> CurrentLine:
+    """The line once `lines` are recorded, each a second after the one before."""
+    line = previous
+    for index, each in enumerate(lines):
+        line = after_line(line, each, LATER + timedelta(seconds=index))
+    assert line is not None
+    return line
+
+
+class TestABackgroundTask:
+    """A task the model left running in the background when its own turn ended
+    (P-253): the line says it waits on it until the task's notification."""
+
+    def test_a_turn_that_leaves_a_command_running_waits_on_it_to_its_notification(
+        self,
+    ) -> None:
+        """The fixture's turn, in the shape `claude` prints one: the call, its
+        task, the model's `result`, the worker's nudge answered WAITING, the
+        notification, the delivery turn."""
+        states: list[tuple[str, str]] = []
+        line: CurrentLine | None = None
+        for index, raw in enumerate(raw_turn("turn_background")):
+            recorded = json.loads(raw)
+            line = after_line(line, recorded, AT + timedelta(seconds=index))
+            states.append((recorded.get("subtype", recorded["type"]), line["state"]))
+            if line["state"] == "background":
+                assert line["task"] == IMPORT
+                assert line["since"] == (AT + timedelta(seconds=8)).isoformat()
+
+        assert states == [
+            ("init", "thinking"),
+            ("status", "thinking"),
+            ("assistant", "working"),
+            ("background_tasks_changed", "working"),
+            ("task_started", "working"),
+            ("user", "thinking"),
+            ("status", "thinking"),
+            ("assistant", "thinking"),
+            ("success", "background"),
+            ("init", "background"),
+            ("status", "background"),
+            ("assistant", "background"),
+            ("success", "background"),
+            ("task_updated", "background"),
+            ("task_notification", "thinking"),
+            ("background_tasks_changed", "thinking"),
+            ("init", "thinking"),
+            ("status", "thinking"),
+            ("assistant", "thinking"),
+            ("success", "thinking"),
+        ]
+        assert line is not None and "tasks" not in line and "task" not in line
+
+    def test_the_models_result_with_a_task_in_the_background_is_background(
+        self,
+    ) -> None:
+        line = _after(WORKING, _task_started(), _tool_result(), RESULT)
+
+        assert line == {
+            "state": "background",
+            "since": (LATER + timedelta(seconds=2)).isoformat(),
+            "step": READ,
+            "task": IMPORT,
+            "tasks": [{"id": "t1", **IMPORT, "backgrounded": True}],
+        }
+
+    def test_a_task_in_the_foreground_is_not_waited_on(self) -> None:
+        started = _task_started(is_backgrounded=False, task_type="local_agent")
+
+        line = _after(WORKING, started, _tool_result(), RESULT)
+
+        assert line["state"] == "thinking"
+
+    def test_a_task_started_without_the_key_is_in_the_foreground(self) -> None:
+        started = _task_started()
+        del started["is_backgrounded"]
+
+        assert _after(WORKING, started, _tool_result(), RESULT)["state"] == "thinking"
+
+    def test_a_command_moved_to_the_background_at_its_timeout_is_waited_on(
+        self,
+    ) -> None:
+        moved = {
+            "type": "system",
+            "subtype": "task_updated",
+            "task_id": "t1",
+            "patch": {"is_backgrounded": True},
+        }
+
+        line = _after(
+            WORKING, _task_started(is_backgrounded=False), moved, _tool_result(), RESULT
+        )
+
+        assert line["state"] == "background"
+        assert line["task"] == IMPORT
+
+    def test_a_sub_agents_own_task_is_not_waited_on(self) -> None:
+        line = _after(
+            WORKING, _task_started(owned_by_subagent=True), _tool_result(), RESULT
+        )
+
+        assert line["state"] == "thinking"
+        assert "tasks" not in line
+
+    def test_a_task_that_ended_before_the_models_result_is_not_waited_on(self) -> None:
+        line = _after(
+            WORKING, _task_started(), _tool_result(), _task_notification(), RESULT
+        )
+
+        assert line == {
+            "state": "thinking",
+            "since": (LATER + timedelta(seconds=1)).isoformat(),
+            "step": READ,
+        }
+
+    def test_nothing_but_a_call_moves_it_before_the_notification(self) -> None:
+        waiting = _after(WORKING, _task_started(), _tool_result(), RESULT)
+
+        for line in (
+            INIT,
+            {"type": "system", "subtype": "status", "status": "requesting"},
+            _assistant({"type": "thinking", "thinking": ""}),
+            _assistant({"type": "text", "text": "WAITING"}),
+            {"type": "rate_limit_event"},
+            RESULT,
+        ):
+            assert after_line(waiting, line, LATER + timedelta(minutes=1)) == waiting
+        for partial in (_block_start("thinking"), _block_start("text"), TEXT_DELTA):
+            assert after_partial(waiting, partial, LATER + timedelta(minutes=1)) is None
+
+    def test_a_call_made_while_it_waits_is_working_and_its_turns_end_waits_again(
+        self,
+    ) -> None:
+        waiting = _after(WORKING, _task_started(), _tool_result(), RESULT)
+        bash = {"tool": "Bash", "input": {"command": "tail import.log"}}
+
+        streaming = after_partial(waiting, _call_start("Bash"), LATER)
+        assert streaming is not None
+        assert streaming["state"] == "working"
+        assert streaming["step"] == {"tool": "Bash", "input": None}
+        assert "task" not in streaming
+        working = _after(streaming, _assistant(_call(bash)))
+        assert working["state"] == "working"
+        assert _after(working, _tool_result())["state"] == "thinking"
+        again = _after(working, _tool_result(), _assistant({"type": "text"}), RESULT)
+        assert again["state"] == "background"
+        assert again["task"] == IMPORT
+
+    def test_of_two_it_waits_on_the_one_started_last_that_still_runs(self) -> None:
+        build = _task_started("t2", "Build the image")
+        waiting = _after(WORKING, _task_started(), build, _tool_result(), RESULT)
+
+        assert waiting["task"] == {
+            "type": "local_bash",
+            "description": "Build the image",
+        }
+        on_the_first = _after(waiting, _task_notification("t2"))
+        assert on_the_first["state"] == "background"
+        assert on_the_first["task"] == IMPORT
+        assert on_the_first["since"] == waiting["since"]
+        assert _after(on_the_first, _task_notification("t1")) == {
+            "state": "thinking",
+            "since": LATER.isoformat(),
+            "step": READ,
+        }
+
+    def test_a_notification_of_a_task_it_does_not_hold_changes_nothing(self) -> None:
+        waiting = _after(WORKING, _task_started(), _tool_result(), RESULT)
+
+        assert after_line(waiting, _task_notification("t9"), LATER) == waiting

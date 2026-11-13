@@ -70,7 +70,12 @@ interface ResultLine extends LineBase {
   num_turns?: number;
 }
 
-/** The system notices: init, status, thinking_tokens, the background tasks' lifecycle. */
+/**
+ * The system notices: init, status, thinking_tokens, the tasks' lifecycle. A task is a sub-agent or
+ * a command `claude` runs apart from its call: `task_started` starts one, in the background where
+ * `is_backgrounded` is true or a later `task_updated`'s patch makes it so, as for a command moved
+ * there at its timeout, and `task_notification` ends it.
+ */
 export interface SystemLine extends LineBase {
   type: 'system';
   subtype: string;
@@ -78,6 +83,13 @@ export interface SystemLine extends LineBase {
   tool_use_id?: string;
   description?: string;
   subagent_type?: string;
+  /** `local_bash` a command, `local_agent` a sub-agent. */
+  task_type?: string;
+  is_backgrounded?: boolean;
+  /** Set on a task a sub-agent started: none of the main thread's. */
+  owned_by_subagent?: boolean;
+  /** On `task_updated`: the task's keys that changed. */
+  patch?: { is_backgrounded?: boolean; status?: string };
   last_tool_name?: string;
   status?: string;
   summary?: string;

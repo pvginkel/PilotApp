@@ -12,8 +12,12 @@
  * on a file the session registered — its read at the run's end failed, its write-back refused —
  * is written after the run's last Turn ended, and stands at that Turn's end. A Turn ends at
  * its `result`, at a failed send or start, at the environment stopped under it, at a Stop before it
- * was sent, or, ended with no record of it, where a later Turn's records begin; a call or a sub-agent still running then was
- * stopped with it. An effect goes on the call that made it, whether its record is written before
+ * was sent, or, ended with no record of it, where a later Turn's records begin; a call, a sub-agent or a
+ * background task still running then was stopped with it. `claude`'s own `result` line ends the
+ * model's turn and not the Turn: with a task it left in the background still running, the Turn
+ * waits on that task, the one started last of those that run, until its notification or the
+ * model's next call; the worker's nudge and the model's answer to it leave the wait as it is. An
+ * effect goes on the call that made it, whether its record is written before
  * or after the call's line; one whose call no record shows, as where its client sent no tool-use id,
  * stands in its own record's place.
  */
@@ -45,6 +49,8 @@ export interface ToolCallView {
   result?: ToolResultView;
   /** Its turn ended with no result for it. */
   stopped?: boolean;
+  /** Set on a command left in the background, whose result says only that it runs there: its task's status. */
+  background?: AgentView['status'];
   /** Set on an Agent call: its sub-agent. */
   agent?: AgentView;
   /** What a `pilot-store` call, or a worker's `register_document` or `attach_file`, changed (the server's effect records). */
@@ -61,6 +67,26 @@ export type Step =
   /** An effect whose call no record shows. */
   | { kind: 'effect'; seq: number; effect: Effect };
 
+/** Whether the call runs: it has no result yet, or it is a command still running in the background. */
+export const isRunning = (call: ToolCallView): boolean => (!call.result && !call.stopped) || call.background === 'running';
+
+/** The background task a Turn waits on, the model's own turn ended. */
+export interface BackgroundWait {
+  /** `claude`'s `task_type`: `local_bash` a command. */
+  type: string;
+  description: string;
+  /** When the model's turn ended with it running. */
+  since: string;
+}
+
+/** A task of the main thread's that runs. */
+interface Task {
+  call?: ToolCallView;
+  type: string;
+  description: string;
+  backgrounded: boolean;
+}
+
 type TurnState = 'running' | 'done' | 'interrupted' | 'failed';
 
 export interface TurnView {
@@ -71,6 +97,8 @@ export interface TurnView {
   /** The server's latest line while the session comes up, or comes up again, until Pilot's next
    *  step (F81, F71): the cue shows it. */
   comingUp: ServerRecord | null;
+  /** The background task it waits on, the model's own turn ended; null while the model works. */
+  background: BackgroundWait | null;
   state: TurnState;
   /** Why it failed, when it did: a failed send or start (F125), an API error, the turn's error. */
   failure?: string;
@@ -104,15 +132,31 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
   const early = new Map<string, Effect[]>();
   const turnCalls = new Map<number, ToolCallView[]>();
   const turns = new Map<number, TurnView>();
+  /** The main thread's tasks that run, by their id, in the order they started. */
+  const tasks = new Map<string, Task>();
   let turn: TurnView | null = null;
 
   const end = (t: TurnView, state: TurnState, at: string) => {
     t.state = state;
     t.endedAt = at;
+    t.background = null;
+    tasks.clear();
     for (const call of turnCalls.get(t.turn) ?? []) {
       if (!call.result) call.stopped = true;
       if (call.agent?.status === 'running') call.agent.status = 'stopped';
+      if (call.background === 'running') call.background = 'stopped';
     }
+  };
+
+  /** The wait on the background task started last of those that run, counted from `since`; null when none runs. */
+  const waitFrom = (since: string): BackgroundWait | null => {
+    const task = [...tasks.values()].filter((each) => each.backgrounded).at(-1);
+    return task ? { type: task.type, description: task.description, since } : null;
+  };
+
+  const toBackground = (task: Task) => {
+    task.backgrounded = true;
+    if (task.call && !task.call.agent) task.call.background = 'running';
   };
 
   const open = (r: ChatRecord): TurnView => {
@@ -124,6 +168,7 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
       turn: number,
       steps: [],
       comingUp: null,
+      background: null,
       state: 'running',
       firstSeq: r.seq,
       lastSeq: r.seq,
@@ -144,22 +189,39 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
     return call.agent.steps;
   };
 
-  const onSystem = (line: SystemLine) => {
+  const onSystem = (t: TurnView, line: SystemLine) => {
     const call = line.tool_use_id ? calls.get(line.tool_use_id) : undefined;
+    const task = line.task_id ? tasks.get(line.task_id) : undefined;
     switch (line.subtype) {
       case 'task_started':
         if (call?.agent) call.agent.status = 'running';
+        if (line.task_id && !line.owned_by_subagent) {
+          const started: Task = { call, type: line.task_type ?? '', description: line.description ?? '', backgrounded: false };
+          tasks.delete(line.task_id);
+          tasks.set(line.task_id, started);
+          if (line.is_backgrounded === true) toBackground(started);
+        }
+        return;
+      case 'task_updated':
+        if (task && line.patch?.is_backgrounded === true) toBackground(task);
         return;
       case 'task_progress':
         if (call?.agent && line.description) call.agent.progress = line.description;
         return;
-      case 'task_notification':
+      case 'task_notification': {
+        const status = line.status === 'completed' ? 'completed' : line.status === 'failed' ? 'failed' : 'stopped';
         if (call?.agent) {
-          call.agent.status = line.status === 'completed' ? 'completed' : line.status === 'failed' ? 'failed' : 'stopped';
+          call.agent.status = status;
           call.agent.summary = typeof line.summary === 'string' ? line.summary : undefined;
           call.agent.progress = undefined;
         }
+        if (task) {
+          tasks.delete(line.task_id!);
+          if (task.call?.background) task.call.background = status;
+          if (t.background) t.background = waitFrom(t.background.since);
+        }
         return;
+      }
     }
   };
 
@@ -248,6 +310,7 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
           calls.set(block.id, call);
           turnCalls.set(t.turn, [...(turnCalls.get(t.turn) ?? []), call]);
           steps.push({ kind: 'tool', seq: r.seq, call });
+          if (isMainThread(line)) t.background = null;
         }
       }
     } else if (isUser(line) && Array.isArray(line.message.content)) {
@@ -258,7 +321,9 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
         if (call) call.result = { text: resultText(block), isError: !!block.is_error, seq: r.seq };
       }
     } else if (isSystem(line)) {
-      onSystem(line);
+      onSystem(t, line);
+    } else if (line.type === 'result') {
+      t.background = waitFrom(t.background?.since ?? r.at);
     }
   }
 

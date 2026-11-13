@@ -3746,13 +3746,14 @@
             "type": "string"
           },
           "state": {
-            "description": "What the turn is doing: the session coming up, thinking, writing a main-thread text block, running a tool call, or waiting on a sub-agent",
+            "description": "What the turn is doing: the session coming up, thinking, writing a main-thread text block, running a tool call, waiting on a sub-agent, or, the model's own turn ended, waiting on a task it left running in the background",
             "enum": [
               "starting",
               "thinking",
               "writing",
               "working",
-              "waiting"
+              "waiting",
+              "background"
             ],
             "title": "State",
             "type": "string"
@@ -3767,6 +3768,17 @@
               }
             ],
             "description": "The latest tool call; null before the first"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.LineTaskSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The background task it waits on, the one started last of those still running; null unless `state` is `background`"
           },
           "text": {
             "anyOf": [
@@ -3790,6 +3802,7 @@
           "since",
           "step",
           "agent",
+          "task",
           "text"
         ],
         "title": "CurrentLineSchema",
@@ -4118,6 +4131,47 @@
           "input"
         ],
         "title": "LineStepSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.LineTaskSchema": {
+        "description": "The background task a current line waits on, from its `task_started`\nline.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task's `description`, its call's own",
+            "examples": [
+              "Wait for the nightly import"
+            ],
+            "title": "Description"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`claude`'s `task_type`: `local_bash` a command, `local_agent` a sub-agent",
+            "examples": [
+              "local_bash"
+            ],
+            "title": "Type"
+          }
+        },
+        "required": [
+          "type",
+          "description"
+        ],
+        "title": "LineTaskSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.OptionSchema": {
@@ -9183,13 +9237,14 @@
             "type": "string"
           },
           "state": {
-            "description": "What the turn is doing: the session coming up, thinking, writing a main-thread text block, running a tool call, or waiting on a sub-agent",
+            "description": "What the turn is doing: the session coming up, thinking, writing a main-thread text block, running a tool call, waiting on a sub-agent, or, the model's own turn ended, waiting on a task it left running in the background",
             "enum": [
               "starting",
               "thinking",
               "writing",
               "working",
-              "waiting"
+              "waiting",
+              "background"
             ],
             "title": "State",
             "type": "string"
@@ -9204,6 +9259,17 @@
               }
             ],
             "description": "The latest tool call; null before the first"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.LineTaskSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The background task it waits on, the one started last of those still running; null unless `state` is `background`"
           },
           "text": {
             "anyOf": [
@@ -9227,6 +9293,7 @@
           "since",
           "step",
           "agent",
+          "task",
           "text"
         ],
         "title": "CurrentLineSchema",
@@ -9555,6 +9622,47 @@
           "input"
         ],
         "title": "LineStepSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.LineTaskSchema": {
+        "description": "The background task a current line waits on, from its `task_started`\nline.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task's `description`, its call's own",
+            "examples": [
+              "Wait for the nightly import"
+            ],
+            "title": "Description"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`claude`'s `task_type`: `local_bash` a command, `local_agent` a sub-agent",
+            "examples": [
+              "local_bash"
+            ],
+            "title": "Type"
+          }
+        },
+        "required": [
+          "type",
+          "description"
+        ],
+        "title": "LineTaskSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.OptionSchema": {
@@ -11354,13 +11462,14 @@
             "type": "string"
           },
           "state": {
-            "description": "What the turn is doing: the session coming up, thinking, writing a main-thread text block, running a tool call, or waiting on a sub-agent",
+            "description": "What the turn is doing: the session coming up, thinking, writing a main-thread text block, running a tool call, waiting on a sub-agent, or, the model's own turn ended, waiting on a task it left running in the background",
             "enum": [
               "starting",
               "thinking",
               "writing",
               "working",
-              "waiting"
+              "waiting",
+              "background"
             ],
             "title": "State",
             "type": "string"
@@ -11375,6 +11484,17 @@
               }
             ],
             "description": "The latest tool call; null before the first"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.LineTaskSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The background task it waits on, the one started last of those still running; null unless `state` is `background`"
           },
           "text": {
             "anyOf": [
@@ -11398,6 +11518,7 @@
           "since",
           "step",
           "agent",
+          "task",
           "text"
         ],
         "title": "CurrentLineSchema",
@@ -11519,6 +11640,47 @@
           "input"
         ],
         "title": "LineStepSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.LineTaskSchema": {
+        "description": "The background task a current line waits on, from its `task_started`\nline.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task's `description`, its call's own",
+            "examples": [
+              "Wait for the nightly import"
+            ],
+            "title": "Description"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`claude`'s `task_type`: `local_bash` a command, `local_agent` a sub-agent",
+            "examples": [
+              "local_bash"
+            ],
+            "title": "Type"
+          }
+        },
+        "required": [
+          "type",
+          "description"
+        ],
+        "title": "LineTaskSchema",
         "type": "object"
       },
       "WorkSchema.1fdd8ae.ProgressState": {

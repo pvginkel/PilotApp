@@ -2,7 +2,9 @@
  * A reply's steps in order: text as Markdown, and between the texts what Pilot did — tool calls,
  * a sub-agent under its call (decisions 3 to 5). Thinking is left out once it has ended (ruling
  * 2); the cue shows it while it runs. A run of consecutive calls is one line that opens to them,
- * its running call's words while one runs, and its spinner once that call has run a second (ruling 3). A sub-agent is a card,
+ * its running call's words while one runs, and its spinner once that call has run a second (ruling 3);
+ * under the mouse the line stands in a rounded box, and opened the box stays, round the line and the
+ * calls under it, a divider between them. A sub-agent is a card,
  * collapsed until opened, its progress under it while it runs (ruling 4). A call that changed
  * something is its effects, in its own place, never inside a run (ruling 5); an effect whose call
  * no record shows stands in its record's place.
@@ -11,7 +13,7 @@
 import { useState } from 'react';
 import { Bot, Check, CircleAlert, Layers, Square } from 'lucide-react';
 import { summarizeRun, summarizeTool, type Words } from '@/lib/chat/tools';
-import { shownSteps, type AgentView, type Step, type ToolCallView } from '@/lib/chat/view';
+import { isRunning, shownSteps, type AgentView, type Step, type ToolCallView } from '@/lib/chat/view';
 import { Markdown } from '@/components/shared/markdown';
 import { useHeld } from '@/hooks/use-held';
 import { cn } from '@/lib/utils';
@@ -54,7 +56,7 @@ function runSummary(steps: Step[]): string {
 function runningCall(steps: Step[]): ToolCallView | null {
   for (let i = steps.length - 1; i >= 0; i--) {
     const s = steps[i]!;
-    if (s.kind === 'tool' && !s.call.result && !s.call.stopped) return s.call;
+    if (s.kind === 'tool' && isRunning(s.call)) return s.call;
   }
   return null;
 }
@@ -71,7 +73,16 @@ function RunLine({ steps, liveFrom }: { steps: Step[]; liveFrom: number | null }
   const words: Words[] = running ? summarizeTool(running.name, running.input).running : [{ text: runSummary(steps) }];
   const said = useHeld({ words, count: steps.length }, `${steps.length} ${JSON.stringify(words)}`);
   return (
-    <div data-testid="chat.run">
+    // The box stands 6px out on either side and 1px over and under the line, its border there
+    // drawn or not, so that the line and its words stand where a line without a box does.
+    <div
+      className={cn(
+        '-mx-1.5 -mt-px rounded-md border px-[5px]',
+        open ? 'mb-1 bg-muted/40' : '-mb-px border-transparent hover:border-border hover:bg-muted/40',
+      )}
+      data-open={open}
+      data-testid="chat.run"
+    >
       <StepLine icon={<Layers className="size-3.5" aria-hidden />} running={running?.id} open={open} onToggle={() => setOpen(!open)}>
         <StepWords words={said.words} />
         <span className="opacity-70"> · {said.count} steps</span>
@@ -85,7 +96,7 @@ function RunLine({ steps, liveFrom }: { steps: Step[]; liveFrom: number | null }
         )}
       </StepLine>
       {open && (
-        <div className="mb-1">
+        <div className="-mx-[5px] border-t px-[5px] py-1" data-testid="chat.run.steps">
           <ReplySteps steps={steps} liveFrom={liveFrom} flat />
         </div>
       )}

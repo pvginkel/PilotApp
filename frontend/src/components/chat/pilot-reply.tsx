@@ -58,11 +58,15 @@ export function ReplyBody({
 /**
  * The cue of the turn in flight: what it is doing, a thinking block under way with the time since
  * the turn's message was sent: by this page's clock where this page sent it, else by the
- * message's record, else, where no person sent one, from the turn's first record.
+ * message's record, else, where no person sent one, from the turn's first record; a wait on a
+ * background task with the time since the model's turn ended on it.
  */
 export function ReplyCue({ sessionId, turn, phantom }: { sessionId: string; turn: TurnView; phantom: Phantom | null }) {
   const now = useNow();
   const activity = activityOf(turn, phantom);
+  if (activity.since !== undefined) {
+    return <WorkingCue activity={{ ...activity, phase: `${activity.phase} · ${duration(now - Date.parse(activity.since))}` }} />;
+  }
   if (activity.kind !== 'thinking') return <WorkingCue activity={activity} />;
   const since = sentFromHere(sessionId, turn.turn) ?? Date.parse(turn.person?.at ?? turn.startedAt);
   return <WorkingCue activity={{ ...activity, phase: `Thinking · ${duration(now - since)}` }} />;

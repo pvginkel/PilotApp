@@ -10,7 +10,7 @@
 
 import { Circle, CircleCheck, CircleDashed, Hourglass, OctagonPause, Pause, RefreshCw, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
 import type { components } from '@/lib/api/generated/types';
-import { phaseOf, type Activity } from '@/lib/chat/activity';
+import { phaseOf, waitingOn, type Activity } from '@/lib/chat/activity';
 import { summarizeTool, type Words } from '@/lib/chat/tools';
 import { clockFormat, formatTime } from '@/lib/utils/time-format';
 
@@ -547,7 +547,8 @@ function runningWords(call: LineStep | null): Words[] | null {
 /**
  * The relay's current line in the chat cue's words (design 2 §9.5): the server's own while the
  * session comes up; the call it runs, else "Working"; Thinking and Writing alone, never the call
- * that finished before them; the sub-agent it waits for, and its description.
+ * that finished before them; the sub-agent it waits for, and its description; the background
+ * task it waits on once the model's turn ended, and its description.
  */
 function lineCue(line: CurrentLine): WorkCue {
   switch (line.state) {
@@ -567,6 +568,8 @@ function lineCue(line: CurrentLine): WorkCue {
         line.agent?.description || null,
       );
     }
+    case 'background':
+      return cue({ kind: 'waiting', phase: waitingOn(line.task?.type ?? null) }, null, line.task?.description || null);
     default: {
       const unknown: never = line.state;
       return cue({ kind: 'working', phase: String(unknown) });

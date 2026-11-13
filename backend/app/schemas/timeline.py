@@ -560,14 +560,34 @@ class LineAgentSchema(BaseModel):
     )
 
 
+class LineTaskSchema(BaseModel):
+    """The background task a current line waits on, from its `task_started`
+    line."""
+
+    type: str | None = Field(
+        description=(
+            "`claude`'s `task_type`: `local_bash` a command, `local_agent` a sub-agent"
+        ),
+        examples=["local_bash"],
+    )
+    description: str | None = Field(
+        description="The task's `description`, its call's own",
+        examples=["Wait for the nightly import"],
+    )
+
+
 class CurrentLineSchema(BaseModel):
     """A work item's one current line while a turn of its Session is in flight,
     which the client words as it words the chat's cue (F26.2; design 2 §9.5)."""
 
-    state: Literal["starting", "thinking", "writing", "working", "waiting"] = Field(
+    state: Literal[
+        "starting", "thinking", "writing", "working", "waiting", "background"
+    ] = Field(
         description=(
             "What the turn is doing: the session coming up, thinking, writing a "
-            "main-thread text block, running a tool call, or waiting on a sub-agent"
+            "main-thread text block, running a tool call, waiting on a sub-agent, "
+            "or, the model's own turn ended, waiting on a task it left running "
+            "in the background"
         )
     )
     since: datetime = Field(description="When that state, or the latest step, began")
@@ -576,6 +596,12 @@ class CurrentLineSchema(BaseModel):
     )
     agent: LineAgentSchema | None = Field(
         description="The sub-agent; null unless `state` is `waiting`"
+    )
+    task: LineTaskSchema | None = Field(
+        description=(
+            "The background task it waits on, the one started last of those "
+            "still running; null unless `state` is `background`"
+        )
     )
     text: str | None = Field(
         description=(

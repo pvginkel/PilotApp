@@ -22,6 +22,7 @@ import { heightOf, iconOf } from '../support/lines';
 import type { People } from '../support/people';
 import { slugOf, type Projects } from '../support/projects';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
+import { modelTurns } from '../support/controller';
 
 const ZONE = 'Europe/Amsterdam';
 test.use({ timezoneId: ZONE });
@@ -156,6 +157,53 @@ test.describe('An open work item', () => {
     await expect(sessionLog.item).toHaveText(TITLE);
     await expect(sessionLog.cue).toHaveText('Waiting for the Explore agent');
     await expect(sessionLog.dots).toBeVisible();
+  });
+
+  test('says what its run waits on once the model ended its turn on a command it left in the background: “Waiting on a background command” and the command’s description, with no time, through the worker’s nudge and the model’s answer to it, until the command’s notification', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    deploymentSse,
+  }) => {
+    const project = await setUp({ people, projects });
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const work = await projects.startWork(project, { title: TITLE, brief: 'Survey.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    const { id: environment } = await projects.environment(project, work);
+    const item = timeline.item(work);
+    const [yielded, nudged, delivered] = modelTurns('turn_background');
+    const lastLine = async () => {
+      const last = (await projects.records(work)).records.at(-1);
+      return last?.kind === 'claude' ? last.payload : null;
+    };
+
+    // The call that starts the command is the step it runs; its result says only that it runs in the background.
+    await controller.play(environment, 'claude-1', yielded!.slice(0, 3));
+    await expect(item.work.line).toHaveText('Wait for the nightly import');
+    // The model says it waits and ends its turn; the worker holds the Turn open for the command.
+    await controller.play(environment, 'claude-1', yielded!.slice(3));
+    await expect(item.work.cue).toHaveText('Waiting on a background command');
+    await expect(item.work.detail).toHaveText('Wait for the nightly import');
+    await expect(item.work.line).toHaveText(/^Waiting on a background command\s*·\s*Wait for the nightly import$/);
+    await expect(item.work.cue.locator('svg')).toHaveClass(/\blucide-hourglass\b/);
+    await expectStill(item.work.line);
+    await expect(item.work.live.locator('.pulse')).toBeVisible();
+    const waiting = (await projects.work(project, work)).current_line!;
+    expect(waiting).toMatchObject({ state: 'background', task: { type: 'local_bash', description: 'Wait for the nightly import' } });
+
+    // The worker's nudge, the model's WAITING and its turn's end leave the line as it is.
+    await controller.play(environment, 'claude-1', nudged!);
+    await expect.poll(lastLine).toMatchObject({ type: 'result', result: 'WAITING' });
+    expect((await projects.work(project, work)).current_line).toEqual(waiting);
+    await expect(item.work.cue).toHaveText('Waiting on a background command');
+    await expect(item.work.detail).toHaveText('Wait for the nightly import');
+
+    // The command's notification ends the wait: the model is told, and carries on.
+    await controller.play(environment, 'claude-1', delivered!.slice(0, 2));
+    await expect(item.work.line).toHaveText('Thinking');
+    await expect(item.work.detail).toHaveCount(0);
   });
 
   test('counts its running time by the wall clock, and again as the page comes back into view, a page that lived through a suspend among them', async ({

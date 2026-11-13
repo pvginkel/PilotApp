@@ -2159,6 +2159,7 @@ class TestTimeline:
                     "input": {"file_path": "/work/Camp/plan.json"},
                 },
                 "agent": None,
+                "task": None,
                 "text": None,
             },
             "environment": {"id": environment.id, "name": "Example-1"},
@@ -2225,6 +2226,7 @@ class TestTimeline:
             "since": datetime(2026, 10, 24, 9, 0, tzinfo=UTC),
             "step": None,
             "agent": None,
+            "task": None,
             "text": "Starting Example-1…",
         }
 
@@ -2257,6 +2259,35 @@ class TestTimeline:
             "Explore",
             "Survey the tent makers",
         )
+
+    def test_a_line_waiting_on_a_background_task_names_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        task = {"type": "local_bash", "description": "Wait for the nightly import"}
+        session.get_one(models.Session, work.id).current_line = {
+            "state": "background",
+            "since": "2026-10-24T09:00:00+00:00",
+            "task": task,
+            "tasks": [{"id": "t0example1", **task, "backgrounded": True}],
+        }
+        session.flush()
+
+        _opening, item = container.timeline_service().timeline(project.id).items
+
+        assert item.work is not None and item.work.current_line is not None
+        assert item.work.current_line.model_dump() == {
+            "state": "background",
+            "since": datetime(2026, 10, 24, 9, 0, tzinfo=UTC),
+            "step": None,
+            "agent": None,
+            "task": task,
+            "text": None,
+        }
 
     def test_a_work_item_between_turns_has_no_line(
         self,

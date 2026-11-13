@@ -2,7 +2,9 @@
  * What the turn in flight is doing, in a few words, for the working cue (decision 6): the
  * phantom's block, else the server's latest line while the session comes up, or comes up again
  * under the turn, in its own words — those lines show nowhere else, and are gone once Pilot's next
- * step lands — else the call still running, else the sub-agent's progress.
+ * step lands — else the call still running, else the sub-agent's progress. A turn that waits on a
+ * task the model left in the background says so, in the task's description, whatever streams in
+ * but a call.
  */
 
 import type { Phantom } from './stream-state';
@@ -14,7 +16,13 @@ export interface Activity {
   kind: ActivityKind;
   /** The phase alone, for a cue under steps that already show the specifics: "Working". */
   phase: string;
+  /** When a wait on a background task began, which the cue counts from. */
+  since?: string;
 }
+
+/** What a turn waits on once the model left a task in the background, by `claude`'s `task_type`. */
+export const waitingOn = (type: string | null): string =>
+  type === 'local_bash' ? 'Waiting on a background command' : 'Waiting on a background task';
 
 /** A line's words without their closing ellipsis: "Starting Example-1". */
 export const phaseOf = (text: string) => text.replace(/\s*(…|\.\.\.)$/, '');
@@ -33,11 +41,13 @@ function runningIn(steps: Step[]): Activity | null {
 }
 
 export function activityOf(turn: TurnView, phantom: Phantom | null): Activity {
-  if (phantom) {
-    if (phantom.block === 'thinking') return { kind: 'thinking', phase: 'Thinking' };
-    if (phantom.block === 'text') return { kind: 'writing', phase: 'Writing' };
-    if (phantom.block === 'tool_use') return { kind: 'tool', phase: 'Working' };
+  if (phantom?.block === 'tool_use') return { kind: 'tool', phase: 'Working' };
+  if (turn.background) {
+    const { type, description, since } = turn.background;
+    return { kind: 'waiting', phase: description ? `${waitingOn(type)} · ${description}` : waitingOn(type), since };
   }
+  if (phantom?.block === 'thinking') return { kind: 'thinking', phase: 'Thinking' };
+  if (phantom?.block === 'text') return { kind: 'writing', phase: 'Writing' };
   const line = turn.comingUp?.payload;
   if (line?.type === 'starting' || line?.type === 'restarting') return { kind: 'starting', phase: phaseOf(line.text) };
   const running = runningIn(turn.steps);
