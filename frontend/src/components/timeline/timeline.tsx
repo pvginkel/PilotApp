@@ -138,10 +138,14 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   };
   // An address jumps: a smooth scroll's first frames, still near the end, read as following it,
   // and the head drawn above the timeline in them would pin it back there. A segment glides.
+  // A block of a folded item is laid out under the fold's cut, out of sight: its box is gone to.
   const goTo = ({ item, block }: Address, behavior: ScrollBehavior = 'instant') => {
     const article = articleOf(item);
     if (article === null) return;
-    const found = block === null ? null : article.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(block)}"]`);
+    const found =
+      block === null || article.dataset.folded === 'true'
+        ? null
+        : article.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(block)}"]`);
     scrollTo(found ?? article, 'center', behavior);
     flash(found === null ? item : blockKey(item, block!));
   };

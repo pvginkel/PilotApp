@@ -266,6 +266,24 @@ test.describe('An open item’s fold', () => {
     await expect(item.block.option('Dome')).toBeEnabled();
   });
 
+  test('the address of a folded item’s block goes to its box and flashes it, the block under the cut', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Address'), members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
+    for (let index = 0; index < 12; index += 1) await projects.place(id, { kind: 'notice', title: `Notice ${index + 1}`, text: LONG });
+    await timeline.open(id);
+    const item = timeline.item(trip);
+    await item.root.scrollIntoViewIfNeeded();
+    await item.kind.click();
+    await expect(item.root).toHaveAttribute('data-folded', 'true');
+
+    await timeline.openAt(id, trip, 'Q1');
+    await expect(item.root).toHaveAttribute('data-folded', 'true');
+    await expect(item.root).toHaveClass(/\bfresh\b/);
+    await expect(item.root).toBeInViewport({ ratio: 1 });
+    await expect(item.blockAt('Q1').root).not.toHaveClass(/\bflash\b/);
+  });
+
   test('an archived project’s item keeps its fold and takes no press, its kind no button', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Archived'), members: [me.handle!] });
