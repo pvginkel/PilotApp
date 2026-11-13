@@ -621,12 +621,12 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         lists the open items alone unless `open` is false. Returns `{items,
         totalCount, limitHit}`: an item has its `seq`, its number among the
         project's items, its `kind`, its `title`, its `path`, the file
-        `read_file` takes, `created_at`, `done_cause`, `for` and `urgent`, and
-        a field with nothing to say is left out: an open item has no
-        `done_cause`, an item with no file no `path`. `totalCount` counts
-        every item the call lists and `limitHit` says whether more remain past
-        this page (page on with `offset`). A project no id or folder names is
-        refused."""
+        `read_file` takes unless the project is archived, `created_at`,
+        `done_cause`, `for` and `urgent`, and a field with nothing to say is
+        left out: an open item has no `done_cause`, an item with no file no
+        `path`. `totalCount` counts every item the call lists and `limitHit`
+        says whether more remain past this page (page on with `offset`). A
+        project no id or folder names is refused."""
         return await api.list_items(
             _caller(ctx),
             project,

@@ -519,8 +519,9 @@ class ListedItem(BaseModel):
     path: str | None = Field(
         default=None,
         description=(
-            "Its file, a path `read_file` takes; left out for an item with no"
-            " file, a work item and a wait among them"
+            "Its file, a path `read_file` takes but for an archived project's,"
+            " whose files are not read; left out for an item with no file, a"
+            " work item and a wait among them"
         ),
     )
     created_at: str = Field(description="When it was added, in UTC")
