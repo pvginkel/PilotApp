@@ -20,13 +20,15 @@ number):
 | Follows PilotDeploy's | `main` | `prd` |
 | Site | `https://pilot-dev.home`, internal | `https://pilot.ginbov.nl`, public |
 | Pilot's MCP server ([`mcp.md`](mcp.md)) | `https://pilot-dev-mcp.home/mcp`, internal | `https://pilot-mcp.home/mcp`, internal |
+| Its projects surface | `https://pilot-dev-mcp.home/mcp/projects` | `https://pilot-mcp.home/mcp/projects` |
 | Images | `:dev-<n>` | `:prd-<n>` |
 | `STAGE` | `dev` | `prd` |
 | The record's testing endpoints ([`projects.md`](projects.md)) | answer a signed-in editor | refused, `400` |
 | KubeCoder | `https://kubecoder-dev.home` | `https://kubecoder.home` |
 | Store environment | `pvginkel-pilotprojects-d75970` | `pvginkel-pilotprojects-8b0225` |
 | The store's `pilot-sync` | `:dev-latest` | `:prd-latest` |
-| OpenBao leaves | `eso/prd/pilot/dev/{oidc,kubecoder,sync,vapid}` | `eso/prd/pilot/prd/{oidc,kubecoder,sync,vapid}` |
+| OpenBao leaves | `eso/prd/pilot/dev/{oidc,kubecoder,sync,vapid,service-user}` and the shared `eso/prd/pilot/projects-token` | `eso/prd/pilot/prd/{oidc,kubecoder,sync,vapid,service-user,youtrack-webhook-token}` and the shared `eso/prd/pilot/projects-token` |
+| Service user's Keycloak client | `pilot-app-dev-service` | `pilot-app-service` |
 | Database | `pilot_dev_db` | `pilot_prd_db` |
 
 ## How a change gets to dev
@@ -129,9 +131,18 @@ objects into each stage's namespace:
   `python -m pilot_mcp`, port 3502) and `ui` (the SPA's nginx, port 3500, which proxies `/api/` to
   the backend and nothing else of it). `migrate` and `backend` run with the stage's `STAGE` and
   with `HOMELAB_INTERNAL` true in both stages.
-  `mcp` calls the backend's tools' routes, `/tools/pilot-work/` and `/tools/pilot-store/`, over the
-  pod's loopback (`PILOT_MCP_API_URL` `http://localhost:3501`, and `PILOT_MCP_PORT` 3502, its only
-  settings); it reads no database, Secret or `FLASK_ENV`. Its readiness and liveness are
+  `mcp` calls the backend over the pod's loopback (`PILOT_MCP_API_URL` `http://localhost:3501`,
+  `PILOT_MCP_PORT` 3502): the tools' routes, `/tools/pilot-work/` and `/tools/pilot-store/`, for its
+  first two servers, and the API's own under `/api/` for `pilot-projects` ([`mcp.md`](mcp.md)).
+  Its other settings are the surface's four: `PILOT_MCP_PROJECTS_TOKEN` from the Secret
+  `pilot-projects-token`, key `token`; `PILOT_MCP_SERVICE_CLIENT_ID` and
+  `PILOT_MCP_SERVICE_CLIENT_SECRET` from the Secret `pilot-service-user`, keys `client_id` and
+  `client_secret` ([below](#secrets)); and `PILOT_MCP_TOKEN_URL`, the token endpoint of the realm
+  the backend's sign-in takes as its issuer, `<oidc.issuerUrl>/protocol/openid-connect/token`,
+  which no values key holds. Each Secret's reference is optional: an `mcp` started while one is
+  absent refuses every call to the surface, `503`, and serves its two other servers and its probes,
+  until its next start. No other container gets any of the four, and it reads no database or
+  `FLASK_ENV`. Its readiness and liveness are
   `/health/readyz` and `/health/healthz` on its port, which ask for no bearer, and its preStop waits
   the 15 s that `ui`'s does. The backend's `MCP_SERVER_URL` is `https://<mcp.host>/mcp`, `mcp.host` the stage's in the
   values, the address a work item's session is handed, and a brain session
@@ -196,8 +207,9 @@ objects into each stage's namespace:
 - **Service `pilot-mcp`**, port 80 to `mcp`, its `server-name` the stage's `mcp.host`,
   `pilot-dev-mcp.home` or `pilot-mcp.home`, with `is-public: "false"` and `enable-ssl: "yes"` on
   both stages: the front door serves it as an internal site over HTTPS from the homelab step-ca, and
-  the homelab DNS publishes the name. The session's bearer is the whole of its authentication, so it
-  is never public. Neither stage's site reaches the tools' routes: the UI's nginx proxies `/api/`
+  the homelab DNS publishes the name. A bearer is the whole of a caller's authentication, a session's
+  own at `/mcp` and `/mcp/store` and the surface's shared token at `/mcp/projects`, so it is never
+  public. Neither stage's site reaches the tools' routes: the UI's nginx proxies `/api/`
   alone, and `/tools/` is outside it.
 - The secrets below.
 
@@ -274,7 +286,8 @@ in `config/prd/terraform.tfvars` alone.
 ## Secrets
 
 PilotApp and PilotDeploy are public repositories, so no secret is committed to either. Each stage
-reads its own OpenBao leaves, under `eso/prd/pilot/<stage>/`, through the `openbao-prd` store.
+reads its own OpenBao leaves, under `eso/prd/pilot/<stage>/`, and the one leaf both read, the
+projects surface's token, through the `openbao-prd` store.
 
 - **The Keycloak client's id and secret** are the operator's to write, to the stage's `oidc` leaf
   (`client_id`, `client_secret`). The ExternalSecret `pilot-oidc` brings them into the namespace.
@@ -307,6 +320,19 @@ reads its own OpenBao leaves, under `eso/prd/pilot/<stage>/`, through the `openb
   of the YouTrack instance's one shared webhook token that SecretRotator keeps, and the
   ExternalSecret `pilot-youtrack-webhook-token` brings it into the namespace for the backend's
   `YOUTRACK_WEBHOOK_TOKEN` (D129, [`waits.md`](waits.md)).
+- **The service user's client**, the stage's own ([below](#sign-in)), is the stage's
+  `service-user` leaf (`client_id`, `client_secret`), written when the client was made. The
+  ExternalSecret `pilot-service-user` brings it into the namespace for `mcp` alone. SecretRotator
+  renews the client's secret on its schedule and rolls the pod after.
+- **The projects surface's token** is one random value for both stages (D208), since a session
+  pointed at dev's surface sends what it sends production's, so its leaf,
+  `eso/prd/pilot/projects-token` (`token`), sits under neither stage's tree. It is placed through Ansible's tooling as Pilot's work
+  (D121), its value never handled, and the ExternalSecret `pilot-projects-token` brings it into each
+  namespace for `mcp`'s `PILOT_MCP_PROJECTS_TOKEN`. Its copy is the key `pilot-projects-token` of
+  KubeCoder's production catalog leaf, `eso/prd/kubecoder/prd/catalog`, which KubeCoder hands every
+  environment of its production fleet as `PILOT_PROJECTS_TOKEN`. SecretRotator renews it on its
+  schedule, rolling Pilot's pods and, through the catalog, restarting that fleet's environments.
+  Each of the surface's two ExternalSecrets is its own, so a missing leaf refuses the surface alone.
 - **The database password** is Terraform's (above).
 
 A secret a later feature needs comes the same way: a value from outside the cluster, or one that
@@ -318,7 +344,15 @@ in each `config/<stage>/values.yaml`; one nothing outside the pod depends on is 
 Keycloak at `https://auth.ginbov.nl`, realm `homelab`. Production's client is `pilot-app`; dev has
 a client of its own in the same realm, which registers `https://pilot-dev.home/*` as a redirect URI
 and `https://pilot-dev.home` as a web origin, and whose `editor` role is granted apart from
-production's. Who gets in is in [`sign-in.md`](sign-in.md). The test phase signs in on dev as a
+production's. Who gets in is in [`sign-in.md`](sign-in.md). Each stage's service user, the party
+`pilot-projects` calls the API as, has a client of its own in the realm, confidential, with service
+accounts its one flow and its service account holding the stage client's `editor`:
+`pilot-app-service` on production, `pilot-app-dev-service` on dev. Its row is made once the client
+exists, by the backend's command, `kubectl --context prd -n pilot-prd exec deploy/pilot -c backend
+-- python -m app.cli create-service-user --handle <handle> --name <name> --subject <subject>`,
+`-n pilot-dev` on dev, where the testing route `POST /api/testing/service-users` makes it too: its
+subject is the `sub` the backend logs at the client's first call, which until then reads and is
+refused every write ([`sign-in.md`](sign-in.md#the-service-user)). The test phase signs in on dev as a
 test account that holds dev's `editor` role alone; its credentials are catalog secrets, in no
 commit ([`slice-test-plan.md`](slice-test-plan.md)).
 

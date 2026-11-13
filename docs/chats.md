@@ -158,7 +158,11 @@ none of which a draft has:
 - `The draft: project.md, empty. The person who started it: <handle> (member).`, `project.md.` once
   its published text is not blank and `(not a member)` for a starter who left, then `Attachments so
   far: none.`, `1 file (timeline.json lists it).` or `<N> files (timeline.json lists them).`, every
-  attachment of the project counted;
+  attachment of the project counted. A draft a call started, its starter the service user
+  ([`projects.md`](projects.md)), has `Started by a call from <environment name>, for <handle>.` in
+  place of the person who started it, a clause the call did not name left out, its first chat's
+  message the call's brief; a later definition chat of it, which a person's message starts, has
+  `Started by a call.`, the environment being in the first brief's words alone;
 - `The message:` and the words verbatim, or `The message, from <handle> (member):` or `(not a
   member):` where someone other than the draft's starter sends the message that starts the chat.
 

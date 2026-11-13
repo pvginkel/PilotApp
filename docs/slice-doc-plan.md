@@ -65,6 +65,17 @@ and reconciles them, by the same rules. This phase edits none of the repos the s
 a slice that changed a surface they depend on, or anything a deployment has to follow, names it in
 the close-out report so the operator can file the change against its owner.
 
+One surface there is this phase's whatever the slice's phases touched: the skill
+`kubecoder:pilot-usage`, in KubeCoderConfig's `kubecoder` plugin
+(`kubecoder/skills/pilot-usage/SKILL.md`), which a session loads before it uses `pilot-projects`
+([`mcp.md`](mcp.md#the-projects-surface)). It carries what the tools do not say: what a project and
+its items are, each path of a project's folder with what it holds, `reference.json`'s codes and the
+done causes, recipes by question, and when `start_project` is the call. A slice that changes any of
+it — a new path of a project's folder, a new item kind or done cause, a new tool or a field a recipe
+would use — brings the skill in line, repeating none of the tools' parameters, caps or errors, which
+their descriptions carry, and bumps the plugin's version with the change, as KubeCoderConfig's
+`CLAUDE.md` asks.
+
 ### 6. The feature ledger
 
 `../PilotAppSpecs/design/feature-ledger.md` is where the delivery of every feature in `features.md`

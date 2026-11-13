@@ -86,7 +86,8 @@ handle:
   `{alarms}` turns it and answers `200` with the person ([`sign-in.md`](sign-in.md)); it writes the
   switch alone. Off pushes the person no alarm; on alarms on the next condition that comes to hold.
 
-Each is the shared `.switch` ([`ui.md`](ui.md)).
+Each is the shared `.switch` ([`ui.md`](ui.md)), as is the page's third, *Join projects started on
+my behalf*, under "Projects" ([`projects.md`](projects.md)).
 
 **The offer** (`frontend/src/components/shell/notifications-offer.tsx`) is a gold bar of its own
 across the full width of the page's top, on every browser (D154): over the top bar off a phone,

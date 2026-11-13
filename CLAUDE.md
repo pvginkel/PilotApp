@@ -18,7 +18,8 @@ turn's tokens, and the store's update: its command, its hold, its sequence and i
 phone's layout: its drawer, its tabs at the bottom and its views, and the waits: their firings by
 YouTrack's posts, the due time and a request, and the run per batch, and an ask Pilot is working
 on: its line, the read-only strip with Stop and take over, a held block's line, the hand-back and
-the Cancel. Every green build of
+the Cancel, and the projects surface: the service user, `pilot-projects` and its tools, and the
+profile's join switch. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -251,7 +252,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/deployment.md`](docs/deployment.md): the dev and prd stages, how a change reaches each,
   and what runs there.
 - [`docs/sign-in.md`](docs/sign-in.md): who can use Pilot: the `editor` role the API requires, a
-  signed-in test's session included, and the person on the record, with the handle they choose.
+  signed-in test's session included, the person on the record, with the handle they choose, and the
+  service user a session outside Pilot calls as.
 - [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md),
   [`docs/timeline.md`](docs/timeline.md), [`docs/documents.md`](docs/documents.md): the UI's shell,
   tokens, motion, shared pieces and links in text, the phone's frame and the drawer; the projects' API and
@@ -272,7 +274,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   its line, its progress and its session log, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
-  worker's tools and the brain's; a registered document's read at the run's end, what of it is
+  worker's tools and the brain's, and its projects surface, any session's, with its door and its
+  service user; a registered document's read at the run's end, what of it is
   Pilot's, a claimed or researched block held through its run, Stop and take over and the Cancel,
   the clarification run, its write-back and the run's continuation; a project's chat and a draft's
   definition chat, its start in the store, its brief, its Stop, its close, `chat.md`, and its Chat

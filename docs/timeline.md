@@ -130,9 +130,9 @@ holds a block while Pilot's work holds it, a claimed action or a block a researc
 claim or research names, and null while it is not held; `writer_asked` is whether Pilot asked the
 registered document's writer about the block; `deferral` is `{to, title}` while `answer`
 is `deferred`, `title` the task's title live from the plan and null for `to: plan`, the project's
-end; `section` is the block's own section, `{heading}`, the heading's text, or null. A person or
-Pilot, wherever one is named, is `{kind, handle, name, initials, avatar_slot}`, Pilot `kind: agent`
-with no slot.
+end; `section` is the block's own section, `{heading}`, the heading's text, or null. A person,
+Pilot or a service user, wherever one is named, is `{kind, handle, name, initials, avatar_slot}`,
+Pilot `kind: agent` and a service user `kind: service`, each with no slot.
 
 ## Answering it
 

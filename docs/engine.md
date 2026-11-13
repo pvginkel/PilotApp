@@ -150,7 +150,7 @@ project's row `FOR UPDATE` before both, as a close takes it, since the save may 
    ended is late: it makes no writer, and leaves the document's writer as it is.
 3. The path's `parse` Save Errors go, in every environment: the save's faults replace them.
 4. The text is validated against the record ([`block-dsl.md`](block-dsl.md)): every user's
-   handle, the plan's tasks and removed tasks, the confirmation reasons, the other projects' slugs,
+   handle but a service user's, the plan's tasks and removed tasks, the confirmation reasons, the other projects' slugs,
    the published text's deferrals, and the title of a save Pilot makes of an item.
 5. With any fault the save is **held**: a `parse` Save Error per fault, under the save's
    environment. The published text stays as it was, and the tree keeps the agent's save.

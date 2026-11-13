@@ -9,12 +9,19 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 **People and projects**
 
-- `users`: a person who signs in, or Pilot itself. Pilot is the one row of kind `agent`, with the
-  handle `agent` and the name `Pilot`, written by the first revision; it has no `subject`, email,
-  avatar slot or `alarm_seen_at`. A person has a `subject` and an `avatar_slot`, each unique. A
+- `users`: a person who signs in, Pilot itself, or a service user. Pilot is the one row of kind
+  `agent`, with the handle `agent` and the name `Pilot`, written by the first revision; it has no
+  `subject`, email, avatar slot or `alarm_seen_at`. A person has a `subject` and an `avatar_slot`,
+  each unique. A service user, kind `service`, the party a session outside Pilot calls as, has a
+  `subject`, the service account of the Keycloak client whose credential it calls with, and no
+  email, avatar slot or `alarm_seen_at` (`ck_users_service`); its row is its command's,
+  `create-service-user`, and no sign-in writes it ([`sign-in.md`](sign-in.md#the-service-user)). A
   handle is lower-case letters, digits and hyphens, unique, and `agent` is no person's. A person's
   row is made when they choose their handle, at their first sign-in, with the lowest free slot
-  counting from 1 ([`sign-in.md`](sign-in.md)). A person's `alarms` switch is on by default, and
+  counting from 1 ([`sign-in.md`](sign-in.md)). A person's `join_calls`, the switch *Join projects
+  started on my behalf*, is on by default and makes them a member of every draft a call starts
+  while it is on ([`projects.md`](projects.md)); it is on for Pilot's row and a service user's too,
+  and read for a person alone. A person's `alarms` switch is on by default, and
   their `alarm_seen_at`, none until their first alarm push or going offline, says when they were
   last shown the conditions that alarm, and only moves forward
   ([`notifications.md`](notifications.md)).

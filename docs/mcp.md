@@ -13,24 +13,35 @@ session's records where the call ran, but for the steps, which write none. What 
 end, its write-back and the run's continuation, is [`round-trip.md`](round-trip.md)'s; the chat
 the brain's tools serve is [`chats.md`](chats.md)'s.
 
+Beside the two, the same process serves `pilot-projects`, the projects surface, to any session of
+KubeCoder's production fleet, Pilot's own included: tools that read the projects Pilot manages,
+their items and their files, and `start_project`, which starts a draft. Its callers present one
+shared token, and its tools call the API's own routes under `/api/` as Pilot's service user
+([below](#the-projects-surface)).
+
 ## The process
 
 `backend/pilot_mcp/` is a package beside `app/` that imports nothing of it. `python -m pilot_mcp`,
 the backend image's second entry point, serves it with uvicorn: FastMCP, of `mcp` 1, over
 Streamable HTTP, `pilot-work` at `/mcp` and `pilot-store` at `/mcp/store`, two servers both named
-`pilot` in one app, stateless, so the process holds nothing between calls, with the DNS-rebinding
-protection off, since its boundary is the bearer and not the `Host` header the front door names it
-by. `pilot-work`'s instructions tell the session to write each document under `/work`, register
-it, attach what backs it and end its turn without waiting for the answers (`server.py`'s
-`WORK_INSTRUCTIONS`); `pilot-store`'s say that its tools act on the one project `$PILOT_PROJECT`
+`pilot`, and `pilot-projects` at `/mcp/projects`, named for what it serves so that no session holds
+two servers of one name, in one app, stateless, so the process holds nothing between calls but the
+service user's token, with the DNS-rebinding protection off, since its boundary is the bearer and
+not the `Host` header the front door names it by. `pilot-work`'s instructions tell the session to
+write each document under `/work`, register it, attach what backs it and end its turn without
+waiting for the answers (`server.py`'s `WORK_INSTRUCTIONS`); `pilot-store`'s say that its tools act on the one project `$PILOT_PROJECT`
 names, only while the session's turn runs, how an item and a block are named, and that a call the
-record refuses changes nothing (`STORE_INSTRUCTIONS`).
+record refuses changes nothing (`STORE_INSTRUCTIONS`); `pilot-projects`' say what the surface is,
+Pilot and its projects, that its tools read a project, its documents and its items, and start one,
+and ask the session to load the skill `kubecoder:pilot-usage` before it uses them
+(`PROJECTS_INSTRUCTIONS`).
 
 - **The bearer gate** (`server.py`, `BearerRequired`): a request with no `Authorization: Bearer
   <token>` is a `401` (`AUTHENTICATION_REQUIRED`), but for `GET /health/healthz` and
   `/health/readyz`, which answer `{"status": "ok"}` without one, the process's own readiness alone.
   The gate checks no token: any bearer is admitted to `initialize` and `tools/list`, and a tool call
-  carries it to its route, which decides.
+  carries it to its route, which decides. A request to `/mcp/projects` meets the projects surface's
+  door before it ([below](#the-projects-surface)).
 - **The tools** (`tools.py`) refuse what their routes would refuse, an empty path, a `to` that is
   not a uuid, a step whose code or label is empty or too long, or too many steps, before calling.
   Each then makes one call to `<PILOT_MCP_API_URL>/tools/pilot-work/<route>` or `…/tools/pilot-store/<route>`
@@ -47,17 +58,22 @@ record refuses changes nothing (`STORE_INSTRUCTIONS`).
 - **The surface** is what the session reads: each tool's description, its parameters' and its
   answer's, and the server's instructions, pinned word for word in
   `backend/tests/pilot_mcp/test_server.py` (`WORK_SURFACE`, `WORK_INSTRUCTIONS`, `STORE_SURFACE`,
-  `STORE_INSTRUCTIONS`). A change to them is a change to a contract
-  ([`change-discipline.md`](change-discipline.md)).
+  `STORE_INSTRUCTIONS`, `PROJECTS_SURFACE`, `PROJECTS_INSTRUCTIONS`). A change to them is a change
+  to a contract ([`change-discipline.md`](change-discipline.md)).
 
 | Setting | Default | |
 |---|---|---|
 | `PILOT_MCP_API_URL` | `http://localhost:3501` | the backend, as the pod's loopback reaches it |
 | `PILOT_MCP_HOST`, `PILOT_MCP_PORT` | `0.0.0.0`, 3502 | where it listens |
 | `PILOT_MCP_LOG_LEVEL` | `INFO` | |
+| `PILOT_MCP_PROJECTS_TOKEN` | none | the projects surface's shared token, its callers' bearer |
+| `PILOT_MCP_TOKEN_URL` | none | the token endpoint of the service user's Keycloak client |
+| `PILOT_MCP_SERVICE_CLIENT_ID`, `PILOT_MCP_SERVICE_CLIENT_SECRET` | none | that client |
 
-It needs no database, Secret or `FLASK_ENV`. In each stage's pod it is the container `mcp`, behind
-its own intranet host ([`deployment.md`](deployment.md)). The dev stack runs none: `Procfile.dev`
+The last four are the projects surface's: while one of them is unset or empty, the surface refuses
+every call and the rest of the process serves. It needs no database or `FLASK_ENV`. In each stage's
+pod it is the container `mcp`, behind its own intranet host, the surface's settings from the stage's
+Secrets ([`deployment.md`](deployment.md)). The dev stack runs none: `Procfile.dev`
 starts the backend and Vite alone.
 
 ## Handed to every session
@@ -75,7 +91,8 @@ session alike, at the endpoint of the surface the create's scope names (`scoped_
   "http", "url": <the endpoint>, "headers": {"Authorization": "Bearer ${PILOT_TOKEN}"}}}}`, which
   `claude` expands from the environment the controller spawns it in, so the token is in neither
   argv nor a file, and in no row, log line or record of Pilot's;
-- it leaves `strictMcpConfig` unset, so the session keeps its environment's own servers.
+- it leaves `strictMcpConfig` unset, so the session keeps its environment's own servers,
+  `pilot-projects` among them where the environment registers it.
 
 A create whose scope names no surface, a finished project's chat's ([`chats.md`](chats.md)), is
 handed neither variable nor the entry, so no bearer reaches either surface's routes from it; a
@@ -204,8 +221,8 @@ item's Session ("… is a work session, not a chat's or a job's") and for a chat
 turn is not running, so a bearer acts only while its turn does. A call acts on the bearer's project
 alone: an item, a block or an attachment of another project is a `404` "… was not found". `for`
 names a person by their handle, `404` "Person <handle> was not found" for one no person has, Pilot's
-`agent` included. Every write locks the Project's row first, the order Finish takes, then the
-Session's, before any Document's, the order a store save of the brain's takes its Session's and its
+`agent` and a service user's included. Every write locks the Project's row first, the order Finish
+takes, then the Session's, before any Document's, the order a store save of the brain's takes its Session's and its
 Document's in ([`engine.md`](engine.md)). A refusal of the record's is a `409` with the reason, the
 record unchanged, and a controller that does not answer or refuses for a reason of its own a `502`.
 
@@ -310,7 +327,8 @@ record unchanged, and a controller that does not answer or refuses for a reason 
 
 ## Effects
 
-Each call that changed the record writes its Effects, but the progress tools' (`EffectService`,
+Each call of the worker's or the brain's that changed the record writes its Effects, but the
+progress tools' (`EffectService`,
 `backend/app/services/effect_service.py`), one per change, by kind: `added`, `answered`, `marked`,
 `stopped`, `finished`, `attached` and `registered`, each naming the item, the block or the
 attachment it changed. They are of the session's Turn in flight, placed in its records by one
@@ -326,11 +344,97 @@ record's place: a work item's session log ([`work.md`](work.md)), the Chat tab a
 ([`chats.md`](chats.md)). A block's latest `answered` effect whose call ran in a chat is where
 *In the chat* goes, the block's `in_chat` ([`timeline.md`](timeline.md)).
 
+## The projects surface
+
+`pilot-projects` is any session's: its tools read the projects Pilot manages, their items and their
+files, and start a draft, for a session in any environment that holds the surface's token, which
+every environment of KubeCoder's production fleet does ([`deployment.md`](deployment.md#secrets)).
+Nothing of it is a session's of Pilot's: it takes no session's bearer, and its calls write no
+effect.
+
+- **The door** (`server.py`, `ProjectsDoor`), outermost, before the bearer gate: a request to
+  `/mcp/projects` or under it is let in only with the surface's shared token as its bearer,
+  compared in constant time, and any other is a `401` (`AUTHENTICATION_REQUIRED`), "Cannot call
+  Pilot's projects because the request does not carry their token". The token is one value for
+  both stages (D207), so a session pointed at dev's surface sends what it sends production's
+  ([`deployment.md`](deployment.md)); the API never sees it. While one of the surface's four
+  settings is unset or empty, the server is not mounted and the door answers every request to it
+  `503` (`SERVICE_UNAVAILABLE`), "Cannot call Pilot's projects because this Pilot is not set up to
+  serve them", while the two other servers and the probes serve on; the process logs "The projects
+  surface refuses every call: <settings> unset" at its start.
+- **The credential** (`credential.py`, `ServiceCredential`). Behind the door no tool calls under the
+  caller's bearer (D207): each makes one call to the API's own routes under `/api/`, at
+  `PILOT_MCP_API_URL`, under a client-credentials token of the stage's service-user client, minted
+  at `PILOT_MCP_TOKEN_URL` from `PILOT_MCP_SERVICE_CLIENT_ID` and `PILOT_MCP_SERVICE_CLIENT_SECRET`,
+  held, and minted again 30 s before it expires; calls that come at once wait for one mint. The
+  token passes the API's sign-in gate as a person's does and names the service user's row by its
+  subject ([`sign-in.md`](sign-in.md)). A token endpoint that does not answer, refuses the client
+  or answers no token is the tool's error, "Cannot call Pilot because its sign-in service …", which
+  never carries the secret; the API's refusal is the tool's error, its `error` whole, as the other
+  surfaces' are, and an API that does not answer is "Cannot call pilot-projects because Pilot's API
+  at <url> did not answer (<error>)".
+- **The caller** (`api.py`, `Caller`): the call's `X-Pilot-Environment` and `X-Pilot-Session`, the
+  id of the environment it calls from and its session's name there, an empty one none. Both travel
+  on to the API's route under the same names. The plus's create names the environment in a call's
+  brief ([`projects.md`](projects.md)); nothing reads the session.
+
+A tool's `project` is a project's id or its folder, `draft-<number>` while it is a draft and its
+slug once created; a draft's folder does not survive Create project, so a session holds a draft by
+its id. Each tool is one call (`tools.py`, `register_projects_tools`; `api.py`,
+`PilotProjectsApi`):
+
+| Tool | Route | Answers |
+|---|---|---|
+| `list_projects(archived?)` | `GET /api/projects` | `{projects}`, a row per project, `{id, folder, name, state, status}`, the unarchived ones, or with `archived` the archived alone, in the order they were started |
+| `get_project(project)` | `GET /api/projects/head?address=` | `{id, folder, name, state, archived, status, autopilot, members, progress, running_work, open_items, url}`: the members by handle, each running work item `{seq, title, environment}`, and no step, note or file |
+| `list_items(project, open?, kind?, offset, limit)` | `GET /api/projects/items?address=` | `{items, totalCount, limitHit}`: a row per item in `seq` order, `{seq, kind, title, path, created_at, done_cause, for, urgent}`, a field that is none or false left out; the open items alone unless `open` is false, of `kind` alone where one is given |
+| `list_files(path?, offset, limit)` | `GET /api/tree/entries?path=` | `{files: [{path, isDirectory}], totalCount, limitHit}`, folders first |
+| `find_files(path_pattern, offset, limit)` | `GET /api/tree/matches?pattern=` | `{pattern, files, totalCount, limitHit}`, the paths in path order |
+| `read_file(path, start_line?, end_line?, tail_lines?)` | `GET /api/tree/text?path=` | `{content, sha256, totalCount, limitHit, lineCut}` |
+| `start_project(brief, title?, for?)` | `POST /api/projects` `{words, title?, for?}` | `{id, folder, url}`, the draft |
+
+The routes answer a list whole and the process pages it (`_page`): `offset`, and a `limit` of 100
+by default and 1,000 at most for `list_items` and `list_files`, 50 and 200 for `find_files`, a
+larger one clamped; `totalCount` counts every row and `limitHit` says whether more remain. The file
+tools are KubeCoder's fleet adapter's one for one, their defaults, caps, answers, ranges, tails and
+glob, with no `env`, paths from the root of the projects' files, and no `skipped` or `truncated`
+in `find_files`' answer, which count the folders a walk of a disk did not enter. What they read, and
+their refusals, are [`projection.md`](projection.md#read-by-path)'s; `list_items`' `path` runs from
+the same root, `<folder>/items/…`, so that `read_file` takes it as it is, and an item with no file,
+a work item or a wait, has none.
+
+`start_project` takes the brief in the session's own words, verbatim the first message of the
+draft's definition chat, a one-line `title` and a person's handle as `for`, and no auto pilot
+switch: the draft is the plus's create by a call, its creator the service user, and runs nothing
+until a person presses Create project ([`projects.md`](projects.md)). A `for` that names no person
+is the API's `404`, and a call while Pilot updates its store the API's `409` ("Pilot is updating");
+neither starts anything.
+
+**The words are the outside's.** A session anywhere in the fleet reads the surface, so every tool's
+description names "project(s) Pilot manages" before its first comma, and no word of the surface,
+its instructions, its descriptions, its parameters or its answers, names the brain, the store, the
+record or the tree (`TestTheProjectsSurface`). What the tools do not say, the map of a project's
+folder and which file answers which question, is the skill `kubecoder:pilot-usage` in
+KubeCoderConfig's `kubecoder` plugin, kept as the tree and the tools are
+([`slice-doc-plan.md`](slice-doc-plan.md)).
+
+**Reaching it.** The surface is at `https://<mcp.host>/mcp/projects`, `pilot-mcp.home` on production
+and `pilot-dev-mcp.home` on dev ([`deployment.md`](deployment.md)). A session reaches it through
+the fleet's shared `~/.claude.json`, whose entry is the operator's to write: production's surface
+unless the environment's `PILOT_PROJECTS_URL` names dev's, the environment's `PILOT_PROJECTS_TOKEN`
+as its bearer, and the two caller headers from the environment's id and its session's name. Pilot's
+own sessions keep it beside their own server, since Pilot leaves `strictMcpConfig` unset (above).
+
 ## Testing it
 
 The server is pinned in `backend/tests/pilot_mcp/`: a real MCP client drives the app in process
 (`backend/tests/support/pilot_mcp.py`), its API calls answered by the test app's own routes in the
-test's session, and `test_main.py` runs `python -m pilot_mcp` as a process. The injection is
+test's session, and `test_main.py` runs `python -m pilot_mcp` as a process, with the projects
+surface's settings and without them. The projects surface is `TestTheProjectsSurface` and
+`TestTheProjectsDoor` in `test_server.py`, and its tools `TestListProjects` to `TestStartProject`
+in `test_tools.py`, through the OIDC app's gate under a token the fake endpoint, `TokenEndpoint`,
+signs with the suite's key; the credential is `test_credential.py`, the settings `test_config.py`,
+and the tree's routes `tests/api/test_tree.py` and `tests/services/test_tree_read_service.py`. The injection is
 `tests/services/test_pilot_server.py`, with the creates in `test_session_start_service.py` and
 `test_relay_service.py`, whose `_services(..., mcp_url=)` and `_relay_service(..., mcp_url=)` build
 services that inject; the suite's default settings set no URL, so other creates carry neither.

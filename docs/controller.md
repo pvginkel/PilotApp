@@ -176,6 +176,12 @@ runs there. The claim ends with its deadline: `_end_claim` clears `server_starte
   store's update the store's ([`sync.md`](sync.md), [`chats.md`](chats.md)), and `pilot-store`'s copy of outside
   material its source's ([`mcp.md`](mcp.md)); the controller's `404` raises `ControllerProblem`
   `not-found`.
+- `CallerEnvironmentService.name(env_id)` (`backend/app/services/caller_environment_service.py`)
+  names the environment a call to `pilot-projects` came from, for its draft's brief
+  ([`projects.md`](projects.md)): its Environment row's name, else the name the controller reports,
+  else the id itself, for an environment neither knows, one the controller reports without a name,
+  and any while no controller is configured or the controller does not answer. It writes no row, and
+  no call is refused for where it came from.
 - `start(env_id) -> ControllerEnvironment` brings the environment up and waits until it settles.
   The `start` goes without `wait`, since only then does its answer say whether this call
   scheduled the bring-up: on `202` it commits `server_started_at`, `started_pod_at` none until it

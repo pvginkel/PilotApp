@@ -43,14 +43,24 @@ projects too.
   out again, so that it goes on naming a project Create project has given its slug, and is
   answered with that slug; else it is a slug. It reads an archived project too. No project at the
   address is a `404`, "Project <address> was not found", and no address a `400`.
+- **`GET /api/projects/head?address=<address>`** answers the head of the project an address names,
+  as `lookup` resolves it, and **`GET /api/projects/items?address=<address>&open=&kind=`** answers
+  `{items}`, the index of its items as its `timeline.json` holds it ([`projection.md`](projection.md)),
+  in `seq` order, each `{seq, kind, title, path, created_at, done_cause, for_handle, urgent}`, its
+  `path` from the root of the store's tree and null for an item with no file: the open items alone
+  unless `open` is false, and with a `kind` of `reference.json`'s those of that kind alone. No
+  screen reads either: they are the routes behind `pilot-projects`' `get_project` and `list_items`
+  ([`mcp.md`](mcp.md#the-projects-surface)), whose `project` is an id or a folder.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, address, name, ticket, repo, state,
   archived, autopilot, status, member, members, progress, tasks, notes, running_work, open_items,
-  autopilot_may_take, create_refusal}`. A member is `{handle, name, initials, avatar_slot}`, in the
-  order they joined; a task is a step, `{id, title, status, notes}`, with its open notes; `notes`
-  are the plan's own; a note is `{id, summary, content}`. `running_work` is `[{id, title}]`, in
-  timeline order, the work items whose session runs, starts or is held, which Finish and Archive
-  stop. `open_items` counts the project's open items but the opening, which is never done (D016),
-  and those, which Finish closes unanswered; a finished project's is its archive question, while it
+  autopilot_may_take, create_refusal, url}`. A member is `{handle, name, initials, avatar_slot}`, in
+  the order they joined; a task is a step, `{id, title, status, notes}`, with its open notes; `notes`
+  are the plan's own; a note is `{id, summary, content}`. `running_work` is `[{id, seq, title,
+  environment}]`, in timeline order, the work items whose session runs, starts or is held, which
+  Finish and Archive stop, `environment` the name of its Session's environment, null while it has
+  none. `url` is the project's page in the app, `<BASEURL>/projects/<address>`. `open_items` counts
+  the project's open items but the opening, which is never done (D016), and those, which Finish
+  closes unanswered; a finished project's is its archive question, while it
   is open (below). `autopilot_may_take` counts the open confirmations the switch would answer: the
   unanswered confirmation blocks of the project's open items whose reason does not ask under auto
   pilot, whether auto pilot is on or off ([`timeline.md`](timeline.md)). `create_refusal` is why
@@ -78,7 +88,31 @@ flight. Once it commits, `ManifestChanged` writes its folder, `draft-<number>`, 
 tree ([`sync.md`](sync.md)), which the chat's start waits for. It is a `400` with no words, and a
 `409` for a caller who has not chosen a handle, while the store's update is unlifted ("Pilot is
 updating") and with no controller or no store environment configured; a refused message rolls
-the draft back with it, so that it leaves no project behind.
+the draft back with it, so that it leaves no project behind. A person's create takes neither `title`
+nor `for`, each a `400`.
+
+**By a call.** Called as a service user ([`sign-in.md`](sign-in.md)), as `pilot-projects`'
+`start_project` calls it ([`mcp.md`](mcp.md#the-projects-surface)), `POST /api/projects` `{words,
+title?, for?}` makes a call's draft (`ProjectService.create_by_call`): the service user its creator
+and no member of it; its members, from its creation, the person `for` names and every person whose
+switch *Join projects started on my behalf* is on, in handle order, and nobody where there is
+neither; `title`, one line, in the draft's front matter, so that it names the project at once until
+Pilot writes its own. The words are the call's brief, sent as the service user's message, the first
+Turn of the draft's definition chat under the brief by a call ([`chats.md`](chats.md)). The request's
+`X-Pilot-Environment`, the id of the environment the call came from, is named for the brief by
+Pilot's own Environment row, else by the controller's report, else by the id itself, and no row is
+written for it ([`controller.md`](controller.md)). A `for` that is no person's handle, the service
+user's own among them, is a `404`, "Person <handle> was not found", and nothing is started; the
+create's other refusals refuse the call. At Create project the opening is the service user's, its
+words the brief.
+
+**The switch** *Join projects started on my behalf*, on the profile page under "Projects"
+([`sign-in.md`](sign-in.md)), is the person's `join_calls`, on by default ([`record.md`](record.md)).
+**`PUT /api/people/self/join-calls`** `{join_calls}` turns it and answers `200` with the person, as
+the self read does; it refuses a caller without a handle and the service user, `409`. On, the person
+is a member of every draft a call starts from then on; off, only of one whose `for` names them. A
+draft a call started before the turn keeps its members. Its note reads "A member, from its start, of
+every project a session outside Pilot starts here. Off, only of one started for you by name."
 
 **`POST /api/projects/<id>/transitions`** `{kind, answer_confirmations?}` makes a transition as the
 caller, now, and answers `201` with the head as it then stands. A transition is a
@@ -101,9 +135,10 @@ An archived project takes `brought_back` alone. Any other `kind` is a `400`, and
 `answer_confirmations` with a kind but `autopilot_on`. A confirmation answered meanwhile is left as
 it was answered, and one added after the Yes is not answered.
 A transition that the project's standing does not allow is a `409`, and so is any write by a caller
-who has not chosen a handle ([`sign-in.md`](sign-in.md)). The refusal's reason is the error
-envelope's `error`, worded to be shown: "Cannot finish Recipe box because it is a draft", "Cannot
-pause Recipe box because it is paused already". An unknown project is a `404`.
+who has not chosen a handle or by the service user, which is no person ([`sign-in.md`](sign-in.md)).
+The refusal's reason is the error envelope's `error`, worded to be shown: "Cannot finish Recipe box
+because it is a draft", "Cannot pause Recipe box because it is paused already". An unknown project
+is a `404`.
 
 **Create project** (`ProjectService._create`) is made under the project's row and then its open
 chat's Session, so a message's send under way makes it wait, then decide. It opens the draft, its
@@ -183,7 +218,8 @@ on the same path leaves it (`200`), each answering the head. Joining opens a `pr
 row, so a rejoin is a new row; leaving closes the open one (`left_at`). Each is refused with `409`
 on an archived project, to a caller without a handle, to a member joining and to someone who is
 not a member leaving. A project may be left with no members. Pilot is never a member: the caller
-is found by the token's subject, and Pilot's row has none.
+is found by the token's subject, and Pilot's row has none. Nor is a service user: it joins and
+leaves nothing, `409`, as any write in a person's name refuses it.
 
 The `editor` role is the whole of the check: anyone who holds it changes any project. Every change
 holds the project's row first (`FOR NO KEY UPDATE`), so two changes of one project never interleave;
@@ -470,6 +506,9 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
 - `POST /api/testing/people` `{handle, name?}` puts a person on the record as the handle step does,
   under a subject no one signs in with, and answers `201` `{handle, name, avatar_slot}`; it refuses
   what the handle step refuses.
+- `POST /api/testing/service-users` `{handle, name, subject}` makes a service user's row as
+  `create-service-user` does ([`deployment.md`](deployment.md)), on a stage where no one runs the
+  command, and answers `201` with the same body; it refuses what the command refuses.
 - `POST /api/testing/environments` `{id, name}` puts an environment on the record (`409` for a taken
   id).
 - `POST /api/testing/projects` makes a project in the standing given and answers `201` `{id,

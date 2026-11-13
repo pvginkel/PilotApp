@@ -867,8 +867,10 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    resolves on the LAN alone, and there is no outside path to check.
 
    Pilot's MCP server's host the same way: `https://pilot-dev-mcp.home/health/readyz` answers `200`
-   `{"status":"ok"}` against the homelab root alone, a `POST /mcp` with no bearer `401`, and the
-   Service `pilot-mcp` carries `server-name: pilot-dev-mcp.home`, `is-public: "false"` and
+   `{"status":"ok"}` against the homelab root alone, a `POST /mcp` with no bearer `401`, a `POST
+   /mcp/projects` with no bearer `401` too, from the projects surface's door, where a `503` is an
+   `mcp` container that started without the surface's settings ([`deployment.md`](deployment.md)),
+   and the Service `pilot-mcp` carries `server-name: pilot-dev-mcp.home`, `is-public: "false"` and
    `enable-ssl: "yes"`. The site never reaches the worker's routes: the UI's nginx answers a `POST`
    to `https://pilot-dev.home/tools/pilot-work/documents` itself, `405` `text/html`
    ([`mcp.md`](mcp.md)):
@@ -876,6 +878,7 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    ```bash
    curl -s -m 10 --cacert /usr/local/share/ca-certificates/homelab-root.crt --capath tmp/ca-none -w '\n%{http_code}\n' https://pilot-dev-mcp.home/health/readyz
    curl -s -m 10 --cacert /usr/local/share/ca-certificates/homelab-root.crt --capath tmp/ca-none -o /dev/null -w '%{http_code}\n' -X POST https://pilot-dev-mcp.home/mcp
+   curl -s -m 10 --cacert /usr/local/share/ca-certificates/homelab-root.crt --capath tmp/ca-none -o /dev/null -w '%{http_code}\n' -X POST https://pilot-dev-mcp.home/mcp/projects
    curl -s -m 10 --cacert /usr/local/share/ca-certificates/homelab-root.crt --capath tmp/ca-none -o /dev/null -w '%{http_code} %{content_type}\n' -X POST -H 'Content-Type: application/json' -d '{}' https://pilot-dev.home/tools/pilot-work/documents
    cexec iac kubectl -n pilot-dev get service pilot-mcp -o jsonpath='{.metadata.annotations}{"\n"}'
    ```

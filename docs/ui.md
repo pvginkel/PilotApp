@@ -344,7 +344,7 @@ button beside it, level with its bottom edge), `.chip`, `.popover`, the steps be
 checkboxes), `.fold` and `.link`, a button drawn as a link, as Show more and a confirmation's
 Details are, which never underlines (D196): only a link that goes somewhere, an `<a>`, underlines under
 the mouse (`a:hover` in `app-theme.css`); `.switch`, a button of role `switch` whose knob moves right while
-it is `aria-checked`, the head's auto pilot switch and the profile's two switches; `.icon-cap`, an
+it is `aria-checked`, the head's auto pilot switch and the profile's three switches; `.icon-cap`, an
 icon on its text's capitals in a flex row;
 `.delta-fresh`; `.unread`, the chat's unread dot ([`chats.md`](chats.md)); and `@keyframes pulse`.
 

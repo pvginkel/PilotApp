@@ -52,10 +52,10 @@ subject, made when they choose their handle. The endpoints are `backend/app/api/
 `PeopleService` (`backend/app/services/people_service.py`).
 
 - **`GET /api/people/self`** answers the signed-in person, `{handle, handle_prefill, name, initials,
-  avatar_slot, alarms}`, and is the sign-in on the record too, since the
+  avatar_slot, alarms, join_calls}`, and is the sign-in on the record too, since the
   template's OIDC callback has no hook for the app: for a person with a row it refreshes the email
   (the token's, or none), the last seen time, and the name, which a token without one leaves as it
-  was. Before the row, `handle`, `avatar_slot` and `alarms` are null, and
+  was. Before the row, `handle`, `avatar_slot`, `alarms` and `join_calls` are null, and
   `handle_prefill` is what the handle step offers: the name's first word, case-folded, folded to
   ASCII and stripped of everything but lower-case letters, digits and hyphens ("Émile" gives
   `emile`), or empty. `name` and `initials` are null for a token with no name or a blank one. Once
@@ -70,7 +70,9 @@ subject, made when they choose their handle. The endpoints are `backend/app/api/
 - **Initials** are the first two capitals of the name; a name with fewer gives the first letters of
   its first two words, upper-cased ("jan-piet" gives `JP`), else its first character.
 - **A write in a person's name** needs the row: an endpoint that writes one refuses a caller
-  without a handle with `409`, "Cannot … because you have not chosen your handle yet".
+  without a handle with `409`, "Cannot … because you have not chosen your handle yet", and the
+  service user with `409`, "Cannot … because you call as the service user '<handle>', which is no
+  person" (below).
 
 **The handle step** (`frontend/src/components/people/handle-step.tsx`). Until the person has a
 handle, no screen opens: the step stands under the top bar, on a phone under the drawer's head, the
@@ -83,9 +85,38 @@ handle is chosen, the address the person asked for opens.
 
 **The profile page**, `/profile` (`frontend/src/routes/_shell/profile.tsx`), opened from Profile in
 the same menu, shows the person's avatar, their name and their handle, which never changes, and
-under it this browser's notifications switch and their alarms switch, the page's only fields,
-with their endpoints, on [`notifications.md`](notifications.md). The self read's `alarms` says
-where the alarms switch stands; what this browser's switch shows is the browser's own.
+under it the page's only fields: under "Notifications" this browser's notifications switch and
+their alarms switch, with their endpoints, on [`notifications.md`](notifications.md), and under
+"Projects" their switch *Join projects started on my behalf*, with its endpoint, on
+[`projects.md`](projects.md). The self read's `alarms` and `join_calls` say where the person's two
+switches stand; what this browser's switch shows is the browser's own.
+
+## The service user
+
+A session outside Pilot calls it through `pilot-projects` ([`mcp.md`](mcp.md)) as the stage's
+service user: a `users` row of kind `service` ([`record.md`](record.md)), whose subject is the
+service account of the stage's service-user Keycloak client, which holds the stage client's
+`editor` ([`deployment.md`](deployment.md#sign-in)). Pilot's MCP process calls under that client's
+client-credentials token, and the API's gate takes it unchanged, as it takes a
+person's: the stage's client in its audience and `editor` among its client roles. The token maps
+to the row by its subject alone.
+
+- **The row** is made by the command `create-service-user --handle <handle> --name <name> --subject
+  <subject>` (`backend/app/service_user_cli.py`, on `PeopleService.make_service_user`), and on every
+  stage but prd by `POST /api/testing/service-users` too ([`projects.md`](projects.md)), never at a
+  sign-in step. Each refuses a handle that is not lower-case letters, digits and hyphens, a blank
+  name or subject, Pilot's handle, a taken handle and a subject a row holds, writing nothing; the
+  command exits 1. The subject is the token's `sub`, which the backend logs at every authenticated
+  request ("Request authenticated: subject=…"), so the client's first call, before the row exists,
+  shows it.
+- **Its reads** answer as a person's. The self read answers its handle and name, `avatar_slot`,
+  `alarms` and `join_calls` null, and writes nothing: no sign-in refreshes the row. The handle step
+  refuses it as a caller whose handle is chosen.
+- **Its one write** is the plus's create, which makes a call's draft ([`projects.md`](projects.md)).
+  Every write in a person's name refuses it (above), and so a service user is never a member;
+  Undo, Resume and Retry name no person and take it as they take anyone. Its handle names no one in
+  a file: `for` and `by` with it are parse faults ([`block-dsl.md`](block-dsl.md)). As an author it
+  is drawn from its initials, with no colour of the palette.
 
 ## Without sign-in
 

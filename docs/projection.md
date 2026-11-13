@@ -50,6 +50,41 @@ hold, is:
 `TreeService.hashes(project)` every path of a folder with its tree hash, and
 `TreeService.manifest()` every path the store syncs: `reference.json` and every path of every
 project that is not archived, each with its tree hash and whether it is read-only.
+`TreeService.paths()` lists the same paths in path order without their hashes, so that no view is
+rendered to list them.
+
+## Read by path
+
+The routes behind `pilot-projects`' file tools ([`mcp.md`](mcp.md#the-projects-surface)) read the
+tree as the record renders it, never the store's disk, so they answer whether the store runs or not
+(`backend/app/api/tree.py` on `TreeReadService`, `backend/app/services/tree_read_service.py`). They
+sit on the API blueprint behind its sign-in, answer a list whole, and no screen reads them. A path
+runs from the tree's root, the empty path the root itself, its `.` segments dropped and each `..`
+taken; the tree is `reference.json` and the paths of every project that is not archived, so an
+archived project's files are not listed, found or read, and a folder is one a file's path runs
+through. A refusal's reason ends with the name KubeCoder's fleet adapter gives it, in brackets.
+
+- **`GET /api/tree/entries?path=`** answers `{entries: [{path, is_directory}]}`, what the folder at
+  the path holds, folders first and then files, each group in case-insensitive name order, every
+  path from the root and a folder's ending with `/`. A file's path is a `409` `[not-a-directory]`,
+  and a path nothing is at a `404`, "Folder '<path>' was not found".
+- **`GET /api/tree/matches?pattern=`** answers `{paths}`, the files whose path matches the glob, in
+  path order (`PathGlob`, `backend/app/utils/path_glob.py`, KubeCoder's ported): `*` any characters
+  but `/`, `**` any path segments, `?` one character, `{a,b}` either alternative, with no nesting.
+  Any other glob syntax is a `400` `[validation-error]` naming it.
+- **`GET /api/tree/text?path=&start_line=&end_line=&tail_lines=`** answers `{content, sha256,
+  total_count, limit_hit, line_cut}`: the file's lines, each `<number>: <line>`, `sha256` the hash
+  of the whole file's bytes and `total_count` its lines. Read whole, a file over 128 KB is a `409`
+  `[file-too-large]` giving its size and line count; a line range, 1-based and inclusive, or a tail,
+  the last lines, reads a file of any size, and is cut at 2,000 lines and 128 KB of content, a range
+  keeping its start and a tail the file's end, `limit_hit` then true. A line over 128 KB on its own
+  comes back cut, the answer's only line, with `line_cut` true. A folder is a `409` `[not-a-file]`,
+  a file that is not UTF-8 text, as an attachment may be, a `409` `[not-text]`, a tail with a range
+  a `400`, and a path nothing is at a `404`, "File '<path>' was not found".
+
+A path or a pattern that starts with `/`, or a path that climbs above the root, is a `400`
+`[path-outside-projects]`. The index of a project's items, `timeline.json`'s `items` as rendered,
+is read by address ([`projects.md`](projects.md)).
 
 ## The JSON files
 

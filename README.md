@@ -76,7 +76,11 @@ and the brain's waits on the timeline, a card wait fired when YouTrack posts tha
 entered one of its states, a timed wait at its due time, either by a person's Check now or Skip
 wait, their firings batched into one run of the brain, which resumes its previous run's
 conversation while the prompt cache holds and closes the wait through `mark` with a note
-([`docs/waits.md`](docs/waits.md)).
+([`docs/waits.md`](docs/waits.md)); and the projects surface, `pilot-projects`, a third server of
+Pilot's MCP process for any session of KubeCoder's production fleet, behind one shared token: it
+lists the projects, reads a project's head, its items and its files as Pilot renders them, and
+starts a draft as Pilot's service user, its members the person it is for and everyone whose profile
+switch joins them ([`docs/mcp.md`](docs/mcp.md)).
 The brain's own repository holds its map, its
 rules, its four skills, and `pilot.py`, the script it edits a project's folder with, on the block
 DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); its four skills' bodies are written:
