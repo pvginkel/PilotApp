@@ -3,7 +3,9 @@
  * item's, by their ids. Opening one scrolls the timeline to it and flashes it: a block's goes to
  * the block, a confirmation's to its card's row, and a done item's to its line; an address the
  * timeline draws nothing for leaves it at its end. One opened in the app, as a chat's quote chip
- * opens it, on a timeline read before its item came, waits for the read that draws the item.
+ * opens it, on a timeline read before its item came, waits for the read that draws the item. Off a
+ * phone the project's own row leaves an item's address in its entry's place, as every move within
+ * a project does, the timeline where it stands, so that Back leaves the project (P-225).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -66,22 +68,32 @@ test.describe('An item’s address', () => {
     expect(await timeline.fromEnd()).toBeGreaterThan(100);
   });
 
-  test('goes to the item again when it is opened with the timeline on screen, by Back', async ({
+  test('is left by its project’s own row in its entry’s place, the timeline where it stands, so that Back leaves the project; opened again with the timeline on screen, from a chat’s quote chip, it goes to the item again', async ({
     page,
     people,
     projectList,
     projects,
+    controller,
     timeline,
+    chat,
+    chats,
   }) => {
     const me = await people.signIn();
     const name = makeUnique('Back');
     const id = await projects.makeWithSession({ name, members: [me.handle!] });
     const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
     await notices(projects, id);
+    await page.goto('/profile');
     await timeline.openAt(id, decision);
     const item = timeline.item(decision);
     await expect(item.root).toBeInViewport();
     await expect(item.root).not.toHaveClass(/\bfresh\b/);
+    const { session } = await chats.start(id, 'Which one was it?');
+    await expect(chat.messageTexts).toHaveText(['Which one was it?']);
+    await controller.play(chats.store, session, [text('again', `See <quoted_item id="${decision}">Which tent?</quoted_item id="${decision}">.`)]);
+    const chip = chat.texts.getByTestId('chat.quote');
+    await expect(chip).toHaveText('Which tent?');
+    const entries = await page.evaluate(() => history.length);
 
     // The project's own address keeps the timeline where it stands.
     await projectList.tab(name).click();
@@ -91,10 +103,17 @@ test.describe('An item’s address', () => {
     await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
     await expect(item.root).not.toBeInViewport();
 
-    await page.goBack();
+    await chip.click();
     await expect(page).toHaveURL(addressOf(id, decision));
     await expect(item.root).toHaveClass(/\bfresh\b/);
     await expect(item.root).toBeInViewport();
+
+    // Neither move added an entry: Back is the page the project was opened from.
+    await projectList.tab(name).click();
+    await expect(page).toHaveURL(projectAddress(id));
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    await page.goBack();
+    await expect(page).toHaveURL('/profile');
   });
 
   test('of the opening goes to the opening and flashes its words', async ({ people, projects, timeline }) => {

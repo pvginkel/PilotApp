@@ -6,7 +6,9 @@
  * frame the address is first drawn in; any other address of the project shows the timeline. A
  * tab's change replaces the browser's entry, so that Back does not move between tabs. The line and
  * the order the tabs showed in are kept in the browser (F133), so that after a reload the line is
- * as it was left, and the project's row in the list brings back the tab it was left on (F1.6).
+ * as it was left, and the project's row in the list brings back the tab it was left on (F1.6). A
+ * tab is kept by its path within the project, its address built from the one the project is at
+ * (`project-paths.ts`).
  * Each tab's scroll is kept while another shows, as long as the page (F28.1). Nothing of it is on
  * a phone, whose documents are views (F98.4).
  */
@@ -15,6 +17,7 @@ import { createContext, useContext, useLayoutEffect, useSyncExternalStore } from
 import { useNavigate } from '@tanstack/react-router';
 import { useShownProject } from '@/hooks/use-project-address';
 import { browserState, rememberLine, type DocTab, type KeptLine } from '@/lib/browser-state';
+import { addressUnder } from '@/lib/project-paths';
 
 declare module '@tanstack/react-router' {
   interface HistoryState {
@@ -124,24 +127,24 @@ export function useDocTabs(showing: DocTab | null): TabLine {
   const kind = showing?.kind;
   const id = showing?.id ?? null;
   const documentId = showing?.documentId;
-  const href = showing?.href;
+  const path = showing?.path;
 
   useLayoutEffect(() => {
     const now = lineOf(projectId);
-    const tab = kind === undefined ? null : { key, kind, id, documentId, href: href! };
+    const tab = kind === undefined ? null : { key, kind, id, documentId, path: path! };
     const open = tab === null || now.tabs.some((each) => each.key === key);
     write(projectId, {
-      // An attachment reached at another of its addresses shows its tab at that one.
+      // An attachment reached at another of its paths shows its tab at that one.
       tabs: open ? now.tabs.map((each) => (each.key === key ? tab! : each)) : [...now.tabs, tab],
       seen: [key, ...now.seen.filter((each) => each !== key)],
       synced: key,
     });
-  }, [projectId, key, kind, id, documentId, href]);
+  }, [projectId, key, kind, id, documentId, path]);
 
   const show = (tab: DocTab | null) =>
     void (tab === null
       ? navigate({ to: '/projects/$address', params: { address }, replace: true })
-      : navigate({ href: tab.href, replace: true }));
+      : navigate({ href: addressUnder(address, tab.path), replace: true }));
   const close = (closed: string) => {
     const now = lineOf(projectId);
     const left = now.tabs.filter((tab) => tab.key !== closed);

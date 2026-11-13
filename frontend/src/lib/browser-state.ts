@@ -6,6 +6,7 @@
 
 import { useSyncExternalStore } from 'react';
 import type { QuoteRef } from '@/lib/chat/quotes';
+import { pathWithin } from '@/lib/project-paths';
 
 export const THEMES = ['system', 'light', 'dark'] as const;
 export type Theme = (typeof THEMES)[number];
@@ -42,7 +43,7 @@ const PANEL_WIDTHS: PanelWidths = { project: 420, draft: 0.5 };
 const DOC_TAB_KINDS = ['document', 'attachment', 'handbook', 'project-document'] as const;
 type DocTabKind = (typeof DOC_TAB_KINDS)[number];
 
-/** A tab of the line: what it shows, and the address that shows it again. */
+/** A tab of the line: what it shows, and the path within its project that shows it again. */
 export interface DocTab {
   /** One per thing shown: `document <item>`, `attachment <attachment>`, `handbook`, `project-document`. */
   key: string;
@@ -51,7 +52,8 @@ export interface DocTab {
   id: string | null;
   /** An attachment's at its document's address: the document, whose read its body waits on. */
   documentId?: string;
-  href: string;
+  /** `documents/<id>`: its address is built from the one its project is at (`project-paths.ts`). */
+  path: string;
 }
 
 /** A project's tab line as the person last left it (F28.8). */
@@ -126,7 +128,7 @@ function loadLines(saved: unknown): Record<string, KeptLine> {
   for (const [projectId, line] of Object.entries(saved as Record<string, unknown>)) {
     if (typeof line !== 'object' || line === null) continue;
     const { tabs, seen } = line as Partial<Record<keyof KeptLine, unknown>>;
-    const kept = Array.isArray(tabs) ? tabs.filter(isDocTab) : [];
+    const kept = Array.isArray(tabs) ? tabs.flatMap(docTabOf) : [];
     if (kept.length === 0) continue;
     const shown = Array.isArray(seen) ? seen.filter((key): key is string => typeof key === 'string') : [];
     lines[projectId] = { tabs: kept, seen: shown };
@@ -134,16 +136,16 @@ function loadLines(saved: unknown): Record<string, KeptLine> {
   return lines;
 }
 
-function isDocTab(tab: unknown): tab is DocTab {
-  if (typeof tab !== 'object' || tab === null) return false;
-  const { key, kind, id, documentId, href } = tab as Partial<Record<keyof DocTab, unknown>>;
-  return (
-    typeof key === 'string' &&
-    DOC_TAB_KINDS.some((each) => each === kind) &&
-    (id === null || typeof id === 'string') &&
-    (documentId === undefined || typeof documentId === 'string') &&
-    typeof href === 'string'
-  );
+/** The tab as kept, none where it is no tab: one kept by its address, `href`, is at the address's path. */
+function docTabOf(tab: unknown): DocTab[] {
+  if (typeof tab !== 'object' || tab === null) return [];
+  const { key, kind, id, documentId, path, href } = tab as Partial<Record<keyof DocTab | 'href', unknown>>;
+  const at = typeof path === 'string' ? path : typeof href === 'string' ? pathWithin(href) : undefined;
+  const of = DOC_TAB_KINDS.find((each) => each === kind);
+  if (typeof key !== 'string' || of === undefined || at === undefined) return [];
+  if (id !== null && typeof id !== 'string') return [];
+  if (documentId !== undefined && typeof documentId !== 'string') return [];
+  return [{ key, kind: of, id, documentId, path: at }];
 }
 
 let state = load();

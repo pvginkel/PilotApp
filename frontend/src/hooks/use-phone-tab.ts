@@ -9,7 +9,9 @@
  * pushed over the one it was opened from, whose tab it keeps under it, a view over a view on top of
  * it; Back takes it off. A view's address reached cold — a notification's link, a link from another
  * app, a typed address — lies over the project's Timeline, an entry of the Timeline put under it,
- * so that Back lands there. The panel the desktop keeps per project is neither read nor changed.
+ * so that Back lands there. A view is kept by its path within the project (`project-paths.ts`), the
+ * same at each of the project's addresses. The panel the desktop keeps per project is neither read
+ * nor changed.
  * A view keeps its scroll while another lies over it, as long as the page (R22): Back finds it
  * where it was left, and a view opened afresh, or reloaded, starts at its top.
  */
@@ -17,6 +19,7 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useMatches, useRouter, type ParsedLocation } from '@tanstack/react-router';
 import { ShownProjectContext } from '@/hooks/use-project-address';
+import { pathWithin } from '@/lib/project-paths';
 
 /** `timeline` is a draft's Chat, the definition chat in the timeline's place. */
 export type PhoneTab = 'timeline' | 'chat' | 'plan' | 'documents' | 'draft';
@@ -31,7 +34,7 @@ declare module '@tanstack/react-router' {
     phoneTab?: Exclude<PhoneTab, 'timeline'>;
     /** The entry was pushed over its address's Timeline, which Back shows. */
     overTimeline?: boolean;
-    /** At a view's entry, the views at it by their addresses, bottom to top, its own last. */
+    /** At a view's entry, the views at it by their paths within the project, bottom to top, its own last. */
     phoneViews?: string[];
   }
 }
@@ -40,7 +43,7 @@ declare module '@tanstack/react-router' {
 export interface PhoneView {
   /** Takes it off, showing what lay under it. */
   back: () => void;
-  /** The address of the view under it, none where it lies on a tab. */
+  /** The path within the project of the view under it, none where it lies on a tab. */
   under: string | null;
   /** Its scroll as it was left, 0 for a view not shown before. */
   scroll: number;
@@ -55,7 +58,7 @@ interface PhoneScreen {
   tab: PhoneTab;
   /** Shows the tab, the views over it taken off first. */
   show: (tab: PhoneTab) => void;
-  /** The views showing, bottom to top, by their addresses. */
+  /** The views showing, bottom to top, by their paths within the project. */
   views: readonly string[];
   /** Takes the view on top off. */
   back: () => void;
@@ -83,11 +86,12 @@ function shownAt(location: ParsedLocation, overlaid: boolean, below: Shown | nul
   const { state } = location;
   const shown = { location, overlaid, kept: state.phoneTab, unsaid: null };
   if (!overlaid) return { ...shown, views: [] };
-  if (state.phoneViews !== undefined) return { ...shown, views: state.phoneViews };
+  // An entry that keeps its views by their addresses reads as their paths.
+  if (state.phoneViews !== undefined) return { ...shown, views: state.phoneViews.map(pathWithin) };
   if (below !== null && below.location.state.__TSR_index === state.__TSR_index - 1) {
-    return { ...shown, kept: below.kept, views: [...below.views, location.pathname], unsaid: 'pushed' };
+    return { ...shown, kept: below.kept, views: [...below.views, pathWithin(location.pathname)], unsaid: 'pushed' };
   }
-  return { ...shown, kept: undefined, views: [location.pathname], unsaid: 'cold' };
+  return { ...shown, kept: undefined, views: [pathWithin(location.pathname)], unsaid: 'cold' };
 }
 
 /**

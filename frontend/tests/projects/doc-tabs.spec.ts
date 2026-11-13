@@ -13,7 +13,9 @@
  * order the tabs showed in are kept in the browser (F133): after a reload the line is as it was
  * left, the project's own address shows its timeline beside it, and its row in the list, the
  * drawer's too, brings back the tab it was left on, at the tab's address in the entry's place, but
- * the row of the project on screen, which goes to the project's own address (F1.6).
+ * the row of the project on screen, which goes to the project's own address (F1.6), in the entry's
+ * place too, so that Back leaves the project (P-225). A tab is kept by its path within the project,
+ * and one a browser kept by its address still opens, at the project's own (P-261).
  */
 
 import { cssColour } from '../support/contrast';
@@ -600,7 +602,7 @@ test.describe('Each project’s line kept in the browser', () => {
     await expect(overlay.title).toHaveText('Alpha');
   });
 
-  test('the row of the project on screen, a document’s tab showing, goes to the project’s own address, its timeline showing', async ({
+  test('the row of the project on screen, a document’s tab showing, goes to the project’s own address in the entry’s place, its timeline showing, so that Back leaves the project', async ({
     page,
     people,
     projects,
@@ -613,16 +615,78 @@ test.describe('Each project’s line kept in the browser', () => {
     const name = makeUnique('On screen');
     const id = await projects.makeWithSession({ name, members: [me.handle!] });
     const a = await projects.place(id, { kind: 'document', title: 'Alpha', text: card('Alpha') });
+    await page.goto('/profile');
     await timeline.open(id);
     await timeline.item(a).card.open.click();
     await expect(page).toHaveURL(documentAddress(id, a));
     await expect(overlay.title).toHaveText('Alpha');
+    const entries = await page.evaluate(() => history.length);
 
     await projectList.tab(name).click();
     await expect(page).toHaveURL(projectAddress(id));
     await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
     await expect(overlay.root).toHaveCount(0);
     await expect(timeline.item(a).root).toBeVisible();
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    await page.goBack();
+    await expect(page).toHaveURL('/profile');
+  });
+
+  test('a line the browser kept by its tabs’ addresses still opens: each tab shows at the project’s own address, and the line is kept by its tabs’ paths from then', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    docTabs,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Kept before'), members: [me.handle!] });
+    const a = await projects.place(id, { kind: 'document', title: 'Alpha', text: card('Alpha') });
+    const b = await projects.place(id, { kind: 'document', title: 'Bravo', text: card('Bravo') });
+    await timeline.open(id);
+    // The line as a page before this one wrote it, each tab at the address it was opened at.
+    await page.evaluate(
+      ({ id, tabs }) => {
+        const kept = JSON.parse(localStorage.getItem('pilot') ?? '{}') as Record<string, unknown>;
+        const line = {
+          tabs: tabs.map((each) => ({ key: `document ${each}`, kind: 'document', id: each, href: `/projects/${id}/documents/${each}` })),
+          seen: ['timeline', ...tabs.map((each) => `document ${each}`)],
+        };
+        localStorage.setItem('pilot', JSON.stringify({ ...kept, lines: { [id]: line } }));
+      },
+      { id, tabs: [a, b] },
+    );
+    await page.reload();
+    await expect(docTabs.tabs).toHaveCount(2);
+    expect(await docTabs.keys()).toEqual([a, b].map((each) => `document ${each}`));
+    await expect(docTabs.first).toHaveAttribute('aria-selected', 'true');
+    // Every address the page goes to from here.
+    await page.evaluate(() => {
+      const went: string[] = [];
+      (window as unknown as { went: string[] }).went = went;
+      for (const move of ['pushState', 'replaceState'] as const) {
+        const own = history[move].bind(history);
+        history[move] = (state, unused, url) => {
+          if (url != null) went.push(String(url));
+          own(state, unused, url);
+        };
+      }
+    });
+
+    await docTabs.document(b).show.click();
+    await expect(page).toHaveURL(documentAddress(id, b));
+    await expect(overlay.title).toHaveText('Bravo');
+    await docTabs.document(a).show.click();
+    await expect(page).toHaveURL(documentAddress(id, a));
+    await expect(overlay.title).toHaveText('Alpha');
+    const went = await page.evaluate(() => (window as unknown as { went: string[] }).went);
+    expect(went.filter((each) => each.includes(id))).toEqual([]);
+    const kept = await page.evaluate(
+      (id) => (JSON.parse(localStorage.getItem('pilot')!) as { lines: Record<string, { tabs: Record<string, unknown>[] }> }).lines[id].tabs,
+      id,
+    );
+    expect(kept.map((each) => [each.path, each.href])).toEqual([a, b].map((each) => [`documents/${each}`, undefined]));
   });
 
   test('on a phone, a project’s row opens it on its Timeline tab, whatever tab the desktop left it on', async ({

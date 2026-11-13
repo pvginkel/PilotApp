@@ -60,15 +60,16 @@ import { useProjectHead, type ProjectHead as ProjectHeadOf } from '@/hooks/use-p
 import { useTimelineItem, type TimelineItem } from '@/hooks/use-timeline';
 import { rememberInBrowser, type DocTab } from '@/lib/browser-state';
 import type { QuoteRef } from '@/lib/chat/quotes';
+import { addressUnder, pathWithin } from '@/lib/project-paths';
 import { readFirst, readProject } from '@/lib/screen-reads';
 
 export const Route = createFileRoute('/_shell/projects/$address')({
   // Off a phone, a project gone to from its row in the list shows the tab it was left on, at the
   // tab's address in the entry's place (F1.6); at its own address however else, its timeline.
-  beforeLoad: ({ location, preload }) => {
+  beforeLoad: ({ location, params, preload }) => {
     const row = location.state.fromList;
     const tab = !preload && row !== undefined && !isPhone() ? tabLeftOn(row) : null;
-    if (tab !== null) throw redirect({ href: tab.href, replace: true });
+    if (tab !== null) throw redirect({ href: addressUnder(params.address, tab.path), replace: true });
   },
   loader: readFirst(({ address }: { address: string }) => readProject(address)),
   component: Project,
@@ -107,7 +108,7 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
   const { sessionId } = shownAt(router, at);
   // Off a phone the session log's address names no tab: the one under it is the line's last.
   const under = phone || sessionId === undefined ? null : tabLeftOn(projectId);
-  const pathname = under?.href ?? at;
+  const pathname = under === null ? at : addressUnder(address, under.path);
   const { route, itemId, blockId, documentId, attachmentId } = shownAt(router, pathname);
   const addressed = useTimelineItem(projectId, blockId === undefined ? undefined : itemId);
   const box = route === '/_shell/projects/$address/documents/$documentId/clarification';
@@ -151,17 +152,18 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
     key: `document ${id}`,
     kind: 'document',
     id,
-    href: router.buildLocation({ to: '/projects/$address/documents/$documentId', params: { address, documentId: id } }).pathname,
+    path: pathWithin(router.buildLocation({ to: '/projects/$address/documents/$documentId', params: { address, documentId: id } }).pathname),
   });
+  const path = pathWithin(pathname);
   const tab: DocTab | null =
     opened !== null && opened.attachment === null
       ? documentTab(opened.documentId)
       : attachmentId !== undefined
-        ? { key: `attachment ${attachmentId}`, kind: 'attachment', id: attachmentId, documentId, href: pathname }
+        ? { key: `attachment ${attachmentId}`, kind: 'attachment', id: attachmentId, documentId, path }
         : handbook
-          ? { key: 'handbook', kind: 'handbook', id: null, href: pathname }
+          ? { key: 'handbook', kind: 'handbook', id: null, path }
           : projectDocument
-            ? { key: 'project-document', kind: 'project-document', id: null, href: pathname }
+            ? { key: 'project-document', kind: 'project-document', id: null, path }
             : null;
   return (
     <ShownProjectContext.Provider value={shown}>

@@ -3,7 +3,8 @@
  * two lines, opening the project at its own address, which off a phone moves on to the tab it was
  * left on (F1.6); its status icon after its name's last word, the pause (F1.3, F141); and the
  * badge counting the items waiting on the person, orange when one of them is urgent (F1.4). The tab of the project on screen, at its own
- * address or an item's under it, is the current page's. An <a> itself, its repos and environments
+ * address or an item's under it, is the current page's, and off a phone it takes the place of the
+ * browser's entry, as every move within a project does (F97). An <a> itself, its repos and environments
  * link through spans (F91, F93), and its ticket ids are plain text, so that a tap on the tab never
  * opens the tracker. Under the mouse or a finger it reads what its project's screen shows first
  * (`screen-reads.ts`).
@@ -13,6 +14,7 @@ import { Link } from '@tanstack/react-router';
 import { StatusIcon } from '@/components/projects/status-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
+import { usePhone } from '@/hooks/use-phone';
 import { useProjectOnScreen } from '@/hooks/use-project-address';
 import type { ProjectTab as Project } from '@/hooks/use-projects';
 import { projectStatusLine } from '@/lib/utils/status-labels';
@@ -22,11 +24,13 @@ export function ProjectTab({ project, archived = false }: { project: Project; ar
   const status = projectStatusLine(project);
   // The tab of the project on screen is no switch (F1.6): it goes to the project's own address.
   const onScreen = useProjectOnScreen() === project.id;
+  const phone = usePhone();
   return (
     <Link
       to="/projects/$address"
       params={{ address: project.address }}
       state={onScreen ? undefined : { fromList: project.id }}
+      replace={onScreen && !phone}
       preload="intent"
       className={cn('tab', project.state === 'finished' && 'finished')}
       data-testid="projects.tab"

@@ -10,6 +10,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { DocTabContext, tabLeftOn } from '@/hooks/use-doc-tabs';
 import { PhoneViewContext } from '@/hooks/use-phone-tab';
 import { useShownProject } from '@/hooks/use-project-address';
+import { addressUnder } from '@/lib/project-paths';
 
 export function useOverlayClose(): () => void {
   const { id: projectId, address } = useShownProject();
@@ -20,7 +21,7 @@ export function useOverlayClose(): () => void {
     const under = tabLeftOn(projectId);
     void (under === null
       ? navigate({ to: '/projects/$address', params: { address }, replace: true })
-      : navigate({ href: under.href, replace: true }));
+      : navigate({ href: addressUnder(address, under.path), replace: true }));
   };
   return view?.back ?? tab?.close ?? closePopover;
 }

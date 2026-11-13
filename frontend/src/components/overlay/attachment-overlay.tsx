@@ -29,6 +29,7 @@ import { PhoneViewContext, type PhoneView } from '@/hooks/use-phone-tab';
 import { useShownProject } from '@/hooks/use-project-address';
 import { attachmentIn, hungById, titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
+import { pathWithin } from '@/lib/project-paths';
 
 /** An attachment of an item of the project's timeline, at the attachment's address under the item's. */
 export function ItemAttachmentOverlay({ projectId, itemId, attachmentId }: { projectId: string; itemId: string; attachmentId: string }) {
@@ -125,8 +126,9 @@ function DocumentLink({ view, documentId, title }: DocumentLinkProps) {
   const router = useRouter();
   const to = '/projects/$address/documents/$documentId';
   const params = { address, documentId };
-  const blocks = `${router.buildLocation({ to: '/projects/$address/items/$itemId', params: { address, itemId: documentId } }).pathname}/blocks/`;
-  const under = view.under !== null && (view.under === router.buildLocation({ to, params }).pathname || view.under.startsWith(blocks));
+  const own = pathWithin(router.buildLocation({ to, params }).pathname);
+  const item = pathWithin(router.buildLocation({ to: '/projects/$address/items/$itemId', params: { address, itemId: documentId } }).pathname);
+  const under = view.under !== null && (view.under === own || view.under.startsWith(`${item}/blocks/`));
   return (
     <Link
       to={to}

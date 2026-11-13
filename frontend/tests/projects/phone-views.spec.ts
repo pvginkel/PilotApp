@@ -10,7 +10,9 @@
  * own, and Back, the arrow or Esc takes it off and shows what lay under it, the tab it was opened
  * from; a reload keeps the tab and the views; a view's address reached cold lies over the
  * project's Timeline, so that Back lands there, at the project's id too, which gives way to its own
- * address. A view keeps its scroll while another lies over it,
+ * address, the views kept by their paths within the project, so that an attachment's link there is
+ * still Back to its document, and so is one over views a browser kept by their addresses (P-261).
+ * A view keeps its scroll while another lies over it,
  * so that Back from an attachment shows its document where it was read; one opened afresh, or
  * reloaded, starts at its top.
  */
@@ -279,6 +281,71 @@ test.describe('Views on a phone', () => {
     await expect(timeline.root).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(projectAddress(before));
+  });
+
+  test('a document’s view reached at the project’s id lies under its attachment at the project’s own address: the attachment’s document link is Back to it, adding no entry', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('At its id'), members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
+    const [notes] = await projects.attach(trip, [NOTES]);
+    await timeline.open(id);
+
+    await page.goto(`/projects/${id}/documents/${trip}`);
+    await expect(page).toHaveURL(documentAddress(id, trip));
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    await overlay.attachmentChip(notes).tap();
+    await expect(page).toHaveURL(documentAttachmentAddress(id, trip, notes));
+    await expect(overlay.title).toHaveText('Tent notes');
+    const entries = await page.evaluate(() => history.length);
+    await overlay.documentLink.tap();
+    await expect(page).toHaveURL(documentAddress(id, trip));
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    await page.goForward();
+    await expect(overlay.title).toHaveText('Tent notes');
+  });
+
+  test('views a browser kept by their addresses still open after a reload: the attachment’s document link is Back to its document, adding no entry, and Back takes them off down to the tab', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    phoneTabs,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Kept before'), members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
+    const [notes] = await projects.attach(trip, [NOTES]);
+    await timeline.open(id);
+    await timeline.item(trip).card.open.tap();
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    await overlay.attachmentChip(notes).tap();
+    await expect(overlay.title).toHaveText('Tent notes');
+    // The entry as a page before this one wrote it, its views at the addresses they were opened at.
+    await expect.poll(() => page.evaluate(() => (history.state as { phoneViews?: string[] }).phoneViews)).toHaveLength(2);
+    await page.evaluate(
+      (views) => history.replaceState({ ...(history.state as object), phoneViews: views }, ''),
+      [`/projects/${id}/documents/${trip}`, `/projects/${id}/documents/${trip}/attachments/${notes}`],
+    );
+    await page.reload();
+    await expect(overlay.title).toHaveText('Tent notes');
+
+    const entries = await page.evaluate(() => history.length);
+    await overlay.documentLink.tap();
+    await expect(page).toHaveURL(documentAddress(id, trip));
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    await page.goBack();
+    await expect(overlay.root).toHaveCount(0);
+    await expect(page).toHaveURL(projectAddress(id));
+    await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
   });
 
   test('a card’s document opened at one of its blocks lies under its attachment too: the attachment’s document link is Back to it, adding no entry', async ({

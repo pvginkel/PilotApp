@@ -305,7 +305,7 @@ test.describe('Create project', () => {
     await expect(page).toHaveURL(`/projects/${slug}/project-document`);
   });
 
-  test('moves the page to the project’s slug, the project remembered as before, its tab line and its words not sent kept; its draft’s name still opens it there, the rest of the address kept', async ({
+  test('moves the page to the project’s slug, the project remembered as before, its tab line and its words not sent kept, a tab opened while drafting showing at the slug with no lookup; its draft’s name still opens it there, the rest of the address kept', async ({
     page,
     people,
     projects,
@@ -345,6 +345,16 @@ test.describe('Create project', () => {
     await expect(docTabs.attachment(packing).root).toBeVisible();
     expect(await docTabs.keys()).toEqual([`attachment ${packing}`]);
     await expect(chat.field).toHaveValue('Which stove?');
+    // The tab, opened at the draft's name and not showing at Create, is at the slug: no lookup.
+    const lookups: string[] = [];
+    const looked = (request: { url(): string }) => void (request.url().includes('/api/projects/lookup') && lookups.push(request.url()));
+    page.on('request', looked);
+    await docTabs.attachment(packing).show.click();
+    await expect(page).toHaveURL(`/projects/${slug}/attachments/${packing}`);
+    await expect(overlay.title).toHaveText('Packing list');
+    await expect(docTabs.attachment(packing).show).toHaveAttribute('aria-selected', 'true');
+    page.off('request', looked);
+    expect(lookups).toEqual([]);
     await page.goto(`/projects/${folder}/project-document`);
     await expect(page).toHaveURL(`/projects/${slug}/project-document`);
     await expect(overlay.title).toHaveText(title);
