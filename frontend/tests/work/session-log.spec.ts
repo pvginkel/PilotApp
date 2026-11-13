@@ -225,6 +225,42 @@ test.describe('A work item’s session log', () => {
     await expect(sessionLog.texts.last()).toHaveText('The import is done.');
   });
 
+  test('waits on a command its call did not put in the background, moved there at its timeout, as on one put there, until its notification', async ({
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await sessionLog.open(project, work);
+    const task = { task_id: 't0example2', tool_use_id: 'toolu_import' };
+
+    // `claude` starts the command's task in the foreground, moves it at the timeout, and answers the call.
+    await controller.play(environment, 'claude-1', [
+      toolUse('toolu_import', 'Bash', { command: 'scripts/import.sh', description: 'Run the import', timeout: 5000 }),
+      line({ type: 'system', subtype: 'task_started', ...task, description: 'Run the import', is_backgrounded: false, task_type: 'local_bash' }),
+      line({ type: 'system', subtype: 'task_updated', task_id: task.task_id, patch: { is_backgrounded: true } }),
+      toolResult('toolu_import', 'Command did not complete within its 5s timeout and was moved to the background (ID: t0example2).'),
+      text('moved', 'The import runs on.'),
+    ]);
+    // The model still works: its turn has not ended.
+    await expect(sessionLog.texts).toHaveText(['The import runs on.']);
+    await expect(sessionLog.cue).toHaveText('Working');
+
+    await controller.play(environment, 'claude-1', [line({ type: 'result', subtype: 'success', is_error: false, result: 'The import runs on.' })]);
+    await expect(sessionLog.cue).toHaveText(/^Waiting on a background command · Run the import · /);
+    expect((await projects.work(project, work)).current_line).toMatchObject({
+      state: 'background',
+      task: { type: 'local_bash', description: 'Run the import' },
+    });
+
+    await controller.play(environment, 'claude-1', [line({ type: 'system', subtype: 'task_notification', ...task, status: 'completed' })]);
+    await expect(sessionLog.cue).toHaveText('Working');
+    await expect.poll(async () => (await projects.work(project, work)).current_line?.state).toBe('thinking');
+  });
+
   test('shows the message of a turn the gate holds before it is sent, a Resume made elsewhere while the project is paused: in a log open through it, and in one opened again onto the Turns it read before', async ({
     people,
     projects,
