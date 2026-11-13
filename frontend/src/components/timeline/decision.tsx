@@ -79,8 +79,9 @@ export function DecisionOptions({ field, block, chosen, closed, live, settled, d
   // Other's words in a one-ask item, where no console of its own holds them.
   const other = useUnsentText(`${field}/other`, held ?? '');
   const typing = choice === null ? opened : choice.typing;
-  // A one-ask item's choice shows chosen in the answer's place, from its first press until it is sent.
-  const made = choice !== null && live && (choice.typing || choice.answer !== null);
+  // A one-ask item's choice shows chosen in the answer's place, from its first press until it is
+  // sent, in the open block alone: closed, the block reads the answer the record holds.
+  const made = choice !== null && live && !closed && (choice.typing || choice.answer !== null);
   const shown = made ? (typing ? null : choice.answer) : chosen;
   const picked = rows.findIndex((row) => row.answer === shown);
   const words = !made && chosen !== null && picked < 0 ? chosen : null;

@@ -294,6 +294,33 @@ test.describe('A one-ask item’s Send', () => {
     await expect(page).toHaveURL(documentAddress(id, decision));
     expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'Dome', by: { handle: me.handle } });
   });
+
+  test('holds Other’s words typed in the item’s tab on the timeline under it too, whose Send sends them once the tab closes', async ({
+    people,
+    projects,
+    timeline,
+    overlay,
+    docTabs,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Under its tab'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    // At the item's address the timeline stands under its tab: the block is drawn twice.
+    await overlay.open(id, decision);
+    const tab = overlay.blockAt('D1');
+    await tab.other.click();
+    await tab.field.fill('The van');
+    await expect(tab.answerSend).toBeEnabled();
+
+    await docTabs.document(decision).close.click();
+    await expect(overlay.root).toHaveCount(0);
+    const item = timeline.item(decision);
+    await expect(item.block.field).toHaveValue('The van');
+    await expect(item.block.answerSend).toBeEnabled();
+    await item.block.answerSend.click();
+    await expect(item.said).toHaveText('The van');
+    expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'The van', by: { handle: me.handle } });
+  });
 });
 
 test.describe('Other’s console', () => {
@@ -520,6 +547,45 @@ test.describe('An answer Pilot gave', () => {
     await block.answerSend.click();
     await expect(item.said).toHaveText('Tunnel');
     expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'Tunnel', note: null, by: { handle: me.handle } });
+  });
+
+  test('reads Pilot’s answer and its note closed, whatever the person chose and has not sent, after a reload and where Pilot answers under a choice; opened, the choice and its Send', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Chosen over'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: PILOTS('Dome') });
+    await timeline.open(id);
+    const { block } = timeline.item(decision);
+    const pilots = async (parts: typeof block) => {
+      await expect(parts.root).toHaveAttribute('data-closed', 'true');
+      await expect(parts.options).toHaveCount(1);
+      await expect(parts.options.locator('.label')).toHaveText('Dome');
+      await expect(parts.note).toHaveText('The forecast is dry.');
+      await expect(parts.answerSend).toHaveCount(0);
+    };
+
+    await block.toggle.click();
+    await block.option('Tunnel').click();
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    // The reload closes the block again, onto what the record holds.
+    await timeline.open(id);
+    await pilots(block);
+    await block.toggle.click();
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await expect(block.option('Dome')).toHaveAttribute('data-chosen', 'false');
+    await expect(block.answerSend).toBeEnabled();
+
+    // Pilot answers a block the person holds a choice on: it closes onto Pilot's answer.
+    const live = await projects.place(id, { kind: 'decision', title: 'Which stove?', text: DECISION });
+    const under = timeline.item(live).block;
+    await under.option('Tunnel').click();
+    await expect(under.answerSend).toBeEnabled();
+    expect(await projects.save(live, `# Which stove?\n\n${PILOTS('Dome')}`)).toMatchObject({ held: false });
+    await pilots(under);
+    expect(await blockOf(projects, id, live)).toMatchObject({ answer: 'Dome', by: { kind: 'agent' } });
   });
 
   test('in free words is Other’s row, which reopens the console with them for Cmd+Enter to send', async ({ people, projects, timeline }) => {

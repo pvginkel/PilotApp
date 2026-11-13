@@ -1,9 +1,10 @@
 /**
  * A field's text, kept in the browser as it is typed until it is sent (F133): a field opened again,
- * after a reload or in another tab, starts from what was left in it. Words that leave a field on
- * their send stay kept until the server takes them, before what is typed in the field since, so
- * that a reload meanwhile finds them in it (D171); refused, they stand in the field again, what
- * was typed since under them.
+ * after a reload or in another tab, starts from what was left in it, and the fields showing under
+ * one key, a block's on the timeline and in its tab over it, hold the same text. Words that leave
+ * a field on their send stay kept until the server takes them, before what is typed in the field
+ * since, so that a reload meanwhile finds them in it (D171); refused, they stand in the field
+ * again, what was typed since under them.
  */
 
 import { useEffect, useState } from 'react';
@@ -30,6 +31,7 @@ export function useUnsentText(field: string, initial = '') {
 
   const change = (next: string) => {
     setText(next);
+    showing.get(field)?.forEach((show) => show(next));
     const left = leaving.get(field);
     if (left === undefined) {
       keepUnsent(field, next);

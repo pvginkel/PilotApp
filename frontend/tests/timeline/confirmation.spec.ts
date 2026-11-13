@@ -309,6 +309,32 @@ test.describe('A confirmation', () => {
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'Yes', note: null, by: { handle: me.handle } });
   });
 
+  test('holds a No’s reason typed in the item’s tab on the timeline under it too, whose Send sends the No with it once the tab closes', async ({
+    people,
+    projects,
+    timeline,
+    overlay,
+    docTabs,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Under its tab'), members: [me.handle!] });
+    const confirmation = await projects.place(id, { kind: 'confirmation', title: 'Ship 1.2?', text: CONFIRMATION });
+    // At the item's address the timeline stands under its tab: the block is drawn twice.
+    await overlay.open(id, confirmation);
+    const tab = overlay.blockAt('C1');
+    await tab.no.click();
+    await tab.noField.fill('Wait for the tests.');
+
+    await docTabs.document(confirmation).close.click();
+    await expect(overlay.root).toHaveCount(0);
+    const item = timeline.item(confirmation);
+    await expect(item.confirm.no).toHaveAttribute('data-chosen', 'true');
+    await expect(item.confirm.field).toHaveValue('Wait for the tests.');
+    await item.confirm.answerSend.click();
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'No', note: 'Wait for the tests.', by: { handle: me.handle } });
+  });
+
   test('answered by Pilot reads its answer and its note in its block, closed, and opens to Yes and No for the person’s', async ({
     people,
     projects,
