@@ -226,12 +226,12 @@ def create_project(
         )
         project = project_service.create_by_call(author, body.title, body.for_)
     else:
+        author = people_service.require_person(auth, "start a new project")
         if body.title is not None or body.for_ is not None:
             raise ValidationException(
                 "Cannot start a new project with a title or for a person because"
                 " a call alone names them"
             )
-        author = people_service.require_person(auth, "start a new project")
         call = None
         project = project_service.create(auth)
     chat_service.send(project.id, author, body.words, call)

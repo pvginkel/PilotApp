@@ -2565,6 +2565,22 @@ class TestCreateProjectByCall:
         )
         assert session.scalars(select(Project)).all() == []
 
+    @pytest.mark.parametrize(
+        "named", [{"title": "Sort the inbox"}, {"for": "ada"}], ids=["title", "for"]
+    )
+    def test_a_caller_with_no_row_naming_a_title_or_for_is_told_of_the_row(
+        self, client: FlaskClient, session: Session, named: dict[str, str]
+    ) -> None:
+        _sign_in(client, subject="subject-newcomer")
+
+        response = client.post(PROJECTS, json={"words": "Hi"} | named)
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot start a new project because you have not chosen your handle yet"
+        )
+        assert session.scalars(select(Project)).all() == []
+
     def test_a_persons_create_reads_no_calling_environment(
         self, client: FlaskClient, session: Session
     ) -> None:
