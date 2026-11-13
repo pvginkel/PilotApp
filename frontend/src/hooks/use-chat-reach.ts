@@ -4,12 +4,14 @@
  * back from another project or another tab; a reload starts from the latest again. Where a chat has
  * opened since the chat last showed, it shows the latest alone. A list the cache holds as the
  * chat opens may predate that chat, and while the read its opening makes is under way, what it
- * shows waits for that read before it says whether one opened. A chat that opens while it shows
- * comes in below.
+ * shows waits for that read before it says whether one opened: the chats it left meanwhile, or,
+ * where a `project_changed` named the project while no screen showed its chats, none, so that the
+ * chats left never show before the one that opened. A chat that opens while it shows comes in
+ * below.
  */
 
 import { useEffect, useState } from 'react';
-import type { Chat } from '@/hooks/use-chats';
+import { chatsChangedUnshown, type Chat } from '@/hooks/use-chats';
 
 interface Reach {
   /** The first chat shown. */
@@ -26,6 +28,8 @@ const reaches = new Map<string, Reach>();
  */
 export function useChatReach(projectId: string, chats: readonly Chat[] | null, reading: boolean) {
   const [left] = useState(() => reaches.get(projectId));
+  // The list in hand as the chat opens is one an event named with no screen showing it.
+  const [changed] = useState(() => chatsChangedUnshown(projectId));
   const [from, setFrom] = useState<string | null>(null);
   // Whether the list in hand is one this chat can trust to hold every chat opened before it showed:
   // a read landed since, or the cache's with none under way.
@@ -33,11 +37,13 @@ export function useChatReach(projectId: string, chats: readonly Chat[] | null, r
   const latest = chats?.at(-1)?.id ?? null;
 
   let next = from;
+  let trusted = current;
   if (chats !== null && !current && !reading) {
     setCurrent(true);
+    trusted = true;
     if (left !== undefined && latest !== left.latest) next = latest;
   }
-  if (chats !== null && next === null) {
+  if (chats !== null && next === null && (trusted || !changed)) {
     const back = left !== undefined && latest === left.latest && chats.some((chat) => chat.id === left.from);
     next = back ? left.from : latest;
   }

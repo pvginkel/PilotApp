@@ -154,6 +154,50 @@ test.describe('The plus', () => {
     await controller.finish(chats.store, session, 'success', 'Noted.');
   });
 
+  test('pressed again while the page is on its way to the draft its first message made opens a new project afresh: nothing in its chat, the focus in its field, which takes words; the draft stands in the list', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    controller,
+    definitionChat,
+    chats,
+  }) => {
+    await people.signIn();
+    await page.goto('/');
+    await waitForUiState(page, 'projects.list', 'ready');
+    await projectList.newProject.click();
+    await expect(definitionChat.empty).toBeVisible();
+
+    const opened = await chats.openingNew();
+    await definitionChat.field.fill('Let us plan the summer trip.');
+    const created = projectList.created();
+    // Each request takes two seconds: the draft's chats are on their way while the plus is pressed.
+    const restore = await slowNetwork(page, 2_000);
+    const reading = page.waitForRequest((request) => request.method() === 'GET' && /^\/api\/projects\/[^/]+\/chats$/.test(new URL(request.url()).pathname));
+    await definitionChat.send.click();
+    const id = (await created).fields!.project as string;
+    const head = await projects.head(id);
+    await reading;
+    await expect(page).toHaveURL(`/projects/${head.address}`);
+    await expect(definitionChat.standInTexts).toHaveText(['Let us plan the summer trip.']);
+    await projectList.newProject.click();
+    await restore();
+
+    await expect(page).toHaveURL('/projects/draft-new');
+    await expect(definitionChat.empty).toBeVisible();
+    await expect(definitionChat.standInTexts).toHaveCount(0);
+    await expect(definitionChat.field).toBeFocused();
+    await expect(definitionChat.field).toHaveJSProperty('readOnly', false);
+    await page.keyboard.type('And the winter one.');
+    await expect(definitionChat.field).toHaveValue('And the winter one.');
+    await expect(projectList.tab('New project', projectList.mine)).toHaveCount(1);
+    await definitionChat.field.fill('');
+
+    const session = await opened(head.address);
+    await controller.finish(chats.store, session, 'success', 'Noted.');
+  });
+
   test('makes no draft of a first message the server refuses: the refusal toasted, the message that stood in the chat gone from it, its words back in the field, the page where it was', async ({
     page,
     people,

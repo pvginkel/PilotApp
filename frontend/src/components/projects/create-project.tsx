@@ -8,30 +8,28 @@
  * head cannot give, no controller or no store environment, comes back as the request's error.
  */
 
-import { useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
+import { UNTIL_READ } from '@/lib/api/until-read';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
 const CREATE_FORM = 'project.create';
 
 export function CreateProject({ project }: { project: Project }) {
-  const queryClient = useQueryClient();
   // Pending until every query is read again, the head included: until then a second press would
-  // ask for the same change. Succeeded here, not in `mutate`'s callbacks: the head read open
-  // unmounts the definition chat, and `mutate`'s callbacks with it.
-  const create = usePostProjectsTransitionsByProjectId({
-    onSuccess: async () => {
-      await queryClient.invalidateQueries();
-      trackFormSuccess(CREATE_FORM);
-    },
-  });
+  // ask for the same change.
+  const create = usePostProjectsTransitionsByProjectId(UNTIL_READ);
   if (project.create_refusal !== null) return null;
   const press = () => {
     if (create.isPending) return;
     trackFormSubmit(CREATE_FORM);
-    create.mutate({ path: { project_id: project.id }, body: { kind: 'opened' } }, { onError: () => trackFormError(CREATE_FORM) });
+    // Succeeded once that read has ended, and by the write's own promise, not in `mutate`'s
+    // callbacks: the head read open unmounts the definition chat, and `mutate`'s callbacks with it.
+    create.mutateAsync({ path: { project_id: project.id }, body: { kind: 'opened' } }).then(
+      () => trackFormSuccess(CREATE_FORM),
+      () => trackFormError(CREATE_FORM),
+    );
   };
   return (
     <div

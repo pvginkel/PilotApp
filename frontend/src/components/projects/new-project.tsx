@@ -5,7 +5,8 @@
  * panel's Draft and Documents, both empty; on a phone the tabs at the bottom, a draft's. The first
  * message sent makes the draft (`useStartProject`), which the page then shows at its address,
  * `draft-<number>`, in this entry's place, the focus in its chat's field, its composer waiting until
- * the draft's chats are read and the route shows them (`screen-reads.ts`). From its Send the message
+ * the draft's chats are read and the route shows them (`screen-reads.ts`); the plus pressed while it
+ * waits brings the page back here, to a new project afresh. From its Send the message
  * stands in the chat, here and then in the draft's until the draft's chat has streamed it
  * (use-stand-ins.ts), its words out of the field. Until the draft is made the server holds
  * nothing of it, so leaving leaves nothing behind; a message the server refuses makes nothing
@@ -14,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type Ref } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { ChatEmptyState } from '@/components/chat/chat-empty-state';
 import { ComposerBox } from '@/components/chat/composer';
 import { chatPeople } from '@/components/chat/people';
@@ -35,6 +36,8 @@ import { useUnsentText } from '@/hooks/use-unsent-text';
 
 /** The words not sent yet, as the browser keeps them. */
 const UNSENT = 'chat/new-project';
+/** The new project's address, the route's (`draft-new.tsx`). */
+const NEW_ADDRESS = '/projects/draft-new';
 
 export function NewProject() {
   return usePhone() ? <PhoneNewProject /> : <DeskNewProject />;
@@ -91,11 +94,15 @@ function NewHead({ phone = false, ref }: { phone?: boolean; ref?: Ref<HTMLElemen
 function NewChat({ covered }: { covered: boolean }) {
   const person = usePerson();
   const people = useMemo(() => chatPeople(person, []), [person]);
-  /** The draft the first message made, which the page shows next. */
-  const [draft, setDraft] = useState<string | null>(null);
-  const standIns = useStandIns(draft ?? NEW_PROJECT);
+  /** The draft the first message made, which the page shows next, `left` once the router is on its way there. */
+  const [draft, setDraft] = useState<{ id: string; left: boolean } | null>(null);
+  // This screen stands until the draft's is read. The router here again while it stands, the plus
+  // was pressed on the way: the draft is left to the list.
+  const here = useRouterState({ select: (state) => state.location.pathname === NEW_ADDRESS });
+  if (draft !== null && draft.left === here) setDraft(here ? null : { ...draft, left: true });
+  const standIns = useStandIns(draft?.id ?? NEW_PROJECT);
   return (
-    <ChatColumn home="feed" covered={covered} composer={<NewComposer moving={draft !== null} onDraft={setDraft} />}>
+    <ChatColumn home="feed" covered={covered} composer={<NewComposer moving={draft !== null} onDraft={(id) => setDraft({ id, left: false })} />}>
       {standIns.length === 0 ? <ChatEmptyState home="feed" /> : <StandIns standIns={standIns} people={people} after={null} />}
     </ChatColumn>
   );
@@ -115,7 +122,10 @@ function NewComposer({ moving, onDraft }: NewComposerProps) {
   const words = text.trim();
   const sendable = !start.pending && !moving && words !== '';
 
-  useEffect(() => field.current!.focus(), []);
+  // As it is drawn, and as a move to a draft is cut short.
+  useEffect(() => {
+    if (!moving) field.current!.focus();
+  }, [moving]);
 
   const send = () => {
     field.current!.focus();

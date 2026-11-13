@@ -3,10 +3,10 @@
  * and, beside it, the alarms switch, the person's on every browser (F142.1).
  */
 
-import { useQueryClient } from '@tanstack/react-query';
 import { useDeviceNotifications } from '@/hooks/use-device-notifications';
 import { usePerson } from '@/hooks/use-self';
 import { usePutPeopleSelfAlarms } from '@/lib/api/generated/hooks';
+import { UNTIL_READ } from '@/lib/api/until-read';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
 const ALARMS_FORM = 'people.alarms';
@@ -47,8 +47,7 @@ export function DeviceSwitch() {
 
 /** The alarms switch, on by default. */
 export function AlarmsSwitch({ on }: { on: boolean }) {
-  const queryClient = useQueryClient();
-  const turn = usePutPeopleSelfAlarms({ onSuccess: () => queryClient.invalidateQueries() });
+  const turn = usePutPeopleSelfAlarms(UNTIL_READ);
 
   const toggle = () => {
     if (turn.isPending) return;

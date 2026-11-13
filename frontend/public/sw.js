@@ -19,7 +19,7 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   const { title, body, tag, url, renotify } = e.data.json();
   e.waitUntil(self.registration.showNotification(title, {
-    body, tag, renotify, silent: !renotify, icon: '/icon-192.png', data: { url },
+    body, tag, renotify, silent: !renotify, data: { url },
   }));
 });
 

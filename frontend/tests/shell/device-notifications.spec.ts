@@ -44,7 +44,7 @@ test.describe("A device's notifications", () => {
             tag: push.tag,
             renotify: true,
             silent: false,
-            icon: new URL('/icon-192.png', page.url()).href,
+            icon: '',
             url: push.url,
           },
         ]);

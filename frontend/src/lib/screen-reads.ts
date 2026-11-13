@@ -5,9 +5,10 @@
  * them into the page's cache, each under its generated hook's key, so that the router keeps the
  * screen showing until they are in, and the loading bar tells of a wait past 200 ms
  * (`loading-bar.tsx`); a project's tab reads its project's as the router preloads its route, on
- * hover or touch. What the cache holds stands, the screen reading it again. A read that fails
- * keeps its error in the cache, which the screen shows once swapped in. The page's first screen
- * waits for none: there is no screen to keep.
+ * hover or touch. What the cache holds stands, the screen reading it again. A read that fails is
+ * not tried again here: the screen is swapped in at once and reads it itself, under the query
+ * client's retries, and shows the error once they give up. The page's first screen waits for none:
+ * there is no screen to keep.
  */
 
 import { isCard } from '@/components/timeline/document-state';
@@ -38,10 +39,11 @@ export function readFirst<P>(reads: (params: P) => Promise<unknown>) {
   };
 }
 
-/** A GET into the page's cache under its generated hook's key, read as the hook reads it, where the cache holds none. */
+/** A GET into the page's cache under its generated hook's key, read as the hook reads it, once, where the cache holds none. */
 function cached<T>(hook: string, params: object, get: () => Promise<unknown>): Promise<T> {
   return queryClient.ensureQueryData<T>({
     queryKey: [hook, params],
+    retry: false,
     queryFn: async () => {
       const result = (await get()) as { data?: T; error?: unknown; response: Response };
       if (result.error) throw toApiError(result.error, result.response.status);

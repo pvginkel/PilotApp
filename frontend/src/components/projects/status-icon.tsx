@@ -8,10 +8,10 @@
  */
 
 import type { KeyboardEvent, SyntheticEvent } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Pause, Play, type LucideIcon } from 'lucide-react';
 import type { ProjectTab as Project } from '@/hooks/use-projects';
 import { usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
+import { UNTIL_READ } from '@/lib/api/until-read';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 import { projectStatusIcon } from '@/lib/utils/status-labels';
 
@@ -23,9 +23,8 @@ interface StatusIconProps {
 }
 
 export function StatusIcon({ project, archived }: StatusIconProps) {
-  const queryClient = useQueryClient();
   // The write stays pending until every query is read again, the list included.
-  const transition = usePostProjectsTransitionsByProjectId({ onSuccess: () => queryClient.invalidateQueries() });
+  const transition = usePostProjectsTransitionsByProjectId(UNTIL_READ);
   const status = project.status;
   if (status === null) return null;
   const { label, icon } = projectStatusIcon(status);

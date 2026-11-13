@@ -11,7 +11,9 @@
  * read again (design 2 §6.2). Nothing waits for the stream: the screens are read without it
  * (SSE-4). A read under way when the event arrives is left to land, and read again once it has.
  * An event a page's write committed names that page, which reads nothing on it: the write's own
- * hook reads every query again once it is answered, so a click reads each query once.
+ * hook reads every query again once it is answered, so a click reads each query once. A query an
+ * event names while no screen shows it is read when one shows it again, and until that read lands
+ * it is known as changed unshown: what the cache holds of it may predate the event.
  *
  * The server's `work_moved` carries a work item's session as it moves (F26.2, F80.2): it replaces
  * the item's in its project's timeline as read, with no read of its own, and so in the session log
@@ -21,7 +23,7 @@
  */
 
 import { useEffect } from 'react';
-import { useQueryClient, type Query, type QueryClient, type QueryFilters } from '@tanstack/react-query';
+import { hashKey, useQueryClient, type Query, type QueryClient, type QueryFilters, type QueryKey } from '@tanstack/react-query';
 import { useSseContext } from '@/contexts/sse-context';
 import type { ItemDocument } from '@/hooks/use-document';
 import { SENDER } from '@/lib/api/generated/hooks';
@@ -56,6 +58,12 @@ const HANDBOOK = 'getProjectsHandbookByProjectId';
 const DRAFT = 'getProjectsDraftByProjectId';
 const CHATS = 'getProjectsChatsByProjectId';
 
+/** The queries an event named while no screen showed them, by their hash, each until a read of it lands. */
+const unshown = new Set<string>();
+
+/** Whether a `project_changed` named the query while no screen showed it, and no read of it has landed since. */
+export const changedUnshown = (queryKey: QueryKey): boolean => unshown.has(hashKey(queryKey));
+
 /**
  * Reads again the queries `read` is handed, never over a read under way: a query whose read is under
  * way is read again once that read lands. A read made over one cancels it, so events closer together
@@ -66,11 +74,20 @@ function reader(queryClient: QueryClient): { read: (filters: QueryFilters) => vo
   const cache = queryClient.getQueryCache();
   const owed = new Set<Query>();
   const readOne = (query: Query) => {
-    if (query.state.fetchStatus === 'idle') void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true });
-    else owed.add(query);
+    if (query.state.fetchStatus !== 'idle') {
+      owed.add(query);
+      return;
+    }
+    if (!query.isActive()) unshown.add(query.queryHash);
+    void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true });
   };
   const unwatch = cache.subscribe((event) => {
-    if (event.type === 'removed') owed.delete(event.query);
+    if (event.type === 'removed') {
+      owed.delete(event.query);
+      unshown.delete(event.query.queryHash);
+    }
+    // A write of the cache's own is no read.
+    if (event.type === 'updated' && event.action.type === 'success' && event.action.manual !== true) unshown.delete(event.query.queryHash);
     if (event.type !== 'updated' || event.query.state.fetchStatus !== 'idle' || !owed.delete(event.query)) return;
     // Once every listener has heard the read land: the moves heard over it go onto it first.
     const { query } = event;

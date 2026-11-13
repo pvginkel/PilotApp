@@ -7,7 +7,6 @@
  */
 
 import { useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { Archive, ArchiveRestore, Ellipsis, Flag, RotateCcw, UserMinus, UserPlus, type LucideIcon } from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/dialog';
 import { LinkedText } from '@/components/shared/linked-text';
@@ -20,6 +19,7 @@ import {
   usePostProjectsTransitionsByProjectId,
 } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
+import { UNTIL_READ } from '@/lib/api/until-read';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
 type Kind = components['schemas']['TransitionRequestSchema.e86ccd6']['kind'];
@@ -93,13 +93,11 @@ function question(ask: Ask, project: Project): Question {
 }
 
 export function ProjectMenu({ project }: { project: Project }) {
-  const queryClient = useQueryClient();
   const { showSuccess } = useToast();
   // Each write stays pending until every query is read again, the list's and the head's.
-  const refetch = { onSuccess: () => queryClient.invalidateQueries() };
-  const join = usePostProjectsMembershipByProjectId(refetch);
-  const leave = useDeleteProjectsMembershipByProjectId(refetch);
-  const transition = usePostProjectsTransitionsByProjectId(refetch);
+  const join = usePostProjectsMembershipByProjectId(UNTIL_READ);
+  const leave = useDeleteProjectsMembershipByProjectId(UNTIL_READ);
+  const transition = usePostProjectsTransitionsByProjectId(UNTIL_READ);
   const [asking, setAsking] = useState<Ask | null>(null);
   // The item that opened a dialog is gone once it is chosen: the focus goes back to the menu's button.
   const menuButton = useRef<HTMLButtonElement>(null);

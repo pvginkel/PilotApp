@@ -7,7 +7,7 @@
  * reads nothing on it: its write reads every query again, once.
  */
 
-import type { Request } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 import type { TestEvent } from '@/lib/test/test-events';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
@@ -24,6 +24,17 @@ const WRITES: { what: string; kind: 'decision' | 'notice'; text: string; act: (i
   { what: 'An option picked', kind: 'decision', text: DECISION, act: (item) => item.block.option('Tunnel').click() },
   { what: 'A notice marked Read', kind: 'notice', text: 'A storm comes.\n', act: (item) => item.read.click() },
 ];
+
+/** Each query's reads, by its address, from the call on. */
+function readsOf(page: Page): Map<string, number> {
+  const reads = new Map<string, number>();
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (request.resourceType() !== 'fetch' || request.method() !== 'GET' || !url.pathname.startsWith('/api/')) return;
+    reads.set(url.pathname + url.search, (reads.get(url.pathname + url.search) ?? 0) + 1);
+  });
+  return reads;
+}
 
 test.describe('Live updates', () => {
   test('an answer and an item from elsewhere reach the open timeline and the tab’s badge without a reload', async ({
@@ -104,13 +115,7 @@ test.describe('Live updates', () => {
       const item = timeline.item(placed);
       await expect(item.root).toBeVisible();
 
-      // Each query's reads, by its address, from the click on.
-      const reads = new Map<string, number>();
-      page.on('request', (request) => {
-        const url = new URL(request.url());
-        if (request.resourceType() !== 'fetch' || request.method() !== 'GET' || !url.pathname.startsWith('/api/')) return;
-        reads.set(url.pathname + url.search, (reads.get(url.pathname + url.search) ?? 0) + 1);
-      });
+      const reads = readsOf(page);
       const fetches = new PageFetches(page);
       await write.act(item);
 
@@ -127,6 +132,42 @@ test.describe('Live updates', () => {
       expect([...reads].filter(([, count]) => count > 1)).toEqual([]);
     });
   }
+
+  test('A pause by a tab’s icon, a write that stays pending until its read ends, reads each query the page shows once, the list read by the time it has succeeded', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    timeline,
+    deploymentSse,
+    testEvents,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Paused once');
+    const id = await projects.makeWithSession({ name, members: [me.handle!], tasks: [{ id: 'a', title: 'Step a', status: 'pending' }] });
+    await timeline.open(id);
+    await deploymentSse.ensureConnected();
+    const icon = projectList.statusIcon(name).root;
+    await expect(icon).toHaveAttribute('data-status', 'idle');
+
+    const reads = readsOf(page);
+    const fetches = new PageFetches(page);
+    const paused = projectList.written(id, 'paused');
+    await icon.click();
+    await paused;
+    // No wait: the write succeeded once the list was read again.
+    expect(await icon.getAttribute('data-status')).toBe('paused');
+
+    await testEvents.waitForEvent(
+      (event) => event.kind === 'sse' && event.streamId === 'project_changed' && (event.data as { project_id: string }).project_id === id,
+    );
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    await fetches.landed();
+    await fetches.landed();
+    expect(reads.get(`/api/projects/${id}`)).toBe(1);
+    expect(reads.get('/api/projects?archived=false')).toBe(1);
+    expect([...reads].filter(([, count]) => count > 1)).toEqual([]);
+  });
 
   test('a timeline left while an item of it is done is read again on the switch back, a work item’s move written into it after the change notwithstanding', async ({
     page,

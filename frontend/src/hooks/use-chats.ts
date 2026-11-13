@@ -20,6 +20,7 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { wallClock } from '@/hooks/use-now';
+import { changedUnshown } from '@/hooks/use-project-events';
 import type { ProjectHead } from '@/hooks/use-projects';
 import {
   useGetProjectsChatsByProjectId,
@@ -45,6 +46,9 @@ const ANSWERING: readonly TurnState[] = ['held', 'starting', 'running'];
 const chatsOf = (projectId: string) => ['getProjectsChatsByProjectId', { path: { project_id: projectId } }];
 
 /** The project's chats as read, and whether a read of them is under way. */
+/** Whether the project changed while no screen showed its chats, and their list has not been read since: as held, it may lack a chat. */
+export const chatsChangedUnshown = (projectId: string): boolean => changedUnshown(chatsOf(projectId));
+
 export function useProjectChats(projectId: string): { read: ChatRead; reading: boolean } {
   const query = useGetProjectsChatsByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
   useUiStateInstrumentation('panel.chat', { isLoading: query.isLoading, error: query.error });

@@ -21,7 +21,7 @@
  * is the same column, the composer over its foot (F98.3; the composer's own specs: composer.spec.ts).
  */
 
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
 import { test, expect } from '../support/fixtures';
 import { allowClipboard, copied } from '../support/clipboard';
@@ -737,6 +737,92 @@ test.describe('The Chat tab’s closed chats', () => {
     await chat.tab.click();
     await expect(chat.replyEnds).toHaveCount(1);
     await expect(chat.messageTexts).toHaveText(['And the pegs?']);
+    await expect(chat.before).toHaveText('Load previous');
+  });
+
+  test('back while its list is read draws the chats it left where the project did not change while away, and none of them where it did: then the chat that opened, alone', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    projectList,
+    projectHead,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Read back');
+    const project = await projects.make({ name, members: [me.handle!] });
+    const other = makeUnique('Elsewhere');
+    const otherId = await projects.makeWithSession({ name: other, members: [me.handle!] });
+    const storm = await projects.place(otherId, { kind: 'notice', title: 'Storm', text: 'A storm comes.\n' });
+    await closedThenOpen({ projects, controller, chats }, project);
+    const left = (await chats.list(project)).chats.map((each) => each.id);
+    await timeline.open(project);
+    await chat.before.click();
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+
+    /**
+     * The chats the page set out to draw, each by a request for its stream or its records, before
+     * its next read of the project's list of chats was answered.
+     */
+    const drawnBeforeRead = (): Promise<string[]> => {
+      const drawn = new Set<string>();
+      const onRequest = (request: Request) => {
+        const chatId = /^\/api\/sessions\/([^/]+)\/(?:stream|records)$/.exec(new URL(request.url()).pathname)?.[1];
+        if (chatId !== undefined) drawn.add(chatId);
+      };
+      page.on('request', onRequest);
+      return page
+        .waitForResponse((response) => response.request().method() === 'GET' && new URL(response.url()).pathname === `/api/projects/${project}/chats`)
+        .then(() => {
+          page.off('request', onRequest);
+          return [...drawn].sort();
+        });
+    };
+
+    // Away, a write of this page's own marks every list it holds to be read again, with no event
+    // naming the project. Back, each request taking a second and a half, the chats left are drawn
+    // while the list is read.
+    await projectList.tab(other).click();
+    await expect(page).toHaveURL(projectAddress(otherId));
+    await timeline.item(storm).read.click();
+    await expect(timeline.item(storm).root).toHaveAttribute('data-state', 'done');
+    let restore = await slowNetwork(page, 1_500);
+    let drawn = drawnBeforeRead();
+    await projectList.tab(name).click();
+    expect(await drawn).toEqual([...left].sort());
+    await restore();
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+    await expect(chat.closed).toHaveCount(1);
+
+    // Away again, the chat closes and another opens, the lists' read that has the project finished
+    // the page's word that it heard of the change. Back, none of the chats left is drawn while the
+    // list is read, and then the chat that opened, alone.
+    await projectList.tab(other).click();
+    await expect(page).toHaveURL(projectAddress(otherId));
+    await expect(projectHead.name).toHaveText(other);
+    const heard = page.waitForResponse(
+      async (response) =>
+        new URL(response.url()).pathname === '/api/projects' &&
+        response.request().method() === 'GET' &&
+        ((await response.json()) as ProjectList).projects.some((each) => each.id === project && each.finished_at !== null),
+    );
+    await projects.transition(project, 'finished');
+    await heard;
+    await projects.transition(project, 'reopened');
+    const third = await chats.start(project, 'And the stove?');
+    await controller.play(chats.store, third.session, [text('stove', 'The gas one.')]);
+    await controller.finish(chats.store, third.session, 'success', 'The gas one.');
+
+    restore = await slowNetwork(page, 1_500);
+    drawn = drawnBeforeRead();
+    await projectList.tab(name).click();
+    expect(await drawn).toEqual([]);
+    await restore();
+    await expect(chat.messageTexts).toHaveText(['And the stove?']);
+    await expect(chat.closed).toHaveCount(0);
     await expect(chat.before).toHaveText('Load previous');
   });
 });
