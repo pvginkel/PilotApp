@@ -106,7 +106,10 @@ export class TimelinePage {
       copy: root.getByTestId('timeline.item.copy'),
       /** The copy of each code block in the item's prose. */
       codeCopies: root.getByTestId('prose.code.copy'),
+      /** The kind in an open item's head: on the timeline the button that folds it (F12.3). */
       kind: root.getByTestId('timeline.item.kind'),
+      /** What an open item holds under its box, inert while it is folded; the box, `root`, says so in `data-folded`. */
+      fold: root.getByTestId('timeline.item.fold'),
       time: root.getByTestId('timeline.item.time'),
       urgent: root.getByTestId('timeline.item.urgent'),
       why: root.getByTestId('timeline.item.why'),

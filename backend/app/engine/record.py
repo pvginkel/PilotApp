@@ -4,8 +4,9 @@ open items (F5.1); Archive's and Reopen's close of the archive question (DB
 265); the switch's Yes to the confirmations it answers (F4.2);
 a work item's place and its done at its turn's end (DB Work, decision 44);
 the claimed actions a work item is named for at its `add_item` (DB
-decision 64); and an item of Pilot's own done at the save that writes its last
-open block's `done` (DB 163).
+decision 64); an item of Pilot's own done at the save that writes its last
+open block's `done` (DB 163); and a person's fold of an open item and their
+unfold (DB decision 75).
 
 Each is a write of the caller's transaction, under the document's row lock
 (TD §8.5), a close and an Undo under its project's row first, and refused
@@ -362,6 +363,56 @@ class RecordService:
         if job is not None:
             self.jobs().withdraw(job, _now())
         self.view_service.timeline_moved(project)
+
+    def fold(self, project: Project, item: Item, folded: bool) -> None:
+        """A person's fold of `item`, or, `folded` false, their unfold (F12.3;
+        DB 316, 317), in the caller's transaction, which holds the project's
+        row: taken on an open item the timeline draws as a box of its own, a
+        prose item but the opening, a work item's run or the setup's job
+        while not retried, and a wait. Whether the item is Pilot's is the
+        caller's to refuse. One that stands so already is taken and changes
+        nothing. The item's row is held and read again, so that a close
+        committed before it refuses the fold; one committed after it clears
+        the fold (`Item.done_at`). The store's tree holds no fold, so the
+        project's screens alone are told (DB 321).
+
+        Raises:
+            InvalidOperationException: the project is archived, the item is
+                done, or the timeline draws no box of its own for it.
+        """
+        operation = f"{'fold' if folded else 'unfold'} item {item.id}"
+        _not_archived(project, operation)
+        item = self.db.get_one(
+            Item, item.id, with_for_update=True, populate_existing=True
+        )
+        _not_done(item, operation)
+        boxless = self._boxless(item)
+        if boxless is not None:
+            raise InvalidOperationException(operation, boxless)
+        if item.folded == folded:
+            return
+        item.folded = folded
+        self.db.flush()
+        self.engine_bus.emit(ProjectChanged(project.id))
+
+    def _boxless(self, item: Item) -> str | None:
+        """Why the timeline draws no box of its own for the open `item`, none
+        where it draws one (DB 317): the opening is its prompt, a retried job
+        its line (D078), and every job but the setup's shows on the item it
+        follows from (F59.1)."""
+        if item.kind_code == OPENING:
+            return "the opening does not fold"
+        if item.kind_code != WORK:
+            return None
+        work = self.db.get_one(Work, item.id)
+        if work.retried_by_id is not None:
+            return "a retried job is a line"
+        if (
+            work.session_kind_code != WORK
+            and work.trigger_code is not WorkTrigger.SETUP
+        ):
+            return "a job shows on the item it follows from"
+        return None
 
     def retry_write_backs(self, continuation_id: uuid.UUID) -> None:
         """A Resume of the continuation `continuation_id`, in the caller's

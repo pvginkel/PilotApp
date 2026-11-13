@@ -948,6 +948,12 @@ class TimelineItemSchema(BaseModel):
         description="The person it is for (F107); null for everyone"
     )
     done: DoneSchema | None = Field(description="Its done line; null while open")
+    folded: bool = Field(
+        description=(
+            "Whether the open item is folded on the timeline, the same for every "
+            "member (F12.3); false once done, and unread while Pilot works on it"
+        )
+    )
     concept: bool = Field(
         description=(
             "Whether the latest save of its text is held, its text shown as last "

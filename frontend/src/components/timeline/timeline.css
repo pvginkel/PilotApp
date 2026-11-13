@@ -101,6 +101,20 @@
   .item-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .item.urgent .item-head .kind { color: hsl(var(--urgent-text)); }
   .item-head .sep { opacity: 0.75; }
+  /* On the timeline the kind is the button that folds the item, the pointer its only sign (F12.3). */
+  .item-head button.kind { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; line-height: inherit; cursor: pointer; }
+  /* Folded, an item is its head and about three lines under it, the title's and the text's, the
+     last two fading out to the background by its foot. The title's margin is dropped, so that the
+     last line sits the same above the cut whatever the title's length. The box takes the press that
+     unfolds it. */
+  .item.folded[role="button"] { cursor: pointer; }
+  .item.folded .item-body {
+    max-height: calc(var(--text-lg) * 1.4 + var(--text-base) * 1.6 + 70px);
+    padding-bottom: 0;
+    overflow: hidden;
+    mask-image: linear-gradient(#000 calc(100% - var(--text-base) * 3), transparent calc(100% - var(--text-base) * 0.4));
+  }
+  .item.folded .item-title { margin-bottom: 0; }
   /* A dot and the part after it, one item of the head's wrap; a part wider than the head's row
      wraps or is cut inside its group. */
   .item-head .dotted { display: inline-flex; align-items: baseline; gap: inherit; min-width: 0; }

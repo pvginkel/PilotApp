@@ -33,6 +33,7 @@ import { ArrowDown, ArrowUp, Flag, TriangleAlert } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { blockKey, FlashContext, GoToContext } from '@/components/timeline/flash';
+import { FoldsContext, useTimelineFolds } from '@/components/timeline/fold';
 import { Item } from '@/components/timeline/item';
 import { Opening } from '@/components/timeline/opening';
 import { ProjectReady } from '@/components/timeline/project-ready';
@@ -75,6 +76,7 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const urgent =
     finishedAt === null ? (items ?? []).filter((item) => item.urgent && item.done === null && item.pilots_work === null) : [];
   const { fresh, flashed, flash } = useFresh(items);
+  const folds = useTimelineFolds(projectId);
   const sections = useSections(address === null || address.block === null ? null : blockKey(address.item, address.block));
   const feed = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
@@ -235,17 +237,19 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
         <FlashContext.Provider value={{ fresh, flashed }}>
           <GoToContext.Provider value={goToBlock}>
             <SectionsContext.Provider value={sections}>
-              {placed && rowsOf(placed).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
-              {ready && <ProjectReady projectId={projectId} />}
-              {finishedAt !== null && (
-                <div className="divider finished" data-testid="timeline.divider.finished">
-                  <span>
-                    <Flag className="icon" aria-hidden="true" />
-                    Finished · <Time at={finishedAt} format="stamp" testId="timeline.divider.finished.time" />
-                  </span>
-                </div>
-              )}
-              {question && <Item item={question} fresh={fresh.has(question.id)} onFlashed={() => flashed(question.id)} />}
+              <FoldsContext.Provider value={folds}>
+                {placed && rowsOf(placed).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+                {ready && <ProjectReady projectId={projectId} />}
+                {finishedAt !== null && (
+                  <div className="divider finished" data-testid="timeline.divider.finished">
+                    <span>
+                      <Flag className="icon" aria-hidden="true" />
+                      Finished · <Time at={finishedAt} format="stamp" testId="timeline.divider.finished.time" />
+                    </span>
+                  </div>
+                )}
+                {question && <Item item={question} fresh={fresh.has(question.id)} onFlashed={() => flashed(question.id)} />}
+              </FoldsContext.Provider>
             </SectionsContext.Provider>
           </GoToContext.Provider>
         </FlashContext.Provider>

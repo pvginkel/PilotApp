@@ -1,6 +1,7 @@
 """What the signed-in person does to a timeline's items (F14, F17, F32.4):
 answer a block, mark an action Done, mark a document Done, a notice Read, a
-review Reviewed, and undo; and request a wait's firing (F27.3). Each is the
+review Reviewed, and undo; request a wait's firing (F27.3); and fold an
+open item and unfold it, for every member (F12.3). Each is the
 record's own write; its refusals answer as the API's errors, a document Pilot
 is working on and a block it holds refusing an answer, Done or paste-back (DB
 295). A block is addressed under its item, by its local id (F30.7). Stop and
@@ -282,6 +283,52 @@ def undo(
             done in a way that offers no undo, or it is no prose item
     """
     item_service.undo(item_id)
+    return "", 204
+
+
+@items_bp.route("/<uuid:item_id>/fold", methods=["POST"])
+@api.validate(resp=_MARK_RESPONSES)
+@inject
+def fold(
+    item_id: uuid.UUID,
+    item_service: ItemService = Provide[ServiceContainer.item_service],
+) -> tuple[str, int]:
+    """Fold an open item on the timeline, for every member (F12.3): its head
+    and about three lines show, and its controls take nothing. An item folded
+    already stays so.
+
+    Returns:
+        204: The item is folded
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No item has the id
+        409: The item is done, Pilot is working on it, the timeline draws no
+            box of its own for it, the opening or a job on another item, or
+            the project is archived
+    """
+    item_service.fold(item_id, True)
+    return "", 204
+
+
+@items_bp.route("/<uuid:item_id>/unfold", methods=["POST"])
+@api.validate(resp=_MARK_RESPONSES)
+@inject
+def unfold(
+    item_id: uuid.UUID,
+    item_service: ItemService = Provide[ServiceContainer.item_service],
+) -> tuple[str, int]:
+    """Unfold a folded item on the timeline, for every member (F12.3). An
+    item not folded stays so.
+
+    Returns:
+        204: The item is unfolded
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No item has the id
+        409: The item is done, Pilot is working on it, the timeline draws no
+            box of its own for it, or the project is archived
+    """
+    item_service.fold(item_id, False)
     return "", 204
 
 

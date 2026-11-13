@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session as DbSession
 
 from app.models import Item, PlanTask, Project, Session, User
@@ -27,6 +27,7 @@ class TestItem:
         session.refresh(item)
 
         assert item.urgent is False
+        assert item.folded is False
         assert item.plan_task_id is None
         assert item.done_at is None
         assert item.created_at is not None
@@ -206,6 +207,73 @@ class TestItem:
         session.flush()
 
         assert item.done_at is None
+
+    def test_an_open_item_folds_and_unfolds(
+        self, session: DbSession, item: Item
+    ) -> None:
+        item.folded = True
+        session.flush()
+        session.refresh(item)
+        assert item.folded is True
+
+        item.folded = False
+        session.flush()
+        session.refresh(item)
+        assert item.folded is False
+
+    def test_a_close_clears_the_fold(self, session: DbSession, item: Item) -> None:
+        item.folded = True
+        session.flush()
+
+        item.done_at = datetime.now(UTC)
+        item.done_cause_code = "marked"
+        session.flush()
+        session.refresh(item)
+
+        assert item.folded is False
+
+    def test_a_close_clears_a_fold_made_since_the_item_was_loaded(
+        self, session: DbSession, item: Item
+    ) -> None:
+        """Another transaction's fold, committed after this one read the item
+        unfolded: the close writes the fold's clear all the same."""
+        session.execute(
+            update(Item)
+            .where(Item.id == item.id)
+            .values(folded=True)
+            .execution_options(synchronize_session=False)
+        )
+        assert item.folded is False
+
+        item.done_at = datetime.now(UTC)
+        item.done_cause_code = "turn_ended"
+        session.flush()
+
+        assert session.scalar(select(Item.folded).where(Item.id == item.id)) is False
+
+    def test_an_undo_leaves_the_item_unfolded(
+        self, session: DbSession, item: Item
+    ) -> None:
+        item.folded = True
+        item.done_at = datetime.now(UTC)
+        item.done_cause_code = "marked"
+        session.flush()
+
+        item.done_at = None
+        item.done_cause_code = None
+        session.flush()
+        session.refresh(item)
+
+        assert item.folded is False
+
+    def test_a_done_item_is_not_folded(self, session: DbSession, item: Item) -> None:
+        item.done_at = datetime.now(UTC)
+        item.done_cause_code = "marked"
+        session.flush()
+
+        item.folded = True
+
+        assert violated_constraint(session) == "ck_items_folded"
 
     def test_a_consumed_item_names_the_session(
         self, session: DbSession, item: Item

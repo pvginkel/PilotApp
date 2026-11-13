@@ -11,7 +11,9 @@
  * triangle and *Edited* a pencil, their words left to a screen reader; the kind never wraps, and
  * the head wraps where its parts still do not fit, so that none leaves the card, the copy and
  * Discuss staying at the end of its first line; the "for" chip takes a line of its own under it, led by its icon. A
- * dot goes with the part after it, so that no row of a wrapping head ends on one.
+ * dot goes with the part after it, so that no row of a wrapping head ends on one. On the timeline
+ * the kind is the button that folds the item, for every member, the pointer its only sign (F12.3,
+ * fold.ts); off it, and in an archived project, it is the kind alone.
  */
 
 import type { ReactNode } from 'react';
@@ -22,6 +24,7 @@ import { Avatar } from '@/components/shared/avatar';
 import { CopyButton } from '@/components/shared/copy-button';
 import { Time } from '@/components/shared/time';
 import { AutopilotMark } from '@/components/timeline/autopilot-mark';
+import { useFolds } from '@/components/timeline/fold';
 import { JobOn } from '@/components/timeline/job';
 import { kindOf } from '@/components/timeline/kinds';
 import { WriterAsked } from '@/components/timeline/writer-asked';
@@ -81,12 +84,31 @@ export function ItemHead({ item, because = null, mayTake = false, asked = false,
   const { icon: Icon, label } = kindOf(item);
   const why = because === null ? null : whyOf(because);
   const prose = item.kind === 'action' ? proseOf(item) : '';
+  const folds = useFolds();
+  const kind = (
+    <>
+      <Icon className="icon" aria-hidden="true" />
+      {label}
+    </>
+  );
   return (
     <div className="item-head" data-testid="timeline.item.head">
-      <span className="kind" data-testid="timeline.item.kind">
-        <Icon className="icon" aria-hidden="true" />
-        {label}
-      </span>
+      {folds === null || folds.archived ? (
+        <span className="kind" data-testid="timeline.item.kind">
+          {kind}
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="kind"
+          onClick={() => folds.fold(item.id)}
+          aria-expanded="true"
+          title="Fold, for everyone"
+          data-testid="timeline.item.kind"
+        >
+          {kind}
+        </button>
+      )}
       <Dotted>
         <Time at={item.created_at} format="clock" testId="timeline.item.time" />
       </Dotted>

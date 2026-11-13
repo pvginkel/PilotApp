@@ -1519,3 +1519,234 @@ class TestWhilePilotWorks:
 
         assert response.status_code == 409
         assert _error(response).endswith("because Pilot is working on block Q1")
+
+
+@pytest.mark.usefixtures("person")
+class TestFold:
+    """`POST /api/items/<id>/fold` and `/unfold` (F12.3; DB 316 to 321)."""
+
+    def test_a_fold_shows_on_the_timeline_and_tells_every_page(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        second_browser: SSEConnection,
+    ) -> None:
+        item = _bear(container, camp, run, "decision", DECISION)
+        _sign_in(client)
+        assert _entry(client, camp, item)["folded"] is False
+        clear_after_commit_callbacks()
+        _heard(second_browser)
+
+        response = client.post(f"{ITEMS}/{item.id}/fold")
+
+        assert response.status_code == 204
+        assert response.data == b""
+        entry = _entry(client, camp, item)
+        assert (entry["folded"], entry["done"]) == (True, None)
+        assert _heard(second_browser) == [
+            {"type": "project_changed", "payload": {"project_id": str(camp.id)}}
+        ]
+
+    def test_an_unfold_shows_on_the_timeline_and_tells_every_page(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+        second_browser: SSEConnection,
+    ) -> None:
+        item = _bear(container, camp, run, "decision", DECISION)
+        _sign_in(client)
+        client.post(f"{ITEMS}/{item.id}/fold")
+        clear_after_commit_callbacks()
+        _heard(second_browser)
+
+        response = client.post(f"{ITEMS}/{item.id}/unfold")
+
+        assert response.status_code == 204
+        assert response.data == b""
+        assert _entry(client, camp, item)["folded"] is False
+        assert _heard(second_browser) == [
+            {"type": "project_changed", "payload": {"project_id": str(camp.id)}}
+        ]
+
+    @pytest.mark.parametrize("act", ["fold", "unfold"])
+    def test_one_that_stands_already_is_taken_and_tells_no_page(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+        second_browser: SSEConnection,
+        act: str,
+    ) -> None:
+        item = _bear(container, camp, run, "decision", DECISION)
+        _sign_in(client)
+        if act == "fold":
+            client.post(f"{ITEMS}/{item.id}/fold")
+        clear_after_commit_callbacks()
+        _heard(second_browser)
+
+        response = client.post(f"{ITEMS}/{item.id}/{act}")
+
+        assert response.status_code == 204
+        assert _entry(client, camp, item)["folded"] is (act == "fold")
+        assert _heard(second_browser) == []
+
+    def test_a_caller_without_a_handle_folds(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item = _bear(container, camp, run, "notice", NOTICE)
+        _sign_in(client, subject="subject-newcomer")
+
+        assert client.post(f"{ITEMS}/{item.id}/fold").status_code == 204
+        assert client.post(f"{ITEMS}/{item.id}/unfold").status_code == 204
+
+    def test_its_close_clears_it_and_its_undo_brings_it_back_unfolded(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item = _bear(container, camp, run, "decision", DECISION)
+        _sign_in(client)
+        client.post(f"{ITEMS}/{item.id}/fold")
+
+        client.post(f"{ITEMS}/{item.id}/blocks/D1/answer", json={"answer": "Dome"})
+        closed = _entry(client, camp, item)
+        client.post(f"{ITEMS}/{item.id}/undo")
+
+        assert (closed["folded"], closed["done"]["cause"]) == (False, "answered")
+        entry = _entry(client, camp, item)
+        assert (entry["folded"], entry["done"]) == (False, None)
+
+    @pytest.mark.parametrize("act", ["fold", "unfold"])
+    def test_a_done_item_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        person: User,
+        camp: Project,
+        run: models.Session,
+        act: str,
+    ) -> None:
+        item = _bear(container, camp, run, "notice", NOTICE)
+        container.record_service().read(item, person)
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{item.id}/{act}")
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot {act} item {item.id} because the item is done"
+        )
+
+    @pytest.mark.parametrize("act", ["fold", "unfold"])
+    def test_an_item_pilot_is_working_on_conflicts(
+        self, client: FlaskClient, working: Camp, act: str
+    ) -> None:
+        pitch, _ = _under_its_pass(working)
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{pitch.id}/{act}")
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot {act} item {pitch.id} because Pilot is working on the item"
+        )
+        working.session.refresh(pitch)
+        assert pitch.folded is False
+
+    def test_a_folded_item_pilot_comes_to_work_on_keeps_its_fold(
+        self, client: FlaskClient, working: Camp
+    ) -> None:
+        run = working.worker()
+        pitch = working.registered(run, PITCH)
+        working.ended(run)
+        _sign_in(client)
+        assert client.post(f"{ITEMS}/{pitch.id}/fold").status_code == 204
+
+        job = working.job_after(run)
+        pilots = _entry(client, working.project, pitch)
+        working.ended(job)
+
+        assert pilots["pilots_work"] is not None
+        assert pilots["folded"] is True
+        entry = _entry(client, working.project, pitch)
+        assert (entry["pilots_work"], entry["folded"]) == (None, True)
+
+    def test_an_archived_projects_item_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item = _bear(container, camp, run, "notice", NOTICE)
+        camp.archived = True
+        session.flush()
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{item.id}/fold")
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot fold item {item.id} because its project is archived"
+        )
+
+    def test_the_opening_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        person: User,
+        camp: Project,
+    ) -> None:
+        opening = container.document_service().bear_opening(
+            camp, "Camp", person, "Let's camp.\n"
+        )
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{opening.id}/fold")
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot fold item {opening.id} because the opening does not fold"
+        )
+
+    @pytest.mark.parametrize("act", ["fold", "unfold"])
+    def test_an_unknown_item_is_not_found(self, client: FlaskClient, act: str) -> None:
+        _sign_in(client)
+
+        assert client.post(f"{ITEMS}/{uuid.uuid4()}/{act}").status_code == 404
+
+    @pytest.mark.parametrize("act", ["fold", "unfold"])
+    def test_without_the_editor_role_it_is_forbidden(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+        act: str,
+    ) -> None:
+        item = _bear(container, camp, run, "notice", NOTICE)
+        _sign_in(client, roles=())
+
+        assert client.post(f"{ITEMS}/{item.id}/{act}").status_code == 403
+        assert item.folded is False
+
+    @pytest.mark.parametrize("act", ["fold", "unfold"])
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient, act: str
+    ) -> None:
+        response = oidc_client.post(f"{ITEMS}/{uuid.uuid4()}/{act}")
+
+        assert response.status_code == 401

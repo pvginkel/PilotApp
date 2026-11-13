@@ -2890,6 +2890,11 @@
             ],
             "title": "File Name"
           },
+          "folded": {
+            "description": "Whether the open item is folded on the timeline, the same for every member (F12.3); false once done, and unread while Pilot works on it",
+            "title": "Folded",
+            "type": "boolean"
+          },
           "for_user": {
             "anyOf": [
               {
@@ -3115,6 +3120,7 @@
           "urgent",
           "for_user",
           "done",
+          "folded",
           "concept",
           "author",
           "words",
@@ -10114,6 +10120,11 @@
             ],
             "title": "File Name"
           },
+          "folded": {
+            "description": "Whether the open item is folded on the timeline, the same for every member (F12.3); false once done, and unread while Pilot works on it",
+            "title": "Folded",
+            "type": "boolean"
+          },
           "for_user": {
             "anyOf": [
               {
@@ -10318,6 +10329,7 @@
           "urgent",
           "for_user",
           "done",
+          "folded",
           "concept",
           "author",
           "words",
@@ -12544,6 +12556,87 @@
         "x-required-role": "editor"
       }
     },
+    "/api/items/{item_id}/fold": {
+      "post": {
+        "description": "Returns:     204: The item is folded     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The item is done, Pilot is working on it, the timeline draws no         box of its own for it, the opening or a job on another item, or         the project is archived",
+        "operationId": "post__api_items_{item_id}_fold",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Fold an open item on the timeline, for every member (F12.3): its head and about three lines show, and its controls take nothing. An item folded already stays so.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/items/{item_id}/read": {
       "post": {
         "description": "Returns:     204: The notice is done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The caller has not chosen a handle, or the item is done or no         notice",
@@ -12945,6 +13038,87 @@
           }
         ],
         "summary": "Undo a done item's answer or mark, whoever gave it, while no session has taken it: the item open again, and a one-ask item's block unanswered.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/unfold": {
+      "post": {
+        "description": "Returns:     204: The item is unfolded     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The item is done, Pilot is working on it, the timeline draws no         box of its own for it, or the project is archived",
+        "operationId": "post__api_items_{item_id}_unfold",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Unfold a folded item on the timeline, for every member (F12.3). An item not folded stays so.",
         "tags": [],
         "x-required-role": "editor"
       }

@@ -1,8 +1,9 @@
 """What a person does to an item on the timeline, by the item's id and a
 block's local id (F30.7): each the record's own write (F32.4), the item and
 the block found by their ids and the writer by the caller; the archive
-question's Archive archives the project with it (DB 265); and a person's
-request of a wait, which fires it (F27.3). A document that is Pilot's, and a
+question's Archive archives the project with it (DB 265); a person's
+request of a wait, which fires it (F27.3); and their fold of an open item and
+unfold (F12.3). A document that is Pilot's, and a
 held block, take no answer, Done or paste-back from here (DB 295); Stop and
 take over hands such a document to the person (F28.9), and a Cancel on a
 document of the run holding a block, while that run waits on the person, ends
@@ -186,6 +187,25 @@ class ItemService:
             InvalidOperationException: the record refuses the undo.
         """
         self.record_service.undo(self._item(item_id))
+
+    def fold(self, item_id: uuid.UUID, folded: bool) -> None:
+        """A person's fold of the open item on the timeline, or, `folded`
+        false, their unfold (F12.3; DB 316, 317), under its project's row:
+        the same for every member, whoever folds, so that it takes no person
+        and needs no handle, as Undo.
+
+        Raises:
+            RecordNotFoundException: no item has the id.
+            InvalidOperationException: the item is Pilot's, or the record
+                refuses the fold.
+        """
+        item = self._item(item_id)
+        project = self._lock_project(item)
+        if item.id in Reading(self.db).found:
+            raise InvalidOperationException(
+                f"{'fold' if folded else 'unfold'} item {item_id}", PILOTS_ITEM
+            )
+        self.record_service.fold(project, item, folded)
 
     def request(self, auth: AuthContext, item_id: uuid.UUID) -> None:
         """The caller's request of the wait (F27.3): *Check now* on a card

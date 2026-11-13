@@ -811,6 +811,7 @@ class TimelineService:
                 urgent=item.urgent,
                 for_user=reader.user(item.for_user_id),
                 done=self._done(item, reader),
+                folded=item.folded,
                 concept=(
                     document is not None and tree_path(project, document.path) in held
                 ),

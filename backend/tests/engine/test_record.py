@@ -42,6 +42,7 @@ from app.models import (
     Project,
     Turn,
     User,
+    Wait,
     Work,
 )
 from app.models.reference import (
@@ -65,6 +66,7 @@ from tests.support.fake_sidecar import FakeSidecar
 from tests.support.locks import in_thread, lock_waits
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise, wait_until
+from tests.support.working_on import Camp
 
 DECISION = """---
 title: Which tent?
@@ -5732,3 +5734,358 @@ class TestRecordServiceArchiveQuestion:
 
         assert _done(question) == answered
         assert _block(session, document, "D1").answer == "Keep"
+
+
+class TestRecordServiceFold:
+    """A person's fold of an open item and their unfold (F12.3; DB 316 to
+    321): the item's own, taken on what the timeline draws as a box, cleared
+    by every close, and nothing of the store's tree."""
+
+    @pytest.mark.parametrize(
+        ("kind", "text"),
+        [
+            ("decision", DECISION),
+            ("action", ACTION),
+            ("notice", NOTICE),
+            ("review", REVIEW),
+            ("document", TWO_ASKS),
+        ],
+    )
+    def test_a_prose_item_folds_and_unfolds(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        kind: str,
+        text: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, kind, "Camp", text
+        )
+        records = container.record_service()
+
+        records.fold(project, item, True)
+        session.refresh(item)
+        assert item.folded is True
+        assert document.published_text == text
+
+        records.fold(project, item, False)
+        session.refresh(item)
+        assert item.folded is False
+        assert _done(item) == (None, None, None)
+
+    def test_the_archive_question_folds(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        question = container.document_service().bear_archive_question(project)
+
+        container.record_service().fold(project, question, True)
+
+        session.refresh(question)
+        assert question.folded is True
+
+    def test_a_work_items_run_the_setups_job_and_a_wait_fold(
+        self, session: DbSession, container: ServiceContainer, person: User
+    ) -> None:
+        camp = Camp(container, session)
+        run = camp.worker()
+        setup = camp.job_on(None, WorkTrigger.SETUP)
+        wait = camp.wait(run)
+        records = container.record_service()
+
+        for item in (camp.line(run), camp.line(setup), wait):
+            records.fold(camp.project, item, True)
+            session.refresh(item)
+            assert item.folded is True
+
+    def test_a_fold_that_stands_already_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, _ = _bear(
+            session, container, project, project_session, "notice", "Camp", NOTICE
+        )
+        records = container.record_service()
+        with scoped_session(container):
+            records.fold(project, item, True)
+        engine_events.clear()
+
+        with scoped_session(container):
+            records.fold(project, item, True)
+        assert item.folded is True
+        with scoped_session(container):
+            records.fold(project, item, False)
+            records.fold(project, item, False)
+
+        assert item.folded is False
+        assert engine_events == [ProjectChanged(project.id)]
+
+    @pytest.mark.parametrize("folded", [True, False])
+    def test_it_tells_the_projects_screens_and_moves_nothing_of_the_tree(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        folded: bool,
+    ) -> None:
+        item, _ = _bear(
+            session, container, project, project_session, "notice", "Camp", NOTICE
+        )
+        records = container.record_service()
+        if not folded:
+            records.fold(project, item, True)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+        timeline = container.view_service().timeline(project)
+
+        with scoped_session(container):
+            records.fold(project, item, folded)
+            assert engine_events == []
+
+        assert engine_events == [ProjectChanged(project.id)]
+        assert container.view_service().timeline(project) == timeline
+        assert "folded" not in timeline.text
+
+    def test_the_opening_does_not_fold(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        opening = container.document_service().bear_opening(
+            project, "Camp", person, "Let's camp.\n"
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().fold(project, opening, True)
+
+        assert refused.value.message == (
+            f"Cannot fold item {opening.id} because the opening does not fold"
+        )
+        assert opening.folded is False
+
+    def test_a_job_on_another_item_and_a_retried_job_do_not_fold(
+        self, session: DbSession, container: ServiceContainer, person: User
+    ) -> None:
+        camp = Camp(container, session)
+        run = camp.worker()
+        camp.ended(run)
+        job = camp.job_after(run)
+        setup = camp.job_on(None, WorkTrigger.SETUP)
+        camp.retried(setup)
+        records = container.record_service()
+
+        with pytest.raises(InvalidOperationException) as on_another:
+            records.fold(camp.project, camp.line(job), True)
+        with pytest.raises(InvalidOperationException) as retried:
+            records.fold(camp.project, camp.line(setup), True)
+
+        assert on_another.value.cause == "a job shows on the item it follows from"
+        assert retried.value.cause == "a retried job is a line"
+        assert camp.line(job).folded is False
+        assert camp.line(setup).folded is False
+
+    @pytest.mark.parametrize("folded", [True, False])
+    def test_a_done_item_takes_neither(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        folded: bool,
+    ) -> None:
+        item, _ = _bear(
+            session, container, project, project_session, "notice", "Camp", NOTICE
+        )
+        records = container.record_service()
+        records.read(item, person)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            records.fold(project, item, folded)
+
+        act = "fold" if folded else "unfold"
+        assert refused.value.message == (
+            f"Cannot {act} item {item.id} because the item is done"
+        )
+        assert item.folded is False
+
+    @pytest.mark.parametrize("folded", [True, False])
+    def test_an_archived_projects_item_takes_neither(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        folded: bool,
+    ) -> None:
+        item, _ = _bear(
+            session, container, project, project_session, "notice", "Camp", NOTICE
+        )
+        records = container.record_service()
+        records.fold(project, item, True)
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            records.fold(project, item, folded)
+
+        assert refused.value.cause == "its project is archived"
+        session.refresh(item)
+        assert item.folded is True
+
+    @pytest.mark.parametrize(
+        ("close", "kind", "text"),
+        [
+            ("answer", "decision", DECISION),
+            ("done_action", "action", ACTION),
+            ("done", "document", RECOMMENDED),
+            ("read", "notice", NOTICE),
+            ("reviewed", "review", NOTICE),
+            ("finish", "decision", DECISION),
+        ],
+    )
+    def test_a_prose_items_close_clears_it_and_its_undo_brings_it_back_unfolded(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        close: str,
+        kind: str,
+        text: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, kind, "Camp", text
+        )
+        records = container.record_service()
+        records.fold(project, item, True)
+
+        if close == "answer":
+            records.answer(document, "D1", person, "Dome")
+        elif close == "done_action":
+            records.done_action(document, "A1", person)
+        elif close == "finish":
+            records.close_unanswered(project, person, FINISH)
+        else:
+            getattr(records, close)(item, person)
+
+        session.refresh(item)
+        assert item.done_at is not None
+        assert item.folded is False
+        if close != "finish":
+            records.undo(item)
+            session.refresh(item)
+            assert (item.done_at, item.folded) == (None, False)
+
+    def test_a_cancel_clears_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        asked, _ = _registered(session, container, project, run, TWO_ASKS)
+        records = container.record_service()
+        records.fold(project, asked, True)
+
+        records.cancel(project, [asked.id], person, "cancel the run")
+
+        session.refresh(asked)
+        assert (asked.done_cause_code, asked.folded) == ("cancelled", False)
+
+    def test_a_turns_end_and_a_waits_close_clear_it(
+        self, session: DbSession, container: ServiceContainer, person: User
+    ) -> None:
+        camp = Camp(container, session)
+        run = camp.worker()
+        wait = camp.wait(run)
+        records = container.record_service()
+        records.fold(camp.project, camp.line(run), True)
+        records.fold(camp.project, wait, True)
+
+        camp.ended(run)
+        container.wait_service().close(
+            camp.project, session.get_one(Wait, wait.id), camp.pilot(), run.id, "Open"
+        )
+
+        for item in (camp.line(run), wait):
+            session.refresh(item)
+            assert item.done_at is not None
+            assert item.folded is False
+
+    def test_the_archive_questions_close_clears_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        question = container.document_service().bear_archive_question(project)
+        records = container.record_service()
+        records.fold(project, question, True)
+
+        records.close_archive_question(project, person, "Keep")
+
+        session.refresh(question)
+        assert (question.done_cause_code, question.folded) == ("answered", False)
+
+    def test_a_publish_of_its_text_leaves_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, "document", "Camp", TWO_ASKS
+        )
+        records = container.record_service()
+        records.fold(project, item, True)
+
+        records.answer(document, "D1", person, "Dome")
+
+        session.refresh(item)
+        assert (item.done_at, item.folded) == (None, True)
+
+    def test_a_fold_changes_nothing_of_what_waits(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, _ = _bear(
+            session, container, project, project_session, "decision", "Camp", DECISION
+        )
+        waits = _waiting(session, project, person)
+        assert waits == [item.id]
+
+        container.record_service().fold(project, item, True)
+
+        assert _waiting(session, project, person) == waits
+
+
+def _waiting(session: DbSession, project: Project, person: User) -> list[uuid.UUID]:
+    """The project's items that wait on `person`."""
+    return list(
+        session.scalars(
+            select(Item.id)
+            .where(Item.project_id == project.id, waiting_on(person, Reading(session)))
+            .order_by(Item.seq)
+        )
+    )

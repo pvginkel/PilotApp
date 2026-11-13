@@ -436,6 +436,37 @@ test.describe('A claimed action', () => {
     await expect(item.root).toHaveAttribute('data-state', 'done');
   });
 
+  test('folded, its document is Pilot’s line while Pilot works on it, with no fold, and folded again, live, once the work doing it is stopped and it is the person’s', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    timeline,
+  }) => {
+    const { project, document, rotating } = await claimed({ people, projects, controller, chats });
+    await timeline.open(project);
+    const item = timeline.item(document);
+    await item.kind.click();
+    await expect(item.root).toHaveAttribute('data-folded', 'true');
+
+    // The one block it leaves open held by the work doing it, the document is Pilot's.
+    await projects.answer(document, 'D1', 'Friday');
+    await expect(item.root).toHaveAttribute('data-state', 'pilots');
+    await expect(item.root).toHaveAttribute('data-folded', 'false');
+    await expect(item.root).not.toHaveAttribute('role', 'button');
+    await expect(item.pilots.root).toHaveText('Doing it');
+    await expect(item.fold).toHaveCount(0);
+    expect((await projects.item(project, document)).folded).toBe(true);
+
+    await projects.stop(rotating);
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    await expect(item.root).toHaveAttribute('data-folded', 'true');
+    await expect(item.fold).toHaveAttribute('inert', '');
+    await item.root.click();
+    await expect(item.root).toHaveAttribute('data-folded', 'false');
+    await expect(item.blockAt('A1').undone).toHaveText('Pilot’s work left it undone');
+  });
+
   test('alone in its document, once the work doing it is stopped, its head says Pilot’s work left it undone, over its controls', async ({
     people,
     projects,

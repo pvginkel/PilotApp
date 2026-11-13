@@ -21,9 +21,15 @@
  * it, no Open and no Undo, and the note Pilot closed it with under its title (F27.4). On a phone the line has Undo alone among its actions,
  * and a tap on it opens what its title opens, as a view whose head carries Discuss, or, on a line
  * with nothing behind it, a menu of its actions under it, its job and Discuss (F13.9).
+ * On the timeline an open item folds by the kind in its head (fold.ts, F12.3): folded, it is its
+ * head and about three lines, the last fading out, everything in it drawn and taking nothing, and
+ * the box its own one control, a press or Enter anywhere on it unfolding it. A done line and the
+ * line of an item Pilot is working on never fold: the fold shows again once the item is the
+ * person's. The focus follows this browser's own press: onto the box it folded, and back onto the
+ * kind of the box it unfolded.
  */
 
-import { useCallback, useLayoutEffect, useRef, useState, type AnimationEvent, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type AnimationEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Check, CircleDashed, FileText, MessagesSquare, ScrollText, StickyNote, TriangleAlert, Undo2, X } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
@@ -40,6 +46,7 @@ import { Confirmation } from '@/components/timeline/confirmation';
 import { DocumentCard, InlineDocument } from '@/components/timeline/document';
 import { isCard } from '@/components/timeline/document-state';
 import { blockKey } from '@/components/timeline/flash';
+import { useFolds } from '@/components/timeline/fold';
 import { ItemHead } from '@/components/timeline/item-head';
 import { JobButton, JobMark, JobMenuRow } from '@/components/timeline/job';
 import { isOneAsk, kindOf } from '@/components/timeline/kinds';
@@ -87,13 +94,24 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
   const retried = retriedOf(item) !== null;
   const open = !done && !retried && pilots === null;
   const { root, retryFocus } = useRetriedFocus(retried);
+  const folds = useFolds();
+  const folded = folds !== null && open && item.folded;
+  useFoldFocus(root, item.id, folded);
   const flashed = (event: AnimationEvent) => event.target === event.currentTarget && onFlashed();
+  // Folded, the box is its own one control; an archived project's takes no press (D012).
+  const unfold = folded && !folds.archived ? () => folds.unfold(item.id) : null;
+  const unfoldByKey = (event: KeyboardEvent) => {
+    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    unfold?.();
+  };
   return (
     <article
       ref={root}
       className={cn(
         'item',
         open ? 'open' : 'collapsed',
+        folded && 'folded',
         pilots !== null && 'pilots',
         item.kind === 'confirmation' && 'confirm',
         (done || retried) && item.kind === 'work' && 'quiet',
@@ -108,13 +126,24 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
       data-state={done ? 'done' : retried ? 'retried' : pilots !== null ? 'pilots' : 'open'}
       data-actionable={isActionable(item)}
       data-concept={item.concept}
+      data-folded={folded}
+      {...(unfold !== null && {
+        role: 'button',
+        tabIndex: 0,
+        'aria-expanded': false,
+        title: 'Unfold',
+        onClick: unfold,
+        onKeyDown: unfoldByKey,
+      })}
     >
       {done || retried ? (
         <DoneLine item={item} />
       ) : pilots !== null ? (
         <PilotsItem item={item} pilots={pilots} />
       ) : (
-        <OpenItem item={item} retryFocus={retryFocus} />
+        <div inert={folded} data-testid="timeline.item.fold">
+          <OpenItem item={item} retryFocus={retryFocus} />
+        </div>
       )}
     </article>
   );
@@ -144,6 +173,24 @@ function useRetriedFocus(retried: boolean) {
     },
   };
   return { root, retryFocus };
+}
+
+/**
+ * The keyboard focus across this browser's own fold and unfold of the item (F12.3), once the
+ * screens have read it back: onto the box it folded, whose kind, the button pressed, takes nothing
+ * now, and onto the kind of the box it unfolded. A fold another member made moves no focus, nor
+ * one made while the focus stands elsewhere on the page.
+ */
+function useFoldFocus(root: RefObject<HTMLElement | null>, itemId: string, folded: boolean) {
+  const pressedOn = useFolds()?.pressedOn;
+  useLayoutEffect(() => {
+    if (!pressedOn?.(itemId)) return;
+    const box = root.current;
+    const focused = document.activeElement;
+    if (box === null || (focused !== null && focused !== document.body && !box.contains(focused))) return;
+    if (folded) box.focus();
+    else box.querySelector<HTMLElement>('button.kind')?.focus();
+  }, [root, pressedOn, itemId, folded]);
 }
 
 function OpenItem({ item, retryFocus }: { item: TimelineItem; retryFocus: RetryFocus }) {

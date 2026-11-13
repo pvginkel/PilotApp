@@ -20,7 +20,8 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
 
@@ -33,6 +34,10 @@ class Item(db.Model):  # type: ignore[name-defined]
     Document's published text, rebuilt on every publish (DB §7.4); the
     opening's are set at its birth, and an archive question's `kind_code` (DB
     264). A Prose Item's `title` is none while its text gives none (DB 223).
+
+    `folded` is an open Item's alone (DB 318): every write of `done_at` that
+    closes the Item clears it in the same UPDATE, whatever the row held when
+    the Item was loaded.
     """
 
     __tablename__ = "items"
@@ -66,6 +71,8 @@ class Item(db.Model):  # type: ignore[name-defined]
             "(consumed_at IS NULL) = (consumed_session_id IS NULL)",
             name="ck_items_consumed",
         ),
+        # No done Item is folded (DB assertion 318).
+        CheckConstraint("NOT folded OR done_at IS NULL", name="ck_items_folded"),
         # The badge, the banner and "N open above" read a Project's open Items.
         Index(
             "ix_items_open",
@@ -97,3 +104,16 @@ class Item(db.Model):  # type: ignore[name-defined]
     consumed_session_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("sessions.id")
     )
+    folded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+    @validates("done_at")
+    def _close_clears_fold(
+        self, _key: str, done_at: datetime | None
+    ) -> datetime | None:
+        """The Item's close clears its fold (DB 318). The fold is written with
+        the close even where the Item was loaded unfolded, so that a fold
+        committed since that load does not outlive the close."""
+        if done_at is not None:
+            self.folded = False
+            flag_modified(self, "folded")
+        return done_at
