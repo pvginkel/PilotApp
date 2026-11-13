@@ -256,6 +256,25 @@ export class Chats {
   }
 
   /**
+   * The work item `item` stopped by Pilot through the project's open chat, as its brain's
+   * `stop_work` stops it while its turn is in flight, and with `reason` closed for good in the same
+   * act (POST /api/testing/projects/<id>/chat/stops): the effect of the call `toolUseId` names.
+   */
+  async stopWork(projectId: string, item: string, { reason, toolUseId }: { reason?: string; toolUseId?: string } = {}): Promise<void> {
+    // As `answer()`: refused until the backend has written the chat's send accepted.
+    let response!: APIResponse;
+    await expect
+      .poll(async () => {
+        response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/stops`, {
+          data: { item, reason, tool_use_id: toolUseId },
+        });
+        return response.status() === 409 && (await response.text()).includes(NO_TURN_IN_FLIGHT);
+      })
+      .toBe(false);
+    expect(response.status(), await response.text()).toBe(201);
+  }
+
+  /**
    * The project finished through its open chat as its brain's `finish` finishes it while its turn is
    * in flight (F86.5), with `archive` Finish and archive, the archive the turn's author's.
    */

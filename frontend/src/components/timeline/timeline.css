@@ -515,8 +515,8 @@
      than the line. */
   .line .menu-anchor { position: static; }
   .line .menu-pop { top: auto; right: 12px; max-width: calc(100% - 24px); margin-top: 6px; }
-  /* A cancelled item's mark, in the time's grey (F13.1), on a work item's quiet line too. */
-  .line .kind-icon.cancelled, .quiet .line .kind-icon.cancelled { color: hsl(var(--muted-foreground)); }
+  /* A cancelled item's mark, in the time's grey (F13.1); a work item's quiet line is in that grey whole. */
+  .line .kind-icon.cancelled { color: hsl(var(--muted-foreground)); }
   /* A retried job's triangle, on its quiet line too. */
   .line .kind-icon.retried, .quiet .line .kind-icon.retried { color: hsl(var(--warning-text)); }
   .line .title, .line .said-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

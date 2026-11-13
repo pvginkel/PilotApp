@@ -229,6 +229,16 @@ export class TimelinePage {
           yes: root.getByTestId('timeline.work.stop-confirm.yes'),
           cancel: root.getByTestId('timeline.work.stop-confirm.cancel'),
         },
+        /** Close, beside Resume on a stopped item, and its question in the row's place: its words, Close it and Cancel. */
+        close: root.getByTestId('timeline.work.close'),
+        closeConfirm: {
+          root: root.getByTestId('timeline.work.close-confirm'),
+          text: root.getByTestId('timeline.work.close-confirm.text'),
+          yes: root.getByTestId('timeline.work.close-confirm.yes'),
+          cancel: root.getByTestId('timeline.work.close-confirm.cancel'),
+        },
+        /** The reason Pilot closed it for good with, under its done line's title. */
+        closeNote: root.getByTestId('timeline.line.close-note'),
       },
       wait: {
         /** The head's one button, *Check now* or *Skip wait* (F27.3). */

@@ -53,7 +53,7 @@ import { isOneAsk, kindOf } from '@/components/timeline/kinds';
 import { PilotsButton } from '@/components/timeline/pilots';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WaitItem } from '@/components/timeline/wait';
-import { WorkItem, type RetryFocus } from '@/components/timeline/work';
+import { WorkItem, type LineFocus } from '@/components/timeline/work';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useNoChoice } from '@/hooks/use-choice';
 import { useDiscuss } from '@/hooks/use-discuss';
@@ -93,7 +93,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
   const pilots = item.pilots_work;
   const retried = retriedOf(item) !== null;
   const open = !done && !retried && pilots === null;
-  const { root, retryFocus } = useRetriedFocus(retried);
+  const { root, lineFocus } = useLineFocus(done || retried);
   const folds = useFolds();
   const folded = folds !== null && open && item.folded;
   useFoldFocus(root, item.id, folded);
@@ -142,7 +142,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
         <PilotsItem item={item} pilots={pilots} />
       ) : (
         <div inert={folded} data-testid="timeline.item.fold">
-          <OpenItem item={item} retryFocus={retryFocus} />
+          <OpenItem item={item} lineFocus={lineFocus} />
         </div>
       )}
     </article>
@@ -150,21 +150,21 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
 }
 
 /**
- * The keyboard focus across this browser's Retry of a job with a tile of its own, whose line takes
- * the tile's place once the Retry lands: onto the line's title, the link to its session log, where
- * Retry had the focus as it was pressed and nothing has it once the line is drawn. A Retry another
- * browser made moves no focus.
+ * The keyboard focus across this browser's Retry of a job with a tile of its own, or its Close of a
+ * stopped work item, whose line takes the tile's place once the act lands: onto the line's title,
+ * the link to its session log, where the button had the focus as it was pressed and nothing has it
+ * once the line is drawn. An act another browser made moves no focus.
  */
-function useRetriedFocus(retried: boolean) {
+function useLineFocus(lined: boolean) {
   const root = useRef<HTMLElement>(null);
   const awaited = useRef(false);
   useLayoutEffect(() => {
-    if (!retried || !awaited.current) return;
+    if (!lined || !awaited.current) return;
     awaited.current = false;
     const focused = document.activeElement;
     if (focused === null || focused === document.body) root.current?.querySelector<HTMLElement>('a.title')?.focus();
-  }, [retried]);
-  const retryFocus: RetryFocus = {
+  }, [lined]);
+  const lineFocus: LineFocus = {
     start: (from) => {
       awaited.current = document.activeElement === from;
     },
@@ -172,7 +172,7 @@ function useRetriedFocus(retried: boolean) {
       if (work === null) awaited.current = false;
     },
   };
-  return { root, retryFocus };
+  return { root, lineFocus };
 }
 
 /**
@@ -193,8 +193,8 @@ function useFoldFocus(root: RefObject<HTMLElement | null>, itemId: string, folde
   }, [root, pressedOn, itemId, folded]);
 }
 
-function OpenItem({ item, retryFocus }: { item: TimelineItem; retryFocus: RetryFocus }) {
-  if (item.kind === 'work') return <WorkItem item={item} retryFocus={retryFocus} />;
+function OpenItem({ item, lineFocus }: { item: TimelineItem; lineFocus: LineFocus }) {
+  if (item.kind === 'work') return <WorkItem item={item} lineFocus={lineFocus} />;
   if (item.form === 'wait') return <WaitItem item={item} />;
   if (item.kind === 'confirmation') return <Confirmation item={item} />;
   if (item.kind === 'archive_question') return <ArchiveQuestion item={item} />;
@@ -307,7 +307,7 @@ function inChatOf(item: TimelineItem) {
  * is, its actions, its attachments' indicator and when it was done; under the title the person's
  * answer to a one-ask item with its note, the other person's after their avatar, and *In the chat*
  * after it, kept whole, where it was given in the chat; under a wait's the note Pilot closed it
- * with (F27.4). A confirmation's Yes leads it with a check, its No with a cross, both in the
+ * with (F27.4), and under a work item's the reason Pilot closed it for good with. A confirmation's Yes leads it with a check, its No with a cross, both in the
  * primary as a kind's icon is (F22.5); an item done `cancelled`, of any kind, with the cancelled
  * mark, its kind's icon in the time's grey with a small cross at its foot (F13.1); and a retried
  * job's line with an orange triangle, its time when it was retried, with no Undo.
@@ -385,7 +385,7 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
   const at = item.done?.at ?? retriedOf(item)!.at;
   const job = item.job;
   const ended = job !== null && jobForm(job.work) === 'ended';
-  const note = item.wait?.note ?? null;
+  const note = item.wait?.note ?? item.work?.note ?? null;
   return (
     <div className="line" onClick={onTap} data-testid="timeline.line">
       <LineLead item={item} />
@@ -426,7 +426,7 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
         </span>
       )}
       {note !== null && (
-        <span className="said" data-testid="timeline.line.wait-note">
+        <span className="said" data-testid={item.form === 'wait' ? 'timeline.line.wait-note' : 'timeline.line.close-note'}>
           <span className="said-text" title={note}>
             <LinkedText text={note} />
           </span>

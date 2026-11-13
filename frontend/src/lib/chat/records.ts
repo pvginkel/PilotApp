@@ -69,7 +69,7 @@ type ServerEvent =
   | { type: 'closed'; cause: CloseCause };
 
 export interface Effect {
-  /** F41's verbs: "Answered", "Added", "Marked read", "Cancelled", "Stopped", "Finished", "Registered", "Attached". */
+  /** F41's verbs: "Answered", "Added", "Marked read", "Cancelled", "Stopped", "Closed", "Finished", "Registered", "Attached". */
   verb: string;
   /** What it changed: "D1 · Which search API", "Action · Store the key", "inbox/3". */
   label: string;

@@ -3,7 +3,8 @@
  * icon in the item's head after Session log's, before Discuss, its square red, asks first in the
  * row under the line, Esc and Cancel dismissing the question (UC, *Keys*), which tells a running
  * item alone that its turn ends where it is; Stop it ends the session
- * where it is, the item "Stopped · <time>" and waiting on you, Resume in the row under the line.
+ * where it is, the item "Stopped · <time>" and waiting on you, Resume in the row under the line,
+ * Close beside it (close.spec.ts).
  * Resume, on a stopped item, a failed start or a turn ended in error, carries it on in the same
  * item through the gate, held while the project is paused, disabled while it is archived; a held
  * start stopped starts no more. A refusal shows as the API words it. A running item has no row.
@@ -148,7 +149,8 @@ test.describe('Stop', () => {
     await expect(item.line).toHaveText(`Stopped · ${clock(stopped_at!)}`);
     await expect(item.stopConfirm.root).toHaveCount(0);
     await expect(item.stop).toHaveCount(0);
-    await expect(item.row).toHaveText('Resume');
+    // Stopped, it can be closed for good too (close.spec.ts).
+    await expect(item.row).toHaveText('ResumeClose');
     await expect(item.resume).toBeFocused();
     expect(await bodyParts(tile.root)).toEqual(['item-head', 'item-title', 'work-line ended', 'item-actions']);
     await expect(tile.head.getByTestId('timeline.work.session-log')).toBeVisible();

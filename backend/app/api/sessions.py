@@ -237,7 +237,8 @@ def resume_session(
         404: No session has the id
         409: No controller is configured; the session is no work item's, is
             Pilot's own, is neither stopped nor failed, or has its stopped
-            turn still ending; or its project is finished or archived
+            turn still ending; its item is done, one closed for good among
+            them; or its project is finished or archived
     """
     session_starts.resume(db, session_id)
     return timeline_service.work(session_id).model_dump(mode="json")

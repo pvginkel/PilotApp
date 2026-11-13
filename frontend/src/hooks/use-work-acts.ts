@@ -3,11 +3,12 @@
  * start held or under way included, and one idle with its nudge owed is owed it no more (D169);
  * Resume carries a stopped or failed one on through the gate. A job of Pilot's own takes neither;
  * Retry places a fresh job for a stopped or failed one's trigger, at the project's next place, and
- * marks the one retried. The answer, the item's session as it stands, goes into its project's
+ * marks the one retried. Close closes a stopped worker's item for good: done, cancelled by the
+ * person, with no Undo and no Resume (D1 of slice 042). The answer, the item's session as it stands, goes into its project's
  * timeline as read; then every screen reads again. A refusal is the query client's toast, the
  * API's words, and the button pressed, disabled while its act was on its way, has the keyboard
  * focus back where it had it and nothing took it meanwhile. Their form events are
- * `timeline.stop`'s, `timeline.resume`'s and `timeline.retry`'s, sent whether or not the item's
+ * `timeline.stop`'s, `timeline.resume`'s, `timeline.close`'s and `timeline.retry`'s, sent whether or not the item's
  * actions are still drawn when the answer comes. An act answers the item's session as it stands,
  * or none where it was refused.
  */
@@ -17,11 +18,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useShownProject } from '@/hooks/use-project-address';
 import { moveWork } from '@/hooks/use-project-events';
 import {
+  usePostSessionsCloseBySessionId,
   usePostSessionsResumeBySessionId,
   usePostSessionsRetryBySessionId,
   usePostSessionsStopBySessionId,
 } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
+import { UNTIL_READ } from '@/lib/api/until-read';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
@@ -43,9 +46,13 @@ const STOPPED_FROM: readonly State[] = [...STOPPABLE, 'idle'];
  */
 export const offersRetry = (work: Work) => RESUMABLE.includes(work.state) && work.retried === null && !work.nudge_owed;
 
+/** Whether a worker's item offers Close beside Resume: stopped, whoever stopped it; a failed one keeps Resume alone. */
+export const offersClose = (work: Work) => !work.pilots_own && work.state === 'stopped';
+
 type Mutation =
   | ReturnType<typeof usePostSessionsStopBySessionId>
   | ReturnType<typeof usePostSessionsResumeBySessionId>
+  | ReturnType<typeof usePostSessionsCloseBySessionId>
   | ReturnType<typeof usePostSessionsRetryBySessionId>;
 
 /** The act of the button `pressed`, the item's session as it stands once it lands, or none where it was refused. */
@@ -103,6 +110,11 @@ export function useStop(itemId: string) {
 
 export function useResume(itemId: string) {
   return useAct(usePostSessionsResumeBySessionId(), 'timeline.resume', itemId, RESUMABLE);
+}
+
+export function useClose(itemId: string) {
+  // Pending until the timeline is read again, the item done: its question takes no second press.
+  return useAct(usePostSessionsCloseBySessionId(UNTIL_READ), 'timeline.close', itemId, RESUMABLE);
 }
 
 export function useRetry(itemId: string) {

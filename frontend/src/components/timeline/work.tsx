@@ -16,7 +16,10 @@
  * F141.3). Session log, in every state, opens the session's records in the overlay (F26.3, F69).
  * Stop, while it runs, starts or is held, or idle with its nudge owed (D169), asks first in the row
  * under the line, Esc dismissing the question; Resume, in that row once it stopped or failed, carries it on (F67), disabled while the
- * project is archived, as its head's switch is (D012). Pilot's own work, the setup, the one job
+ * project is archived, as its head's switch is (D012). Close stands beside Resume on a stopped item, never a failed one's: it closes
+ * the item for good, cancelled by the person, and asks first in the row's place, as Stop does, Close it and Cancel, Cancel focused as
+ * the question opens and Esc dismissing it, the focus back on Close once cancelled; closed, the item's line stands for it under the
+ * cancelled mark (item.tsx). Pilot's own work, the setup, the one job
  * drawn here (every other shows on the item it follows from, job.tsx), has no env chip and no Stop
  * or Resume (F26.3, F59.1), and Retry where Resume is once it stopped or failed: a fresh job for
  * the same trigger at the project's next place, disabled while the project is archived. Retried, it
@@ -24,15 +27,15 @@
  * the plan's donut and the first step in progress, opening their list (F145.2, F145.3), until the
  * list is emptied; a job publishes none. A tile with nothing for the row has no row. Once this
  * browser's Stop or Resume swaps the two, the keyboard focus on the button that went goes to the
- * other, Resume or Stop's icon, and once its Retry lands, to the line that takes the tile's place
+ * other, Resume or Stop's icon, and once its Retry or its Close lands, to the line that takes the tile's place
  * (item.tsx); a swap another browser's act made moves no focus, and a refused act gives it back to
- * the button pressed, Resume, Retry or Stop it. Stop's question tells a running item that its turn
+ * the button pressed, Resume, Retry, Stop it or Close it. Stop's question tells a running item that its turn
  * ends where it is, and no other (status-labels.ts).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Link } from '@tanstack/react-router';
-import { CircleAlert, Play, RotateCw, ScrollText, Server, Square } from 'lucide-react';
+import { CircleAlert, Play, RotateCw, ScrollText, Server, Square, X } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Popover } from '@/components/shared/popover';
@@ -44,10 +47,10 @@ import { useNow } from '@/hooks/use-now';
 import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
-import { offersRetry, offersStop, RESUMABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
+import { offersClose, offersRetry, offersStop, RESUMABLE, useClose, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
 import { useEscape } from '@/lib/keys';
-import { progressStepMark, stopQuestion, workLine } from '@/lib/utils/status-labels';
+import { CLOSE_QUESTION, progressStepMark, stopQuestion, workLine } from '@/lib/utils/status-labels';
 
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 
@@ -62,15 +65,15 @@ function actionsOf(work: Work): Actions {
   return offersStop(work) ? 'stop' : RESUMABLE.includes(work.state) ? 'resume' : 'log';
 }
 
-/** This browser's Retry, told to the item, whose line takes the tile's place once it lands (item.tsx). */
-export interface RetryFocus {
-  /** Retry is pressed, `from` its button. */
+/** This browser's Retry or Close, told to the item, whose line takes the tile's place once it lands (item.tsx). */
+export interface LineFocus {
+  /** Retry or Close it is pressed, `from` its button. */
   start: (from: HTMLElement) => void;
   /** The act's answer: the item's session as it stands, or none where it was refused. */
   land: (work: Work | null) => void;
 }
 
-export function WorkItem({ item, retryFocus }: { item: TimelineItem; retryFocus: RetryFocus }) {
+export function WorkItem({ item, lineFocus }: { item: TimelineItem; lineFocus: LineFocus }) {
   // The API gives every work item its session.
   const work = item.work!;
   const actions = actionsOf(work);
@@ -84,6 +87,18 @@ export function WorkItem({ item, retryFocus }: { item: TimelineItem; retryFocus:
   useEffect(() => {
     if (asking) cancelButton.current?.focus();
   }, [asking]);
+  const closes = actions === 'resume' && offersClose(work);
+  const [closeAsked, setCloseAsked] = useState(false);
+  // The question goes with Close, whichever browser's act took Close away.
+  if (closeAsked && !closes) setCloseAsked(false);
+  const closing = closeAsked && closes;
+  const closeButton = useRef<HTMLButtonElement>(null);
+  // The focus goes with the swap: onto Cancel as the question opens (CloseQuestion), back onto Close once cancelled.
+  const closeWasAsked = useRef(false);
+  useEffect(() => {
+    if (!closing && closeWasAsked.current) closeButton.current?.focus();
+    closeWasAsked.current = closing;
+  }, [closing]);
   return (
     <div className="item-body">
       <ItemHead item={item}>
@@ -122,8 +137,18 @@ export function WorkItem({ item, retryFocus }: { item: TimelineItem; retryFocus:
             setAsked(false);
           }}
         />
+      ) : closing ? (
+        <CloseQuestion item={item} focus={lineFocus} onCancel={() => setCloseAsked(false)} />
       ) : (
-        <Row item={item} actions={actions} handoff={handoff} retryFocus={retryFocus} steps={work.progress} />
+        <Row
+          item={item}
+          actions={actions}
+          handoff={handoff}
+          lineFocus={lineFocus}
+          steps={work.progress}
+          closeButton={closeButton}
+          onClose={closes ? () => setCloseAsked(true) : null}
+        />
       )}
     </div>
   );
@@ -251,23 +276,94 @@ function StopQuestion({ item, handoff, cancelButton, onCancel }: StopQuestionPro
   );
 }
 
+interface CloseQuestionProps {
+  item: TimelineItem;
+  focus: LineFocus;
+  /** Ends the question, the focus back on the row's Close. */
+  onCancel: () => void;
+}
+
+/**
+ * Close's question, in the row's place under the line, as Stop's stands there: Close it closes the
+ * item for good; Cancel, focused as the question opens so that Enter pressed again cancels, and Esc
+ * dismiss it.
+ */
+function CloseQuestion({ item, focus, onCancel }: CloseQuestionProps) {
+  const { act, pending } = useClose(item.id);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancelButton.current?.focus(), []);
+  const cancel = () => {
+    if (!pending) onCancel();
+  };
+  useEscape('menu', true, cancel);
+  return (
+    <div className="item-actions confirm" data-testid="timeline.work.close-confirm">
+      <span className="confirm-text" data-testid="timeline.work.close-confirm.text">
+        {CLOSE_QUESTION}
+      </span>
+      <button
+        type="button"
+        className="btn btn-sm btn-danger"
+        disabled={pending}
+        onClick={(event) => {
+          focus.start(event.currentTarget);
+          void act(event.currentTarget).then(focus.land);
+        }}
+        data-testid="timeline.work.close-confirm.yes"
+      >
+        <X className="icon" aria-hidden="true" />
+        Close it
+      </button>
+      <button
+        ref={cancelButton}
+        type="button"
+        className="btn btn-sm"
+        disabled={pending}
+        onClick={cancel}
+        data-testid="timeline.work.close-confirm.cancel"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 interface RowProps {
   item: TimelineItem;
   actions: Actions;
   handoff: Handoff;
-  retryFocus: RetryFocus;
+  lineFocus: LineFocus;
   steps: Work['progress'];
+  closeButton: RefObject<HTMLButtonElement | null>;
+  /** The press on Close beside Resume, which asks its question, on a stopped worker's item; none elsewhere. */
+  onClose: (() => void) | null;
 }
 
-/** The row under the line, with the progress button and Resume or a job's Retry; none where it has neither. */
-function Row({ item, actions, handoff, retryFocus, steps }: RowProps) {
+/** The row under the line, with the progress button, Resume and Close beside it, or a job's Retry; none where it has none of them. */
+function Row({ item, actions, handoff, lineFocus, steps, closeButton, onClose }: RowProps) {
   if (steps.length === 0 && actions !== 'resume' && actions !== 'retry') return null;
   return (
     <div className="item-actions" data-testid="timeline.work.row">
       {steps.length > 0 && <Progress steps={steps} />}
       {actions === 'resume' && <Resume item={item} handoff={handoff} />}
-      {actions === 'retry' && <Retry item={item} focus={retryFocus} />}
+      {onClose !== null && <Close button={closeButton} onAsk={onClose} />}
+      {actions === 'retry' && <Retry item={item} focus={lineFocus} />}
     </div>
+  );
+}
+
+/**
+ * Close, beside Resume: it opens its question in the row's place and writes nothing; disabled while
+ * the project is archived, which the API refuses until Bring back.
+ */
+function Close({ button, onAsk }: { button: RefObject<HTMLButtonElement | null>; onAsk: () => void }) {
+  const { id: projectId } = useShownProject();
+  const archived = useArchived(projectId);
+  return (
+    <button ref={button} type="button" className="btn btn-sm" disabled={archived} onClick={onAsk} data-testid="timeline.work.close">
+      <X className="icon" aria-hidden="true" />
+      Close
+    </button>
   );
 }
 
@@ -308,7 +404,7 @@ function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
 }
 
 /** A job's Retry, where a worker's Resume is; disabled while the project is archived, which the API refuses until Bring back. */
-function Retry({ item, focus }: { item: TimelineItem; focus: RetryFocus }) {
+function Retry({ item, focus }: { item: TimelineItem; focus: LineFocus }) {
   const { id: projectId } = useShownProject();
   const { act, pending } = useRetry(item.id);
   const archived = useArchived(projectId);

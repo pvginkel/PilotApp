@@ -492,6 +492,9 @@ const cue = (activity: Activity, step: Words[] | null = null, detail: string | n
 export const stopQuestion = (work: Work) =>
   work.state === 'running' ? 'Stop the session? Its turn ends where it is; Resume sends it on.' : 'Stop the session? Resume sends it on.';
 
+/** Close's question on a stopped work item: the close is for good, as Stop's is not. */
+export const CLOSE_QUESTION = 'Close it for good? It takes no Resume afterwards, and what it put to you stays open.';
+
 /**
  * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
  * chat words its cue, the call it runs alone in the phase's place and Thinking or Writing with

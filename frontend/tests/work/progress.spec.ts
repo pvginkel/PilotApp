@@ -155,7 +155,7 @@ test.describe('The progress button', () => {
     expect(Math.abs(head.ring - head.capitals)).toBeLessThanOrEqual(0.5);
   });
 
-  test('goes with the row while Stop asks and comes back with it; stays on the stopped item beside Resume, on its held start and on the run resumed', async ({
+  test('goes with the row while Stop asks and comes back with it; stays on the stopped item beside Resume and Close, on its held start and on the run resumed', async ({
     people,
     projects,
     timeline,
@@ -179,7 +179,7 @@ test.describe('The progress button', () => {
     await item.stopConfirm.yes.click();
     await expect(item.line).toHaveAttribute('data-state', 'stopped');
     await expect(item.resume).toBeVisible();
-    expect(await rowButtons(item.row)).toEqual(['timeline.work.progress', 'timeline.work.resume']);
+    expect(await rowButtons(item.row)).toEqual(['timeline.work.progress', 'timeline.work.resume', 'timeline.work.close']);
 
     await turnEnded(projects, work);
     await projects.transition(project, 'paused');

@@ -15912,7 +15912,7 @@
     },
     "/api/sessions/{session_id}/resume": {
       "post": {
-        "description": "Returns:     200: The work item's status, starting, or held at the gate     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: No controller is configured; the session is no work item's, is         Pilot's own, is neither stopped nor failed, or has its stopped         turn still ending; or its project is finished or archived",
+        "description": "Returns:     200: The work item's status, starting, or held at the gate     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: No controller is configured; the session is no work item's, is         Pilot's own, is neither stopped nor failed, or has its stopped         turn still ending; its item is done, one closed for good among         them; or its project is finished or archived",
         "operationId": "post__api_sessions_{session_id}_resume",
         "parameters": [
           {
