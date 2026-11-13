@@ -741,6 +741,37 @@ STORE_SURFACE = {
         " reason, and nothing is marked. Answers `{effect}`, the call's effect"
         " line.",
     ),
+    "cancel_ask": (
+        {
+            "properties": {
+                "item": {**_ITEM, "description": "The ask's item id"},
+                "for": {
+                    "description": (
+                        "The handle of the person on whose word it is called off"
+                    ),
+                    "minLength": 1,
+                    "title": "For",
+                    "type": "string",
+                },
+            },
+            "required": ["item", "for"],
+            "title": "cancel_askArguments",
+            "type": "object",
+        },
+        _RECORDED,
+        "Call off an ask you added, once a person says in the chat that it is"
+        " obsolete: `for` names them by handle. The ask is a decision, a"
+        " confirmation, a question, an action or a document that an `add_item` of"
+        " yours added. It is closed as cancelled, by them, its blocks left as they"
+        " stand: its line shows the cancelled mark, it has no undo, and no job"
+        " follows it. Never call one off on your own word. A document a work"
+        " item's run registered is refused: the Cancel on its page, which ends"
+        " that run, is the one way to call it off. An item not of your project, a"
+        " `for` that names no person, a notice, a work item, a wait, an item no"
+        " `add_item` of yours added, or one that is done is refused with the"
+        " reason, and nothing is closed. Answers `{effect}`, the call's effect"
+        " line.",
+    ),
     "stop_work": (
         {
             "properties": {"item": {**_ITEM, "description": "The work item's id"}},

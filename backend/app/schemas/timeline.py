@@ -396,6 +396,12 @@ class CancelSchema(BaseModel):
     takes_back: list[TakenBackSchema] = Field(
         description="The blocks the run holds, which it gives back, in timeline order"
     )
+    also_closes: list[DocumentLinkSchema] = Field(
+        description=(
+            "The run's other open documents, which it closes with this one, in "
+            "timeline order (DB 298)"
+        )
+    )
 
 
 class BlockSchema(BaseModel):

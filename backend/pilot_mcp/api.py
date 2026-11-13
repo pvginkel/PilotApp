@@ -770,6 +770,22 @@ class PilotStoreApi(_Routes):
         answer = await self._post("marks", authorization, tool_use_id, body)
         return Recorded.model_validate(answer)
 
+    async def cancel_ask(
+        self,
+        authorization: str,
+        tool_use_id: str | None,
+        *,
+        item: uuid.UUID,
+        person: str,
+    ) -> Recorded:
+        answer = await self._post(
+            "cancellations",
+            authorization,
+            tool_use_id,
+            {"item": str(item), "for": person},
+        )
+        return Recorded.model_validate(answer)
+
     async def stop_work(
         self, authorization: str, tool_use_id: str | None, *, item: uuid.UUID
     ) -> Recorded:

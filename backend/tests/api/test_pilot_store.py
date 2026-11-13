@@ -45,6 +45,7 @@ ITEMS = "/tools/pilot-store/items"
 ATTACHMENTS = "/tools/pilot-store/attachments"
 ANSWERS = "/tools/pilot-store/answers"
 MARKS = "/tools/pilot-store/marks"
+CANCELLATIONS = "/tools/pilot-store/cancellations"
 STOPS = "/tools/pilot-store/stops"
 FINISH = "/tools/pilot-store/finish"
 WRITER_QUESTIONS = "/tools/pilot-store/writer-questions"
@@ -198,7 +199,7 @@ def _error(response: Any) -> str:
 
 
 class TestPilotStoreRoutes:
-    def test_the_surface_is_seven_routes_outside_the_api(self, app: Flask) -> None:
+    def test_the_surface_is_eight_routes_outside_the_api(self, app: Flask) -> None:
         routes = sorted(
             (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
             for rule in app.url_map.iter_rules()
@@ -208,6 +209,7 @@ class TestPilotStoreRoutes:
         assert routes == [
             (ANSWERS, ["POST"]),
             (ATTACHMENTS, ["POST"]),
+            (CANCELLATIONS, ["POST"]),
             (FINISH, ["POST"]),
             (ITEMS, ["POST"]),
             (MARKS, ["POST"]),
@@ -676,6 +678,147 @@ class TestMark:
         )
 
         assert response.status_code == 409
+
+
+class TestCancelAsk:
+    """`POST /tools/pilot-store/cancellations`: `cancel_ask(item, for)`."""
+
+    def test_a_cancel_is_200_with_its_effect_line(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _decision(container, project, run)
+
+        response = client.post(
+            CANCELLATIONS,
+            json={"item": str(item.id), "for": "ada"},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"effect": "Cancelled · Which tent?"}
+        session.refresh(item)
+        assert (item.done_cause_code, item.done_by_user_id) == ("cancelled", person.id)
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"item": "not-a-uuid", "for": "ada"},
+            {"item": "{item}"},
+            {"item": "{item}", "for": ""},
+            {"item": "{item}", "for": "ada", "note": "Obsolete."},
+        ],
+        ids=["no-item-id", "no-for", "an-empty-for", "a-note"],
+    )
+    def test_a_body_that_is_not_an_item_and_a_handle_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, str],
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _decision(container, project, run)
+
+        response = client.post(
+            CANCELLATIONS,
+            json={key: value.format(item=item.id) for key, value in body.items()},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 400
+
+    def test_an_unknown_item_and_an_unknown_person_are_404(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _decision(container, project, run)
+        # Committed, so that the refused call's rollback keeps it.
+        session.commit()
+        unknown = "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+
+        missing = client.post(
+            CANCELLATIONS, json={"item": unknown, "for": "ada"}, headers=_bearer()
+        )
+        nobody = client.post(
+            CANCELLATIONS, json={"item": str(item.id), "for": "zed"}, headers=_bearer()
+        )
+
+        assert (missing.status_code, nobody.status_code) == (404, 404)
+        assert _error(nobody) == "Person zed was not found"
+
+    def test_a_registered_document_is_409_naming_its_pages_cancel(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        _brain(session, project, environment)
+        item = _registered(session, container, project, environment)
+        session.commit()
+
+        response = client.post(
+            CANCELLATIONS,
+            json={"item": str(item.id), "for": "ada"},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 409
+        assert _error(response).endswith(
+            "survey.md because a document a work item's run registered is called"
+            " off by the Cancel on its page, which ends that run"
+        )
+        session.refresh(item)
+        assert item.done_at is None
+
+    def test_a_notice_and_a_work_item_are_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _brain(session, project, environment)
+        notice = container.document_service().bear_item(
+            project, "notice", "The lake is open", run, "# The lake is open\n"
+        )
+        work = _work(session, container, project)
+        session.commit()
+
+        read = client.post(
+            CANCELLATIONS,
+            json={"item": str(notice.id), "for": "ada"},
+            headers=_bearer(),
+        )
+        running = client.post(
+            CANCELLATIONS, json={"item": str(work.id), "for": "ada"}, headers=_bearer()
+        )
+
+        assert (read.status_code, running.status_code) == (409, 409)
+        assert _error(read).endswith(
+            "because a notice asks nothing, and takes its Read"
+        )
+        assert _error(running) == (
+            f"Cannot cancel item {work.id} because a work item is no ask"
+        )
 
 
 class TestStopWork:

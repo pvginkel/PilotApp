@@ -48,6 +48,7 @@ from app.schemas.testing_record import (
     InventedAttachmentsCreateSchema,
     InventedAttachmentsSchema,
     InventedChatAnswerCreateSchema,
+    InventedChatCancelCreateSchema,
     InventedChatFinishCreateSchema,
     InventedClarificationCreateSchema,
     InventedClarificationSchema,
@@ -780,6 +781,45 @@ def create_chat_answer(
         note=data.note,
         to=data.to,
         tool_use_id=data.tool_use_id,
+    )
+    return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(
+        mode="json"
+    ), 201
+
+
+@testing_record_bp.route(
+    "/projects/<uuid:project_id>/chat/cancellations", methods=["POST"]
+)
+@api.validate(
+    json=InventedChatCancelCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=RecordedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_chat_cancellation(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Call off an ask Pilot added through the project's open chat, on a
+    person's word, as its brain's `cancel_ask` calls it off (DB 297): the
+    effect of the call `tool_use_id` names in the chat's turn in flight.
+
+    Returns:
+        201: The call's effect line
+        400: The body is not an item's id, a handle and an optional call id,
+            or the stage is prd
+        404: No project has the id, the item is not of it, or no person has
+            the handle
+        409: The project has no chat open, its chat has no turn in flight, or
+            the record refuses the cancel: the reason
+    """
+    data = InventedChatCancelCreateSchema.model_validate(request.get_json())
+    line = test_data_service.cancel_in_chat(
+        project_id, data.item, data.for_, tool_use_id=data.tool_use_id
     )
     return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(
         mode="json"

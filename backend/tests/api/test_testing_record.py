@@ -153,6 +153,10 @@ def _chat_answers_path(project_id: uuid.UUID | str) -> str:
     return f"/api/testing/projects/{project_id}/chat/answers"
 
 
+def _chat_cancellations_path(project_id: uuid.UUID | str) -> str:
+    return f"/api/testing/projects/{project_id}/chat/cancellations"
+
+
 def _chat_finish_path(project_id: uuid.UUID | str) -> str:
     return f"/api/testing/projects/{project_id}/chat/finish"
 
@@ -1930,6 +1934,7 @@ ENDPOINTS = [
         _chat_answers_path(NO_ROW),
         {"block": f"{NO_ROW}/D1", "value": "Yes", "for": "ada"},
     ),
+    (_chat_cancellations_path(NO_ROW), {"item": str(NO_ROW), "for": "ada"}),
     (_chat_finish_path(NO_ROW), {"archive": True}),
     (STORE_UPDATE, {}),
     (_waits_path(NO_ROW), {"kind": "card_wait", "title": "SR-4", "cards": ["SR-4"]}),
@@ -2813,6 +2818,139 @@ class TestCreateChatAnswer:
         body = {**body, "block": body["block"].replace("{item}", item_id)}
 
         response = client.post(_chat_answers_path(project_id), json=body)
+
+        assert response.status_code == 400
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateChatCancellation:
+    def _placed(self, client: FlaskClient, environment: Environment) -> tuple[str, str]:
+        """A project with a decision a job of Pilot's own added, and the
+        item's id."""
+        project_id = _make(client, environment_id=environment.id)
+        response = client.post(
+            _items_path(project_id),
+            json={
+                "kind": "decision",
+                "title": "Which tent?",
+                "text": CHAT_DECISION,
+                "by_pilot": True,
+            },
+        )
+        assert response.status_code == 201, response.get_json()
+        return project_id, response.get_json()["id"]
+
+    def _chat(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        project_id: str,
+        person: User,
+    ) -> models.Session:
+        """The project's chat open, a message of `person`'s in flight,
+        committed so that a refused call's rollback keeps it."""
+        chat = open_chat(session, session.get_one(Project, uuid.UUID(project_id)))
+        ChatWriter(session, container.session_record_service(), chat).message(
+            person, "Never mind the tent."
+        )
+        chat.state_code = SessionState.RUNNING
+        session.commit()
+        return chat
+
+    def test_the_ask_is_called_off_through_the_chat_done_cancelled_with_no_undo(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project_id, item_id = self._placed(client, environment)
+        chat = self._chat(session, container, project_id, person)
+
+        response = client.post(
+            _chat_cancellations_path(project_id),
+            json={"item": item_id, "for": "ada", "tool_use_id": "toolu_01"},
+        )
+
+        assert response.status_code == 201
+        assert response.get_json() == {"effect": "Cancelled · Which tent?"}
+        [record] = [
+            stored.record
+            for stored in read_records(session, chat.id, limit=10)
+            if stored.record.kind_code == "server"
+        ]
+        assert record.payload["toolUseId"] == "toolu_01"
+        done = _timeline_item(client, project_id, item_id)["done"]
+        assert (done["cause"], done["by"]["handle"], done["undo"]) == (
+            "cancelled",
+            "ada",
+            False,
+        )
+
+    def test_an_unknown_project_item_or_person_is_not_found(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project_id, item_id = self._placed(client, environment)
+        self._chat(session, container, project_id, person)
+        body = {"item": item_id, "for": "ada"}
+
+        unknown = client.post(_chat_cancellations_path(uuid.uuid4()), json=body)
+        no_item = client.post(
+            _chat_cancellations_path(project_id),
+            json={**body, "item": str(uuid.uuid4())},
+        )
+        nobody = client.post(
+            _chat_cancellations_path(project_id), json={**body, "for": "zed"}
+        )
+
+        assert (unknown.status_code, no_item.status_code, nobody.status_code) == (
+            404,
+            404,
+            404,
+        )
+
+    def test_a_project_with_no_chat_open_and_an_ask_the_record_refuses_conflict(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project_id, item_id = self._placed(client, environment)
+        theirs = _place(client, project_id, "decision", CHAT_DECISION)
+        body = {"item": item_id, "for": "ada"}
+
+        closed = client.post(_chat_cancellations_path(project_id), json=body)
+        self._chat(session, container, project_id, person)
+        refused = client.post(
+            _chat_cancellations_path(project_id), json={**body, "item": theirs}
+        )
+
+        assert (closed.status_code, refused.status_code) == (409, 409)
+        assert closed.get_json()["error"].endswith(
+            "because the project has no chat open"
+        )
+        assert refused.get_json()["error"].endswith("because it is no ask Pilot added")
+
+    @pytest.mark.parametrize(
+        "body",
+        [{"item": "D1", "for": "ada"}, {"item": "{item}"}],
+        ids=["not-an-items-id", "no-person"],
+    )
+    def test_a_body_that_is_not_an_item_and_a_handle_is_invalid(
+        self, client: FlaskClient, environment: Environment, body: dict[str, Any]
+    ) -> None:
+        project_id, item_id = self._placed(client, environment)
+        body = {**body, "item": body["item"].replace("{item}", item_id)}
+
+        response = client.post(_chat_cancellations_path(project_id), json=body)
 
         assert response.status_code == 400
 

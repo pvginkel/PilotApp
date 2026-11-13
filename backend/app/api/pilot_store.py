@@ -20,6 +20,7 @@ from app.schemas.pilot_store import (
     AnswerRequestSchema,
     AttachedSchema,
     AttachRequestSchema,
+    CancelAskRequestSchema,
     FinishRequestSchema,
     MarkRequestSchema,
     RecordedSchema,
@@ -246,6 +247,49 @@ def mark(
         body.for_,
         request.headers.get(TOOL_USE_ID_HEADER),
         note=body.note,
+    )
+    return _recorded(line), 200
+
+
+@pilot_store_bp.route("/cancellations", methods=["POST"])
+@public
+@api.validate(
+    json=CancelAskRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=RecordedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def cancel_ask(
+    pilot_store_service: PilotStoreService = Provide[
+        ServiceContainer.pilot_store_service
+    ],
+) -> Any:
+    """`cancel_ask(item, for)` (DB 297): an ask Pilot added, a decision, a
+    confirmation, a question, an action or a document of its own, called off
+    on the word of the person `for` names, given in the chat: done
+    `cancelled`, by them, with no Undo and no job after it.
+
+    Returns:
+        200: The call's effect line
+        400: The body is not an item's id and a handle
+        401: No bearer, or one no session has
+        403: The bearer's session is not a chat's or a job's, or has no turn
+            running
+        404: The item is not of the session's project, or no person has the
+            handle
+        409: The item is a document a work item's run registered, a notice,
+            a work item, a wait or no ask Pilot added, it is done, or the
+            project is archived: the reason
+    """
+    body = CancelAskRequestSchema.model_validate(request.get_json())
+    line = pilot_store_service.cancel_ask(
+        g.brain, body.item, body.for_, request.headers.get(TOOL_USE_ID_HEADER)
     )
     return _recorded(line), 200
 

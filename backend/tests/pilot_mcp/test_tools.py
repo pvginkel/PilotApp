@@ -869,6 +869,82 @@ class TestMark:
 
 
 @pytest.mark.anyio
+class TestCancelAsk:
+    async def test_the_ask_is_called_off_for_the_person_through_its_route(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        person: models.User,
+        brain: models.Session,
+    ) -> None:
+        item = _decision(session, container, brain)
+
+        result = await call(
+            mcp_app,
+            "cancel_ask",
+            {"item": str(item.id), "for": person.handle},
+            meta={TOOL_USE_ID_META: "toolu_01"},
+            path=STORE_PATH,
+        )
+
+        assert not result.isError
+        assert result.structuredContent == {"effect": "Cancelled · Which tent?"}
+        [(request, _)] = routes.calls
+        assert str(request.url) == f"{API_URL}/tools/pilot-store/cancellations"
+        assert json.loads(request.content) == {"item": str(item.id), "for": "ada"}
+        assert request.headers["tool-use-id"] == "toolu_01"
+        session.refresh(item)
+        assert (item.done_cause_code, item.done_by_user_id) == ("cancelled", person.id)
+        assert _effect(session, brain)["toolUseId"] == "toolu_01"
+
+    async def test_without_for_it_is_refused_without_calling_the_api(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        brain: models.Session,
+    ) -> None:
+        item = _decision(session, container, brain)
+
+        result = await call(
+            mcp_app, "cancel_ask", {"item": str(item.id)}, path=STORE_PATH
+        )
+
+        assert "Field required" in error_text(result)
+        assert routes.calls == []
+
+    async def test_the_routes_refusal_is_the_tools_error_its_reason_whole(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        person: models.User,
+        brain: models.Session,
+    ) -> None:
+        project = session.get_one(models.Project, brain.project_id)
+        notice = container.document_service().bear_item(
+            project, "notice", "The lake is open", brain, "# The lake is open\n"
+        )
+        session.commit()
+
+        result = await call(
+            mcp_app,
+            "cancel_ask",
+            {"item": str(notice.id), "for": person.handle},
+            path=STORE_PATH,
+        )
+
+        assert error_text(result) == _refusal(routes, "cancel_ask")
+        assert error_text(result).endswith(
+            "because a notice asks nothing, and takes its Read"
+        )
+
+
+@pytest.mark.anyio
 class TestStopWork:
     async def test_a_work_items_session_is_stopped_by_pilot(
         self,

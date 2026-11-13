@@ -789,6 +789,36 @@
         "title": "AttachedSchema",
         "type": "object"
       },
+      "CancelAskRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "An ask Pilot added, called off on a person's word.",
+        "properties": {
+          "for": {
+            "description": "The handle of the person on whose word it is called off",
+            "examples": [
+              "ada"
+            ],
+            "minLength": 1,
+            "title": "For",
+            "type": "string"
+          },
+          "item": {
+            "description": "The ask's item id",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "for"
+        ],
+        "title": "CancelAskRequestSchema",
+        "type": "object"
+      },
       "ChatListSchema.f9d9b43": {
         "description": "A project's chats, and the caller's place in them.",
         "properties": {
@@ -1634,6 +1664,52 @@
           "for"
         ],
         "title": "InventedChatAnswerCreateSchema",
+        "type": "object"
+      },
+      "InventedChatCancelCreateSchema.6d6b324": {
+        "additionalProperties": false,
+        "description": "An ask Pilot added, which the project's brain calls off in the chat on\na person's word as its `cancel_ask` call does.",
+        "properties": {
+          "for": {
+            "description": "The handle of the person on whose word it is called off",
+            "examples": [
+              "ada"
+            ],
+            "minLength": 1,
+            "title": "For",
+            "type": "string"
+          },
+          "item": {
+            "description": "The ask's item id",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id Claude Code gives the call, which its effect's record names; none for a call whose client sent none",
+            "examples": [
+              "toolu_01"
+            ],
+            "title": "Tool Use Id"
+          }
+        },
+        "required": [
+          "item",
+          "for"
+        ],
+        "title": "InventedChatCancelCreateSchema",
         "type": "object"
       },
       "InventedChatFinishCreateSchema.6d6b324": {
@@ -3505,6 +3581,14 @@
       "ItemDocumentSchema.1fdd8ae.CancelSchema": {
         "description": "The Cancel a registered document of a run offers (F28.9; DB 297 to\n299): the document is the person's, nothing of the run is in flight, and\nthe run holds a block of another document. It closes every open document\nof the run at once, with no Undo, and gives the blocks back.",
         "properties": {
+          "also_closes": {
+            "description": "The run's other open documents, which it closes with this one, in timeline order (DB 298)",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.DocumentLinkSchema"
+            },
+            "title": "Also Closes",
+            "type": "array"
+          },
           "takes_back": {
             "description": "The blocks the run holds, which it gives back, in timeline order",
             "items": {
@@ -3515,7 +3599,8 @@
           }
         },
         "required": [
-          "takes_back"
+          "takes_back",
+          "also_closes"
         ],
         "title": "CancelSchema",
         "type": "object"
@@ -8996,6 +9081,14 @@
       "TimelineSchema.1fdd8ae.CancelSchema": {
         "description": "The Cancel a registered document of a run offers (F28.9; DB 297 to\n299): the document is the person's, nothing of the run is in flight, and\nthe run holds a block of another document. It closes every open document\nof the run at once, with no Undo, and gives the blocks back.",
         "properties": {
+          "also_closes": {
+            "description": "The run's other open documents, which it closes with this one, in timeline order (DB 298)",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.DocumentLinkSchema"
+            },
+            "title": "Also Closes",
+            "type": "array"
+          },
           "takes_back": {
             "description": "The blocks the run holds, which it gives back, in timeline order",
             "items": {
@@ -9006,7 +9099,8 @@
           }
         },
         "required": [
-          "takes_back"
+          "takes_back",
+          "also_closes"
         ],
         "title": "CancelSchema",
         "type": "object"
@@ -17964,6 +18058,84 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/projects/{project_id}/chat/cancellations": {
+      "post": {
+        "description": "Returns:     201: The call's effect line     400: The body is not an item's id, a handle and an optional call id,         or the stage is prd     404: No project has the id, the item is not of it, or no person has         the handle     409: The project has no chat open, its chat has no turn in flight, or         the record refuses the cancel: the reason",
+        "operationId": "post__api_testing_projects_{project_id}_chat_cancellations",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedChatCancelCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Call off an ask Pilot added through the project's open chat, on a person's word, as its brain's `cancel_ask` calls it off (DB 297): the effect of the call `tool_use_id` names in the chat's turn in flight.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/projects/{project_id}/chat/finish": {
       "post": {
         "description": "Returns:     201: The call's effect line     400: The body is not an optional archive flag and call id, or the         stage is prd     404: No project has the id     409: The project has no chat open, its chat has no turn in flight, or         the project's standing does not allow Finish: the reason",
@@ -19993,6 +20165,87 @@
           }
         },
         "summary": "`attach_file(source, to?)` (F86.7, F36.6): outside material, a file or a folder in any environment, copied into the record now with its source and hung on the item `to` names, or, with no `to` in a draft's definition chat, on nothing.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-store/cancellations": {
+      "post": {
+        "description": "Returns:     200: The call's effect line     400: The body is not an item's id and a handle     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project, or no person has the         handle     409: The item is a document a work item's run registered, a notice,         a work item, a wait or no ask Pilot added, it is done, or the         project is archived: the reason",
+        "operationId": "post__tools_pilot-store_cancellations",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelAskRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`cancel_ask(item, for)` (DB 297): an ask Pilot added, a decision, a confirmation, a question, an action or a document of its own, called off on the word of the person `for` names, given in the chat: done `cancelled`, by them, with no Undo and no job after it.",
         "tags": []
       }
     },

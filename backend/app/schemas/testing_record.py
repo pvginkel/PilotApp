@@ -24,7 +24,12 @@ from pydantic import (
 )
 
 from app.models.reference import ProjectState, TaskStatus
-from app.schemas.pilot_store import AnswerRequestSchema, BlockId, FinishRequestSchema
+from app.schemas.pilot_store import (
+    AnswerRequestSchema,
+    BlockId,
+    CancelAskRequestSchema,
+    FinishRequestSchema,
+)
 
 OPENING_WORDS = "An invented project, started for a test."
 """The opening of a project made without words of its own."""
@@ -239,6 +244,13 @@ class InventedRegistrationCreateSchema(BaseModel):
 class InventedChatAnswerCreateSchema(AnswerRequestSchema):
     """A person's answer to a block, given in the chat, which the project's
     brain records for them as its `answer` call does."""
+
+    tool_use_id: str | None = _tool_use_id()
+
+
+class InventedChatCancelCreateSchema(CancelAskRequestSchema):
+    """An ask Pilot added, which the project's brain calls off in the chat on
+    a person's word as its `cancel_ask` call does."""
 
     tool_use_id: str | None = _tool_use_id()
 

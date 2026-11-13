@@ -5239,6 +5239,249 @@ class TestRecordServiceAutopilotYes:
         assert _first_message(session, work) == CONTINUED.format(paths=REGISTERED_PATH)
 
 
+@pytest.mark.usefixtures("placing")
+class TestRecordServiceCallOff:
+    """The chat's cancel of an ask Pilot added, on a person's word (DB 297,
+    299): the item done `cancelled`, by them, its blocks as they stood, with
+    no undo and no job after it; refused on every other item."""
+
+    @pytest.mark.parametrize(
+        ("kind", "text"),
+        [
+            pytest.param("decision", DECISION, id="decision"),
+            pytest.param("confirmation", PUSH, id="confirmation"),
+            pytest.param("question", QUESTION_DRAFT, id="question"),
+            pytest.param("action", ACTION, id="action"),
+            pytest.param("document", TWO_ASKS, id="document"),
+        ],
+    )
+    def test_an_ask_pilot_added_is_done_cancelled_by_the_person_its_blocks_as_they_stood(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+        kind: str,
+        text: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, opened, _brain(session, opened), kind, "Camp", text
+        )
+        versions = _versions(session, document)
+        records = container.record_service()
+        clear_after_commit_callbacks()
+
+        with scoped_session(container):
+            records.call_off(item, person)
+
+        assert (item.done_cause_code, item.done_by_user_id) == ("cancelled", person.id)
+        assert item.done_at is not None
+        assert document.published_text == text
+        assert _versions(session, document) == versions
+        assert [
+            (block.answer, block.done_at)
+            for block in session.scalars(
+                select(Block).where(Block.document_id == document.id)
+            )
+        ] == [(None, None)] * len(pilot_dsl.parse(text).blocks)
+        assert _jobs_after(session, item) == []
+        assert _owed_events(engine_events) == []
+        assert ProjectChanged(opened.id) in engine_events
+        assert not records.offers_undo(item)
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(item)
+        assert refused.value.cause == "an item done as cancelled offers no undo"
+
+    def test_an_answer_given_before_it_stands(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "document",
+            "Camp",
+            TWO_ASKS,
+        )
+        records = container.record_service()
+        records.answer(document, "D1", person, "Dome")
+        text = document.published_text
+
+        records.call_off(item, person)
+
+        assert item.done_cause_code == "cancelled"
+        assert document.published_text == text
+        assert _block(session, document, "D1").answer == "Dome"
+
+    def test_it_clears_the_items_fold(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        item, _ = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "decision",
+            "Camp",
+            DECISION,
+        )
+        records = container.record_service()
+        records.fold(opened, item, True)
+
+        records.call_off(item, person)
+
+        session.refresh(item)
+        assert (item.done_cause_code, item.folded) == ("cancelled", False)
+
+    def test_a_registered_document_is_refused_naming_its_pages_cancel(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, opened, project_session)
+        asked, document = _registered(session, container, opened, run, TWO_ASKS)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().call_off(asked, person)
+
+        assert refused.value.operation == (f"cancel {tree_path(opened, document.path)}")
+        assert refused.value.cause == (
+            "a document a work item's run registered is called off by the Cancel"
+            " on its page, which ends that run"
+        )
+        assert _done(asked) == (None, None, None)
+        assert _done(session.get_one(Item, run.id))[1] == "turn_ended"
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "cause"),
+        [
+            pytest.param(
+                "notice",
+                NOTICE,
+                "a notice asks nothing, and takes its Read",
+                id="notice",
+            ),
+            pytest.param("review", REVIEW, "it is no ask Pilot added", id="review"),
+        ],
+    )
+    def test_a_notice_and_a_review_of_pilots_own_are_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+        kind: str,
+        text: str,
+        cause: str,
+    ) -> None:
+        item, _ = _bear(
+            session, container, opened, _brain(session, opened), kind, "Camp", text
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().call_off(item, person)
+
+        assert refused.value.cause == cause
+        assert _done(item) == (None, None, None)
+
+    def test_an_ask_no_session_of_pilots_own_added_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, _ = _bear(
+            session, container, opened, project_session, "decision", "Camp", DECISION
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().call_off(item, person)
+
+        assert refused.value.cause == "it is no ask Pilot added"
+        assert _done(item) == (None, None, None)
+
+    def test_pilot_calls_none_off_on_its_own_word(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        item, _ = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "decision",
+            "Camp",
+            DECISION,
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().call_off(item, _agent(session))
+
+        assert refused.value.cause == "Pilot calls off no ask on its own word"
+        assert _done(item) == (None, None, None)
+
+    def test_a_done_ask_and_an_archived_projects_are_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        brain = _brain(session, opened)
+        answered, document = _bear(
+            session, container, opened, brain, "decision", "Camp", DECISION
+        )
+        standing, _ = _bear(session, container, opened, brain, "action", "Key", ACTION)
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel", via=AnswerChannel.CHAT)
+
+        with pytest.raises(InvalidOperationException) as done:
+            records.call_off(answered, person)
+        opened.archived = True
+        session.flush()
+        with pytest.raises(InvalidOperationException) as archived:
+            records.call_off(standing, person)
+
+        assert done.value.cause == "the item is done"
+        assert answered.done_cause_code == "answered"
+        assert archived.value.cause == "its project is archived"
+        assert _done(standing) == (None, None, None)
+
+    def test_a_work_item_is_no_ask(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, opened, project_session)
+        work = session.get_one(Item, run.id)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().call_off(work, person)
+
+        assert refused.value.operation == f"cancel item {work.id}"
+        assert refused.value.cause == "a work item is no ask"
+
+
 def _work_item(
     session: DbSession,
     container: ServiceContainer,

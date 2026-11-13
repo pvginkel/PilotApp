@@ -7,7 +7,8 @@
  * reads only under the gold strip, its blocks drawn whole, which links that work item and offers
  * *Stop and take over*, the take-over stopping that work; while the run doing it waits on the
  * person's answer to a document it registered, the strip links that document instead, with no Stop,
- * and that document's Cancel ends the run, the action the person's again at once (F28.9). Once the
+ * and that document's Cancel, which asks first in its own place, naming the documents it closes and
+ * what it gives back, ends the run, the action the person's again at once (F28.9). Once the
  * work doing it fails or is stopped, the action is the person's again, live, unfolded with its
  * controls, its head saying Pilot's work left it undone, and their Done marks it done as any
  * action's Done, the claim gone; while that work is in flight the server takes no Done on it (DB
@@ -79,6 +80,10 @@ const ASK_PATH = '/work/Example/which-token.md';
 const ASK_TITLE = 'Which token goes first?';
 // What the work doing the action asks the person before it goes on.
 const ASK = `# ${ASK_TITLE}\n\n\`\`\`question id=Q1\n\`\`\`\n`;
+const NOTES_PATH = '/work/Example/token-notes.md';
+const NOTES_TITLE = 'Where the token is used';
+// A second document of the work doing the action: a report, with no ask.
+const NOTES = `# ${NOTES_TITLE}\n\nJenkins and GitHub Actions.\n`;
 
 interface Fixtures {
   people: People;
@@ -152,21 +157,29 @@ const colourOf = (segment: Locator) => segment.evaluate((each) => getComputedSty
 /**
  * The cut-over claimed, the roll-out with it where `rollOut` says so, D1 answered, and the work doing
  * A1 registering a question to the person at its turn's end, read, the pass after it ended, so that
- * the run waits on their answer; answers the ids, the question's `asking`.
+ * the run waits on their answer; with `notes`, that work registers its notes after the question, a
+ * second document of the run; answers the ids, the question's `asking` and the notes' `noting`.
  */
-async function waiting(fixtures: Fixtures, heading = TOKEN, rollOut = false) {
+async function waiting(fixtures: Fixtures, heading = TOKEN, rollOut = false, notes = false) {
   const { projects, controller, chats } = fixtures;
   const { project, document, rotating, others } = await claimed(fixtures, { heading, rollOut });
   await projects.answer(document, 'D1', 'Friday');
   const { environment, session } = await turnOf(fixtures, project, rotating);
   await controller.putFile(environment, ASK_PATH, ASK);
   const asking = await projects.register(rotating, ASK_PATH);
+  let noting: string | null = null;
+  if (notes) {
+    await controller.putFile(environment, NOTES_PATH, NOTES);
+    noting = await projects.register(rotating, NOTES_PATH);
+  }
   const passed = await chats.passing(project);
   await controller.finish(environment, session);
-  await expect.poll(async () => (await projects.item(project, asking)).awaiting_read).toBe(false);
+  for (const each of noting === null ? [asking] : [asking, noting]) {
+    await expect.poll(async () => (await projects.item(project, each)).awaiting_read).toBe(false);
+  }
   await passed();
   await expect.poll(async () => (await projects.item(project, document)).pilots_work?.doing).toBe('waiting_on_answer');
-  return { project, document, asking, others };
+  return { project, document, asking, noting, others };
 }
 
 test.describe('A claimed action', () => {
@@ -327,7 +340,7 @@ test.describe('A claimed action', () => {
     await expect(overlay.send).toBeEnabled();
   });
 
-  test('while the run doing it waits on the person’s answer to a document it registered, its document opened says so on the strip and links that document, with no Stop; that document’s Cancel, saying it is part of the work on the first and naming the action, closes it, and the action is the person’s, live, its head saying Pilot’s work left it undone', async ({
+  test('while the run doing it waits on the person’s answer to a document it registered, its document opened says so on the strip and links that document, with no Stop; that document’s Cancel, saying it is part of the work on the first and naming the action, asks first in its place, Keep and Esc leaving the run as it was, and confirmed closes it, and the action is the person’s, live, its head saying Pilot’s work left it undone', async ({
     people,
     projects,
     controller,
@@ -355,9 +368,33 @@ test.describe('A claimed action', () => {
     await expect(overlay.cancel.line).toHaveText(`Pilot asks this as part of its work on ${CUT_OVER_TITLE}.`);
     await expect(overlay.cancel.links).toHaveAttribute('href', documentAddress(project, document));
     await expect(overlay.cancel.button).toHaveText(`Cancel and take back “${TOKEN}”`);
+    // It asks first, in the button's place, Keep focused: Keep and Esc each leave the run as it was.
     await overlay.cancel.button.click();
+    await expect(overlay.cancel.button).toHaveCount(0);
+    await expect(overlay.cancel.confirm.text).toHaveText(
+      `End that work? This document closes for good, with no Undo, and “${TOKEN}” is yours again.`,
+    );
+    await expect(overlay.cancel.confirm.yes).toHaveText('Confirm');
+    await expect(overlay.cancel.confirm.keep).toHaveText('Keep');
+    await expect(overlay.cancel.confirm.keep).toBeFocused();
+    await expect(overlay.cancel.line).toBeVisible();
+    await overlay.cancel.confirm.keep.click();
+    await expect(overlay.cancel.confirm.root).toHaveCount(0);
+    await expect(overlay.cancel.button).toBeFocused();
+    await overlay.cancel.button.press('Enter');
+    await expect(overlay.cancel.confirm.keep).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(overlay.cancel.confirm.root).toHaveCount(0);
+    await expect(overlay.cancel.button).toBeFocused();
+    await expect(page).toHaveURL(documentAddress(project, asking));
+    expect((await projects.item(project, asking)).done).toBeNull();
+    expect((await projects.item(project, document)).pilots_work?.doing).toBe('waiting_on_answer');
+
+    await overlay.cancel.button.click();
+    await overlay.cancel.confirm.yes.click();
     await expect(overlay.done).toBeVisible();
     await expect(overlay.cancel.button).toHaveCount(0);
+    await expect(overlay.cancel.confirm.root).toHaveCount(0);
     const cancelled = (await projects.item(project, asking)).done;
     expect([cancelled?.cause, cancelled?.undo]).toEqual(['cancelled', false]);
 
@@ -399,6 +436,38 @@ test.describe('A claimed action', () => {
     await expect(overlay.cancel.links.nth(0)).toHaveAttribute('href', documentAddress(project, document));
     await expect(overlay.cancel.links.nth(1)).toHaveAttribute('href', documentAddress(project, others[0]));
     await expect(overlay.cancel.button).toHaveText(`Cancel and take back “${TOKEN}” and “${ROLL_OUT_TITLE}”`);
+    await overlay.cancel.button.click();
+    await expect(overlay.cancel.confirm.text).toHaveText(
+      `End that work? This document closes for good, with no Undo, and “${TOKEN}” and “${ROLL_OUT_TITLE}” are yours again.`,
+    );
+  });
+
+  test('the Cancel of a run that put two documents to the person names the other in its question, on either, and confirmed closes both at once', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    overlay,
+  }) => {
+    const { project, asking, noting } = await waiting({ people, projects, controller, chats }, TOKEN, false, true);
+
+    await overlay.open(project, noting!);
+    await overlay.cancel.button.click();
+    await expect(overlay.cancel.confirm.text).toHaveText(
+      `End that work? This document and “${ASK_TITLE}” close for good, with no Undo, and “${TOKEN}” is yours again.`,
+    );
+    await overlay.cancel.confirm.keep.click();
+
+    await overlay.open(project, asking);
+    await overlay.cancel.button.click();
+    await expect(overlay.cancel.confirm.text).toHaveText(
+      `End that work? This document and “${NOTES_TITLE}” close for good, with no Undo, and “${TOKEN}” is yours again.`,
+    );
+    await overlay.cancel.confirm.yes.click();
+    await expect(overlay.done).toBeVisible();
+    for (const each of [asking, noting!]) {
+      expect((await projects.item(project, each)).done?.cause).toBe('cancelled');
+    }
   });
 
   test('once the work doing it is stopped, it unfolds with its controls, its head saying Pilot’s work left it undone, and a person’s Done marks it done as any action’s, the claim gone, and the document’s answers can be sent', async ({
@@ -532,7 +601,7 @@ test.describe('A researched block', () => {
 test.describe('A claimed action on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('while the run doing it waits on the person’s answer to a document it registered, that document’s Cancel names the action whole, its words wrapping inside the foot, a long name inside itself', async ({
+  test('while the run doing it waits on the person’s answer to a document it registered, that document’s Cancel names the action whole, its words wrapping inside the foot, a long name inside itself, and so does its question', async ({
     people,
     projects,
     controller,
@@ -548,5 +617,16 @@ test.describe('A claimed action on a phone', () => {
     const button = (await overlay.cancel.button.boundingBox())!;
     expect(button.x + button.width).toBeLessThanOrEqual(foot.x + foot.width);
     expect(await overlay.cancel.button.evaluate((each) => each.scrollWidth <= each.clientWidth)).toBe(true);
+
+    // Its question wraps inside the foot too, Confirm and Keep within it.
+    await overlay.cancel.button.click();
+    await expect(overlay.cancel.confirm.keep).toBeFocused();
+    const asked = (await overlay.foot.boundingBox())!;
+    for (const each of [overlay.cancel.confirm.text, overlay.cancel.confirm.yes, overlay.cancel.confirm.keep]) {
+      const box = (await each.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(asked.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(asked.x + asked.width);
+    }
+    expect(await overlay.cancel.confirm.text.evaluate((each) => each.scrollWidth <= each.clientWidth)).toBe(true);
   });
 });

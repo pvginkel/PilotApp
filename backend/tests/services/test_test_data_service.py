@@ -2300,6 +2300,44 @@ class TestAnswerInChat:
         assert raised.value.cause == "its chat has no turn in flight"
 
 
+class TestCancelInChat:
+    def test_the_ask_is_called_off_through_the_chat_its_effect_in_the_turn_in_flight(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        person: User,
+    ) -> None:
+        item = container.test_data_service().item(
+            camp.id, "decision", "Which tent?", DECISION_TEXT, by_pilot=True
+        )
+        chat, writer = _chat_in_flight(container, camp, person)
+
+        line = container.test_data_service().cancel_in_chat(
+            camp.id, item.id, "ada", tool_use_id="toolu_01"
+        )
+
+        assert (line.verb, line.label, line.item_id) == (
+            "Cancelled",
+            "Which tent?",
+            item.id,
+        )
+        assert (item.done_cause_code, item.done_by_user_id) == ("cancelled", person.id)
+        [effect] = session.scalars(select(Effect).where(Effect.item_id == item.id))
+        assert writer.turn is not None
+        assert effect.turn_id == writer.turn.id
+
+    def test_a_project_with_no_chat_open_is_refused(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().cancel_in_chat(
+                camp.id, uuid.uuid4(), "ada", tool_use_id=None
+            )
+
+        assert raised.value.cause == "the project has no chat open"
+
+
 class TestFinishInChat:
     def test_with_archive_the_chats_brain_finishes_and_the_turns_author_archives(
         self,

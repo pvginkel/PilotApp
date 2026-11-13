@@ -128,6 +128,7 @@ from app.services.working_on import (
     holds,
     jobs_on,
     pilots_work,
+    run_documents,
 )
 
 WORK = "work"
@@ -1038,6 +1039,10 @@ class TimelineService:
             if cancel.offered
         }
         taken = [each for cancel in offered.values() for each in cancel.takes_back]
+        closed = {
+            run_id: run_documents(self.db, run_id)
+            for run_id in {cancel.run_id for cancel in offered.values()}
+        }
         named = set(reading.held) | reading.undone | {each.block_id for each in taken}
         blocks = (
             {
@@ -1058,6 +1063,7 @@ class TimelineService:
             {each.asked_in for each in doing.values() if each.asked_in}
             | {hold.asked_in for hold in reading.held.values() if hold.asked_in}
             | {each.document_id for each in taken}
+            | {each for documents in closed.values() for each in documents}
         )
         linked_items = linked | linked_documents
         titles = (
@@ -1096,8 +1102,9 @@ class TimelineService:
 
         def link(item_id: uuid.UUID) -> DocumentLinkSchema:
             title, source_path = titles[item_id]
-            # `asked_in` names a registered document alone (`working_on`), and
-            # a claim or a research is of one (DB 261, 293).
+            # `asked_in` names a registered document alone (`working_on`), a
+            # claim or a research is of one (DB 261, 293), and a Cancel closes
+            # registered documents alone (DB 298).
             assert source_path is not None
             return DocumentLinkSchema(
                 id=item_id, title=title or PurePosixPath(source_path).name
@@ -1138,7 +1145,10 @@ class TimelineService:
             undone=frozenset(blocks[block_id] for block_id in reading.undone),
             cancels={
                 item_id: CancelSchema(
-                    takes_back=[taken_back(each) for each in cancel.takes_back]
+                    takes_back=[taken_back(each) for each in cancel.takes_back],
+                    also_closes=[
+                        link(each) for each in closed[cancel.run_id] if each != item_id
+                    ],
                 )
                 for item_id, cancel in offered.items()
             },

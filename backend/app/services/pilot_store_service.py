@@ -128,6 +128,7 @@ MARKED: dict[Mark, str] = {
     "read": "Marked read",
     "reviewed": "Marked reviewed",
 }
+CANCELLED = "Cancelled"
 STOPPED = "Stopped"
 FINISHED = "Finished"
 FINISHED_AND_ARCHIVED = "Finished and archived"
@@ -538,6 +539,35 @@ class PilotStoreService:
                 case "reviewed":
                     self.record_service.reviewed(item, user, via=AnswerChannel.CHAT)
         line = EffectLine(MARKED[mark], self._title(item), item_id=item.id)
+        self.effect_service.record(
+            brain.session_id,
+            tool_use_id,
+            line,
+            [Change(EffectKind.MARKED, item_id=item.id)],
+        )
+        return line
+
+    def cancel_ask(
+        self,
+        brain: Brain,
+        item_id: uuid.UUID,
+        person: str,
+        tool_use_id: str | None,
+    ) -> EffectLine:
+        """The ask Pilot added called off on the word of the person whose
+        handle is `person`, given in the chat (DB 297): the item done
+        `cancelled`, by them, as the record calls it off. The call
+        `tool_use_id`'s effect is "Cancelled · <title>", of kind `marked`.
+
+        Raises:
+            RecordNotFoundException: the item is not of the brain's project,
+                or no person has the handle.
+            InvalidOperationException: the record refuses the cancel.
+        """
+        self._project(brain)
+        item = self._item(brain, item_id)
+        self.record_service.call_off(item, self._person(person))
+        line = EffectLine(CANCELLED, self._title(item), item_id=item.id)
         self.effect_service.record(
             brain.session_id,
             tool_use_id,

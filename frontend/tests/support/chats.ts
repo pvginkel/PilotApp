@@ -237,6 +237,25 @@ export class Chats {
   }
 
   /**
+   * The ask `item` called off on `person`'s word through the project's open chat, as its brain's
+   * `cancel_ask` calls it off while its turn is in flight (POST
+   * /api/testing/projects/<id>/chat/cancellations): the effect of the call `toolUseId` names.
+   */
+  async cancel(projectId: string, item: string, person: string, { toolUseId }: { toolUseId?: string } = {}): Promise<void> {
+    // As `answer()`: refused until the backend has written the chat's send accepted.
+    let response!: APIResponse;
+    await expect
+      .poll(async () => {
+        response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/cancellations`, {
+          data: { item, for: person, tool_use_id: toolUseId },
+        });
+        return response.status() === 409 && (await response.text()).includes(NO_TURN_IN_FLIGHT);
+      })
+      .toBe(false);
+    expect(response.status(), await response.text()).toBe(201);
+  }
+
+  /**
    * The project finished through its open chat as its brain's `finish` finishes it while its turn is
    * in flight (F86.5), with `archive` Finish and archive, the archive the turn's author's.
    */

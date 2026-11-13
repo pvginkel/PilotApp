@@ -47,6 +47,7 @@ const STORE_VERBS: Record<string, [string, string]> = {
   answer: ['Recorded an answer', 'Recording an answer'],
   add_item: ['Added an item', 'Adding an item'],
   mark: ['Marked an item', 'Marking an item'],
+  cancel_ask: ['Called off an ask', 'Calling off an ask'],
   attach_file: ['Attached', 'Attaching'],
   stop_work: ['Stopped a session', 'Stopping a session'],
   finish: ['Finished the project', 'Finishing the project'],

@@ -1157,6 +1157,91 @@ class TestPilotStoreServiceMark:
         assert _effects(session) == []
 
 
+class TestPilotStoreServiceCancelAsk:
+    @pytest.mark.usefixtures("placing")
+    def test_the_ask_is_called_off_for_the_person_its_effect_a_mark(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "decision", "Which tent?", DECISION)
+
+        line = _service(container).cancel_ask(
+            _admitted(run), item.id, "ada", TOOL_USE_ID
+        )
+
+        assert (item.done_cause_code, item.done_by_user_id) == ("cancelled", person.id)
+        assert _block(session, item, "D1").answer is None
+        assert (line.verb, line.label, line.item_id) == (
+            "Cancelled",
+            "Which tent?",
+            item.id,
+        )
+        assert _effect_record(session, run)["effect"] == {
+            "verb": "Cancelled",
+            "label": "Which tent?",
+            "itemId": str(item.id),
+        }
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.item_id) == (EffectKind.MARKED, item.id)
+        assert _jobs_after(session, item) == []
+
+    def test_a_registered_document_is_the_records_refusal_and_writes_no_effect(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _registered(session, container, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).cancel_ask(_admitted(run), item.id, "ada", TOOL_USE_ID)
+
+        assert refused.value.cause == (
+            "a document a work item's run registered is called off by the Cancel"
+            " on its page, which ends that run"
+        )
+        assert item.done_at is None
+        assert _effects(session) == []
+
+    def test_an_item_of_another_project_and_an_unknown_person_are_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "decision", "Which tent?", DECISION)
+        other = _other_project(session, person)
+        theirs = _bear(
+            container,
+            other,
+            _brain(session, other, environment, token="other-token"),
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        service = _service(container)
+
+        with pytest.raises(RecordNotFoundException) as not_ours:
+            service.cancel_ask(_admitted(run), theirs.id, "ada", TOOL_USE_ID)
+        with pytest.raises(RecordNotFoundException) as nobody:
+            service.cancel_ask(_admitted(run), item.id, "zed", TOOL_USE_ID)
+
+        assert not_ours.value.message == f"Item {theirs.id} was not found"
+        assert nobody.value.message == "Person zed was not found"
+        assert (item.done_at, theirs.done_at) == (None, None)
+
+
 class TestPilotStoreServiceStopWork:
     @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.HELD])
     def test_a_work_items_session_is_stopped_by_pilot(

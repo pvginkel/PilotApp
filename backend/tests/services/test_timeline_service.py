@@ -3660,28 +3660,35 @@ class TestPilotsWork:
         survey = camp.registered(doing, _SURVEY)
         camp.ended(doing)
         camp.ended(camp.job_after(doing))
-        cancel = {
-            "takes_back": [
-                {
-                    "document": _link(checklist, "Release checklist"),
-                    "block": "A1",
-                    "heading": "Push the tag",
-                    "kind": "action",
-                    "research": False,
-                },
-                {
-                    "document": _link(trip, "The trip"),
-                    "block": "Q2",
-                    "heading": None,
-                    "kind": "question",
-                    "research": True,
-                },
-            ]
+        takes_back = [
+            {
+                "document": _link(checklist, "Release checklist"),
+                "block": "A1",
+                "heading": "Push the tag",
+                "kind": "action",
+                "research": False,
+            },
+            {
+                "document": _link(trip, "The trip"),
+                "block": "Q2",
+                "heading": None,
+                "kind": "question",
+                "research": True,
+            },
+        ]
+        # Each names the run's other open document, which it closes too.
+        on_question = {
+            "takes_back": takes_back,
+            "also_closes": [_link(survey, "The survey")],
+        }
+        on_survey = {
+            "takes_back": takes_back,
+            "also_closes": [_link(question, "Where do we pitch?")],
         }
 
         for read in (_entry(camp, question), _read(camp.container, question)):
-            assert read["cancel"] == cancel
-        assert _entry(camp, survey)["cancel"] == cancel
+            assert read["cancel"] == on_question
+        assert _entry(camp, survey)["cancel"] == on_survey
         assert _entry(camp, checklist)["cancel"] is None
 
         camp.container.item_service().cancel(ADA, survey.id)

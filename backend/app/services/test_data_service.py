@@ -1275,6 +1275,35 @@ class TestDataService:
             tool_use_id=tool_use_id,
         )
 
+    def cancel_in_chat(
+        self,
+        project_id: uuid.UUID,
+        item_id: uuid.UUID,
+        person: str,
+        *,
+        tool_use_id: str | None,
+    ) -> EffectLine:
+        """The ask `item_id` called off on the word of the person whose handle
+        is `person`, through the project's open chat as its brain's
+        `cancel_ask` calls it off (DB 297): the call `tool_use_id`'s effect
+        in the chat's Turn in flight.
+
+        Raises:
+            RecordNotFoundException: no project has the id, the item is not
+                of it, or no person has the handle.
+            InvalidOperationException: the project has no chat open, its chat
+                has no turn in flight, or the record refuses the cancel.
+        """
+        return self.pilot_store_service.cancel_ask(
+            self._chats_brain(
+                project_id,
+                f"cancel item {item_id} in the chat of project {project_id}",
+            ),
+            item_id,
+            person,
+            tool_use_id,
+        )
+
     def finish_in_chat(
         self, project_id: uuid.UUID, *, archive: bool, tool_use_id: str | None
     ) -> EffectLine:

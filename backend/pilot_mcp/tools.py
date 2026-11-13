@@ -476,6 +476,36 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         )
 
     @mcp.tool()
+    @_taking_for
+    async def cancel_ask(
+        item: Annotated[uuid.UUID, Field(description="The ask's item id")],
+        for_: Annotated[
+            str,
+            Field(
+                alias=_FOR,
+                min_length=1,
+                description="The handle of the person on whose word it is called off",
+            ),
+        ],
+        ctx: Call,
+    ) -> Recorded:
+        """Call off an ask you added, once a person says in the chat that it
+        is obsolete: `for` names them by handle. The ask is a decision, a
+        confirmation, a question, an action or a document that an `add_item`
+        of yours added. It is closed as cancelled, by them, its blocks left
+        as they stand: its line shows the cancelled mark, it has no undo, and
+        no job follows it. Never call one off on your own word. A document a
+        work item's run registered is refused: the Cancel on its page, which
+        ends that run, is the one way to call it off. An item not of your
+        project, a `for` that names no person, a notice, a work item, a wait,
+        an item no `add_item` of yours added, or one that is done is refused
+        with the reason, and nothing is closed. Answers `{effect}`, the
+        call's effect line."""
+        return await api.cancel_ask(
+            _authorization(ctx), _tool_use_id(ctx), item=item, person=for_
+        )
+
+    @mcp.tool()
     async def stop_work(
         item: Annotated[uuid.UUID, Field(description="The work item's id")],
         ctx: Call,

@@ -71,7 +71,13 @@ export class OverlayPage {
   /** The strip under the head while the document is Pilot's (F28.9). */
   readonly strip: { root: Locator; text: Locator; link: Locator; stop: Locator };
   /** The foot's Cancel of a document a run of Pilot's put to the person (F28.9): its line, the line's links, its button. */
-  readonly cancel: { line: Locator; links: Locator; button: Locator };
+  readonly cancel: {
+    line: Locator;
+    links: Locator;
+    button: Locator;
+    /** The Cancel's question, in its button's place: its words, Confirm and Keep. */
+    confirm: { root: Locator; text: Locator; yes: Locator; keep: Locator };
+  };
   readonly foot: Locator;
   readonly done: Locator;
   readonly doneTime: Locator;
@@ -146,6 +152,12 @@ export class OverlayPage {
       line: this.foot.getByTestId('overlay.cancel.line'),
       links: this.foot.getByTestId('overlay.cancel.link'),
       button: this.foot.getByTestId('overlay.cancel'),
+      confirm: {
+        root: this.foot.getByTestId('overlay.cancel.confirm'),
+        text: this.foot.getByTestId('overlay.cancel.confirm.text'),
+        yes: this.foot.getByTestId('overlay.cancel.confirm.yes'),
+        keep: this.foot.getByTestId('overlay.cancel.confirm.keep'),
+      },
     };
     this.done = this.root.getByTestId('overlay.done');
     this.doneTime = this.root.getByTestId('overlay.done.time');

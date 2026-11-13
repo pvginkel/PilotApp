@@ -5,8 +5,9 @@ open items (F5.1); Archive's and Reopen's close of the archive question (DB
 a work item's place and its done at its turn's end (DB Work, decision 44);
 the claimed actions a work item is named for at its `add_item` (DB
 decision 64); an item of Pilot's own done at the save that writes its last
-open block's `done` (DB 163); and a person's fold of an open item and their
-unfold (DB decision 75).
+open block's `done` (DB 163); a person's fold of an open item and their
+unfold (DB decision 75); and the chat's cancel of an ask Pilot added, on a
+person's word (DB 297).
 
 Each is a write of the caller's transaction, under the document's row lock
 (TD §8.5), a close and an Undo under its project's row first, and refused
@@ -42,6 +43,7 @@ from app.engine.documents import (
     ARCHIVE,
     ARCHIVE_BLOCK,
     ARCHIVE_QUESTION,
+    CONFIRMATION,
     DOCUMENT,
     KEEP,
     OPENING,
@@ -91,6 +93,15 @@ WITHDRAWN = "withdrawn"
 ENDS_RUN = (FINISHED, CANCELLED)
 """The Done Causes of a registered document's close that ends its run: no
 continuation follows it and it owes no write-back (D049; DB 299)."""
+
+ASKS = ("decision", CONFIRMATION, "question", "action", DOCUMENT)
+"""The kinds of an ask Pilot added that the chat calls off (DB 297)."""
+
+REGISTERED_CANCEL = (
+    "a document a work item's run registered is called off by the Cancel on its"
+    " page, which ends that run"
+)
+"""Why the chat's cancel takes no registered document (DB 297)."""
 
 YES = "Yes"
 
@@ -587,6 +598,43 @@ class RecordService:
             item.done_by_user_id = user.id
         if items:
             self.view_service.timeline_moved(project)
+
+    def call_off(self, item: Item, user: User) -> None:
+        """The chat's cancel of an ask Pilot added, on the word of the person
+        `user` (DB 297, 299): an open decision, confirmation, question, action
+        or document that a session of Pilot's own added, done at once by
+        `user`, its Done Cause `cancelled`, which offers no undo. Its text
+        and its blocks stand as they are; no job is placed after it and no
+        run is ended.
+
+        Raises:
+            InvalidOperationException: the item is a work item or a wait; the
+                project is archived; `user` is Pilot; the item is a
+                registered document, a notice, or no ask Pilot added; or it
+                is done.
+        """
+        if self.references.form(self.db, item.kind_code) != PROSE:
+            raise InvalidOperationException(
+                f"cancel item {item.id}", f"a {item.kind_code} item is no ask"
+            )
+        document = self.db.get_one(Document, item.id)
+        project, _ = self._closing(document)
+        operation = f"cancel {tree_path(project, document.path)}"
+        _not_archived(project, operation)
+        _a_person(user, operation, "Pilot calls off no ask on its own word")
+        if document.source_path is not None:
+            raise InvalidOperationException(operation, REGISTERED_CANCEL)
+        if item.kind_code == NOTICE:
+            raise InvalidOperationException(
+                operation, "a notice asks nothing, and takes its Read"
+            )
+        if item.kind_code not in ASKS or not self.pilots_own(item):
+            raise InvalidOperationException(operation, "it is no ask Pilot added")
+        _not_done(item, operation)
+        item.done_at = _now()
+        item.done_cause_code = CANCELLED
+        item.done_by_user_id = user.id
+        self.view_service.timeline_moved(project)
 
     def close_archive_question(
         self,

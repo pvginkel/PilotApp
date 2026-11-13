@@ -184,6 +184,23 @@ class MarkRequestSchema(BaseModel):
     )
 
 
+class CancelAskRequestSchema(BaseModel):
+    """An ask Pilot added, called off on a person's word."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item: uuid.UUID = Field(
+        description="The ask's item id",
+        examples=["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"],
+    )
+    for_: str = Field(
+        alias="for",
+        min_length=1,
+        description="The handle of the person on whose word it is called off",
+        examples=["ada"],
+    )
+
+
 class StopRequestSchema(BaseModel):
     """A work item whose session to stop."""
 
