@@ -21,7 +21,15 @@ const QUESTION = '```question id=Q1\n```\n';
 const DECISION = '```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n';
 
 const WRITES: { what: string; kind: 'decision' | 'notice'; text: string; act: (item: ReturnType<TimelinePage['item']>) => Promise<void> }[] = [
-  { what: 'An option picked', kind: 'decision', text: DECISION, act: (item) => item.block.option('Tunnel').click() },
+  {
+    what: 'An option chosen and sent',
+    kind: 'decision',
+    text: DECISION,
+    act: async (item) => {
+      await item.block.option('Tunnel').click();
+      await item.block.answerSend.click();
+    },
+  },
   { what: 'A notice marked Read', kind: 'notice', text: 'A storm comes.\n', act: (item) => item.read.click() },
 ];
 

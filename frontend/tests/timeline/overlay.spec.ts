@@ -481,6 +481,28 @@ test.describe('On a phone', () => {
     await expect(page).toHaveURL(projectAddress(id));
   });
 
+  test('a one-ask item’s view takes its choice and its block’s Send, as the timeline does, and has no foot', async ({ people, projects, overlay }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Phone ask'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    await overlay.open(id, decision);
+    const block = overlay.blockAt('D1');
+
+    await expect(overlay.foot).toHaveCount(0);
+    await expect(block.answerSend).toBeDisabled();
+    await block.option('Tunnel').click();
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await expect(overlay.doneChip).toHaveCount(0);
+    expect((await projects.block(id, decision)).answer).toBeNull();
+    // The choice stands again after a reload.
+    await overlay.open(id, decision);
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+
+    await block.answerSend.click();
+    await expect(overlay.done).toBeVisible();
+    expect(await projects.block(id, decision)).toMatchObject({ answer: 'Tunnel', by: { handle: me.handle } });
+  });
+
   test('a document’s view lies over the head and its drawer’s button, which its arrow back gives back to switch projects', async ({
     page,
     people,

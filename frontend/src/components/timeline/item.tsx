@@ -41,7 +41,7 @@ import { DocumentCard, InlineDocument } from '@/components/timeline/document';
 import { isCard } from '@/components/timeline/document-state';
 import { ItemHead } from '@/components/timeline/item-head';
 import { JobButton, JobMark, JobMenuRow } from '@/components/timeline/job';
-import { kindOf } from '@/components/timeline/kinds';
+import { isOneAsk, kindOf } from '@/components/timeline/kinds';
 import { PilotsButton } from '@/components/timeline/pilots';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WaitItem } from '@/components/timeline/wait';
@@ -219,9 +219,6 @@ function ItemText({ body, ask }: { body: BodyPart[]; ask: ReactNode }) {
   );
 }
 
-/** One ask in an item of its own: its line shows the person's answer under its title. */
-const ONE_ASK = new Set<TimelineItem['kind']>(['decision', 'confirmation', 'question', 'action', 'archive_question']);
-
 interface Said {
   by: TimelineUser;
   words: string;
@@ -229,11 +226,11 @@ interface Said {
 }
 
 /**
- * A person's answer to a one-ask item, and its note; never what Pilot did. A confirmation's Yes or
+ * A person's answer to a one-ask item, which its line shows under its title, and its note; never what Pilot did. A confirmation's Yes or
  * No is no words: only its reason is.
  */
 function saidIn(item: TimelineItem): Said | null {
-  if (!ONE_ASK.has(item.kind)) return null;
+  if (!isOneAsk(item)) return null;
   const [block] = blocksOf(item);
   if (block === undefined || block.by === null || block.by.kind === 'agent') return null;
   const words =
@@ -249,7 +246,7 @@ function saidIn(item: TimelineItem): Said | null {
 
 /** Where a one-ask item's answer given in the chat was recorded, which *In the chat* goes to. */
 function inChatOf(item: TimelineItem) {
-  if (!ONE_ASK.has(item.kind)) return null;
+  if (!isOneAsk(item)) return null;
   const [block] = blocksOf(item);
   return block?.in_chat ?? null;
 }

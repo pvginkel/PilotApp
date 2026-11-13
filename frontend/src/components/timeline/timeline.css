@@ -136,6 +136,8 @@
   .item-sub { margin: 0 0 6px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
   .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  /* A one-ask item's Send ends its block's last row, at the right where the row wraps too. */
+  .item-actions .send-choice { margin-left: auto; }
   /* A work item's progress button, in the row under its line: its steps open from its left edge,
      within the card's margins on a phone. */
   .progress-anchor .plan-pop { right: auto; left: 0; width: min(320px, calc(100vw - 58px)); }
@@ -297,6 +299,9 @@
   }
   .console:focus-within { box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
   .options .console { flex: none; }
+  /* In a one-ask item the block's Send stands in the row under Other's console, or under it where
+     its own row wraps: kept in view with the console, the row's 12px and the button's 34px. */
+  .console.over-send { scroll-margin-bottom: 70px; }
   .console .field { flex: 1; min-width: 0; height: 36px; border-width: 7px 1px; outline: 0; background: transparent; }
   .console .field:focus { box-shadow: none; }
   .console-btn {

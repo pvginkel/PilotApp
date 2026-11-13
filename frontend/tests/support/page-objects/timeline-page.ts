@@ -164,10 +164,11 @@ export class TimelinePage {
       lineAttachmentItems: root.getByTestId('timeline.line.attachments.item'),
       block: blockParts(this.page, root.getByTestId('timeline.block')),
       confirm: this.confirm(root),
-      /** The archive question's two buttons (F5.6). */
+      /** The archive question's two buttons, which choose, and its Send (F5.6). */
       archiveQuestion: {
         archive: root.getByTestId('timeline.archive-question.archive'),
         keep: root.getByTestId('timeline.archive-question.keep'),
+        send: root.getByTestId('timeline.archive-question.send'),
       },
       edited: root.getByTestId('timeline.item.edited'),
       editedTime: root.getByTestId('timeline.item.edited.time'),
@@ -258,12 +259,13 @@ export class TimelinePage {
     };
   }
 
-  /** An open confirmation's card: its proposal, Yes and No in its block, No's console, Details. */
+  /** An open confirmation's card: its proposal, Yes and No in its block, the block's Send (F32.3), No's console, Details. */
   private confirm(item: Locator) {
     return {
       proposal: item.getByTestId('timeline.confirm.proposal'),
       yes: item.getByTestId('timeline.confirm.yes'),
       no: item.getByTestId('timeline.confirm.no'),
+      answerSend: item.getByTestId('timeline.block.send'),
       console: item.getByTestId('timeline.confirm.console'),
       field: item.getByTestId('timeline.confirm.console.field'),
       send: item.getByTestId('timeline.confirm.console.send'),
@@ -358,7 +360,9 @@ export function settledHeadParts(within: Locator, blockId: string) {
  * An open item's block, its head, its answer; a decision's options, a question's field and Send,
  * an action's paste-back, Done and its options as buttons, and Pilot's claim on it, or the mark of
  * Pilot's work that left it undone; Other and its console; a confirmation block's proposal, Yes
- * and No, and No's console; a block Pilot's work holds as its section's line (F31.7).
+ * and No, and No's console; a block Pilot's work holds as its section's line (F31.7). `answerSend`
+ * is the block's own Send, a question's and a one-ask item's (F32.3); `send` and `noSend` are a
+ * console's, which a one-ask item's console has none of.
  */
 export function blockParts(page: Page, root: Locator) {
   return {

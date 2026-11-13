@@ -1,13 +1,16 @@
 /**
  * A decision answered inline (F19): its options as full-width rows, a proposal as one row that
- * agrees, Other's console in the growing text field (F17.2, F19.4, F115, F110, F133), each answer
- * saved as given and the item's done (F32.1, F32.3); and its block as an answer Pilot gave or a
- * deferral reads it: closed, opening to every option, with who answered in its head (F31).
+ * agrees, Other's console in the growing text field (F17.2, F19.4, F115, F110, F133); in an item of
+ * its own a press only chooses and the block's Send answers (F32.3), the choice kept in the browser
+ * until then, the answer saved as given and the item's done (F32.1); and its block as an answer
+ * Pilot gave or a deferral reads it: closed, opening to every option, with who answered in its
+ * head (F31).
  */
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { slowNetwork } from '../support/network';
+import { documentAddress } from '../support/page-objects/overlay-page';
 import type { Projects } from '../support/projects';
 import type { components } from '@/lib/api/generated/types';
 
@@ -80,7 +83,7 @@ test.describe('A decision', () => {
     }
   });
 
-  test('saves the option picked as given, the row filling and the others fading while it saves, Other among them, then reads as its done line', async ({
+  test('saves the option chosen as given on its Send, the row filling and the others fading while it saves, Other among them, then reads as its done line', async ({
     page,
     people,
     projects,
@@ -93,12 +96,14 @@ test.describe('A decision', () => {
     const item = timeline.item(decision);
     const { block } = item;
 
-    const restore = await slowNetwork(page, 1_000);
     await block.option('Tunnel').click();
+    const restore = await slowNetwork(page, 1_000);
+    await block.answerSend.click();
     await expect(block.option('Tunnel')).toHaveClass(/\bchosen\b/);
     await expect(block.option('Tunnel')).toBeDisabled();
     await expect(block.option('Dome')).toHaveClass(/\bfaded\b/);
     await expect(block.option('Dome')).toBeDisabled();
+    await expect(block.answerSend).toBeDisabled();
     // Read at once, while the write is on its way: Other stays, faded and disabled as the rest.
     expect(await block.other.count()).toBe(1);
     await expect(block.other).toHaveClass(/\bfaded\b/);
@@ -112,7 +117,7 @@ test.describe('A decision', () => {
     expect(answered).toMatchObject({ answer: 'Tunnel', note: null, via: 'app', by: { kind: 'person', handle: me.handle } });
   });
 
-  test('agrees to a proposal through its one row, tinted as the recommendation, Other under it', async ({ people, projects, timeline }) => {
+  test('agrees to a proposal through its one row and Send, the row tinted as the recommendation, Other under it', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Proposal'), members: [me.handle!] });
     const decision = await projects.place(id, { kind: 'decision', title: 'The dome?', text: PROPOSAL });
@@ -128,13 +133,142 @@ test.describe('A decision', () => {
     await expect(block.other).toBeVisible();
 
     await row.click();
+    await expect(row).toHaveClass(/\bchosen\b/);
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    await block.answerSend.click();
     await expect(item.said).toHaveText('Agree');
     expect((await blockOf(projects, id, decision)).answer).toBe('Agree');
   });
 });
 
+test.describe('A one-ask item’s Send', () => {
+  test('waits for a choice at the right end of the block’s last row, a press only choosing and another moving the choice; the record and the badge see nothing of it until it sends', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Chosen');
+    const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    await timeline.open(id);
+    const item = timeline.item(decision);
+    const { block } = item;
+
+    await expect(block.answerSend).toHaveText('Send');
+    await expect(block.answerSend.locator('svg')).toHaveClass(/\blucide-send\b/);
+    await expect(block.answerSend).toHaveClass(/\bbtn-primary\b/);
+    await expect(block.answerSend).toBeDisabled();
+    const rows = (await block.root.locator('.options').boundingBox())!;
+    const send = (await block.answerSend.boundingBox())!;
+    expect(send.y).toBeGreaterThanOrEqual(rows.y + rows.height);
+    expect(send.x + send.width).toBeCloseTo(rows.x + rows.width, 0);
+    // The last of the block's controls.
+    await expect(block.root.locator('button').last()).toHaveAttribute('data-testid', 'timeline.block.send');
+
+    await block.option('Tunnel').click();
+    await expect(block.option('Tunnel')).toHaveClass(/\bchosen\b/);
+    for (const row of [block.option('Tunnel'), block.option('Dome'), block.other]) {
+      await expect(row).toBeEnabled();
+      await expect(row).not.toHaveClass(/\bfaded\b/);
+    }
+    await expect(block.answerSend).toBeEnabled();
+    await block.option('Dome').click();
+    await expect(block.option('Dome')).toHaveAttribute('data-chosen', 'true');
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'false');
+
+    // The choice is no answer: the item stays open, unanswered, and counts in the badge.
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    expect(await blockOf(projects, id, decision)).toMatchObject({ answer: null, by: null });
+    await expect(projectList.badge(name)).toHaveText('1');
+
+    await block.answerSend.click();
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    await expect(item.said).toHaveText('Dome');
+    await expect(item.undo).toHaveCount(1);
+    expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'Dome', via: 'app', by: { kind: 'person', handle: me.handle } });
+    const kept = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>, UNSENT_KEY);
+    expect(kept).not.toHaveProperty(`${decision}/D1/choice`);
+  });
+
+  test('finds its choice again after a reload, an option’s and Other’s with its words, its console open without the focus; Other’s cross gives back the option chosen before it', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Reloaded'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    await timeline.open(id);
+    const item = timeline.item(decision);
+    const { block } = item;
+    const kept = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>, UNSENT_KEY);
+
+    await block.option('Tunnel').click();
+    await timeline.open(id);
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await expect(block.answerSend).toBeEnabled();
+
+    // Other is a choice too, in the option's place while its console stands open.
+    await block.other.click();
+    await expect(block.field).toBeFocused();
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'false');
+    await expect(block.answerSend).toBeDisabled();
+    await block.field.fill('The van');
+    await expect(block.answerSend).toBeEnabled();
+    expect(await kept()).toMatchObject({ [`${decision}/D1/other`]: 'The van', [`${decision}/D1/choice`]: { answer: 'Tunnel', typing: true } });
+
+    await timeline.open(id);
+    await expect(block.field).toHaveValue('The van');
+    await expect(block.field).not.toBeFocused();
+    await expect(block.answerSend).toBeEnabled();
+    await block.cancel.click();
+    await expect(block.console).toHaveCount(0);
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await expect(block.other.locator('.desc')).toHaveText('The van');
+    await expect(block.other).toHaveAttribute('data-chosen', 'false');
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+
+    await block.answerSend.click();
+    await expect(item.said).toHaveText('Tunnel');
+    expect(await kept()).not.toHaveProperty(`${decision}/D1/choice`);
+    expect(await kept()).not.toHaveProperty(`${decision}/D1/other`);
+  });
+
+  test('is the block’s in the item’s tab too, which has no foot, and takes the choice made on the timeline', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('In its tab'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    await timeline.open(id);
+    await timeline.item(decision).block.option('Tunnel').click();
+
+    await overlay.open(id, decision);
+    const block = overlay.blockAt('D1');
+    await expect(overlay.foot).toHaveCount(0);
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await block.option('Dome').click();
+    await expect(block.option('Dome')).toHaveAttribute('data-chosen', 'true');
+    await expect(overlay.doneChip).toHaveCount(0);
+    expect((await blockOf(projects, id, decision)).answer).toBeNull();
+
+    await block.answerSend.click();
+    await expect(overlay.done).toBeVisible();
+    await expect(page).toHaveURL(documentAddress(id, decision));
+    expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'Dome', by: { handle: me.handle } });
+  });
+});
+
 test.describe('Other’s console', () => {
-  test('takes Other’s place with its field, Send and a cross; Enter breaks the line and Ctrl+Enter sends the words as typed', async ({
+  test('takes Other’s place with its field and a cross, with no Send of its own in an item of its own; Enter breaks the line and Ctrl+Enter, the block’s Send, sends the words as typed', async ({
     people,
     projects,
     timeline,
@@ -151,8 +285,13 @@ test.describe('Other’s console', () => {
     await expect(block.console).toBeVisible();
     await expect(block.field).toBeFocused();
     await expect(block.field).toHaveAttribute('placeholder', 'Other: in your own words');
-    await expect(block.send).toBeDisabled();
+    // The block's Send sends its words, and waits for them.
+    await expect(block.send).toHaveCount(0);
+    await expect(block.answerSend).toBeDisabled();
     await expect(block.cancel).toHaveAttribute('title', 'Cancel (Esc)');
+    // Ctrl+Enter sends nothing while it holds no words.
+    await block.field.press('Control+Enter');
+    await expect(item.root).toHaveAttribute('data-state', 'open');
 
     await block.field.pressSequentially('Neither:');
     await block.field.press('Enter');
@@ -175,7 +314,10 @@ test.describe('Other’s console', () => {
     const item = timeline.item(trip);
     const block = item.blockAt('D1');
 
+    // In a document a press answers: the block has no Send, and the console its own.
+    await expect(block.answerSend).toHaveCount(0);
     await block.other.click();
+    await expect(block.send).toBeDisabled();
     await block.field.fill('The van');
     await block.send.click();
     // Other's row comes back, taking answers again, once its words are read back.
@@ -187,7 +329,7 @@ test.describe('Other’s console', () => {
     expect((await projects.block(id, trip)).answer).toBe('The van');
   });
 
-  test('closes on its cross and on Esc in its field, keeping what was typed, after a reload too, until Send sends it', async ({
+  test('closes on its cross and on Esc in its field, keeping what was typed in its row, unchosen, after a reload too, until Send sends it', async ({
     page,
     people,
     projects,
@@ -199,13 +341,15 @@ test.describe('Other’s console', () => {
     await timeline.open(id);
     const item = timeline.item(decision);
     const { block } = item;
-    const kept = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>, UNSENT_KEY);
+    const kept = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, unknown>, UNSENT_KEY);
 
     await block.other.click();
     await block.field.fill('Not yet');
     await block.cancel.click();
     await expect(block.console).toHaveCount(0);
-    await expect(block.other.locator('.desc')).toHaveText('Something else');
+    await expect(block.other.locator('.desc')).toHaveText('Not yet');
+    await expect(block.other).toHaveAttribute('data-chosen', 'false');
+    await expect(block.answerSend).toBeDisabled();
 
     await block.other.click();
     await expect(block.field).toHaveValue('Not yet');
@@ -216,9 +360,10 @@ test.describe('Other’s console', () => {
     await timeline.open(id);
     await block.other.click();
     await expect(block.field).toHaveValue('Not yet');
-    await block.send.click();
+    await block.answerSend.click();
     await expect(item.said).toHaveText('Not yet');
     expect(await kept()).not.toHaveProperty(`${decision}/D1/other`);
+    expect(await kept()).not.toHaveProperty(`${decision}/D1/choice`);
   });
 
   test('lies under everything else in Esc’s order: Esc elsewhere closes the keys list first, then the console', async ({
@@ -280,8 +425,9 @@ test.describe('Other’s console', () => {
     expect(most.height).toBeCloseTo(rest.height + 7 * rest.line, 0);
     expect(most).toMatchObject({ overflow: 'auto', scrolls: true });
 
+    // The block's Send, in the row under the console.
     const feed = (await timeline.root.boundingBox())!;
-    const send = (await block.send.boundingBox())!;
+    const send = (await block.answerSend.boundingBox())!;
     expect(send.y + send.height).toBeLessThanOrEqual(feed.y + feed.height);
     expect(send.y).toBeGreaterThanOrEqual(feed.y);
   });
@@ -328,13 +474,21 @@ test.describe('An answer Pilot gave', () => {
       await expect(row).toBeEnabled();
       await expect(row).not.toHaveClass(/\bfaded\b/);
     }
+    // Pilot's answer is no choice of the person's: Send waits for one.
+    await expect(block.answerSend).toBeDisabled();
 
     await block.toggle.click();
     await expect(block.options).toHaveCount(1);
     await block.options.click();
     await expect(block.options).toHaveCount(2);
 
+    // The person's choice shows in the place of Pilot's answer, whose note stays with Pilot's.
     await block.option('Tunnel').click();
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await expect(block.option('Dome')).toHaveAttribute('data-chosen', 'false');
+    await expect(block.note).toHaveCount(0);
+    expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'Dome', by: { kind: 'agent' } });
+    await block.answerSend.click();
     await expect(item.said).toHaveText('Tunnel');
     expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'Tunnel', note: null, by: { handle: me.handle } });
   });
@@ -375,8 +529,9 @@ test.describe('An answer Pilot gave', () => {
     await block.options.click();
     await expect(block.other).toHaveAttribute('data-chosen', 'true');
 
-    const restore = await slowNetwork(page, 1_000);
     await block.option('Tunnel').click();
+    const restore = await slowNetwork(page, 1_000);
+    await block.answerSend.click();
     await expect(block.option('Tunnel')).toHaveClass(/\bchosen\b/);
     await expect(block.other.locator('.desc')).toHaveText('The van, not a tent');
     await expect(block.other).toHaveAttribute('data-chosen', 'false');

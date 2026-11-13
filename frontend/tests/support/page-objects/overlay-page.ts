@@ -83,8 +83,8 @@ export class OverlayPage {
   readonly clarificationBox: Locator;
   /** Its sections, one per pass that asked. */
   readonly clarifications: Locator;
-  /** An open archive question's Archive and Keep, in its block's place (F5.6). */
-  readonly archiveQuestion: { archive: Locator; keep: Locator };
+  /** An open archive question's Archive and Keep, in its block's place, and its Send (F5.6). */
+  readonly archiveQuestion: { archive: Locator; keep: Locator; send: Locator };
   /** An attachment shown: its view, by its type in `data-view`, and its parts. */
   readonly attachment: {
     root: Locator;
@@ -157,6 +157,7 @@ export class OverlayPage {
     this.archiveQuestion = {
       archive: this.body.getByTestId('timeline.archive-question.archive'),
       keep: this.body.getByTestId('timeline.archive-question.keep'),
+      send: this.body.getByTestId('timeline.archive-question.send'),
     };
     const attachment = this.root.getByTestId('overlay.attachment');
     this.attachment = {

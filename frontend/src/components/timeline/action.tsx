@@ -5,7 +5,10 @@
  * option, the words boxed, the note under it (F21.5). Claimed by Pilot and not yet done, it reads
  * "Pilot does it", linking the work item that does it, the claim's note under it, over its controls
  * (F21.6), unless its held line says so (held.tsx) or Pilot's work handed it back, when it reads
- * nothing of the claim.
+ * nothing of the claim. In a one-ask item its options only choose (F32.3): every one a plain
+ * button, the one chosen a soft one; Other is a choice too, its console with no Send of its own
+ * and its cross giving the choice back; and the block's Send, at the row's end, sends the choice
+ * with the paste-back. Its Done, on one without options, sends as before.
  */
 
 import { useState } from 'react';
@@ -13,10 +16,13 @@ import { Link } from '@tanstack/react-router';
 import { Check } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
 import { TextField } from '@/components/shared/text-field';
-import { Console } from '@/components/timeline/console';
+import { Console, ConsoleBox } from '@/components/timeline/console';
+import { OTHER } from '@/components/timeline/decision';
 import { Note } from '@/components/timeline/note';
 import { DEFERRED, Said } from '@/components/timeline/said';
+import { SendChoice } from '@/components/timeline/send-choice';
 import type { Answer, Saving, Sent } from '@/hooks/use-answer';
+import type { Choosing } from '@/hooks/use-choice';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useShownProject } from '@/hooks/use-project-address';
 import type { Block } from '@/hooks/use-timeline';
@@ -44,9 +50,11 @@ interface ActionAnswerProps {
   disabled?: boolean;
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
+  /** A one-ask item's choice, which its options move and its Send sends; none where a press answers. */
+  choice: Choosing | null;
 }
 
-export function ActionAnswer({ field, block, claimed, saving, closable, closed, live, settled, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
+export function ActionAnswer({ field, block, claimed, saving, closable, closed, live, settled, disabled = false, onAnswer, onDone, choice }: ActionAnswerProps) {
   const said = saidOf(block, saving);
   return (
     <>
@@ -54,7 +62,15 @@ export function ActionAnswer({ field, block, claimed, saving, closable, closed, 
         ? claimed && <Claimed block={block} work={block.claim.work} />
         : said !== null && <Said {...said} />}
       {(live || settled) && !closed && (
-        <ActionControls field={field} block={block} closable={closable} disabled={disabled || !live} onAnswer={onAnswer} onDone={onDone} />
+        <ActionControls
+          field={field}
+          block={block}
+          closable={closable}
+          disabled={disabled || !live}
+          onAnswer={onAnswer}
+          onDone={onDone}
+          choice={block.options.length > 0 ? choice : null}
+        />
       )}
     </>
   );
@@ -108,11 +124,15 @@ interface ActionControlsProps {
   disabled: boolean;
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
+  choice: Choosing | null;
 }
 
-function ActionControls({ field, block, closable, disabled, onAnswer, onDone }: ActionControlsProps) {
+function ActionControls({ field, block, closable, disabled, onAnswer, onDone, choice }: ActionControlsProps) {
   const pasted = useUnsentText(`${field}/paste`);
-  const [typing, setTyping] = useState(false);
+  // Other's words in a one-ask item, where no console of its own holds them.
+  const other = useUnsentText(`${field}/other`);
+  const [opened, setOpened] = useState(false);
+  const typing = choice === null ? opened : choice.typing;
   const optioned = block.options.length > 0;
   const done = () => onDone({ note: pasted.text, onSaved: pasted.sent });
   const pick = (answer: string, onSaved?: () => void) =>
@@ -123,13 +143,23 @@ function ActionControls({ field, block, closable, disabled, onAnswer, onDone }: 
         onSaved?.();
       },
     });
+  // What a one-ask item's presses chose, while its field is closed.
+  const chose = choice === null || choice.typing ? null : (block.options.find((option) => option.label === choice.answer)?.label ?? null);
+  const ready = !disabled && (typing ? other.text.trim() !== '' : chose !== null);
+  const send = () => {
+    if (!ready) return;
+    pick(typing ? other.text : chose!, () => {
+      other.change('');
+      choice!.sent();
+    });
+  };
   return (
     // The field's parent: kept in view while it grows, with the buttons that send it.
     <div className="paste-back">
       <TextField
         value={pasted.text}
         onChange={pasted.change}
-        onSend={optioned ? undefined : done}
+        onSend={optioned ? (choice === null ? undefined : send) : done}
         label="What to paste back"
         placeholder="What to paste back, if anything"
         disabled={disabled}
@@ -143,30 +173,51 @@ function ActionControls({ field, block, closable, disabled, onAnswer, onDone }: 
               <button
                 key={option.label}
                 type="button"
-                className={cn('btn', index === 0 && 'btn-primary')}
-                onClick={() => pick(option.label)}
+                className={cn('btn', choice === null ? index === 0 && 'btn-primary' : chose === option.label && 'btn-soft')}
+                onClick={() => (choice === null ? pick(option.label) : choice.choose(option.label))}
                 disabled={disabled}
                 title={option.text ?? undefined}
                 data-testid="timeline.block.act"
+                data-chosen={chose === option.label}
               >
                 {option.label}
               </button>
             ))}
-            {typing ? (
+            {!typing ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={choice === null ? () => setOpened(true) : choice.type}
+                disabled={disabled}
+                data-testid="timeline.block.other"
+              >
+                Other…
+              </button>
+            ) : choice === null ? (
               <Console
                 field={`${field}/other`}
-                label="Other, in your own words"
-                placeholder="Other: in your own words"
+                label={OTHER.label}
+                placeholder={OTHER.placeholder}
                 send="Send"
                 testId="timeline.block.console"
                 onSend={pick}
-                onClose={() => setTyping(false)}
+                onClose={() => setOpened(false)}
               />
             ) : (
-              <button type="button" className="btn" onClick={() => setTyping(true)} disabled={disabled} data-testid="timeline.block.other">
-                Other…
-              </button>
+              <ConsoleBox
+                text={other.text}
+                onChange={other.change}
+                label={OTHER.label}
+                placeholder={OTHER.placeholder}
+                send={null}
+                autoFocus={choice.opened}
+                className="over-send"
+                testId="timeline.block.console"
+                onSend={send}
+                onClose={choice.back}
+              />
             )}
+            {choice !== null && <SendChoice ready={ready} onSend={send} />}
           </>
         ) : (
           <button

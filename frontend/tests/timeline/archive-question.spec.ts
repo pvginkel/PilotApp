@@ -1,6 +1,7 @@
 /**
  * The archive question (F5.6, D061): after a finish, one question of the server's under the end
- * divider, "Archive the project?", with Archive and Keep. Archive archives the project as the
+ * divider, "Archive the project?", with Archive and Keep, each chosen first and then sent, as in
+ * every one-ask item (F32.3). Archive archives the project as the
  * menu's Archive does, its tab leaving the list for Archived (F128.1); Keep closes it, the project
  * staying finished. Either way its done line stays under the divider, with no Undo. Opened at its
  * address, the overlay draws the open question's Archive and Keep in its block's place. Pilot's
@@ -12,7 +13,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 
 test.describe('The archive question', () => {
-  test('stands under the end divider after a finish, with Archive and Keep, the badge counting it', async ({
+  test('stands under the end divider after a finish, with Archive and Keep, plain buttons, and Send waiting at their row’s end, the badge counting it', async ({
     people,
     projects,
     projectList,
@@ -31,12 +32,22 @@ test.describe('The archive question', () => {
     await expect(item.title).toHaveText('Archive the project?');
     await expect(item.archiveQuestion.archive).toHaveText('Archive');
     await expect(item.archiveQuestion.keep).toHaveText('Keep');
+    await expect(item.archiveQuestion.archive).toHaveClass('btn');
+    await expect(item.archiveQuestion.keep).toHaveClass('btn');
+    await expect(item.archiveQuestion.send).toHaveText('Send');
+    await expect(item.archiveQuestion.send.locator('svg')).toHaveClass(/\blucide-send\b/);
+    await expect(item.archiveQuestion.send).toBeDisabled();
+    const send = (await item.archiveQuestion.send.boundingBox())!;
+    const keep = (await item.archiveQuestion.keep.boundingBox())!;
+    const row = (await item.root.locator('.item-actions').boundingBox())!;
+    expect(send.y).toBeCloseTo(keep.y, 0);
+    expect(send.x + send.width).toBeCloseTo(row.x + row.width, 0);
     const rows = await timeline.rowsRead();
     expect(rows.slice(-2).map(([testId]) => testId)).toEqual(['timeline.divider.finished', 'timeline.item']);
     await expect(projectList.badge(name)).toHaveText('1');
   });
 
-  test('Keep closes it, its done line staying under the divider with no Undo', async ({ people, projects, projectHead, timeline }) => {
+  test('Keep, chosen and then sent, closes it, its done line staying under the divider with no Undo', async ({ people, projects, projectHead, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Kept'), members: [me.handle!] });
     await projects.transition(id, 'finished');
@@ -44,7 +55,18 @@ test.describe('The archive question', () => {
     await timeline.open(id);
     const item = timeline.item(question.id);
 
+    // A press only chooses, and another moves the choice.
+    await item.archiveQuestion.archive.click();
+    await expect(item.archiveQuestion.archive).toHaveClass('btn btn-soft');
     await item.archiveQuestion.keep.click();
+    await expect(item.archiveQuestion.keep).toHaveClass('btn btn-soft');
+    await expect(item.archiveQuestion.archive).toHaveClass('btn');
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    expect((await projects.block(id, question.id)).answer).toBeNull();
+    // The choice stands again after a reload.
+    await timeline.open(id);
+    await expect(item.archiveQuestion.keep).toHaveAttribute('data-chosen', 'true');
+    await item.archiveQuestion.send.click();
 
     await expect(item.root).toHaveAttribute('data-state', 'done');
     await expect(item.lineTitle).toHaveText('Archive the project?');
@@ -72,14 +94,17 @@ test.describe('The archive question', () => {
     await expect(overlay.archiveQuestion.keep).toHaveText('Keep');
     await expect(overlay.blocks).toHaveCount(0);
 
+    await expect(overlay.archiveQuestion.send).toBeDisabled();
     await overlay.archiveQuestion.keep.click();
+    await expect(overlay.doneChip).toHaveCount(0);
+    await overlay.archiveQuestion.send.click();
 
     await expect(overlay.done).toBeVisible();
     await expect(overlay.archiveQuestion.keep).toHaveCount(0);
     await expect(overlay.blocks).toHaveCount(1);
   });
 
-  test('Archive takes the project off the list for Archived, as the menu’s Archive does', async ({
+  test('Archive, chosen and then sent, takes the project off the list for Archived, as the menu’s Archive does', async ({
     people,
     projects,
     projectHead,
@@ -97,6 +122,10 @@ test.describe('The archive question', () => {
     const item = timeline.item(question.id);
 
     await item.archiveQuestion.archive.click();
+    await expect(item.archiveQuestion.archive).toHaveAttribute('data-chosen', 'true');
+    await expect(projectHead.archived).toHaveCount(0);
+    await expect(projectList.tab(name, finished)).toBeVisible();
+    await item.archiveQuestion.send.click();
 
     await expect(projectHead.archived).toBeVisible();
     await expect(projectList.tab(name, finished)).toHaveCount(0);

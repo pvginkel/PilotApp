@@ -25,7 +25,11 @@
  * work handed back reads no claim, its head, drawn in a one-ask item too, saying Pilot's work left it
  * undone (F21.6). A draft's
  * block in the Draft tab is answered in place, as a document's is (F47.4), its Discuss quoting it
- * into the definition chat (F39.1).
+ * into the definition chat (F39.1). A one-ask item's block is answered on its Send (F32.3),
+ * wherever it is drawn, on the timeline, in the item's tab or view, in the item alone: a press on a
+ * decision's row, a confirmation's Yes or No or an action's option only chooses, the choice kept in
+ * the browser (use-choice.ts), and the block's one Send sends it; a question's Send and an
+ * action's Done are that one control already.
  */
 
 import { useContext, useState } from 'react';
@@ -41,7 +45,7 @@ import { ConfirmAnswer } from '@/components/timeline/confirm-answer';
 import { DecisionOptions, EXPAND } from '@/components/timeline/decision';
 import { blockKey, useBlockFlash } from '@/components/timeline/flash';
 import { HeldBody, HeldLine, type Hold } from '@/components/timeline/held';
-import { blockKindOf } from '@/components/timeline/kinds';
+import { blockKindOf, isOneAsk } from '@/components/timeline/kinds';
 import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
 import { QuestionAnswer } from '@/components/timeline/question';
@@ -50,6 +54,7 @@ import { SectionsContext } from '@/components/timeline/sections';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { useAnswer, useDraftAnswer, type Answering } from '@/hooks/use-answer';
+import { useChoice } from '@/hooks/use-choice';
 import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { isAnswered, type Block as BlockData, type BodyPart, type TimelineItem } from '@/hooks/use-timeline';
@@ -95,6 +100,7 @@ export function Block({ item, block, solo = false, section = [{ type: 'block', b
       solo={solo}
       mayTake={autopilotMayTake(item, block, autopilotOff)}
       answering={answering}
+      choosing={isOneAsk(item) && item.done === null}
       settled={item.done !== null}
       disabled={archived || locked || block.held !== null}
       quote={solo ? null : quoteOfBlock(item, block)}
@@ -117,6 +123,7 @@ export function DocumentBlock({ document, block }: { document: string; block: Bl
       solo={false}
       mayTake={false}
       answering={null}
+      choosing={false}
       settled={false}
       disabled
       quote={null}
@@ -148,6 +155,7 @@ export function DraftBlock({ projectId, block, blocks, title, flash }: DraftBloc
       solo={false}
       mayTake={false}
       answering={answering}
+      choosing={false}
       settled={false}
       disabled={archived}
       quote={quoteOfDraftBlock(block, blocks, title)}
@@ -182,6 +190,8 @@ interface BlockPanelProps {
   mayTake: boolean;
   /** How it takes an answer; none where it is read only. */
   answering: Answering | null;
+  /** It is an open one-ask item's: a press chooses, and its Send answers (F32.3). */
+  choosing: boolean;
   /** Its item is done. */
   settled: boolean;
   /** Its controls stand and take nothing. */
@@ -195,8 +205,10 @@ interface BlockPanelProps {
   held: Held | null;
 }
 
-function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled, quote, asked, flash, held }: BlockPanelProps) {
+function BlockPanel({ field, block, solo, mayTake, answering, choosing, settled, disabled, quote, asked, flash, held }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
+  const kept = useChoice(field);
+  const choice = choosing ? kept : null;
   const saving = answering?.saving ?? null;
   const answer = answering?.answer ?? unanswerable;
   const answered = isAnswered(block);
@@ -224,6 +236,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
           settled={settled}
           disabled={off}
           onAnswer={answer}
+          choice={choice}
         />
       );
     }
@@ -240,6 +253,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
             disabled={off}
             onOpen={answering === null ? null : () => setOpened(true)}
             onAnswer={answer}
+            choice={choice}
           />
         );
       case 'question':
@@ -269,6 +283,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
             disabled={off}
             onAnswer={answer}
             onDone={answering?.done ?? unanswerable}
+            choice={choice}
           />
         );
       default: {

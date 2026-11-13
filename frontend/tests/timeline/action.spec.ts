@@ -102,7 +102,7 @@ test.describe('An action without options', () => {
 });
 
 test.describe('An action with options', () => {
-  test('is its options as buttons, the first the primary, then Other, and no Done; an option saves the paste-back as its note', async ({
+  test('is its options as plain buttons, then Other and Send, and no Done; an option only chooses, a soft button then, and Send saves it with the paste-back as its note', async ({
     people,
     projects,
     timeline,
@@ -115,16 +115,33 @@ test.describe('An action with options', () => {
     const { block } = item;
 
     await expect(block.acts).toHaveText(['Works', "Doesn't"]);
-    await expect(block.acts.first()).toHaveClass(/\bbtn-primary\b/);
-    await expect(block.acts.last()).not.toHaveClass(/\bbtn-primary\b/);
+    await expect(block.act('Works')).toHaveClass('btn');
+    await expect(block.act("Doesn't")).toHaveClass('btn');
     await expect(block.other).toHaveText('Other…');
     await expect(block.done).toHaveCount(0);
+    // The block's Send ends the buttons' row, at its right, and waits for a choice.
+    await expect(block.answerSend.locator('svg')).toHaveClass(/\blucide-send\b/);
+    await expect(block.answerSend).toBeDisabled();
+    const row = (await block.root.locator('.item-actions').boundingBox())!;
+    const send = (await block.answerSend.boundingBox())!;
+    const other = (await block.other.boundingBox())!;
+    expect(send.y).toBeCloseTo(other.y, 0);
+    expect(send.x + send.width).toBeCloseTo(row.x + row.width, 0);
 
     await block.paste.fill('The light stays off');
-    // Ctrl+Enter sends nothing where several buttons send the field.
+    // Ctrl+Enter sends nothing while nothing is chosen.
     await block.paste.press('Control+Enter');
     await expect(item.root).toHaveAttribute('data-state', 'open');
+    await block.act('Works').click();
+    await expect(block.act('Works')).toHaveClass('btn btn-soft');
+    // Another press moves the choice, and nothing of it is on the record.
     await block.act("Doesn't").click();
+    await expect(block.act("Doesn't")).toHaveClass('btn btn-soft');
+    await expect(block.act('Works')).toHaveClass('btn');
+    await expect(block.paste).toHaveValue('The light stays off');
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    expect((await projects.block(id, action)).answer).toBeNull();
+    await block.answerSend.click();
     await expect(item.root).toHaveAttribute('data-state', 'done');
     await expect(item.said).toHaveText("Doesn't · The light stays off");
     expect(await projects.block(id, action)).toMatchObject({ answer: "Doesn't", note: 'The light stays off', by: { handle: me.handle } });
@@ -143,7 +160,11 @@ test.describe('An action with options', () => {
     await expect(block.other).toHaveCount(0);
     await expect(block.field).toBeFocused();
     await expect(block.field).toHaveAttribute('placeholder', 'Other: in your own words');
+    // Other is a choice: its console has no Send of its own, and the block's waits for its words.
+    await expect(block.send).toHaveCount(0);
+    await expect(block.answerSend).toBeDisabled();
     await block.field.fill('Half works');
+    await expect(block.answerSend).toBeEnabled();
     await block.field.press('Control+Enter');
 
     await expect(item.root).toHaveAttribute('data-state', 'done');
@@ -160,6 +181,10 @@ test.describe('An action with options', () => {
     const item = timeline.item(trip);
     const block = item.blockAt('A1');
 
+    // In a document a press answers: the first option the primary, and the block has no Send.
+    await expect(block.acts.first()).toHaveClass(/\bbtn-primary\b/);
+    await expect(block.acts.last()).not.toHaveClass(/\bbtn-primary\b/);
+    await expect(block.answerSend).toHaveCount(0);
     await block.other.click();
     await block.field.fill('Half works');
     await block.send.click();
@@ -170,7 +195,7 @@ test.describe('An action with options', () => {
     expect((await projects.block(id, trip)).answer).toBe('Half works');
   });
 
-  test('closes Other’s console on Esc, keeping the paste-back', async ({ people, projects, timeline }) => {
+  test('closes Other’s console on Esc, keeping the paste-back and giving back the option chosen before it, after a reload too', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Esc'), members: [me.handle!] });
     const action = await projects.place(id, { kind: 'action', title: 'Try the lamp', text: OPTIONS });
@@ -178,14 +203,21 @@ test.describe('An action with options', () => {
     const { block } = timeline.item(action);
 
     await block.paste.fill('flicker');
+    await block.act('Works').click();
     await block.other.click();
+    await expect(block.act('Works')).toHaveAttribute('data-chosen', 'false');
+    await timeline.open(id);
+    await expect(block.console).toBeVisible();
+    await expect(block.field).not.toBeFocused();
     await block.field.press('Escape');
     await expect(block.console).toHaveCount(0);
     await expect(block.other).toBeVisible();
     await expect(block.paste).toHaveValue('flicker');
+    await expect(block.act('Works')).toHaveClass('btn btn-soft');
+    await expect(block.answerSend).toBeEnabled();
   });
 
-  test('reads the option picked in its block, not boxed, while it saves', async ({ page, people, projects, timeline }) => {
+  test('reads the option chosen in its block, not boxed, while it saves, sent by Ctrl+Enter in its paste-back', async ({ page, people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Picked'), members: [me.handle!] });
     const action = await projects.place(id, { kind: 'action', title: 'Try the lamp', text: OPTIONS });
@@ -193,8 +225,9 @@ test.describe('An action with options', () => {
     const item = timeline.item(action);
     const { block } = item;
 
-    const restore = await slowNetwork(page, 1_000);
     await block.act('Works').click();
+    const restore = await slowNetwork(page, 1_000);
+    await block.paste.press('Control+Enter');
     const said = block.said.locator('.said');
     await expect(said).toHaveText('Works');
     // Read at once, while the write is on its way.

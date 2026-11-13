@@ -7,19 +7,29 @@
  * option chosen, the words stay there, unchosen. The chosen row fills; while the answer saves, and
  * once it no longer changes, the others fade and are disabled, Other among them, which goes only
  * from a done item's block that holds no words of it. Closed, the chosen row stands alone and
- * opens its block, or, read only, opens nothing.
+ * opens its block, or, read only, opens nothing. In a one-ask item a press only chooses (F32.3):
+ * the row chosen fills as an answer's does and another press moves the choice; Other is a choice
+ * too, its console with no Send of its own and its cross giving the choice back, its words kept in
+ * its row, unchosen, under another choice; and the block's Send, in a row of its own under the
+ * rows, disabled until a row is chosen or Other holds words, sends it.
  */
 
 import { useState } from 'react';
 import { LinkedText } from '@/components/shared/linked-text';
-import { Console } from '@/components/timeline/console';
+import { Console, ConsoleBox } from '@/components/timeline/console';
 import { Note } from '@/components/timeline/note';
+import { SendChoice } from '@/components/timeline/send-choice';
 import type { Answer } from '@/hooks/use-answer';
+import type { Choosing } from '@/hooks/use-choice';
 import type { Block } from '@/hooks/use-timeline';
+import { useUnsentText } from '@/hooks/use-unsent-text';
 import { cn } from '@/lib/utils';
 
 /** A proposal's answer, and the label of a decision's one row where it proposes nothing. */
 const AGREE = 'Agree';
+
+/** Other's field, as a decision's and an action's console name it. */
+export const OTHER = { label: 'Other, in your own words', placeholder: 'Other: in your own words' };
 
 /** What opening a closed block does, on its head's chevron and on a closed decision's row. */
 export const EXPAND = 'Show expansion list';
@@ -55,19 +65,38 @@ interface DecisionOptionsProps {
   /** Opens the closed block; none where it stays closed, its row taking nothing. */
   onOpen: (() => void) | null;
   onAnswer: Answer;
+  /** A one-ask item's choice, which its presses move and its Send sends; none where a press answers. */
+  choice: Choosing | null;
 }
 
-export function DecisionOptions({ field, block, chosen, closed, live, settled, disabled = false, onOpen, onAnswer }: DecisionOptionsProps) {
-  const [typing, setTyping] = useState(false);
+export function DecisionOptions({ field, block, chosen, closed, live, settled, disabled = false, onOpen, onAnswer, choice }: DecisionOptionsProps) {
+  const [opened, setOpened] = useState(false);
   const rows = rowsOf(block);
   const single = block.options.length === 0;
-  const picked = rows.findIndex((row) => row.answer === chosen);
-  const words = chosen !== null && picked < 0 ? chosen : null;
   // Free words the block holds stay in Other's row, unchosen, while another option is chosen.
   const own = block.deferral === null ? block.answer : null;
-  const kept = words ?? (own !== null && !rows.some((row) => row.answer === own) ? own : null);
-  // The block's note goes with the block's own answer, not with one being saved.
-  const note = chosen !== null && chosen === block.answer ? block.note : null;
+  const held = own !== null && !rows.some((row) => row.answer === own) ? own : null;
+  // Other's words in a one-ask item, where no console of its own holds them.
+  const other = useUnsentText(`${field}/other`, held ?? '');
+  const typing = choice === null ? opened : choice.typing;
+  // A one-ask item's choice shows chosen in the answer's place, from its first press until it is sent.
+  const made = choice !== null && live && (choice.typing || choice.answer !== null);
+  const shown = made ? (typing ? null : choice.answer) : chosen;
+  const picked = rows.findIndex((row) => row.answer === shown);
+  const words = !made && chosen !== null && picked < 0 ? chosen : null;
+  const typed = choice !== null && other.text.trim() !== '' ? other.text : null;
+  const kept = words ?? typed ?? held;
+  const ready = made && !disabled && (typing ? typed !== null : picked >= 0);
+  const send = () => {
+    if (!ready) return;
+    const sent = () => {
+      other.change('');
+      choice!.sent();
+    };
+    onAnswer(typing ? other.text : rows[picked].answer, { onSaved: sent });
+  };
+  // The block's note goes with the block's own answer, not with one being saved or chosen.
+  const note = !made && chosen !== null && chosen === block.answer ? block.note : null;
 
   if (closed) {
     const row = rows[picked];
@@ -89,62 +118,84 @@ export function DecisionOptions({ field, block, chosen, closed, live, settled, d
   }
 
   return (
-    <div className="options">
-      {rows.map((row, index) => (
-        <button
-          key={row.answer}
-          type="button"
-          className={cn(
-            'option',
-            single && 'single',
-            row.recommended && 'recommended',
-            index === picked && 'chosen',
-            !live && index !== picked && 'faded',
-          )}
-          onClick={() => onAnswer(row.answer)}
-          disabled={!live || disabled}
-          data-testid="timeline.block.option"
-          data-chosen={index === picked}
-        >
-          <RowWords label={row.label} text={row.text} />
-          {row.recommended && !single && <span className="rec">Recommended</span>}
-          {index === picked && note !== null && <Note text={note} nested />}
-        </button>
-      ))}
-      {live && typing ? (
-        <Console
-          field={`${field}/other`}
-          initial={kept ?? ''}
-          label="Other, in your own words"
-          placeholder="Other: in your own words"
-          send="Send"
-          testId="timeline.block.console"
-          onSend={(words, onSaved) =>
-            onAnswer(words, {
-              onSaved: () => {
-                onSaved();
-                setTyping(false);
-              },
-            })
-          }
-          onClose={() => setTyping(false)}
-        />
-      ) : (
-        (!settled || kept !== null) && (
+    <>
+      <div className="options">
+        {rows.map((row, index) => (
           <button
+            key={row.answer}
             type="button"
-            className={cn('option other', words !== null && 'chosen', !live && words === null && 'faded')}
-            onClick={() => setTyping(true)}
+            className={cn(
+              'option',
+              single && 'single',
+              row.recommended && 'recommended',
+              index === picked && 'chosen',
+              !live && index !== picked && 'faded',
+            )}
+            onClick={() => (choice === null ? onAnswer(row.answer) : choice.choose(row.answer))}
             disabled={!live || disabled}
-            data-testid="timeline.block.other"
-            data-chosen={words !== null}
+            data-testid="timeline.block.option"
+            data-chosen={index === picked}
           >
-            <RowWords label="Other" text={kept ?? 'Something else'} />
-            {words !== null && note !== null && <Note text={note} nested />}
+            <RowWords label={row.label} text={row.text} />
+            {row.recommended && !single && <span className="rec">Recommended</span>}
+            {index === picked && note !== null && <Note text={note} nested />}
           </button>
-        )
+        ))}
+        {live && typing ? (
+          choice === null ? (
+            <Console
+              field={`${field}/other`}
+              initial={kept ?? ''}
+              label={OTHER.label}
+              placeholder={OTHER.placeholder}
+              send="Send"
+              testId="timeline.block.console"
+              onSend={(words, onSaved) =>
+                onAnswer(words, {
+                  onSaved: () => {
+                    onSaved();
+                    setOpened(false);
+                  },
+                })
+              }
+              onClose={() => setOpened(false)}
+            />
+          ) : (
+            <ConsoleBox
+              text={other.text}
+              onChange={other.change}
+              label={OTHER.label}
+              placeholder={OTHER.placeholder}
+              send={null}
+              autoFocus={choice.opened}
+              className="over-send"
+              testId="timeline.block.console"
+              onSend={send}
+              onClose={choice.back}
+            />
+          )
+        ) : (
+          (!settled || kept !== null) && (
+            <button
+              type="button"
+              className={cn('option other', words !== null && 'chosen', !live && words === null && 'faded')}
+              onClick={choice === null ? () => setOpened(true) : choice.type}
+              disabled={!live || disabled}
+              data-testid="timeline.block.other"
+              data-chosen={words !== null}
+            >
+              <RowWords label="Other" text={kept ?? 'Something else'} />
+              {words !== null && note !== null && <Note text={note} nested />}
+            </button>
+          )
+        )}
+      </div>
+      {choice !== null && (
+        <div className="item-actions">
+          <SendChoice ready={ready} onSend={send} />
+        </div>
       )}
-    </div>
+    </>
   );
 }
 

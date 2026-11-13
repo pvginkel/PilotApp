@@ -314,6 +314,8 @@ test.describe('A confirmation block in a document', () => {
     await expect(confirm.proposal).toHaveText('Push the release to production');
     await expect(confirm.yes).toHaveClass('btn btn-primary');
     await expect(confirm.no).toHaveClass('btn');
+    // In a document a press answers: the block has no Send.
+    await expect(confirm.answerSend).toHaveCount(0);
     const text = (await confirm.proposal.boundingBox())!;
     expect((await confirm.yes.boundingBox())!.y).toBeGreaterThanOrEqual(text.y + text.height);
     await confirm.yes.click();
@@ -335,6 +337,8 @@ test.describe('A confirmation block in a document', () => {
     const confirm = item.blockAt('C1');
 
     await confirm.no.click();
+    await expect(confirm.noSend).toHaveAttribute('title', 'Send No (Ctrl+Enter)');
+    await expect(confirm.noSend).toBeEnabled();
     await confirm.noField.fill('Wait for the freeze to end.');
     await confirm.noSend.click();
     await expect(confirm.said.locator('.said')).toHaveText('No');

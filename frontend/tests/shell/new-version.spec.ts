@@ -73,18 +73,18 @@ test.describe('A new version', () => {
 
     await block.other.click();
     await block.field.fill('Neither: the van');
-    // To the console's Send, a button.
+    // To the console's cross, a button.
     await block.field.press('Tab');
-    await expect(block.send).toBeFocused();
+    await expect(block.cancel).toBeFocused();
     const holding = held(page, 'words');
     await newer();
     await holding;
     await expect(block.field).toHaveValue('Neither: the van');
 
-    // The console closes on Send, before its answer is saved.
+    // The console closes on the block's Send, before its answer is saved.
     const restore = await slowNetwork(page, 3_000);
     const writing = held(page, 'write');
-    await block.send.click();
+    await block.answerSend.click();
     await expect(block.console).toHaveCount(0);
     await writing;
     const reloaded = page.waitForEvent('load');

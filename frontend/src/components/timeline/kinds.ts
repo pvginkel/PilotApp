@@ -47,6 +47,11 @@ const BLOCK_KINDS: Record<Block['kind'], Kind> = {
   action: KINDS.action,
 };
 
+/** One ask in an item of its own, answered on its Send (F32.3). */
+const ONE_ASK = new Set<TimelineItem['kind']>(['decision', 'confirmation', 'question', 'action', 'archive_question']);
+
+export const isOneAsk = (item: TimelineItem) => ONE_ASK.has(item.kind);
+
 /** A block's icon and label, as its head shows them (F31.1): a confirmation's is its item's. */
 export function blockKindOf(block: Block): Kind {
   return block.confirmation ? KINDS.confirmation : BLOCK_KINDS[block.kind];

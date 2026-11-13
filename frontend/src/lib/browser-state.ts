@@ -1,7 +1,7 @@
 /**
  * What the browser remembers (F133): kept in its storage, nothing of it on the server. Unsent text
  * is kept under a key of its own, read when its field opens and written as it is typed, and beside
- * it the quote a composer's field carries.
+ * it the quote a composer's field carries and a one-ask item's choice before its Send (F32.3).
  */
 
 import { useSyncExternalStore } from 'react';
@@ -228,5 +228,35 @@ export function keepUnsentQuote(field: string, quote: QuoteRef | null): void {
   const unsent = readUnsent();
   if (quote === null) delete unsent[`${field}/quote`];
   else unsent[`${field}/quote`] = quote;
+  localStorage.setItem(UNSENT_KEY, JSON.stringify(unsent));
+}
+
+/**
+ * A one-ask item's choice before its Send (F32.3): the option chosen, and whether its field,
+ * Other's or a No's, stands open, when the field's words are the choice and the option is what the
+ * field's cross gives back.
+ */
+export interface Choice {
+  answer: string | null;
+  typing: boolean;
+}
+
+function isChoice(saved: unknown): saved is Choice {
+  if (typeof saved !== 'object' || saved === null) return false;
+  const { answer, typing } = saved as Partial<Record<keyof Choice, unknown>>;
+  return (answer === null || typeof answer === 'string') && typeof typing === 'boolean';
+}
+
+/** What is chosen in the block `field` and not sent; none where nothing is. */
+export function unsentChoice(field: string): Choice | null {
+  const choice = readUnsent()[`${field}/choice`];
+  return isChoice(choice) ? choice : null;
+}
+
+/** Keeps a block's choice beside its fields' words until it is sent, over what another tab keeps; none, nothing kept. */
+export function keepUnsentChoice(field: string, choice: Choice | null): void {
+  const unsent = readUnsent();
+  if (choice === null) delete unsent[`${field}/choice`];
+  else unsent[`${field}/choice`] = choice;
   localStorage.setItem(UNSENT_KEY, JSON.stringify(unsent));
 }

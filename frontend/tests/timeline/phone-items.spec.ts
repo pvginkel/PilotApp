@@ -135,7 +135,11 @@ test.describe('The item alone on a phone', () => {
     await timeline.openAt(id, decision);
     const alone = timeline.item(decision, overlay.alone);
 
+    // A tap only chooses, here as on the timeline: its Send answers.
     await alone.block.option('Tunnel').tap();
+    await expect(alone.block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await expect(alone.root).toHaveAttribute('data-state', 'open');
+    await alone.block.answerSend.tap();
     await expect(alone.root).toHaveAttribute('data-state', 'done');
     await expect(alone.said).toHaveText('Tunnel');
     await expect(alone.undo).toBeVisible();
@@ -162,9 +166,11 @@ test.describe('The item alone on a phone', () => {
     // The keyboard opening: the page's viewport resizes its content to what the keyboard leaves.
     await page.setViewportSize({ width: PHONE.width, height: 300 });
     await expect(alone.block.console).toBeInViewport({ ratio: 1 });
+    // And the block's Send with it, in the row under the console.
+    await expect(alone.block.answerSend).toBeInViewport({ ratio: 1 });
 
     await alone.block.field.fill('A tent from the neighbours');
-    await alone.block.send.tap();
+    await alone.block.answerSend.tap();
     await expect(alone.root).toHaveAttribute('data-state', 'done');
     await expect(alone.said).toHaveText('A tent from the neighbours');
   });

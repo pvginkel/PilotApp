@@ -1,9 +1,10 @@
 /**
  * A confirmation (F22): a compact yellow card, its reason line with the ground as tooltip (F22.1),
  * drawn as an action is: the title, the proposal as its text, full width, and under it Yes and No,
- * plain buttons in its block, neither tinted, no paste-back and no Other (F22.2, F17.3), its answer
- * read as an action's; No opening a console whose reason may stay empty and is the note (F22.3), in
- * the growing field kept until sent (F115, F110, F133); Details / Less unfolding the prose, on the
+ * plain buttons in its block, neither tinted, no paste-back and no Other (F22.2, F17.3), each only
+ * chosen, the one chosen a soft button, until the block's Send (F32.3), its answer read as an
+ * action's; No opening a console whose reason may stay empty and is the note (F22.3), with no Send
+ * of its own, in the growing field kept until sent (F115, F110, F133); Details / Less unfolding the prose, on the
  * left and never underlined (F22.4); its done line led by a green check or a red cross with the
  * reason (F22.5); and done, its answer alone, opening on its chevron to its proposal and Yes and No,
  * standing and taking nothing (F31.2).
@@ -23,7 +24,7 @@ const PILOTS =
 const UNSENT_KEY = 'pilot.unsent';
 
 test.describe('A confirmation', () => {
-  test('is a compact yellow card drawn as an action: its reason line, the title, the proposal its text, full width, Yes and No plain buttons in its block under it, no paste-back, no Other, the prose folded', async ({
+  test('is a compact yellow card drawn as an action: its reason line, the title, the proposal its text, full width, Yes and No plain buttons in its block under it, Send at their row’s end, no paste-back, no Other, the prose folded', async ({
     people,
     projects,
     timeline,
@@ -49,10 +50,15 @@ test.describe('A confirmation', () => {
     await expect(confirm.yes).toHaveAttribute('title', 'Yes: Push the release to production');
     await expect(confirm.no).toHaveText('No');
     await expect(confirm.no).toHaveAttribute('title', 'No, and say why');
-    // An action's options: plain buttons, the first the primary, neither green nor red.
-    await expect(confirm.yes).toHaveClass('btn btn-primary');
+    // An action's options in an item of its own: plain buttons, neither the primary, green nor red.
+    await expect(confirm.yes).toHaveClass('btn');
     await expect(confirm.no).toHaveClass('btn');
-    await expect(item.block.root.locator('button')).toHaveCount(2);
+    // The block's Send, the primary, waits for the choice.
+    await expect(confirm.answerSend).toHaveText('Send');
+    await expect(confirm.answerSend).toHaveClass(/\bbtn-primary\b/);
+    await expect(confirm.answerSend.locator('svg')).toHaveClass(/\blucide-send\b/);
+    await expect(confirm.answerSend).toBeDisabled();
+    await expect(item.block.root.locator('button')).toHaveCount(3);
     await expect(item.block.paste).toHaveCount(0);
     await expect(item.block.other).toHaveCount(0);
 
@@ -71,6 +77,12 @@ test.describe('A confirmation', () => {
     expect(yes.y).toBeGreaterThan(panel.y);
     expect(no.y).toBeCloseTo(yes.y, 0);
     expect(no.x).toBeGreaterThan(yes.x + yes.width);
+    // Send ends their row, at its right.
+    const send = (await confirm.answerSend.boundingBox())!;
+    const row = (await item.block.root.locator('.item-actions').boundingBox())!;
+    expect(send.y).toBeCloseTo(yes.y, 0);
+    expect(send.x + send.width).toBeCloseTo(row.x + row.width, 0);
+    expect(send.x).toBeGreaterThan(no.x + no.width + 40);
 
     await expect(confirm.prose).toHaveCount(0);
     await expect(item.root).not.toContainText(BEFORE);
@@ -141,7 +153,7 @@ test.describe('A confirmation', () => {
     await expect(timeline.item(bare).confirm.details).toHaveCount(0);
   });
 
-  test('saves Yes on its button, reading Yes in its block, not boxed, while it saves, and its line leads with a green check', async ({
+  test('chooses Yes on its button, a soft one then, and saves it on Send, reading Yes in its block, not boxed, while it saves, and its line leads with a green check', async ({
     page,
     people,
     projects,
@@ -154,8 +166,16 @@ test.describe('A confirmation', () => {
     const item = timeline.item(confirmation);
     const { confirm } = item;
 
-    const restore = await slowNetwork(page, 1_000);
     await confirm.yes.click();
+    // A press only chooses: nothing of it is on the record.
+    await expect(confirm.yes).toHaveClass('btn btn-soft');
+    await expect(confirm.yes).toHaveAttribute('data-chosen', 'true');
+    await expect(confirm.no).toHaveClass('btn');
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    expect((await projects.block(id, confirmation)).answer).toBeNull();
+
+    const restore = await slowNetwork(page, 1_000);
+    await confirm.answerSend.click();
     const said = item.block.said.locator('.said');
     await expect(said).toHaveText('Yes');
     // Read at once, while the write is on its way.
@@ -176,7 +196,7 @@ test.describe('A confirmation', () => {
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'Yes', note: null, via: 'app', by: { handle: me.handle } });
   });
 
-  test('opens a reason console on No; Enter breaks the line, Ctrl+Enter sends No with the reason, and the line leads with a red cross and the reason', async ({
+  test('opens a reason console on No, which is chosen while it stands open; Enter breaks the line, Ctrl+Enter, the block’s Send, sends No with the reason, and the line leads with a red cross and the reason', async ({
     people,
     projects,
     timeline,
@@ -193,8 +213,11 @@ test.describe('A confirmation', () => {
     await expect(confirm.console).toBeVisible();
     await expect(confirm.field).toBeFocused();
     await expect(confirm.field).toHaveAttribute('placeholder', 'No: why not? (you may leave it empty)');
-    await expect(confirm.send).toHaveAttribute('title', 'Send No (Ctrl+Enter)');
-    await expect(confirm.send).toBeEnabled();
+    // No is chosen, a soft button; its console has no Send of its own, and the reason may stay empty.
+    await expect(confirm.no).toHaveClass('btn btn-soft');
+    await expect(confirm.yes).toHaveClass('btn');
+    await expect(confirm.send).toHaveCount(0);
+    await expect(confirm.answerSend).toBeEnabled();
 
     await confirm.field.pressSequentially('Wait for the tests,');
     await confirm.field.press('Enter');
@@ -209,7 +232,7 @@ test.describe('A confirmation', () => {
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'No', note: 'Wait for the tests,\nthey run tonight.' });
   });
 
-  test('closes the reason console on Esc and the cross, keeping the reason after a reload, and sends No with none once it is cleared', async ({
+  test('closes the reason console on Esc and the cross, which give the choice back, keeping the reason after a reload, and sends No with none once it is cleared', async ({
     page,
     people,
     projects,
@@ -227,6 +250,9 @@ test.describe('A confirmation', () => {
     await confirm.field.fill('Not now');
     await confirm.field.press('Escape');
     await expect(confirm.console).toHaveCount(0);
+    // Nothing was chosen before the No: nothing is again, and Send waits.
+    await expect(confirm.no).toHaveClass('btn');
+    await expect(confirm.answerSend).toBeDisabled();
     await confirm.no.click();
     await expect(confirm.field).toHaveValue('Not now');
     await confirm.cancel.click();
@@ -237,13 +263,50 @@ test.describe('A confirmation', () => {
     await confirm.no.click();
     await expect(confirm.field).toHaveValue('Not now');
     await confirm.field.fill('');
-    await confirm.send.click();
+    await confirm.answerSend.click();
 
     await expect(item.root).toHaveAttribute('data-state', 'done');
     await expect(item.lineKind).toHaveClass(/\bno\b/);
     await expect(item.said).toHaveCount(0);
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'No', note: null });
     expect(await kept()).not.toHaveProperty(`${confirmation}/C1/no`);
+    expect(await kept()).not.toHaveProperty(`${confirmation}/C1/choice`);
+  });
+
+  test('finds its choice again after a reload, the No with its console open and its reason; the cross gives back the Yes chosen before it, which Send then saves', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Reloaded'), members: [me.handle!] });
+    const confirmation = await projects.place(id, { kind: 'confirmation', title: 'Ship 1.2?', text: CONFIRMATION });
+    await timeline.open(id);
+    const item = timeline.item(confirmation);
+    const { confirm } = item;
+
+    await confirm.yes.click();
+    await confirm.no.click();
+    await expect(confirm.no).toHaveAttribute('data-chosen', 'true');
+    await expect(confirm.yes).toHaveAttribute('data-chosen', 'false');
+    await confirm.field.fill('Wait for the tests.');
+
+    await timeline.open(id);
+    await expect(confirm.field).toHaveValue('Wait for the tests.');
+    await expect(confirm.field).not.toBeFocused();
+    await expect(confirm.no).toHaveClass('btn btn-soft');
+    await confirm.cancel.click();
+    await expect(confirm.console).toHaveCount(0);
+    await expect(confirm.yes).toHaveClass('btn btn-soft');
+    await expect(confirm.no).toHaveClass('btn');
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    expect((await projects.block(id, confirmation)).answer).toBeNull();
+
+    await timeline.open(id);
+    await expect(confirm.yes).toHaveAttribute('data-chosen', 'true');
+    await confirm.answerSend.click();
+    await expect(item.lineKind).toHaveClass(/\byes\b/);
+    expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'Yes', note: null, by: { handle: me.handle } });
   });
 
   test('answered by Pilot reads its answer and its note in its block, closed, and opens to Yes and No for the person’s', async ({
@@ -268,9 +331,10 @@ test.describe('A confirmation', () => {
 
     await item.block.toggle.click();
     await expect(confirm.yes).toBeEnabled();
+    await expect(confirm.answerSend).toBeDisabled();
     await confirm.no.click();
     await confirm.field.fill('Hold it');
-    await confirm.send.click();
+    await confirm.answerSend.click();
     await expect(item.lineKind).toHaveClass(/\bno\b/);
     expect(await projects.block(id, confirmation)).toMatchObject({ answer: 'No', note: 'Hold it', by: { handle: me.handle } });
   });
