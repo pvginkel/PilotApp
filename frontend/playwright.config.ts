@@ -52,6 +52,11 @@ export default defineConfig({
   ],
 
   outputDir: 'test-results/',
+  // A passing test's folder is removed: each test's backend.log carries its worker's whole log so
+  // far, so keeping every folder grows test-results/ with the square of the test count, and a
+  // copy of it under a size cap left out the failing test's own log. The HTML report keeps each
+  // test's logs as attachments.
+  preserveOutput: 'failures-only',
 
   globalSetup: './tests/support/global-setup.ts',
   globalTeardown: './tests/support/global-teardown.ts',

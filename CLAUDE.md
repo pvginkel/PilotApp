@@ -96,7 +96,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty-one stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twenty-two stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -134,7 +134,12 @@ in the runner's process, before it seeds the run's database, where the template 
 place for a step of a run's setup: this app's takes the test suite lock, one run at a time across
 the project's environments, held until the runner ends; a Playwright test's budget, 60 s in
 `frontend/playwright.config.ts`, where the template leaves Playwright's 30 s, which the longest
-specs outrun on a node other environments load; a worker's service start in
+specs outrun on a node other environments load; a passing Playwright test's output, which
+`preserveOutput: 'failures-only'` in `frontend/playwright.config.ts` removes, where the template
+kept every test's folder, each with a `backend.log` holding its worker's whole log so far, so that
+`test-results/` grew with the square of the test count, some 500 MB a run, and a copy of it under
+a size cap left out the failing test's own log, the HTML report keeping every test's logs as
+attachments; a worker's service start in
 `frontend/tests/support/process/servers.ts` and `frontend/tests/support/fixtures-infrastructure.ts`,
 which attaches the service's output to the worker's log from the spawn on and puts it in a failed
 start's error, where the template attached it once the service was ready, so that a start that
