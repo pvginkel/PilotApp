@@ -2120,7 +2120,7 @@ class TestListFiles:
     @pytest.mark.parametrize(
         ("path", "refusal"),
         [
-            ("bike-log", "Folder 'bike-log' was not found"),
+            ("bike-log", "Folder 'bike-log' was not found [not-found]"),
             (
                 "reference.json",
                 "Cannot list 'reference.json' because it is a file, not a folder"
@@ -2150,6 +2150,7 @@ class TestListFiles:
 
         assert error_text(result) == (
             f"Error executing tool list_files: Folder '{camp.slug}' was not found"
+            " [not-found]"
         )
 
     async def test_the_tool_takes_no_environment(
@@ -2390,7 +2391,10 @@ class TestReadFile:
                 "Cannot read '{folder}/items' because it is a folder, not a file"
                 " [not-a-file]",
             ),
-            ("{folder}/notes.md", "File '{folder}/notes.md' was not found"),
+            (
+                "{folder}/notes.md",
+                "File '{folder}/notes.md' was not found [not-found]",
+            ),
             (
                 "/work/PilotProjects/{folder}/project.md",
                 "Path '/work/PilotProjects/{folder}/project.md' is outside the"
@@ -2437,7 +2441,7 @@ class TestReadFile:
 
         assert error_text(result) == (
             "Error executing tool read_file: File"
-            f" '{camp.slug}/project.md' was not found"
+            f" '{camp.slug}/project.md' was not found [not-found]"
         )
 
     @pytest.mark.parametrize(

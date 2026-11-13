@@ -67,7 +67,7 @@ through. A refusal's reason ends with the name KubeCoder's fleet adapter gives i
 - **`GET /api/tree/entries?path=`** answers `{entries: [{path, is_directory}]}`, what the folder at
   the path holds, folders first and then files, each group in case-insensitive name order, every
   path from the root and a folder's ending with `/`. A file's path is a `409` `[not-a-directory]`,
-  and a path nothing is at a `404`, "Folder '<path>' was not found".
+  and a path nothing is at a `404`, "Folder '<path>' was not found [not-found]".
 - **`GET /api/tree/matches?pattern=`** answers `{paths}`, the files whose path matches the glob, in
   path order (`PathGlob`, `backend/app/utils/path_glob.py`, KubeCoder's ported): `*` any characters
   but `/`, `**` any path segments, `?` one character, `{a,b}` either alternative, with no nesting.
@@ -80,7 +80,7 @@ through. A refusal's reason ends with the name KubeCoder's fleet adapter gives i
   keeping its start and a tail the file's end, `limit_hit` then true. A line over 128 KB on its own
   comes back cut, the answer's only line, with `line_cut` true. A folder is a `409` `[not-a-file]`,
   a file that is not UTF-8 text, as an attachment may be, a `409` `[not-text]`, a tail with a range
-  a `400`, and a path nothing is at a `404`, "File '<path>' was not found".
+  a `400`, and a path nothing is at a `404`, "File '<path>' was not found [not-found]".
 
 A path or a pattern that starts with `/`, or a path that climbs above the root, is a `400`
 `[path-outside-projects]`. The index of a project's items, `timeline.json`'s `items` as rendered,

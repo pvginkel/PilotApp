@@ -117,7 +117,7 @@ class TreeReadService:
                 raise InvalidOperationException(
                     f"list {path!r}", "it is a file, not a folder [not-a-directory]"
                 )
-            raise RecordNotFoundException("Folder", repr(path))
+            raise _not_found("Folder", path)
         directories = {rest.partition("/")[0] for rest in under if "/" in rest}
         files = [rest for rest in under if "/" not in rest]
         return [
@@ -220,7 +220,7 @@ class TreeReadService:
                 raise InvalidOperationException(
                     f"read {path!r}", "it is a folder, not a file [not-a-file]"
                 )
-            raise RecordNotFoundException("File", repr(path))
+            raise _not_found("File", path)
         return self.tree_service.read(file).content
 
 
@@ -230,6 +230,15 @@ def _outside(what: str, path: str) -> ValidationException:
         " root, as `<folder>/timeline.json` does, never from `/` and never above"
         " it [path-outside-projects]"
     )
+
+
+def _not_found(what: str, path: str) -> RecordNotFoundException:
+    """Nothing is at `path`: the `404`, its reason ending with the adapter's
+    name for it, as every other refusal's does."""
+    refused = RecordNotFoundException(what, repr(path))
+    refused.message = f"{refused.message} [not-found]"
+    refused.args = (refused.message,)
+    return refused
 
 
 def _normal(path: str) -> str:

@@ -86,7 +86,10 @@ class TestListEntries:
         response = client.get(ENTRIES, query_string={"path": "bike-log"})
 
         assert response.status_code == 404
-        assert response.get_json()["error"] == "Folder 'bike-log' was not found"
+        assert (
+            response.get_json()["error"]
+            == "Folder 'bike-log' was not found [not-found]"
+        )
 
     def test_a_files_path_is_refused(
         self, client: FlaskClient, recipes: Project
@@ -249,7 +252,7 @@ class TestReadText:
 
         assert response.status_code == 404
         assert response.get_json()["error"] == (
-            f"File '{recipes.slug}/notes.md' was not found"
+            f"File '{recipes.slug}/notes.md' was not found [not-found]"
         )
 
     def test_an_archived_projects_file_is_not_read(

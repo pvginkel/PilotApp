@@ -313,7 +313,7 @@ class TestTreeReadServiceEntries:
         with pytest.raises(RecordNotFoundException) as raised:
             container.tree_read_service().entries(path)
 
-        assert raised.value.message == f"Folder '{path}' was not found"
+        assert raised.value.message == f"Folder '{path}' was not found [not-found]"
 
     @pytest.mark.parametrize(
         "path", ["/", "/badge-colours", "..", "badge-colours/../..", "./../x"]
@@ -688,7 +688,7 @@ class TestTreeReadServiceText:
         with pytest.raises(RecordNotFoundException) as raised:
             container.tree_read_service().text(path, None, None, None)
 
-        assert raised.value.message == f"File {path!r} was not found"
+        assert raised.value.message == f"File {path!r} was not found [not-found]"
 
     def test_an_archived_projects_file_is_not_read(
         self, session: DbSession, container: ServiceContainer, badges: Project
