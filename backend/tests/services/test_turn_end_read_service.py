@@ -2,8 +2,8 @@
 V24): the documents a work item's run registered, read through the fake
 controller once the run ends, and published as written or their read failed;
 then the job after the worker's turn (design 3 D2; slice 025 V12); a read
-the controller refuses `409 conflict` made again, and failed once its wait has
-passed (slice 030 V09).
+the controller refuses for a reason of its own made again, and failed once
+its wait has passed (slice 030 V09, slice 046 V02).
 
 The read's run is called on the test's session as its loop calls it; the
 loop's tests run it on a database of its own, as the supervisor does."""
@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
 
 from app import extensions, models
-from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.documents import awaits_read
 from app.engine.views import ViewService
@@ -49,8 +48,6 @@ from app.services.container import ServiceContainer
 from app.services.controller_client import (
     FILE_SIZE_CAP,
     ControllerClient,
-    ControllerProblem,
-    ControllerProblemType,
     ControllerUnreachable,
 )
 from app.services.controller_outage import ControllerOutage
@@ -94,9 +91,14 @@ def _no_callbacks() -> Iterator[None]:
 
 
 WAIT = 0.2
-"""The tests' wait on a read the controller refuses `409 conflict`."""
+"""The tests' wait on a read the controller refuses for a reason of its own."""
 LINK_LOOP = FakeControllerProblem(409, "conflict", "too many levels of links")
 LINK_LOOP_REASON = "the controller answered 409 conflict: too many levels of links"
+UNREADABLE_REASON = (
+    f"the controller answered 503 environment-unreadable: environment {ENV!r}"
+    " could not be read; the environment is still there but the controller"
+    " could not read its record; try again"
+)
 
 
 def _service(
@@ -104,7 +106,8 @@ def _service(
 ) -> tuple[TurnEndReadService, LifecycleCoordinator]:
     """The reads on a supervisor of their own, the container's start the
     one the job after a run's turn starts through, its loops never run; a
-    read the controller refuses `409 conflict` made again for `wait`."""
+    read the controller refuses for a reason of its own made again for
+    `wait`."""
     supervisor, coordinator = supervise(container)
     container.session_start_service.override(
         providers.Object(configured_starts(container, supervise))
@@ -464,7 +467,7 @@ class TestTurnEndReadServiceRead:
         assert awaits_read(item, _document(session, item))
         assert _servers(session, run.id) == []
 
-    def test_an_environment_the_controller_cannot_read_raises_and_reads_nothing(
+    def test_an_environment_the_controller_cannot_read_is_made_again_then_fails_the_read(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -476,12 +479,18 @@ class TestTurnEndReadServiceRead:
         item = _register(container, project, run)
         _end(session, container, run)
         fake_controller.unreadable(ENV)
+        began = time.perf_counter()
 
-        with pytest.raises(ControllerProblem) as raised:
-            _read(reads, run.id)
+        _read(reads, run.id)
 
-        assert raised.value.problem_type is ControllerProblemType.ENVIRONMENT_UNREADABLE
-        assert awaits_read(item, _document(session, item))
+        assert time.perf_counter() - began >= WAIT
+        assert len(_file_reads(fake_controller)) >= 2
+        assert _servers(session, run.id) == [
+            (None, _failed(item, PATH, UNREADABLE_REASON))
+        ]
+        assert _document(session, item).read_failed_at is not None
+        # The run's last read settled: the job after its turn is placed.
+        assert len(_jobs_after(session, run)) == 1
 
     @pytest.mark.parametrize(
         "state", [SessionState.RUNNING, SessionState.STOPPED, SessionState.FAILED]
@@ -742,28 +751,32 @@ def _pending() -> set[str]:
 
 class _ReadWatched(ServedFakeController):
     """The fake, calling `on_read` with the path before it answers a read,
-    and answering `refusal` instead while it is set."""
+    and answering a `502` page an ingress writes instead while `unanswered`,
+    else `refusal` while it is set."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
         self.on_read: Callable[[str], None] | None = None
+        self.unanswered = False
         self.refusal: FakeControllerProblem | None = None
 
     def _read_file(self, request: Request, env_id: str) -> Response:
         if self.on_read is not None:
             self.on_read(request.args["path"])
+        if self.unanswered:
+            return Response("Bad Gateway", status=502, content_type="text/html")
         if self.refusal is not None:
             raise self.refusal
         return super()._read_file(request, env_id)
 
 
-def _refusing(fake: _ReadWatched, refused: str) -> Callable[[str], None]:
-    """An `on_read` that has the fake refuse the read of `refused`, and every
-    read after it, for a reason of its own."""
+def _unanswering(fake: _ReadWatched, unanswered: str) -> Callable[[str], None]:
+    """An `on_read` that has the fake leave the read of `unanswered`, and
+    every read after it, unanswered."""
 
     def on_read(path: str) -> None:
-        if path == refused:
-            fake.refusal = FakeControllerProblem(500, "something", "its own")
+        if path == unanswered:
+            fake.unanswered = True
 
     return on_read
 
@@ -772,10 +785,11 @@ def _refusing(fake: _ReadWatched, refused: str) -> Callable[[str], None]:
 def watched(
     session: DbSession,
     container: ServiceContainer,
+    controller_outage: ControllerOutage,
     project: Project,
 ) -> Iterator[tuple[_ReadWatched, models.Session]]:
     """The fake as `_ReadWatched`, holding the document's file, and a work
-    item's Session in its environment."""
+    item's Session in its environment; the client's outage the test's own."""
     fake = _ReadWatched(keepalive_seconds=0.2)
     client_of(container, fake)
     fake.add_environment(ENV, status="running")
@@ -841,18 +855,28 @@ class TestTurnEndReadServiceRefusals:
         # The run's last read settled: the job after its turn is placed.
         assert len(_jobs_after(session, run)) == 1
 
-    def test_a_conflict_that_settles_within_its_wait_is_read(
+    @pytest.mark.parametrize(
+        "refusal",
+        [
+            FakeControllerProblem(409, "conflict", "the path changed"),
+            FakeControllerProblem(503, "environment-unreadable", "not read"),
+            FakeControllerProblem(500, "something", "its own"),
+        ],
+        ids=["conflict", "unreadable", "its-own"],
+    )
+    def test_a_refusal_of_its_own_that_settles_within_its_wait_is_read(
         self,
         session: DbSession,
         container: ServiceContainer,
         supervise: Supervise,
         project: Project,
         watched: tuple[_ReadWatched, models.Session],
+        refusal: FakeControllerProblem,
     ) -> None:
         fake, run = watched
         item = _register(container, project, run)
         _end(session, container, run)
-        fake.refusal = FakeControllerProblem(409, "conflict", "the path changed")
+        fake.refusal = refusal
         reads: list[str] = []
 
         def settles(path: str) -> None:
@@ -896,9 +920,16 @@ class TestTurnEndReadServiceRefusals:
         ]
 
     @pytest.mark.parametrize(
-        "status", [401, 422, 500], ids=["unauthenticated", "invalid", "its-own"]
+        ("status", "problem"),
+        [
+            (401, "unauthenticated"),
+            (422, "invalid"),
+            (500, "something"),
+            (409, "a-type-pilot-does-not-know"),
+        ],
+        ids=["unauthenticated", "invalid", "its-own", "unknown"],
     )
-    def test_a_refusal_of_the_controllers_own_raises_and_reads_nothing(
+    def test_a_refusal_of_the_controllers_own_is_made_again_then_fails_the_read(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -906,16 +937,32 @@ class TestTurnEndReadServiceRefusals:
         project: Project,
         watched: tuple[_ReadWatched, models.Session],
         status: int,
+        problem: str,
     ) -> None:
         fake, run = watched
         item = _register(container, project, run)
         _end(session, container, run)
-        fake.refusal = FakeControllerProblem(status, "something", "its own")
+        fake.refusal = FakeControllerProblem(status, problem, "its own")
+        began = time.perf_counter()
 
-        with pytest.raises(ExternalServiceException):
-            _read(_service(container, supervise)[0], run.id)
+        _read(_service(container, supervise)[0], run.id)
 
-        assert awaits_read(item, _document(session, item))
+        assert time.perf_counter() - began >= WAIT
+        reads = _file_reads(fake)
+        assert len(reads) >= 2
+        assert set(reads) == {_read_of(PATH)}
+        assert _servers(session, run.id) == [
+            (
+                None,
+                _failed(
+                    item, PATH, f"the controller answered {status} {problem}: its own"
+                ),
+            )
+        ]
+        document = _document(session, item)
+        assert document.read_failed_at is not None
+        assert not awaits_read(item, document)
+        assert len(_jobs_after(session, run)) == 1
 
 
 class TestTurnEndReadServiceJob:
@@ -937,14 +984,14 @@ class TestTurnEndReadServiceJob:
         _end(session, container, run)
         reads = _service(container, supervise)[0]
 
-        fake.on_read = _refusing(fake, OTHER)
-        with pytest.raises(ExternalServiceException):
+        fake.on_read = _unanswering(fake, OTHER)
+        with pytest.raises(ControllerUnreachable):
             _read(reads, run.id)
 
         assert _document(session, first).published_text == TEXT
         assert _jobs_after(session, run) == []
 
-        fake.on_read, fake.refusal = None, None
+        fake.on_read, fake.unanswered = None, False
         _read(reads, run.id)
         _read(reads, run.id)
 
@@ -1133,12 +1180,12 @@ class TestTurnEndReadServiceLoop:
                     container, db.get_one(Project, project_id), run, OTHER
                 ).id
                 _end(db, container, run)
-            fake.on_read = _refusing(fake, OTHER)
-            with pytest.raises(ExternalServiceException):
+            fake.on_read = _unanswering(fake, OTHER)
+            with pytest.raises(ControllerUnreachable):
                 # The process stops after the first read committed.
                 _read(_service(container, supervise)[0], run_id)
             assert _published(container, item_id) == TEXT
-            fake.on_read, fake.refusal = None, None
+            fake.on_read, fake.unanswered = None, False
             reads, coordinator = _service(container, supervise)
 
             coordinator.fire_startup()

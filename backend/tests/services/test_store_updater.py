@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.models import Chat, Environment, Item, Project, StoreUpdate, Turn, User, Work
 from app.models.reference import (
     ChatKind,
@@ -35,6 +35,7 @@ from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerUnreachable, HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService, EnvironmentStartFailed
+from app.services.job_service import retry_refusal
 from app.services.pilot_server import PilotServer
 from app.services.relay_service import RelayService
 from app.services.session_start_service import (
@@ -592,6 +593,18 @@ def _retry(db: DbSession, job: models.Session) -> models.Session:
     return _session(db, retry_id)
 
 
+def _jobs(db: DbSession) -> int:
+    """How many jobs' Sessions there are."""
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(models.Session)
+            .where(models.Session.kind_code == "job")
+        )
+        or 0
+    )
+
+
 def _retried(db: DbSession) -> set[uuid.UUID]:
     """The jobs a Retry placed a job for."""
     return set(db.scalars(select(Work.id).where(Work.retried_by_id.is_not(None))))
@@ -658,6 +671,49 @@ class TestLift:
             rf"The store's update {update.id}: left {left.id} to a person's "
             "Retry: Cannot retry Setting up the project because its project is "
             "archived"
+        )
+
+    def test_a_retry_refused_after_its_writes_leaves_none_and_the_job_keeps_its_retry(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        camp: Project,
+        engine_events: list[EngineEvent],
+        updater_log: LogWaiter,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        update = _at_lift(session)
+        left = stopped_job(container, session, camp, datetime.now(UTC))
+        jobs = _jobs(session)
+        # The start refuses once the Retry has placed its job and marked the
+        # job it retries.
+        monkeypatch.setattr(container.session_start_service(), "_store", "")
+        clear_after_commit_callbacks()
+
+        _run(updater)
+
+        assert _retry_of(session, left) is None
+        assert _jobs(session) == jobs
+        assert not [
+            event for event in engine_events if isinstance(event, TreeHashMoved)
+        ]
+        assert _update(session, update.id).lifted_at is not None
+        assert updater_log.matching(
+            rf"The store's update {update.id}: left {left.id} to a person's "
+            "Retry: Cannot retry Setting up the project because no store "
+            "environment is configured"
+        )
+        # The job keeps its Retry.
+        assert (
+            retry_refusal(
+                session,
+                session.get_one(Project, camp.id, populate_existing=True),
+                _session(session, left.id),
+                session.get_one(Work, left.id, populate_existing=True),
+                session.get_one(Item, left.id, populate_existing=True),
+            )
+            is None
         )
 
     def test_a_job_its_retry_refuses_has_its_project_changed_at_the_lift(

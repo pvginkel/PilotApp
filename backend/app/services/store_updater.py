@@ -26,13 +26,14 @@ is asked (`lift_requested_at`):
 4. `lifted_at`, after each job the update stopped whose item is open and
    which no Work retries is retried once, through a person's Retry, in the
    order the jobs were made, each in a transaction of its own under the row's
-   lock (DB 281): its retry placed held behind its project's held jobs, a
-   refusal logged and the job's Retry left to a person. A stopped turn still
-   ending, which that Retry refuses too, holds the lift to a later run. Once
-   `lifted_at` commits, the held starts are released, the nudges sent, the
-   conditions told, and each project of a job left to a person's Retry
-   changed, its pass's documents the person's. The server retries no other
-   job (D078).
+   lock (DB 281): its retry placed held behind its project's held jobs, or a
+   refusal's transaction rolled back, what the Retry wrote and the events it
+   queued with it, then the refusal logged and the job's Retry left to a
+   person. A stopped turn still ending, which that Retry refuses too, holds
+   the lift to a later run. Once `lifted_at` commits, the held starts are
+   released, the nudges sent, the conditions told, and each project of a job
+   left to a person's Retry changed, its pass's documents the person's. The
+   server retries no other job (D078).
 
 A lift asked goes to 4 from wherever the sequence stands. The job's reconcile
 at STARTUP and the timer `store-update`, on every tick, run the loop while an
@@ -282,10 +283,26 @@ class StoreUpdater:
                 return
             retrying = db.scalars(_retriable(update)).all()
         for job_id in retrying:
-            with scoped_session(self._container) as db:
-                update = _locked(db, update_id)
-                if update.lifted_at is not None or not self._retry(db, update, job_id):
+            try:
+                with scoped_session(self._container) as db:
+                    update = _locked(db, update_id)
+                    if update.lifted_at is not None:
+                        return
+                    self._retry(db, update, job_id)
+            except InvalidOperationException as refused:
+                if refused.cause == TURN_ENDING:
+                    logger.info(
+                        "The store's update %s: lifts once %s's stopped turn ends",
+                        update_id,
+                        job_id,
+                    )
                     return
+                logger.info(
+                    "The store's update %s: left %s to a person's Retry: %s",
+                    update_id,
+                    job_id,
+                    refused.message,
+                )
         with scoped_session(self._container) as db:
             update = _locked(db, update_id)
             if update.lifted_at is not None:
@@ -302,34 +319,23 @@ class StoreUpdater:
             after_commit(self._lifted)
             logger.info("The store's update %s: lifted", update_id)
 
-    def _retry(self, db: Session, update: StoreUpdate, job_id: uuid.UUID) -> bool:
+    def _retry(self, db: Session, update: StoreUpdate, job_id: uuid.UUID) -> None:
         """Under the update's lock, while the job is one to retry still: a
-        person's Retry of it, or that Retry's refusal logged; False when the
-        refusal is its stopped turn still ending."""
+        person's Retry of it.
+
+        Raises:
+            InvalidOperationException: The Retry refused, its stopped turn
+                still ending among the refusals; what it wrote before its
+                refusal, and the events it queued, are the caller's to roll
+                back
+        """
         if (
             db.scalars(_retriable(update).where(AgentSession.id == job_id)).first()
             is None
         ):
-            return True
-        try:
-            self._container.job_service().retry(job_id)
-        except InvalidOperationException as refused:
-            if refused.cause == TURN_ENDING:
-                logger.info(
-                    "The store's update %s: lifts once %s's stopped turn ends",
-                    update.id,
-                    job_id,
-                )
-                return False
-            logger.info(
-                "The store's update %s: left %s to a person's Retry: %s",
-                update.id,
-                job_id,
-                refused.message,
-            )
-            return True
+            return
+        self._container.job_service().retry(job_id)
         logger.info("The store's update %s: retried %s", update.id, job_id)
-        return True
 
     def _lifted(self) -> None:
         self._starts.release_held()

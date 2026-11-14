@@ -15,18 +15,22 @@ is not. Each such environment's file is brought in line by a loop of its own,
 `halt-file:<env id>`, under the Environment's row; a file the controller no
 longer finds counts as deleted. A call the controller does not answer, or
 refuses — its own work on the tree, a `409 conflict`, among the refusals —
-raises, and the loop runs again after its backoff. Each run writes the file
-where it is wanted, whatever the column says, so an environment owed a write
-or a delete gets it once the controller answers.
+raises, and the loop runs again after its backoff, with no end, the
+supervisor logging each. Each run writes the file where it is wanted,
+whatever the column says, so an environment owed a write or a delete gets it
+once the controller answers.
 
 A change of what holds the file asks for a sweep once it commits: a pause or
 a resume (`ProjectService`), a halt's turn (`UsageWatcher`), a work item's
 run's end (`WorkSlots`). The sweep, the loop `halt-file`, starts the loop of
-every environment owed. The timer does the same on every tick, and finds a
+every environment owed. The timer, on every tick, and the job's reconcile at
+STARTUP start the loop of every environment owed or whose column is set, so
+the file is written again where it is wanted at every tick: a write that
+failed after its mark lands at the next tick of whichever process runs, the
+write of a process that ended in its loop's backoff, or of a deploy roll's
+old pod, marked after the new pod's STARTUP, among them. They also find a
 work item whose start the gate let through before a halt or a pause it now
-runs under. The job's reconcile at STARTUP starts the loop of every
-environment owed or whose column is set: a process that ended during a call
-left the file's presence unknown there.
+runs under.
 """
 
 import logging
@@ -81,8 +85,8 @@ class HaltFileService:
         week_halt: HaltSetting,
         five_hour_halt: HaltSetting,
     ) -> None:
-        """Register the `halt-file` job, its reconcile and its timer, and hear
-        each work item's run's end.
+        """Register the `halt-file` job, its reconcile the timer's run, and
+        its timer, and hear each work item's run's end.
 
         Args:
             container: Gives each run its database session, and the client
@@ -102,7 +106,7 @@ class HaltFileService:
             UsageWindow.FIVE_HOUR: five_hour_halt,
         }
         supervisor.register_job(
-            HALT_FILE_JOB, needs_controller=True, reconcile=self.reconcile
+            HALT_FILE_JOB, needs_controller=True, reconcile=self.run_timer
         )
         supervisor.register_timer(TIMER, self.run_timer, needs_controller=True)
         work_slots.subscribe(self.request)
@@ -152,15 +156,13 @@ class HaltFileService:
     def sweep(self, handle: LoopHandle) -> None:
         """The sweep's run: the loop of every environment owed started."""
         with scoped_session(self._container) as db:
-            self._start_owed(db)
+            for env_id in self.owed(db):
+                self._start(env_id)
 
     def run_timer(self, db: Session) -> None:
-        """The timer's tick: the loop of every environment owed started."""
-        self._start_owed(db)
-
-    def reconcile(self, db: Session) -> None:
-        """The job's reconcile at STARTUP: the loop of every environment owed
-        or whose `halt_requested_at` is set started."""
+        """The timer's tick, and the job's reconcile at STARTUP: the loop of
+        every environment owed or whose `halt_requested_at` is set started,
+        each of which writes the file again where it is wanted."""
         requested = db.scalars(
             select(Environment.id).where(Environment.halt_requested_at.is_not(None))
         )
@@ -217,10 +219,6 @@ class HaltFileService:
             logger.info("Deleted the halt file from environment %s", env_id)
             return _Step.DELETED
         return None
-
-    def _start_owed(self, db: Session) -> None:
-        for env_id in self.owed(db):
-            self._start(env_id)
 
     def _start(self, env_id: str) -> None:
         self._supervisor.start_loop(

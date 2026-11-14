@@ -1,12 +1,13 @@
 """The wait on a file call the controller keeps refusing for a reason of its
 own (P-64): the write-back's every refusal but one naming the file, its path
-or its environment (`WriteBackService`), and the turn-end read's `409
-conflict` (`TurnEndReadService`). Such a call is made again a round at a time,
-every `REFUSAL_RETRY_SECONDS`, until `REFUSAL_WAIT_SECONDS` have passed since
-the round of its first refusal counted, and is then taken as refused with the
-controller's answer. A run makes all its calls in each round, so that their
-waits run side by side, never one after another. A refusal that counts toward
-no wait starts its call's afresh from the next one.
+or its environment (`WriteBackService`), and the turn-end read's every
+refusal but one naming the file or its path (`TurnEndReadService`). Such a
+call is made again a round at a time, every `REFUSAL_RETRY_SECONDS`, until
+`REFUSAL_WAIT_SECONDS` have passed since the round of its first refusal
+counted, and is then taken as refused with the controller's answer. A run
+makes all its calls in each round, so that their waits run side by side, never
+one after another. A refusal that counts toward no wait starts its call's
+afresh from the next one.
 """
 
 import time

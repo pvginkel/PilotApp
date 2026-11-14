@@ -3,12 +3,15 @@ written into an environment where a work item's Session runs under a usage
 halt whose setting is the cooperative stop or under its project's pause, and
 deleted once none runs there under either; never for a job or a chat, so
 never into the store; shared by two projects and by a halt and a pause; owed
-from the rows through an outage and a restart.
+from the rows through an outage and a restart; written again where it is
+wanted at every tick, a deploy roll's lost write among them, and a call the
+controller keeps refusing made again until it lands (slice 046 V01, V03).
 
 An environment's run is called on the test's session as its loop calls it;
 the loops' tests run them on a database of their own, as the supervisor
 does."""
 
+import re
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -34,14 +37,25 @@ from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
 )
-from app.services.halt_file_service import HALT_FILE, HALT_FILE_JOB, HaltFileService
+from app.services.halt_file_service import (
+    HALT_FILE,
+    HALT_FILE_JOB,
+    TIMER,
+    HaltFileService,
+)
 from app.services.start_gate import WorkSlots
-from app.services.supervisor import LoopHandle
+from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
-from tests.support.supervisor import LogWaiter, Supervise, listening, wait_until
+from tests.support.supervisor import (
+    LogWaiter,
+    Supervise,
+    listening,
+    metric_value,
+    wait_until,
+)
 
 ENV = "env-a"
 OTHER = "env-b"
@@ -846,3 +860,94 @@ class TestHaltFileServiceLoop:
         loop_log.wait_for(f"Wrote the halt file into environment {ENV}")
         assert _file(fake_controller) == b""
         assert _committed_requested(container) is not None
+
+    def test_a_write_the_old_pod_marked_after_the_new_pods_startup_lands_at_its_next_tick(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        # A deploy roll: the new pod beside the old one, which still serves
+        # (slice 028 P6's review r2, F3).
+        container = committed_app.container
+        project_id, _ = _committed_rows(committed_app, fake_controller)
+        ticks = metric_value(TIMER_RUNS_TOTAL, timer=TIMER, outcome="ok")
+        new, new_coordinator = _service(container, supervise, tick=60)
+        new_coordinator.fire_startup()
+        # The sweep runs once the new pod's reconcile has, and its first tick
+        # comes at once: both before the old pod's mark.
+        new.request()
+        loop_log.wait_for(f"Loop {HALT_FILE_JOB} ended")
+        wait_until(
+            lambda: metric_value(TIMER_RUNS_TOTAL, timer=TIMER, outcome="ok") > ticks,
+            "the new pod's first tick",
+        )
+        old, _ = _service(container, supervise, tick=60)
+        with scoped_session(container) as db:
+            db.get_one(Project, project_id).paused = True
+        fake_controller.outage()
+        with pytest.raises(ExternalServiceException):
+            # The old pod marks, its write fails, and its drain ends the loop.
+            _settle(old)
+        marked = _committed_requested(container)
+        fake_controller.outage(on=False)
+
+        with scoped_session(container) as db:
+            # The new pod's next tick.
+            new.run_timer(db)
+
+        loop_log.wait_for(f"Wrote the halt file into environment {ENV}")
+        assert marked is not None
+        assert _file(fake_controller) == b""
+        assert _committed_requested(container) == marked
+
+    @pytest.mark.parametrize("wanted", [True, False], ids=["write", "delete"])
+    def test_a_call_the_controller_keeps_refusing_is_made_again_until_it_lands(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+        wanted: bool,
+    ) -> None:
+        container = committed_app.container
+        project_id, run_id = _committed_rows(
+            committed_app, fake_controller, requested=not wanted
+        )
+        with scoped_session(container) as db:
+            if wanted:
+                db.get_one(Project, project_id).paused = True
+            else:
+                db.get_one(models.Session, run_id).state_code = SessionState.IDLE
+        # The controller's own work on the tree refuses every file call.
+        fake_controller.set_status(ENV, "starting")
+        _, coordinator = _service(container, supervise, tick=60)
+
+        coordinator.fire_startup()
+
+        refused = rf"Loop {HALT_FILE_JOB}:{ENV} raised; restarting in .*"
+        loop_log.wait_for(refused, 3)
+        fake_controller.set_status(ENV, "running")
+        done = "Wrote the halt file into" if wanted else "Deleted the halt file from"
+        loop_log.wait_for(f"{done} environment {ENV}")
+
+        # Each refusal is in the server's log, with the controller's answer.
+        failures = [
+            record.exc_info[1]
+            for record in loop_log.records
+            if re.fullmatch(refused, record.getMessage()) and record.exc_info
+        ]
+        assert len(failures) >= 3
+        assert all(
+            isinstance(failure, ControllerProblem)
+            and failure.problem_type is ControllerProblemType.CONFLICT
+            for failure in failures
+        )
+        assert _file(fake_controller) == (b"" if wanted else None)
+        if not wanted:
+            wait_until(
+                lambda: _committed_requested(container) is None, "the delete taken"
+            )
