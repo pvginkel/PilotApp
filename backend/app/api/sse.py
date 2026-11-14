@@ -276,7 +276,9 @@ def stream(
             sse_connection_manager,
             connection,
             settings.sse_heartbeat_interval,
-            testing_service.sse_streams_silent if settings.is_testing else lambda: False,
+            testing_service.sse_streams_silent
+            if settings.is_testing
+            else lambda: False,
         )
     )
     # A body that never starts (a HEAD request, an error before the first
