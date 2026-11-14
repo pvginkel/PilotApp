@@ -65,6 +65,7 @@ function generateClient() {
 import createClient, { type Middleware } from 'openapi-fetch';
 import type { paths } from './types';
 import { buildLoginUrl } from '@/lib/auth-redirect';
+import { appFetch } from '@/lib/api/fetch-extensions';
 
 // Middleware to intercept 401 responses and redirect to login
 const authMiddleware: Middleware = {
@@ -77,9 +78,10 @@ const authMiddleware: Middleware = {
   },
 };
 
-// Create the main API client
+// Create the main API client; every request goes through the app's fetch
 export const api = createClient<paths>({
   baseUrl: '',
+  fetch: appFetch,
 });
 
 // Register auth middleware
