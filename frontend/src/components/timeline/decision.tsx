@@ -72,9 +72,11 @@ interface DecisionOptionsProps {
   onAnswer: Answer;
   /** A one-ask item's choice, which its presses move and its Send sends; none where a press answers. */
   choice: Choosing | null;
+  /** Its Send starts Pilot's work (F59.3). */
+  starts: boolean;
 }
 
-export function DecisionOptions({ field, block, chosen, saving, closed, live, settled, disabled = false, onOpen, onAnswer, choice }: DecisionOptionsProps) {
+export function DecisionOptions({ field, block, chosen, saving, closed, live, settled, disabled = false, onOpen, onAnswer, choice, starts }: DecisionOptionsProps) {
   const [opened, setOpened] = useState(false);
   const rows = rowsOf(block);
   const single = block.options.length === 0;
@@ -202,7 +204,7 @@ export function DecisionOptions({ field, block, chosen, saving, closed, live, se
       </div>
       {choice !== null && (
         <div className="item-actions">
-          <SendChoice ready={ready} busy={saving} onSend={send} />
+          <SendChoice ready={ready} busy={saving} starts={starts} onSend={send} />
         </div>
       )}
     </>

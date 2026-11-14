@@ -250,14 +250,17 @@ function ownFoot(item: ItemDocument, onSent: () => void): ReactNode {
   return null;
 }
 
-/** A review's one mark: read, nothing to answer (F25.2); disabled while the project is archived (D012). */
+/**
+ * A review's one mark: read, nothing to answer (F25.2); disabled while the project is archived
+ * (D012); its icon the job's mark under the mouse where its close starts Pilot's work (F59.3).
+ */
 function Reviewed({ item }: { item: ItemDocument }) {
   const { id: projectId } = useShownProject();
   const { mark, pending } = useReviewed(item.id);
   const archived = useArchived(projectId);
   return (
     <button type="button" className="btn btn-primary" onClick={mark} disabled={pending || archived} data-testid="overlay.reviewed">
-      <BusyIcon busy={pending}>
+      <BusyIcon busy={pending} starts={item.close_starts_work}>
         <Check className="icon" aria-hidden="true" />
       </BusyIcon>
       Reviewed

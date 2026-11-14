@@ -69,7 +69,8 @@ interface ConfirmDialogProps {
   /** What the act does, a line each. */
   lines: string[];
   note?: string;
-  act: { label: string; icon: LucideIcon };
+  /** The act, its label and its icon; `starts`, it starts Pilot's work (F59.3). */
+  act: { label: string; icon: LucideIcon; starts?: boolean };
   /** The act is on its way: nothing closes the dialog but its answer. */
   pending: boolean;
   onConfirm: () => void;
@@ -108,7 +109,7 @@ export function ConfirmDialog({ title, lines, note, act, pending, onConfirm, onC
           Cancel
         </button>
         <button type="button" className="btn btn-primary" disabled={pending} onClick={onConfirm} data-testid={`${testId}.confirm`}>
-          <BusyIcon busy={pending}>
+          <BusyIcon busy={pending} starts={act.starts}>
             <Icon className="icon" aria-hidden="true" />
           </BusyIcon>
           {act.label}

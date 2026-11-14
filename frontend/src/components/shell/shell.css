@@ -226,6 +226,7 @@
   .gold-btn {
     display: inline-flex;
     align-items: center;
+    gap: 6px;
     height: 26px;
     padding: 0 10px;
     border: 1px solid hsl(var(--gold-foreground));

@@ -2969,6 +2969,11 @@
             "title": "Clarifications",
             "type": "array"
           },
+          "close_starts_work": {
+            "description": "Whether a person's close of it on the page starts Pilot's work, as the record stands at this read, which the button that closes it says under the mouse (F59.3): an item a session of Pilot's own added, but a notice, its close placing the job after it; a registered document whose run's turn has ended and whose other documents are all closed, its close continuing the run. Read at every read, never stored; false once done, and while the project is archived",
+            "title": "Close Starts Work",
+            "type": "boolean"
+          },
           "concept": {
             "description": "Whether the latest save of its text is held, its text shown as last published until a parseable save arrives (F78)",
             "title": "Concept",
@@ -3250,6 +3255,7 @@
           "for_user",
           "done",
           "folded",
+          "close_starts_work",
           "concept",
           "author",
           "words",
@@ -10250,6 +10256,11 @@
             "title": "Clarifications",
             "type": "array"
           },
+          "close_starts_work": {
+            "description": "Whether a person's close of it on the page starts Pilot's work, as the record stands at this read, which the button that closes it says under the mouse (F59.3): an item a session of Pilot's own added, but a notice, its close placing the job after it; a registered document whose run's turn has ended and whose other documents are all closed, its close continuing the run. Read at every read, never stored; false once done, and while the project is archived",
+            "title": "Close Starts Work",
+            "type": "boolean"
+          },
           "concept": {
             "description": "Whether the latest save of its text is held, its text shown as last published until a parseable save arrives (F78)",
             "title": "Concept",
@@ -10510,6 +10521,7 @@
           "for_user",
           "done",
           "folded",
+          "close_starts_work",
           "concept",
           "author",
           "words",

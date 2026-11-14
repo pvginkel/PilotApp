@@ -66,6 +66,7 @@ export function ArchiveAnswers({ item }: { item: TimelineItem }) {
       <SendChoice
         ready={saving === null && (chosen === ARCHIVE || chosen === KEEP)}
         busy={saving !== null}
+        starts={item.close_starts_work}
         onSend={() => answer(chosen!, { onSaved: choice.sent })}
         testId="timeline.archive-question.send"
       />

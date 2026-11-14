@@ -46,6 +46,14 @@
   .btn:disabled { opacity: 0.45; cursor: default; }
   /* A press that writes, waiting on its spinner (F148, busy-icon.tsx). */
   :is(.btn, .gold-btn, .console-btn, .option):disabled:has(> .spinner) { cursor: progress; }
+  /* A button that starts Pilot's work (F59.3, job-glyph.tsx): under the mouse, while it takes a
+     press, its icon gives way to the job's mark; with no hover, a phone's, the icon stays. */
+  .starts-work { display: contents; }
+  .starts-work > .job-glyph { display: none; }
+  @media (hover: hover) {
+    button:hover:enabled:not([aria-disabled='true']) > .starts-work > :not(.job-glyph) { display: none; }
+    button:hover:enabled:not([aria-disabled='true']) > .starts-work > .job-glyph { display: inline-block; }
+  }
   .btn-sm { --h: 28px; padding: 0 10px; font-size: var(--text-sm); gap: 6px; }
   .btn-icon { width: var(--h); padding: 0; align-items: center; }
   .btn-icon .icon { top: 0; }

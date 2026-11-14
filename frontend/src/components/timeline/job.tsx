@@ -116,7 +116,7 @@ export function JobMenuRow({ job, onOpen }: { job: Job; onOpen: () => void }) {
 /**
  * Retry, placing a fresh job for the same trigger, which the item then shows. Pressed from the
  * keyboard, the focus goes to the job's button once Retry, gone with the retried job, has left it
- * nowhere.
+ * nowhere. It starts Pilot's work (F59.3).
  */
 function Retry({ job, testId, onLanded }: { job: Job; testId: string; onLanded: () => void }) {
   const { id: projectId } = useShownProject();
@@ -138,7 +138,7 @@ function Retry({ job, testId, onLanded }: { job: Job; testId: string; onLanded: 
       }}
       data-testid={testId}
     >
-      <BusyIcon busy={pending}>
+      <BusyIcon busy={pending} starts>
         <RotateCw className="icon" aria-hidden="true" />
       </BusyIcon>
       Retry

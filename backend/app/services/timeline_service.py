@@ -19,7 +19,14 @@ from sqlalchemy.orm import Session, aliased
 from app.engine.claims import standing
 from app.engine.documents import ARCHIVE_QUESTION, OPENING, PROSE, awaits_read
 from app.engine.paths import tree_path
-from app.engine.record import MARKED, NOTICE, SETTLED, TURN_ENDED, RecordService
+from app.engine.record import (
+    MARKED,
+    NOTICE,
+    SETTLED,
+    TURN_ENDED,
+    RecordService,
+    close_starts_work,
+)
 from app.engine.references import Reason, References
 from app.exceptions import RecordNotFoundException
 from app.models import (
@@ -721,6 +728,9 @@ class TimelineService:
             slots=self.work_slots,
         )
         job_titles = self._titles(job_ids)
+        starts = close_starts_work(
+            self.db, project, [(item, document) for item, document, _ in rows]
+        )
 
         def job(job_id: uuid.UUID | None) -> JobSchema | None:
             if job_id is None:
@@ -812,6 +822,7 @@ class TimelineService:
                 for_user=reader.user(item.for_user_id),
                 done=self._done(item, reader),
                 folded=item.folded,
+                close_starts_work=item.id in starts,
                 concept=(
                     document is not None and tree_path(project, document.path) in held
                 ),

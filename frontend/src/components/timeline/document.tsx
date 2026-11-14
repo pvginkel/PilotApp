@@ -160,14 +160,17 @@ function CountChips({ counts, autopilot }: { counts: Counts; autopilot: number }
   );
 }
 
-/** A review's one mark: read, nothing to answer (F25.2); disabled while the project is archived (D012). */
+/**
+ * A review's one mark: read, nothing to answer (F25.2); disabled while the project is archived
+ * (D012); its icon the job's mark under the mouse where its close starts Pilot's work (F59.3).
+ */
 function Reviewed({ item }: { item: TimelineItem }) {
   const { id: projectId } = useShownProject();
   const { mark, pending } = useReviewed(item.id);
   const archived = useArchived(projectId);
   return (
     <button type="button" className="btn" onClick={mark} disabled={pending || archived} data-testid="timeline.item.reviewed">
-      <BusyIcon busy={pending}>
+      <BusyIcon busy={pending} starts={item.close_starts_work}>
         <Check className="icon" aria-hidden="true" />
       </BusyIcon>
       Reviewed
@@ -286,7 +289,11 @@ function sendTitle(held: boolean, ready: boolean): string {
   return ready ? 'Send the answers to Pilot' : 'Answer every block that has no recommendation first';
 }
 
-/** `onSent` runs once the record holds the answers; disabled while the project is archived (D012). */
+/**
+ * `onSent` runs once the record holds the answers; disabled while the project is archived (D012).
+ * Where the document's close starts Pilot's work, its icon and its dialog's Confirm's are the job's
+ * mark under the mouse (F59.3).
+ */
 export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () => void }) {
   const { id: projectId } = useShownProject();
   const { mark, pending } = useSend(item.id, onSent);
@@ -307,7 +314,7 @@ export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () 
         title={sendTitle(held, ready)}
         data-testid="timeline.item.send"
       >
-        <BusyIcon busy={pending && !asking}>
+        <BusyIcon busy={pending && !asking} starts={item.close_starts_work}>
           <Check className="icon" aria-hidden="true" />
         </BusyIcon>
         Send answers
@@ -317,7 +324,7 @@ export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () 
           title="Send with the recommendations?"
           lines={unanswered.map((block) => `${askOf(block)} · ${recommendedWords(block, recommendationOf(block)!)}`)}
           note="These are unanswered: sending takes each recommendation as your answer."
-          act={{ label: 'Confirm', icon: Check }}
+          act={{ label: 'Confirm', icon: Check, starts: item.close_starts_work }}
           pending={pending}
           onConfirm={mark}
           onCancel={() => setAsking(false)}

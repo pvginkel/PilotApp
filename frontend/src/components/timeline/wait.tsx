@@ -177,7 +177,8 @@ const capitalised = (words: string) => words.charAt(0).toUpperCase() + words.sli
 /**
  * The request's button, a press that writes (use-press.ts). From the press until the timeline reads
  * the firing it recorded, it is disabled, so that a second press cannot follow the first before the
- * read says Pilot is checking, its icon the spinner once it has waited (F148).
+ * read says Pilot is checking, its icon the spinner once it has waited (F148). It fires the wait,
+ * which starts Pilot's work (F59.3).
  */
 function RequestButton({ item, wait }: { item: TimelineItem; wait: Wait }) {
   const mutation = usePostItemsRequestByItemId();
@@ -208,7 +209,7 @@ function RequestButton({ item, wait }: { item: TimelineItem; wait: Wait }) {
       aria-label={label}
       data-testid="timeline.wait.request"
     >
-      <BusyIcon busy={pending}>
+      <BusyIcon busy={pending} starts>
         <HourglassSkip />
       </BusyIcon>
     </button>

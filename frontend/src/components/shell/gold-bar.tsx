@@ -11,7 +11,8 @@
  * than the viewer's today.
  */
 
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Play } from 'lucide-react';
+import { StartsWork } from '@/components/shared/job-glyph';
 import { Popover } from '@/components/shared/popover';
 import { Time } from '@/components/shared/time';
 import type { Condition } from '@/hooks/use-conditions';
@@ -173,7 +174,10 @@ interface OverruleButtonProps {
   onMade?: () => void;
 }
 
-/** The overrule the week's halt offers now (F135.2), one at a time; its toast says what it did. */
+/**
+ * The overrule the week's halt offers now (F135.2), one at a time; its toast says what it did. It
+ * lets the held starts go: its icon, Lucide's play, is the job's mark under the mouse (F59.3).
+ */
 function OverruleButton({ kind, target, onMade }: OverruleButtonProps) {
   const overrule = usePostQuotaOverrules();
   const press = usePress();
@@ -204,6 +208,9 @@ function OverruleButton({ kind, target, onMade }: OverruleButtonProps) {
       onClick={make}
       data-testid="shell.gold-line.overrule"
     >
+      <StartsWork>
+        <Play className="icon" aria-hidden="true" />
+      </StartsWork>
       {label}
     </button>
   );

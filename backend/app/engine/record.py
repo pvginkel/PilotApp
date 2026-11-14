@@ -1086,6 +1086,7 @@ class RecordService:
             # A registered document is its Session's.
             assert item.created_by_session_id is not None
             self.engine_bus.emit(WriteBackOwed(item.created_by_session_id))
+        # `close_starts_work` reads these two branches for the page (F59.3).
         if document.source_path is not None:
             self._release(project, item)
         elif (
@@ -1126,7 +1127,7 @@ class RecordService:
         run = self.db.get(Item, run_id, populate_existing=True)
         if run is None or run.done_cause_code != TURN_ENDED:
             return
-        if self._closed_for_good(run_id):
+        if closed_for_good(self.db, run_id):
             return
         registered = self.db.execute(
             select(Item, Document)
@@ -1164,27 +1165,117 @@ class RecordService:
         self.db.flush()
         self.engine_bus.emit(ProjectChanged(project.id))
 
-    def _closed_for_good(self, run_id: uuid.UUID) -> bool:
-        """Whether a close for good ended the conversation of the work item
-        `run_id` (DB 348): the latest worker's run on it, the one whose Item
-        has the highest `seq`, is done `cancelled`."""
-        conversation = (
-            select(AgentSession.conversation_id)
-            .where(AgentSession.id == run_id)
-            .scalar_subquery()
+
+def closed_for_good(db: Session, run_id: uuid.UUID) -> bool:
+    """Whether a close for good ended the conversation of the work item
+    `run_id` (DB 348): the latest worker's run on it, the one whose Item
+    has the highest `seq`, is done `cancelled`."""
+    conversation = (
+        select(AgentSession.conversation_id)
+        .where(AgentSession.id == run_id)
+        .scalar_subquery()
+    )
+    latest = db.scalar(
+        select(Item.done_cause_code)
+        .join(AgentSession, AgentSession.id == Item.id)
+        .join(Work, Work.id == Item.id)
+        .where(
+            Work.session_kind_code == WORKERS_RUN,
+            AgentSession.conversation_id == conversation,
         )
-        latest = self.db.scalar(
-            select(Item.done_cause_code)
-            .join(AgentSession, AgentSession.id == Item.id)
-            .join(Work, Work.id == Item.id)
-            .where(
-                Work.session_kind_code == WORKERS_RUN,
-                AgentSession.conversation_id == conversation,
+        .order_by(Item.seq.desc())
+        .limit(1)
+    )
+    return latest == CANCELLED
+
+
+def close_starts_work(
+    db: Session, project: Project, items: Sequence[tuple[Item, Document | None]]
+) -> set[uuid.UUID]:
+    """The ids of the open items among `items`, `project`'s, whose close by a
+    person on the page starts Pilot's work as the rows stand now (F59.3), as
+    `_mark` starts it: a registered document's continues its run
+    (`_release`); an item's a session of Pilot's own added, but a notice's,
+    places the job after it (`pilots_own`). None while the project is
+    archived, whose items take no close (D012). A statement is sent only
+    where it can find something."""
+    if project.archived:
+        return set()
+    closable = [
+        (item, document)
+        for item, document in items
+        if document is not None and item.done_at is None
+    ]
+    added = {
+        item.id: item.created_by_session_id
+        for item, document in closable
+        if document.source_path is None
+        and item.kind_code != NOTICE
+        and item.created_by_session_id is not None
+    }
+    pilots = (
+        set(
+            db.scalars(
+                select(AgentSession.id)
+                .join(SessionKind, SessionKind.code == AgentSession.kind_code)
+                .where(
+                    AgentSession.id.in_(set(added.values())),
+                    SessionKind.surface == Surface.STORE,
+                )
             )
-            .order_by(Item.seq.desc())
-            .limit(1)
         )
-        return latest == CANCELLED
+        if added
+        else set()
+    )
+    return {
+        item_id for item_id, session_id in added.items() if session_id in pilots
+    } | _continuing(
+        db,
+        [item for item, document in closable if document.source_path is not None],
+    )
+
+
+def _continuing(db: Session, registered: list[Item]) -> set[uuid.UUID]:
+    """The ids of the open registered documents `registered` whose close
+    continues their run, as `_release` has it: its work item done at its
+    turn's end, its conversation not closed for good, and every other
+    document it registered closed, by neither Finish nor a Cancel."""
+    run_of: dict[uuid.UUID, uuid.UUID] = {}
+    for item in registered:
+        # A registered document is its Session's.
+        assert item.created_by_session_id is not None
+        run_of[item.id] = item.created_by_session_id
+    if not run_of:
+        return set()
+    ended = {
+        run_id
+        for run_id in db.scalars(
+            select(Item.id).where(
+                Item.id.in_(set(run_of.values())), Item.done_cause_code == TURN_ENDED
+            )
+        )
+        if not closed_for_good(db, run_id)
+    }
+    if not ended:
+        return set()
+    holding: dict[uuid.UUID, set[uuid.UUID]] = {run_id: set() for run_id in ended}
+    for item_id, run_id, done_at, cause in db.execute(
+        select(Item.id, Item.created_by_session_id, Item.done_at, Item.done_cause_code)
+        .join(Document, Document.id == Item.id)
+        .where(
+            Item.created_by_session_id.in_(ended),
+            Document.source_path.is_not(None),
+        )
+    ):
+        # The query takes the documents of the runs in `ended` alone.
+        assert run_id is not None
+        if done_at is None or cause in ENDS_RUN:
+            holding[run_id].add(item_id)
+    return {
+        item_id
+        for item_id, run_id in run_of.items()
+        if run_id in ended and holding[run_id] <= {item_id}
+    }
 
 
 def done_refusal(item: Item) -> str | None:

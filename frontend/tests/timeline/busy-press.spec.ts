@@ -20,6 +20,8 @@ const TENT = '```decision id=D1\noptions:\n  - Dome: up in five minutes\n  - Tun
 // More than one ask: a press on a row answers, where a document of one ask only chooses.
 const TRIP = ['## Which tent?\n', TENT, '## Where do we pitch?\n', '```question id=Q1\n```\n'].join('\n');
 const CONFIRMATION = 'The tag is cut.\n\n```decision id=C1\ntype: confirmation\nproposal: Push the release\nbecause: auto-pilot-off\n```\n';
+// A confirmation among two asks: its Yes, a button with no icon, is the answer.
+const RELEASE = [CONFIRMATION, '## Where do we pitch?\n', '```question id=Q1\n```\n'].join('\n');
 
 /** How the next press on `testId` stands a tenth of a second after its click, read later by `early()`. */
 async function probe(page: Page, testId: string): Promise<void> {
@@ -100,7 +102,7 @@ test.describe('A busy button', () => {
     await expect(second.root).toHaveAttribute('data-state', 'done');
   });
 
-  test('with no icon has the spinner at its start: a question’s Send, its answer boxed beside it while it saves', async ({
+  test('has the spinner in its icon’s place: a question’s Send, Lucide’s send, its answer boxed beside it while it saves', async ({
     page,
     people,
     projects,
@@ -112,6 +114,7 @@ test.describe('A busy button', () => {
     await timeline.open(id);
     const { block } = question;
     await block.answerField.fill('The north shore');
+    await expect(block.answerSend.locator('.lucide-send')).toBeVisible();
 
     const restore = await slowNetwork(page, 1_500);
     await block.answerSend.click();
@@ -120,10 +123,30 @@ test.describe('A busy button', () => {
     await expect(block.answerSend).toBeDisabled();
     await expect(block.answerSend.locator(SPINNER)).toBeVisible();
     expect(await spinnerAt(block.answerSend, 'first')).toBe(true);
+    await expect(block.answerSend.locator('.lucide-send')).toHaveCount(0);
     await restore();
 
     await expect(question.root).toHaveAttribute('data-state', 'done');
     await expect(question.said).toHaveText('The north shore');
+  });
+
+  test('with no icon has the spinner at its start: a document’s Yes', async ({ page, people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Busy yes'), members: [me.handle!] });
+    const release = timeline.item(await projects.place(id, { kind: 'document', title: 'The release', text: RELEASE }));
+    await timeline.open(id);
+    const push = release.blockAt('C1');
+    await expect(push.yes.locator('svg')).toHaveCount(0);
+
+    const restore = await slowNetwork(page, 1_500);
+    await push.yes.click();
+    await expect(push.yes).toBeDisabled();
+    await expect(push.yes.locator(SPINNER)).toBeVisible();
+    expect(await spinnerAt(push.yes, 'first')).toBe(true);
+    await restore();
+
+    await expect(push.answered).toBeVisible();
+    await expect(push.yes.locator(SPINNER)).toHaveCount(0);
   });
 
   test('in a document’s option row has the spinner at the row’s end, the row chosen and the others faded', async ({ page, people, projects, timeline }) => {

@@ -26,6 +26,7 @@ from app.engine.paths import sha256_hex, tree_path
 from app.engine.record import (
     RecordService,
     autopilot_may_take,
+    close_starts_work,
     owes_write_back,
     resume_message,
     write_back_owed,
@@ -65,6 +66,7 @@ from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_sidecar import FakeSidecar
 from tests.support.locks import in_thread, lock_waits
 from tests.support.starts import configured_starts
+from tests.support.statements import sent
 from tests.support.supervisor import Supervise, wait_until
 from tests.support.working_on import Camp
 
@@ -4867,6 +4869,221 @@ class TestRecordServicePilotsOwn:
         item, _ = _bear(session, container, opened, run, "action", "Key", ACTION)
 
         assert container.record_service().pilots_own(item) is own
+
+
+def _starting(session: DbSession, project: Project, *items: Item) -> set[uuid.UUID]:
+    """Which of `items`, `project`'s, `close_starts_work` reads as starting
+    work, each with its document."""
+    return close_starts_work(
+        session,
+        project,
+        [(item, session.get(Document, item.id)) for item in items],
+    )
+
+
+@pytest.mark.usefixtures("placing")
+class TestCloseStartsWork:
+    """The page's reading of whether a person's close starts Pilot's work
+    (F59.3), as the close then does: each case closes the item it reads."""
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "close"),
+        [
+            pytest.param("decision", DECISION, "answer", id="answered"),
+            pytest.param("action", ACTION, "done_action", id="an-actions-done"),
+            pytest.param("document", RECOMMENDED, "done", id="a-documents-done"),
+            pytest.param("review", REVIEW, "reviewed", id="a-reviews-reviewed"),
+        ],
+    )
+    def test_an_item_of_pilots_own_starts_work_as_its_close_places_the_job(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+        kind: str,
+        text: str,
+        close: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, opened, _brain(session, opened), kind, "Camp", text
+        )
+        records = container.record_service()
+
+        assert _starting(session, opened, item) == {item.id}
+
+        match close:
+            case "answer":
+                records.answer(document, "D1", person, "Tunnel")
+            case "done_action":
+                records.done_action(document, "A1", person)
+            case "done":
+                records.done(item, person)
+            case "reviewed":
+                records.reviewed(item, person)
+
+        assert len(_jobs_after(session, item)) == 1
+        assert _starting(session, opened, item) == set()
+
+    def test_a_notice_of_pilots_own_and_a_workers_item_start_none_as_their_close(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        notice, _ = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "notice",
+            "Palette",
+            NOTICE,
+        )
+        workers, document = _bear(
+            session, container, opened, project_session, "decision", "Tent", DECISION
+        )
+        records = container.record_service()
+
+        assert _starting(session, opened, notice, workers) == set()
+
+        records.read(notice, person)
+        records.answer(document, "D1", person, "Tunnel")
+
+        assert _jobs_after(session, notice) == _jobs_after(session, workers) == []
+
+    def test_an_archived_projects_items_start_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        item, _ = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "decision",
+            "Tent",
+            DECISION,
+        )
+        opened.archived = True
+        session.flush()
+
+        assert _starting(session, opened, item) == set()
+
+    def test_the_last_open_document_of_an_ended_run_starts_work_as_its_close_continues_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        decision, document = _registered(session, container, project, run, DECISION)
+        survey, _ = _registered(session, container, project, run, NOTICE, SURVEY_PATH)
+        records = container.record_service()
+
+        assert _starting(session, project, decision, survey) == set()
+
+        records.answer(document, "D1", person, "Tunnel")
+
+        assert _starting(session, project, decision, survey) == {survey.id}
+
+        records.reviewed(survey, person)
+
+        (work,) = _continuations(session, project)
+        assert work.trigger_item_id == survey.id
+
+    def test_a_document_of_a_run_not_ended_starts_none_as_its_close(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        container.record_service().place_work(
+            project, project_session, "Refining the camp", repo="example/Example"
+        )
+        item, document = _registered(
+            session, container, project, project_session, DECISION
+        )
+
+        assert _starting(session, project, item) == set()
+
+        container.record_service().answer(document, "D1", person, "Tunnel")
+
+        assert _continuations(session, project) == []
+
+    def test_a_document_of_a_cancelled_run_starts_none_as_its_close(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        decision, document = _registered(session, container, project, run, DECISION)
+        survey, _ = _registered(session, container, project, run, NOTICE, SURVEY_PATH)
+        records = container.record_service()
+        records.cancel(project, [survey.id], person, "cancel the run")
+
+        assert _starting(session, project, decision) == set()
+
+        records.answer(document, "D1", person, "Tunnel")
+
+        assert _continuations(session, project) == []
+
+    def test_a_document_of_a_conversation_closed_for_good_starts_none_as_its_close(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        decision, document = _registered(session, container, project, run, DECISION)
+        later = _stopped_work(session, container, project, environment, "conv-1")
+        records = container.record_service()
+        assert _starting(session, project, decision) == {decision.id}
+
+        records.close_work(project, later.id, person, "close Renaming")
+
+        assert _starting(session, project, decision) == set()
+
+        records.answer(document, "D1", person, "Tunnel")
+
+        assert _continuations(session, project) == []
+
+    def test_items_it_can_find_nothing_for_send_no_statement(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        brain = _brain(session, opened)
+        notice, _ = _bear(
+            session, container, opened, brain, "notice", "Palette", NOTICE
+        )
+        done, _ = _bear(session, container, opened, brain, "notice", "Lake", NOTICE)
+        container.record_service().read(done, person)
+        items = [
+            (notice, session.get(Document, notice.id)),
+            (done, session.get(Document, done.id)),
+        ]
+
+        with sent(session) as each:
+            assert close_starts_work(session, opened, items) == set()
+
+        assert each.texts == []
 
 
 @pytest.mark.usefixtures("placing")

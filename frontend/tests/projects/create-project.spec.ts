@@ -669,7 +669,7 @@ async function readyBoxes(timeline: TimelinePage) {
 }
 
 test.describe('The pause at Create', () => {
-  test('pausing while the setup runs, a work item placed meanwhile held; paused once its turn ends, the ready box at the timeline’s foot, gone at its Resume, which lets the work item go on; a person’s pause shows none', async ({
+  test('pausing while the setup runs, a work item placed meanwhile held; paused once its turn ends, the ready box at the timeline’s foot, gone at its Resume, which lets the work item go on; a person’s pause shows none; Create project and the Resume each the job’s mark under the mouse', async ({
     page,
     people,
     projects,
@@ -683,6 +683,10 @@ test.describe('The pause at Create', () => {
     const me = await people.signIn();
     const { id, title, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
     const started = await chats.opening(id, slug);
+    // Create project places the setup, Pilot's work: under the mouse its plus gives way to the job's mark (F59.3).
+    await definitionChat.createButton.hover();
+    await expect(definitionChat.createButton.locator('.job-glyph')).toBeVisible();
+    await expect(definitionChat.createButton.locator('.lucide-plus')).toBeHidden();
     await definitionChat.create();
     const session = await started();
     const setupId = (await projects.timeline(id)).items.find((item) => item.work?.pilots_own)!.id;
@@ -705,7 +709,7 @@ test.describe('The pause at Create', () => {
     await expect(timeline.rows.last()).toHaveAttribute('data-testid', 'timeline.ready');
     await expect(timeline.ready.resume).toHaveText('Resume');
     await expect(timeline.ready.resume).toHaveClass('btn btn-primary btn-sm');
-    await expect(timeline.ready.resume.locator('svg')).toHaveClass(/\blucide-play\b/);
+    await expect(timeline.ready.resume.locator('.lucide-play')).toBeVisible();
     await expect(timeline.ready.line).toHaveText('The project is set up and ready to start.');
     await expect(timeline.ready.line).toHaveCSS('color', await cssColour(page, 'hsl(var(--muted-foreground))'));
     await expect(timeline.ready.root).toHaveCSS('border-top-style', 'solid');
@@ -725,6 +729,10 @@ test.describe('The pause at Create', () => {
       'form',
       (event) => event.formId === 'timeline.ready.resume' && event.phase === 'success' && event.fields?.project === id,
     );
+    // It starts Pilot's work: under the mouse its play gives way to the job's mark (F59.3).
+    await timeline.ready.resume.hover();
+    await expect(timeline.ready.resume.locator('.job-glyph')).toBeVisible();
+    await expect(timeline.ready.resume.locator('.lucide-play')).toBeHidden();
     await timeline.ready.resume.click();
     await resumed;
     await expect(timeline.ready.root).toHaveCount(0);

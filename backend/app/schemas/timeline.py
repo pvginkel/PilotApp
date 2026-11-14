@@ -968,6 +968,18 @@ class TimelineItemSchema(BaseModel):
             "member (F12.3); false once done, and unread while Pilot works on it"
         )
     )
+    close_starts_work: bool = Field(
+        description=(
+            "Whether a person's close of it on the page starts Pilot's work, "
+            "as the record stands at this read, which the button that closes "
+            "it says under the mouse (F59.3): an item a session of Pilot's own "
+            "added, but a notice, its close placing the job after it; a "
+            "registered document whose run's turn has ended and whose other "
+            "documents are all closed, its close continuing the run. Read at "
+            "every read, never stored; false once done, and while the project "
+            "is archived"
+        )
+    )
     concept: bool = Field(
         description=(
             "Whether the latest save of its text is held, its text shown as last "

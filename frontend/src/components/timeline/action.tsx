@@ -55,9 +55,11 @@ interface ActionAnswerProps {
   onDone: (sent: Sent) => void;
   /** A one-ask item's choice, which its options move and its Send sends; none where a press answers. */
   choice: Choosing | null;
+  /** Its Send, or its Done, closes its one-ask item and starts Pilot's work (F59.3). */
+  starts: boolean;
 }
 
-export function ActionAnswer({ field, block, claimed, saving, closable, closed, live, settled, disabled = false, onAnswer, onDone, choice }: ActionAnswerProps) {
+export function ActionAnswer({ field, block, claimed, saving, closable, closed, live, settled, disabled = false, onAnswer, onDone, choice, starts }: ActionAnswerProps) {
   const said = saidOf(block, saving);
   return (
     <>
@@ -74,6 +76,7 @@ export function ActionAnswer({ field, block, claimed, saving, closable, closed, 
           onAnswer={onAnswer}
           onDone={onDone}
           choice={block.options.length > 0 ? choice : null}
+          starts={starts}
         />
       )}
     </>
@@ -130,9 +133,10 @@ interface ActionControlsProps {
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
   choice: Choosing | null;
+  starts: boolean;
 }
 
-function ActionControls({ field, block, closable, saving, disabled, onAnswer, onDone, choice }: ActionControlsProps) {
+function ActionControls({ field, block, closable, saving, disabled, onAnswer, onDone, choice, starts }: ActionControlsProps) {
   const pasted = useUnsentText(`${field}/paste`);
   // Other's words in a one-ask item, where no console of its own holds them.
   const other = useUnsentText(`${field}/other`);
@@ -233,7 +237,7 @@ function ActionControls({ field, block, closable, saving, disabled, onAnswer, on
                 onClose={choice.back}
               />
             )}
-            {choice !== null && <SendChoice ready={ready} busy={saving !== null} onSend={send} />}
+            {choice !== null && <SendChoice ready={ready} busy={saving !== null} starts={starts} onSend={send} />}
           </>
         ) : (
           <button
@@ -244,7 +248,7 @@ function ActionControls({ field, block, closable, saving, disabled, onAnswer, on
             title="Done (Ctrl+Enter)"
             data-testid="timeline.block.done"
           >
-            <BusyIcon busy={saving !== null}>
+            <BusyIcon busy={saving !== null} starts={starts}>
               <Check className="icon" aria-hidden="true" />
             </BusyIcon>
             Done

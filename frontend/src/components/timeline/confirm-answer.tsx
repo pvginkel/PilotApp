@@ -59,9 +59,11 @@ interface ConfirmAnswerProps {
   onAnswer: Answer;
   /** A one-ask item's choice, which its presses move and its Send sends; none where a press answers. */
   choice: Choosing | null;
+  /** Its Send starts Pilot's work (F59.3). */
+  starts: boolean;
 }
 
-export function ConfirmAnswer({ field, block, bare, saving, closed, opens, live, settled, disabled = false, onAnswer, choice }: ConfirmAnswerProps) {
+export function ConfirmAnswer({ field, block, bare, saving, closed, opens, live, settled, disabled = false, onAnswer, choice, starts }: ConfirmAnswerProps) {
   const [opened, setOpened] = useState(false);
   // A No's reason in a one-ask item, where no console of its own holds it.
   const why = useUnsentText(`${field}/no`);
@@ -120,7 +122,7 @@ export function ConfirmAnswer({ field, block, bare, saving, closed, opens, live,
             <BusyIcon busy={pressed === NO} />
             {NO}
           </button>
-          {choice !== null && <SendChoice ready={!off && chose !== null} busy={saving !== null} onSend={send} />}
+          {choice !== null && <SendChoice ready={!off && chose !== null} busy={saving !== null} starts={starts} onSend={send} />}
         </div>
       )}
       {live &&

@@ -4,6 +4,7 @@
  * person's Yes through auto pilot, and Pilot goes ahead; No, a click beside it or Esc turns it on
  * and leaves them open. No takes the focus as it opens, so that Enter pressed again leaves them.
  * The answer on its way has the spinner once it has waited (F148): at Yes's icon, at No's start.
+ * Yes starts Pilot's work, its icon the job's mark under the mouse (F59.3).
  */
 
 import { useRef } from 'react';
@@ -59,7 +60,7 @@ export function AutopilotDialog({ count, answering, onAnswer }: AutopilotDialogP
           No
         </button>
         <button type="button" className="btn btn-primary" disabled={pending} onClick={() => answer(true)} data-testid={`${TEST_ID}.yes`}>
-          <BusyIcon busy={answering === true}>
+          <BusyIcon busy={answering === true} starts>
             <Check className="icon" aria-hidden="true" />
           </BusyIcon>
           Yes

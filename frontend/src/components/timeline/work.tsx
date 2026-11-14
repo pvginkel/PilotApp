@@ -385,7 +385,7 @@ function Progress({ steps }: { steps: Work['progress'] }) {
   );
 }
 
-/** Resume, disabled while the project is archived, which the API refuses until Bring back. */
+/** Resume, disabled while the project is archived, which the API refuses until Bring back; it starts Pilot's work (F59.3). */
 function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
   const { id: projectId } = useShownProject();
   const { act, pending } = useResume(item.id);
@@ -402,7 +402,7 @@ function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
       }}
       data-testid="timeline.work.resume"
     >
-      <BusyIcon busy={pending}>
+      <BusyIcon busy={pending} starts>
         <Play className="icon" aria-hidden="true" />
       </BusyIcon>
       Resume
@@ -410,7 +410,7 @@ function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
   );
 }
 
-/** A job's Retry, where a worker's Resume is; disabled while the project is archived, which the API refuses until Bring back. */
+/** A job's Retry, where a worker's Resume is; disabled while the project is archived, which the API refuses until Bring back; it starts Pilot's work (F59.3). */
 function Retry({ item, focus }: { item: TimelineItem; focus: LineFocus }) {
   const { id: projectId } = useShownProject();
   const { act, pending } = useRetry(item.id);
@@ -426,7 +426,7 @@ function Retry({ item, focus }: { item: TimelineItem; focus: LineFocus }) {
       }}
       data-testid="timeline.work.retry"
     >
-      <BusyIcon busy={pending}>
+      <BusyIcon busy={pending} starts>
         <RotateCw className="icon" aria-hidden="true" />
       </BusyIcon>
       Retry

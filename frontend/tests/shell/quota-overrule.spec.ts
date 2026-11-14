@@ -37,7 +37,7 @@ async function openAnother(page: Page, path: string): Promise<ShellPage> {
 }
 
 test.describe('The week’s overrule', () => {
-  test('opens from the halt’s badge, never from a click beside it; the allowance lets the held work go on to its target, where the halt holds again', async ({
+  test('opens from the halt’s badge, never from a click beside it; the allowance, the job’s mark under the mouse, lets the held work go on to its target, where the halt holds again', async ({
     page,
     people,
     projects,
@@ -80,6 +80,13 @@ test.describe('The week’s overrule', () => {
     // A button's shape, ruled in the line's text colour.
     const textColour = await shell.goldText(shell.goldPopover).evaluate((text) => getComputedStyle(text).color);
     await expect(button).toHaveCSS('border-top-color', textColour);
+    // It lets the held starts go, Pilot's work: its play gives way to the job's mark under the mouse (F59.3).
+    await shell.goldText(shell.goldPopover).hover();
+    await expect(button.locator('.lucide-play')).toBeVisible();
+    await expect(button.locator('.job-glyph')).toBeHidden();
+    await button.hover();
+    await expect(button.locator('.job-glyph')).toBeVisible();
+    await expect(button.locator('.lucide-play')).toBeHidden();
 
     // Esc closes it, and so does a press outside it, neither making the overrule.
     await page.keyboard.press('Escape');

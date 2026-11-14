@@ -3775,6 +3775,34 @@ class TestPilotsWork:
         assert _entry(camp, survey)["cancel"] is None
 
 
+@pytest.mark.usefixtures("person")
+class TestCloseStartsWork:
+    """Each entry says whether a person's close of it starts Pilot's work
+    (F59.3), as `close_starts_work` reads it."""
+
+    def test_an_entry_and_an_items_document_say_whether_its_close_starts_work(
+        self, container: ServiceContainer, environment: Environment
+    ) -> None:
+        project = _make(container, environment_id=environment.id)
+        data = container.test_data_service()
+        pilots = data.item(project.id, "question", "Where?", QUESTION, by_pilot=True)
+        notice = data.item(project.id, "notice", "Opens in May", NOTICE, by_pilot=True)
+        workers = data.item(project.id, "action", "Pack", ACTION)
+
+        starts = {
+            entry["id"]: entry["close_starts_work"]
+            for entry in _items(container, project)
+        }
+
+        assert [starts[str(each.id)] for each in (pilots, notice, workers)] == [
+            True,
+            False,
+            False,
+        ]
+        assert _read(container, pilots)["close_starts_work"] is True
+        assert _read(container, workers)["close_starts_work"] is False
+
+
 class TestJobsOnItems:
     """Pilot's job on each item it follows from, and the job after a worker's
     run's turn, with the job's session as its own line shows it (F59.1), as

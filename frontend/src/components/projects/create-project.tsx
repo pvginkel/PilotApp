@@ -5,6 +5,7 @@
  * (ready-box.tsx) holds the button and a muted line saying the project is ready to be created.
  * Pressed, it makes the `opened` transition, by the person, a press that writes (F148); a refusal
  * the head cannot give, no controller or no store environment, comes back as the request's error.
+ * It places the setup, Pilot's work: its icon is the job's mark under the mouse (F59.3).
  */
 
 import { Plus } from 'lucide-react';
@@ -46,7 +47,7 @@ export function CreateProject({ project }: { project: Project }) {
         onClick={act}
         data-testid="project.create"
       >
-        <BusyIcon busy={pending}>
+        <BusyIcon busy={pending} starts>
           <Plus className="icon" aria-hidden="true" />
         </BusyIcon>
         Create project

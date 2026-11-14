@@ -3,7 +3,8 @@
  * names the setup the project is ready after, stuck there over what scrolls under it and standing
  * at the timeline's end once scrolled there, on the phone and the desktop. Its Resume makes the
  * `resumed` transition, by the person, as the status icon's does (F141.2), a press that writes
- * (F148); the timeline read after it names no setup, and the box is gone.
+ * (F148) that starts Pilot's work, its play the job's mark under the mouse (F59.3); the timeline
+ * read after it names no setup, and the box is gone.
  */
 
 import { Play } from 'lucide-react';
@@ -44,7 +45,7 @@ export function ProjectReady({ projectId }: { projectId: string }) {
         onClick={act}
         data-testid="timeline.ready.resume"
       >
-        <BusyIcon busy={pending}>
+        <BusyIcon busy={pending} starts>
           <Play className="icon" aria-hidden="true" />
         </BusyIcon>
         Resume
