@@ -5,7 +5,7 @@ the KubeCoder fleet, through the controller ([`controller.md`](controller.md)). 
 it is a Turn. Everything the session does is a list of Session Records that the server appends to as
 the controller's raw response stream comes in, numbered from 1; a browser reads the list by REST
 from any record number and follows it live on its SSE connection. This page is the sessions as
-built: the start through the gate, what a create is handed, the send, the relay, Stop, Resume and a
+built: the start through the gate, what a create is handed, the send, the relay, Stop, Resume, a work item's close for good and a
 job's Retry, an environment restarted or stopped under a turn, the current line, the records and
 their stream, and the recovery after a restart. A work item is a Session on the timeline, and what
 its line and its session log show is [`work.md`](work.md)'s, Pilot's own jobs among them; a
@@ -415,7 +415,7 @@ Resume starts the environment again (below), which is also KubeCoder's way out o
 column holds the cause: the record that ended the turn is the fact, which the work item's line
 reads ([`work.md`](work.md)).
 
-## Stop, Resume and Retry
+## Stop, Resume, Close and Retry
 
 Each is a work item's, by its id, which is its Session's, behind the API's `editor` gate, and
 answers `200` with the item's work status as the timeline reads it ([`work.md`](work.md)), or `404`
@@ -457,8 +457,8 @@ again ([`round-trip.md`](round-trip.md)), and it passes the gate as a start does
 under a share lock on the project's row, its slot counted before its environment's row is locked.
 A nudge owed to it is owed no more: the Resume stands in for it, one continuation, never two. A
 nudge carries a run on the same way, its Turn the nudge's words ([`usage.md`](usage.md)).
-A stopped or failed work item keeps its environment meanwhile: no other start takes it, and
-nothing resets or deletes it (D042, [`controller.md`](controller.md)).
+A stopped or failed work item keeps its environment meanwhile, while it is open: no other start
+takes it, and nothing resets or deletes it (D042, [`controller.md`](controller.md)).
 
 - **With a conversation to continue**, its start loop sends the Turn to the controller session it
   has; one that is gone, ended, its name holding another conversation, or whose environment is not
@@ -473,10 +473,27 @@ nothing resets or deletes it (D042, [`controller.md`](controller.md)).
 
 Once the Resume's Turn is sent, its `started_at` is the Session's `started_at`. The item stays one
 item. It is a `409` with no controller configured, for a Session that is no work item's, for a job's
-("it is Pilot's own work"), for one neither stopped nor failed ("its start waits at the gate", "it
-is starting", "it is running", "its turn has ended", "its session has ended"), for one in an
-environment Pilot did not create ("its environment is not Pilot's"), for one whose stopped turn is
+("it is Pilot's own work"), for one whose item is done, "it is closed for good" for one closed so
+(below) and "it is done" otherwise, read before its state, for one neither stopped nor failed ("its
+start waits at the gate", "it is starting", "it is running", "its turn has ended", "its session has
+ended"), for one in an environment Pilot did not create ("its environment is not Pilot's"), for one whose stopped turn is
 still ending, until the interrupt's `result` is recorded, and in a finished or an archived project.
+
+**`POST /api/sessions/<id>/close`**, no body (`SessionStartService.close`), closes a stopped
+worker's item for good, as the signed-in person, whoever stopped it: its item is done `cancelled`
+by them, with no Undo and no note (`RecordService.close_work`, [`engine.md`](engine.md)). The
+Session stays `stopped`, its stop as it was written, owed its nudge no more, and holds its
+environment no more ([`controller.md`](controller.md)); it takes no Resume again. Nothing continues
+its conversation, and the documents its run registered are read once the close commits, or once its
+stopped turn has ended ([`round-trip.md`](round-trip.md)). The project's row is locked exclusively,
+as an item's close locks it, so that the close never interleaves with a Resume, an Archive or the
+close of a document of its run. It is a `409` for a caller with no handle, for a Session that is no
+work item's, for a job's ("it is Pilot's own work"), for one whose item is done, in an archived
+project, and for one not stopped: "its start waits at the gate, and its Stop comes first", "it is
+starting, and its Stop comes first", "it is running, and its Stop comes first", "its turn has
+ended", "its session has ended" and "it has failed, and keeps its Resume". The brain's `stop_work`
+with a `reason` makes the same close, by Pilot, first stopping, by Pilot, one that runs, starts or
+is held ([`mcp.md`](mcp.md)).
 
 **`POST /api/sessions/<id>/retry`**, no body (`JobService.retry`), is a job's in Resume's place: for
 a job of Pilot's own that `failed` or is `stopped`, whoever stopped it, its work item open and not
@@ -505,7 +522,8 @@ close of the open items and before each one's close of the chat (`stop_project`,
 send moves it under that lock alone ([`chats.md`](chats.md)). The chat's own Stop,
 `POST /api/projects/<id>/chat/stop`, stops its Session as Stop stops a work item's, by any person
 (`stop_chat`, [`chats.md`](chats.md)). The brain's `stop_work` stops a work item as Stop does, by
-Pilot, and is refused a job's as Stop is ([`mcp.md`](mcp.md)). Finish and Archive stop a job as they
+Pilot, or with a `reason` closes it for good (above), and is refused a job's as Stop is
+([`mcp.md`](mcp.md)). Finish and Archive stop a job as they
 stop every Session; a job held before its brief has no Turn to end.
 
 ## The current line
@@ -515,11 +533,17 @@ keys:
 
 - `state`: `starting` (the session start, or its environment restarting under the turn),
   `thinking`, `writing` (a main-thread text block under way), `working` (a tool call without its
-  result yet) or `waiting` (a sub-agent running);
+  result yet), `waiting` (a sub-agent running) or `background` (the model's own turn ended with a
+  task it left in the background still running);
 - `since`: when that state began, or the latest step did;
 - `step`: the latest tool call's `tool` and `input`, absent before the first, its `input` null
   while the call's input streams in;
 - `agent`: the sub-agent's `type` and `description`, while `waiting`;
+- `task`: the `type` and `description` of the background task started last of those still
+  running, while `background`, the type `claude`'s `task_type`, `local_bash` a command and
+  `local_agent` a sub-agent;
+- `tasks`: the main thread's tasks that run, each its `id`, `type`, `description` and whether it is
+  `backgrounded`, absent while none runs; the API leaves it out;
 - `text`: the latest `starting` or `restarting` record's words, while `starting`.
 
 The session start sets it from each `starting` record it writes, in that record's transaction. From
@@ -530,7 +554,13 @@ block's start or a text delta is `writing`, a thinking block's start `thinking`,
 start `working` with that call as the step, its tool named and its `input` null, which the call's
 `assistant` line fills in, keeping the step's `since`. A partial that leaves the line as it is
 writes nothing. A sub-agent's line, and any other, keeps the state, a `starting` one becoming
-`thinking`. A partial's move takes the Session's lock and writes nothing once the Turn has ended.
+`thinking`. A task is `claude`'s own: a `system` `task_started` line starts one, in the background
+where its `is_backgrounded` is true or a later `task_updated` line's patch makes it so, as for a
+command moved there at its timeout, and its `task_notification` ends it. `claude`'s `result` line,
+the model's own turn ended, is `background` while a backgrounded task runs, the worker holding the
+Turn open for it; from there only a tool call's line or its block's start, or the notification of
+the last such task, moves the state, the worker's nudge and the model's answer to it leaving it
+(`current_line.py`). A partial's move takes the Session's lock and writes nothing once the Turn has ended.
 The relay moves only a `running` Session's line: one stopped under its turn has none.
 
 ## The records

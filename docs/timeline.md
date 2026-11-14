@@ -21,8 +21,9 @@ the latest `finished` transition's time while the project is finished, else null
 that kind, and null while the project is not finished or where an `archived` transition stands at
 `finished_at`, a Finish and archive, which puts none ([`projects.md`](projects.md)), so that the
 question of a finish before a Reopen is never taken for the latest's. `ready_after` is the setup's work item,
-its latest Retry's where it was retried, once it is done at its turn's end, while the project stands
-paused by the pause Create wrote (D083, [`projects.md`](projects.md)); else null.
+its latest Retry's where it was retried, once it is done at its turn's end, while the project is
+open, not archived, and stands paused by the pause Create wrote (D083, [`projects.md`](projects.md)),
+so while the ready box stands (below); else null.
 `unhung_attachments` are a draft's attachments hung on no item, by batch and then file name, in an
 item's attachments' shape: what its definition chat attached, which Create project hangs on the
 opening, so none past Create ([`documents.md`](documents.md)). `items` are every item, by `seq`,
@@ -39,6 +40,15 @@ each with:
   plan (a removed task's last), or null; `urgent`; `for_user`, a person or null;
 - `done`, null while open, else `{at, cause, by, undo}`: `by` is null when the server did it, and
   `undo` whether the record takes Undo now (`RecordService.offers_undo`);
+- `folded`: whether the open item is folded on the timeline, the same for every member (below);
+  false once done, and never read while Pilot works on the item;
+- `close_starts_work`: whether a person's close of it on the page starts Pilot's work, read from
+  the rows at every read as the close's own rule places work and never stored
+  (`RecordService.close_starts_work`, [`engine.md`](engine.md)): an open item a session of Pilot's
+  own added, but a notice, whose close places the job after it, and a registered document whose
+  run's turn has ended and whose run's other documents are all closed, whose close continues the
+  run; false once done and while the project is archived. The button that closes it says so
+  under the mouse ([`ui.md`](ui.md));
 - `concept`: whether a `parse` Save Error stands on its document's path, its latest save held, so
   that its text is the one last published (F78);
 - the opening's `author` and its `words`, verbatim; null on every other item;
@@ -99,9 +109,11 @@ each with:
   `waiting_on_answer`, else null. `awaiting_read` tells a document with no text from one already
   read while another of its run awaits its read, both `awaiting_run`;
 - `cancel`, the Cancel the item offers ([`round-trip.md`](round-trip.md)), null while it offers none:
-  `{takes_back}`, the blocks the run holds, in timeline order, each `{document, block, heading,
-  kind, research}`, its document `{id, title}`, its local id, its own section's heading or null,
-  its kind, and whether the run holds it as a research rather than a claimed action;
+  `{takes_back, also_closes}`. `takes_back` are the blocks the run holds, in timeline order, each
+  `{document, block, heading, kind, research}`, its document `{id, title}`, its local id, its own
+  section's heading or null, its kind, and whether the run holds it as a research rather than a
+  claimed action; `also_closes` the run's other open documents, `{id, title}` each, in timeline
+  order, which the Cancel closes with this one;
 - `job`, Pilot's job that shows on it, whatever the job's state ([`work.md`](work.md)), null where
   none does: `{id, title, work}`, the job's work item, its title and its `work` as the job's own
   entry carries it. On a registered document it is the pass over what its run registered, or the
@@ -136,7 +148,7 @@ Pilot `kind: agent` and a service user `kind: service`, each with no slot.
 
 ## Answering it
 
-Seven routes under `/api/items/<item_id>`, each the record's own write, as the caller, now, through
+Nine routes under `/api/items/<item_id>`, each the record's own write, as the caller, now, through
 the app, answering `204` with no body:
 
 | Route | Body | Does |
@@ -148,6 +160,8 @@ the app, answering `204` with no body:
 | `POST reviewed` | | Reviewed on a review |
 | `POST undo` | | Undo of a done item's answer or mark, whoever gave it |
 | `POST request` | | a wait's firing requested by the caller, *Check now* on a card wait, *Skip wait* on a timed wait, which the wait's next run is briefed with ([`waits.md`](waits.md)) |
+| `POST fold` | | the open item folded on the timeline, for every member (`ItemService.fold`) |
+| `POST unfold` | | its fold undone, for every member |
 
 Stop and take over, `POST take-over`, and the Cancel, `POST cancel`, are
 [`round-trip.md`](round-trip.md)'s. An answer, an action's Done and a document's Done are refused
@@ -167,8 +181,12 @@ its Undo is refused. An unknown item answers `404` "Item <id>
 was not found", and a block the item lacks, any block of a work item or of the opening, `404`
 "Block <item>/<block> was not found". A caller who has not chosen a handle, and every refusal of the
 record, an archived project's close or Undo among them, "its project is archived" (D012), answer
-`409` with the record's reason ([`engine.md`](engine.md)); Undo takes no person, so
-it needs no handle. A request on an item that is no wait, or on a wait that takes none now, is a
+`409` with the record's reason ([`engine.md`](engine.md)); Undo, the fold and the unfold take no
+person, so they need no handle. A fold or an unfold is refused on a done item, on an item Pilot is
+working on, on one the timeline draws no box of its own for, the opening, a job on another item and
+the setup's job once retried, and while the project is archived; one that stands so already is
+taken and changes nothing. A fold raises `project_changed` alone: the store's tree holds no fold,
+and the brain sees none. A request on an item that is no wait, or on a wait that takes none now, is a
 `409` with the reason, "Pilot is checking" among them ([`waits.md`](waits.md)). The routes are behind the API's sign-in and `editor` role
 ([`sign-in.md`](sign-in.md)).
 
@@ -194,7 +212,10 @@ cancel it, and events closer together than a read takes would then let none land
 awaits the query's read, as Create project's success does ([`projects.md`](projects.md)). A
 page's own write reads every query again once it is answered: its generated mutation hook names the
 page in the request's `X-Sender` header (`SENDER`, `frontend/src/lib/api/generated/hooks.ts`), and
-the page skips the event that names it, so a click reads each query once. Another page reads on it,
+the page skips the event that names it, so a click reads each query once. A caller's `onSuccess`
+runs beside that read, and the hook returns both, so that the write stays pending until the read
+ends; `UNTIL_READ` (`lib/api/until-read.ts`) is the options of a write whose button must take no
+second press before the screen shows the first, and adds nothing more. Another page reads on it,
 the same person's included. Each `work_moved`'s status it writes into the timeline as read, with no
 read.
 
@@ -219,14 +240,19 @@ timeline's place ([`chats.md`](chats.md)).
   theirs (`hooks/use-own-growth.ts`), and at the end the timeline then stops following its end
   once that is out of reach, and follows it again once their close brings it back in reach. An
   item that arrives after the first read flashes once.
-- **The ready line.** While `ready_after` names the setup's work item, one line stands right under
-  its line, before the items the setup placed after it: Pilot's avatar and "The project is ready —
-  resume the project to start it." (`rows.ts`'s `ready` row). It has nothing to press, and it goes
-  at the first resume ([`projects.md`](projects.md)).
+- **The ready box** (`ProjectReady`, `project-ready.tsx`). While `ready_after` names a setup, Create
+  project's box stands at the timeline's foot, after the last item and before the Finished divider
+  (`ReadyBox`, `components/shared/ready-box.tsx`): a border, as wide as what it holds and centred,
+  round Resume, a small primary button with Lucide's play, and the muted line "The project is set up
+  and ready to start."; above 900px the button left of the line, at 900px and below above it. It is
+  stuck 12px above the timeline's foot, lifted by a shadow over what scrolls under it, and stands at
+  the timeline's end once scrolled there, on a phone as off it. Resume makes the `resumed`
+  transition, by the person, as the status icon's does, and the read after it names no setup, so
+  the box goes ([`projects.md`](projects.md)).
 - **The opening** (`opening.tsx`) is a bubble beside its author's avatar, on the primary's light
   blue (`--primary-muted`), as a person's message in the chat is ([`chats.md`](chats.md)), "<who> started this
   project · <time>" over it, "You" for the signed-in person and the full name for the other; its
-  words verbatim, folding with Show more, and its attachments under them. It has no head and is
+  words verbatim and whole, and its attachments under them. It has no head, never folds and is
   never done.
 - **An open item** (`item.tsx`) is its head, its title (`title`, else `file_name`), its text and
   its attachments; a document and a review draw as [below](#documents-and-reviews). The head
@@ -246,12 +272,25 @@ timeline's place ([`chats.md`](chats.md)).
   At 600px and below the "for" chip stands on a line of its own under the rest of the head, led by
   a person icon, and Discuss stays at the end of the head's first row however the rest wraps
   (D166). The text's prose is GFM
-  (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
-  more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
+  (`Markdown`, [`ui.md`](ui.md)), shown whole, nothing in the timeline cutting it short, the ask in
+  its block's place; a notice's Read stands alone under its text. A concept has a
   dashed border. An open work item is its session's: its env chip once its start has an
-  environment, its one line and its Stop or Resume, the setup its Retry once it failed or stopped; every
+  environment, its one line and its Stop or Resume, Close beside a stopped one's Resume, the setup its Retry once it failed or stopped; every
   other job of Pilot's own draws no item of its own, showing on the item it follows from
   ([`work.md`](work.md)).
+- **A folded item** (`fold.ts`, `item.tsx`). The kind in an open box's head is a button, "Fold, for
+  everyone" its tooltip, that folds the item in its place for every member (`POST fold`): folded, the
+  box is its head, its title and about one line more, the last fading out (`.item.folded`,
+  `timeline.css`), everything in it drawn and inert, and the box itself one button, "Unfold", whose
+  press or Enter anywhere unfolds it (`POST unfold`). Every open box folds, a work item and a wait
+  among them; a done line, the line of an item Pilot is working on, the opening, and an item drawn
+  off the timeline, alone or in an opened document, never do. The fold shows again once Pilot's
+  work on the item ends, and a close clears it, so an item opened again by Undo comes back unfolded.
+  This browser's own press moves the focus onto the box it folded and back onto the kind of the box
+  it unfolded; another member's moves none. While the press waits the kind's icon is the spinner
+  ([`ui.md`](ui.md)), the kind staying enabled. An archived project's items keep the folds they
+  were left with and take neither press (D012). An unfold at the timeline's end follows the end, as
+  an arrival does.
 - **An item Pilot is working on** (`PilotsLine`, `item.tsx`), its `pilots_work` set, is one line,
   as a done line is: a dashed circle in the time's grey in its kind's place, "Pilot is working on
   it" its tooltip; the title (`title`, else `file_name`), which opens the document once its text is read; Open once
@@ -410,7 +449,22 @@ closes it again. In a document that is Pilot's every block is drawn whole, under
 ## Answering inline
 
 A one-ask item's block, and each of a document's (`block.tsx`), is answered in its place; each
-click or Send posts through `useAnswer` (`hooks/use-answer.ts`). The block's form, `BlockPanel`, is
+answer posts through `useAnswer` (`hooks/use-answer.ts`). In a document a press answers. In a
+one-ask item a press only chooses, on the timeline, in its tab, in a phone's view and in the item
+alone (`useChoice`, `hooks/use-choice.ts`): an option, Agree, Yes or No, an action's option,
+Archive or Keep shows as chosen, a soft button or a filled row, and another press moves the
+choice. Other and a No are choices too, their field's words the choice while it stands open; their
+console has no Send of its own, and its cross gives back the option chosen before it. The block's
+one Send (`SendChoice`, `send-choice.tsx`), the primary with Lucide's send, at the right end of the
+block's last row, a decision's in a row of its own under its rows, is disabled until something is
+chosen, Other holding words, and sends the choice; Ctrl+Enter in the console's field is that Send.
+The browser keeps the choice beside the unsent words ([`ui.md`](ui.md)), so a reload shows it
+again and every drawing of the block the same one, and nothing of it reaches the server until the
+Send. A done item keeps none: a choice on an item answered elsewhere since is dropped, so that an
+Undo brings it back with nothing chosen. A block Pilot answered reads Pilot's answer while closed,
+the person's choice in the opened block alone. A question's Send and an action's Done send as they
+are. While an answer saves, the button pressed shows the spinner once it has waited
+([`ui.md`](ui.md)). The block's form, `BlockPanel`, is
 the one every ask is drawn with: an item's (`Block`), the handbook's and the project document's,
 opened, read only (`DocumentBlock`), and a draft's in its Draft tab, answered through the
 draft's routes (`DraftBlock`, `useDraftAnswer`, [`documents.md`](documents.md)). A one-ask item
@@ -420,15 +474,19 @@ answers*.
 - **A decision** (`decision.tsx`): its options as full-width rows, each its label, Recommended at
   the label's end on the recommendation, and its line under the label at every width (D187); a proposal is
   one row, tinted as recommended, that answers `Agree`; Other comes last, "Something else", and
-  opens a console. While an answer saves, its row fills and the others fade, disabled, Other among
-  them; Other is absent only from a done item's block.
+  opens a console; words typed in Other and left show in its row, unchosen, under another choice.
+  While an answer saves, its row fills and the others fade, disabled, Other among them, a
+  document's row being saved holding the spinner at its end; Other is absent only from a done
+  item's block.
 - **A question** (`question.tsx`): the field, "Your answer", or "Default: …" where the block has a
-  default, and Send. Send with the field empty answers the default; with no default it is disabled
-  while the field is blank. The answer shows boxed while it saves.
+  default, and Send, with Lucide's send. Send with the field empty answers the default; with no
+  default it is disabled while the field is blank. While the answer saves it stands boxed in the
+  field's place, beside the Send, disabled.
 - **An action** (`action.tsx`): without options, a paste-back field, "What to paste back, if
-  anything", over Done; with options, a button each, the first primary, and Other…, whose console
-  sends its words as the answer. The paste-back goes as the note of the Done, the option or the
-  words. An action Pilot claimed is open until its `done`. Unless its held line says so, it reads,
+  anything", over Done; with options, a button each, and Other…, whose console sends its words as
+  the answer: in a document the first is the primary and a press answers, in a one-ask item every
+  one is plain and a press chooses. The paste-back goes as the note of the Done, the option or the
+  words. While the answer saves its controls stand, disabled. An action Pilot claimed is open until its `done`. Unless its held line says so, it reads,
   while nothing saves, Pilot's avatar, "Pilot does it" and " · " the work item that does it, linked
   to its address, with the claim's note under it, over the controls: disabled in a document that is
   Pilot's, and a person's where no work item is named for it. One Pilot's work handed back
@@ -440,21 +498,24 @@ answers*.
   (`item-head.tsx`'s `WHY`: "Auto pilot off", "Always asks: cannot be undone", and so on; a code
   without words of its own shows `because.name`); the title; the proposal as its text, full width;
   and under it its block, an action's panel holding Yes and No, plain buttons in an action's row, Yes
-  the primary, neither tinted, chosen or not, with no paste-back and no Other. No opens a console for
-  the reason that sends empty too, "Send No". Answered, the block reads "Yes" or "No", the reason
-  under it, as an action's option reads, and while it saves that line stands in the buttons' place;
-  answered by Pilot it reads closed, that line alone, and opens on its chevron to its buttons. Under
+  the primary, neither tinted, chosen or not, with no paste-back and no Other; in a one-ask item
+  both are plain, the one chosen a soft button, and the block's Send ends the row. No opens a console
+  for the reason, which may stay empty: in a document its own Send, "Send No", sends it, in a
+  one-ask item the block's Send. Answered, the block reads "Yes" or "No", the reason under it, as an
+  action's option reads; while it saves the buttons stand, disabled; answered by Pilot it reads
+  closed, that line alone, and opens on its chevron to its buttons. Under
   the block, Details, on the left, unfolds the prose, and Less folds it. Inside a document a
   confirmation is a block, its proposal inside it over the same Yes and No. A standing grant, a
   permission meant to outlast the project or reach past it, is a reason of its own,
   `standing-grant`, which asks under auto pilot too, so the switch never answers it (D086): "Always
   asks: a lasting permission", its tooltip "The permission would outlast the project or reach past
   it; Pilot asks even under auto pilot".
-- **A notice** has Read.
+- **A notice** has Read, alone under its text; it starts no work.
 
 A console (`console.tsx`) is the growing text field with Send and a cross, Cancel, inside its
 border; Ctrl+Enter (Cmd+Enter on a Mac) sends it and Esc closes it, and so does the answer it sends once that is saved; its Send is disabled while
-it is blank, a No's excepted. While its field has the focus, a resize of the window, as a phone's
+it is blank, a No's excepted. In a one-ask item it has no Send of its own, the block's Send standing
+under it in view, and its cross gives the choice back. While its field has the focus, a resize of the window, as a phone's
 keyboard makes as it opens, scrolls the console back into view. Its words, and every field's here,
 are kept in the browser until sent ([`ui.md`](ui.md)).
 
@@ -475,8 +536,13 @@ since opening it would show no more than its answer.
 
 ## Done lines and Undo
 
-A done item is one line that does not expand: its kind's icon, or a confirmation's green check for
-Yes and red cross for No; its title; its actions, the mark of Pilot's job on it once the job ended,
+A done item is one line that does not expand: its kind's icon, or a confirmation's check for Yes
+and cross for No, both in the primary as a kind's icon is, their answer the icon's title; a line
+done `cancelled`, of any kind, leads with the cancelled mark instead, its kind's icon in the time's
+grey with a small cross cut into its foot, "Cancelled" its title (`CancelledMark`,
+`cancelled-mark.tsx`): a run's document closed by its Cancel ([`round-trip.md`](round-trip.md)), an
+ask the chat called off for a person ([`mcp.md`](mcp.md)) and a work item closed for good
+([`work.md`](work.md)); its title; its actions, the mark of Pilot's job on it once the job ended,
 Open, Undo while `done.undo` and Discuss, quoting the item into the chat; its attachments'
 indicator; Pilot's job on it while not ended ([`work.md`](work.md)); and the time it was done. The
 title of every line but a wait's is the link to what is behind it, the one Open goes to (`Behind`,
@@ -509,7 +575,8 @@ an idle project, and an Undo before then withdraws that job ([`work.md`](work.md
   consecutive work lines, in muted text, its icon, its time and its buttons smaller. Its Open and its
   title open its session log ([`work.md`](work.md)), and it never offers Undo. A worker's run's line
   carries the job after its turn where the run registered no document for it to go over, adding no height
-  to the quiet line.
+  to the quiet line. A work item closed for good leads with the cancelled mark, and where Pilot
+  closed it, its reason stands under its title (`work.note`).
 - **A wait's line** has nothing behind it: no Open, and never Undo, Pilot's close being consumed on
   the spot ([`waits.md`](waits.md)). Under its title stands the note Pilot closed it with, as linked
   text; a wait Finish closed has none.
@@ -527,17 +594,19 @@ opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05".
 stands the archive question its latest finish put, the one the read names, `archive_question`, and
 none after a Finish and archive (`archive-question.tsx`;
 [`projects.md`](projects.md)): open, its head "Question" with the archive box, "Archive the
-project?", and two buttons, Archive, primary, and Keep, both disabled from a click until the answer
-is read back; answered, its done line, the answer under its title. No line offers Undo while the
+project?", Archive and Keep, plain buttons that choose, the one chosen a soft button, and Send at the
+row's end, disabled until one is chosen, all three disabled from the Send until the answer is read
+back; answered, its done line, the answer under its title. No line offers Undo while the
 project is finished, a line answered before Finish included (D028); Reopen brings it back.
 
 **Archived.** An archived project takes Bring back alone (D012), so its timeline reads as it was
 left: every close of an open item stands disabled, not hidden, as a work item's Resume does
 ([`work.md`](work.md)): a decision's options, a question's field and Send, an action's
-paste-back, Done, options and Other…, a confirmation's Yes and No, a notice's Read, a
-review's Reviewed, a document's *Send answers*, and an opened document's foot's
+paste-back, Done, options and Other…, a confirmation's Yes and No, a one-ask item's Send, a
+notice's Read, a review's Reviewed, a document's *Send answers*, and an opened document's foot's
 ([`documents.md`](documents.md)), each reading the head's `archived` (`useArchived`). No line
-offers Undo while the project is archived; Bring back gives every close and Undo back.
+offers Undo while the project is archived, and its items keep the folds they were left with, the
+kind no button; Bring back gives every close, Undo and the fold back.
 
 ## Addresses
 
@@ -549,7 +618,8 @@ draw nothing of their own. Opened there, the timeline jumps to the middle of the
 a confirmation card's row, and flashes it. A block the timeline does not draw, as in a done item's
 line or an id the item lacks, goes to its item; an item it does not draw leaves it at its end. Each
 address is gone to once, when the timeline is read or when Back reopens it, and the jump stops the
-timeline following its end. An address whose item the timeline as read lacks, read before the item
+timeline following its end. A block's address in a folded item goes to its box, which flashes:
+the block lies under the fold's cut. An address whose item the timeline as read lacks, read before the item
 came, as a chat's quote chip can open it, waits: the timeline is read again, a read under way
 cancelled for it, and the address goes to its item once a read draws it, or leaves the timeline
 where it stands once that read has landed without it. A block in a collapsed section opens its section first. A block's
@@ -586,7 +656,10 @@ The engine's side is pinned in `backend/tests/engine/`, the read in
 writes and the event in `tests/api/test_items.py`, `tests/services/test_item_service.py` and
 `tests/services/test_project_event_service.py`. The browser suites are `frontend/tests/timeline/`,
 with `tests/projects/badge.spec.ts`; `document.spec.ts`, `card.spec.ts` and `settled.spec.ts` pin
-the documents, `phone-items.spec.ts` the item alone, a done line and every kind's head on a phone, and
+the documents, `fold.spec.ts` the fold, `decision.spec.ts`'s "A one-ask item’s Send" a choice and
+its Send, `busy-press.spec.ts` a busy button and `starts-work.spec.ts` the mark of a button that
+starts work ([`ui.md`](ui.md)), `confirmation.spec.ts` a confirmation's marks,
+`tests/work/claimed.spec.ts` and `tests/chat/cancel-ask.spec.ts` the cancelled mark, `phone-items.spec.ts` the item alone, a done line and every kind's head on a phone, and
 `frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)), `line-actions.spec.ts`
 a done line's actions under the mouse and its title, `jobs.spec.ts` Pilot's jobs on their items,
 and `waits.spec.ts` the
@@ -614,7 +687,10 @@ it undone (`writerAsked`, `claim`, `claimWork`, `undone`, pinned in
 (`item(id).pilots`, `data-doing` the API's `doing`), a held block's line (`held`), the auto pilot
 marks and chip
 (`autopilotMark`, `autopilotChip`, `tests/timeline/autopilot-mark.spec.ts`), the archive question's
-buttons (`archiveQuestion`, `archive-question.spec.ts`), the ready line (`ready`) and a wait's
+buttons and Send (`archiveQuestion`, `archive-question.spec.ts`), the ready box (`ready`, `{root,
+resume, line}`, its Resume's form event `timeline.ready.resume`, pinned in `create-project.spec.ts`),
+a block's Send (`block.answerSend`, `confirm.answerSend` on a confirmation's card), an open item's
+kind and its fold (`timeline.item.kind`, `item.fold`, the box's `data-folded`) and a wait's
 button, what it waits on, its firings, its note and its phone menu (`item(id).wait`); `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. Whether an
 item counts for "N open above" is its article's `data-actionable`; `dotsEndingARow(head)` finds the

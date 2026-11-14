@@ -6,7 +6,7 @@ it wrote, put to a person on the project's timeline; `attach_file`, the material
 copied into the record; and `set_progress` and `set_progress_step`, the steps its run goes through,
 shown on its tile. The brain's sessions, a project's chat and the server's jobs, get
 `pilot-store`, the one door to the record beyond the project's folder: `add_item`, `attach_file`,
-`answer`, `mark`, `stop_work`, `finish` and `ask_writer`. Each tool is one REST call to the backend
+`answer`, `mark`, `cancel_ask`, `stop_work`, `finish` and `ask_writer`. Each tool is one REST call to the backend
 under the session's bearer, which names the session's project, environment and work item, so the
 tools take none of them, and each call that changed the record is its effect, a line in the
 session's records where the call ran, but for the steps, which write none. What becomes of a registered document, its read at the run's
@@ -299,11 +299,32 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   `note`: …"), with `for`, or as `read` or `reviewed`, and a `note` on any other item, are
   refused.
   "Marked done · <title>", "Marked read · …", "Marked reviewed · …".
-- **`stop_work(item)`**, `POST …/stops`, answers `200` `{effect}`: the work item's Session stopped
-  by Pilot as a Stop stops one ([`sessions.md`](sessions.md)), one idle with its nudge owed among
-  them, its turn ended under a usage halt or the project's pause, as its served description says;
-  refused for an item that is no work item, for Pilot's own work, a job, and for a Session neither
-  running, starting, held nor idle with its nudge owed. "Stopped · <title>".
+- **`cancel_ask(item, for)`**, `POST …/cancellations`, answers `200` `{effect}`: an open ask a
+  session of Pilot's own added through `add_item`, a decision, a confirmation, a question, an action
+  or a document, called off on the word of the person `for` names, by handle, both required (D209): done
+  `cancelled` by them, its blocks as they stand, with no Undo and no job after it, its line led by
+  the cancelled mark ([`engine.md`](engine.md)'s `call_off`). The server takes it from any Session of
+  Pilot's own, as it takes `answer` and `mark` with `for`; that a person said so is the brain's to
+  know, and its chat skill gives the cancel to an ask that no longer applies and the `No` to a
+  confirmation the person refuses. Refused with the reason, nothing closed: a document a work item's
+  run registered, which the Cancel on its page calls off and so ends its run (D210) ("a document a work item's run registered is called off by the Cancel on its page,
+  which ends that run"), a notice ("a notice asks nothing, and takes its Read"), a work item or a
+  wait ("a <kind> item is no ask"), an item no session of Pilot's own added ("it is no ask Pilot
+  added"), a done one, an archived project's, an item not of the session's project, and a `for`
+  that names no person or names Pilot. "Cancelled · <title>".
+- **`stop_work(item, reason?)`**, `POST …/stops`, answers `200` `{effect}`: the work item's Session
+  stopped by Pilot as a Stop stops one ([`sessions.md`](sessions.md)), one idle with its nudge owed
+  among them, its turn ended under a usage halt or the project's pause, as its served description
+  says; refused for an item that is no work item, for Pilot's own work, a job ("it is Pilot's own
+  work"), and for a Session neither running, starting, held nor idle with its nudge owed, "it is
+  stopped already" among them. "Stopped · <title>". With `reason`, a string that is not empty, a
+  line its done line carries, the work item is closed for good in the same act, one Pilot replaced:
+  one stopped already as it stands, and one a Stop takes stopped first, by Pilot; it is done
+  `cancelled` by Pilot, the reason its Work's `done_note`, and takes no Resume and no Undo
+  ([`work.md`](work.md)). The documents its run put to a person stay open. Refused with a reason: a
+  failed item ("it has failed, and keeps its Resume"), one closed already ("it is closed for good"),
+  one done otherwise ("it is done"), one whose turn ended ("its turn has ended"), a job ("it is
+  Pilot's own work") and an archived project's ("its project is archived"). "Closed · <title>".
 - **`finish(archive=false)`**, `POST …/finish` `{archive}`, answers `200` `{effect}`: the project
   finished by Pilot as Finish finishes it ([`projects.md`](projects.md)), refused but in an open
   project. With `archive`, on the operator's Finish and archive, the project is archived in the
@@ -441,7 +462,9 @@ services that inject; the suite's default settings set no URL, so other creates 
 `TestAScriptsCall` (`tests/pilot_mcp/test_server.py`) pins a script's lone `tools/call` as the
 transport admits it. The routes are `tests/api/test_pilot_work.py`, whose
 `test_the_surface_is_four_routes_outside_the_api` holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
-`tests/api/test_pilot_store.py` and `tests/services/test_pilot_store_service.py`, the scope
+`tests/api/test_pilot_store.py`, whose `test_the_surface_is_eight_routes_outside_the_api` holds
+its blueprint's rules, and `tests/services/test_pilot_store_service.py`, each tool's served schema
+`STORE_SURFACE` in `tests/pilot_mcp/test_server.py`, the scope
 `tests/services/test_session_scope.py`, the effects `tests/services/test_effect_service.py`; the
 copies `tests/engine/test_attachments.py`. The fake controller serves the file routes
 ([`controller.md`](controller.md)), and the record's testing routes `POST

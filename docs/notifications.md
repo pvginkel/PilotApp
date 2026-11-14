@@ -106,8 +106,8 @@ so no subscription, Sign out signs out at once.
 ## The service worker
 
 `frontend/public/sw.js` shows each push under its `tag`, replacing what stands there,
-`showNotification(title, {body, tag, renotify, silent: !renotify, icon: '/icon-192.png', data:
-{url}})`: an alert renotifies, and an update is silent, so that it keeps quiet also where nothing
+`showNotification(title, {body, tag, renotify, silent: !renotify, data: {url}})`, naming no icon:
+an alert renotifies, and an update is silent, so that it keeps quiet also where nothing
 stands under its tag any more, swiped away or closed by the app. A tap closes the notification,
 focuses the window last focused and loads the push's `url` in it, or, with no window open, opens
 the app at the `url`. The window is focused first, while the tap allows it.

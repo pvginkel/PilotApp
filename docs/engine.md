@@ -240,6 +240,31 @@ merge carries the write to the file.
   done by `user`, cause `cancelled`, which offers no undo; the texts are untouched, no Version is
   cut, and like Finish's close it owes no write-back and continues nothing (`ENDS_RUN`). It refuses
   Pilot as the user and an archived project.
+- `call_off(item, user)`: the chat's cancel of an ask Pilot added, on the word of the person `user`
+  ([`mcp.md`](mcp.md)): an open decision, confirmation, question, action or document that a session
+  of Pilot's own added (`pilots_own`), marked done at once by `user`, cause `cancelled`, which
+  offers no undo. Its text and its blocks stand as they are; no Version is cut, no write-back owed,
+  no job placed after it and no run ended, so it raises `timeline_moved` alone. It refuses, in this
+  order, a work item or a wait ("a <kind> item is no ask"), an archived project, Pilot as the user
+  ("Pilot calls off no ask on its own word"), a registered document, which its page's Cancel calls
+  off, a notice ("a notice asks nothing, and takes its Read"), an item of any other kind or one no
+  session of Pilot's own added ("it is no ask Pilot added"), and a done item.
+- `close_work(project, work_id, user, operation, *, note=None)`: a stopped work item's close for
+  good, a person's Close or Pilot's `stop_work` with its reason ([`work.md`](work.md)), in the
+  caller's transaction, which holds the project's row exclusively and the work item's Session: the
+  item done at once by `user`, cause `cancelled`, which offers no undo, and `note`, Pilot's reason,
+  its Work's `done_note`. No document is closed, no job is placed and nothing continues its
+  conversation. It refuses an archived project and a done item, "it is closed for good" for one
+  closed so (`done_refusal`, which a Resume reads too).
+- `fold(project, item, folded)`: a person's fold of an open item on the timeline, or its unfold
+  ([`timeline.md`](timeline.md)), taken on an item the timeline draws as a box of its own: a prose
+  item but the opening, a worker's run, the setup's job while not retried, and a wait. The item's
+  row is held and read again, so a close committed before it refuses the fold; one that stands so
+  already is taken and changes nothing. It raises `ProjectChanged` alone, never `timeline_moved`,
+  the store's tree holding no fold. It refuses an archived project and a done item; the caller
+  refuses an item Pilot is working on. Every write of an item's `done_at` that closes it clears
+  `folded` in the same `UPDATE` (`Item`'s validator, `backend/app/models/item.py`), so no close
+  leaves a fold behind ([`record.md`](record.md)).
 - `close_unanswered(project, user, at)`: Finish's close ([`projects.md`](projects.md)). Every open
   item of the project but the opening, which is never done, is marked done at `at` by `user`, cause
   `finished`, which offers no undo; the texts are untouched, and a registered document so closed
@@ -318,8 +343,9 @@ The close of a registered document by anything but Finish or a Cancel (`ENDS_RUN
 answer, an action's Done that closes it, Done or Reviewed, emits `WriteBackOwed` for the Session that
 registered it while its text is owed to its file (`owes_write_back`, and `write_back_owed()` as a
 query's condition). Once that Session's work item is done `turn_ended` and none of the documents it
-registered is open or closed by Finish or a Cancel, the close also releases its continuation
-(`_release`): the work item that continues
+registered is open or closed by Finish or a Cancel, and while the latest worker's run of its
+conversation, by its Item's `seq`, is not closed for good (`closed_for_good`), the close also
+releases its continuation (`_release`): the work item that continues
 the run's conversation, placed through the port `Continuations` (the session start's
 `continue_run`, [`sessions.md`](sessions.md)) with the message naming the files, and every
 document of the run consumed by it, `consumed_at` and `consumed_session_id`, with
@@ -335,7 +361,11 @@ and Reviewed. A close given `via` `chat`, which `pilot-store`'s `answer` and its
 record on a person's behalf ([`mcp.md`](mcp.md)), places none: the chat's own turn carries the
 ruling out (D139). Neither do a notice's Read, Pilot's own Done, its close at a save (above),
 Finish's close, a registered document's close, an item a worker's session added and the archive
-question, which no session added. Every
+question, which no session added. `close_starts_work(db, project, items)` reads these two
+branches for the page, from the rows at each read (`close_starts_work` on a timeline entry,
+[`timeline.md`](timeline.md)): an open item a session of Pilot's own added, but a notice, and a
+registered document whose close would release its run's continuation; none while the project is
+archived, and it sends no statement where nothing can be found. Every
 close of an item holds its project's row `FOR UPDATE`, a close in the draft alone holding it shared.
 The job's brief consumes the item, which takes its Undo ([`sessions.md`](sessions.md)). An Undo
 before that, while the job is held behind the project's other jobs or by the pause, withdraws it

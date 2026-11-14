@@ -175,11 +175,11 @@ and the gate holds their starts, each line "Paused" ([`sessions.md`](sessions.md
 icon's, releases them as it releases any paused project's held starts, and a resume while the setup
 runs cancels the pause under way, so the work items it places start. While the project is open, not
 archived, paused by that pause, Pilot's `paused` the transition after `opened` with no `resumed`
-since, and its setup is done, its latest Retry's where it was retried, the timeline stands one line
-under the setup: "The project is ready — resume the project to start it."
-([`timeline.md`](timeline.md)). It has nothing to press and is not in the badge, and the first
-resume takes it away for good. A person's pause never shows it, so a project opened before Create
-paused one shows none. Every project Create opens is paused so; no setting turns it off.
+since, and its setup is done, its latest Retry's where it was retried, the ready box stands at the
+timeline's foot, Create project's box holding Resume and "The project is set up and ready to start."
+([`timeline.md`](timeline.md)). Its Resume is the status icon's resume, and the first resume takes
+the box away for good; it is not in the badge. A person's pause never shows it, so a project opened
+before Create paused one shows none. Every project Create opens is paused so; no setting turns it off.
 
 Finish's close is the engine's `RecordService.close_unanswered` ([`engine.md`](engine.md)): each
 open item but the opening is marked done at the transition's instant, by the person who finished,
@@ -237,8 +237,8 @@ folder moves from `draft-<number>` to its slug.
 
 ## The project list
 
-The side column (`project-column.tsx`), on a phone and at the narrow width the drawer
-([`ui.md`](ui.md)). Its head reads
+The side column (`project-column.tsx`), at the narrow width the drawer and on a phone the home
+([`ui.md`](ui.md), below). Its head reads
 "Projects", at the base size, with the plus ("New project") and the overflow menu ("More"), which
 holds *Archived*, at its right, their icons 16px. The plus is a link to `/projects/draft-new`, a
 new project's definition chat with nothing behind it on the server (D174; `NewProject`,
@@ -252,13 +252,15 @@ screen until the draft's chats are read and then on the draft's until its chat h
 the new project's composer, empty from the Send, waits until the route shows the draft's chats
 (below), and the page shows
 the draft at its address, `draft-<number>`, in the entry's place, the focus in its chat's field.
+The plus pressed while the page is on its way to that draft opens a new project afresh, its field
+focused and taking words.
 
 - **The groups.** The person's projects, the unfinished ones they are a member of, stand under the
   head with no group row; *Other projects* holds the unfinished rest, and *Finished* every finished
   project, member or not. A group with no project is not drawn. *Other projects* and *Finished*
   open and close on their chevrons and show their counts. The browser remembers each chevron as
-  last set, closed by default. A group also stands open while the project on screen is in it,
-  until the person closes it.
+  last set, closed by default. Off a phone a group also stands open while the project on screen is
+  in it, until the person closes it.
 - **A tab** (`project-tab.tsx`) is a link to the project: its name ("New project" for a draft
   without a title) with its status icon after its last word (below), its ticket, on one line, the
   name giving way to it, and its status line, at most two lines, ellipsized, its whole text
@@ -286,7 +288,8 @@ the draft at its address, `draft-<number>`, in the entry's place, the focus in i
   refuses its pause and its resume.
 - **Archived** switches the column to the archived projects (D012): their tabs, flat, in the API's
   order, or "None yet", under a back arrow ("Back to the projects") that returns to the list. Which
-  view shows is the column's own state, and the browser does not remember it.
+  view shows is the column's own state, and the browser does not remember it. On a phone it is a
+  view of its own over the home and its head instead (below).
 
 A project has its own address, `/projects/<address>`: its slug once Create project has given it
 one, a draft's `draft-<number>` (D173). An address names its one project for good: a slug is set
@@ -298,18 +301,23 @@ plus's, naming no project. The project's route resolves the address to the proje
 (`useProjectIdAt`, `hooks/use-project-address.ts`): an id as it stands, else from the project
 lists' reads, else `GET /api/projects/lookup` (above), read once; each resolution is kept for the
 page's life. The API and what the browser keeps name the project by that id, every link by the
-address (`useShownProject()`). The bare address opens the project the
-browser remembers while that project is in the list, else the list's first in the order shown; with
-no project the centre reads "No projects yet" and the address stays `/`. Under it are an item's
+address (`useShownProject()`). The bare address is a phone's home (below); off a phone it opens the
+project the browser remembers while that project is in the list, else the list's first in the order
+shown; with no project the centre reads "No projects yet" and the address stays `/`. Under it are an item's
 address and a block's ([`timeline.md`](timeline.md)), and a document's, an attachment's, the
 handbook's and the project document's ([`documents.md`](documents.md)), at which the project's tab
 is current too. Off a phone the project's row in the list brings back the document's tab the
-project was left on, but for the row of the project on screen, which shows its timeline, adding an
-entry; any other arrival at the project's own address, a fresh page's included, shows its timeline
-(D151). The project's screen is drawn afresh on each project, so whatever it opened (the plan, the
+project was left on, but for the row of the project on screen, which shows its timeline in the
+browser's entry's place, as every move within a project does, from a document's tab and from
+an item's address alike, so that Back leaves the project (D217); any other arrival at the project's own
+address, a fresh page's included, shows its timeline (D151). A tab of the line and a phone's view
+are kept by their path within the project, `documents/<id>`, their address built from the one the
+project is at (`pathWithin`, `addressUnder`, `lib/project-paths.ts`), so that a tab opened while
+drafting shows at the slug after Create and a reload with no lookup; a line or a view a browser kept
+by its address still opens. The project's screen is drawn afresh on each project, so whatever it opened (the plan, the
 notes, the menu, a dialog, the session log's popover) is closed on the next one, while its tab line and its
-side panel's tab come back as that project left them, and a phone shows its Timeline (below); the drawer closes on any change of
-address ([`ui.md`](ui.md)).
+side panel's tab come back as that project left them, and a phone shows its Timeline (below); the
+narrow width's drawer closes on any change of address ([`ui.md`](ui.md)).
 
 **A switch never blanks the screen** (`readFirst`, `lib/screen-reads.ts`): the project's route
 reads the project's head and its timeline, or a draft's chats, before the router swaps it in, and
@@ -318,7 +326,9 @@ project's chat, the loading bar telling of a wait past 200 ms ([`ui.md`](ui.md))
 moves at once. An address gone to while another's reads are under way replaces it, the first never
 shown. A project's tab preloads its route on hover or touch (`preload="intent"`), so that its reads
 may be in by the click. What the cache holds stands, the screen reading it again. The page's first
-screen waits for none, and a read that fails is the screen's to show once swapped in.
+screen waits for none. A route's read that fails is not tried again (`retry: false`): the screen is
+swapped in at once and reads it itself, under the query client's retries, and shows the error once
+they give up.
 
 The list and the head are read again when the window regains focus, after each of the page's own
 writes, which invalidate every query, on the server's `project_changed` event but the one such a
@@ -394,7 +404,7 @@ refusal toasts the server's words. Turned on while the head's
 The popovers and the menu close on a press outside them, which does nothing else (D202), and on Esc
 ([`ui.md`](ui.md)).
 
-**A phone's head** (`PhoneHead`, `phone-head.tsx`) is one line, 52px high: the drawer's button
+**A phone's head** (`PhoneHead`, `phone-head.tsx`) is one line, 52px high: the arrow to the home
 ([`ui.md`](ui.md)); the name and its chip, with no ticket (D192) and no repo; the auto pilot switch without
 its label, named "Auto pilot" to a screen reader, and its warning triangle, or the Finished chip in
 its place; the plan's donut alone (`PlanDonut`), with no button's chrome and no step's name, its
@@ -426,6 +436,20 @@ comes back as the request's error, the query client's toast.
 
 ## A project on a phone
 
+**The home** (`PhoneHome`, `components/projects/phone-home.tsx`) is the bare address at 900px and
+below: under the gold bar its head ([`ui.md`](ui.md)), and under it the project list as the side
+column has it, the plus and the menu at its head, each group closed until opened and no row marked
+as on screen. A row opens its project's Timeline over the home, never the tab it was left on. The
+home's entry lies under every other screen a phone shows (`use-phone-home.ts`): what opens from the
+home says so in its entry's state (`overHome`, `OVER_HOME`), and a screen's first entry that does
+not — its address reached cold, a notification's link among them, a link from another project, a
+window narrowed to a phone's width — has the home's entry put under it. Back from a project's
+Timeline, and the head's arrow from any tab of a project's, a draft's or a new project's, and alone
+on the profile page, show the home, never the project before; a draft made from a new project keeps
+its place over the home. A reload keeps where you were. Archived, from the list head's menu, is a
+view of its own over the home and its head, an entry of its own (`homeView: 'archived'`); its arrow
+back, Esc and Back take it off. A home row's status icon pauses and resumes as the list's does.
+
 At 900px and below, a project's screen is `PhoneProject` (`components/projects/phone-project.tsx`):
 the head in one line (above), the tab showing, and under it the tabs at the bottom: Timeline, Chat,
 Plan and Documents for a project, and for a draft its Chat, the definition chat in the timeline's
@@ -443,11 +467,11 @@ then "Chat, a reply unread" ([`chats.md`](chats.md)), and Documents its count on
   it keeps its scroll.
 
 **The tab is the history entry's** (`usePhoneTab`, `hooks/use-phone-tab.ts`, the entry's state), and
-nothing of it is in the browser's storage, so that Back and a reload find it. Leaving the Timeline
-is an entry of its own, pushed over the Timeline's; a change between the other tabs replaces it, so
-that Back from any of them shows the Timeline, and on the Timeline Back is the browser's own. An
-address gone to keeps no tab: a project opens on its Timeline, always, a draft on its Chat, and
-switching projects is an entry like any address. A tab the project does not have, a draft's Draft
+nothing of it is in the browser's storage, so that Back and a reload find it. A project's first
+entry, its Timeline's, lies on the home's. Leaving the Timeline is an entry of its own, pushed over
+the Timeline's; a change between the other tabs replaces it, so that Back from any of them shows the
+Timeline, and Back from the Timeline shows the home. An address gone to keeps no tab: a project
+opens on its Timeline, always, and a draft on its Chat. A tab the project does not have, a draft's Draft
 past Create, shows the Timeline. What the desktop keeps per project in the browser, the side
 panel's tab and width and the tab line, is neither read nor written on a phone.
 
@@ -456,11 +480,12 @@ the handbook, a session log ([`documents.md`](documents.md), [`work.md`](work.md
 alone, which an item's address opens on a phone ([`timeline.md`](timeline.md)). A view is the whole
 screen over the head and the tabs, which take no focus under it. It is an entry of its own, pushed
 over the one it was opened from, whose tab it keeps under it, and a view opened from a view lies on
-top of it; the entry's state lists the views, bottom to top. The view's arrow back, Esc and the
+top of it; the entry's state lists the views, bottom to top, each by its path within the project.
+The view's arrow back, Esc and the
 browser's Back take the one on top off, showing what lay under it where it was read, since a view
 keeps its scroll while another lies over it ([`documents.md`](documents.md)). A view's address reached cold — a
-notification's link, a link from another app, a typed address — lies over the project's Timeline, an
-entry of the Timeline put under it, so that Back lands there. Discuss and *In the chat* anywhere on
+notification's link, a link from another app, a typed address — lies over the project's Timeline,
+entries of the home and the Timeline put under it, so that Back lands there and then on the home. Discuss and *In the chat* anywhere on
 the screen show the Chat tab, a draft's its Chat, every view taken off first
 ([`chats.md`](chats.md)), and an ask of the draft gone to shows the Draft tab at it, past Create the
 project document.
@@ -666,6 +691,10 @@ pause are pinned in `tests/projects/project-status.spec.ts`, the switch's dialog
 `create-project.spec.ts`, the addresses in `project-address.spec.ts`, a switch that keeps the
 screen in `tests/shell/screen-switch.spec.ts`, the tight head, the auto pilot switch's refusals
 and a phone's head in `project-head.spec.ts`, a phone's
-tabs in `phone-tabs.spec.ts` and its views and Back in `phone-views.spec.ts`. Each Playwright
+tabs in `phone-tabs.spec.ts`, its views and Back in `phone-views.spec.ts`, and its home in
+`phone-home.spec.ts`, where the bare address is the home (`shell.home`, `shell.homeList`, the arrow
+`shell.homeButton`), `projectList.tab()` reading the home's list where no side column shows, and a
+project's address reached by `page.goto` has the home under it, so that Back from its Timeline is
+`/`. Each Playwright
 worker's database is a clone of the dev seed ([`record.md`](record.md)), so every spec's list holds
 the seed's projects beside its own.

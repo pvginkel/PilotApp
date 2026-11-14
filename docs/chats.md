@@ -352,7 +352,9 @@ closed.
   `hooks/use-chat-reach.ts`): back from another project or from the Documents tab it shows the
   chats loaded before, after a reload the latest alone; and where a chat has opened since it last
   showed, it shows the latest alone, waiting, on a list the cache holds while a read of it is under
-  way, for that read before it decides. Nothing stands in it while the list's read is under
+  way, for that read before it decides: meanwhile it shows the chats it left, or none where a
+  `project_changed` named the project's chats while no screen showed them (`changedUnshown`,
+  `use-project-events.ts`), so that the chats left never show before the one that opened. Nothing stands in it while the list's read is under
   way, and "The chat did not load." while its latest read failed. A project with no chat reads "Ask
   Pilot about this project: how a session is going, what an item means, a change to the plan.
   Discuss on an item quotes it here.", and a draft's "Tell Pilot what to manage", over "A card, a
@@ -380,7 +382,10 @@ closed.
   texts as written, a blank line apart; a running reply has none, nor one that said nothing, and
   the row keeps its height. The cue's "Thinking ·
   N s" counts from the press of Send, by this page's clock where this page sent the message, a new
-  project's first aside, else from the message's record, else from the turn's first record.
+  project's first aside, else from the message's record, else from the turn's first record. Once
+  the model has ended its own turn on a task it left running in the background, the cue reads
+  "Waiting on a background command · <description> · <time>", the time counted from that end, as
+  the session log's tail does ([`work.md`](work.md)).
 - **It sticks to its end** while it grows (`useStickyBottom`), and while its view gets shorter, as
   under a phone's keyboard or in a window made shorter, so that it is at its end still when the view
   grows back; a reader who scrolled away keeps their place, the top of their view where it stood.
@@ -394,8 +399,8 @@ closed.
 On a phone it is the Chat tab among the tabs at the bottom, the same column between the project's
 head and the tabs ([`projects.md`](projects.md)).
 
-**The composer** (`composer.tsx`) lies over the transcript's foot, clear of its scrollbar, with no
-divider: the transcript scrolls under its frosted glass, three backdrop blurs, each masked to a
+**The composer** (`composer.tsx`) lies over the transcript's foot, across it, with no divider, the
+transcript's drawn scrollbar ([`ui.md`](ui.md)) ending at its top: the transcript scrolls under its frosted glass, three backdrop blurs, each masked to a
 band, over a tint, the glass the composer's box, in a draft the column's width alone (`ChatColumn`,
 `.composer .glass` in `panel.css`). The transcript is padded at its foot by the composer's height
 as measured, `--composer-h`, which a scroll into view keeps clear of too. It holds the growing

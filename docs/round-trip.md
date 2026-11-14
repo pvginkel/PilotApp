@@ -104,7 +104,10 @@ of session <id> no longer awaits its read`).
   waiting the outage out. Each document is its own transaction: one failing leaves the others.
 
 A run that stops or fails reads nothing: its documents await their reads until the run of its
-Resume ends. At STARTUP the job's reconcile runs the reads every Session owes, from the rows.
+Resume ends. A stopped run closed for good ([`work.md`](work.md)) is read once the close commits, or
+once its stopped turn has ended, the relay telling the reads at each end of a stopped turn
+(`TurnEndReadService.run_closed`): it takes no Resume, so its documents would otherwise stay Pilot's
+for good. They are read and then the person's, and no job follows them. At STARTUP the job's reconcile runs the reads every Session owes, from the rows.
 
 ## Pilot's job after the turn
 
@@ -238,7 +241,10 @@ That document offers the Cancel instead, which ends the run and gives its blocks
 open registered document of a work item's run offers it, as the timeline's `cancel`, while it is
 the person's, nothing of the run is in flight, a document of it awaiting its read among them, the
 run holds a block of another document, and no other open document of the run is Pilot's or has a
-held block.
+held block. The timeline's `cancel` names the blocks it takes back and the run's other open
+documents, `also_closes`, which the page's question names before the Cancel is made
+([`documents.md`](documents.md)). It is the one way to call off a run's document: the chat's
+`cancel_ask` refuses one ([`mcp.md`](mcp.md)).
 
 **`POST /api/items/<id>/cancel`**, no body, answers `204` (`ItemService.cancel`): under the
 project's row, every open registered document of the run is done at once by the person, Done Cause
@@ -291,7 +297,8 @@ wait's first refusal logs `Write-back of document <path> of session <id> refused
 
 A document whose read failed has no text to write. Finish's close, cause `finished`, and a
 Cancel's, `cancelled`, owe no write-back and continue nothing (D049, D133): with no document of the
-run open and no continuation to come, the environment is free. Undo of a closed document clears
+run open and no continuation to come, the environment is free. A close of a document whose run's
+conversation ended at a work item closed for good continues nothing either (below). Undo of a closed document clears
 `written_back_at` and
 `write_back_refused_at`, so that its next close writes it again. At STARTUP the job's reconcile runs
 the writes every Session owes, from the rows.
@@ -301,7 +308,9 @@ the writes every Session owes, from the rows.
 The close that leaves none of the documents a run registered open places the run's continuation,
 in its own transaction (D046): once the run's work item is done `turn_ended`, which a close implies
 since nothing closes before its read, and never once one of them was closed by Finish or a
-Cancel, whatever follows, since a Reopen leaves a Finish's close as it is. No continuation is
+Cancel, whatever follows, since a Reopen leaves a Finish's close as it is; nor where the latest
+worker's run of the conversation, by its Item's `seq`, was closed for good, so that a clarification
+run closed while its pass's documents are open is not continued by their close. No continuation is
 placed while any of the run's
 documents is open: the continuation waits on every one, and on nothing else. Another run's documents,
 open or not, hold up none of it, so that two runs of one project each go on as soon as their own

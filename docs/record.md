@@ -55,7 +55,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   `done_by_user_id` when a user did it; `consumed_at` with `consumed_session_id` is a session
   taking its answers: a registered document's, the continuation of the run that registered it, from
   its placement ([`round-trip.md`](round-trip.md)), and a wait's, the session whose `mark` closed
-  it, at the close ([`waits.md`](waits.md)).
+  it, at the close ([`waits.md`](waits.md)). `folded` is an open item folded on the timeline, the
+  same for every member, false by default: no done item is folded (`ck_items_folded`, `NOT folded OR
+  done_at IS NULL`), and every write of `done_at` that closes the item clears it in the same
+  `UPDATE` ([`timeline.md`](timeline.md), [`engine.md`](engine.md)).
 - `documents`: a Markdown file of a project's folder, `path` relative to the folder. A prose item's
   document shares its item's `id`, and its own columns are `summary` and, for a registered
   document, the source environment and path, both or neither, `read_failed_at` (its read at its
@@ -120,7 +123,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   close released it), `repo`, the repository a worker's run is placed by (none for a job),
   `autopilot`, the switch's setting at its brief, and `retried_by_id`, the job a person's Retry of
   this failed or stopped one placed: only a job is retried, never by itself, by a job of the same
-  project, and a job retries one at most (`ck_work_retried_by`, `uq_work_retried_by_id`). Its keys
+  project, and a job retries one at most (`ck_work_retried_by`, `uq_work_retried_by_id`); and
+  `done_note`, Pilot's reason for closing a stopped work item for good, the words `stop_work` gave,
+  set with its Item's `done_at` at that close and never changed, null for one a person closed, one
+  done any other way and an open one ([`work.md`](work.md)). Its keys
   reach its Item and its Session through the one project. A `work`-kind Session may stand with no
   `work` row, as the seed's idle session and a testing project's do.
 - `claim_assignments`: a claimed action given to a work item, the `work` and the `block`, both the
@@ -255,7 +261,7 @@ form, a cause's undo and a confirmation reason, each read on its code's first lo
 | Table | Rows |
 |---|---|
 | `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`, `archive_question`; work: `work`; wait: `card_wait`, `timed_wait` |
-| `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `cancelled` (a run's documents a person's Cancel closed), `withdrawn` (a job an Undo of its trigger item, or its wait's close, withdrew before its brief, which never ran) |
+| `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `cancelled` (a run's documents a person's Cancel closed, an ask the chat called off on a person's word, a stopped work item closed for good), `withdrawn` (a job an Undo of its trigger item, or its wait's close, withdrew before its brief, which never ran) |
 | `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval`, `standing-grant` |
 | `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
 

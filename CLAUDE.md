@@ -15,7 +15,7 @@ questions to the writer, the switch's dialog and the archive question, and the n
 through web push, a project's and the alarms, with a browser's switch, the offer and the online
 status, and the usage limits: the halts, the overrule, the halt file, the hard stop, the nudge and each
 turn's tokens, and the store's update: its command, its hold, its sequence and its retry, and the
-phone's layout: its drawer, its tabs at the bottom and its views, and the waits: their firings by
+phone's layout: its home, its tabs at the bottom and its views, and the waits: their firings by
 YouTrack's posts, the due time and a request, and the run per batch, and an ask Pilot is working
 on: its line, the read-only strip with Stop and take over, a held block's line, the hand-back and
 the Cancel, and the projects surface: the service user, `pilot-projects` and its tools, and the
@@ -96,7 +96,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty-two stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twenty-three stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -161,7 +161,19 @@ failed every task whose result is a plain model, as the backend's `TaskService` 
 generated mutation hooks of `frontend/scripts/generate-api.js`, which name the page in each write's
 `X-Sender` header, `SENDER`, exported from the generated hooks, where the template's named none, so
 that a page leaves the `project_changed` its own write committed to the read of every query that
-write's hook makes, and a click reads each query once; the
+write's hook makes, and a click reads each query once, and which run a caller's `onSuccess` beside
+that read and return both, where the template's let a caller's replace it; the live stream, which
+names its heartbeat's cadence in `ready` and sends `heartbeat` as a named event every 5 s
+(`backend/app/api/sse.py`, `backend/app/config.py`), is timed by the browser, which counts it gone
+after two silent beats, retries it at most 5 s apart and at once back online, a refusal whose
+session check failed included, and toasts no reload (`frontend/src/workers/sse-worker.ts`,
+`frontend/src/contexts/sse-context-base.ts` and `sse-context-provider.tsx`,
+`tests/infrastructure/sse/sse-auth-recovery.spec.ts` pinning the retry), with its testing outage
+(`backend/app/api/testing_sse.py`, `backend/app/schemas/testing_sse.py`,
+`backend/app/services/testing_service.py`) and the generated client's fetch, `fetch: appFetch` in
+`generate-api.js`, which times a slow request, where the template's stream retried up to 60 s apart,
+gave up on a refusal behind a toast and sent its heartbeat as a comment the browser never sees, so
+that a dropped connection went unseen ([`docs/ui.md`](docs/ui.md)); the
 app's height, `h-dvh` on the root layout of `frontend/src/routes/__root.tsx` and on the auth gate's
 screens in `frontend/src/components/auth/auth-gate.tsx`, where the template's `h-screen`, `100vh`,
 which a phone's Chrome measures with its URL bar hidden, cut off the app's foot by the bar's
@@ -261,9 +273,10 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   service user a session outside Pilot calls as.
 - [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md),
   [`docs/timeline.md`](docs/timeline.md), [`docs/documents.md`](docs/documents.md): the UI's shell,
-  tokens, motion, shared pieces and links in text, the phone's frame and the drawer; the projects' API and
-  screens, a project's address, the plus and Create project, a project on a phone, its tabs and views; the timeline's
-  API, live event and screens; a document read alone, a draft's asks, the attachments, the tabs, the
+  tokens, motion, shared pieces and links in text, the phone's frame, its home and the drawer, a
+  dropped connection, the buttons that write or start work and the drawn scrollbar; the projects' API and
+  screens, a project's address, the plus and Create project, a project on a phone, its home, tabs and views; the timeline's
+  API, live event and screens, the fold, a one-ask item's Send and the done lines' marks; a document read alone, a draft's asks, the attachments, the tabs, the
   tab line and the side panel with a draft's Draft tab.
 - [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
   [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
@@ -275,8 +288,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   [`docs/sessions.md`](docs/sessions.md), [`docs/work.md`](docs/work.md): the supervisor that runs
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
   environments on demand and Pilot's own, with its fake; the sessions, the gate, its slot and the
-  jobs' queue, their records, relay and live stream, Stop, Resume and Retry; a work item's status,
-  its line, its progress and its session log, and Pilot's own work: its jobs, their briefs, Retry.
+  jobs' queue, their records, relay and live stream, Stop, Resume, Close and Retry; a work item's status,
+  its line, its progress, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
   worker's tools and the brain's, and its projects surface, any session's, with its door and its

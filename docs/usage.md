@@ -322,4 +322,10 @@ limits (`conditions.halts(codes)`); after a spec that moved them, `restore()` pu
 0.1, under every limit, which also ends an overrule the spec left holding.
 `fileText(env, '/work/.quota-limit-halt-requested')` reads the halt file, `""` while it is written
 and null once deleted. Playwright's backends run the five-hour halt as the hard stop and the week's
-as the cooperative stop (`loadAppBackendEnv()`, [`controller.md`](controller.md)).
+as the cooperative stop (`loadAppBackendEnv()`, [`controller.md`](controller.md)). A spec that needs
+another setting sets it on the running backend through `PUT /api/testing/halt-settings`
+`{week_halt?, five_hour_halt?}`, in testing mode alone, which sets both holders of the setting,
+`UsageHalts` and `HaltFileService`, a setting left out the one the app booted with: the
+`haltSettings` fixture, `await haltSettings.set({ week_halt: 'no_new_work' })`, set before the
+reading that makes the halt, which puts the usage under the limits and the settings back after the
+spec (`usage-halts.spec.ts`'s no-new-work halt).

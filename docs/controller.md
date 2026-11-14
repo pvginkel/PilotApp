@@ -238,13 +238,15 @@ environment a work item was placed in by its id. The one exception is the store'
 update (`reset`, below).
 
 **Free.** One of Pilot's own is free while it is neither `deleting` nor `gone`, no Session there
-is `running`, `starting` or `held`, nor `stopped` or `failed`, nor `idle` an open work item owed
-its nudge, whose run goes on there ([`usage.md`](usage.md)), and no document a work item's run
+is `running`, `starting` or `held`, nor an open work item's `stopped` or `failed`, nor `idle` an
+open work item owed its nudge, whose run goes on there ([`usage.md`](usage.md)), and no document a work item's run
 registered there is still open: the run's conversation goes on there once each is closed
 ([`round-trip.md`](round-trip.md)), and the last close's continuation names the environment from
 its placement on, so it is never free between the two. A work item that shows Resume keeps
 its environment for as long as it does, with no expiry: nothing takes, resets or deletes it, its
-project's Finish and Archive included, since Bring back offers the Resume again (D042). The
+project's Archive included, since Bring back offers the Resume again (D042). A done work item's
+Session holds it no more, whatever its state: one closed for good ([`work.md`](work.md)), and one
+Finish closed, so that a finished project's stopped work items free theirs. The
 shutdown timer still stops it, and it holds no slot of the gate's ([`sessions.md`](sessions.md)).
 Freedom is derived wherever it is read; no column holds it.
 
@@ -398,8 +400,12 @@ folder, its `files` the bytes by path), `session()`, `sessions()` and `calls` re
 
 The turns a test plays are invented, in `backend/tests/fixtures/raw/turn_text.jsonl`,
 `turn_tool.jsonl` and `turn_subagent.jsonl`, `turn_wall.jsonl`, a turn at the quota wall, and
-`turn_resumed.jsonl`, a turn that carries `turn_text.jsonl`'s conversation on, read by
-`raw_turn(name)`: bare `claude` lines in the shapes of its stream-json, which the fake frames as
+`turn_resumed.jsonl`, a turn that carries `turn_text.jsonl`'s conversation on, and
+`turn_background.jsonl`, a turn the worker holds open: the model's turn that leaves a command in
+the background, its answer to the worker's nudge and the turn the command's notification starts,
+read by `raw_turn(name)`, and in the browser suite by `rawTurn(name)`, with `modelTurns(name)` its
+lines by the model's turns in it, each ending on `claude`'s own `result` line
+(`frontend/tests/support/controller.ts`): bare `claude` lines in the shapes of its stream-json, which the fake frames as
 the controller does, each `result` line with its `modelUsage` and each `rate_limit_event` with its
 `unifiedWindows` ([`usage.md`](usage.md)). No line of them is a real
 session's.

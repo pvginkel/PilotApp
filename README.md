@@ -11,13 +11,13 @@ sign-in ([`docs/sign-in.md`](docs/sign-in.md)), the project list, and a project'
 plan, its members, the auto pilot switch, which offers to answer the confirmations it would take as
 it turns on, and Finish, Reopen, Archive and Bring back, a finish followed by the question whether
 to archive, which Pilot's Finish and archive leaves out ([`docs/projects.md`](docs/projects.md)); under the head, its timeline, where every item
-that asks one thing is answered in place and a document inline or from its card, its answers sent at
-once, with Undo, an urgent banner, the auto pilot mark, a badge per tab and a URL per item, an item
+that asks one thing is answered in place, chosen and then sent, and a document inline or from its
+card, with Undo, an open item folded for every member, an urgent banner, the auto pilot mark, a badge per tab and a URL per item, an item
 Pilot is still working on one line until it is done, read-only under a gold strip with Stop and
 take over, and which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its
 work items, each a
 session Pilot runs, live on the timeline with its one current line, the steps its run publishes on
-a donut, Stop and Resume, and its session log, which shows what each turn was sent, and Pilot's own
+a donut, Stop, Resume and Close, and its session log, which shows what each turn was sent, and Pilot's own
 background jobs, each shown on the item it follows from, one at a time per project, each a session of
 the brain's, fresh but for a wait's run: the setup, the pre-ruling pass after every worker's turn,
 which may ask the worker's writer, or claim an action or research a fact for a work item of
@@ -29,15 +29,17 @@ project's status as one icon on its tab, which pauses it, and the gold bar, a ba
 or a line on a phone, while the controller does not answer, Pilot updates its store or a usage
 halt holds; and on the desktop the tabs that open a document, an attachment or the handbook in the
 timeline's place, each project's kept in the browser, beside the side panel, always open, its width
-dragged, with the project's chat and its documents ([`docs/documents.md`](docs/documents.md)); and on a phone no top bar, the head in one line, the
-tabs at the bottom and what opens from them a view pushed over them, the item alone from a
-notification's link among them, Back the browser's ([`docs/projects.md`](docs/projects.md)). A
+dragged, with the project's chat and its documents ([`docs/documents.md`](docs/documents.md)); and on a phone no top bar, a home listing the
+projects, a project's head in one line over the tabs at the bottom and what opens from them a view
+pushed over them, the item alone from a notification's link among them, Back the browser's
+([`docs/projects.md`](docs/projects.md)); everywhere the page tinted while its connection to the
+server is down ([`docs/ui.md`](docs/ui.md)). A
 project starts from the plus beside the list, its definition chat alone until its first message
 makes the draft, each project then at its own address, its slug once created: the chat stands in
 the timeline's place while Pilot writes the draft, `project.md`, in the panel's Draft tab, its asks
 answered in place, and Create project opens it, hands it to Pilot's setup, the brain's first
-background job, and pauses it, so that its work waits for a person's resume
-([`docs/projects.md`](docs/projects.md), [`docs/work.md`](docs/work.md)). Beneath the screens are
+background job, and pauses it, so that its work waits for a person's resume, which a box at the
+timeline's foot offers ([`docs/projects.md`](docs/projects.md), [`docs/work.md`](docs/work.md)). Beneath the screens are
 the record's schema and the engine behind it: the block DSL, the parse gate and the merge by
 ownership, the record's own writes, and the rendered `timeline.json`, `reference.json` and
 `plan.json` ([`docs/engine.md`](docs/engine.md)); and the sync that keeps the store environment's

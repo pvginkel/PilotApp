@@ -25,9 +25,10 @@ Every timeline item carries `work`, null for every kind but `work` (`WorkSchema`
 for the live event:
 
 - `state`: its Session's, `held`, `starting`, `running`, `idle`, `stopped`, `failed` or `ended`;
-- `current_line`: `{state, since, step, agent, text}`, the Session's current line
+- `current_line`: `{state, since, step, agent, task, text}`, the Session's current line
   ([`sessions.md`](sessions.md)) with every key present, null where it leaves one out, `step`
-  `{tool, input}` and `agent` `{type, description}`; null while no turn is in flight;
+  `{tool, input}`, `agent` `{type, description}` and `task`, the background task a `background`
+  line waits on, `{type, description}`; null while no turn is in flight;
 - `environment`: `{id, name}`, the env chip and the session log's link, as the Environment's row stands: null
   until its start has one; a done item's names the project that took the environment after it, or
   its id while it is free ([`controller.md`](controller.md));
@@ -45,6 +46,9 @@ for the live event:
   nudge;
 - `held_running`: while it is held for a slot, the running work items of the maximum that closed
   the gate, across every project or its project's own ([`sessions.md`](sessions.md)); else null;
+- `note`: Pilot's reason for closing it for good through `stop_work` ([below](#closed-for-good)),
+  which its done line carries under its title; null while it is open, after a person's Close and
+  after any other close;
 - `stopped_at` and `stopped_by`, who stopped it by Stop, Finish or Archive, or Pilot, through its
   `stop_work`, a usage halt's hard stop or the store's update: only while `stopped`, `stopped_by`
   null when no one did;
@@ -66,7 +70,7 @@ for the live event:
 - `progress`: the steps its run published ([below](#its-progress)), in order, each `{code, label,
   state}`; empty while it has published none, once it emptied the list, and always for a job.
 
-A work item waits on you while `stopped` or `failed`, a job only until it is retried, and neither
+A work item open waits on you while `stopped` or `failed`, a job only until it is retried, and neither
 while its nudge is owed, which its project's badge counts ([`projects.md`](projects.md)). It is
 done at the end of a turn neither interrupted nor in error ([`sessions.md`](sessions.md)), but for
 the turn its environment's restart left it that came back with no text and no tool call, which
@@ -74,7 +78,8 @@ fails it (D137), and unless a cooperative usage halt or its project's pause hold
 ([`usage.md`](usage.md)), cause
 `turn_ended`, by no one, or by
 Finish's close, and a job withdrawn before its brief by an Undo or its wait's close, cause
-`withdrawn` ([below](#pilots-own-work)). A worker's run and the setup then draw as their done line
+`withdrawn` ([below](#pilots-own-work)); a stopped worker's item closed for good is done
+`cancelled` ([below](#closed-for-good)), and leaves the badge. A worker's run and the setup then draw as their done line
 ([`timeline.md`](timeline.md)); any other job shows its ended mark on the item it follows from, and
 a withdrawn job nowhere ([below](#pilots-own-work)).
 
@@ -131,7 +136,10 @@ follows from ([below](#pilots-own-work)):
   "Thinking" and "Writing" alone; "Waiting for the <type> agent" and, after a " · ", the
   sub-agent's description, which at 600px and below stands on a line of its own under the cue, the
   " · " dropped, indented to its text, so that each line is cut at most once and a phase as short as
-  "Thinking" never is (operator, 2026-10-31). The line is in one colour, the cue's, code in the mono
+  "Thinking" never is (operator, 2026-10-31); once the model has ended its own turn on a task it
+  left running in the background, "Waiting on a background command", or "Waiting on a background
+  task" for a sub-agent, and after a " · " the command's description, as a sub-agent's, with no
+  time, which the session log's tail carries (D213). The line is in one colour, the cue's, code in the mono
   face. A call whose input still streams in is its verb alone ("Editing"), and its target joins it
   once the call's line gives it; an empty target is not drawn. "Starting" before a start's first line, and "Waiting for
   Pilot" for a running one with none; "Stopped · <time>", with the cause of a stop made elsewhere
@@ -141,8 +149,10 @@ follows from ([below](#pilots-own-work)):
   store's update stopped, "Stopped for Pilot's update · <time>"; "Failed · <error>";
   and nothing once `idle` or `ended`.
 - **The row under the line**: the progress button once its run has published steps
-  ([below](#its-progress)), then Resume while `stopped` or `failed`, disabled while the project is
-  archived, as its head's switch is (D012), the API refusing it until Bring back. The setup has no
+  ([below](#its-progress)), then Resume while `stopped` or `failed`, and Close beside it while a
+  worker's item is `stopped`, never a failed one's or a job's ([below](#closed-for-good)), each
+  disabled while the project is archived, as its head's switch is (D012), the API refusing it until
+  Bring back. The setup has no
   Stop or Resume: `stopped` or `failed`, not retried and owed no nudge, it offers Retry there,
   disabled while the project is archived. A tile with none of them has no row. Stop asks
   first in the row's place, the progress button going with the row, "Stop the session? Its turn
@@ -151,18 +161,39 @@ follows from ([below](#pilots-own-work)):
   (`stopQuestion()`), with Stop it and Cancel, which takes the focus; Stop's
   icon pressed again puts the focus back on Cancel, and Esc or Cancel puts it back on Stop's icon.
   The question goes as the item is offered Stop no more, and the row comes back once it goes.
+  Close asks first in the row's place too, "Close it for good? It takes no Resume afterwards, and
+  what it put to you stays open.", with Close it and Cancel, which takes the focus; Esc or Cancel
+  puts the focus back on Close, and the question goes with Close, whichever browser's act took it
+  away.
 
-Stop and Resume (`useStop`, `useResume`, `frontend/src/hooks/use-work-acts.ts`) call
+Stop, Resume and Close it (`useStop`, `useResume`, `useClose`, `frontend/src/hooks/use-work-acts.ts`) call
 [`sessions.md`](sessions.md)'s routes and write the answer into the cached timeline, only while the
 item there is still in a state the act was made from (`moveWork`). A refusal is the query client's
 toast in the API's words, and Resume, or the question, stays offered; the keyboard focus, which
-the button pressed lost while it was disabled for its act, goes back to it, Resume, Retry or Stop
-it, once it is enabled again, where the focus is then nowhere (`useFocusBack`). Once this browser's Stop it or
+the button pressed lost while it was disabled for its act, goes back to it, Resume, Retry, Stop
+it or Close it, once it is enabled again, where the focus is then nowhere (`useFocusBack`). Once this browser's Stop it or
 Resume lands and swaps the two, the keyboard focus that was on the button that went goes to the
 other's resting button, Resume after a Stop and Stop's icon after a Resume (`useHandoff`,
 `work.tsx`); a swap another browser's act made, or one after the focus moved elsewhere meanwhile,
-moves no focus. Retry (`useRetry`) calls its route the same way, and once this browser's Retry
-lands, the focus that was on it goes to the title of the line that takes the tile's place (below).
+moves no focus. Retry (`useRetry`) calls its route the same way, and once this browser's Retry or
+Close it lands, the focus that was on it goes to the title of the line that takes the tile's place
+(below).
+
+### Closed for good
+
+A stopped work item nobody will resume is closed for good in two ways (D212). A person's Close, beside
+Resume (above), calls `POST /api/sessions/<id>/close` ([`sessions.md`](sessions.md)), taken on a
+worker's item `stopped`, whoever stopped it. Pilot closes one it replaced through `stop_work` with a
+`reason`, in the same act as its stop: one stopped already as it stands, and one a Stop takes,
+stopped first by Pilot ([`mcp.md`](mcp.md)); its reason is kept as `work.done_note`
+([`record.md`](record.md)). Either way the item is done `cancelled`, by the person or Pilot, with no
+Undo, and leaves the badge; its quiet line leads with the cancelled mark and, where Pilot closed
+it, carries the reason under its title (`work.note`, [`timeline.md`](timeline.md)). Its Session
+stays `stopped`, its nudge owed no more, and holds its environment no more; a Resume of it is
+refused, "it is closed for good". Nothing continues its conversation, and its run holds no block.
+The documents its run put to a person stay open; those it registered and that await their read are
+read once its stopped turn has ended, and are then the person's, and no job follows the close
+([`round-trip.md`](round-trip.md)). A failed work item takes no close: it keeps its Resume.
 
 **A retried setup** stays open on the record, not done (D078), and reads as its line (D190)
 (`DoneLine`, `item.tsx`), quiet as a done work item's: an orange triangle in its kind's icon's place
@@ -442,7 +473,8 @@ phone** it is a view pushed over the tabs, or over the view it opened from.
 more over the end of the last and, once opened, Show less after its last word, the one pressed
 handing the focus to the other (`Clamp`, `components/shared/clamp.tsx`): a work
   item's brief, a continuation's message, a Resume's `continue`, every turn with no author, in a work
-  item's log and a job's alike (D150). A turn sent and not yet answered shows its message alone.
+  item's log and a job's alike (D150). A turn sent and not yet answered shows its message alone, and
+  so does one the gate holds before it is sent, a Resume's, a continuation's or a nudge's.
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
   (`ReplyBody`), each under what it was sent, bare in the log's column, 6px in from either side (D002): the text as Markdown, the
   runs of tool calls with their summaries, a sub-agent's card with its own steps, the phantom of the
@@ -457,7 +489,12 @@ handing the focus to the other (`Clamp`, `components/shared/clamp.tsx`): a work
   ([`ui.md`](ui.md)). An earlier turn ends on its time, with " · Stopped" after an interrupted one
   or one stopped before it was sent, and " · Failed" after a failed one.
 - **Its tail**: while the item is held, starts or runs, the working cue: the held reason, what the
-  turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Its dancing
+  turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. A turn
+  whose model has ended its own turn on a task it left running in the background reads "Waiting on
+  a background command · <description> · <time>", the time how long the turn has waited since,
+  "3 min 20 s" (`activityOf`, `lib/chat/activity.ts`); the worker's nudge and the model's answer to
+  it leave it as it is, and the command's call reads as running until the task's notification
+  (`isRunning`, `lib/chat/view.ts`). Its dancing
   dots run while a turn runs or comes up, and stand still, its icon and words kept, while the gate
   holds the start and while a nudge is owed. Otherwise
   how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>",
@@ -480,7 +517,9 @@ routes). A read or a subscribe that fails drops the stream, which reopens after 
 so does a new SSE connection. The stream's `end` ends nothing here: the tail follows `work`. What
 each turn was sent is read apart, from `GET /api/sessions/<id>/turns` (`useSessionTurns`,
 `hooks/use-session-turns.ts`), since no record carries a server's turn's message, and read again once
-a record names a turn the last read did not hold; the log merges the two by the turn's number.
+a record names a turn the last read did not hold, at each move of the work item's state, whose event
+follows the commit that stores a held Turn, and at every open of the log; the log merges the two by
+the turn's number.
 
 **The view.** A record outside any Turn, the start's lines, a failed start and a gone session, falls
 in the Turn in flight, else in the next one. A Turn ends at its `result`, at a failed send or start,
@@ -513,7 +552,10 @@ model's own sentence, stands alone, without a verb, and so does an agent's, its 
 of calls is one line in its usual colour, "Ran 3 commands, used a tool, used gitblit 4 times · 8
 steps", an MCP server's calls counted under its own name, "used youtrack once", Pilot's as "changed
 the record N times" and a worker's progress calls as "updated its steps N times"; its failures "· N
-failed" after its steps, the one red in it. Each text a run's line shows, its words and its count
+failed" after its steps, the one red in it. Under the mouse a run's line stands in a rounded box,
+its border clear away from the mouse so that nothing moves under it, 6px out of the reply's column
+on either side; opened, the box stays, round the line and its calls, a divider under the line. Each
+text a run's line shows, its words and its count
 of steps, stands at least 200 ms: once the text differs from the one shown, the line waits 200 ms
 and shows the text as it then is, the wait never starting over, so that a call that came and went
 within it never shows (`useHeld`, `hooks/use-held.ts`); its failures change at once. A running

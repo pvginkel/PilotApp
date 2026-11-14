@@ -28,15 +28,16 @@ phone, `DeskFrame` (`components/shell/desk-frame.tsx`): the offer of the browser
 while it shows, the top bar, then, in `.app`'s grid, the
 side column (`nav.tabs`, the project list) and the centre (`main.centre`) beside it, where the child
 route shows; at the narrow width, 901px to 1199px (`useNarrow()`, `src/hooks/use-narrow.ts`), the
-side column is the drawer over the centre instead (below), the rest as on a wide window. On a phone, `PhoneFrame` (`phone-frame.tsx`): no top bar, the offer
-while it shows, the gold bar across the page's top, and under it the centre, the side column a drawer over it (below). A screen whose phone
+side column is the drawer over the centre instead (below), the rest as on a wide window. On a phone, `PhoneFrame` (`phone-frame.tsx`): no top bar and no drawer, the offer
+while it shows, the gold bar across the page's top, and under it the centre, which holds the home at
+the bare address or a screen opened from it (below). A screen whose phone
 use differs draws a phone component of its own under the same address, as a project's does
 ([`projects.md`](projects.md)). The shell reads the signed-in person through `useSelf()` (`GET
 /api/people/self`), and runs `useAppPage`, the page's beat and its closing of the device's
 notifications ([`notifications.md`](notifications.md)); the phone's frame draws nothing until the
 person is read. Until they have a handle, the
 handle step stands in place of the side column and the centre, under the top bar, or on a phone
-under the drawer's head, which opens no drawer there; a screen under the shell reads the person with
+under the home's head; a screen under the shell reads the person with
 `usePerson()`, whose handle, name and avatar slot are never null.
 
 - **The top bar** (`components/shell/top-bar.tsx`), off a phone: at the narrow width the drawer's
@@ -49,7 +50,7 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
   `import.meta.env.VITE_BUILD_COMMIT` as the dev server or the build starts: from `frontend/git-rev`,
   which the `Jenkinsfile` writes at checkout, as CI's trees hold no `.git`, else the work tree's
   `git rev-parse HEAD`; a build that can name neither fails ([`deployment.md`](deployment.md)). It keeps the template's `app-shell.topbar.user*` test
-  ids, on a phone too, where it opens from the drawer's head, so the template's sign-in specs pass
+  ids, on a phone too, where it opens from the home's head, so the template's sign-in specs pass
   against it.
 - **The gold bar** (`components/shell/gold-bar.tsx`) shows each condition that holds all work, and
   nothing while none does; a condition's badge or line stands while it holds and goes when it ends,
@@ -113,23 +114,41 @@ under the drawer's head, which opens no drawer there; a screen under the shell r
   and the lines, reads it, writes each event over the read, and reads it again at every rise of the
   stream's `isConnected`. The overrule posts `POST /api/quota-overrules` `{kind: offer}`
   ([`usage.md`](usage.md)).
-- **The drawer**, on a phone and at the narrow width: the side column over the centre, 300px wide,
-  at most 85% of the window, on the project list's tint (`--side`) with no rule at its right edge.
-  Its button, "Projects" (`DrawerToggle`, `components/shell/drawer.tsx`, test id
-  `shell.drawer-toggle`), opens and closes it. On a phone the drawer covers the screen's head too and
-  opens on the drawer's head (`.drawer-head`), the top bar's block of colour: Pilot's logo and name,
-  white on the primary, and the avatar with the profile menu. Its button there is the first part of
-  a screen's head (`DrawerButton`); on a screen with no head, `DrawerProvider` stands it alone at the
-  top-left (`.drawer-bar`), at the same place, 8px from the left and from the top under the gold
-  bar, 36px square, where a view's arrow back stands too ([`documents.md`](documents.md)), and the
-  open drawer covers it. At the narrow width the drawer lies under the top bar, with no head of its
-  own, and its button is the top bar's first part, in the bar's white. Its scrim closes it, and so
-  does any change of address, so that coming back finds it closed. Behind it, the
+- **The drawer**, at the narrow width alone: the side column over the centre, under the top bar,
+  300px wide, at most 85% of the window, on the project list's tint (`--side`) with no rule at its
+  right edge. Its button, "Projects" (`DrawerToggle`, `components/shell/drawer.tsx`, test id
+  `shell.drawer-toggle`), the top bar's first part, in the bar's white, opens and closes it. Its
+  scrim closes it, and so does any change of address, so that coming back finds it closed. Behind it, the
   scrim darkens the page, `--scrim`, 30% black in the light theme and 80% in the dark, its opacity
   the share of its way the drawer has come: the slide and the darkening follow one number,
   `@property --drawer`, over 160ms. Under reduced motion (`prefers-reduced-motion: reduce`) the
   drawer comes and goes at once. Closed, the drawer and the scrim are hidden once out of sight, so
   that they take no focus and no press.
+- **The home**, on a phone, in the drawer's place (`PhoneHome`, `components/projects/phone-home.tsx`),
+  at the bare address: under the gold bar its head (`HomeHead`, `components/shell/home-head.tsx`),
+  the top bar's block of colour at a project head's height, Pilot's icon on its white tile and its
+  name, white on the primary, and the avatar with the profile menu; under it the project list as
+  the side column has it, on the page's colour ([`projects.md`](projects.md)). Every other screen a
+  phone shows lies over the home's entry in the browser's history (`hooks/use-phone-home.ts`), and
+  the arrow to the home, "All projects" (`HomeButton`, test id `shell.home-button`), is the first
+  part of a screen's head; on a screen with no head, the profile page, it stands alone at the
+  top-left (`.home-bar`), where a head's stands, as a view's arrow back does
+  ([`documents.md`](documents.md)).
+- **A dropped connection** (`ConnectionTint`, `components/shell/connection-tint.tsx`, drawn in
+  `_shell.tsx` after both frames). While the browser's connection to Pilot's server is down or
+  slow, the whole page, the top bar and the gold bar included, lies under the scrim, fading in as
+  the drawer's darkening does, over a dialog and under a toast, and takes every press, an open
+  dialog's or menu's outside-press close among them, which neither acts nor closes under it. A
+  badge in its middle, the gold badge's shape in the page's colours, shows Lucide's loader turning
+  in the primary before "Connecting…", or "Retrying…" once an attempt to open the stream has failed.
+  Down is the live stream gone for more than 3 s since it stood, or not up 3 s after the launch, or
+  the browser offline; slow is a request of the generated client under way for more than 8 s
+  (`lateRequest`, `src/lib/api/fetch-extensions.ts`, the fetch `generate-api.js` gives the client).
+  The tint lifts at once when the connection is back, and the stream's return reads everything again
+  ([`timeline.md`](timeline.md)). The stream is opened again for as long as it takes, and a stream
+  that died silently is found by its heartbeat ([`sign-in.md`](sign-in.md)). The gold bar is the
+  server saying the controller is unreachable to a browser still connected, and under the tint it
+  may be stale.
 - **The browser's bar** takes the bottom tabs' tint (`--side`) on a phone (D194), one colour with a
   project's head and its tabs, from the page as it is served: the page head names three
   `theme-color`s by `media`, a phone's in the dark scheme, a phone's (`max-width: 900px`) and,
@@ -179,7 +198,7 @@ above the chat mockup's own sizes on a phone (D177):
 - **lg**: an item's title, a project's name in the list, an opened document's title, an empty state's and
   a dialog's title, a prose h3.
 - **xl**: the project head's title, the profile's, a prose h2.
-- **2xl**: Pilot's name in the top bar and the drawer's head, a prose h1, and so a draft's title in
+- **2xl**: Pilot's name in the top bar and the phone home's head, a prose h1, and so a draft's title in
   its Draft tab.
 
 Text sized to its shape keeps a size of its own: an avatar's letters, a count (11.5px in a tab or a
@@ -225,7 +244,9 @@ clearing it (`timeline.css` redefines `@keyframes fresh` under the setting). A s
 script asks for jumps (`smoothly()`, `src/lib/motion.ts`): the timeline's, the overlay's and the
 clarification box's. The pulses, on a work item, Pilot's jobs and the project list's glyphs, the
 dancing dots, which run by script (`el.animate(…)`) and no style rule reaches, a running step's
-spinner and the loading bar's stretch keep moving: no rule names them.
+spinner, a busy button's and the dropped connection's, Tailwind's `animate-spin`, and the loading
+bar's stretch keep moving: no rule names them. The dropped connection's tint comes at once, and a
+drawn scrollbar's thumb widens with no transition.
 
 **The loading bar** (`components/shell/loading-bar.tsx`, `shell.loading`) shows while the router
 keeps a screen showing for what its successor reads ([`projects.md`](projects.md)), once the wait
@@ -319,8 +340,6 @@ In `src/components/shared/`:
   part starts flush. A writer's reply to a clarification takes the same headings.
   `HeadingWords({text})` is a heading's inline Markdown alone, for inside a button: emphasis, code
   and links as the heading shows them, each link nested as `LinkedText`'s are.
-- `Fold({children, testId})`: a text cut at 13.5em, fading out, with Show more; one that fits shows
-  whole.
 - `Clamp({lines, children, testId})`: a text cut after its first `lines` lines, Show more over the
   end of the last, and once opened Show less after its last word; the one pressed hands the focus
   to the other, and a text that fits shows whole, with neither. The session log's sent message is
@@ -335,18 +354,65 @@ In `src/components/shared/`:
   breaks the line; Ctrl+Enter, Cmd+Enter on a Mac, calls its `onSend` where the field has one Send,
   and Esc its `onEscape` where something holds it. While it has the focus, its parent, the row
   holding what sends it, is kept in view.
+- `BusyIcon({busy, starts?, children?})` (`busy-icon.tsx`), `StartsWork` (`job-glyph.tsx`),
+  `ReadyBox({stuck?, testId, children})` (`ready-box.tsx`, Create project's box and the ready
+  box, [`timeline.md`](timeline.md)) and `ScrollBar({view, testId})` (`scroll-bar.tsx`): below.
+
+**Buttons that write or start work.** A press that writes goes through `usePress()`'s `run`
+(`src/hooks/use-press.ts`), the app's one press that writes: from the press until its write's
+promise settles, the read of an `UNTIL_READ` write included, another press that writes does
+nothing, wherever it is on the page, and `run` answers null. The button pressed is disabled from the
+press, its hook's pending reading `press.held`, which renders on the click. Once its write has
+waited a third of a second, its icon inside `BusyIcon` gives way to the spinner, Lucide's loader
+turning, until the button's own wait ends, so that a quick write never shows one; a button with no
+icon has the spinner alone at its start (`<BusyIcon busy={…} />`), a document's option row at its
+end, the row chosen and the others faded. Every button that writes takes it, but the status icon,
+which keeps its glyph ([`projects.md`](projects.md)), the overrule, whose popover closes on the
+press, the auto pilot switch and the menu's Join and Leave, which take the one press and no spinner;
+the chat's Send and the profile's switches take neither. With the network down the query client
+pauses a write, and its press holds until the connection is back. A button that starts Pilot's work
+says so under the mouse: its icon gives way to Pilot's mark without the avatar's circle, Lucide's
+play hollow at its foot, cut out of the mark, in the icon's colour, and comes back off it, the
+spinner taking the mark's place once pressed. The icon goes inside `<BusyIcon busy={…} starts>`, or
+`<StartsWork>` on a button with no `BusyIcon`, as the button's direct child; the swap is CSS alone
+(`.starts-work`, `shared.css`), under `@media (hover: hover)`, so a phone shows the icon, and a
+disabled button shows its icon. Marked by the server's reading, `close_starts_work`: a one-ask
+item's Send, an action's Done, a document's *Send answers* and its dialog's Confirm, and a review's
+Reviewed ([`timeline.md`](timeline.md)). Marked always: Resume and Retry on a work item, a job's
+Retry, Create project, a wait's request, the auto pilot dialog's Yes, the week's overrule, with
+Lucide's play, and the ready box's Resume. Never marked: Undo, Stop, Close, Stop and take over, the
+run Cancel's Confirm, Discuss, the chat's Send, Read, an option, Yes or No, Archive or Keep, the
+status icon and the project's menu.
+
+**A pane's drawn scrollbar.** Every pane that scrolls a page's content hides the browser's bar
+(`.scroll-view`, `scrollbar-width: none`) and draws its own (`ScrollBar`), built here with no scroll
+library (D215), its sibling in a
+positioned box that holds both, in a column a `.scroll-frame`, over its right edge, taking none of
+its width, so nothing reflows as it shows: the timeline, the overlay's body (a document's tab, a
+phone's view and the session log), the side panel's tabs and the chat's transcript, the desktop's
+side column, the phone's home and its Archived view, the phone's plan page, the handle step and the
+profile page, and every popover, which scrolls in its body (`.popover-body`). It is drawn while the
+content overflows the pane, and shows under the mouse (a touch screen's lasting hover excepted),
+with the keyboard's focus in its pane, while its thumb is dragged and for 800 ms after any scroll,
+over the pins and the ready box and under a tab. Its thumb, 32px at least, widens from 6 to 10px
+under the mouse. The thumb drags under the pointer or a finger, a press on the track pages towards
+it by seven eighths of the view, and the wheel over the bar is sent on to the pane as the pane's own
+`wheel`. A press on the bar sends the pane `BAR_PRESS` (`src/lib/scroll-bar.ts`), which lets go of
+the chat's and the session log's end, and of the place the chat's *Load previous* or *In the chat*
+keeps, as a press in the pane does. A code block, a tool call's detail, a menu and a text field keep
+the browser's bar, and `src/index.css`'s thin bar stands for them.
 
 `shared.css` has the mockup's buttons (`.btn` with `.btn-sm`, `.btn-icon`, `.btn-primary`,
 `.btn-danger`, `.btn-soft`, `.btn-ghost`), the text field (`.field` in a `.field-row` with its
 button beside it, level with its bottom edge), `.chip`, `.popover`, the steps behind a button
 (`.plan-ring`, `.plan-pop`, `.plan-step`), `.menu-pop`, `.dialog`,
 `.empty-state`, `.mention`, `.prose` (its lists with their bullets and numbers, a task list's
-checkboxes), `.fold` and `.link`, a button drawn as a link, as Show more and a confirmation's
+checkboxes), `.link`, a button drawn as a link, as `Clamp`'s Show more and a confirmation's
 Details are, which never underlines (D196): only a link that goes somewhere, an `<a>`, underlines under
 the mouse (`a:hover` in `app-theme.css`); `.switch`, a button of role `switch` whose knob moves right while
 it is `aria-checked`, the head's auto pilot switch and the profile's three switches; `.icon-cap`, an
-icon on its text's capitals in a flex row;
-`.delta-fresh`; `.unread`, the chat's unread dot ([`chats.md`](chats.md)); and `@keyframes pulse`.
+icon on its text's capitals in a flex row; `.starts-work`; `.scroll-view`, `.scroll-frame` and
+`.scrollbar`; `.delta-fresh`; `.unread`, the chat's unread dot ([`chats.md`](chats.md)); and `@keyframes pulse`.
 
 ## The keys
 
@@ -362,12 +428,12 @@ that has one Send (`TextField`).
 ## What the browser remembers
 
 `src/lib/browser-state.ts`, one localStorage entry, `pilot`: the theme, the current project (which
-the bare address opens), the chevrons of *Other projects* and *Finished*, and, off a phone
+the bare address opens off a phone), the chevrons of *Other projects* and *Finished*, and, off a phone
 ([`documents.md`](documents.md)): each project's side panel's tab, `panels`, `{tab}` by the project's
 id, once the person set it; the panel's two widths, `panelWidths`, `{project, draft}`, every
 project's in pixels and every draft's as a share of the window; and each project's tab line,
-`lines`, `{tabs, seen}` by the project's id, its tabs in the order they opened and their keys in the
-order they showed, while it has a tab open. A phone neither reads nor writes the panel's or the
+`lines`, `{tabs, seen}` by the project's id, its tabs in the order they opened, each by its path
+within the project, and their keys in the order they showed, while it has a tab open. A phone neither reads nor writes the panel's or the
 line's: its tab and its views are the history entry's ([`projects.md`](projects.md)). Nothing of it
 is on the server. A component reads it with `useBrowserState()` and changes it with
 `rememberInBrowser(change)`, a panel's tab with `rememberPanel(projectId, panel)`, a width with
@@ -375,12 +441,16 @@ is on the server. A component reads it with `useBrowserState()` and changes it w
 another tab of the browser keeps for the rest.
 
 The unsent text of every answer's field and of the chat's composer is a second entry,
-`pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other` and `/no`
-([`timeline.md`](timeline.md)), a draft's ask's under `<project>/project.md/<block>` the same way
+`pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other` and `/no`, and a one-ask
+item's choice before its Send, `<item>/<block>/choice`, `{answer, typing}`, the option chosen and
+whether its field is open, whose words are then the choice ([`timeline.md`](timeline.md)), a draft's ask's under `<project>/project.md/<block>` the same way
 ([`documents.md`](documents.md)), and `chat/<project>` ([`chats.md`](chats.md)).
 `useUnsentText(field, initial)` (`src/hooks/use-unsent-text.ts`) reads it when the field opens, so a
 field opened again, after a reload or in another tab, starts from what was left in it, and writes it
-on every keystroke over what the storage holds. An emptied field's entry is deleted, and so is a
+on every keystroke over what the storage holds; every field showing under one key at once, as a
+block drawn on the timeline and in its tab, shows what is typed in any of them. The choices are read
+once at the page's load (`useChoice`), so another tab's choice shows after a reload, and a done
+item's is dropped. An emptied field's entry is deleted, and so is a
 sent one's once the record holds it; a refused send keeps it. Words that leave a field on their
 send, as the chat's composer's do (`leave()`), stay in its entry, before what is typed after them,
 until the server takes them (`taken()`), so that a reload meanwhile finds them in the field; refused
@@ -449,7 +519,7 @@ The app takes the renders as they are: `vite-icons.ts`, a plugin of `loadAppPlug
 from the dev server and writes them to the build's root under the names the app asks for, so a new
 render is in the next build with nothing copied: the favicon (`favicon.png`, the 384px blue one)
 and the manifest's icons (`icon-192.png`, `icon-512.png` and the maskable `icon-512-maskable.png`)
-from the blue renders, and the top bar's `logo.png`, the drawer's head's too, from the 96px white
+from the blue renders, and the top bar's `logo.png`, the phone home's head's too, from the 96px white
 one, three times the bar's 32px, the bar being the theme's blue itself (D020). Beside them stand
 `public/`'s manifest (`manifest.json`), which names no `theme_color`, and service worker, `sw.js`;
 the page head links the manifest, names the page "Pilot — AI powered work orchestration" (D205) and sets
@@ -482,8 +552,10 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   `goldLine(code)` the phone's lines, `goldLineWords(line)` a phone's line's words and `goldFlyout`
   its open flyout, `goldText(line)` a whole line's words without its button, in the popover or the
   flyout, and `goldOverrule(line)` its overrule's button; `browserBarColour()` the browser's bar's
-  colour as the browser computes it, of the first `theme-color` whose `media` holds; `drawerToggle` is the drawer's button, on a phone
-  and at the narrow width, `drawerHead` the phone's drawer's head and `scrim` the scrim; `offer`,
+  colour as the browser computes it, of the first `theme-color` whose `media` holds; `drawerToggle` is the drawer's button
+  at the narrow width and `scrim` its scrim; `home`, `homeHead`, `homeList` and `homeButton` the
+  phone's home, its head, its list and the arrow to it; `connection` and `connectionBadge` the
+  dropped connection's tint and its badge; `offer`,
   `offerOn` and `offerNotNow` are the notifications' offer and its two buttons, `loading` the
   loading bar, `profileVersion` the profile menu's commit, and `listening()`
   waits until the page hears its person's input, on which it beats. Every spec's page reduces motion
@@ -492,7 +564,18 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   1.6 s. A spec that measures the slide or a fade asks for `reducedMotion: 'no-preference'` first,
   as `tests/shell/motion.spec.ts` does, each of its tests under both settings.
 - `controller` drives the worker's fake controller, and `conditions` reads what the gold bar reads
-  ([`work.md`](work.md)).
+  ([`work.md`](work.md)); `haltSettings` sets what the usage halts do ([`usage.md`](usage.md)).
+- `outage`: `drop()` has every attempt to open the page's stream answer `503`, and `silence()` has
+  the streams that are open send nothing too, their heartbeat included, as a connection that died
+  without saying so, through `POST /api/testing/sse/outage` (`?silent=true`), which
+  `DELETE /api/testing/sse/outage` ends after the spec ([`sign-in.md`](sign-in.md)); `tests/shell/connection.spec.ts` pins the tint, its
+  SharedWorker cases under the `@preview` tag, which run-suite's preview pass runs. A spec that
+  holds a request for more than 8 s tints the page, and a press under the tint lands on it.
+- `DrawnBar` and `expectDrawnBar` (`tests/support/scroll-bar.ts`) read a pane's drawn scrollbar,
+  `tests/shell/scrollbar.spec.ts` pinning it; a popover's scroll is read in its body,
+  `<testId>.body`. `tests/timeline/busy-press.spec.ts` pins a busy button and
+  `tests/timeline/starts-work.spec.ts` the mark: a marked button holds two svgs, its icon and
+  `.job-glyph`.
 - `browserPush` gives the spec's browser its notifications permission and a subscription from the
   worker's fake push service, and reads the pushes it took; `device` hands a push to the page's
   service worker and reads what stands on the device ([`notifications.md`](notifications.md)).

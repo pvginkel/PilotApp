@@ -39,11 +39,22 @@ chooses theirs at their first sign-in, before the app opens, and is on Pilot's r
   the tracker-events endpoint, `/api/tracker-events/<tracker>`, behind the tracker's own token,
   YouTrack's `X-YouTrack-Token` ([`waits.md`](waits.md)).
 
-On a `rejected` event the UI stops reconnecting and asks `/api/auth/self`, which refreshes an
+On a `rejected` event the UI closes the stream and asks `/api/auth/self`, which refreshes an
 expired token: on `200` it opens a new stream, on `401` it goes to the login page, and on anything
-else it shows a "connection lost" message. The shared worker and the plain `EventSource` that a
-browser without `SharedWorker` and the Vite dev server use both recover this way, and neither
-retries in a loop.
+else it opens a new one after the backoff below, which checks the session again should it be
+refused; nothing asks for a reload. The shared worker and the plain `EventSource` that a browser
+without `SharedWorker` and the Vite dev server use both recover this way.
+
+An accepted stream opens with the named event `ready`, its data the heartbeat's cadence,
+`{"heartbeat": <seconds>}`, and only then is the page connected; it sends the named event
+`heartbeat` after each `SSE_HEARTBEAT_INTERVAL` seconds it was idle, 5 by default
+(`backend/app/api/sse.py`, `backend/app/config.py`). A stream that hears no frame for two cadences
+has died without saying so, and is closed and opened again; a `ready` that names no cadence, an
+older backend's during a roll, leaves the stream untimed. A stream that fails is closed and opened
+again by the app's backoff, from 1 s doubling to at most 5 s, for as long as it takes, and at once
+when the browser comes back online, never by the browser's own reconnect, which a `502` or `503`
+ends for good. While it is down, the page lies under the dropped connection's tint
+([`ui.md`](ui.md)), so a connection that died silently tints at most 13 s after its last frame.
 
 ## The person on the record
 
@@ -75,7 +86,7 @@ subject, made when they choose their handle. The endpoints are `backend/app/api/
   person" (below).
 
 **The handle step** (`frontend/src/components/people/handle-step.tsx`). Until the person has a
-handle, no screen opens: the step stands under the top bar, on a phone under the drawer's head, the
+handle, no screen opens: the step stands under the top bar, on a phone under the home's head, the
 top bar's block of colour ([`ui.md`](ui.md)), whose avatar's menu holds the name, the theme and
 Sign out, so a person can leave before choosing (D013). It reads "Choose your handle", "The short
 name that stands for you in Pilot's files." and "Lower-case letters, digits and hyphens. Once
@@ -133,7 +144,10 @@ a read refused, does it through `people.withoutRole()`, which waits for the page
 old session to land, swaps the session, then waits for every fetch sent during the swap
 (`PageFetches`, `frontend/tests/support/network.ts`); a page that marks a chat seen is first left
 to make its mark (`chat.acted('read')`), whose answer refetches every query the page holds. `POST /api/testing/sse/force-callback-error?status=401` (or `403`) makes the
-next stream's connect callback refuse it, once.
+next stream's connect callback refuse it, once, and `POST /api/testing/sse/outage` answers every
+stream's connect `503`, with `?silent=true` the open streams sending nothing either, until
+`DELETE /api/testing/sse/outage` (the `outage` fixture, [`ui.md`](ui.md)); the direct path's
+`heartbeat` is the test event `heartbeat` of `streamId` `connection`.
 
 A test session writes no person row: a spec gets a person with a handle the way production does,
 through `POST /api/people/self/handle` (the suite's `people.signIn()`, [`ui.md`](ui.md)), and

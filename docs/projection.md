@@ -113,7 +113,10 @@ The values the agent writes from a closed list:
   - `step` (a task id, or null), `urgent`, `for` (a handle, or null) and `summary` (or null);
   - `created_at`;
   - `done`: null while open, else `at`, `cause` (a done cause's code) and `by` (a handle, or null),
-    and on a wait `note`, the brain's words at its close through `mark`, null after Finish's;
+    and on a wait `note`, the brain's words at its close through `mark`, null after Finish's, and
+    on a work item, a job's among them, `note`, Pilot's reason for closing it for good through
+    `stop_work`, null after any other close; an item's fold on the timeline is not here, nor
+    anywhere in the tree;
   - `attachments`: the `id` and `path` of each attachment hung on the item, in their order;
   - on a wait alone, its fields in `add_item`'s shape, a card wait's `cards` and `states` or a timed
     wait's `due_at`, and `firings`, in order, each `seq`, `cause` (`transition`, `due` or

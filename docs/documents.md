@@ -119,11 +119,15 @@ between the project's addresses replaces the browser's entry rather than adding 
 (`useTabReplace()`), so that Back does not move between tabs.
 
 **Each project's line is kept in the browser** (`browser-state.ts`'s `lines`, [`ui.md`](ui.md)): its
-tabs in the order they opened and the order they showed in, nothing once no tab is open; the scrolls
-stay in the page. A reload finds the line as it was left. The project's row in the list, the
+tabs in the order they opened and the order they showed in, each by its path within the project
+(`DocTab.path`), nothing once no tab is open; the scrolls stay in the page. A tab's address is built
+from the one the project is at (`addressUnder`, `lib/project-paths.ts`), so a tab opened while
+drafting shows at the slug after Create, and a line a browser kept by its tabs' addresses still
+opens. A reload finds the line as it was left. The project's row in the list, the narrow width's
 drawer's included, brings back the tab the project was left on, at the tab's address in the entry's
-place, but for the row of the project on screen, which shows its timeline; every other arrival at a
-project's own address, a fresh page included, shows its timeline, the line beside it (D151).
+place, but for the row of the project on screen, which shows its timeline in the entry's place, so
+that Back leaves the project; every other arrival at a project's own address, a fresh page
+included, shows its timeline, the line beside it (D151).
 
 **The session log's popover.** Off a phone a work item's session log is the Overlay's popover, over
 the tab showing, the timeline or a document's, which its cross, Esc and a press outside it close
@@ -131,7 +135,7 @@ the tab showing, the timeline or a document's, which its cross, Esc and a press 
 
 **On a phone, a view** pushed over the tabs ([`projects.md`](projects.md) has the views and Back):
 the whole screen under the gold bar, over the project's head and the tabs, with no backdrop,
-maximize or cross. Its head starts with the arrow back ("Back"), where the head's drawer button
+maximize or cross. Its head starts with the arrow back ("Back"), where the head's arrow to the home
 stands, 8px from the left and the top. The arrow, Esc and the browser's Back take the view off,
 showing what lay under it, another view or the tab; closing is Back, never a new entry. A view keeps
 its body's scroll while another lies over it, in the page, by its history entry
@@ -155,8 +159,8 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
 - **The body**: the summary as its lead, the attachments, then Pilot's questions to the writer
   (below), then the text as an inline document draws it, every block answered in place, every
   settled section collapsed and every held block its line, a claimed action reading "Pilot does it"
-  and its work item ([`timeline.md`](timeline.md)), an open archive question its Archive and Keep
-  alone, as the timeline draws them, and Pilot's dots while a turn saves it. A segment scrolls the body
+  and its work item ([`timeline.md`](timeline.md)), an open archive question its Archive, Keep
+  and Send alone, as the timeline draws them, and Pilot's dots while a turn saves it. A segment scrolls the body
   to its block, which flashes, its section opened first.
 - **The foot**: on a done item, "Done · <stamp>", then " · Pilot", or the other person's name, where
   the signed-in person did not do it; on an open review, Reviewed; on an open document, *Send
@@ -198,9 +202,13 @@ asks this as part of its work on <document>.", each document of `takes_back` a l
 address, joined with "and", then the button "Cancel and take back “<name>”", each block named by
 its section's `heading`, else by its document's title, the names joined with "and" and none twice;
 "End that work: this document and every other it put to you close, and what it holds is yours
-again" its tooltip. It asks nothing first, and offers no Undo after: it calls `POST cancel`
-([`round-trip.md`](round-trip.md)), disabled while the project is archived and from the click until
-the document reads back as done. Its words wrap at their spaces.
+again" its tooltip, disabled while the project is archived. It offers no Undo after, so it asks
+first, in its own place, as a work item's Stop does (D211): "End that work? This document closes for good,
+with no Undo, and “<name>” is yours again.", the run's other open documents (`also_closes`) named
+after "This document", then Confirm and Keep, Keep focused as it opens so that Enter pressed again
+keeps, and Esc keeping too. Confirm calls `POST cancel` ([`round-trip.md`](round-trip.md)), a press
+that writes ([`ui.md`](ui.md)), and stands disabled until the document reads back as done. Its words
+wrap at their spaces.
 
 **Pilot asked the writer** (`clarification.tsx`). Over a registered document's text stands the box
 of Pilot's questions to its writer, a section per pre-ruling pass that asked about its blocks, the
@@ -402,7 +410,8 @@ attachment's link to its document (`documentLink`), a link to attached material 
 and on a phone the view's arrow back (`back`), its clarification box and sections
 (`clarificationBox`, `clarification(n)`, pinned in `tests/work/clarification.spec.ts`), the strip
 (`strip`: `root`, `text`, `link`, `stop`), the unread body (`unread`) and the Cancel (`cancel`:
-`line`, `links`, `button`), pinned in `tests/work/registered.spec.ts` and `claimed.spec.ts`; the
+`line`, `links`, `button`, which opens its question, `overlay.cancel.confirm.yes` cancelling and
+`.keep` keeping), pinned in `tests/work/registered.spec.ts` and `claimed.spec.ts`; the
 `docTabs` fixture
 (`doc-tabs-page.ts`) the tab line (`first`, `document(id)`, `attachment(id)`, `tab(key)`, `closeAll`,
 `keys()`), a spec closing a document's tab by `docTabs.document(id).close`; the `panel` fixture
