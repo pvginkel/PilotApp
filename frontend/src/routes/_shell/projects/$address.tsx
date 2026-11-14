@@ -10,7 +10,8 @@
  * wherever it hangs, a draft's material hung on nothing (F36.6). The handbook's address, and the
  * project document's, open it (F129.4, F37.4), and a work item's session log's opens it (F69):
  * off a phone a popover over the tab showing, the one the line showed last, as its own address
- * draws it (F69.1). Another project's address closes them. A draft has its
+ * draws it (F69.1); a done work item's debrief's, under it, opens the debrief there (F26.9).
+ * Another project's address closes them. A draft has its
  * definition chat in the timeline's place (F46.1), once the head says it is one, Create project at
  * its end once the project can be created (D119). Off a phone, what opens as a document is a tab
  * in the timeline's place (F28.1, F28.8), the tab line the head's last row while one is open
@@ -37,6 +38,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createFileRoute, redirect, useMatches, useNavigate, useRouter } from '@tanstack/react-router';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { ItemAttachmentOverlay, ProjectAttachmentOverlay } from '@/components/overlay/attachment-overlay';
+import { DebriefOverlay } from '@/components/overlay/debrief-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
 import { ItemOverlay } from '@/components/overlay/item-overlay';
 import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
@@ -105,7 +107,7 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
   }, [named, address, projectId, router]);
   // The matches' address: the router takes a new location a render before the matches it draws.
   const at = useMatches({ select: (matches) => matches.at(-1)!.pathname });
-  const { sessionId } = shownAt(router, at);
+  const { route: logRoute, sessionId } = shownAt(router, at);
   // Off a phone the session log's address names no tab: the one under it is the line's last.
   const under = phone || sessionId === undefined ? null : tabLeftOn(projectId);
   const pathname = under === null ? at : addressUnder(address, under.path);
@@ -134,7 +136,12 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
       {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
     </>
   );
-  const log = sessionId === undefined ? null : <SessionLogOverlay projectId={projectId} sessionId={sessionId} />;
+  const log =
+    sessionId === undefined ? null : logRoute === '/_shell/projects/$address/sessions/$sessionId/debrief' ? (
+      <DebriefOverlay projectId={projectId} sessionId={sessionId} />
+    ) : (
+      <SessionLogOverlay projectId={projectId} sessionId={sessionId} />
+    );
   if (phone) {
     const overlaid = opened !== null || attached !== null || loose !== null || alone !== null || handbook || projectDocument || sessionId !== undefined;
     return (
@@ -180,7 +187,7 @@ interface DeskProjectProps {
   /** The tab the address shows, or the session log's popover lies over, none for the timeline. */
   tab: DocTab | null;
   goneTo: { item: string; block: string | null } | null;
-  /** The session log the address opens in its popover, or none. */
+  /** The session log, or a done work item's debrief, the address opens in its popover, or none. */
   log: ReactNode | null;
   /** What the tab showing shows. */
   children: ReactNode;

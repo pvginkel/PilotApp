@@ -16,7 +16,8 @@
  * title opening what is behind it, with its attachments' indicator (F13.6) and *In the chat* after a
  * one-ask item's answer given in the chat (F42.3), and its actions under the mouse (F13.8): Open
  * (F13.3), Undo while the record offers it (F14.1) and Discuss (F13.4); a work item's is quieter,
- * its Open the session log (F13.5, F26.6). Pilot's job on an item shows on it, its line's or its
+ * its Open the session log (F13.5, F26.6), and where its stage session gave a debrief it carries
+ * the Debrief, shown always, on a phone too, right of the actions under the mouse (F26.6, D158). Pilot's job on an item shows on it, its line's or its
  * head's (job.tsx, F59.1). A wait open is its own (wait.tsx, F27); done, its line has nothing behind
  * it, no Open and no Undo, and the note Pilot closed it with under its title (F27.4). On a phone the line has Undo alone among its actions,
  * and a tap on it opens what its title opens, as a view whose head carries Discuss, or, on a line
@@ -43,6 +44,7 @@ import { ArchiveQuestion } from '@/components/timeline/archive-question';
 import { Attachments, LineAttachments } from '@/components/timeline/attachments';
 import { Block } from '@/components/timeline/block';
 import { CancelledMark } from '@/components/timeline/cancelled-mark';
+import { DebriefButton } from '@/components/timeline/debrief-button';
 import { Confirmation } from '@/components/timeline/confirmation';
 import { DocumentCard, InlineDocument } from '@/components/timeline/document';
 import { isCard } from '@/components/timeline/document-state';
@@ -316,7 +318,8 @@ function inChatOf(item: TimelineItem) {
  * job's line with an orange triangle, its time when it was retried, with no Undo.
  * It does not expand. Its actions, the mark of Pilot's job on it once the job ended, Open where
  * something is behind it, Undo while the record offers it and Discuss, show while the mouse is on
- * it or the focus in it, and always where nothing hovers (timeline.css, F13.8); a job not ended
+ * it or the focus in it, and always where nothing hovers (timeline.css, F13.8); the Debrief after
+ * them shows always and never moves as they show (F26.6, D158); a job not ended
  * stands at its end beside the time, shown always (F59.1). On a phone the job's mark, Open and
  * Discuss leave it, and a tap on it anywhere but on a control of its own opens what its title
  * opens, or a wait's menu (F13.9).
@@ -407,6 +410,7 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
         {item.done?.undo && <Undo itemId={item.id} testId="timeline.line.undo" />}
         {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       </span>
+      {item.work?.debriefed && <DebriefButton itemId={item.id} testId="timeline.line.debrief" />}
       <LineAttachments item={item} />
       {job !== null && !ended && <JobButton job={job} />}
       <Time at={at} format="clock" testId="timeline.line.time" />

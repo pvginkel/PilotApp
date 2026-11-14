@@ -17,7 +17,8 @@
  * worker's `register_document` registers it (/api/testing/items/<id>/registrations), and a file or
  * a folder attached as its `attach_file` attaches it (/api/testing/items/<id>/worker-attachments),
  * each the effect of the call a tool-use id names, and its list of steps replaced as its
- * `set_progress` replaces it (/api/testing/items/<id>/progress); a registered document's writer is asked about
+ * `set_progress` replaces it (/api/testing/items/<id>/progress), and its debrief given as its
+ * `register_debrief` gives it (/api/testing/items/<id>/debrief); a registered document's writer is asked about
  * its blocks as the pre-ruling pass's `ask_writer` asks (/api/testing/items/<id>/writer-questions),
  * and the pass's clarification run placed, with the writer's reply or to run
  * (/api/testing/items/<id>/clarification).
@@ -41,6 +42,7 @@ export type AttachedFile = Omit<InventedFile, 'content'> & { content: string | B
 type WorkSpec = components['schemas']['InventedWorkCreateSchema.6d6b324'];
 type ProgressStep = components['schemas']['SetProgressRequestSchema.ce33d8b.ProgressStepRequestSchema'];
 type Progress = components['schemas']['ProgressSchema.ce33d8b'];
+type DebriefEntry = components['schemas']['RegisterDebriefRequestSchema.ce33d8b.DebriefEntryRequestSchema'];
 type WriterQuestion = components['schemas']['InventedWriterQuestionsCreateSchema.6d6b324.InventedWriterQuestionSchema'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type ItemDocument = components['schemas']['ItemDocumentSchema.1fdd8ae'];
@@ -56,6 +58,9 @@ type ProjectDocument = components['schemas']['ProjectDocumentSchema.1fdd8ae'];
 export function slugOf(projectId: string): string {
   return `project-${projectId.replaceAll('-', '').slice(0, 12)}`;
 }
+
+/** An invented account of a debrief. */
+const AN_ENTRY: DebriefEntry = { section: 'P1 · The schema', round: 1, role: 'code-writer', duration: 540, words: 'The schema went in cleanly.' };
 
 /** Each project the worker's specs made, by its id: its folder in the store's tree, as the testing route answered it. */
 const folders = new Map<string, string>();
@@ -295,6 +300,18 @@ export class Projects {
     });
     expect(response.status(), await response.text()).toBe(200);
     return ((await response.json()) as Progress).steps;
+  }
+
+  /**
+   * A work item's debrief, the stage session's own words and its entries in order, one invented
+   * entry where none are given, given once as its session's `register_debrief` gives it while its
+   * turn runs.
+   */
+  async debrief(workId: string, debrief: string, entries: DebriefEntry[] = [AN_ENTRY]): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${workId}/debrief`, {
+      data: { debrief, entries },
+    });
+    expect(response.status(), await response.text()).toBe(201);
   }
 
   /** A registered document's writer asked about its blocks, by their local ids, as the pre-ruling pass asks. */

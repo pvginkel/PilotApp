@@ -4,7 +4,8 @@
  * "Session log", the session's id its tooltip, over the item's title and its environment's link
  * once its start has one, none for Pilot's own work (F26.3); a worker's run's carries Pilot's job
  * after its turn, in whichever form it stands, whose log then takes its place, on a phone pushed
- * over it (F59.1); on a phone Discuss, quoting the item (F69.1, D127). Its body is the session's records rendered
+ * over it (F59.1); on a phone the Debrief, where the item has one, opening the debrief over it
+ * (F26.6), and Discuss, quoting the item (F69.1, D127). Its body is the session's records rendered
  * as the chat renders a reply — the runs of calls, the sub-agents' cards, the phantom — streamed
  * from the first record while it is open (F40.3), one reply per turn, each ended one closing on
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
@@ -32,6 +33,7 @@ import { WorkingCue } from '@/components/chat/working-cue';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { Avatar } from '@/components/shared/avatar';
 import { Clamp } from '@/components/shared/clamp';
+import { DebriefButton } from '@/components/timeline/debrief-button';
 import { JobOn } from '@/components/timeline/job';
 import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
@@ -78,6 +80,7 @@ export function SessionLogOverlay({ projectId, sessionId }: SessionLogOverlayPro
         item && (
           <>
             {item.after_turn !== null && <JobOn job={item.after_turn} testId="overlay.job" />}
+            {phone && work?.debriefed && <DebriefButton itemId={item.id} testId="overlay.debrief" />}
             {phone && work && <DiscussButton quote={quoteOfItem(item)} title="Discuss: ask Pilot about this session" testId="overlay.discuss" />}
           </>
         )

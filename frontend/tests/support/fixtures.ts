@@ -8,7 +8,7 @@
  * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
  * list, `projectHead` a project's head, `timeline` its timeline, `overlay` a document opened, in its
  * tab or its view, or the session log over the timeline,
- * `sessionLog` a work item's session log in it, `docTabs` the desktop's tab line under the head, `panel`
+ * `sessionLog` a work item's session log in it, `debrief` a done work item's debrief there, `docTabs` the desktop's tab line under the head, `panel`
  * the side panel beside it, `chat` its Chat tab,
  * `phoneTabs` a phone's tabs at the bottom and the page over them,
  * `chats` puts a project's chats in the store's fake environment and sends their messages,
@@ -37,6 +37,7 @@ import { Links } from './links';
 import { ChatPage } from './page-objects/chat-page';
 import { DocTabsPage } from './page-objects/doc-tabs-page';
 import { HandleStepPage } from './page-objects/handle-step-page';
+import { DebriefPage } from './page-objects/debrief-page';
 import { OverlayPage } from './page-objects/overlay-page';
 import { PanelPage } from './page-objects/panel-page';
 import { PhoneTabsPage } from './page-objects/phone-tabs-page';
@@ -66,6 +67,7 @@ interface DomainFixtures {
   timeline: TimelinePage;
   overlay: OverlayPage;
   sessionLog: SessionLogPage;
+  debrief: DebriefPage;
   docTabs: DocTabsPage;
   panel: PanelPage;
   phoneTabs: PhoneTabsPage;
@@ -161,6 +163,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   sessionLog: async ({ page }, use) => {
     await use(new SessionLogPage(page));
+  },
+  debrief: async ({ page }, use) => {
+    await use(new DebriefPage(page));
   },
   docTabs: async ({ page }, use) => {
     await use(new DocTabsPage(page));

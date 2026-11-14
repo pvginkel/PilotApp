@@ -12,7 +12,8 @@
  * "Stopped · <time>" with the cause of a stop made elsewhere (F71), a failure's error (F125) — and
  * its Session log (F26.3). Done, it is a quieter line, its Open the session log, with
  * no Undo and its attachments' indicator (F13.5, F26.6, F13.6), and so is every work item of a
- * finished project (F5.3). A run of work items stands under its last member's dividers (F9.1).
+ * finished project (F5.3); one whose session gave a debrief carries the Debrief from its turn's
+ * end, which opens the debrief where the session log opens (F26.6, F26.9). A run of work items stands under its last member's dividers (F9.1).
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -20,7 +21,8 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { heightOf, iconOf } from '../support/lines';
 import type { People } from '../support/people';
-import { slugOf, type Projects } from '../support/projects';
+import { projectAddress, slugOf, type Projects } from '../support/projects';
+import { debriefAddress } from '../support/page-objects/debrief-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { modelTurns } from '../support/controller';
 
@@ -554,12 +556,59 @@ test.describe('A done work item', () => {
     await expect(item.lineTime).toHaveText(clock(done!.at));
     await expect(item.lineAttachment).toHaveAttribute('data-attachment-id', attachment);
     await expect(item.undo).toHaveCount(0);
+    await expect(item.debrief).toHaveCount(0);
     await expect(item.open).toHaveAttribute('href', sessionLogAddress(project, work));
 
     await item.line.hover();
     await item.open.click();
     await expect(page).toHaveURL(sessionLogAddress(project, work));
     await expect(sessionLog.tail).toHaveText(`The turn ended · ${clock(done!.at)}`);
+  });
+
+  test('whose session gave a debrief carries the Debrief from its turn’s end, an icon whose tooltip is its name, and nothing of the debrief on its line; it opens the debrief: “Debrief” over the item’s title and the time its turn ended, the stage session’s words as prose the frame’s full width', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    debrief,
+    page,
+  }) => {
+    const project = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    const { id: environment } = await projects.environment(project, work);
+    await projects.debrief(work, 'It went **well**, if slowly.\n\nThe second review was worth it.\n');
+    await timeline.open(project);
+    const item = timeline.item(work);
+
+    // Given while its turn runs, it shows from the turn's end.
+    await expect(item.work.line).toBeVisible();
+    await expect(item.debrief).toHaveCount(0);
+    await controller.finish(environment, 'claude-1');
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    const { done } = await projects.item(project, work);
+    await expect(item.debrief).toBeVisible();
+    await expect(item.debrief).toHaveAttribute('title', 'Debrief');
+    await expect(item.debrief).toHaveAccessibleName('Debrief');
+    await expect(item.debrief).toHaveAttribute('href', debriefAddress(project, work));
+    await expect(item.debrief.locator('svg.lucide-notebook-pen')).toBeVisible();
+    await expect(item.line).not.toContainText('slowly');
+    await expect(item.root.locator('.said')).toHaveCount(0);
+
+    await item.debrief.click();
+    await expect(page).toHaveURL(debriefAddress(project, work));
+    await expect(debrief.title).toHaveText('Debrief');
+    await expect(debrief.title.locator('svg.lucide-notebook-pen')).toBeVisible();
+    await expect(debrief.item).toHaveText(TITLE);
+    await expect(debrief.ended).toHaveText(clock(done!.at));
+    await expect(debrief.text.locator('p')).toHaveText(['It went well, if slowly.', 'The second review was worth it.']);
+    await expect(debrief.text.locator('strong')).toHaveText('well');
+    // The prose takes the frame's full width, in from its sides by the body's padding alone.
+    const [column, text] = await Promise.all([debrief.body.locator('.column').boundingBox(), debrief.text.boundingBox()]);
+    expect(text!.width).toBeCloseTo(column!.width - 32, 0);
+
+    await page.keyboard.press('Escape');
+    await expect(debrief.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(projectAddress(project));
   });
 
   test('is every work item of a finished project, a running one stopped and closed by Finish', async ({ people, projects, timeline }) => {

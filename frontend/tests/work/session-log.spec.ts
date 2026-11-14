@@ -12,7 +12,8 @@
  * (F69.2, F125). Before each turn's reply stands what the server sent it, as Pilot's message,
  * cut after its first lines until Show more, Show less once opened (T5): the brief, a Resume's.
  * It follows the item through a Resume, sticks to its end until the reader scrolls up, and Esc
- * closes it.
+ * closes it. A done work item's Debrief opens its debrief where the log opens, off a phone in the
+ * popover's place and of its frame, the log's own head carrying no Debrief there (F26.9).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -23,6 +24,7 @@ import { makeUnique } from '../support/helpers';
 import { iconOf } from '../support/lines';
 import type { People } from '../support/people';
 import { projectAddress, type Projects } from '../support/projects';
+import { debriefAddress } from '../support/page-objects/debrief-page';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { attachmentAddress } from '../support/page-objects/timeline-page';
@@ -868,6 +870,25 @@ test.describe('A work item’s session log', () => {
     await page.goto(sessionLogAddress(project, randomUUID()));
     await expect(sessionLog.failed).toHaveText('The session log did not load.');
   });
+
+  test('a debrief’s address of a done work item whose session gave none, or of no work item of the project, reads "The debrief did not load"', async ({
+    page,
+    people,
+    projects,
+    controller,
+    debrief,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await controller.finish(environment, 'claude-1');
+    await expect.poll(async () => (await projects.item(project, work)).done?.cause).toBe('turn_ended');
+
+    await page.goto(debriefAddress(project, work));
+    await expect(debrief.failed).toHaveText('The debrief did not load.');
+    await page.goto(debriefAddress(project, randomUUID()));
+    await expect(debrief.failed).toHaveText('The debrief did not load.');
+  });
 });
 
 /** A document long enough to be a card on the timeline. */
@@ -931,6 +952,65 @@ test.describe('Off a phone, the session log’s popover', () => {
     await timeline.item(second).work.sessionLog.click();
     await expect(sessionLog.item).toHaveText('Surveying the scripts');
     expect(await sessionLog.overlay.boundingBox()).toEqual(box);
+  });
+
+  test('gives way to a done work item’s debrief at its Debrief, in its place and of its frame, with no entry in the history, its own head carrying no Debrief; the Debrief again closes it, the item’s Open shows the log in its place again, and Esc gives the focus back to the Debrief', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    sessionLog,
+    debrief,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Popover'), members: [me.handle!] });
+    const work = await startIn(projects, project, 'running');
+    const { id: environment } = await projects.environment(project, work);
+    await projects.debrief(work, 'It went well, if slowly.');
+    await controller.finish(environment, 'claude-1');
+    await expect.poll(async () => (await projects.item(project, work)).done?.cause).toBe('turn_ended');
+    await timeline.open(project);
+    const item = timeline.item(work);
+    const entries = await page.evaluate(() => history.length);
+
+    await item.line.hover();
+    await item.open.click();
+    await expect(sessionLog.log).toBeVisible();
+    await expect(sessionLog.debrief).toHaveCount(0);
+    const frame = (await sessionLog.overlay.boundingBox())!;
+
+    await item.debrief.click();
+    await expect(page).toHaveURL(debriefAddress(project, work));
+    await expect(debrief.text).toHaveText('It went well, if slowly.');
+    await expect(sessionLog.log).toHaveCount(0);
+    expect(await debrief.overlay.boundingBox()).toEqual(frame);
+    await expect(timeline.root).not.toHaveAttribute('inert');
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+
+    await item.line.hover();
+    await item.open.click();
+    await expect(page).toHaveURL(sessionLogAddress(project, work));
+    await expect(sessionLog.log).toBeVisible();
+
+    await item.debrief.click();
+    await expect(debrief.text).toBeVisible();
+    await item.debrief.click();
+    await expect(debrief.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(projectAddress(project));
+
+    await item.debrief.focus();
+    await page.keyboard.press('Enter');
+    await expect(debrief.overlay).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(debrief.overlay).toHaveCount(0);
+    await expect(item.debrief).toBeFocused();
+
+    await item.debrief.click();
+    await debrief.close.click();
+    await expect(debrief.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(projectAddress(project));
+    expect(await page.evaluate(() => history.length)).toBe(entries);
   });
 
   test('closes on a press outside it, the press doing what it does, and on its own button; another item’s button shows that item’s log in its place; Esc gives the focus back to the button that opened it', async ({

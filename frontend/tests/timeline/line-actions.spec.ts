@@ -1,8 +1,10 @@
 /**
  * A done line's actions under the mouse (F13.8): what the line says shows always, its actions — Open,
  * Undo, Discuss — only while the mouse is on the line or the focus in it, taking no room until then
- * and adding no height, and always on a screen with no hover wider than a phone; its title opens
- * what is behind the line, the document in its tab or a work item's session log in its popover.
+ * and adding no height, and always on a screen with no hover wider than a phone; a done work
+ * item's Debrief shows always, right of them and before the time, and never moves as they show
+ * (F26.6, D158); its title opens what is behind the line, the document in its tab or a work item's
+ * session log in its popover.
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -98,6 +100,50 @@ test.describe('A done line’s actions', () => {
     expect(await height(item.line)).toBe(line);
   });
 
+  test('leave a done work item’s Debrief shown always, right of them and before the time, where it never moves as they show and touches them while they do; the focus reaches it after them', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Debriefed'), members: [me.handle!] });
+    const work = await projects.startWork(id, { title: 'Surveying the stylesheets', brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
+    await projects.debrief(work, 'It went well.');
+    await projects.transition(id, 'finished');
+    await timeline.open(id);
+    const item = timeline.item(work);
+
+    await away(page);
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    await expect(item.open).toBeHidden();
+    await expect(item.lineDiscuss).toBeHidden();
+    await expect(item.debrief).toBeVisible();
+    const [line, debrief, time] = await Promise.all([box(item.line), box(item.debrief), box(item.lineTime)]);
+    expect(debrief.x + debrief.width).toBeLessThanOrEqual(time.x);
+
+    await item.line.hover();
+    for (const action of [item.open, item.lineDiscuss]) await expect(action).toBeVisible();
+    expect(await box(item.debrief)).toEqual(debrief);
+    const discuss = await box(item.lineDiscuss);
+    expect(discuss.x + discuss.width).toBeCloseTo(debrief.x, 0);
+    expect(await height(item.line)).toBe(line.height);
+
+    await away(page);
+    await expect(item.lineDiscuss).toBeHidden();
+    expect(await box(item.debrief)).toEqual(debrief);
+
+    await item.lineTitle.focus();
+    await page.keyboard.press('Tab');
+    await expect(item.open).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(item.lineDiscuss).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(item.debrief).toBeFocused();
+    expect(await box(item.debrief)).toEqual(debrief);
+  });
+
   test('take the focus back from the session log Open opened, from the keyboard or the mouse', async ({ page, people, projects, timeline, sessionLog }) => {
     const me = await people.signIn();
     const id = await projects.make({ name: makeUnique('Back to Open'), members: [me.handle!] });
@@ -141,6 +187,22 @@ test.describe('A done line’s actions', () => {
       expect(await page.evaluate(() => window.matchMedia('(hover: hover)').matches)).toBe(false);
       await expect(item.root).toHaveAttribute('data-state', 'done');
       for (const action of [item.open, item.undo, item.lineDiscuss]) await expect(action).toBeVisible();
+    });
+
+    test('and a done work item’s Debrief after them', async ({ people, projects, timeline }) => {
+      const me = await people.signIn();
+      const id = await projects.make({ name: makeUnique('No hover'), members: [me.handle!] });
+      const work = await projects.startWork(id, { title: 'Surveying the stylesheets', brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+      await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
+      await projects.debrief(work, 'It went well.');
+      await projects.transition(id, 'finished');
+      await timeline.open(id);
+      const item = timeline.item(work);
+
+      await expect(item.root).toHaveAttribute('data-state', 'done');
+      for (const shown of [item.open, item.lineDiscuss, item.debrief]) await expect(shown).toBeVisible();
+      const [discuss, debrief] = await Promise.all([box(item.lineDiscuss), box(item.debrief)]);
+      expect(discuss.x + discuss.width).toBeCloseTo(debrief.x, 0);
     });
   });
 });

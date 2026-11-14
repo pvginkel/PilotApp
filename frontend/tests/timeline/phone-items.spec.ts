@@ -7,7 +7,9 @@
  * shows as it stands. A block's address shows its item alone at the block, or a card's document
  * at it; a quote's chip and a claimed action's link push the item alone over the tab they stand
  * on. A done line shows Undo alone among its actions, and a tap on it opens its view, whose head
- * carries Discuss, its title the way in from the keyboard; Undo undoes and opens nothing. An item's
+ * carries Discuss, its title the way in from the keyboard; Undo undoes and opens nothing. A done
+ * work item's Debrief stays on its line, its tap opening the debrief as a view, and its session
+ * log's view carries it in its head, pushing the debrief over the log (F26.6, F26.9). An item's
  * head keeps Discuss at the end of its first line however the rest wraps, and puts "for <user>" on a
  * line of its own under the rest, led by its icon, on every kind; no row of it ends on a dot, each
  * dot going with the part after it, a part wider than the row wrapping behind its dot; and Urgent's
@@ -19,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique, makeUniqueToken } from '../support/helpers';
+import { debriefAddress } from '../support/page-objects/debrief-page';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { addressOf, attachmentAddress, dotsEndingARow, type TimelinePage } from '../support/page-objects/timeline-page';
@@ -501,9 +504,71 @@ test.describe('A done line on a phone', () => {
 
     await expect(item.root).toHaveAttribute('data-state', 'done');
     await expect(item.open).toHaveCount(0);
+    await expect(item.debrief).toHaveCount(0);
     await item.lineTitle.tap();
     await expect(page).toHaveURL(sessionLogAddress(id, work));
     await expect(sessionLog.discuss).toBeVisible();
+    await expect(sessionLog.debrief).toHaveCount(0);
+  });
+
+  test('a work item’s with a debrief keeps the Debrief, whose tap opens the debrief as a view over the whole screen; its session log’s view carries it in its head, pushing the debrief over the log, and Back takes each off', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    sessionLog,
+    debrief,
+    projectHead,
+    phoneTabs,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Debriefed'), members: [me.handle!] });
+    const work = await projects.startWork(id, { title: 'Surveying the stylesheets', brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
+    await projects.debrief(work, 'It went well, if slowly.');
+    await projects.transition(id, 'finished');
+    await timeline.open(id);
+    const item = timeline.item(work);
+
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    await expect(item.open).toHaveCount(0);
+    await expect(item.debrief).toBeVisible();
+    // On the line's one row, overhanging it as its buttons do.
+    const [line, debriefed] = await Promise.all([box(item.line), box(item.debrief)]);
+    expect(debriefed.y + debriefed.height / 2).toBeGreaterThan(line.y);
+    expect(debriefed.y + debriefed.height / 2).toBeLessThan(line.y + line.height);
+    expect(debriefed.x + debriefed.width).toBeLessThanOrEqual((await box(item.lineTime)).x);
+
+    await item.debrief.tap();
+    await expect(page).toHaveURL(debriefAddress(id, work));
+    await expect(debrief.title).toHaveText('Debrief');
+    await expect(debrief.item).toHaveText('Surveying the stylesheets');
+    await expect(debrief.text).toHaveText('It went well, if slowly.');
+    await expect(debrief.back).toBeVisible();
+    await expect(debrief.close).toHaveCount(0);
+    const [view, head, tabs] = await Promise.all([debrief.overlay, projectHead.root, phoneTabs.root].map(async (each) => (await each.boundingBox())!));
+    expect(view).toMatchObject({ x: 0, y: head.y, width: PHONE.width });
+    expect(view.y + view.height).toBe(tabs.y + tabs.height);
+    await debrief.back.tap();
+    await expect(debrief.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(projectAddress(id));
+
+    await item.lineTitle.tap();
+    await expect(page).toHaveURL(sessionLogAddress(id, work));
+    await expect(sessionLog.debrief).toBeVisible();
+    await expect(sessionLog.debrief).toHaveAttribute('title', 'Debrief');
+    const [debriefButton, discuss] = await Promise.all([box(sessionLog.debrief), box(sessionLog.discuss)]);
+    expect(debriefButton.x).toBeLessThan(discuss.x);
+    expect(debriefButton.y).toBeCloseTo(discuss.y, 0);
+    await sessionLog.debrief.tap();
+    await expect(page).toHaveURL(debriefAddress(id, work));
+    await expect(debrief.text).toHaveText('It went well, if slowly.');
+    await debrief.back.tap();
+    await expect(page).toHaveURL(sessionLogAddress(id, work));
+    await expect(sessionLog.log).toBeVisible();
+    await sessionLog.overlay.getByTestId('overlay.back').tap();
+    await expect(sessionLog.overlay).toHaveCount(0);
+    await expect(page).toHaveURL(projectAddress(id));
   });
 });
 

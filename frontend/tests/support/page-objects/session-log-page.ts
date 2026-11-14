@@ -7,7 +7,7 @@ import { projectAddress } from '../projects';
  * A work item's session log in the overlay (F69), at its own address: off a phone its popover over
  * the tab showing, a dialog, on a phone a view. Its head with "Session log", the session's id its
  * tooltip, the item's title and the environment's link, a worker's run's Pilot's job after its
- * turn, on a phone Discuss, off one the cross; its
+ * turn, on a phone the Debrief and Discuss, off one the cross; its
  * body with a reply per turn — text, a run of calls, a sub-agent's card, the phantom, a failure, the
  * server's word on a file the session registered, a call's effects in its place and an effect whose
  * call no record shows in its own — each ended one closing on its time, and before it what the
@@ -55,6 +55,8 @@ export class SessionLogPage {
   readonly retriedLink: Locator;
   readonly failed: Locator;
   readonly discuss: Locator;
+  /** On a phone, the Debrief in its head, where the item has one (F26.6). */
+  readonly debrief: Locator;
 
   constructor(private readonly page: Page) {
     // A dialog, never a tab, which it may lie over.
@@ -95,6 +97,7 @@ export class SessionLogPage {
     this.retriedLink = this.log.getByTestId('session-log.retried.link');
     this.failed = this.overlay.getByTestId('overlay.failed');
     this.discuss = this.overlay.getByTestId('overlay.discuss');
+    this.debrief = this.overlay.getByTestId('overlay.debrief');
   }
 
   /** Opens the session log at its address, once its project's timeline is read and its stream reads live on the browser's connection. */

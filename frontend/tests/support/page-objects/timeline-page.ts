@@ -5,7 +5,8 @@ import { projectAddress } from '../projects';
 
 /**
  * A project's timeline (F8): its rows, the opening, its items open and as done lines, their title
- * a link to what is behind them and Open, Undo and Discuss under the mouse (F13.8), an open item's
+ * a link to what is behind them and Open, Undo and Discuss under the mouse (F13.8), a done work
+ * item's Debrief (F26.6), an open item's
  * block (F31) or a confirmation's card (F22), *In the chat* in a block's head
  * and a done line (F42.3), an inline document's blocks,
  * segments and *Send answers* with its dialog (F24.1, F33, F32.5), a larger document's or a
@@ -130,6 +131,8 @@ export class TimelinePage {
       undo: root.getByTestId('timeline.line.undo'),
       open: root.getByTestId('timeline.line.open'),
       lineDiscuss: root.getByTestId('timeline.line.discuss'),
+      /** A done work item's Debrief, shown always where its stage session gave a debrief (F26.6). */
+      debrief: root.getByTestId('timeline.line.debrief'),
       /**
        * The menu a tap opens on a phone on a line with nothing behind it, a done wait's or that of an
        * item Pilot is working on before its read: its row of Pilot's job on it, and its Discuss (F13.9).
