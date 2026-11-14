@@ -124,7 +124,7 @@ test.describe('A card wait', () => {
 });
 
 test.describe('The request’s button', () => {
-  test('is an icon in the head touching Discuss, its label its tooltip, Check now on a card wait; a press records the person’s request, Pilot checking until the run it fired ends', async ({
+  test('is an icon in the head touching Discuss, its label its tooltip, Check now on a card wait, the job’s mark under the mouse; a press records the person’s request, Pilot checking until the run it fired ends', async ({
     people,
     projects,
     timeline,
@@ -142,7 +142,12 @@ test.describe('The request’s button', () => {
     await expect(request).toHaveAttribute('title', 'Check now');
     await expect(request).toHaveAttribute('aria-label', 'Check now');
     await expect(request).toHaveText('');
-    await expect(request.locator('svg path')).toHaveCount(6);
+    await expect(request.locator('svg:not(.job-glyph) path')).toHaveCount(6);
+    // It fires the wait, Pilot's work: under the mouse its hourglass gives way to the job's mark (F59.3).
+    await expect(request.locator('.job-glyph')).toBeHidden();
+    await request.hover();
+    await expect(request.locator('.job-glyph')).toBeVisible();
+    await expect(request.locator('svg:not(.job-glyph)')).toBeHidden();
     await touching(request, item.discuss);
 
     await request.click();
