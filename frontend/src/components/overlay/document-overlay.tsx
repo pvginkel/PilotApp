@@ -34,6 +34,7 @@ import { Clarifications } from '@/components/overlay/clarification';
 import { useClarificationBox } from '@/components/overlay/clarification-box';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { PilotStrip } from '@/components/overlay/pilot-strip';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { CopyButton } from '@/components/shared/copy-button';
 import { RunCancel } from '@/components/overlay/run-cancel';
 import { LinkedText } from '@/components/shared/linked-text';
@@ -256,7 +257,9 @@ function Reviewed({ item }: { item: ItemDocument }) {
   const archived = useArchived(projectId);
   return (
     <button type="button" className="btn btn-primary" onClick={mark} disabled={pending || archived} data-testid="overlay.reviewed">
-      <Check className="icon" aria-hidden="true" />
+      <BusyIcon busy={pending}>
+        <Check className="icon" aria-hidden="true" />
+      </BusyIcon>
       Reviewed
     </button>
   );

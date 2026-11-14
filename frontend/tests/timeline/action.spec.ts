@@ -79,7 +79,7 @@ test.describe('An action without options', () => {
     expect(await kept()).not.toHaveProperty(`${action}/A1/paste`);
   });
 
-  test('reads Done in its block, not boxed, while Done saves', async ({ page, people, projects, timeline }) => {
+  test('reads Done in its block, not boxed, while Done saves, Done standing disabled under it, its icon the spinner', async ({ page, people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Saving'), members: [me.handle!] });
     const action = await projects.place(id, { kind: 'action', title: 'Plug it in', text: ACTION });
@@ -94,7 +94,9 @@ test.describe('An action without options', () => {
     await expect(said).toHaveText('Done');
     // Read at once, while the write is on its way.
     expect(await said.getAttribute('class')).not.toMatch(/\bboxed\b/);
-    await expect(block.done).toHaveCount(0);
+    await expect(block.done).toBeDisabled();
+    await expect(block.done.locator('.lucide-loader-circle')).toBeVisible();
+    await expect(block.done.locator('.lucide-check')).toHaveCount(0);
     await restore();
 
     await expect(item.root).toHaveAttribute('data-state', 'done');

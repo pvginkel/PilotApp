@@ -27,6 +27,7 @@ import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
 import { useAutopilotFlip } from '@/hooks/use-autopilot-flip';
+import { usePress } from '@/hooks/use-press';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { STOPPABLE } from '@/hooks/use-work-acts';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
@@ -100,6 +101,7 @@ const AUTOPILOT_FORM = 'project.autopilot';
  */
 export function Autopilot({ project, phone = false }: { project: Project; phone?: boolean }) {
   const flip = useAutopilotFlip(project.id);
+  const press = usePress();
   const [asking, setAsking] = useState(false);
   // The dialog asks only while auto pilot is off on an open, unarchived project: turned on,
   // finished or archived by another session, the server refuses each of its answers.
@@ -112,19 +114,25 @@ export function Autopilot({ project, phone = false }: { project: Project; phone?
       </span>
     );
   }
+  // Each flip is a press that writes, one at a time across the app (use-press.ts).
   const send = (kind: 'autopilot_on' | 'autopilot_off', answerConfirmations = false) => {
-    const fields = { kind, answer_confirmations: answerConfirmations };
-    trackFormSubmit(AUTOPILOT_FORM, fields);
-    flip.mutate(answerConfirmations ? fields : { kind }, {
-      onSuccess: () => {
-        trackFormSuccess(AUTOPILOT_FORM, fields);
-        setAsking(false);
-      },
-      onError: () => trackFormError(AUTOPILOT_FORM, fields),
-    });
+    press.run(() => {
+      const fields = { kind, answer_confirmations: answerConfirmations };
+      trackFormSubmit(AUTOPILOT_FORM, fields);
+      return flip.mutateAsync(answerConfirmations ? fields : { kind }).then(
+        () => {
+          trackFormSuccess(AUTOPILOT_FORM, fields);
+          setAsking(false);
+        },
+        () => trackFormError(AUTOPILOT_FORM, fields),
+      );
+    }, String(answerConfirmations));
   };
+  const pending = press.held !== null || flip.isPending;
+  // Which of the dialog's answers is on its way: Yes, answering the confirmations, or No.
+  const answering = press.held !== null ? press.held === 'true' : flip.isPending ? flip.variables.answer_confirmations === true : null;
   const toggle = () => {
-    if (flip.isPending) return;
+    if (pending) return;
     if (project.autopilot) send('autopilot_off');
     else if (project.autopilot_may_take > 0) setAsking(true);
     else send('autopilot_on');
@@ -136,7 +144,7 @@ export function Autopilot({ project, phone = false }: { project: Project; phone?
         className="switch"
         role="switch"
         aria-checked={project.autopilot}
-        aria-disabled={flip.isPending || undefined}
+        aria-disabled={pending || undefined}
         disabled={project.archived}
         title="Auto pilot hands the project to Pilot; it still asks on the held column"
         aria-label={phone ? 'Auto pilot' : undefined}
@@ -152,7 +160,7 @@ export function Autopilot({ project, phone = false }: { project: Project; phone?
       {asking && (
         <AutopilotDialog
           count={project.autopilot_may_take}
-          pending={flip.isPending}
+          answering={answering}
           onAnswer={(answerConfirmations) => send('autopilot_on', answerConfirmations)}
         />
       )}

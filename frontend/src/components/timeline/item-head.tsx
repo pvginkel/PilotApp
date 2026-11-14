@@ -13,7 +13,8 @@
  * Discuss staying at the end of its first line; the "for" chip takes a line of its own under it, led by its icon. A
  * dot goes with the part after it, so that no row of a wrapping head ends on one. On the timeline
  * the kind is the button that folds the item, for every member, the pointer its only sign (F12.3,
- * fold.ts); off it, and in an archived project, it is the kind alone.
+ * fold.ts), its icon the spinner while this browser's fold or unfold of it waits (F148); off it,
+ * and in an archived project, it is the kind alone.
  */
 
 import type { ReactNode } from 'react';
@@ -21,6 +22,7 @@ import { Pencil, TriangleAlert, UserRound } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { Avatar } from '@/components/shared/avatar';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { CopyButton } from '@/components/shared/copy-button';
 import { Time } from '@/components/shared/time';
 import { AutopilotMark } from '@/components/timeline/autopilot-mark';
@@ -87,7 +89,9 @@ export function ItemHead({ item, because = null, mayTake = false, asked = false,
   const folds = useFolds();
   const kind = (
     <>
-      <Icon className="icon" aria-hidden="true" />
+      <BusyIcon busy={folds?.busy(item.id) ?? false}>
+        <Icon className="icon" aria-hidden="true" />
+      </BusyIcon>
       {label}
     </>
   );

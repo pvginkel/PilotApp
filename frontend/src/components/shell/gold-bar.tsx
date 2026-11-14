@@ -15,6 +15,7 @@ import { ChevronDown } from 'lucide-react';
 import { Popover } from '@/components/shared/popover';
 import { Time } from '@/components/shared/time';
 import type { Condition } from '@/hooks/use-conditions';
+import { usePress } from '@/hooks/use-press';
 import { useToast } from '@/hooks/use-toast';
 import { useToday } from '@/hooks/use-today';
 import { usePostQuotaOverrules } from '@/lib/api/generated/hooks';
@@ -175,27 +176,31 @@ interface OverruleButtonProps {
 /** The overrule the week's halt offers now (F135.2), one at a time; its toast says what it did. */
 function OverruleButton({ kind, target, onMade }: OverruleButtonProps) {
   const overrule = usePostQuotaOverrules();
+  const press = usePress();
   const { showSuccess } = useToast();
   const { label, does } = overruleWords(kind, target);
   const make = () => {
-    trackFormSubmit(FORM, { kind });
-    // The halt's lifting can take the button off the screen before the answer comes: the toast
-    // follows the request, not the button. The query client toasts a refusal (UI-2).
-    void overrule.mutateAsync({ body: { kind } }).then(
-      (made) => {
-        trackFormSuccess(FORM, { kind });
-        showSuccess(overruleWords(made.kind, made.target).does);
-      },
-      () => trackFormError(FORM, { kind }),
-    );
-    onMade?.();
+    // One press that writes at a time (F148); the popover closes on it, so it shows no spinner.
+    const made = press.run(() => {
+      trackFormSubmit(FORM, { kind });
+      // The halt's lifting can take the button off the screen before the answer comes: the toast
+      // follows the request, not the button. The query client toasts a refusal (UI-2).
+      return overrule.mutateAsync({ body: { kind } }).then(
+        (answer) => {
+          trackFormSuccess(FORM, { kind });
+          showSuccess(overruleWords(answer.kind, answer.target).does);
+        },
+        () => trackFormError(FORM, { kind }),
+      );
+    });
+    if (made !== null) onMade?.();
   };
   return (
     <button
       type="button"
       className="gold-btn"
       title={does}
-      disabled={overrule.isPending}
+      disabled={press.held !== null || overrule.isPending}
       onClick={make}
       data-testid="shell.gold-line.overrule"
     >

@@ -3,7 +3,8 @@
  * bar is: Pilot's mark, what Pilot does on it in a sentence, linking the work item doing it or the
  * run's document awaiting the person's answer, and *Stop and take over* while something of Pilot's
  * on it runs. The take-over stops, by the person, what holds the document, and the document is
- * theirs on the read that follows it; a refusal is the query client's toast, the API's words. Its
+ * theirs on the read that follows it, a press that writes (F148); a refusal is the query client's
+ * toast, the API's words. Its
  * form events are `overlay.take-over`'s. While the document awaits its read, a read one waits on
  * another document of its run, or the run holding its blocks waits on the person, there is no Stop.
  */
@@ -11,7 +12,9 @@
 import { Link } from '@tanstack/react-router';
 import { Square } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
+import { usePress } from '@/hooks/use-press';
 import { useShownProject } from '@/hooks/use-project-address';
 import type { PilotsWork } from '@/hooks/use-timeline';
 import { usePostItemsTakeOverByItemId } from '@/lib/api/generated/hooks';
@@ -96,28 +99,31 @@ function stops(doing: PilotsWork['doing']): boolean {
 
 function TakeOver({ itemId }: { itemId: string }) {
   const takeOver = usePostItemsTakeOverByItemId();
+  const press = usePress();
   const fields = { item: itemId };
+  // From the click until the document is read back as the person's, which takes the strip away.
+  const busy = press.held !== null || takeOver.isPending || takeOver.isSuccess;
   const take = () => {
-    trackFormSubmit(FORM, fields);
-    takeOver.mutate(
-      { path: { item_id: itemId } },
-      {
-        onSuccess: () => trackFormSuccess(FORM, fields),
-        onError: () => trackFormError(FORM, fields),
-      },
-    );
+    press.run(() => {
+      trackFormSubmit(FORM, fields);
+      return takeOver.mutateAsync({ path: { item_id: itemId } }).then(
+        () => trackFormSuccess(FORM, fields),
+        () => trackFormError(FORM, fields),
+      );
+    });
   };
   return (
     <button
       type="button"
       className="gold-btn"
       onClick={take}
-      // From the click until the document is read back as the person's, which takes the strip away.
-      disabled={takeOver.isPending || takeOver.isSuccess}
+      disabled={busy}
       title="Stop Pilot’s work on it: the document is yours then"
       data-testid="overlay.pilot-strip.stop"
     >
-      <Square className="icon" aria-hidden="true" />
+      <BusyIcon busy={busy}>
+        <Square className="icon" aria-hidden="true" />
+      </BusyIcon>
       Stop and take over
     </button>
   );

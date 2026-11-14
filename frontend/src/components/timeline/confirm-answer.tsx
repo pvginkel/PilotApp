@@ -9,10 +9,12 @@
  * (F32.3): Yes and No are both plain, the one chosen a soft button, as an action's chosen option
  * is; No is chosen while its console stands open, which has no Send of its own and whose cross
  * gives the choice back; and the block's Send, at the row's end, sends the Yes, or the No with its
- * reason.
+ * reason. While the answer saves the buttons stand, disabled, and the spinner shows once it has
+ * waited (F148): at the Send's icon, or at the start of the Yes or the No that was the answer.
  */
 
 import { useState } from 'react';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Console, ConsoleBox } from '@/components/timeline/console';
 import { DEFERRED, Said } from '@/components/timeline/said';
@@ -66,8 +68,10 @@ export function ConfirmAnswer({ field, block, bare, saving, closed, opens, live,
   const refusing = choice === null ? opened : choice.typing;
   const answer = saving === null ? block.answer : saving.answer;
   const off = disabled || !live;
-  // What a one-ask item's presses chose: No while its console stands open.
-  const chose = choice === null ? null : choice.typing ? NO : choice.answer === YES ? YES : null;
+  // What a one-ask item's presses chose: No while its console stands open; the answer being saved once sent.
+  const chose = choice === null ? null : saving !== null ? saving.answer : choice.typing ? NO : choice.answer === YES ? YES : null;
+  // Where a press is the answer, the button pressed has the spinner while it saves.
+  const pressed = choice === null && saving !== null ? saving.answer : null;
   const yes = () => {
     setOpened(false);
     onAnswer(YES);
@@ -89,7 +93,7 @@ export function ConfirmAnswer({ field, block, bare, saving, closed, opens, live,
     <>
       {!bare && (!closed || !opens) && <Proposal block={block} />}
       {answer !== null && answer !== DEFERRED && <Said words={answer} note={saving === null ? block.note : saving.note} boxed={false} />}
-      {(live || settled) && !closed && (
+      {(live || settled || saving !== null) && !closed && (
         <div className="item-actions yes-no">
           <button
             type="button"
@@ -100,6 +104,7 @@ export function ConfirmAnswer({ field, block, bare, saving, closed, opens, live,
             data-testid="timeline.confirm.yes"
             data-chosen={chose === YES}
           >
+            <BusyIcon busy={pressed === YES} />
             {YES}
           </button>
           <button
@@ -112,9 +117,10 @@ export function ConfirmAnswer({ field, block, bare, saving, closed, opens, live,
             data-testid="timeline.confirm.no"
             data-chosen={chose === NO}
           >
+            <BusyIcon busy={pressed === NO} />
             {NO}
           </button>
-          {choice !== null && <SendChoice ready={!off && chose !== null} onSend={send} />}
+          {choice !== null && <SendChoice ready={!off && chose !== null} busy={saving !== null} onSend={send} />}
         </div>
       )}
       {live &&

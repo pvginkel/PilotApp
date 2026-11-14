@@ -3,13 +3,15 @@
  * given, through the app (F32.1), with its note (F17.4); on a one-ask item either is the item's
  * done (F32.3), and every screen reads it again. In a document the block takes another answer
  * once the screens have read this one back (F32.2). A draft's ask is answered in place the same
- * way, through the draft's own path (F47.4), and takes another answer as a document's does. Their
+ * way, through the draft's own path (F47.4), and takes another answer as a document's does. Each is
+ * a press that writes, one at a time across the app (use-press.ts). Their
  * form events are `timeline.answer`'s and `timeline.done`'s, a draft's `draft.answer`'s and
  * `draft.done`'s.
  */
 
 import { useRef } from 'react';
 import { useQueryClient, type UseMutationResult } from '@tanstack/react-query';
+import { usePress } from '@/hooks/use-press';
 import {
   usePostItemsBlocksAnswerByItemIdAndBlockId,
   usePostItemsBlocksDoneByItemIdAndBlockId,
@@ -79,6 +81,7 @@ function useAnswering<Path>(
   names: Record<string, string>,
 ): Answering {
   const queryClient = useQueryClient();
+  const press = usePress();
   // The block's latest write: an earlier one read back leaves a later one being saved.
   const latest = useRef(0);
 
@@ -99,41 +102,39 @@ function useAnswering<Path>(
   };
 
   const answer: Answer = (text, { note, onSaved } = {}) => {
-    const body = { answer: text, note: given(note) };
-    const fields = { ...names, ...body };
-    const formId = `${form}.answer`;
-    const write = ++latest.current;
-    trackFormSubmit(formId, fields);
-    answering.mutate(
-      { path, body },
-      {
-        onSuccess: () => {
+    press.run(() => {
+      const body = { answer: text, note: given(note) };
+      const fields = { ...names, ...body };
+      const formId = `${form}.answer`;
+      const write = ++latest.current;
+      trackFormSubmit(formId, fields);
+      return answering.mutateAsync({ path, body }).then(
+        () => {
           trackFormSuccess(formId, fields);
           onSaved?.();
           readBack(write);
         },
-        onError: () => trackFormError(formId, fields),
-      },
-    );
+        () => trackFormError(formId, fields),
+      );
+    });
   };
 
   const done = ({ note, onSaved }: Sent = {}) => {
-    const body = { note: given(note) };
-    const fields = { ...names, ...body };
-    const formId = `${form}.done`;
-    const write = ++latest.current;
-    trackFormSubmit(formId, fields);
-    marking.mutate(
-      { path, body },
-      {
-        onSuccess: () => {
+    press.run(() => {
+      const body = { note: given(note) };
+      const fields = { ...names, ...body };
+      const formId = `${form}.done`;
+      const write = ++latest.current;
+      trackFormSubmit(formId, fields);
+      return marking.mutateAsync({ path, body }).then(
+        () => {
           trackFormSuccess(formId, fields);
           onSaved?.();
           readBack(write);
         },
-        onError: () => trackFormError(formId, fields),
-      },
-    );
+        () => trackFormError(formId, fields),
+      );
+    });
   };
 
   const saving: Saving | null =

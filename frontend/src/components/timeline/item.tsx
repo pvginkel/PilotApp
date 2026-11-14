@@ -35,6 +35,7 @@ import { Check, CircleDashed, FileText, MessagesSquare, ScrollText, StickyNote, 
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { InChatButton } from '@/components/chat/in-chat-button';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Time } from '@/components/shared/time';
@@ -239,7 +240,9 @@ function Read({ item }: { item: TimelineItem }) {
   return (
     <div className="item-actions">
       <button type="button" className="btn btn-primary" onClick={mark} disabled={pending || archived} data-testid="timeline.item.read">
-        <Check className="icon" aria-hidden="true" />
+        <BusyIcon busy={pending}>
+          <Check className="icon" aria-hidden="true" />
+        </BusyIcon>
         Read
       </button>
     </div>
@@ -600,7 +603,9 @@ export function Undo({ itemId, testId }: { itemId: string; testId: string }) {
       aria-label="Undo"
       data-testid={testId}
     >
-      <Undo2 className="icon" aria-hidden="true" />
+      <BusyIcon busy={pending}>
+        <Undo2 className="icon" aria-hidden="true" />
+      </BusyIcon>
     </button>
   );
 }

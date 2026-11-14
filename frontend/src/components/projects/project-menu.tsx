@@ -11,6 +11,7 @@ import { Archive, ArchiveRestore, Ellipsis, Flag, RotateCcw, UserMinus, UserPlus
 import { ConfirmDialog } from '@/components/shared/dialog';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Menu, MenuItem } from '@/components/shared/menu';
+import { usePress } from '@/hooks/use-press';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -98,6 +99,8 @@ export function ProjectMenu({ project }: { project: Project }) {
   const join = usePostProjectsMembershipByProjectId(UNTIL_READ);
   const leave = useDeleteProjectsMembershipByProjectId(UNTIL_READ);
   const transition = usePostProjectsTransitionsByProjectId(UNTIL_READ);
+  // Each is a press that writes, one at a time across the app (use-press.ts).
+  const press = usePress();
   const [asking, setAsking] = useState<Ask | null>(null);
   // The item that opened a dialog is gone once it is chosen: the focus goes back to the menu's button.
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -105,32 +108,30 @@ export function ProjectMenu({ project }: { project: Project }) {
   const path = { project_id: project.id };
 
   const membership = (form: 'project.join' | 'project.leave', toast: string) => {
-    trackFormSubmit(form);
-    (form === 'project.join' ? join : leave).mutate(
-      { path },
-      {
-        onSuccess: () => {
+    press.run(() => {
+      trackFormSubmit(form);
+      return (form === 'project.join' ? join : leave).mutateAsync({ path }).then(
+        () => {
           trackFormSuccess(form);
           showSuccess(toast);
         },
-        onError: () => trackFormError(form),
-      },
-    );
+        () => trackFormError(form),
+      );
+    });
   };
 
   const confirm = (ask: Ask, kind: Kind) => {
-    const form = `project.${ask}`;
-    trackFormSubmit(form, { kind });
-    transition.mutate(
-      { path, body: { kind } },
-      {
-        onSuccess: () => {
+    press.run(() => {
+      const form = `project.${ask}`;
+      trackFormSubmit(form, { kind });
+      return transition.mutateAsync({ path, body: { kind } }).then(
+        () => {
           trackFormSuccess(form, { kind });
           setAsking(null);
         },
-        onError: () => trackFormError(form, { kind }),
-      },
-    );
+        () => trackFormError(form, { kind }),
+      );
+    });
   };
 
   const asked = asking && question(asking, project);
@@ -206,7 +207,7 @@ export function ProjectMenu({ project }: { project: Project }) {
           lines={asked.lines}
           note={asked.note}
           act={asked.act}
-          pending={transition.isPending}
+          pending={press.held !== null || transition.isPending}
           onConfirm={() => confirm(asking, asked.kind)}
           onCancel={() => setAsking(null)}
           returnFocus={menuButton}

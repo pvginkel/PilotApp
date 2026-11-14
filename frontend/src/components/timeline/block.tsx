@@ -248,6 +248,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, choosing, settled,
             field={field}
             block={block}
             chosen={saving === null ? own : saving.answer}
+            saving={saving !== null}
             closed={closed}
             live={live}
             settled={settled}

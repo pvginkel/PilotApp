@@ -11,6 +11,7 @@
 
 import { useEffect, useRef } from 'react';
 import { Send, X } from 'lucide-react';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { TextField } from '@/components/shared/text-field';
 import { useUnsentText } from '@/hooks/use-unsent-text';
 import { useEscape } from '@/lib/keys';
@@ -27,22 +28,24 @@ interface ConsoleProps {
   send: string;
   /** It sends with nothing typed: a No's reason may stay empty. */
   blankSends?: boolean;
+  /** What it sent is being saved: Send is disabled, its icon the spinner once it has waited (F148). */
+  busy?: boolean;
   className?: string;
   testId: string;
   onSend: (words: string, onSaved: () => void) => void;
   onClose: () => void;
 }
 
-export function Console({ field, initial = '', label, placeholder, send, blankSends = false, className, testId, onSend, onClose }: ConsoleProps) {
+export function Console({ field, initial = '', label, placeholder, send, blankSends = false, busy = false, className, testId, onSend, onClose }: ConsoleProps) {
   const { text, change, sent } = useUnsentText(field, initial);
-  const held = !blankSends && text.trim() === '';
+  const held = busy || (!blankSends && text.trim() === '');
   return (
     <ConsoleBox
       text={text}
       onChange={change}
       label={label}
       placeholder={placeholder}
-      send={{ name: send, held }}
+      send={{ name: send, held, busy }}
       autoFocus
       className={className}
       testId={testId}
@@ -59,8 +62,8 @@ interface ConsoleBoxProps {
   onChange: (text: string) => void;
   label: string;
   placeholder: string;
-  /** Its own Send, by its name, disabled while held; none in a one-ask item. */
-  send: { name: string; held: boolean } | null;
+  /** Its own Send, by its name, disabled while held, busy while what it sent saves; none in a one-ask item. */
+  send: { name: string; held: boolean; busy: boolean } | null;
   autoFocus: boolean;
   className?: string;
   testId: string;
@@ -103,7 +106,9 @@ export function ConsoleBox({ text, onChange, label, placeholder, send, autoFocus
           aria-label={send.name}
           data-testid={`${testId}.send`}
         >
-          <Send className="icon" aria-hidden="true" />
+          <BusyIcon busy={send.busy}>
+            <Send className="icon" aria-hidden="true" />
+          </BusyIcon>
         </button>
       )}
       <button

@@ -5,17 +5,19 @@
  * Retry places a fresh job for a stopped or failed one's trigger, at the project's next place, and
  * marks the one retried. Close closes a stopped worker's item for good: done, cancelled by the
  * person, with no Undo and no Resume (D1 of slice 042). The answer, the item's session as it stands, goes into its project's
- * timeline as read; then every screen reads again. A refusal is the query client's toast, the
+ * timeline as read; then every screen reads again. Each is a press that writes, one at a time across the app
+ * (use-press.ts). A refusal is the query client's toast, the
  * API's words, and the button pressed, disabled while its act was on its way, has the keyboard
  * focus back where it had it and nothing took it meanwhile. Their form events are
  * `timeline.stop`'s, `timeline.resume`'s, `timeline.close`'s and `timeline.retry`'s, sent whether or not the item's
  * actions are still drawn when the answer comes. An act answers the item's session as it stands,
- * or none where it was refused.
+ * or none where it was refused or did nothing, another press waiting.
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useShownProject } from '@/hooks/use-project-address';
+import { usePress } from '@/hooks/use-press';
 import { moveWork } from '@/hooks/use-project-events';
 import {
   usePostSessionsCloseBySessionId,
@@ -61,24 +63,28 @@ type Act = (pressed: HTMLElement) => Promise<Work | null>;
 function useAct(mutation: Mutation, form: string, itemId: string, from: readonly State[]): { act: Act; pending: boolean } {
   const queryClient = useQueryClient();
   const { id: projectId } = useShownProject();
-  const pending = mutation.isPending;
+  const press = usePress();
+  const pending = press.held !== null || mutation.isPending;
   const focusBack = useFocusBack(pending);
   const fields = { item: itemId };
   const act: Act = (pressed) => {
     const focused = document.activeElement === pressed;
-    trackFormSubmit(form, fields);
-    return mutation.mutateAsync({ path: { session_id: itemId } }).then(
-      (work) => {
-        trackFormSuccess(form, fields);
-        moveWork(queryClient, projectId, itemId, work, from);
-        return work;
-      },
-      () => {
-        trackFormError(form, fields);
-        if (focused) focusBack(pressed);
-        return null;
-      },
-    );
+    const answered = press.run(() => {
+      trackFormSubmit(form, fields);
+      return mutation.mutateAsync({ path: { session_id: itemId } }).then(
+        (work) => {
+          trackFormSuccess(form, fields);
+          moveWork(queryClient, projectId, itemId, work, from);
+          return work;
+        },
+        () => {
+          trackFormError(form, fields);
+          if (focused) focusBack(pressed);
+          return null;
+        },
+      );
+    });
+    return answered ?? Promise.resolve(null);
   };
   return { act, pending };
 }

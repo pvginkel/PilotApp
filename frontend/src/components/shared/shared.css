@@ -44,6 +44,8 @@
   .btn .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .btn:hover:not(:disabled) { background: hsl(var(--accent)); }
   .btn:disabled { opacity: 0.45; cursor: default; }
+  /* A press that writes, waiting on its spinner (F148, busy-icon.tsx). */
+  :is(.btn, .gold-btn, .console-btn, .option):disabled:has(> .spinner) { cursor: progress; }
   .btn-sm { --h: 28px; padding: 0 10px; font-size: var(--text-sm); gap: 6px; }
   .btn-icon { width: var(--h); padding: 0; align-items: center; }
   .btn-icon .icon { top: 0; }
@@ -110,7 +112,7 @@
   .field:focus { outline-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
   .field::placeholder { color: hsl(var(--muted-foreground)); }
   .field-row { display: flex; gap: 8px; align-items: flex-end; scroll-margin-bottom: 24px; }
-  .field-row .field { flex: 1; min-width: 0; }
+  .field-row .field, .field-row > .answer { flex: 1; min-width: 0; }
   .field-row .btn { --h: 38px; }
 
   /* ---- Switches: Auto pilot, the alarms ------------------------------------------------- */

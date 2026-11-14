@@ -1,21 +1,27 @@
 /**
  * A one-ask item's Send (F32.3): the one control that sends what its block's presses chose, at the
- * right end of the block's last row, disabled until something is chosen.
+ * right end of the block's last row, disabled until something is chosen; while what it sent saves,
+ * disabled, its icon the spinner once the write has waited (F148).
  */
 
 import { Send } from 'lucide-react';
+import { BusyIcon } from '@/components/shared/busy-icon';
 
 interface SendChoiceProps {
   /** Something is chosen, and the block takes an answer now. */
   ready: boolean;
+  /** What it sent is being saved. */
+  busy: boolean;
   onSend: () => void;
   testId?: string;
 }
 
-export function SendChoice({ ready, onSend, testId = 'timeline.block.send' }: SendChoiceProps) {
+export function SendChoice({ ready, busy, onSend, testId = 'timeline.block.send' }: SendChoiceProps) {
   return (
-    <button type="button" className="btn btn-primary send-choice" onClick={onSend} disabled={!ready} title="Send (Ctrl+Enter)" data-testid={testId}>
-      <Send className="icon" aria-hidden="true" />
+    <button type="button" className="btn btn-primary send-choice" onClick={onSend} disabled={!ready || busy} title="Send (Ctrl+Enter)" data-testid={testId}>
+      <BusyIcon busy={busy}>
+        <Send className="icon" aria-hidden="true" />
+      </BusyIcon>
       Send
     </button>
   );

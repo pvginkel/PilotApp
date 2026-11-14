@@ -25,6 +25,7 @@
 import { useContext, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Check, FileText } from 'lucide-react';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { ConfirmDialog } from '@/components/shared/dialog';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
@@ -166,7 +167,9 @@ function Reviewed({ item }: { item: TimelineItem }) {
   const archived = useArchived(projectId);
   return (
     <button type="button" className="btn" onClick={mark} disabled={pending || archived} data-testid="timeline.item.reviewed">
-      <Check className="icon" aria-hidden="true" />
+      <BusyIcon busy={pending}>
+        <Check className="icon" aria-hidden="true" />
+      </BusyIcon>
       Reviewed
     </button>
   );
@@ -304,7 +307,9 @@ export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () 
         title={sendTitle(held, ready)}
         data-testid="timeline.item.send"
       >
-        <Check className="icon" aria-hidden="true" />
+        <BusyIcon busy={pending && !asking}>
+          <Check className="icon" aria-hidden="true" />
+        </BusyIcon>
         Send answers
       </button>
       {asking && (

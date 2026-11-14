@@ -3,12 +3,13 @@
  * and a press or Enter anywhere on it folded unfolds it. The fold is the item's, the record's, the
  * same for every member: each press is a write, and the screens read the item back. The timeline
  * alone offers it; an item drawn anywhere else, an item alone or an opened document, has no fold.
- * An archived project's items keep the folds they were left with and take neither (D012). One
- * press at a time: another while one is on its way does nothing. Their form events are
+ * An archived project's items keep the folds they were left with and take neither (D012). Each is
+ * a press that writes, one at a time across the app (use-press.ts). Their form events are
  * `timeline.fold`'s and `timeline.unfold`'s.
  */
 
 import { createContext, useCallback, useContext, useRef } from 'react';
+import { usePress } from '@/hooks/use-press';
 import { useArchived } from '@/hooks/use-projects';
 import { usePostItemsFoldByItemId, usePostItemsUnfoldByItemId } from '@/lib/api/generated/hooks';
 import { UNTIL_READ } from '@/lib/api/until-read';
@@ -21,6 +22,8 @@ interface Folds {
   archived: boolean;
   /** Whether this browser's latest press folded or unfolded the item, asked once, by its box as it draws the change. */
   pressedOn: (itemId: string) => boolean;
+  /** This browser's press on the item waits on the server: its kind's icon is busy (busy-icon.tsx). */
+  busy: (itemId: string) => boolean;
 }
 
 /** The timeline's folds; null wherever an item is drawn off the timeline. */
@@ -31,36 +34,36 @@ export const useFolds = () => useContext(FoldsContext);
 /** The folds of the project's timeline, for its items. */
 export function useTimelineFolds(projectId: string): Folds {
   const archived = useArchived(projectId);
+  // Each write stays pending until the screens have read it back.
   const folding = usePostItemsFoldByItemId(UNTIL_READ);
   const unfolding = usePostItemsUnfoldByItemId(UNTIL_READ);
+  const press = usePress();
   const pressed = useRef<string | null>(null);
-  // From the press until the screens have read it back.
-  const pending = folding.isPending || unfolding.isPending;
   const pressedOn = useCallback((itemId: string) => {
     if (pressed.current !== itemId) return false;
     pressed.current = null;
     return true;
   }, []);
-  const press = (mutation: typeof folding, form: string, itemId: string) => {
-    if (pending || archived) return;
-    const fields = { item: itemId };
-    pressed.current = itemId;
-    trackFormSubmit(form, fields);
-    mutation.mutate(
-      { path: { item_id: itemId } },
-      {
-        onSuccess: () => trackFormSuccess(form, fields),
-        onError: () => {
+  const write = (mutation: typeof folding, form: string, itemId: string) => {
+    if (archived) return;
+    press.run(() => {
+      const fields = { item: itemId };
+      pressed.current = itemId;
+      trackFormSubmit(form, fields);
+      return mutation.mutateAsync({ path: { item_id: itemId } }).then(
+        () => trackFormSuccess(form, fields),
+        () => {
           pressed.current = null;
           trackFormError(form, fields);
         },
-      },
-    );
+      );
+    }, itemId);
   };
   return {
-    fold: (itemId) => press(folding, 'timeline.fold', itemId),
-    unfold: (itemId) => press(unfolding, 'timeline.unfold', itemId),
+    fold: (itemId) => write(folding, 'timeline.fold', itemId),
+    unfold: (itemId) => write(unfolding, 'timeline.unfold', itemId),
     archived,
     pressedOn,
+    busy: (itemId) => press.held === itemId,
   };
 }

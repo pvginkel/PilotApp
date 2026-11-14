@@ -154,7 +154,7 @@ test.describe('A confirmation', () => {
     await expect(timeline.item(bare).confirm.details).toHaveCount(0);
   });
 
-  test('chooses Yes on its button, a soft one then, and saves it on Send, reading Yes in its block, not boxed, while it saves, and its line leads with a check in the primary', async ({
+  test('chooses Yes on its button, a soft one then, and saves it on Send, reading Yes in its block, not boxed, while it saves, Yes and No standing disabled, and its line leads with a check in the primary', async ({
     page,
     people,
     projects,
@@ -181,8 +181,11 @@ test.describe('A confirmation', () => {
     await expect(said).toHaveText('Yes');
     // Read at once, while the write is on its way.
     expect(await said.getAttribute('class')).not.toMatch(/\bboxed\b/);
-    expect(await confirm.yes.count()).toBe(0);
-    expect(await confirm.no.count()).toBe(0);
+    // The buttons stand through the save, for the Send's spinner (busy-press.spec.ts).
+    await expect(confirm.yes).toBeDisabled();
+    await expect(confirm.yes).toHaveAttribute('data-chosen', 'true');
+    await expect(confirm.no).toBeDisabled();
+    await expect(confirm.answerSend).toBeDisabled();
     await expect(confirm.proposal).toHaveText('Push the release to production');
     await restore();
 

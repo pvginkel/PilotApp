@@ -2,12 +2,13 @@
  * A modal dialog over the page (the mockup's `.overlay` and `.dialog`), on Radix's dialog: a click
  * beside it or Esc closes it, and while it is open the focus stays in it. It takes the focus as it
  * opens and gives it back as it closes. A confirm dialog asks before an act, as the mockup's Finish
- * does.
+ * does, its act's icon the spinner while the act waits (F148).
  */
 
 import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import type { LucideIcon } from 'lucide-react';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { useEscape } from '@/lib/keys';
 import { cn } from '@/lib/utils';
 
@@ -107,7 +108,9 @@ export function ConfirmDialog({ title, lines, note, act, pending, onConfirm, onC
           Cancel
         </button>
         <button type="button" className="btn btn-primary" disabled={pending} onClick={onConfirm} data-testid={`${testId}.confirm`}>
-          <Icon className="icon" aria-hidden="true" />
+          <BusyIcon busy={pending}>
+            <Icon className="icon" aria-hidden="true" />
+          </BusyIcon>
           {act.label}
         </button>
       </div>

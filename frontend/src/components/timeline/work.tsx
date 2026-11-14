@@ -37,6 +37,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { Link } from '@tanstack/react-router';
 import { CircleAlert, Play, RotateCw, ScrollText, Server, Square, X } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Popover } from '@/components/shared/popover';
 import { StepsButton } from '@/components/shared/steps-button';
@@ -259,7 +260,9 @@ function StopQuestion({ item, handoff, cancelButton, onCancel }: StopQuestionPro
         }}
         data-testid="timeline.work.stop-confirm.yes"
       >
-        <Square className="icon" aria-hidden="true" />
+        <BusyIcon busy={pending}>
+          <Square className="icon" aria-hidden="true" />
+        </BusyIcon>
         Stop it
       </button>
       <button
@@ -311,7 +314,9 @@ function CloseQuestion({ item, focus, onCancel }: CloseQuestionProps) {
         }}
         data-testid="timeline.work.close-confirm.yes"
       >
-        <X className="icon" aria-hidden="true" />
+        <BusyIcon busy={pending}>
+          <X className="icon" aria-hidden="true" />
+        </BusyIcon>
         Close it
       </button>
       <button
@@ -397,7 +402,9 @@ function Resume({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
       }}
       data-testid="timeline.work.resume"
     >
-      <Play className="icon" aria-hidden="true" />
+      <BusyIcon busy={pending}>
+        <Play className="icon" aria-hidden="true" />
+      </BusyIcon>
       Resume
     </button>
   );
@@ -419,7 +426,9 @@ function Retry({ item, focus }: { item: TimelineItem; focus: LineFocus }) {
       }}
       data-testid="timeline.work.retry"
     >
-      <RotateCw className="icon" aria-hidden="true" />
+      <BusyIcon busy={pending}>
+        <RotateCw className="icon" aria-hidden="true" />
+      </BusyIcon>
       Retry
     </button>
   );

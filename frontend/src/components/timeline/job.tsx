@@ -16,6 +16,7 @@ import { useRef } from 'react';
 import { Link } from '@tanstack/react-router';
 import { RotateCw } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { PILOT_MARK } from '@/components/shared/pilot-mark';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useShownProject } from '@/hooks/use-project-address';
@@ -137,7 +138,9 @@ function Retry({ job, testId, onLanded }: { job: Job; testId: string; onLanded: 
       }}
       data-testid={testId}
     >
-      <RotateCw className="icon" aria-hidden="true" />
+      <BusyIcon busy={pending}>
+        <RotateCw className="icon" aria-hidden="true" />
+      </BusyIcon>
       Retry
     </button>
   );

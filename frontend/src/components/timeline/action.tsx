@@ -8,13 +8,16 @@
  * nothing of the claim. In a one-ask item its options only choose (F32.3): every one a plain
  * button, the one chosen a soft one; Other is a choice too, its console with no Send of its own
  * and its cross giving the choice back; and the block's Send, at the row's end, sends the choice
- * with the paste-back. Its Done, on one without options, sends as before.
+ * with the paste-back. Its Done, on one without options, sends as before. While the answer saves
+ * its controls stand, disabled, and the spinner shows once it has waited (F148): at the Send's or
+ * the Done's icon, at the start of the option that was the answer, or at Other's Send.
  */
 
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Check } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { TextField } from '@/components/shared/text-field';
 import { Console, ConsoleBox } from '@/components/timeline/console';
 import { OTHER } from '@/components/timeline/decision';
@@ -61,11 +64,12 @@ export function ActionAnswer({ field, block, claimed, saving, closable, closed, 
       {saving === null && block.claim !== null
         ? claimed && <Claimed block={block} work={block.claim.work} />
         : said !== null && <Said {...said} />}
-      {(live || settled) && !closed && (
+      {(live || settled || saving !== null) && !closed && (
         <ActionControls
           field={field}
           block={block}
           closable={closable}
+          saving={saving}
           disabled={disabled || !live}
           onAnswer={onAnswer}
           onDone={onDone}
@@ -121,13 +125,14 @@ interface ActionControlsProps {
   field: string;
   block: Block;
   closable: boolean;
+  saving: Saving | null;
   disabled: boolean;
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
   choice: Choosing | null;
 }
 
-function ActionControls({ field, block, closable, disabled, onAnswer, onDone, choice }: ActionControlsProps) {
+function ActionControls({ field, block, closable, saving, disabled, onAnswer, onDone, choice }: ActionControlsProps) {
   const pasted = useUnsentText(`${field}/paste`);
   // Other's words in a one-ask item, where no console of its own holds them.
   const other = useUnsentText(`${field}/other`);
@@ -143,8 +148,12 @@ function ActionControls({ field, block, closable, disabled, onAnswer, onDone, ch
         onSaved?.();
       },
     });
-  // What a one-ask item's presses chose, while its field is closed.
-  const chose = choice === null || choice.typing ? null : (block.options.find((option) => option.label === choice.answer)?.label ?? null);
+  // What a one-ask item's presses chose, while its field is closed; the answer being saved once sent.
+  const picked = saving === null ? (choice?.answer ?? null) : saving.answer;
+  const chose = choice === null || (saving === null && choice.typing) ? null : (block.options.find((option) => option.label === picked)?.label ?? null);
+  // Where a press is the answer, what was pressed has the spinner while it saves: an option, Other's Send, or Done.
+  const pressed = choice === null && saving !== null ? saving.answer : undefined;
+  const wordsBusy = pressed !== undefined && pressed !== null && !block.options.some((option) => option.label === pressed);
   const ready = !disabled && (typing ? other.text.trim() !== '' : chose !== null);
   const send = () => {
     if (!ready) return;
@@ -180,6 +189,7 @@ function ActionControls({ field, block, closable, disabled, onAnswer, onDone, ch
                 data-testid="timeline.block.act"
                 data-chosen={chose === option.label}
               >
+                <BusyIcon busy={pressed === option.label} />
                 {option.label}
               </button>
             ))}
@@ -199,8 +209,14 @@ function ActionControls({ field, block, closable, disabled, onAnswer, onDone, ch
                 label={OTHER.label}
                 placeholder={OTHER.placeholder}
                 send="Send"
+                busy={wordsBusy}
                 testId="timeline.block.console"
-                onSend={pick}
+                onSend={(words, onSaved) =>
+                  pick(words, () => {
+                    onSaved();
+                    setOpened(false);
+                  })
+                }
                 onClose={() => setOpened(false)}
               />
             ) : (
@@ -217,7 +233,7 @@ function ActionControls({ field, block, closable, disabled, onAnswer, onDone, ch
                 onClose={choice.back}
               />
             )}
-            {choice !== null && <SendChoice ready={ready} onSend={send} />}
+            {choice !== null && <SendChoice ready={ready} busy={saving !== null} onSend={send} />}
           </>
         ) : (
           <button
@@ -228,7 +244,9 @@ function ActionControls({ field, block, closable, disabled, onAnswer, onDone, ch
             title="Done (Ctrl+Enter)"
             data-testid="timeline.block.done"
           >
-            <Check className="icon" aria-hidden="true" />
+            <BusyIcon busy={saving !== null}>
+              <Check className="icon" aria-hidden="true" />
+            </BusyIcon>
             Done
           </button>
         )}

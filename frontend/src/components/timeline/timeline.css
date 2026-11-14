@@ -290,6 +290,7 @@
   .option.chosen .desc { color: hsl(var(--primary-foreground) / 0.85); }
   .option.chosen .rec { background: hsl(var(--primary-foreground)); color: hsl(var(--primary-strong)); }
   .option.faded { opacity: 0.5; }
+  .option > .spinner { flex: none; position: relative; top: calc(0.5em - 0.5cap); }
   .option.single .label { font-weight: 500; }
   .option.other { border-style: dashed; border-right-width: 1px; border-bottom-width: 1px; }
   .option.other .label { color: hsl(var(--primary-muted-foreground)); }
@@ -600,12 +601,13 @@
      line keeps Undo alone (F13.9). Shown, a button's 28px overhangs the text's row, a line's or a
      quiet one's, so they add no height. The attachments' indicator after them touches them while
      they show. Hidden, each stays a box of no size that can take the focus, which shows them: a
-     sheet closing gives the focus back to the one that opened it. */
+     sheet closing gives the focus back to the one that opened it. One whose press waits on its
+     spinner stays (F148). */
   .line-acts { display: contents; }
   .line .line-acts .btn { margin-block: -4px; }
   .line .line-acts:not(:empty) + :is(.btn-icon, .menu-anchor) { margin-left: -10px; }
   @media (hover: hover) and (min-width: 901px) {
-    .line:not(:hover):not(:focus-within) .line-acts > * { position: absolute; width: 0; height: 0; border: 0; overflow: hidden; }
+    .line:not(:hover):not(:focus-within) .line-acts > :not(:has(.spinner)) { position: absolute; width: 0; height: 0; border: 0; overflow: hidden; }
     .line:not(:hover):not(:focus-within) .line-acts + :is(.btn-icon, .menu-anchor) { margin-left: 0; }
   }
 

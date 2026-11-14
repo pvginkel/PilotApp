@@ -6,15 +6,18 @@
  * person, and the blocks the run held are theirs again; it has no Undo, so the button asks first, in
  * its own place, as a work item's Stop does: the question names the documents the Cancel closes and
  * the blocks it gives back, with Confirm and Keep, Keep focused as it opens so that Enter pressed
- * again keeps, and Esc keeping too. A refusal is the query client's toast, the API's words. Its form
- * events are `overlay.cancel`'s.
+ * again keeps, and Esc keeping too. Confirm is a press that writes, its icon the spinner once it has
+ * waited (F148). A refusal is the query client's toast, the API's words. Its form events are
+ * `overlay.cancel`'s.
  */
 
 import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { ItemDocument } from '@/hooks/use-document';
+import { usePress } from '@/hooks/use-press';
 import { useShownProject } from '@/hooks/use-project-address';
 import { useArchived } from '@/hooks/use-projects';
 import { usePostItemsCancelByItemId } from '@/lib/api/generated/hooks';
@@ -33,6 +36,7 @@ export function RunCancel({ itemId, cancel }: { itemId: string; cancel: Cancel }
   const { id: projectId } = useShownProject();
   const archived = useArchived(projectId);
   const mutation = usePostItemsCancelByItemId();
+  const press = usePress();
   const [asking, setAsking] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const keepButton = useRef<HTMLButtonElement>(null);
@@ -44,21 +48,20 @@ export function RunCancel({ itemId, cancel }: { itemId: string; cancel: Cancel }
     asked.current = asking;
   }, [asking]);
   // From the click until the document is read back as done, which takes the Cancel away.
-  const busy = mutation.isPending || mutation.isSuccess;
+  const busy = press.held !== null || mutation.isPending || mutation.isSuccess;
   const keep = () => {
     if (!busy) setAsking(false);
   };
   useEscape('menu', asking, keep);
   const fields = { item: itemId };
   const run = () => {
-    trackFormSubmit(FORM, fields);
-    mutation.mutate(
-      { path: { item_id: itemId } },
-      {
-        onSuccess: () => trackFormSuccess(FORM, fields),
-        onError: () => trackFormError(FORM, fields),
-      },
-    );
+    press.run(() => {
+      trackFormSubmit(FORM, fields);
+      return mutation.mutateAsync({ path: { item_id: itemId } }).then(
+        () => trackFormSuccess(FORM, fields),
+        () => trackFormError(FORM, fields),
+      );
+    });
   };
   const names = unique(cancel.takes_back.map((each) => `“${nameOf(each)}”`));
   return (
@@ -72,7 +75,9 @@ export function RunCancel({ itemId, cancel }: { itemId: string; cancel: Cancel }
             {question(cancel, names)}
           </span>
           <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={run} data-testid="overlay.cancel.confirm.yes">
-            <X className="icon" aria-hidden="true" />
+            <BusyIcon busy={busy}>
+              <X className="icon" aria-hidden="true" />
+            </BusyIcon>
             Confirm
           </button>
           <button ref={keepButton} type="button" className="btn btn-sm" disabled={busy} onClick={keep} data-testid="overlay.cancel.confirm.keep">

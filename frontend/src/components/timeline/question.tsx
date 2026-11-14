@@ -1,9 +1,12 @@
 /**
  * A question answered inline (F20): the growing field, "Your answer" or "Default: …" from its
  * `default`, and Send (F20.1); Send with the field empty gives the default. Answered, the answer is
- * boxed (F20.2): from the click on, and where Pilot gave it, until opened to the field again.
+ * boxed (F20.2): from the click on, and where Pilot gave it, until opened to the field again. While
+ * it saves it stands boxed in the field's place, beside the Send, disabled, the spinner at its start
+ * once the write has waited (F148).
  */
 
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { TextField } from '@/components/shared/text-field';
 import { DEFERRED, Said } from '@/components/timeline/said';
 import type { Answer, Saving } from '@/hooks/use-answer';
@@ -30,8 +33,16 @@ interface QuestionAnswerProps {
 
 export function QuestionAnswer({ field, block, saving, closable, closed, live, disabled = false, onAnswer }: QuestionAnswerProps) {
   const own = block.answer === DEFERRED ? null : block.answer;
+  if (saving !== null && !closed) {
+    // An answer being saved is the person's, never Done: boxed in the field's place, beside its Send.
+    return (
+      <div className="field-row">
+        <Said words={saving.answer!} note={saving.note} boxed />
+        <SendButton busy disabled />
+      </div>
+    );
+  }
   if (closed || !live) {
-    // An answer being saved is the person's, never Done.
     const words = saving === null ? own : saving.answer!;
     return words === null ? null : <Said words={words} note={saving === null ? block.note : saving.note} boxed />;
   }
@@ -66,16 +77,17 @@ function QuestionField({ field, block, initial, closable, disabled, onAnswer }: 
         survivesReload={!closable || text === initial}
         testId="timeline.block.field"
       />
-      <button
-        type="button"
-        className="btn btn-primary"
-        onClick={send}
-        disabled={disabled || words === null}
-        title="Send (Ctrl+Enter)"
-        data-testid="timeline.block.send"
-      >
-        Send
-      </button>
+      <SendButton busy={false} disabled={disabled || words === null} onSend={send} />
     </div>
+  );
+}
+
+/** The question's Send; while what it sent saves, disabled, the spinner at its start once it has waited (F148). */
+function SendButton({ busy, disabled, onSend }: { busy: boolean; disabled: boolean; onSend?: () => void }) {
+  return (
+    <button type="button" className="btn btn-primary" onClick={onSend} disabled={disabled} title="Send (Ctrl+Enter)" data-testid="timeline.block.send">
+      <BusyIcon busy={busy} />
+      Send
+    </button>
   );
 }

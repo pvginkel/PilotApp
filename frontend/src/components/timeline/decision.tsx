@@ -11,10 +11,13 @@
  * the row chosen fills as an answer's does and another press moves the choice; Other is a choice
  * too, its console with no Send of its own and its cross giving the choice back, its words kept in
  * its row, unchosen, under another choice; and the block's Send, in a row of its own under the
- * rows, disabled until a row is chosen or Other holds words, sends it.
+ * rows, disabled until a row is chosen or Other holds words, sends it. While an answer saves, the
+ * spinner shows once it has waited (F148): a document's row being saved has it at its end, and a
+ * one-ask item's Send at its icon.
  */
 
 import { useState } from 'react';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Console, ConsoleBox } from '@/components/timeline/console';
 import { Note } from '@/components/timeline/note';
@@ -55,6 +58,8 @@ interface DecisionOptionsProps {
   block: Block;
   /** The answer that shows chosen: the one being saved, else the block's own. */
   chosen: string | null;
+  /** The chosen answer is being saved. */
+  saving: boolean;
   closed: boolean;
   /** Whether it takes an answer now. */
   live: boolean;
@@ -69,7 +74,7 @@ interface DecisionOptionsProps {
   choice: Choosing | null;
 }
 
-export function DecisionOptions({ field, block, chosen, closed, live, settled, disabled = false, onOpen, onAnswer, choice }: DecisionOptionsProps) {
+export function DecisionOptions({ field, block, chosen, saving, closed, live, settled, disabled = false, onOpen, onAnswer, choice }: DecisionOptionsProps) {
   const [opened, setOpened] = useState(false);
   const rows = rowsOf(block);
   const single = block.options.length === 0;
@@ -98,6 +103,8 @@ export function DecisionOptions({ field, block, chosen, closed, live, settled, d
   };
   // The block's note goes with the block's own answer, not with one being saved or chosen.
   const note = !made && chosen !== null && chosen === block.answer ? block.note : null;
+  // A row's press is the answer where no Send is: the row being saved has the spinner at its end.
+  const rowBusy = saving && choice === null;
 
   if (closed) {
     const row = rows[picked];
@@ -139,6 +146,7 @@ export function DecisionOptions({ field, block, chosen, closed, live, settled, d
           >
             <RowWords label={row.label} text={row.text} />
             {row.recommended && !single && <span className="rec">Recommended</span>}
+            <BusyIcon busy={rowBusy && index === picked} />
             {index === picked && note !== null && <Note text={note} nested />}
           </button>
         ))}
@@ -186,6 +194,7 @@ export function DecisionOptions({ field, block, chosen, closed, live, settled, d
               data-chosen={words !== null}
             >
               <RowWords label="Other" text={kept ?? 'Something else'} />
+              <BusyIcon busy={rowBusy && words !== null} />
               {words !== null && note !== null && <Note text={note} nested />}
             </button>
           )
@@ -193,7 +202,7 @@ export function DecisionOptions({ field, block, chosen, closed, live, settled, d
       </div>
       {choice !== null && (
         <div className="item-actions">
-          <SendChoice ready={ready} onSend={send} />
+          <SendChoice ready={ready} busy={saving} onSend={send} />
         </div>
       )}
     </>

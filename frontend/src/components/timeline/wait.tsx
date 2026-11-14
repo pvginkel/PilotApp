@@ -13,11 +13,13 @@
  */
 
 import { Fragment, useState } from 'react';
+import { BusyIcon } from '@/components/shared/busy-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { HourglassSkip } from '@/components/timeline/hourglass-skip';
 import { ItemHead } from '@/components/timeline/item-head';
 import { useNow } from '@/hooks/use-now';
+import { usePress } from '@/hooks/use-press';
 import { useToday } from '@/hooks/use-today';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
 import { usePostItemsRequestByItemId } from '@/lib/api/generated/hooks';
@@ -173,26 +175,27 @@ function Outcome({ firing }: { firing: Firing }) {
 const capitalised = (words: string) => words.charAt(0).toUpperCase() + words.slice(1);
 
 /**
- * The request's button. From the press until the timeline reads the firing it recorded, it is
- * disabled, so that a second press cannot follow the first before the read says Pilot is checking.
+ * The request's button, a press that writes (use-press.ts). From the press until the timeline reads
+ * the firing it recorded, it is disabled, so that a second press cannot follow the first before the
+ * read says Pilot is checking, its icon the spinner once it has waited (F148).
  */
 function RequestButton({ item, wait }: { item: TimelineItem; wait: Wait }) {
   const mutation = usePostItemsRequestByItemId();
+  const press = usePress();
   // The wait's firings when the request was sent.
   const [sentAt, setSentAt] = useState(0);
   const { label, open, refusal } = wait.request;
-  const pending = mutation.isPending || (mutation.isSuccess && wait.firings.length <= sentAt);
+  const pending = press.held !== null || mutation.isPending || (mutation.isSuccess && wait.firings.length <= sentAt);
   const fields = { item: item.id };
   const request = () => {
-    setSentAt(wait.firings.length);
-    trackFormSubmit('timeline.request', fields);
-    mutation.mutate(
-      { path: { item_id: item.id } },
-      {
-        onSuccess: () => trackFormSuccess('timeline.request', fields),
-        onError: () => trackFormError('timeline.request', fields),
-      },
-    );
+    press.run(() => {
+      setSentAt(wait.firings.length);
+      trackFormSubmit('timeline.request', fields);
+      return mutation.mutateAsync({ path: { item_id: item.id } }).then(
+        () => trackFormSuccess('timeline.request', fields),
+        () => trackFormError('timeline.request', fields),
+      );
+    });
   };
   return (
     <button
@@ -205,7 +208,9 @@ function RequestButton({ item, wait }: { item: TimelineItem; wait: Wait }) {
       aria-label={label}
       data-testid="timeline.wait.request"
     >
-      <HourglassSkip />
+      <BusyIcon busy={pending}>
+        <HourglassSkip />
+      </BusyIcon>
     </button>
   );
 }

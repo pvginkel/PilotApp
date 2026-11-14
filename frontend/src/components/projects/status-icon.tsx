@@ -3,12 +3,14 @@
  * glyph the mockup's live dot, pulsing; and the pause (F141.2). A click, or a tap on the phone,
  * pauses a project that is not paused, the pause glyph showing under the pointer, and resumes one
  * paused or pausing, the play glyph showing there. There is no dialog: the icon takes the glyph
- * it asked for at once and holds it until the list is read again. An archived project's icon
- * shows its status alone, since the record refuses its pause and its resume (D012).
+ * it asked for at once and holds it until the list is read again, in a busy button's spinner's
+ * place (F148), a press that writes, one at a time across the app (use-press.ts). An archived
+ * project's icon shows its status alone, since the record refuses its pause and its resume (D012).
  */
 
 import type { KeyboardEvent, SyntheticEvent } from 'react';
 import { Pause, Play, type LucideIcon } from 'lucide-react';
+import { usePress } from '@/hooks/use-press';
 import type { ProjectTab as Project } from '@/hooks/use-projects';
 import { usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
 import { UNTIL_READ } from '@/lib/api/until-read';
@@ -25,6 +27,7 @@ interface StatusIconProps {
 export function StatusIcon({ project, archived }: StatusIconProps) {
   // The write stays pending until every query is read again, the list included.
   const transition = usePostProjectsTransitionsByProjectId(UNTIL_READ);
+  const press = usePress();
   const status = project.status;
   if (status === null) return null;
   const { label, icon } = projectStatusIcon(status);
@@ -46,16 +49,14 @@ export function StatusIcon({ project, archived }: StatusIconProps) {
     // which a link turns into a click of its own.
     event.preventDefault();
     event.stopPropagation();
-    if (transition.isPending) return;
-    const fields = { project: project.id, kind };
-    trackFormSubmit(PAUSE_FORM, fields);
-    transition.mutate(
-      { path: { project_id: project.id }, body: { kind } },
-      {
-        onSuccess: () => trackFormSuccess(PAUSE_FORM, fields),
-        onError: () => trackFormError(PAUSE_FORM, fields),
-      },
-    );
+    press.run(() => {
+      const fields = { project: project.id, kind };
+      trackFormSubmit(PAUSE_FORM, fields);
+      return transition.mutateAsync({ path: { project_id: project.id }, body: { kind } }).then(
+        () => trackFormSuccess(PAUSE_FORM, fields),
+        () => trackFormError(PAUSE_FORM, fields),
+      );
+    });
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Enter' || event.key === ' ') act(event);

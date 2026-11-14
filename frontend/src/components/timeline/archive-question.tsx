@@ -4,7 +4,7 @@
  * leaving the list for Archived; Keep closes it, the project staying finished. Each is chosen first
  * and then sent, as in every one-ask item (F32.3): both plain buttons, the one chosen a soft one,
  * and Send at the row's end, disabled until one is chosen. All three stand disabled from the Send
- * until the screens read the answer back.
+ * until the screens read the answer back, the Send's icon the spinner once it has waited (F148).
  */
 
 import { Archive, Check } from 'lucide-react';
@@ -65,6 +65,7 @@ export function ArchiveAnswers({ item }: { item: TimelineItem }) {
       </button>
       <SendChoice
         ready={saving === null && (chosen === ARCHIVE || chosen === KEEP)}
+        busy={saving !== null}
         onSend={() => answer(chosen!, { onSaved: choice.sent })}
         testId="timeline.archive-question.send"
       />
