@@ -16,6 +16,9 @@ The wire protocol, which the frontend's SSE worker and provider read:
   ``SSE_HEARTBEAT_INTERVAL`` seconds idle, so that no two frames are further
   apart: a browser that has heard nothing for longer counts the stream as
   gone, and a browser that has gone is noticed when the write fails.
+- In testing, ``POST /api/testing/sse/outage`` fails every connect with a
+  ``503`` until it ends, and with ``silent`` keeps the open streams from
+  sending anything, their heartbeat included.
 - A refusal answers ``200`` too, with one named event ``rejected``,
   ``{"status": <code>, "message": <reason phrase>}``, and ends: a browser's
   ``EventSource`` does not reconnect a non-200, and the frontend's recovery
@@ -26,7 +29,7 @@ The wire protocol, which the frontend's SSE worker and provider read:
 
 import json
 import logging
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from queue import Empty
 
@@ -184,16 +187,20 @@ def _accept(
 
 
 def _stream(
-    manager: SSEConnectionManager, connection: SSEConnection, heartbeat_interval: float
+    manager: SSEConnectionManager,
+    connection: SSEConnection,
+    heartbeat_interval: float,
+    silent: Callable[[], bool],
 ) -> Generator[str]:
     """The accepted stream's body: ``ready``, then the connection's frames.
 
     It runs after Flask has popped the request context (the teardown and the
     database session are done before the body streams), so it touches the
-    connection and the manager only: no ``request``, ``g``, database session
-    or container. It ends when the connection closes (replaced, its queue
-    full, shutdown) or the browser goes (a write fails and the server closes
-    the generator); either way its ``finally`` unregisters the connection.
+    connection, the manager and ``silent`` only: no ``request``, ``g``,
+    database session or container. It ends when the connection closes
+    (replaced, its queue full, shutdown) or the browser goes (a write fails
+    and the server closes the generator); either way its ``finally``
+    unregisters the connection. While ``silent()`` holds it writes nothing.
     """
     try:
         if connection.closed:
@@ -204,11 +211,11 @@ def _stream(
             try:
                 frame = connection.next_frame(heartbeat_interval)
             except Empty:
-                yield HEARTBEAT_FRAME
-                continue
+                frame = HEARTBEAT_FRAME
             if frame is None:
                 return
-            yield frame
+            if not silent():
+                yield frame
     finally:
         manager.on_disconnect(connection)
 
@@ -243,6 +250,10 @@ def stream(
     """
     request_id = request.args.get("request_id", "")
 
+    if settings.is_testing and testing_service.sse_connects_fail():
+        logger.info("SSE stream %s failed by the testing outage", request_id)
+        return Response(status=503)
+
     try:
         identity = _accept(
             request_id,
@@ -261,7 +272,12 @@ def stream(
         request_id, identity.subject, local_admin=identity.local_admin
     )
     response = create_sse_response(
-        _stream(sse_connection_manager, connection, settings.sse_heartbeat_interval)
+        _stream(
+            sse_connection_manager,
+            connection,
+            settings.sse_heartbeat_interval,
+            testing_service.sse_streams_silent if settings.is_testing else lambda: False,
+        )
     )
     # A body that never starts (a HEAD request, an error before the first
     # write) never runs the generator's finally; closing the response
