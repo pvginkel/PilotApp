@@ -31,7 +31,9 @@ def _stream_url(request_id: str) -> str:
 def _open(app: Flask, request_id: str) -> Iterator[Iterator[str]]:
     """An editor's stream, read a frame at a time; closing it is the browser going."""
     client = app.test_client()
-    token = app.container.testing_service().create_session("outage-user", roles=["editor"])
+    token = app.container.testing_service().create_session(
+        "outage-user", roles=["editor"]
+    )
     client.set_cookie("access_token", str(token))
     response = client.get(_stream_url(request_id), buffered=False)
     assert response.status_code == 200
@@ -42,19 +44,25 @@ def _open(app: Flask, request_id: str) -> Iterator[Iterator[str]]:
 
 
 class TestSseOutage:
-    def test_a_connect_during_the_outage_answers_503(self, app: Flask, client: FlaskClient) -> None:
+    def test_a_connect_during_the_outage_answers_503(
+        self, app: Flask, client: FlaskClient
+    ) -> None:
         assert client.post(OUTAGE).status_code == 204
 
         assert client.get(_stream_url("req-down")).status_code == 503
 
-    def test_a_connect_after_the_outage_is_accepted(self, app: Flask, client: FlaskClient) -> None:
+    def test_a_connect_after_the_outage_is_accepted(
+        self, app: Flask, client: FlaskClient
+    ) -> None:
         assert client.post(OUTAGE).status_code == 204
         assert client.delete(OUTAGE).status_code == 204
 
         with _open(app, "req-up") as frames:
             assert next(frames).startswith("event: ready\n")
 
-    def test_an_open_stream_speaks_through_an_outage_that_is_not_silent(self, app: Flask, client: FlaskClient) -> None:
+    def test_an_open_stream_speaks_through_an_outage_that_is_not_silent(
+        self, app: Flask, client: FlaskClient
+    ) -> None:
         with _open(app, "req-speaks") as frames:
             next(frames)
             assert client.post(OUTAGE).status_code == 204
@@ -77,7 +85,9 @@ class TestSseOutage:
             assert time.perf_counter() - started >= 3 * beat
             ender.join()
 
-    def test_a_silent_outage_fails_connects_too(self, app: Flask, client: FlaskClient) -> None:
+    def test_a_silent_outage_fails_connects_too(
+        self, app: Flask, client: FlaskClient
+    ) -> None:
         assert client.post(f"{OUTAGE}?silent=true").status_code == 204
 
         assert client.get(_stream_url("req-silent-down")).status_code == 503
