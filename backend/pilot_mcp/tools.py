@@ -29,6 +29,8 @@ from pilot_mcp.api import (
     FIND_LIMIT_MAX,
     LIST_LIMIT_DEFAULT,
     LIST_LIMIT_MAX,
+    MAX_DEBRIEF,
+    MAX_DEBRIEF_ENTRIES,
     MAX_STEP_CODE,
     MAX_STEPS,
     SESSION_HEADER,
@@ -38,6 +40,7 @@ from pilot_mcp.api import (
     AttachedFiles,
     AttachedMaterial,
     Caller,
+    DebriefEntry,
     FileListing,
     FileText,
     FoundFiles,
@@ -52,6 +55,7 @@ from pilot_mcp.api import (
     ProjectHead,
     Projects,
     Recorded,
+    RegisteredDebrief,
     RegisteredDocument,
     StartedProject,
     Step,
@@ -231,16 +235,19 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
     ) -> Progress:
         """Publish your work item's steps as your run moves through them,
         shown on its tile in Pilot: the whole list, in order, each step a
-        `code`, your name for it, a `label`, its words, and a `state`,
-        `pending`, `active` or `done`. The list replaces the one standing: a
-        code already on it keeps its state where you give none, a new code
-        starts `pending`, a code left out goes, and `[]` removes the list.
-        Where the work grows, add a step; a second round of a step is a step
-        of its own. Pilot stamps each step's start and end by its own clock.
-        An empty or repeated code, an empty label, a state outside the three,
-        a code over 64 characters, a label over 120 or a list over 100 steps
-        is refused with the reason, and nothing changes. Answers `{steps}`,
-        the list as it stands."""
+        `code`, your name for it, a `label`, its words, a `state`, `pending`,
+        `active` or `done`, and, where it has one, a `why`, a short line shown
+        under its label. The list replaces the one standing: a code already
+        on it keeps its state where you give none, a new code starts
+        `pending`, a code left out goes, and `[]` removes the list; a step's
+        label and why are as you give them, a step given without a why having
+        none. Where the work grows, add a step; a second round of a step is a
+        step of its own. Pilot stamps each step's start and end by its own
+        clock. An empty or repeated code, an empty label or why, a state
+        outside the three, a code over 64 characters, a label or a why over
+        120, an unknown field or a list over 100 steps is refused with the
+        reason, and nothing changes. Answers `{steps}`, the list as it
+        stands."""
         return await api.set_progress(_authorization(ctx), steps)
 
     @mcp.tool()
@@ -263,6 +270,46 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
         reason, and nothing changes; `set_progress` adds a step. Answers
         `{steps}`, the list as it stands."""
         return await api.set_progress_step(_authorization(ctx), code, state)
+
+    @mcp.tool()
+    async def register_debrief(
+        debrief: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=MAX_DEBRIEF,
+                description=(
+                    "Your account of how the run went, in your own words, at most"
+                    " 16,000 characters"
+                ),
+            ),
+        ],
+        entries: Annotated[
+            list[DebriefEntry],
+            Field(
+                min_length=1,
+                max_length=MAX_DEBRIEF_ENTRIES,
+                description="The run's accounts, in order, 1 to 500",
+            ),
+        ],
+        ctx: Call,
+    ) -> RegisteredDebrief:
+        """Hand Pilot your work item's debrief, once, before your turn ends:
+        `debrief`, your own account of how the run went, and `entries`, every
+        account of the run in order, each with the `section` of the run it
+        ran in, its `round` of that part, its `role`, its `duration` in whole
+        seconds, at most one of its `words` and `passed`, a pass or a fail,
+        and, on an entry that opens a round past the first, its `why`. Pilot
+        stores them as you give them and shows them behind the work item's
+        Debrief once your turn ends. A second call is refused with the
+        reason, and nothing changes. A call outside the limits — an empty
+        debrief or one over 16,000 characters, no entries or over 500, an
+        empty section, role, words or why, a section or a why over 120
+        characters, a role over 64, words over 4,000, a round under 1, a
+        duration under 0, both words and passed, an unknown field — is
+        refused with each fault, and nothing is stored. Answers `{entries}`,
+        the number of entries stored."""
+        return await api.register_debrief(_authorization(ctx), debrief, entries)
 
 
 def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:

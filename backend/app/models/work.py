@@ -1,6 +1,6 @@
 """Work (DB §2.2), the subtype of Item and of Session, Claim Assignment,
-Progress Step, a characteristic of Work, Research Assignment, and Clarification
-Run, a role of a Work (DB §2.3).
+Progress Step and Debrief Entry, characteristics of Work, Research Assignment,
+and Clarification Run, a role of a Work (DB §2.3).
 
 `work` is the extension table keyed by the id a Work's Item and Session share
 (DB §7.3).
@@ -47,6 +47,11 @@ class Work(db.Model):  # type: ignore[name-defined]
     `stop_work` gave, none for a Work a person closed, for one done any other
     way and for an open one (DB 346): a rule across `items` and `work` the
     server keeps.
+
+    `debrief` is the stage session's own words on how its run went, set once
+    with the Work's Debrief Entries by its Session's call and never changed
+    (DB 323, 324); that a Work has entries exactly when it has a debrief is
+    the server's.
     """
 
     __tablename__ = "work"
@@ -89,6 +94,10 @@ class Work(db.Model):  # type: ignore[name-defined]
         ),
         # A retry retries one job.
         Index("uq_work_retried_by_id", "retried_by_id", unique=True),
+        # Only a worker's run has a debrief (DB 323).
+        CheckConstraint(
+            "session_kind_code = 'work' OR debrief IS NULL", name="ck_work_debrief"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -100,6 +109,7 @@ class Work(db.Model):  # type: ignore[name-defined]
     autopilot: Mapped[bool] = mapped_column(Boolean)
     retried_by_id: Mapped[uuid.UUID | None]
     done_note: Mapped[str | None] = mapped_column(Text)
+    debrief: Mapped[str | None] = mapped_column(Text)
 
 
 class ClaimAssignment(db.Model):  # type: ignore[name-defined]
@@ -133,7 +143,8 @@ class ProgressStep(db.Model):  # type: ignore[name-defined]
 
     `started_at` is the server's clock when the step first went `active`, or
     went straight to `done`, never changed once written; `ended_at` when it
-    last went `done` (DB 287).
+    last went `done` (DB 287). `why` is the short line the run gives with
+    the step, standing as the last list gave it (DB 327).
 
     That the Work is a worker's run whose own Session writes it (DB 286) is
     the server's check at the call: no key reaches the Session Kind from this
@@ -170,6 +181,37 @@ class ProgressStep(db.Model):  # type: ignore[name-defined]
     state_code: Mapped[ProgressState] = mapped_column(PROGRESS_STATE)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    why: Mapped[str | None] = mapped_column(Text)
+
+
+class DebriefEntry(db.Model):  # type: ignore[name-defined]
+    """One account in a Work's debrief, as the workflow gives it, written
+    with the Work's `debrief` at its one call and never changed (DB decision
+    76, 322 to 325): its position its place in the order given, from 1
+    without a gap, which no constraint holds. Every value is the workflow's,
+    stored and shown as given and read for nothing else (DB 326).
+    """
+
+    __tablename__ = "debrief_entries"
+    __table_args__ = (
+        CheckConstraint("position >= 1", name="ck_debrief_entries_position"),
+        CheckConstraint('"round" >= 1', name="ck_debrief_entries_round"),
+        CheckConstraint("duration >= 0", name="ck_debrief_entries_duration"),
+        # Words, or a pass or a fail in their place, or neither (DB 325).
+        CheckConstraint(
+            "words IS NULL OR passed IS NULL", name="ck_debrief_entries_result"
+        ),
+    )
+
+    work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("work.id"), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    section: Mapped[str] = mapped_column(Text)
+    round: Mapped[int] = mapped_column(Integer)
+    role: Mapped[str] = mapped_column(Text)
+    duration: Mapped[int] = mapped_column(Integer)
+    words: Mapped[str | None] = mapped_column(Text)
+    passed: Mapped[bool | None] = mapped_column(Boolean)
+    why: Mapped[str | None] = mapped_column(Text)
 
 
 class ResearchAssignment(db.Model):  # type: ignore[name-defined]

@@ -2,16 +2,29 @@
 for a worker session's tools (TD §4.5)."""
 
 import uuid
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.reference import ProgressState
 
 MAX_STEP_CODE = 64
 MAX_STEP_LABEL = 120
+MAX_STEP_WHY = 120
 MAX_STEPS = 100
-"""The limits of a work item's list of steps (F85.3), which the schema of
-`progress_steps` does not hold."""
+"""The limits of a work item's list of steps (F85.3, DB 327), which the
+schema of `progress_steps` does not hold."""
+
+MAX_DEBRIEF = 16_000
+MAX_DEBRIEF_ENTRIES = 500
+MAX_ENTRY_SECTION = 120
+MAX_ENTRY_ROLE = 64
+MAX_ENTRY_WORDS = 4_000
+MAX_ENTRY_WHY = 120
+MAX_ENTRY_NUMBER = 2**31 - 1
+"""The limits of a work item's debrief (DB 325), which the schema of `work`
+and `debrief_entries` does not hold; `MAX_ENTRY_NUMBER` is the range of the
+columns of a round and a duration."""
 
 
 class RegisterDocumentRequestSchema(BaseModel):
@@ -94,6 +107,15 @@ class ProgressStepRequestSchema(BaseModel):
         ),
         examples=["active"],
     )
+    why: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_STEP_WHY,
+        description=(
+            "A short line shown under the step's label; without it, the step has none"
+        ),
+        examples=["The reviewer found the migration's downgrade left the column"],
+    )
 
 
 class SetProgressRequestSchema(BaseModel):
@@ -139,3 +161,103 @@ class ProgressSchema(BaseModel):
     """The work item's list of steps as it stands."""
 
     steps: list[ProgressStepSchema] = Field(description="Its steps, in order")
+
+
+class PublishedStepSchema(ProgressStepSchema):
+    """A step of the work item's list, as its worker's call answers it."""
+
+    why: str | None = Field(
+        description="The short line under its label; none where not given",
+        examples=["The reviewer found the migration's downgrade left the column"],
+    )
+
+
+class PublishedProgressSchema(BaseModel):
+    """The work item's list of steps as it stands, as its worker's call
+    answers it."""
+
+    steps: list[PublishedStepSchema] = Field(description="Its steps, in order")
+
+
+class DebriefEntryRequestSchema(BaseModel):
+    """One account of the debrief, as the call gives it: every value the
+    run's, stored and shown as given (DB 325, 326)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    section: str = Field(
+        min_length=1,
+        max_length=MAX_ENTRY_SECTION,
+        description="The name of the part of the run it ran in",
+        examples=["P3 · The client"],
+    )
+    round: int = Field(
+        ge=1,
+        le=MAX_ENTRY_NUMBER,
+        strict=True,
+        description="Its round of that part, 1 or more",
+        examples=[2],
+    )
+    role: str = Field(
+        min_length=1,
+        max_length=MAX_ENTRY_ROLE,
+        description="Whose account it is",
+        examples=["code-reviewer"],
+    )
+    duration: int = Field(
+        ge=0,
+        le=MAX_ENTRY_NUMBER,
+        strict=True,
+        description="The time its turn took, in whole seconds",
+        examples=[540],
+    )
+    words: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_ENTRY_WORDS,
+        description="The account, in its own words; none with `passed`",
+        examples=["The review went quickly; one finding, and a fair one."],
+    )
+    passed: bool | None = Field(
+        default=None,
+        strict=True,
+        description="A pass or a fail in place of words; none with `words`",
+        examples=[False],
+    )
+    why: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_ENTRY_WHY,
+        description="Why the round it opens was needed",
+        examples=["The reviewer found the migration's downgrade left the column"],
+    )
+
+    @model_validator(mode="after")
+    def _words_or_a_result(self) -> Self:
+        if self.words is not None and self.passed is not None:
+            raise ValueError("an entry gives at most one of words and passed")
+        return self
+
+
+class RegisterDebriefRequestSchema(BaseModel):
+    """The work item's debrief, to store once."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    debrief: str = Field(
+        min_length=1,
+        max_length=MAX_DEBRIEF,
+        description="The session's own account of how the run went",
+        examples=["It went well, if slowly: the second review was worth it."],
+    )
+    entries: list[DebriefEntryRequestSchema] = Field(
+        min_length=1,
+        max_length=MAX_DEBRIEF_ENTRIES,
+        description="The run's accounts, in order",
+    )
+
+
+class RegisteredDebriefSchema(BaseModel):
+    """The debrief stored."""
+
+    entries: int = Field(description="The number of its entries", examples=[36])

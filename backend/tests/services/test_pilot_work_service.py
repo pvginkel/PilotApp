@@ -1,9 +1,10 @@
 """`pilot-work`: a bearer resolved to its work item's Session,
 `register_document` (TD §4.5, F84, F85.1, ruling D1) and `attach_file`
 (F85.2, F36.1), each call's Effects (R18, F41), against the fake controller,
-and `set_progress` and `set_progress_step`, the work item's steps (F85.3,
-F85.4, F145.1; DB 285 to 289), each change moving its status alone
-(F145.4)."""
+`set_progress` and `set_progress_step`, the work item's steps (F85.3,
+F85.4, F145.1; DB 285 to 289, a step's why 327), each change moving its
+status alone (F145.4), and `register_debrief`, its debrief, stored once and
+moving nothing (F85.5; DB 322 to 329)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -29,6 +30,7 @@ from app.exceptions import (
 from app.extensions import db
 from app.models import (
     Attachment,
+    DebriefEntry,
     Document,
     Effect,
     Environment,
@@ -38,6 +40,7 @@ from app.models import (
     Project,
     Turn,
     User,
+    Work,
 )
 from app.models.reference import (
     EffectKind,
@@ -46,7 +49,10 @@ from app.models.reference import (
     SessionState,
     UserKind,
 )
-from app.schemas.pilot_work import ProgressStepRequestSchema
+from app.schemas.pilot_work import (
+    DebriefEntryRequestSchema,
+    ProgressStepRequestSchema,
+)
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     FILE_SIZE_CAP,
@@ -1098,11 +1104,18 @@ PENDING, ACTIVE, DONE = ProgressState.PENDING, ProgressState.ACTIVE, ProgressSta
 EARLIER = datetime(2026, 11, 1, 9, 30, tzinfo=UTC)
 """A stamp a test writes before its call, which the call keeps or replaces."""
 
+WHY = "The reviewer found the migration's downgrade left the column"
+
 
 def _step(
-    code: str, label: str | None = None, state: ProgressState | None = None
+    code: str,
+    label: str | None = None,
+    state: ProgressState | None = None,
+    why: str | None = None,
 ) -> ProgressStepRequestSchema:
-    return ProgressStepRequestSchema(code=code, label=label or code, state=state)
+    return ProgressStepRequestSchema(
+        code=code, label=label or code, state=state, why=why
+    )
 
 
 def _listed(steps: list[ProgressStep]) -> list[tuple[str, str, int, ProgressState]]:
@@ -1309,6 +1322,38 @@ class TestPilotWorkServiceSetProgress:
         ]
         assert _listed(_stored(session, run)) == [("test", "test", 1, PENDING)]
 
+    def test_a_steps_why_stands_as_the_last_call_gave_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 327: taken on any step, as its label is; a step the call gives
+        without one has none, and a step moved keeps its own."""
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(
+            _worker(run),
+            [_step("P1.code", state=DONE, why="First"), _step("P1.code-2", why=WHY)],
+        )
+
+        moved = [
+            step.why
+            for step in pilot_work.set_progress_step(_worker(run), "P1.code-2", ACTIVE)
+        ]
+        published = [
+            step.why
+            for step in pilot_work.set_progress(
+                _worker(run),
+                [_step("P1.code", state=DONE), _step("P1.code-2", why="Again")],
+            )
+        ]
+
+        assert moved == ["First", WHY]
+        assert published == [None, "Again"]
+        assert [step.why for step in _stored(session, run)] == [None, "Again"]
+
 
 _Stamp = Literal["earlier", "now"] | None
 
@@ -1471,6 +1516,10 @@ class TestPilotWorkServiceProgressMovesTheWork:
             ),
             lambda: pilot_work.set_progress_step(_worker(run), "docs", DONE),
             lambda: pilot_work.set_progress(_worker(run), [_step("docs", "Docs")]),
+            lambda: pilot_work.set_progress(
+                _worker(run), [_step("docs", "Docs", why=WHY)]
+            ),
+            lambda: pilot_work.set_progress(_worker(run), [_step("docs", "Docs")]),
             lambda: pilot_work.set_progress(_worker(run), []),
         ]
         moved = []
@@ -1495,7 +1544,7 @@ class TestPilotWorkServiceProgressMovesTheWork:
         pilot_work = container.pilot_work_service()
         with scoped_session(container):
             pilot_work.set_progress(_worker(run), [])
-        listed = [_step("test", "Test", ACTIVE), _step("docs", "Docs")]
+        listed = [_step("test", "Test", ACTIVE), _step("docs", "Docs", why=WHY)]
         with scoped_session(container):
             pilot_work.set_progress(_worker(run), listed)
         engine_events.clear()
@@ -1503,7 +1552,7 @@ class TestPilotWorkServiceProgressMovesTheWork:
         with scoped_session(container):
             pilot_work.set_progress(_worker(run), listed)
             pilot_work.set_progress(
-                _worker(run), [_step("test", "Test"), _step("docs", "Docs")]
+                _worker(run), [_step("test", "Test"), _step("docs", "Docs", why=WHY)]
             )
             pilot_work.set_progress_step(_worker(run), "test", ACTIVE)
 
@@ -1639,3 +1688,247 @@ class TestPilotWorkServiceProgressAtOnce:
             call.result()
         with scoped_session(container) as db_session:
             assert db_session.scalars(select(ProgressStep)).all() == []
+
+
+DEBRIEF = "It went well, if slowly: the second review was worth it."
+
+_ACCOUNTS = [
+    DebriefEntryRequestSchema(
+        section="The preparer",
+        round=1,
+        role="plan-preparer",
+        duration=1020,
+        words="A well-specified slice.",
+    ),
+    DebriefEntryRequestSchema(
+        section="P1 · The client", round=1, role="code-writer", duration=2400
+    ),
+    DebriefEntryRequestSchema(
+        section="Completion check",
+        round=2,
+        role="sweep",
+        duration=0,
+        passed=False,
+        why=WHY,
+    ),
+    DebriefEntryRequestSchema(
+        section="P1 · The client",
+        round=1,
+        role="code-writer",
+        duration=60,
+        words="The same name further on.",
+    ),
+]
+
+_Account = tuple[int, str, int, str, int, str | None, bool | None, str | None]
+
+
+def _accounts(entries: list[DebriefEntry]) -> list[_Account]:
+    return [
+        (
+            entry.position,
+            entry.section,
+            entry.round,
+            entry.role,
+            entry.duration,
+            entry.words,
+            entry.passed,
+            entry.why,
+        )
+        for entry in entries
+    ]
+
+
+_GIVEN: list[_Account] = [
+    (
+        1,
+        "The preparer",
+        1,
+        "plan-preparer",
+        1020,
+        "A well-specified slice.",
+        None,
+        None,
+    ),
+    (2, "P1 · The client", 1, "code-writer", 2400, None, None, None),
+    (3, "Completion check", 2, "sweep", 0, None, False, WHY),
+    (
+        4,
+        "P1 · The client",
+        1,
+        "code-writer",
+        60,
+        "The same name further on.",
+        None,
+        None,
+    ),
+]
+
+
+def _debrief_of(
+    session: DbSession, work_id: uuid.UUID
+) -> tuple[str | None, list[_Account]]:
+    """The Work's debrief and its entries, in order, as the database holds
+    them."""
+    session.expire_all()
+    entries = session.scalars(
+        select(DebriefEntry)
+        .where(DebriefEntry.work_id == work_id)
+        .order_by(DebriefEntry.position)
+    ).all()
+    return session.get_one(Work, work_id).debrief, _accounts(list(entries))
+
+
+class TestPilotWorkServiceRegisterDebrief:
+    def test_the_debrief_and_its_entries_are_stored_as_given_in_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 325, 326: every value as given, each entry's position its
+        place; the same section's name further on is an entry like any."""
+        run = _session(session, container, project, environment)
+
+        stored = container.pilot_work_service().register_debrief(
+            _worker(run), DEBRIEF, _ACCOUNTS
+        )
+
+        assert _accounts(stored) == _GIVEN
+        assert _debrief_of(session, run.id) == (DEBRIEF, _GIVEN)
+
+    def test_a_second_call_is_refused_and_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 324: a work item is debriefed once."""
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.register_debrief(_worker(run), DEBRIEF, _ACCOUNTS)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            pilot_work.register_debrief(_worker(run), "Again.", _ACCOUNTS[:1])
+
+        assert refused.value.message == (
+            f"Cannot register the debrief of work item {run.id} because it has"
+            " its debrief already"
+        )
+        assert _debrief_of(session, run.id) == (DEBRIEF, _GIVEN)
+
+    def test_the_steps_are_untouched_and_take_a_call_after_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 324: the call touches nothing else of the Work."""
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(_worker(run), [_step("test", state=ACTIVE, why=WHY)])
+
+        pilot_work.register_debrief(_worker(run), DEBRIEF, _ACCOUNTS)
+        moved = [
+            (step.code, step.state_code, step.why)
+            for step in pilot_work.set_progress_step(_worker(run), "test", DONE)
+        ]
+        listed = pilot_work.set_progress(_worker(run), [_step("test"), _step("docs")])
+
+        assert moved == [("test", DONE, WHY)]
+        assert _listed(listed) == [
+            ("test", "test", 1, DONE),
+            ("docs", "docs", 2, PENDING),
+        ]
+
+    def test_a_turn_ended_after_the_gate_stores_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        worker = _worker(run)
+        run.state_code = SessionState.IDLE
+        session.flush()
+
+        with pytest.raises(AuthorizationException) as refused:
+            container.pilot_work_service().register_debrief(worker, DEBRIEF, _ACCOUNTS)
+
+        assert refused.value.message == (
+            f"Cannot call pilot-work because session {run.id} has no turn running"
+        )
+        assert _debrief_of(session, run.id) == (None, [])
+
+    def test_only_the_workers_own_work_item_is_debriefed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 323: no Session gives another Work's."""
+        run = _session(session, container, project, environment)
+        other = _session(session, container, project, environment, token="other")
+
+        container.pilot_work_service().register_debrief(
+            _worker(run), DEBRIEF, _ACCOUNTS
+        )
+
+        assert _debrief_of(session, other.id) == (None, [])
+        assert _debrief_of(session, run.id) == (DEBRIEF, _GIVEN)
+
+    def test_it_records_no_effect_or_line_and_moves_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        """DB 328: no Effect and no line in the session log; DB 329: no live
+        event of its own."""
+        run = _session(session, container, project, environment)
+        _turn_in_flight(session, run)
+        clear_after_commit_callbacks()
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.pilot_work_service().register_debrief(
+                _worker(run), DEBRIEF, _ACCOUNTS
+            )
+
+        assert engine_events == []
+        assert _effect_records(session, run) == []
+        assert _effects(session) == []
+
+
+class TestPilotWorkServiceRegisterDebriefAtOnce:
+    def test_a_second_call_waits_on_the_first_and_is_refused(
+        self, committed_app: Flask
+    ) -> None:
+        """Two calls at once are served one after the other under the
+        Session's row, the second reading the debrief the first stored (DB
+        324)."""
+        container = committed_app.container
+        worker = _committed_work(committed_app)
+
+        def again() -> object:
+            with scoped_session(container):
+                return container.pilot_work_service().register_debrief(
+                    worker, "Again.", _ACCOUNTS[:1]
+                )
+
+        with scoped_session(container):
+            container.pilot_work_service().register_debrief(worker, DEBRIEF, _ACCOUNTS)
+            second = in_thread(again)
+            wait_until(lambda: lock_waits(container) == 1, "the second call waiting")
+
+        with pytest.raises(InvalidOperationException):
+            second.result()
+        with scoped_session(container) as db_session:
+            assert _debrief_of(db_session, worker.work_item_id) == (DEBRIEF, _GIVEN)

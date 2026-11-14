@@ -1,9 +1,10 @@
 """`pilot-work`, a worker session's tools (TD §4.5, F85): the bearer its
 Session was created with resolved to the Session, `register_document`
 (ruling D1) and `attach_file`, each call that changed the record writing its
-Effects (F41), and `set_progress` and `set_progress_step`, its work item's
+Effects (F41), `set_progress` and `set_progress_step`, its work item's
 steps (F145), which write none, a change of the steps moving the work item's
-status alone (F145.4)."""
+status alone (F145.4), and `register_debrief`, its work item's debrief, which
+writes none and moves nothing (F85.5; DB 328, 329)."""
 
 import uuid
 from collections.abc import Callable, Sequence
@@ -29,10 +30,18 @@ from app.exceptions import (
     InvalidOperationException,
     RecordNotFoundException,
 )
-from app.models import Attachment, Document, Item, ProgressStep, Project, Work
+from app.models import (
+    Attachment,
+    DebriefEntry,
+    Document,
+    Item,
+    ProgressStep,
+    Project,
+    Work,
+)
 from app.models import Session as AgentSession
 from app.models.reference import EffectKind, ProgressState, SessionState, Surface
-from app.schemas.pilot_work import ProgressStepRequestSchema
+from app.schemas.pilot_work import DebriefEntryRequestSchema, ProgressStepRequestSchema
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
@@ -236,9 +245,11 @@ class PilotWorkService:
         their order (F85.3, DB 288): a code on the list keeps its row, its
         stamps and, where its step gives no state, its state; a new code
         starts `pending`, or in the state its step gives; a code left out
-        goes, and no steps remove the list. Each change of a state is stamped
-        by the server's clock (DB 287). No Effect is recorded (DB 289); a
-        call that changed the list moves the work item's status (`work_moved`).
+        goes, and no steps remove the list. Each step's label and why are as
+        its step gives them, a step given without a why having none (DB 327).
+        Each change of a state is stamped by the server's clock (DB 287). No
+        Effect is recorded (DB 289); a call that changed the list moves the
+        work item's status (`work_moved`).
 
         Returns:
             The list as it stands, in order.
@@ -271,6 +282,7 @@ class PilotWorkService:
                 )
                 self.db.add(step)
             step.label = given.label
+            step.why = given.why
             step.position = position
             if given.state is not None:
                 _move(step, given.state, at)
@@ -309,13 +321,60 @@ class PilotWorkService:
         self.db.flush()
         return self._steps(worker)
 
+    def register_debrief(
+        self,
+        worker: Worker,
+        debrief: str,
+        entries: Sequence[DebriefEntryRequestSchema],
+    ) -> list[DebriefEntry]:
+        """The worker's own work item's debrief, `debrief` and its `entries`
+        in their order, stored as given, once (F85.5; DB 323 to 325). Nothing
+        else of the Work changes: its steps take a call after it as before
+        (DB 324). No Effect is recorded, no line written in the session's
+        records and nothing moved (DB 328, 329).
+
+        Returns:
+            The entries stored, in order.
+
+        Raises:
+            InvalidOperationException: the work item has its debrief
+                already, nothing changed.
+            AuthorizationException: the worker's Session has no turn running
+                once its row is held, nothing stored.
+        """
+        self._holding_its_turn(worker)
+        work = self.db.get_one(Work, worker.work_item_id, populate_existing=True)
+        if work.debrief is not None:
+            raise InvalidOperationException(
+                f"register the debrief of work item {worker.work_item_id}",
+                "it has its debrief already",
+            )
+        work.debrief = debrief
+        stored = [
+            DebriefEntry(
+                work_id=worker.work_item_id,
+                position=position,
+                section=given.section,
+                round=given.round,
+                role=given.role,
+                duration=given.duration,
+                words=given.words,
+                passed=given.passed,
+                why=given.why,
+            )
+            for position, given in enumerate(entries, start=1)
+        ]
+        self.db.add_all(stored)
+        self.db.flush()
+        return stored
+
     def _holding_its_turn(self, worker: Worker) -> AgentSession:
         """The worker's Session, its row held until the transaction ends,
         read as the lock found it; the call refused unless its turn still runs.
         Every change of the Session's state takes the row, so a call that
-        waited on one reads its outcome; and two calls on the Work's list are
-        served one after the other, the second reading the list the first
-        left (DB 286).
+        waited on one reads its outcome; and two calls on the Work's list, or
+        its debrief, are served one after the other, the second reading what
+        the first left (DB 286, 324).
 
         Raises:
             AuthorizationException: the Session has no turn running.
@@ -356,9 +415,11 @@ def _move(step: ProgressStep, state: ProgressState, at: datetime) -> bool:
     return True
 
 
-def _shown(steps: Sequence[ProgressStep]) -> list[tuple[str, str, ProgressState]]:
+def _shown(
+    steps: Sequence[ProgressStep],
+) -> list[tuple[str, str, ProgressState, str | None]]:
     """What the work item's status shows of its steps, in order."""
-    return [(step.code, step.label, step.state_code) for step in steps]
+    return [(step.code, step.label, step.state_code, step.why) for step in steps]
 
 
 def material(

@@ -37,6 +37,7 @@ from app.models.wait import CardTransition, Wait, WaitFiring
 from app.models.work import (
     ClaimAssignment,
     ClarificationRun,
+    DebriefEntry,
     ProgressStep,
     ResearchAssignment,
     Work,

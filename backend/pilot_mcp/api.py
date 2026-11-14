@@ -17,7 +17,7 @@ does not answer is one naming that.
 
 import uuid
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 import httpx
 from mcp.server.fastmcp.exceptions import ToolError
@@ -28,6 +28,7 @@ from pydantic import (
     Field,
     SerializerFunctionWrapHandler,
     model_serializer,
+    model_validator,
 )
 from pydantic.alias_generators import to_camel
 
@@ -57,8 +58,19 @@ StepState = Literal["pending", "active", "done"]
 
 MAX_STEP_CODE = 64
 MAX_STEP_LABEL = 120
+MAX_STEP_WHY = 120
 MAX_STEPS = 100
 """The limits of a work item's list of steps, as its route takes them
+(`app/schemas/pilot_work.py`)."""
+
+MAX_DEBRIEF = 16_000
+MAX_DEBRIEF_ENTRIES = 500
+MAX_ENTRY_SECTION = 120
+MAX_ENTRY_ROLE = 64
+MAX_ENTRY_WORDS = 4_000
+MAX_ENTRY_WHY = 120
+MAX_ENTRY_NUMBER = 2**31 - 1
+"""The limits of a work item's debrief, as its route takes them
 (`app/schemas/pilot_work.py`)."""
 
 
@@ -328,6 +340,15 @@ class Step(BaseModel):
             " list keeps its state and a new one starts `pending`"
         ),
     )
+    why: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_STEP_WHY,
+        description=(
+            "A short line shown under the step's label, at most 120 characters;"
+            " without it, the step has none"
+        ),
+    )
 
 
 class PublishedStep(BaseModel):
@@ -336,6 +357,76 @@ class PublishedStep(BaseModel):
     code: str = Field(description="Your name for the step")
     label: str = Field(description="Its words on the tile")
     state: StepState = Field(description="`pending`, `active` or `done`")
+    why: str | None = Field(
+        default=None, description="Its line under the label; none where not given"
+    )
+
+
+class DebriefEntry(BaseModel):
+    """One account of your work item's debrief."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    section: str = Field(
+        min_length=1,
+        max_length=MAX_ENTRY_SECTION,
+        description=(
+            "The name of the part of the run it ran in, at most 120 characters:"
+            " consecutive entries of one name show as one section"
+        ),
+    )
+    round: int = Field(
+        ge=1,
+        le=MAX_ENTRY_NUMBER,
+        strict=True,
+        description="Its round of that part, 1 or more",
+    )
+    role: str = Field(
+        min_length=1,
+        max_length=MAX_ENTRY_ROLE,
+        description="Whose account it is, at most 64 characters",
+    )
+    duration: int = Field(
+        ge=0,
+        le=MAX_ENTRY_NUMBER,
+        strict=True,
+        description="The time its turn took, in whole seconds",
+    )
+    words: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_ENTRY_WORDS,
+        description=(
+            "The account, in its own words, at most 4,000 characters; none with"
+            " `passed`"
+        ),
+    )
+    passed: bool | None = Field(
+        default=None,
+        strict=True,
+        description="A pass or a fail in place of words; none with `words`",
+    )
+    why: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_ENTRY_WHY,
+        description=(
+            "On an entry that opens a round past the first, why that round was"
+            " needed, at most 120 characters"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _words_or_a_result(self) -> Self:
+        if self.words is not None and self.passed is not None:
+            raise ValueError("an entry gives at most one of words and passed")
+        return self
+
+
+class RegisteredDebrief(BaseModel):
+    """The debrief stored."""
+
+    entries: int = Field(description="The number of its entries")
 
 
 class Progress(BaseModel):
@@ -711,6 +802,17 @@ class PilotWorkApi(_Routes):
         body = {"code": code, "state": state}
         answer = await self._send("PATCH", "progress", authorization, None, body)
         return Progress.model_validate(answer)
+
+    async def register_debrief(
+        self, authorization: str, debrief: str, entries: list[DebriefEntry]
+    ) -> RegisteredDebrief:
+        """No tool-use id is sent: the call records no effect to name it."""
+        body = {
+            "debrief": debrief,
+            "entries": [entry.model_dump(exclude_none=True) for entry in entries],
+        }
+        answer = await self._post("debrief", authorization, None, body)
+        return RegisteredDebrief.model_validate(answer)
 
 
 class PilotStoreApi(_Routes):

@@ -1,4 +1,5 @@
-"""Work, Progress Step and Clarification Run: what a row must hold."""
+"""Work, Progress Step, Debrief Entry and Clarification Run: what a row must
+hold."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.models import (
     ClarificationRun,
+    DebriefEntry,
     Environment,
     Item,
     ProgressStep,
@@ -784,3 +786,154 @@ class TestProgressStep:
         session.add(_step(uuid.uuid4(), "test", 1))
 
         assert violated_constraint(session) == "progress_steps_work_id_fkey"
+
+    def test_a_step_may_carry_a_why(self, session: DbSession, run: uuid.UUID) -> None:
+        """DB 327: a short line under its label, none where not given."""
+        session.add_all(
+            [
+                _step(run, "P1.code-2", 1, why="The reviewer found the gap"),
+                _step(run, "P1.review-2", 2),
+            ]
+        )
+        session.flush()
+        session.expire_all()
+
+        assert [
+            session.get_one(ProgressStep, (run, code)).why
+            for code in ("P1.code-2", "P1.review-2")
+        ] == ["The reviewer found the gap", None]
+
+
+def _account(work_id: uuid.UUID, position: int, **overrides: object) -> DebriefEntry:
+    values: dict[str, object] = {
+        "work_id": work_id,
+        "position": position,
+        "section": "P1 · The client",
+        "round": 1,
+        "role": "code-writer",
+        "duration": 540,
+    }
+    values.update(overrides)
+    return DebriefEntry(**values)
+
+
+class TestDebriefEntry:
+    """A Work's debrief and its accounts (DB decision 76, assertions 322 to
+    325)."""
+
+    @pytest.fixture
+    def run(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> uuid.UUID:
+        return _job(
+            session, project, environment, project_session, seq=2, kind_code="work"
+        )
+
+    def test_a_work_holds_its_debrief_and_its_entries_in_order(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.get_one(Work, run).debrief = "It went well, if slowly."
+        session.add_all(
+            [
+                _account(
+                    run,
+                    2,
+                    section="Completion check",
+                    role="sweep",
+                    duration=0,
+                    passed=False,
+                    why="Red again",
+                ),
+                _account(run, 1, words="One finding, and a fair one."),
+                _account(run, 3, section="Completion check", role="consult", round=2),
+            ]
+        )
+        session.flush()
+        session.expire_all()
+
+        entries = session.scalars(
+            select(DebriefEntry)
+            .where(DebriefEntry.work_id == run)
+            .order_by(DebriefEntry.position)
+        ).all()
+
+        assert session.get_one(Work, run).debrief == "It went well, if slowly."
+        assert [
+            (
+                entry.section,
+                entry.round,
+                entry.role,
+                entry.duration,
+                entry.words,
+                entry.passed,
+                entry.why,
+            )
+            for entry in entries
+        ] == [
+            (
+                "P1 · The client",
+                1,
+                "code-writer",
+                540,
+                "One finding, and a fair one.",
+                None,
+                None,
+            ),
+            ("Completion check", 1, "sweep", 0, None, False, "Red again"),
+            ("Completion check", 2, "consult", 540, None, None, None),
+        ]
+
+    def test_only_a_workers_run_has_a_debrief(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        """DB 323: a job, handed `pilot-store`, gives none."""
+        job = _job(session, project, environment, project_session, seq=3)
+        session.get_one(Work, job).debrief = "It went well."
+
+        assert violated_constraint(session) == "ck_work_debrief"
+
+    def test_its_position_is_unique_in_its_work(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add(_account(run, 1))
+        session.flush()
+        session.add(_account(run, 1, role="code-reviewer"))
+
+        assert violated_constraint(session) == "debrief_entries_pkey"
+
+    @pytest.mark.parametrize(
+        ("overrides", "constraint"),
+        [
+            ({"position": 0}, "ck_debrief_entries_position"),
+            ({"round": 0}, "ck_debrief_entries_round"),
+            ({"duration": -1}, "ck_debrief_entries_duration"),
+            ({"words": "Fine.", "passed": True}, "ck_debrief_entries_result"),
+        ],
+        ids=["position", "round", "duration", "words-and-passed"],
+    )
+    def test_an_entry_outside_its_bounds_is_refused(
+        self,
+        session: DbSession,
+        run: uuid.UUID,
+        overrides: dict[str, object],
+        constraint: str,
+    ) -> None:
+        entry = _account(run, 1)
+        for name, value in overrides.items():
+            setattr(entry, name, value)
+        session.add(entry)
+
+        assert violated_constraint(session) == constraint
+
+    def test_it_is_a_works_entry(self, session: DbSession) -> None:
+        session.add(_account(uuid.uuid4(), 1))
+
+        assert violated_constraint(session) == "debrief_entries_work_id_fkey"

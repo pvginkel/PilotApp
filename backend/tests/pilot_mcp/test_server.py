@@ -80,6 +80,12 @@ _PROGRESS = {
                     "description": "`pending`, `active` or `done`",
                     "title": "State",
                 },
+                "why": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                    "default": None,
+                    "description": "Its line under the label; none where not given",
+                    "title": "Why",
+                },
             },
             "required": ["code", "label", "state"],
             "title": "PublishedStep",
@@ -101,7 +107,7 @@ _PROGRESS = {
 }
 
 # Each tool: its parameters, its result and its description, the words as the
-# worker reads them (FM §5 step 1, F65.3, F85, F85.3, F85.4).
+# worker reads them (FM §5 step 1, F65.3, F85, F85.3, F85.4, F85.5).
 WORK_SURFACE = {
     "register_document": (
         {
@@ -214,6 +220,18 @@ WORK_SURFACE = {
                             ),
                             "title": "State",
                         },
+                        "why": {
+                            "anyOf": [
+                                {"maxLength": 120, "minLength": 1, "type": "string"},
+                                {"type": "null"},
+                            ],
+                            "default": None,
+                            "description": (
+                                "A short line shown under the step's label, at most"
+                                " 120 characters; without it, the step has none"
+                            ),
+                            "title": "Why",
+                        },
                     },
                     "required": ["code", "label"],
                     "title": "Step",
@@ -239,15 +257,18 @@ WORK_SURFACE = {
         _PROGRESS,
         "Publish your work item's steps as your run moves through them, shown on its"
         " tile in Pilot: the whole list, in order, each step a `code`, your name for"
-        " it, a `label`, its words, and a `state`, `pending`, `active` or `done`."
-        " The list replaces the one standing: a code already on it keeps its state"
-        " where you give none, a new code starts `pending`, a code left out goes, and"
-        " `[]` removes the list. Where the work grows, add a step; a second round of"
-        " a step is a step of its own. Pilot stamps each step's start and end by its"
-        " own clock. An empty or repeated code, an empty label, a state outside the"
-        " three, a code over 64 characters, a label over 120 or a list over 100"
-        " steps is refused with the reason, and nothing changes. Answers `{steps}`,"
-        " the list as it stands.",
+        " it, a `label`, its words, a `state`, `pending`, `active` or `done`, and,"
+        " where it has one, a `why`, a short line shown under its label. The list"
+        " replaces the one standing: a code already on it keeps its state where you"
+        " give none, a new code starts `pending`, a code left out goes, and `[]`"
+        " removes the list; a step's label and why are as you give them, a step"
+        " given without a why having none. Where the work grows, add a step; a"
+        " second round of a step is a step of its own. Pilot stamps each step's"
+        " start and end by its own clock. An empty or repeated code, an empty label"
+        " or why, a state outside the three, a code over 64 characters, a label or a"
+        " why over 120, an unknown field or a list over 100 steps is refused with"
+        " the reason, and nothing changes. Answers `{steps}`, the list as it"
+        " stands.",
     ),
     "set_progress_step": (
         {
@@ -276,6 +297,135 @@ WORK_SURFACE = {
         " or a state outside the three is refused with the reason, and nothing"
         " changes; `set_progress` adds a step. Answers `{steps}`, the list as it"
         " stands.",
+    ),
+    "register_debrief": (
+        {
+            "$defs": {
+                "DebriefEntry": {
+                    "additionalProperties": False,
+                    "description": "One account of your work item's debrief.",
+                    "properties": {
+                        "section": {
+                            "description": (
+                                "The name of the part of the run it ran in, at most"
+                                " 120 characters: consecutive entries of one name"
+                                " show as one section"
+                            ),
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "title": "Section",
+                            "type": "string",
+                        },
+                        "round": {
+                            "description": "Its round of that part, 1 or more",
+                            "maximum": 2147483647,
+                            "minimum": 1,
+                            "title": "Round",
+                            "type": "integer",
+                        },
+                        "role": {
+                            "description": "Whose account it is, at most 64 characters",
+                            "maxLength": 64,
+                            "minLength": 1,
+                            "title": "Role",
+                            "type": "string",
+                        },
+                        "duration": {
+                            "description": "The time its turn took, in whole seconds",
+                            "maximum": 2147483647,
+                            "minimum": 0,
+                            "title": "Duration",
+                            "type": "integer",
+                        },
+                        "words": {
+                            "anyOf": [
+                                {"maxLength": 4000, "minLength": 1, "type": "string"},
+                                {"type": "null"},
+                            ],
+                            "default": None,
+                            "description": (
+                                "The account, in its own words, at most 4,000"
+                                " characters; none with `passed`"
+                            ),
+                            "title": "Words",
+                        },
+                        "passed": {
+                            "anyOf": [{"type": "boolean"}, {"type": "null"}],
+                            "default": None,
+                            "description": (
+                                "A pass or a fail in place of words; none with `words`"
+                            ),
+                            "title": "Passed",
+                        },
+                        "why": {
+                            "anyOf": [
+                                {"maxLength": 120, "minLength": 1, "type": "string"},
+                                {"type": "null"},
+                            ],
+                            "default": None,
+                            "description": (
+                                "On an entry that opens a round past the first, why"
+                                " that round was needed, at most 120 characters"
+                            ),
+                            "title": "Why",
+                        },
+                    },
+                    "required": ["section", "round", "role", "duration"],
+                    "title": "DebriefEntry",
+                    "type": "object",
+                }
+            },
+            "properties": {
+                "debrief": {
+                    "description": (
+                        "Your account of how the run went, in your own words, at"
+                        " most 16,000 characters"
+                    ),
+                    "maxLength": 16000,
+                    "minLength": 1,
+                    "title": "Debrief",
+                    "type": "string",
+                },
+                "entries": {
+                    "description": "The run's accounts, in order, 1 to 500",
+                    "items": {"$ref": "#/$defs/DebriefEntry"},
+                    "maxItems": 500,
+                    "minItems": 1,
+                    "title": "Entries",
+                    "type": "array",
+                },
+            },
+            "required": ["debrief", "entries"],
+            "title": "register_debriefArguments",
+            "type": "object",
+        },
+        {
+            "description": "The debrief stored.",
+            "properties": {
+                "entries": {
+                    "description": "The number of its entries",
+                    "title": "Entries",
+                    "type": "integer",
+                }
+            },
+            "required": ["entries"],
+            "title": "RegisteredDebrief",
+            "type": "object",
+        },
+        "Hand Pilot your work item's debrief, once, before your turn ends:"
+        " `debrief`, your own account of how the run went, and `entries`, every"
+        " account of the run in order, each with the `section` of the run it ran in,"
+        " its `round` of that part, its `role`, its `duration` in whole seconds, at"
+        " most one of its `words` and `passed`, a pass or a fail, and, on an entry"
+        " that opens a round past the first, its `why`. Pilot stores them as you give"
+        " them and shows them behind the work item's Debrief once your turn ends. A"
+        " second call is refused with the reason, and nothing changes. A call outside"
+        " the limits — an empty debrief or one over 16,000 characters, no entries or"
+        " over 500, an empty section, role, words or why, a section or a why over 120"
+        " characters, a role over 64, words over 4,000, a round under 1, a duration"
+        " under 0, both words and passed, an unknown field — is refused with each"
+        " fault, and nothing is stored. Answers `{entries}`, the number of entries"
+        " stored.",
     ),
 }
 
@@ -1095,9 +1245,19 @@ class TestAScriptsCall:
         assert answer["result"]["isError"] is False
         assert answer["result"]["structuredContent"] == {
             "steps": [
-                {"code": "P1.code", "label": "P1 · the client", "state": "done"},
-                {"code": "P1.review", "label": "P1 · review", "state": "active"},
-                {"code": "test", "label": "Test", "state": "pending"},
+                {
+                    "code": "P1.code",
+                    "label": "P1 · the client",
+                    "state": "done",
+                    "why": None,
+                },
+                {
+                    "code": "P1.review",
+                    "label": "P1 · review",
+                    "state": "active",
+                    "why": None,
+                },
+                {"code": "test", "label": "Test", "state": "pending", "why": None},
             ]
         }
         [(request, _)] = routes.calls

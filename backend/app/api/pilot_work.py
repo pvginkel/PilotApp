@@ -21,9 +21,11 @@ from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.pilot_work import (
     AttachedFilesSchema,
     AttachFileRequestSchema,
-    ProgressSchema,
-    ProgressStepSchema,
+    PublishedProgressSchema,
+    PublishedStepSchema,
+    RegisterDebriefRequestSchema,
     RegisterDocumentRequestSchema,
+    RegisteredDebriefSchema,
     RegisteredDocumentSchema,
     SetProgressRequestSchema,
     SetProgressStepRequestSchema,
@@ -132,7 +134,7 @@ def attach_file(
 @api.validate(
     json=SetProgressRequestSchema,
     resp=SpectreeResponse(
-        HTTP_200=ProgressSchema,
+        HTTP_200=PublishedProgressSchema,
         HTTP_400=ApiErrorResponseSchema,
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
@@ -149,7 +151,8 @@ def set_progress(
     Returns:
         200: The list as it stands
         400: The body is not a list of at most 100 steps, each a code of 1 to
-            64 characters, a label of 1 to 120 and an optional state
+            64 characters, a label of 1 to 120, an optional state and an
+            optional why of 1 to 120
         401: No bearer, or one no session has
         403: The bearer's session is not a work item's, or has no turn running
         409: A code is repeated, nothing changed: the reason
@@ -164,7 +167,7 @@ def set_progress(
 @api.validate(
     json=SetProgressStepRequestSchema,
     resp=SpectreeResponse(
-        HTTP_200=ProgressSchema,
+        HTTP_200=PublishedProgressSchema,
         HTTP_400=ApiErrorResponseSchema,
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
@@ -190,10 +193,49 @@ def set_progress_step(
     return _progress(steps), 200
 
 
+@pilot_work_bp.route("/debrief", methods=["POST"])
+@public
+@api.validate(
+    json=RegisterDebriefRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_201=RegisteredDebriefSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def register_debrief(
+    pilot_work_service: PilotWorkService = Provide[ServiceContainer.pilot_work_service],
+) -> Any:
+    """`register_debrief(debrief, entries)` (F85.5; DB 323 to 329): the
+    session's own work item's debrief and its entries, in the call's order,
+    stored once; no effect.
+
+    Returns:
+        201: The debrief stored: the number of its entries
+        400: The body is not a debrief of 1 to 16,000 characters and 1 to 500
+            entries, each a section of 1 to 120 characters, a round of 1 or
+            more, a role of 1 to 64, a duration of 0 seconds or more, at most
+            one of words of 1 to 4,000 and passed, and an optional why of 1 to
+            120: each fault
+        401: No bearer, or one no session has
+        403: The bearer's session is not a work item's, or has no turn running
+        409: The work item has its debrief already, nothing changed
+    """
+    body = RegisterDebriefRequestSchema.model_validate(request.get_json())
+    entries = pilot_work_service.register_debrief(g.worker, body.debrief, body.entries)
+    answer = RegisteredDebriefSchema(entries=len(entries))
+    return answer.model_dump(mode="json"), 201
+
+
 def _progress(steps: Sequence[ProgressStep]) -> dict[str, Any]:
-    answer = ProgressSchema(
+    answer = PublishedProgressSchema(
         steps=[
-            ProgressStepSchema(code=step.code, label=step.label, state=step.state_code)
+            PublishedStepSchema(
+                code=step.code, label=step.label, state=step.state_code, why=step.why
+            )
             for step in steps
         ]
     )

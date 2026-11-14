@@ -19,7 +19,10 @@ from app.models.reference import (
     ProjectState,
     SessionState,
 )
-from app.schemas.pilot_work import ProgressStepRequestSchema
+from app.schemas.pilot_work import (
+    DebriefEntryRequestSchema,
+    ProgressStepRequestSchema,
+)
 from app.services.container import ServiceContainer
 from app.services.pilot_work_service import Worker
 
@@ -164,6 +167,59 @@ class TestTreeService:
         )
 
         assert tree.hashes(project) == unlisted
+
+    def test_a_work_items_debrief_and_a_steps_why_move_no_path_of_its_folder(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 328: the store's tree carries no debrief, no Debrief Entry and
+        no step's why."""
+        container.document_service().bear_draft(project)
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="3" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(project, run, "Refining the camp")
+        worker = Worker(run.id, project.id, environment.id, run.id)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(
+            worker, [ProgressStepRequestSchema(code="P1.code", label="P1 · code")]
+        )
+        tree = container.tree_service()
+        before = tree.hashes(project)
+
+        pilot_work.set_progress(
+            worker,
+            [
+                ProgressStepRequestSchema(
+                    code="P1.code", label="P1 · code", why="The review found a gap"
+                )
+            ],
+        )
+        pilot_work.register_debrief(
+            worker,
+            "It went well.",
+            [
+                DebriefEntryRequestSchema(
+                    section="P1 · code",
+                    round=1,
+                    role="code-writer",
+                    duration=60,
+                    words="Fine.",
+                )
+            ],
+        )
+
+        assert tree.hashes(project) == before
 
     def test_an_open_projects_folder_holds_every_path(
         self,

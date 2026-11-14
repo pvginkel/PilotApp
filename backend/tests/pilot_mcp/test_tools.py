@@ -1,4 +1,4 @@
-"""`pilot-work`'s tools (F85, ruling D1, F85.3, F85.4) and `pilot-store`'s
+"""`pilot-work`'s tools (F85, ruling D1, F85.3, F85.4, F85.5) and `pilot-store`'s
 (F86) driven through a real MCP client to the API's routes: each one REST call
 under the caller's bearer as it came, its answer the route's, and the route's
 refusal the tool's error, its reason whole. And `pilot-projects`' (F150.5 to
@@ -24,6 +24,7 @@ from app.models import (
     Attachment,
     Block,
     Chat,
+    DebriefEntry,
     Document,
     Environment,
     Item,
@@ -35,6 +36,7 @@ from app.models import (
     UsageReading,
     User,
     WindowShare,
+    Work,
     WriterQuestion,
 )
 from app.models.reference import (
@@ -379,6 +381,8 @@ _PUBLISHED = [
     {"code": "test", "label": "Test"},
 ]
 
+_WHY = "The reviewer found the migration's downgrade left the column"
+
 
 @pytest.mark.anyio
 class TestSetProgress:
@@ -406,10 +410,30 @@ class TestSetProgress:
         assert result.structuredContent == answer.json()
         assert answer.json() == {
             "steps": [
-                {"code": "P1.code", "label": "P1 · the client", "state": "done"},
-                {"code": "test", "label": "Test", "state": "pending"},
+                {
+                    "code": "P1.code",
+                    "label": "P1 · the client",
+                    "state": "done",
+                    "why": None,
+                },
+                {"code": "test", "label": "Test", "state": "pending", "why": None},
             ]
         }
+
+    async def test_a_steps_why_reaches_its_route_and_is_answered(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        """DB 327: a why on any step, sent as given; a step without one sends
+        none."""
+        steps = [_PUBLISHED[0], {**_PUBLISHED[1], "why": _WHY}]
+
+        result = await call(mcp_app, "set_progress", {"steps": steps})
+
+        assert not result.isError
+        [(request, answer)] = routes.calls
+        assert json.loads(request.content) == {"steps": steps}
+        assert result.structuredContent == answer.json()
+        assert [step["why"] for step in answer.json()["steps"]] == [None, _WHY]
 
     async def test_a_repeated_code_is_the_routes_refusal_its_reason_whole(
         self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
@@ -433,6 +457,8 @@ class TestSetProgress:
             [{"code": "test", "label": ""}],
             [{"code": "test", "label": "l" * 121}],
             [{"code": "test", "label": "Test", "state": "failed"}],
+            [{"code": "test", "label": "Test", "why": ""}],
+            [{"code": "test", "label": "Test", "why": "w" * 121}],
             [{"code": f"s{n}", "label": "Step"} for n in range(101)],
             [{"code": "test", "label": "Test", "note": "x"}],
         ],
@@ -442,6 +468,8 @@ class TestSetProgress:
             "empty-label",
             "long-label",
             "state",
+            "empty-why",
+            "long-why",
             "long-list",
             "extra-field",
         ],
@@ -456,6 +484,176 @@ class TestSetProgress:
         result = await call(mcp_app, "set_progress", {"steps": steps})
 
         assert error_text(result).startswith("Error executing tool set_progress: ")
+        assert routes.calls == []
+
+
+_ACCOUNTS = [
+    {
+        "section": "P1 · The client",
+        "round": 1,
+        "role": "code-writer",
+        "duration": 2400,
+        "words": "The client came out cleanly.",
+    },
+    {
+        "section": "P1 · The client",
+        "round": 2,
+        "role": "code-reviewer",
+        "duration": 600,
+        "why": _WHY,
+    },
+    {
+        "section": "Completion check",
+        "round": 1,
+        "role": "sweep",
+        "duration": 0,
+        "passed": True,
+    },
+]
+
+_DEBRIEF = {"debrief": "It went well, if slowly.", "entries": _ACCOUNTS}
+
+
+def _entry(**overrides: object) -> dict[str, object]:
+    return {
+        "section": "P1 · The client",
+        "round": 1,
+        "role": "code-writer",
+        "duration": 60,
+        **overrides,
+    }
+
+
+@pytest.mark.anyio
+class TestRegisterDebrief:
+    async def test_the_debrief_is_stored_through_its_route_naming_no_call(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        session: DbSession,
+    ) -> None:
+        """The call records no effect, so its tool-use id goes nowhere."""
+        result = await call(
+            mcp_app,
+            "register_debrief",
+            _DEBRIEF,
+            meta={TOOL_USE_ID_META: "toolu_01ABC"},
+        )
+
+        assert not result.isError
+        [(request, answer)] = routes.calls
+        assert (request.method, str(request.url)) == (
+            "POST",
+            f"{API_URL}/tools/pilot-work/debrief",
+        )
+        assert request.headers["authorization"] == BEARER["Authorization"]
+        assert "tool-use-id" not in request.headers
+        assert json.loads(request.content) == _DEBRIEF
+        assert answer.status_code == 201
+        assert result.structuredContent == answer.json() == {"entries": 3}
+        session.expire_all()
+        assert session.get_one(Work, worker.id).debrief == _DEBRIEF["debrief"]
+        assert [
+            (entry.position, entry.role, entry.words, entry.passed, entry.why)
+            for entry in session.scalars(
+                select(DebriefEntry).order_by(DebriefEntry.position)
+            )
+        ] == [
+            (1, "code-writer", "The client came out cleanly.", None, None),
+            (2, "code-reviewer", None, None, _WHY),
+            (3, "sweep", None, True, None),
+        ]
+
+    async def test_a_second_call_is_the_routes_refusal_its_reason_whole(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        async with mcp_session(mcp_app) as (mcp, _):
+            await mcp.call_tool("register_debrief", _DEBRIEF)
+            result = await mcp.call_tool("register_debrief", _DEBRIEF)
+
+        assert routes.calls[-1][1].status_code == 409
+        assert error_text(result) == _refusal(routes, "register_debrief")
+        assert error_text(result) == (
+            f"Error executing tool register_debrief: Cannot register the debrief"
+            f" of work item {worker.id} because it has its debrief already"
+        )
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"debrief": "", "entries": [_entry()]},
+            {"debrief": "d" * 16_001, "entries": [_entry()]},
+            {"debrief": "Fine.", "entries": []},
+            {"debrief": "Fine.", "entries": [_entry()] * 501},
+            {"debrief": "Fine.", "entries": [_entry(section="")]},
+            {"debrief": "Fine.", "entries": [_entry(section="s" * 121)]},
+            {"debrief": "Fine.", "entries": [_entry(round=0)]},
+            {"debrief": "Fine.", "entries": [_entry(round="2")]},
+            {"debrief": "Fine.", "entries": [_entry(role="")]},
+            {"debrief": "Fine.", "entries": [_entry(role="r" * 65)]},
+            {"debrief": "Fine.", "entries": [_entry(duration=-1)]},
+            {"debrief": "Fine.", "entries": [_entry(words="")]},
+            {"debrief": "Fine.", "entries": [_entry(words="w" * 4_001)]},
+            {"debrief": "Fine.", "entries": [_entry(passed="yes")]},
+            {"debrief": "Fine.", "entries": [_entry(words="Fine.", passed=True)]},
+            {"debrief": "Fine.", "entries": [_entry(why="")]},
+            {"debrief": "Fine.", "entries": [_entry(why="w" * 121)]},
+            {"debrief": "Fine.", "entries": [_entry(verdict="good")]},
+        ],
+        ids=[
+            "empty-debrief",
+            "long-debrief",
+            "no-entries",
+            "long-entries",
+            "empty-section",
+            "long-section",
+            "round-0",
+            "round-text",
+            "empty-role",
+            "long-role",
+            "negative-duration",
+            "empty-words",
+            "long-words",
+            "passed-text",
+            "words-and-passed",
+            "empty-why",
+            "long-why",
+            "extra-field",
+        ],
+    )
+    async def test_arguments_outside_the_limits_are_refused_without_calling_the_api(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        arguments: dict[str, object],
+    ) -> None:
+        result = await call(mcp_app, "register_debrief", arguments)
+
+        assert error_text(result).startswith("Error executing tool register_debrief: ")
+        assert routes.calls == []
+
+    async def test_a_call_with_faults_names_each(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        """DB 325: refused with the reason, each fault named, nothing stored."""
+        arguments = {
+            "debrief": "",
+            "entries": [
+                _entry(),
+                _entry(role="r" * 65, duration=-1),
+                _entry(words="Fine.", passed=True),
+            ],
+        }
+
+        result = await call(mcp_app, "register_debrief", arguments)
+
+        text = error_text(result)
+        assert "4 validation errors" in text
+        for fault in ("debrief", "entries.1.role", "entries.1.duration", "entries.2"):
+            assert f"\n{fault}\n" in text
+        assert "an entry gives at most one of words and passed" in text
         assert routes.calls == []
 
 
@@ -483,6 +681,7 @@ class TestSetProgressStep:
             "code": "test",
             "label": "Test",
             "state": "active",
+            "why": None,
         }
 
     async def test_a_code_not_on_the_list_is_the_routes_refusal(

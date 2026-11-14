@@ -7101,6 +7101,85 @@
         "title": "ProjectLookupQuerySchema",
         "type": "object"
       },
+      "PublishedProgressSchema.ce33d8b": {
+        "description": "The work item's list of steps as it stands, as its worker's call\nanswers it.",
+        "properties": {
+          "steps": {
+            "description": "Its steps, in order",
+            "items": {
+              "$ref": "#/components/schemas/PublishedProgressSchema.ce33d8b.PublishedStepSchema"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "title": "PublishedProgressSchema",
+        "type": "object"
+      },
+      "PublishedProgressSchema.ce33d8b.ProgressState": {
+        "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
+        "enum": [
+          "pending",
+          "active",
+          "done"
+        ],
+        "title": "ProgressState",
+        "type": "string"
+      },
+      "PublishedProgressSchema.ce33d8b.PublishedStepSchema": {
+        "description": "A step of the work item's list, as its worker's call answers it.",
+        "properties": {
+          "code": {
+            "description": "The run's name for the step",
+            "examples": [
+              "P3.review-2"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "description": "The step's words on the tile",
+            "examples": [
+              "P3 · second review"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PublishedProgressSchema.ce33d8b.ProgressState",
+            "description": "Where it stands",
+            "examples": [
+              "active"
+            ]
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The short line under its label; none where not given",
+            "examples": [
+              "The reviewer found the migration's downgrade left the column"
+            ],
+            "title": "Why"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "state",
+          "why"
+        ],
+        "title": "PublishedStepSchema",
+        "type": "object"
+      },
       "PushEndpointQuerySchema.efd40b8": {
         "description": "The browser's subscription to delete, by its endpoint.",
         "properties": {
@@ -7345,6 +7424,144 @@
         "title": "RecordedSchema",
         "type": "object"
       },
+      "RegisterDebriefRequestSchema.ce33d8b": {
+        "additionalProperties": false,
+        "description": "The work item's debrief, to store once.",
+        "properties": {
+          "debrief": {
+            "description": "The session's own account of how the run went",
+            "examples": [
+              "It went well, if slowly: the second review was worth it."
+            ],
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Debrief",
+            "type": "string"
+          },
+          "entries": {
+            "description": "The run's accounts, in order",
+            "items": {
+              "$ref": "#/components/schemas/RegisterDebriefRequestSchema.ce33d8b.DebriefEntryRequestSchema"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "debrief",
+          "entries"
+        ],
+        "title": "RegisterDebriefRequestSchema",
+        "type": "object"
+      },
+      "RegisterDebriefRequestSchema.ce33d8b.DebriefEntryRequestSchema": {
+        "additionalProperties": false,
+        "description": "One account of the debrief, as the call gives it: every value the\nrun's, stored and shown as given (DB 325, 326).",
+        "properties": {
+          "duration": {
+            "description": "The time its turn took, in whole seconds",
+            "examples": [
+              540
+            ],
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Duration",
+            "type": "integer"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A pass or a fail in place of words; none with `words`",
+            "examples": [
+              false
+            ],
+            "title": "Passed"
+          },
+          "role": {
+            "description": "Whose account it is",
+            "examples": [
+              "code-reviewer"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "round": {
+            "description": "Its round of that part, 1 or more",
+            "examples": [
+              2
+            ],
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Round",
+            "type": "integer"
+          },
+          "section": {
+            "description": "The name of the part of the run it ran in",
+            "examples": [
+              "P3 · The client"
+            ],
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Section",
+            "type": "string"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why the round it opens was needed",
+            "examples": [
+              "The reviewer found the migration's downgrade left the column"
+            ],
+            "title": "Why"
+          },
+          "words": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The account, in its own words; none with `passed`",
+            "examples": [
+              "The review went quickly; one finding, and a fair one."
+            ],
+            "title": "Words"
+          }
+        },
+        "required": [
+          "section",
+          "round",
+          "role",
+          "duration"
+        ],
+        "title": "DebriefEntryRequestSchema",
+        "type": "object"
+      },
       "RegisterDocumentRequestSchema.ce33d8b": {
         "additionalProperties": false,
         "description": "A document a worker wrote, to register.",
@@ -7363,6 +7580,24 @@
           "path"
         ],
         "title": "RegisterDocumentRequestSchema",
+        "type": "object"
+      },
+      "RegisteredDebriefSchema.ce33d8b": {
+        "description": "The debrief stored.",
+        "properties": {
+          "entries": {
+            "description": "The number of its entries",
+            "examples": [
+              36
+            ],
+            "title": "Entries",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "RegisteredDebriefSchema",
         "type": "object"
       },
       "RegisteredDocumentSchema.ce33d8b": {
@@ -7982,6 +8217,24 @@
             "examples": [
               "active"
             ]
+          },
+          "why": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A short line shown under the step's label; without it, the step has none",
+            "examples": [
+              "The reviewer found the migration's downgrade left the column"
+            ],
+            "title": "Why"
           }
         },
         "required": [
@@ -21125,6 +21378,77 @@
         "tags": []
       }
     },
+    "/tools/pilot-work/debrief": {
+      "post": {
+        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120: each fault     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: The work item has its debrief already, nothing changed",
+        "operationId": "post__tools_pilot-work_debrief",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDebriefRequestSchema.ce33d8b"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredDebriefSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`register_debrief(debrief, entries)` (F85.5; DB 323 to 329): the session's own work item's debrief and its entries, in the call's order, stored once; no effect.",
+        "tags": []
+      }
+    },
     "/tools/pilot-work/documents": {
       "post": {
         "description": "Returns:     200: The document the session registered from the path already     201: The document, minted     400: The body is not a path     401: No bearer, or one no session has     403: The bearer's session is not a work item's     409: The file cannot be registered, nothing minted: the reason, the         text's faults each with its line     502: The controller did not answer, or refused for a reason of its own",
@@ -21236,7 +21560,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProgressSchema.ce33d8b"
+                  "$ref": "#/components/schemas/PublishedProgressSchema.ce33d8b"
                 }
               }
             },
@@ -21287,7 +21611,7 @@
         "tags": []
       },
       "put": {
-        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120 and an optional state     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: A code is repeated, nothing changed: the reason",
+        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120, an optional state and an         optional why of 1 to 120     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: A code is repeated, nothing changed: the reason",
         "operationId": "put__tools_pilot-work_progress",
         "parameters": [],
         "requestBody": {
@@ -21305,7 +21629,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProgressSchema.ce33d8b"
+                  "$ref": "#/components/schemas/PublishedProgressSchema.ce33d8b"
                 }
               }
             },

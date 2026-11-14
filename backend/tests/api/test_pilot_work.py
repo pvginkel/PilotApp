@@ -1,7 +1,8 @@
 """`pilot-work`'s routes (TD §4.5, F85): the REST calls Pilot's MCP server
 makes for a worker session's tools, under the session's bearer, outside `/api/`
 (review 2), pinned as the surface they are, a work item's progress among them
-(F85.3, F85.4)."""
+(F85.3, F85.4), a step's why with it (DB 327), and its debrief (F85.5; DB 323
+to 329)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.models import (
     Attachment,
+    DebriefEntry,
     Document,
     Effect,
     Environment,
@@ -23,6 +25,7 @@ from app.models import (
     ProgressStep,
     Project,
     Turn,
+    Work,
 )
 from app.models.reference import ProgressState, SessionState
 from app.services.container import ServiceContainer
@@ -36,6 +39,8 @@ DOCUMENTS = "/tools/pilot-work/documents"
 ATTACHMENTS = "/tools/pilot-work/attachments"
 
 PROGRESS = "/tools/pilot-work/progress"
+
+DEBRIEF = "/tools/pilot-work/debrief"
 
 TOKEN = "worker-token"
 
@@ -79,7 +84,7 @@ def _file(fake_controller: ServedFakeController, environment: Environment) -> No
 
 
 class TestPilotWorkRoutes:
-    def test_the_surface_is_four_routes_outside_the_api(self, app: Flask) -> None:
+    def test_the_surface_is_five_routes_outside_the_api(self, app: Flask) -> None:
         routes = sorted(
             (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
             for rule in app.url_map.iter_rules()
@@ -88,6 +93,7 @@ class TestPilotWorkRoutes:
 
         assert routes == [
             (ATTACHMENTS, ["POST"]),
+            (DEBRIEF, ["POST"]),
             (DOCUMENTS, ["POST"]),
             (PROGRESS, ["PATCH"]),
             (PROGRESS, ["PUT"]),
@@ -521,11 +527,13 @@ _PUBLISHED = {
 
 _ANSWERED = {
     "steps": [
-        {"code": "P1.code", "label": "P1 · the client", "state": "done"},
-        {"code": "P1.review", "label": "P1 · review", "state": "active"},
-        {"code": "test", "label": "Test", "state": "pending"},
+        {"code": "P1.code", "label": "P1 · the client", "state": "done", "why": None},
+        {"code": "P1.review", "label": "P1 · review", "state": "active", "why": None},
+        {"code": "test", "label": "Test", "state": "pending", "why": None},
     ]
 }
+
+_WHY = "The reviewer found the migration's downgrade left the column"
 
 
 class TestSetProgress:
@@ -568,6 +576,42 @@ class TestSetProgress:
         assert response.get_json() == {"steps": []}
         assert _steps(session, run) == []
 
+    def test_a_steps_why_stands_as_the_last_call_gave_it(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 327: taken on any step, answered with the list, and a step given
+        without one has none."""
+        run = _session(session, container, project, environment)
+        given = {
+            "steps": [
+                {"code": "P1.code", "label": "P1 · code", "state": "done"},
+                {"code": "P1.code-2", "label": "P1 · code 2", "why": _WHY},
+            ]
+        }
+
+        published = client.put(PROGRESS, json=given, headers=_bearer())
+        given["steps"][1].pop("why")
+        republished = client.put(PROGRESS, json=given, headers=_bearer())
+
+        assert published.status_code == 200
+        assert [step["why"] for step in published.get_json()["steps"]] == [None, _WHY]
+        assert republished.status_code == 200
+        assert [step["why"] for step in republished.get_json()["steps"]] == [
+            None,
+            None,
+        ]
+        assert [
+            step.why
+            for step in session.scalars(
+                select(ProgressStep).where(ProgressStep.work_id == run.id)
+            )
+        ] == [None, None]
+
     @pytest.mark.parametrize(
         "body",
         [
@@ -577,6 +621,8 @@ class TestSetProgress:
             {"steps": [{"code": "test", "label": ""}]},
             {"steps": [{"code": "test", "label": "l" * 121}]},
             {"steps": [{"code": "test", "label": "Test", "state": "failed"}]},
+            {"steps": [{"code": "test", "label": "Test", "why": ""}]},
+            {"steps": [{"code": "test", "label": "Test", "why": "w" * 121}]},
             {"steps": [{"code": f"s{n}", "label": "Step"} for n in range(101)]},
             {"steps": [{"code": "test", "label": "Test", "note": "x"}]},
         ],
@@ -587,6 +633,8 @@ class TestSetProgress:
             "empty-label",
             "long-label",
             "state",
+            "empty-why",
+            "long-why",
             "long-list",
             "extra-field",
         ],
@@ -617,7 +665,10 @@ class TestSetProgress:
         environment: Environment,
     ) -> None:
         run = _session(session, container, project, environment)
-        steps = [{"code": f"{n:064d}", "label": "l" * 120} for n in range(100)]
+        steps = [
+            {"code": f"{n:064d}", "label": "l" * 120, "why": "w" * 120}
+            for n in range(100)
+        ]
 
         response = client.put(PROGRESS, json={"steps": steps}, headers=_bearer())
 
@@ -680,6 +731,299 @@ class TestSetProgress:
             f"Cannot call pilot-work because session {run.id} {error}"
         )
         assert session.scalars(select(ProgressStep)).all() == []
+
+
+_DEBRIEF = {
+    "debrief": "It went well, if slowly: the second review was worth it.",
+    "entries": [
+        {
+            "section": "P1 · The client",
+            "round": 1,
+            "role": "code-writer",
+            "duration": 2400,
+            "words": "The client came out cleanly.",
+        },
+        {
+            "section": "P1 · The client",
+            "round": 2,
+            "role": "code-writer",
+            "duration": 600,
+            "why": _WHY,
+        },
+        {
+            "section": "Completion check",
+            "round": 1,
+            "role": "sweep",
+            "duration": 0,
+            "passed": False,
+        },
+    ],
+}
+
+_STORED = [
+    (
+        1,
+        "P1 · The client",
+        1,
+        "code-writer",
+        2400,
+        "The client came out cleanly.",
+        None,
+        None,
+    ),
+    (2, "P1 · The client", 2, "code-writer", 600, None, None, _WHY),
+    (3, "Completion check", 1, "sweep", 0, None, False, None),
+]
+
+
+def _entries(session: DbSession, run: models.Session) -> list[tuple[object, ...]]:
+    return [
+        (
+            entry.position,
+            entry.section,
+            entry.round,
+            entry.role,
+            entry.duration,
+            entry.words,
+            entry.passed,
+            entry.why,
+        )
+        for entry in session.scalars(
+            select(DebriefEntry)
+            .where(DebriefEntry.work_id == run.id)
+            .order_by(DebriefEntry.position)
+        )
+    ]
+
+
+def _debriefed(session: DbSession, run: models.Session) -> str | None:
+    session.expire_all()
+    return session.get_one(Work, run.id).debrief
+
+
+def _entry(**overrides: object) -> dict[str, object]:
+    """An entry inside every limit, with `overrides`; one given None goes."""
+    entry: dict[str, object] = {
+        "section": "P1 · The client",
+        "round": 1,
+        "role": "code-writer",
+        "duration": 60,
+    }
+    entry.update(overrides)
+    return {name: value for name, value in entry.items() if value is not None}
+
+
+class TestRegisterDebrief:
+    """`POST /tools/pilot-work/debrief`: `register_debrief(debrief, entries)`."""
+
+    def test_the_debrief_stored_is_201_with_the_number_of_its_entries(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+
+        response = client.post(DEBRIEF, json=_DEBRIEF, headers=_bearer())
+
+        assert response.status_code == 201
+        assert response.get_json() == {"entries": 3}
+        assert _debriefed(session, run) == _DEBRIEF["debrief"]
+        assert _entries(session, run) == _STORED
+
+    def test_a_second_call_is_409_with_the_reason_and_changes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 324: a work item is debriefed once."""
+        run = _session(session, container, project, environment)
+        client.post(DEBRIEF, json=_DEBRIEF, headers=_bearer())
+
+        response = client.post(
+            DEBRIEF,
+            json={"debrief": "Another account.", "entries": [_entry()]},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot register the debrief of work item {run.id} because it has"
+            " its debrief already"
+        )
+        assert _debriefed(session, run) == _DEBRIEF["debrief"]
+        assert _entries(session, run) == _STORED
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"entries": [_entry()]},
+            {"debrief": "", "entries": [_entry()]},
+            {"debrief": "d" * 16_001, "entries": [_entry()]},
+            {"debrief": "Fine."},
+            {"debrief": "Fine.", "entries": []},
+            {"debrief": "Fine.", "entries": [_entry()] * 501},
+            {"debrief": "Fine.", "entries": [_entry(section="")]},
+            {"debrief": "Fine.", "entries": [_entry(section="s" * 121)]},
+            {"debrief": "Fine.", "entries": [_entry(round=0)]},
+            {"debrief": "Fine.", "entries": [_entry(round=1.5)]},
+            {"debrief": "Fine.", "entries": [_entry(round="2")]},
+            {"debrief": "Fine.", "entries": [_entry(round=True)]},
+            {"debrief": "Fine.", "entries": [_entry(role="")]},
+            {"debrief": "Fine.", "entries": [_entry(role="r" * 65)]},
+            {"debrief": "Fine.", "entries": [_entry(duration=-1)]},
+            {"debrief": "Fine.", "entries": [_entry(duration=2**31)]},
+            {"debrief": "Fine.", "entries": [_entry(words="")]},
+            {"debrief": "Fine.", "entries": [_entry(words="w" * 4_001)]},
+            {"debrief": "Fine.", "entries": [_entry(passed="yes")]},
+            {"debrief": "Fine.", "entries": [_entry(words="Fine.", passed=True)]},
+            {"debrief": "Fine.", "entries": [_entry(why="")]},
+            {"debrief": "Fine.", "entries": [_entry(why="w" * 121)]},
+            {"debrief": "Fine.", "entries": [_entry(verdict="good")]},
+            {"debrief": "Fine.", "entries": [_entry()], "verdict": "good"},
+        ],
+        ids=[
+            "no-debrief",
+            "empty-debrief",
+            "long-debrief",
+            "no-entries",
+            "empty-entries",
+            "long-entries",
+            "empty-section",
+            "long-section",
+            "round-0",
+            "round-fraction",
+            "round-text",
+            "round-bool",
+            "empty-role",
+            "long-role",
+            "negative-duration",
+            "huge-duration",
+            "empty-words",
+            "long-words",
+            "passed-text",
+            "words-and-passed",
+            "empty-why",
+            "long-why",
+            "entry-extra-field",
+            "extra-field",
+        ],
+    )
+    def test_a_body_outside_the_limits_is_400_and_stores_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, object],
+    ) -> None:
+        run = _session(session, container, project, environment)
+
+        response = client.post(DEBRIEF, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+        assert _debriefed(session, run) is None
+        assert _entries(session, run) == []
+
+    def test_a_body_with_faults_names_each(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 325: refused with the reason, each fault named."""
+        _session(session, container, project, environment)
+        body = {
+            "debrief": "",
+            "entries": [
+                _entry(),
+                _entry(role="r" * 65, duration=-1),
+                _entry(words="Fine.", passed=True),
+            ],
+        }
+
+        response = client.post(DEBRIEF, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+        assert [fault["loc"] for fault in response.get_json()] == [
+            ["debrief"],
+            ["entries", 1, "role"],
+            ["entries", 1, "duration"],
+            ["entries", 2],
+        ]
+
+    def test_the_limits_themselves_are_taken(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        longest = _entry(
+            section="s" * 120,
+            role="r" * 64,
+            duration=2**31 - 1,
+            words="w" * 4_000,
+            why="w" * 120,
+        )
+        least = _entry(duration=0, passed=True)
+        body = {"debrief": "d" * 16_000, "entries": [longest] * 499 + [least]}
+
+        response = client.post(DEBRIEF, json=body, headers=_bearer())
+
+        assert response.status_code == 201
+        assert response.get_json() == {"entries": 500}
+        assert len(_entries(session, run)) == 500
+
+    def test_no_bearer_is_401(self, client: FlaskClient) -> None:
+        response = client.post(DEBRIEF, json=_DEBRIEF)
+
+        assert response.status_code == 401
+
+    @pytest.mark.parametrize(
+        ("kind", "state", "error"),
+        [
+            ("chat", SessionState.RUNNING, "is a chat session, not a work item's"),
+            ("job", SessionState.RUNNING, "is a job session, not a work item's"),
+            ("work", SessionState.IDLE, "has no turn running"),
+        ],
+        ids=["chat", "job", "turn-ended"],
+    )
+    def test_a_session_that_is_not_a_running_work_items_is_403_and_stores_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        kind: str,
+        state: SessionState,
+        error: str,
+    ) -> None:
+        """DB 323: only a work item's own Session gives its debrief, while
+        its turn runs; a job gives none."""
+        run = _session(session, container, project, environment, kind, state)
+
+        response = client.post(DEBRIEF, json=_DEBRIEF, headers=_bearer())
+
+        assert response.status_code == 403
+        assert response.get_json()["error"] == (
+            f"Cannot call pilot-work because session {run.id} {error}"
+        )
+        assert session.scalars(select(DebriefEntry)).all() == []
+        assert session.scalars(select(Work.debrief)).all() == [None] * len(
+            session.scalars(select(Work.id)).all()
+        )
 
 
 class TestSetProgressStep:
@@ -789,8 +1133,9 @@ class TestSetProgressStep:
 
 
 class TestTheProgressRecordsNothing:
-    """Neither progress call records an Effect or a line of the server's in
-    the session's records, its turn in flight (F145.4; DB 289)."""
+    """Neither progress call nor the debrief's records an Effect or a line of
+    the server's in the session's records, its turn in flight (F145.4; DB
+    289, 328)."""
 
     def test_neither_call_writes_an_effect_or_a_record(
         self,
@@ -820,6 +1165,33 @@ class TestTheProgressRecordsNothing:
         )
 
         assert (published.status_code, moved.status_code) == (200, 200)
+        assert read_records(session, run.id, limit=10) == []
+        assert session.scalars(select(Effect)).all() == []
+
+    def test_the_debrief_writes_no_effect_or_record(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        session.add(
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Refine the camp.",
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+
+        response = client.post(
+            DEBRIEF, json=_DEBRIEF, headers=_bearer() | {"Tool-Use-Id": "toolu_01ABC"}
+        )
+
+        assert response.status_code == 201
         assert read_records(session, run.id, limit=10) == []
         assert session.scalars(select(Effect)).all() == []
 
