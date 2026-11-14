@@ -3,13 +3,14 @@
 Pilot hands its own MCP server to every headless session it creates, one of two surfaces by the
 session's kind. A work item's session gets `pilot-work`: `register_document`, a decision document
 it wrote, put to a person on the project's timeline; `attach_file`, the material that backs one,
-copied into the record; and `set_progress` and `set_progress_step`, the steps its run goes through,
-shown on its tile. The brain's sessions, a project's chat and the server's jobs, get
+copied into the record; `set_progress` and `set_progress_step`, the steps its run goes through,
+shown on its tile; and `register_debrief`, its run's debrief, shown behind the done work item's
+Debrief. The brain's sessions, a project's chat and the server's jobs, get
 `pilot-store`, the one door to the record beyond the project's folder: `add_item`, `attach_file`,
 `answer`, `mark`, `cancel_ask`, `stop_work`, `finish` and `ask_writer`. Each tool is one REST call to the backend
 under the session's bearer, which names the session's project, environment and work item, so the
 tools take none of them, and each call that changed the record is its effect, a line in the
-session's records where the call ran, but for the steps, which write none. What becomes of a registered document, its read at the run's
+session's records where the call ran, but for the steps and the debrief, which write none. What becomes of a registered document, its read at the run's
 end, its write-back and the run's continuation, is [`round-trip.md`](round-trip.md)'s; the chat
 the brain's tools serve is [`chats.md`](chats.md)'s.
 
@@ -43,7 +44,8 @@ and ask the session to load the skill `kubecoder:pilot-usage` before it uses the
   carries it to its route, which decides. A request to `/mcp/projects` meets the projects surface's
   door before it ([below](#the-projects-surface)).
 - **The tools** (`tools.py`) refuse what their routes would refuse, an empty path, a `to` that is
-  not a uuid, a step whose code or label is empty or too long, or too many steps, before calling.
+  not a uuid, a step whose code, label or why is empty or too long, too many steps, or a debrief
+outside its limits, before calling.
   Each then makes one call to `<PILOT_MCP_API_URL>/tools/pilot-work/<route>` or `…/tools/pilot-store/<route>`
   (`api.py`, `PilotWorkApi` and `PilotStoreApi`), a `POST`, or the steps' `PUT` and `PATCH`, with the
   call's `Authorization` header as it came, and the call's tool-use id, which Claude Code sends with
@@ -97,7 +99,8 @@ session alike, at the endpoint of the surface the create's scope names (`scoped_
 A create whose scope names no surface, a finished project's chat's ([`chats.md`](chats.md)), is
 handed neither variable nor the entry, so no bearer reaches either surface's routes from it; a
 token's hash is minted for it all the same. A worker's tools are `mcp__pilot__register_document`,
-`mcp__pilot__attach_file`, `mcp__pilot__set_progress` and `mcp__pilot__set_progress_step`, the
+`mcp__pilot__attach_file`, `mcp__pilot__set_progress`, `mcp__pilot__set_progress_step` and
+`mcp__pilot__register_debrief`, the
 brain's `mcp__pilot__add_item` and the rest. The token's
 sha256 is the Session's `token_hash`, written in the transaction that records the create's
 controller session, so a bearer resolves to the Session whose controller session carries it; a
@@ -188,28 +191,56 @@ answers `[]`. A call that attached is the effect "Attached · <title>" for one f
 
 ### `set_progress(steps)` and `set_progress_step(code, state)`
 
-The session's own work item's list of steps ([`work.md`](work.md)), each `{code, label, state}`:
-`code` the run's name for the step, unique in the list, `label` its words on the tile, `state`
-`pending`, `active` or `done`.
+The session's own work item's list of steps ([`work.md`](work.md)), each `{code, label, state,
+why}`: `code` the run's name for the step, unique in the list, `label` its words on the tile,
+`state` `pending`, `active` or `done`, and `why`, a short line shown under the label in the
+popover, which a run gives the step that opens a repeat round to say why the round before did not
+settle it, null where it gave none.
 
-- **`PUT /tools/pilot-work/progress`** `{steps: [{code, label, state?}]}` replaces the list, in the
-  call's order: a code already on it keeps its row, and its state where its step gives none; a new
-  code starts `pending`, or in the state it gives; a code left out goes; and `[]` removes the
-  list.
+- **`PUT /tools/pilot-work/progress`** `{steps: [{code, label, state?, why?}]}` replaces the list,
+  in the call's order: a code already on it keeps its row, and its state where its step gives
+  none; a new code starts `pending`, or in the state it gives; a code left out goes; and `[]`
+  removes the list. Each step's label and why are as the call gives them, so a step given without
+  a why has none, whatever it had.
 - **`PATCH /tools/pilot-work/progress`** `{code, state}` moves one step, every step keeping its
   place; a code not on the list is a `404` "Progress step <code> was not found".
 
 Both answer `200` `{steps}`, the list as it stands, in order. A body outside the limits, an empty
-code or label, a code over 64 characters, a label over 120, a list over 100 steps
-(`MAX_STEP_CODE`, `MAX_STEP_LABEL` and `MAX_STEPS` in `backend/app/schemas/pilot_work.py`, which
-`pilot_mcp/api.py` mirrors), or a state outside the three, is a `400`, and a repeated code a
-`409`, nothing changed. The server's clock stamps a step's start when it first goes `active` or
+code, label or why, a code over 64 characters, a label or a why over 120, a list over 100 steps
+(`MAX_STEP_CODE`, `MAX_STEP_LABEL`, `MAX_STEP_WHY` and `MAX_STEPS` in
+`backend/app/schemas/pilot_work.py`, which `pilot_mcp/api.py` mirrors), a state outside the three
+or a field the step does not have, is a `400`, and a repeated code a `409`, nothing changed. The server's clock stamps a step's start when it first goes `active` or
 `done`, never changed after, and its end each time it goes `done`, cleared when it leaves `done`; a
 step set to the state it is in is left as it is. Each call holds the Session's row, `FOR NO KEY
 UPDATE`, and refuses with the gate's `403` unless its turn still runs, so two calls on one list,
 a script's and the agent's, are served one after the other, each answering the list its own change
-left. No call writes an effect. One that changed the steps' codes, labels, states or order moves the
-work item's status ([`work.md`](work.md)); one that changed none of them sends nothing.
+left. No call writes an effect. One that changed the steps' codes, labels, whys, states or order
+moves the work item's status ([`work.md`](work.md)); one that changed none of them sends nothing.
+
+### `register_debrief(debrief, entries)`
+
+The session's own work item's debrief ([`work.md`](work.md#its-debrief)), handed over once, before
+its turn ends: `debrief`, the stage session's own account of how the run went, and `entries`, every
+account of the run in order, each `{section, round, role, duration, words?, passed?, why?}`: the
+name of the part of the run it ran in, its round of that part, whose account it is, its turn's time
+in whole seconds, at most one of its words and `passed`, a pass or a fail in their place, and, on an
+entry that opens a round past the first, that round's why. Every value is the workflow's: Pilot
+stores it as given and shows it as given, and reads nothing of the workflow's shape from it (D159).
+
+**`POST /tools/pilot-work/debrief`** `{debrief, entries}` answers `201` `{entries}`, the number
+stored, the entries numbered from 1 in the call's order (`PilotWorkService.register_debrief`). A
+body outside the limits is a `400` naming each fault, nothing stored: a debrief empty, blank or over
+16,000 characters; no entries or over 500; an empty section, role, words or why; a section or a why
+over 120 characters, a role over 64, words over 4,000; a round under 1 or a duration under 0, or
+either not an integer, or a `passed` that is not a boolean; both words and `passed`; a field the
+call or an entry does not have (`MAX_DEBRIEF` to `MAX_ENTRY_NUMBER` in
+`backend/app/schemas/pilot_work.py`, which `pilot_mcp/api.py` mirrors). A second call is a `409`,
+"it has its debrief already", nothing changed. The call holds the Session's row as the steps' calls
+do and refuses with the gate's `403` unless its turn still runs, so a second call made at once
+waits for the first and is refused. It writes no effect and no line in the session's records, moves
+nothing and sends nothing: the work item shows its debrief once its turn has ended it done
+([`work.md`](work.md)), and the store's tree carries none of it ([`projection.md`](projection.md)).
+The tool sends no tool-use id, since no effect needs it.
 
 ## The brain's routes
 
@@ -461,14 +492,15 @@ and the tree's routes `tests/api/test_tree.py` and `tests/services/test_tree_rea
 services that inject; the suite's default settings set no URL, so other creates carry neither.
 `TestAScriptsCall` (`tests/pilot_mcp/test_server.py`) pins a script's lone `tools/call` as the
 transport admits it. The routes are `tests/api/test_pilot_work.py`, whose
-`test_the_surface_is_four_routes_outside_the_api` holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
+`test_the_surface_is_five_routes_outside_the_api` holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
 `tests/api/test_pilot_store.py`, whose `test_the_surface_is_eight_routes_outside_the_api` holds
 its blueprint's rules, and `tests/services/test_pilot_store_service.py`, each tool's served schema
 `STORE_SURFACE` in `tests/pilot_mcp/test_server.py`, the scope
 `tests/services/test_session_scope.py`, the effects `tests/services/test_effect_service.py`; the
 copies `tests/engine/test_attachments.py`. The fake controller serves the file routes
 ([`controller.md`](controller.md)), and the record's testing routes `POST
-/api/testing/items/<id>/registrations`, `…/worker-attachments` and `…/progress` register a
-document, attach a file and replace the list of steps as the worker's tools do, and `…/writer-questions` asks a document's writer as the pass does
+/api/testing/items/<id>/registrations`, `…/worker-attachments`, `…/progress` and `…/debrief`
+register a document, attach a file, replace the list of steps and give the debrief as the worker's
+tools do, and `…/writer-questions` asks a document's writer as the pass does
 ([`projects.md`](projects.md)). `frontend/tests/infrastructure/nginx.spec.ts` pins that the UI's
 nginx forwards no path under `/tools/`, whatever its extension.

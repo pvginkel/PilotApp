@@ -79,8 +79,8 @@ The title and the stored type do not travel on the stream: the timeline's `attac
 ## What opens
 
 `Overlay` (`components/overlay/overlay.tsx`) draws what a project opens: a document, an attachment,
-the handbook and the project document, a work item's session log ([`work.md`](work.md)) and, on a
-phone, the item alone ([`timeline.md`](timeline.md)). Its head holds the titles and, once what it
+the handbook and the project document, a work item's session log, its debrief and its full
+debrief ([`work.md`](work.md)) and, on a phone, the item alone ([`timeline.md`](timeline.md)). Its head holds the titles and, once what it
 shows is read, its buttons: Pilot's job on it and its Undo where it has them, then Discuss, quoting
 it ([`chats.md`](chats.md)). The head stands at its top however tall it is, its buttons level with
 the title's first line, the title at weight 600. Under it stand the strip where what it shows has
@@ -131,7 +131,8 @@ included, shows its timeline, the line beside it (D151).
 
 **The session log's popover.** Off a phone a work item's session log is the Overlay's popover, over
 the tab showing, the timeline or a document's, which its cross, Esc and a press outside it close
-([`work.md`](work.md)).
+([`work.md`](work.md)). A done work item's debrief opens in the same popover, and its full debrief
+in a taller one (`tall`), at most 640px high, its head's arrow back to the debrief (`back`).
 
 **On a phone, a view** pushed over the tabs ([`projects.md`](projects.md) has the views and Back):
 the whole screen under the gold bar, over the project's head and the tabs, with no backdrop,

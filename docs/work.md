@@ -68,7 +68,10 @@ for the live event:
   ([`usage.md`](usage.md)): hard-stopped, `stopped`; halted or paused at its turn's end, `idle` and
   not done; or at the quota wall, `failed`;
 - `progress`: the steps its run published ([below](#its-progress)), in order, each `{code, label,
-  state}`; empty while it has published none, once it emptied the list, and always for a job.
+  state, why}`; empty while it has published none, once it emptied the list, and always for a job;
+- `debriefed`: whether it is done and its session gave its debrief ([below](#its-debrief)), which
+  the Debrief on its done line opens; false while it is open, for a run that gave none and for a
+  job. The read leaves the debrief's text unread: the line shows none of it.
 
 A work item open waits on you while `stopped` or `failed`, a job only until it is retried, and neither
 while its nudge is owed, which its project's badge counts ([`projects.md`](projects.md)). It is
@@ -89,7 +92,7 @@ A write of a work item's state, its current line, its `started_at`, its `error` 
 the bus's `WorkMoved(project_id, work_id)` in its transaction, and `ProjectChanged` too when its state moved,
 since that moves the project's tab and head (`work_moved`, `backend/app/services/work_status.py`);
 equal events of one transaction go out once. A call of the progress tools that changed none of the
-steps' codes, labels, states or order emits none. A Chat's Session has no work item: its state's move
+steps' codes, labels, whys, states or order emits none. A Chat's Session has no work item: its state's move
 raises `ProjectChanged` alone. A pause and a resume move the reason on the project's held items
 and those whose nudge is owed, each a `WorkMoved`, and the release of the held starts tells every work item it still holds,
 since the outage's turn or the slot's count may have moved its reason. `ProjectEventService` sends a `WorkMoved` to every person's connections as the
@@ -209,8 +212,10 @@ one's place.
 A work item's run says which steps it goes through, so that where it stands shows on its tile
 without its log. Its session publishes them while its turn runs, through `pilot-work`'s
 `set_progress`, the whole list in order, and `set_progress_step`, one step's state
-([`mcp.md`](mcp.md)): each step a code, the run's name for it, a label, its words on the tile, and
-a state, `pending`, `active` or `done`. The server stamps each step's start and end by its own
+([`mcp.md`](mcp.md)): each step a code, the run's name for it, a label, its words on the tile, a
+state, `pending`, `active` or `done`, and where the run gives one a why, a short line the
+workflow writes on the step that opens a repeat round, saying why the round before did not settle
+it. The server stamps each step's start and end by its own
 clock (`progress_steps`, [`record.md`](record.md)); the API carries neither. Each work item has a
 list of its own: Stop and Resume keep it, and a continuation, a work item of its own, starts with
 none ([`round-trip.md`](round-trip.md)). A job has none: its session is given `pilot-store`.
@@ -234,12 +239,63 @@ the button's middle, as the head's step button's do, a top margin on its donut u
 `.progress-anchor` setting the button's baseline.
 
 **Its popover**, "Progress", lists the steps in order, a done one ticked and every active one
-highlighted, under the heading "Progress · N of M done", with no notes. It opens with its first
+highlighted, under the heading "Progress · N of M done", with no notes; a step's why stands under
+its label, on a line of its own close under it, a size down and muted, in the text's weight under
+a step in progress too, and wraps where it is long, nothing cutting it. Only the popover shows the
+why: the button, its tooltip and the tile's line never do. It opens with its first
 active step, or with none its first not started, at the middle of the list's box, as the plan
 popover does ([`ui.md`](ui.md)). It follows the list live, opens from the button's left edge,
 within the card's margins on a phone, and opens above the button where it does not fit below in
 the timeline and has more room there. A press outside it, which does nothing else, or Esc closes
 it.
+
+## Its debrief
+
+A worker's run may carry a debrief: the stage session's own account of how the run went, and every
+account the run's roles gave, an entry each, in the order given, as a workflow's run gives it in
+the turn its loop completes in. Its session hands it over once, before its turn ends, through `pilot-work`'s `register_debrief`
+([`mcp.md`](mcp.md)), and the record keeps it as given (`work.debrief` and `debrief_entries`,
+[`record.md`](record.md)). A job has none. The work item shows it once it is done: nothing of it
+shows while the item is open, and a run that gave none shows nothing. Every value in it, a section's
+name, a round, a role, a why, is the workflow's, shown as given; Pilot groups and counts the entries
+and reads nothing else of the workflow's shape from them (D159).
+
+**`GET /api/items/<id>/debrief`** (`TimelineService.debrief`) answers `{debrief, sections}`: the
+stage session's words, and the entries in their sections, `{name, rounds, duration, entries}`,
+each entry `{round, role, duration, words, passed, why}`, every value as given. A section is a run
+of consecutive entries of one section's name, compared exactly, in the order given, so that the same
+name further on starts a section of its own (`debrief_sections`); `rounds` counts the distinct
+rounds in it and `duration` sums its entries' times, in whole seconds. It answers `404` for an id
+that names no work item, one not done, and one whose session gave no debrief.
+
+**The Debrief** (`DebriefButton`, `components/timeline/debrief-button.tsx`) stands on the done line
+of a work item whose `debriefed` is true ([`timeline.md`](timeline.md)): an icon button, the
+notebook, "Debrief" its name and its tooltip, shown always and on a phone too, right after the
+line's actions shown under the mouse, so that it never moves as they show (D158). The line still
+does not expand (D218). It opens the debrief at `/projects/<project>/sessions/<session>/debrief`,
+under the session log's address, which the project's route opens where the session log opens and
+as the log does ([below](#the-session-log)): off a phone in the log's popover over the tab showing,
+replacing the entry, the Debrief pressed again closing it; on a phone as a view pushed over the
+tabs. On a phone the session log's view carries the Debrief in its head too, before Discuss, and it
+pushes the debrief over the log.
+
+**The debrief** (`DebriefOverlay`, `components/overlay/debrief-overlay.tsx`): its head the notebook
+and "Debrief", over the item's title and the time its turn ended, and *Full debrief* at its end;
+its body the stage session's words as Markdown, the frame's full width. An address that names no
+work item of the project, or one whose read fails, reads "The debrief did not load."
+
+**The full debrief**, behind *Full debrief*, at `…/debrief/full`: off a phone in the same popover,
+taller, at most 640px high, the arrow back to the debrief at the left of its head, each move
+between the two replacing the entry, and Esc giving the focus back to the line's Debrief; on a
+phone a view pushed over the debrief's. Its head is the notebook and "Full debrief" over the item's
+title. Its body is first the sections as a table, Section, Rounds and Time: a row per section, its
+name on one line, cut short with an ellipsis, the whole name its tooltip, its rounds, bold past one,
+and its time; a row clicked, or its name pressed from the keyboard, scrolls the body to its section.
+Then the sections, each its name and its entries in the order given, each with its role and its
+time: its words as Markdown, its role bold; or its pass or fail, "passed" or "failed", muted, a fail
+in the warning's colour; or neither, its role and its time alone, muted. An entry that carries a why
+opens its round with a line of its own, "Round N" and the why. A time reads "<1m" under a minute,
+then "17m", "1h 40m".
 
 ## Pilot's own work
 
@@ -328,7 +384,10 @@ work item you add is held until a person resumes it.` Then by trigger:
   `Registered this run, in the order registered:` and a line per document, `- <path> (<item id>) —
   published` or `— read failed: <reason>`, or `Registered nothing this run.`; then `Attached on the
   work item: 1 file (timeline.json lists it).` or `<N> files (timeline.json lists them).` where some
-  are; then, where the work item or another on its conversation was given claimed actions, its
+  are; then, where its session gave its debrief, `The stage session's debrief, as given:` and the
+  words on the lines after it, the whitespace they end in left off, none of its entries carried,
+  which the pass reads, an exception the operator ruled to what the brain is given (D219); then,
+  where the work item or another on its conversation was given claimed actions, its
   standing naming theirs, so that a continuation's names those of the run it continues and a retry,
   on a conversation of its own, takes them from it (D100), `The claimed actions given to this work
   item, as they stand:` and a line per action in timeline order, `- <path> (<item id>) <local id>
@@ -354,6 +413,7 @@ work item you add is held until a person resumes it.` Then by trigger:
   ended with no text.`. Then the files attached on the run and what it registered, as a worker's
   turn's brief has them, and `This pass asks nothing: what is still unclear is the operator's, the
   clarification beside the ask.`, after `Registered this run: nothing.` where it registered nothing;
+  then the debrief the clarification run's own session gave, as a worker's turn's brief has one;
   then the open notes and the deferrals without a home. The pass it briefs asks the writer nothing
   ([`mcp.md`](mcp.md)).
 - **An item of Pilot's own is done**: `/plan`, kind `an item of yours is done`; `The item: <path>
@@ -467,7 +527,8 @@ phone** it is a view pushed over the tabs, or over the view it opened from.
   worker's run's head carries the job after its turn, its `after_turn`, in whichever form it stands
   ([above](#pilots-own-work)), and that job's log then takes its place, on a phone pushed over it.
   The popover has no Discuss; the view on a phone has, quoting the work item into the chat
-  ([`chats.md`](chats.md)), so that a finished work item is discussed from there (D127).
+  ([`chats.md`](chats.md)), so that a finished work item is discussed from there (D127), and before
+  it the Debrief, where the item has one ([above](#its-debrief)).
 - **What each turn was sent**: before a turn's reply stands what the server sent it, as Pilot's
   message, "Pilot" and its time under it (`SentMessage`, `.log-sent`), cut after 8 lines with Show
 more over the end of the last and, once opened, Show less after its last word, the one pressed
@@ -580,7 +641,8 @@ The status, its event and the routes are pinned in `backend/tests/services/test_
 `test_timeline_service.py`, `test_project_event_service.py`, and
 `backend/tests/api/test_sessions.py` and `test_testing_record.py`. The browser suites are
 `frontend/tests/work/`: `harness.spec.ts`, `timeline.spec.ts`, `stop-resume.spec.ts`,
-`progress.spec.ts`, the progress button and its popover, `session-log.spec.ts`, `switch-warning.spec.ts`, `usage-halts.spec.ts`, `hard-stop.spec.ts` and
+`progress.spec.ts`, the progress button and its popover, a step's why among them,
+`full-debrief.spec.ts`, the full debrief, `session-log.spec.ts`, `switch-warning.spec.ts`, `usage-halts.spec.ts`, `hard-stop.spec.ts` and
 `nudge.spec.ts`, the usage limits ([`usage.md`](usage.md)), and `registered.spec.ts`, the round trip of a
 registered document ([`round-trip.md`](round-trip.md)), with `clarification.spec.ts`, the
 clarification run and its reply, and `claimed.spec.ts`, a claimed action. Pilot's jobs are pinned in
@@ -592,7 +654,11 @@ pause at Create, in `frontend/tests/projects/create-project.spec.ts`; a job on t
 from, its forms, its Retry, an open card's head, the phone's row and a wait menu's, and the job in an
 opened document's head and a run's log's, in `frontend/tests/timeline/jobs.spec.ts`; and a withdrawn
 job, shown nowhere, in `frontend/tests/timeline/undo.spec.ts`. The session log's popover is pinned in
-`session-log.spec.ts`, and what the log shows a turn was sent there too.
+`session-log.spec.ts`, and what the log shows a turn was sent there too. The debrief's read and its
+sections are pinned in `TestDebrief` (`test_timeline_service.py`) and `TestGetItemDebrief`
+(`backend/tests/api/test_items.py`), its brief in `test_brief_service.py`; the Debrief on the line
+in `timeline.spec.ts`, `frontend/tests/timeline/line-actions.spec.ts` (it never moves as the actions
+show) and `phone-items.spec.ts`, and the debrief in the log's popover in `session-log.spec.ts`.
 
 Each Playwright backend's controller is the fake it serves itself
 ([`controller.md`](controller.md)), which the `controller` fixture
@@ -626,7 +692,9 @@ start took or created and answers its `{id, name}`, the name the project's slug 
 the testing route's), `-2` for a second at once; `projects.work(project, item)` reads its `work`,
 `projects.records(session, after?)` its records, and `projects.stop(id)` and `projects.resume(id)`
 call the routes as the signed-in person; `projects.setProgress(work, steps)` replaces its list of
-steps as its session's `set_progress` does while its turn runs; `projects.register(work, path, toolUseId?)` and
+steps as its session's `set_progress` does while its turn runs, and `projects.debrief(work, words,
+entries?)` gives its debrief as its session's `register_debrief` does, one invented entry where none
+are given (`DebriefEntry` their type); `projects.register(work, path, toolUseId?)` and
 `projects.workerAttach(work, path, {to?, toolUseId?})` make its worker's calls, each its effect
 while its turn is in flight, `projects.askWriter(document, [{block, question}])` the pass's
 question, and `projects.clarify(document, reply?)` its clarification run, ended with the reply, or
@@ -635,11 +703,15 @@ with none started in the writer's environment, where `controller.finish(env, <it
 a reply's steps in order and `effects` the effects standing on their own. The `timeline` page
 object's `item(id).work` reads the open item (`environment`, `running`, `line`, whose `data-state`
 is the Session's state, `cue`, `step`, `sessionLog`, `stop`, `row`, `progress`, with
-`progressRing` and `progressName`, `steps`, its popover, `resume`, `stopConfirm`, `retry`), its
+`progressRing` and `progressName`, `steps`, its popover, with `whys`, `resume`, `stopConfirm`,
+`retry`), and `item(id).debrief` a done line's Debrief, its
 `item(id).job` Pilot's job on the item (`root`, with `data-form` its form, `pulse`, `retry`), and
 the `sessionLog` fixture the log (`sessionLogAddress()`, `overlay`, the popover or the view), its
-head (`head`, `sub`, `close`, the job after a run's turn `job`, a phone's `discuss`) and what each
-turn was sent (`sent`, `sentTexts`, `sentEnds`, `sentMore`). A job's own entry draws nothing:
+head (`head`, `sub`, `close`, the job after a run's turn `job`, a phone's `debrief` and `discuss`)
+and what each turn was sent (`sent`, `sentTexts`, `sentEnds`, `sentMore`). The `debrief` fixture
+(`DebriefPage`, `tests/support/page-objects/debrief-page.ts`) reads the debrief at
+`debriefAddress()` and the full debrief at `fullDebriefAddress()`: the head, the words, `full`, the
+table's rows and the sections with their entries. A job's own entry draws nothing:
 `timeline.item(jobId).root` has none. A spec placing an
 item in a project while a work item's start there still writes waits for that item to run first. The
 backends run with `WORK_PARALLELISM_MAX` 10000 and `PROJECT_PARALLELISM_MAX` 3

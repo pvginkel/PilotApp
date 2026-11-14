@@ -123,7 +123,10 @@ Pilot's that checks a fact its answer rests on (below), ask the writer about a b
 (below), and give a document it settled or deferred whole Pilot's own Done, cause `settled`,
 which closes it as a person's Done does, its write-back and its continuation included: an item of
 kind `document`, or a registered document of one block, which has its block's kind, once that block
-is answered, deferred, or claimed and done ([`engine.md`](engine.md)).
+is answered, deferred, or claimed and done ([`engine.md`](engine.md)). Where the run's session gave
+its debrief, the brief carries it whole after the documents (D219, [`work.md`](work.md#its-debrief)),
+and the pass leaves it, or makes a notice, a card or a fieldnote of it; the debrief is no document,
+with no block to answer and nothing to mark.
 
 **A claimed action** (D085). An action Pilot may run under the grants, the pass claims: it adds the
 work item that does it, the block named in its `claims` ([`mcp.md`](mcp.md)), then answers the

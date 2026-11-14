@@ -126,7 +126,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   project, and a job retries one at most (`ck_work_retried_by`, `uq_work_retried_by_id`); and
   `done_note`, Pilot's reason for closing a stopped work item for good, the words `stop_work` gave,
   set with its Item's `done_at` at that close and never changed, null for one a person closed, one
-  done any other way and an open one ([`work.md`](work.md)). Its keys
+  done any other way and an open one ([`work.md`](work.md)); and `debrief`, the stage session's own
+  account of how its run went, set once with its `debrief_entries` and never changed, which only a
+  worker's run has (`ck_work_debrief`), that a Work has entries exactly when it has a debrief being
+  the server's ([`work.md`](work.md#its-debrief)). Its keys
   reach its Item and its Session through the one project. A `work`-kind Session may stand with no
   `work` row, as the seed's idle session and a testing project's do.
 - `claim_assignments`: a claimed action given to a work item, the `work` and the `block`, both the
@@ -142,9 +145,18 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   which is checked at the commit, so that a replace reorders a whole list in its transaction;
   `state_code` (`pending`, `active`, `done`); `started_at`, which an `active` or `done` step has
   (`ck_progress_steps_started`); and `ended_at`, set exactly while it is `done`
-  (`ck_progress_steps_ended`). That the positions run without a gap, the code's, the label's and
-  the list's limits, and that only the work item's own session writes it are the server's checks at
-  the call ([`mcp.md`](mcp.md)).
+  (`ck_progress_steps_ended`); and `why`, the short line the run gave with the step, as the last
+  list gave it. That the positions run without a gap, the code's, the label's, the why's and the
+  list's limits, and that only the work item's own session writes it are the server's checks at the
+  call ([`mcp.md`](mcp.md)).
+- `debrief_entries`: an account in a work item's debrief, as the workflow gave it, written with the
+  `work` row's `debrief` at its one call and never changed, the `work` and its `position`, its place
+  in the order given from 1 (`ck_debrief_entries_position`), the key: `section`, `round` (1 or more,
+  `ck_debrief_entries_round`), `role`, `duration` in whole seconds (0 or more,
+  `ck_debrief_entries_duration`), `words` and `passed`, at most one of them
+  (`ck_debrief_entries_result`), and `why`. Every value is stored and shown as given and read for
+  nothing else; that the positions run without a gap and the text's limits are the server's checks
+  at the call ([`mcp.md`](mcp.md)).
 - `clarification_runs`: the role of a work item that puts a pre-ruling pass's questions to the
   writer, sharing its id with its `work` row: `pass_id`, the pass's job, one run a pass
   (`uq_clarification_runs_pass_id`), never the run itself (`ck_clarification_runs_pass`); and

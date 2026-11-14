@@ -543,16 +543,19 @@ grey with a small cross cut into its foot, "Cancelled" its title (`CancelledMark
 `cancelled-mark.tsx`): a run's document closed by its Cancel ([`round-trip.md`](round-trip.md)), an
 ask the chat called off for a person ([`mcp.md`](mcp.md)) and a work item closed for good
 ([`work.md`](work.md)); its title; its actions, the mark of Pilot's job on it once the job ended,
-Open, Undo while `done.undo` and Discuss, quoting the item into the chat; its attachments'
-indicator; Pilot's job on it while not ended ([`work.md`](work.md)); and the time it was done. The
+Open, Undo while `done.undo` and Discuss, quoting the item into the chat; a work item's Debrief,
+where its stage session gave a debrief; its attachments' indicator; Pilot's job on it while not
+ended ([`work.md`](work.md)); and the time it was done. The
 title of every line but a wait's is the link to what is behind it, the one Open goes to (`Behind`,
 test id `timeline.line.title`, its ticket ids nested), underlined under the mouse off a phone, so
 that the line opens from the keyboard and a screen reader too. Off a phone, on a screen whose
 pointer hovers, the actions show only while the mouse is on the line or the focus in it, and take
 no room until then (`.line-acts`, `timeline.css`): hidden, each is a box of no size that still takes
 the focus, which shows them, so that a tab or a log opened from Open gives the focus back there as
-it closes. Shown, they add no height to a line, a quiet one included. The attachments' indicator and
-a job not ended show always, the indicator after the actions, touching them while they show. Under the title stands a
+it closes. Shown, they add no height to a line, a quiet one included. The Debrief, the attachments'
+indicator and a job not ended show always, after the actions, the Debrief first, then the
+indicator, the first of the two touching the actions while they show, so that an icon shown always
+stands right of those shown on hover and never moves (D158). Under the title stands a
 person's answer to a one-ask item, the other person's after their avatar, its note after " · " with
 the note icon: an option, the words, or "Deferred to <task>"; a confirmation's Yes or No shows only
 its note, and nothing of Pilot's shows. After an answer given in the chat stands *In the chat*,
@@ -576,13 +579,16 @@ an idle project, and an Undo before then withdraws that job ([`work.md`](work.md
   title open its session log ([`work.md`](work.md)), and it never offers Undo. A worker's run's line
   carries the job after its turn where the run registered no document for it to go over, adding no height
   to the quiet line. A work item closed for good leads with the cancelled mark, and where Pilot
-  closed it, its reason stands under its title (`work.note`).
+  closed it, its reason stands under its title (`work.note`). A work item whose stage session gave
+  a debrief carries the Debrief, the notebook, "Debrief" its tooltip, which opens the debrief where
+  the session log opens ([`work.md`](work.md#its-debrief)): one control more on the line, which
+  still does not expand (D218).
 - **A wait's line** has nothing behind it: no Open, and never Undo, Pilot's close being consumed on
   the spot ([`waits.md`](waits.md)). Under its title stands the note Pilot closed it with, as linked
   text; a wait Finish closed has none.
 - **On a phone** a done line has Undo alone among its actions: no Open, no Discuss and no mark of
-  an ended job, its attachments' indicator staying, and a job not ended takes a row under its
-  title. A tap on the line, anywhere but on a link, a button or a menu of its own, goes where its
+  an ended job, the Debrief and its attachments' indicator staying, and a job not ended takes a row
+  under its title. A tap on the line, anywhere but on a link, a button or a menu of its own, goes where its
   title goes, the document's address or the session log's, which opens it as a view whose head
   carries Discuss ([`projects.md`](projects.md)); the title is the line's way in from the keyboard
   and a screen reader. A wait's line, with nothing behind it, opens instead the menu of its actions

@@ -382,7 +382,9 @@ admission-blocked`; with none, the node's cap, every create too; never an exempt
 `not_whitelisted` (a create of a repository of that owner is `403 namespace-not-whitelisted`),
 `no_sandbox_profile` (with `env_id`, `on`: that environment's boxed creates are `409
 capability-unavailable` until `on=False`),
-`unprojectable`, `busy`, `play` (the lines `claude` prints, answered with their offsets), `finish`
+`unprojectable`, `session_env` (the variables the session's create gave its process, by name, a
+work item's `PILOT_MCP_URL` and `PILOT_TOKEN` among them, so that a check calls Pilot's MCP server as
+the session does), `busy`, `play` (the lines `claude` prints, answered with their offsets), `finish`
 (the turn's outcome: `success`, `error`, `interrupted`, `spawn-failure` or `ended`), `write_log`,
 `publish_state`, `publish_sessions`, `drop_streams`, `usage` (the poll answered, taken at
 `taken_at`, now by default: each window given a share, `five_hour` and `seven_day`, a window given

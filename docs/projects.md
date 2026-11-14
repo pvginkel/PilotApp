@@ -617,11 +617,17 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   names while its turn is in flight. It answers `201` `{ids}`; an unknown work item or a `to` of no
   item of its project is a `404`, a session with no environment yet or a file that cannot be copied
   a `409`, and the controller's own failure a `502`.
-- `POST /api/testing/items/<id>/progress` `{steps: [{code, label, state?}]}` replaces the work item
+- `POST /api/testing/items/<id>/progress` `{steps: [{code, label, state?, why?}]}` replaces the work item
   `<id>`'s list of steps as its worker's `set_progress` does ([`mcp.md`](mcp.md)), its status moved
   on every browser through `work_moved` where the list changed. It answers `200` `{steps}`, the list
   as it stands; a session with no turn running is a `403`, an unknown work item a `404`, a session
   with no environment yet or a repeated code a `409`, and a body outside the limits a `400`.
+- `POST /api/testing/items/<id>/debrief` `{debrief, entries}` gives the work item `<id>`'s debrief as
+  its worker's `register_debrief` does ([`mcp.md`](mcp.md)), while its session's turn is in flight;
+  its done line carries the Debrief once the turn ends ([`work.md`](work.md#its-debrief)). It answers
+  `201` `{entries}`, the number stored; a session with no turn running is a `403`, an unknown work
+  item a `404`, a session with no environment yet or a debrief given already a `409`, and a body
+  outside the limits a `400`.
 - `POST /api/testing/items/<id>/writer-questions` `{questions: [{block, question}]}` asks the writer
   of the registered document `<id>` about its blocks, by their local ids, as the pre-ruling pass's
   `ask_writer` does, in one turn of a job's session of its project placed for it and ended once

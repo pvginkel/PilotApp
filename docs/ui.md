@@ -277,14 +277,16 @@ In `src/components/shared/`:
   has its height.
 - `StepsButton({steps, name, anchorClassName, testId, popoverTestId})` (`steps-button.tsx`): a list
   of steps behind a button, the plan's step button and a work item's progress button alike
-  ([`projects.md`](projects.md), [`work.md`](work.md)), each step `{id, title, mark, notes?}`, its
+  ([`projects.md`](projects.md), [`work.md`](work.md)), each step `{id, title, mark, notes?, why?}`, its
   mark `done`, `now` or `pending` (`planStepMark()` and `progressStepMark()`,
   `src/lib/utils/status-labels.ts`). The button is the donut of the steps done, in progress and the
   rest, counts and not places, and the step reading (`stepReading()`), its name giving way down to
   about three letters in a tight row, ", …" kept, its ticket ids plain text; its popover, named
   `name`, lists the steps in
-  order under `<name> · N of M done`, a step's open notes beside it where it has some, each step's
-  ring in the primary colour, filled by its mark, a step not started's empty. Opened (D201), the
+  order under `<name> · N of M done`, a step's open notes beside it where it has some, its why under
+  its title where it has one, on a line of its own, a size down and muted, each step's
+  ring in the primary colour, filled by its mark, a step not started's empty; the button shows no
+  why. Opened (D201), the
   list scrolls its first step `now`, or with none its first `pending`, to the middle of the box it
   scrolls in (`showCurrentStep()`), once, after the popover has its height; the browser's own clamp
   keeps a step near an end of the list at that end, and a list with neither stays at its top. The

@@ -17,10 +17,12 @@ Pilot is still working on one line until it is done, read-only under a gold stri
 take over, and which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its
 work items, each a
 session Pilot runs, live on the timeline with its one current line, the steps its run publishes on
-a donut, Stop, Resume and Close, and its session log, which shows what each turn was sent, and Pilot's own
+a donut, a repeat round's why under its step, Stop, Resume and Close, its session log, which shows
+what each turn was sent, and, once done, the debrief its stage session gave, behind the Debrief on
+its line, every role's account in the full debrief behind that, and Pilot's own
 background jobs, each shown on the item it follows from, one at a time per project, each a session of
 the brain's, fresh but for a wait's run: the setup, the pre-ruling pass after every worker's turn,
-which may ask the worker's writer, or claim an action or research a fact for a work item of
+which reads the stage session's debrief where the run gave one and may ask the worker's writer, or claim an action or research a fact for a work item of
 Pilot's, the blocks held through its run, the plan's next
 step after every item of Pilot's a person closes in the app, the chat carrying out a ruling it
 records itself, and a wait's run, with Retry on one that failed

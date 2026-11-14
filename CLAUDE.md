@@ -19,7 +19,8 @@ phone's layout: its home, its tabs at the bottom and its views, and the waits: t
 YouTrack's posts, the due time and a request, and the run per batch, and an ask Pilot is working
 on: its line, the read-only strip with Stop and take over, a held block's line, the hand-back and
 the Cancel, and the projects surface: the service user, `pilot-projects` and its tools, and the
-profile's join switch. Every green build of
+profile's join switch, and the debrief: a repeat round's why under its step, the Debrief on a done
+work item, the debrief and the full debrief, and the pass reading it. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -289,7 +290,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
   environments on demand and Pilot's own, with its fake; the sessions, the gate, its slot and the
   jobs' queue, their records, relay and live stream, Stop, Resume, Close and Retry; a work item's status,
-  its line, its progress, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
+  its line, its progress, its debrief, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
   worker's tools and the brain's, and its projects surface, any session's, with its door and its
