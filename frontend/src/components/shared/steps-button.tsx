@@ -4,8 +4,9 @@
  * first step in progress by name, its ticket ids plain text, ", …" when more are; with none in
  * progress "Not started", "N of M done" or "All steps done". Its popover lists the steps in order, done ones ticked, every
  * step in progress highlighted, side by side (F3.4), how many are done in its heading, and beside a
- * step with open notes the sticky-note icon, listing them on hover and on a tap (F3.6). It opens
- * with its first step in progress, or with none its first not started, at its middle.
+ * step with open notes the sticky-note icon, listing them on hover and on a tap (F3.6), and under
+ * a step with a why its why, on a line of its own (F145.3). It opens with its first step in
+ * progress, or with none its first not started, at its middle.
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
@@ -24,6 +25,8 @@ export interface Step {
   title: string;
   mark: StepMark;
   notes?: Note[];
+  /** Why the round before a repeat round's step did not settle it (F145.1); the button never shows it. */
+  why?: string | null;
 }
 
 interface StepsButtonProps {
@@ -163,6 +166,11 @@ export function StepRow({ step, testId }: { step: Step; testId: string }) {
       </span>
       <span className="step-title" data-testid={`${testId}.title`}>
         <LinkedText text={step.title} />
+        {step.why != null && (
+          <span className="why" data-testid={`${testId}.why`}>
+            <LinkedText text={step.why} />
+          </span>
+        )}
       </span>
       {notes.length > 0 && (
         <button

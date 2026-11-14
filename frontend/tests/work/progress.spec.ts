@@ -3,13 +3,16 @@
  * `set_progress` while its turn runs, shown in the row under its line as the progress button, the
  * plan's donut and the first active step's label, ", …" when more are active, else read as the
  * plan's step button reads; its popover lists the steps in order, done ones ticked, active ones
- * highlighted, how many are done in its heading, no notes, and closes on an outside click or Esc. A
- * change moves the button and an open popover through the live event, with no read of the
+ * highlighted, how many are done in its heading, no notes, a step's why on a line of its own close
+ * under its label, a size down and muted, and nowhere else on the tile, and closes on an outside
+ * click or Esc. A change moves the button and an open popover through the live event, with no read of the
  * timeline's own; an emptied list takes the button away. It shows on every open item that
  * published a list, stopped, held, failed or halted at its turn's end, beside Resume where it has
  * one, goes with the row while Stop asks, and the done line never has it. At the timeline's end
- * its popover opens above it; on a phone it keeps its label. Its donut and its step's capitals
- * stand at the button's middle, as the head's step button's do, on a phone too (W9).
+ * its popover opens above it; on a phone it keeps its label. With the whys' taller rows it still
+ * fits and still opens at the step in progress, and on a phone a long why wraps within it. Its
+ * donut and its step's capitals stand at the button's middle, as the head's step button's do, on a
+ * phone too (W9).
  */
 
 import type { Locator } from '@playwright/test';
@@ -22,7 +25,7 @@ import { scrolled, underMiddle } from '../support/steps';
 
 type State = 'pending' | 'active' | 'done';
 
-const step = (code: string, state?: State) => ({ code, label: `Step ${code}`, state });
+const step = (code: string, state?: State, why?: string) => ({ code, label: `Step ${code}`, state, ...(why === undefined ? {} : { why }) });
 
 const HALT_FILE = '/work/.quota-limit-halt-requested';
 
@@ -62,6 +65,28 @@ async function offMiddle(button: Locator): Promise<{ ring: number; capitals: num
     const capital = probe.getBoundingClientRect();
     probe.remove();
     return { ring: (ring.top + ring.bottom) / 2 - middle, capitals: (capital.top + capital.bottom) / 2 - middle };
+  });
+}
+
+/**
+ * How a step's why stands under its label: its top off the end of the label's first line, its left
+ * off the label's, in pixels; its lines; its size and the label's; its weight and its colour.
+ */
+async function whyLook(stepRow: Locator) {
+  return stepRow.evaluate((element) => {
+    const title = element.querySelector('.step-title')!;
+    const why = element.querySelector('.why')!;
+    const [own, under] = [title.getBoundingClientRect(), why.getBoundingClientRect()];
+    const [titleStyle, whyStyle] = [getComputedStyle(title), getComputedStyle(why)];
+    return {
+      under: under.top - own.top - parseFloat(titleStyle.lineHeight),
+      left: under.left - own.left,
+      lines: Math.round(under.height / parseFloat(whyStyle.lineHeight)),
+      size: parseFloat(whyStyle.fontSize),
+      labelSize: parseFloat(titleStyle.fontSize),
+      weight: whyStyle.fontWeight,
+      colour: whyStyle.color,
+    };
   });
 }
 
@@ -307,6 +332,84 @@ test.describe('Its popover', () => {
     await expect(item.steps.root).toHaveCount(0);
   });
 
+  test('carries a step’s why on a line of its own close under its label, a size down and muted, moved through the live event; the button, its title and the rest of the tile never show it', async ({
+    people,
+    projects,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, work } = await running({ people, projects });
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const tile = timeline.item(work);
+    const item = tile.work;
+    const why = 'The review found the downgrade left the column';
+    expect(await projects.setProgress(work, [step('a', 'done'), step('b', 'done'), step('b-2', 'active', why), step('c')])).toEqual([
+      { code: 'a', label: 'Step a', state: 'done', why: null },
+      { code: 'b', label: 'Step b', state: 'done', why: null },
+      { code: 'b-2', label: 'Step b-2', state: 'active', why },
+      { code: 'c', label: 'Step c', state: 'pending', why: null },
+    ]);
+    await expect(item.progress).toHaveText('Step b-2');
+    await expect(item.progress).toHaveAttribute('title', '2 of 4 steps done · in progress: Step b-2');
+    await expect(tile.root).not.toContainText(why);
+
+    await item.progress.click();
+    await expect(item.steps.whys).toHaveText([why]);
+    await expect(item.steps.items.nth(2).getByTestId('timeline.work.steps.step.why')).toHaveText(why);
+    const look = await whyLook(item.steps.items.nth(2));
+    expect(look.under).toBeLessThanOrEqual(0.5);
+    expect(look.under).toBeGreaterThanOrEqual(-2);
+    expect(Math.abs(look.left)).toBeLessThanOrEqual(0.5);
+    // A size down: the heading's, under the label's.
+    expect(look.size).toBeLessThan(look.labelSize);
+    expect(look.size).toBe(await item.steps.heading.evaluate((element) => parseFloat(getComputedStyle(element).fontSize)));
+    // Muted, as a step not started is, in the text's weight under the step in progress's bold label.
+    expect(look.colour).toBe(await item.steps.items.nth(3).evaluate((element) => getComputedStyle(element).color));
+    expect(look.colour).not.toBe(await item.steps.items.nth(2).evaluate((element) => getComputedStyle(element).color));
+    expect(look.weight).toBe('400');
+    await expect(item.progress).toHaveText('Step b-2');
+    await expect(tile.work.line).not.toContainText(why);
+
+    // A why's change alone moves the open popover; a step sent without one has none.
+    const next = 'The second review still found the downgrade wrong';
+    await projects.setProgress(work, [step('a', 'done'), step('b', 'done'), step('b-2', 'active', next), step('c')]);
+    await expect(item.steps.whys).toHaveText([next]);
+    await projects.setProgress(work, [step('a', 'done'), step('b', 'done'), step('b-2', 'active'), step('c')]);
+    await expect(item.steps.whys).toHaveCount(0);
+    await expect(item.steps.items).toHaveText(['Step a', 'Step b', 'Step b-2', 'Step c']);
+  });
+
+  test('with whys under its steps, still opens with its active step at its middle, fits within the timeline and scrolls past it', async ({
+    people,
+    projects,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, work } = await running({ people, projects });
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(work).work;
+    const code = (index: number) => String(index + 1).padStart(2, '0');
+    // Sixty steps, a why on every third, the active one's among them.
+    await projects.setProgress(
+      work,
+      Array.from({ length: 60 }, (_, index) =>
+        step(code(index), index < 30 ? 'done' : index === 30 ? 'active' : 'pending', index % 3 === 0 ? `Round ${index}: the review before it found more` : undefined),
+      ),
+    );
+    await expect(item.progress).toHaveText('Step 31');
+    await item.progress.click();
+    await expect(item.steps.items).toHaveCount(60);
+    await expect(item.steps.whys).toHaveCount(20);
+
+    expect(Math.abs(await underMiddle(item.steps.body, item.steps.items.nth(30)))).toBeLessThanOrEqual(1);
+    expect((await scrolled(item.steps.body)).furthest).toBeGreaterThan(600);
+    const [feed, pop] = await Promise.all([timeline.root, item.steps.root].map(async (locator) => (await locator.boundingBox())!));
+    expect(pop.y).toBeGreaterThanOrEqual(feed.y);
+    expect(pop.y + pop.height).toBeLessThanOrEqual(feed.y + feed.height);
+  });
+
   test('opens with its first active step, or with none its first not started, at its middle; a step near the list’s end stays at that end', async ({
     people,
     projects,
@@ -403,5 +506,40 @@ test.describe('On the phone', () => {
     const pop = (await item.steps.root.boundingBox())!;
     expect(pop.x).toBeGreaterThanOrEqual(0);
     expect(pop.x + pop.width).toBeLessThanOrEqual(390);
+  });
+
+  test('a step’s why stands under its label, a long one wrapping within the popover, the button keeping the label alone', async ({
+    people,
+    projects,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, work } = await running({ people, projects });
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const tile = timeline.item(work);
+    const item = tile.work;
+    // The longest a why may be: 120 characters.
+    const why = 'The second review found that the downgrade left the column behind and that no test ran the downgrade, so this runs again';
+    expect(why).toHaveLength(120);
+    await projects.setProgress(work, [step('a', 'done'), step('review-2', 'active', why)]);
+    await expect(item.progressName).toHaveText('Step review-2');
+    await expect(tile.root).not.toContainText(why);
+
+    await item.progress.tap();
+    await expect(item.steps.whys).toHaveText([why]);
+    const look = await whyLook(item.steps.items.nth(1));
+    expect(look.under).toBeLessThanOrEqual(0.5);
+    expect(look.under).toBeGreaterThanOrEqual(-2);
+    expect(Math.abs(look.left)).toBeLessThanOrEqual(0.5);
+    expect(look.lines).toBeGreaterThan(1);
+    expect(look.size).toBeLessThan(look.labelSize);
+    const [pop, under] = await Promise.all([item.steps.root, item.steps.whys].map(async (locator) => (await locator.boundingBox())!));
+    expect(pop.x).toBeGreaterThanOrEqual(0);
+    expect(pop.x + pop.width).toBeLessThanOrEqual(390);
+    expect(pop.y).toBeGreaterThanOrEqual(0);
+    expect(pop.y + pop.height).toBeLessThanOrEqual(844);
+    expect(under.x + under.width).toBeLessThanOrEqual(pop.x + pop.width);
+    expect(await item.steps.body.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   });
 });

@@ -372,11 +372,11 @@ function Close({ button, onAsk }: { button: RefObject<HTMLButtonElement | null>;
   );
 }
 
-/** The progress button: the steps the run published, behind the plan's donut and its popover. */
+/** The progress button: the steps the run published, behind the plan's donut and its popover, a step's why under its label there alone. */
 function Progress({ steps }: { steps: Work['progress'] }) {
   return (
     <StepsButton
-      steps={steps.map((step) => ({ id: step.code, title: step.label, mark: progressStepMark(step.state) }))}
+      steps={steps.map((step) => ({ id: step.code, title: step.label, why: step.why, mark: progressStepMark(step.state) }))}
       name="Progress"
       anchorClassName="progress-anchor"
       testId="timeline.work.progress"

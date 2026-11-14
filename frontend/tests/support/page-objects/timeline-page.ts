@@ -220,6 +220,8 @@ export class TimelinePage {
           body: root.getByTestId('timeline.work.steps.body'),
           heading: root.getByTestId('timeline.work.steps.heading'),
           items: root.getByTestId('timeline.work.steps.step'),
+          /** The whys under the steps' labels, in the steps' order. */
+          whys: root.getByTestId('timeline.work.steps.step.why'),
         },
         resume: root.getByTestId('timeline.work.resume'),
         /** A job's Retry, once it stopped or failed. */
