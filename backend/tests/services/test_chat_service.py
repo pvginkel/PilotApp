@@ -60,6 +60,7 @@ from app.services.controller_client import HeadlessCreateRequest
 from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer
+from app.services.pilot_store_service import Brain
 from app.services.relay_service import STOPPED_UNSENT, RelayService, Words
 from app.services.session_record_service import (
     SessionRecordService,
@@ -2426,6 +2427,22 @@ class _SendHeld(_Sent):
         return super()._send(request, env_id, name)
 
 
+def _committed_job(container: ServiceContainer, project_id: uuid.UUID) -> uuid.UUID:
+    """An idle job of Pilot's in the project, committed: its id."""
+    with scoped_session(container) as db:
+        job = models.Session(
+            project_id=project_id,
+            environment_id=STORE_ENVIRONMENT_ID,
+            kind_code="job",
+            cwd=STORE_REPO,
+            token_hash="b" * 64,
+            state_code=SessionState.IDLE,
+        )
+        db.add(job)
+        db.flush()
+        return job.id
+
+
 class TestATransitionMeetingAMessage:
     @pytest.mark.parametrize(
         ("kind", "state", "cause"),
@@ -2484,6 +2501,54 @@ class TestATransitionMeetingAMessage:
                 assert run.state_code == SessionState.STOPPED
                 assert run.stopped_by_user_id == person_id
                 assert db.get_one(Chat, chat_id).close_cause_code is cause
+        finally:
+            fake.close()
+
+    def test_pilots_finish_meeting_a_message_waits_for_its_send(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        """Pilot's own Finish, through pilot-store, takes the project's row
+        exclusively before any Session's, and the send holds it shared before
+        the chat's, across the controller's call: Finish waits for the send,
+        then stops the turn it started, and neither deadlocks."""
+        container = committed_app.container
+        fake = _SendHeld(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            person_id, project_id, chat_id = _committed_idle_chat(container, fake)
+            job_id = _committed_job(container, project_id)
+            services = _starts(container, supervise)
+
+            def send() -> uuid.UUID:
+                with scoped_session(container) as db:
+                    return (
+                        _chats(container, *services)
+                        .send(project_id, db.get_one(User, person_id), "Two")
+                        .session_id
+                    )
+
+            def finish() -> None:
+                with scoped_session(container):
+                    container.pilot_store_service().finish(
+                        Brain(job_id, project_id, "job"), None
+                    )
+
+            sending = in_thread(send)
+            assert fake.sending.wait(WAIT_SECONDS)
+            finishing = in_thread(finish)
+            wait_until(lambda: lock_waits(container) == 1, "Finish waiting")
+            fake.release.set()
+
+            assert sending.result() == chat_id
+            finishing.result()
+            assert fake.sent == ["Two"]
+            with scoped_session(container) as db:
+                assert _read(db, chat_id).state_code == SessionState.STOPPED
+                assert db.get_one(Project, project_id).state_code is (
+                    ProjectState.FINISHED
+                )
         finally:
             fake.close()
 

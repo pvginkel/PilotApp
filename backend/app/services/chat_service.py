@@ -243,16 +243,18 @@ class ChatService:
     def _still_open(
         self, project: Project, session_id: uuid.UUID
     ) -> AgentSession | None:
-        """The open chat's Session, locked until the transaction ends while
-        its chat is still open, its start went out and its project is not
+        """The open chat's Session, locked until the transaction ends after
+        its project's row, held shared (the start's lock order), while its
+        chat is still open, its start went out and its project is not
         archived, so that no close or stop interleaves with its send. None
         when it closed, its start fell through or its project was archived
-        meanwhile: the lock let go with the savepoint that took it, since a
-        start locks the project's row first (the start's lock order). A
-        transition that stops the project's sessions holds that lock to its
-        commit (`SessionStartService.stop_project`), so `project` is read
-        under it."""
+        meanwhile: the locks let go with the savepoint that took them, since
+        a start locks the project's row as a change of its standing does
+        (`_locked`). A transition that stops the project's sessions holds the
+        Session's lock to its commit (`SessionStartService.stop_project`), so
+        `project` is read under it."""
         savepoint = self.db.begin_nested()
+        self.records.lock_project(session_id)
         session = self.records.lock_session(session_id)
         chat = self.db.get_one(Chat, session_id, populate_existing=True)
         self.db.get_one(Project, project.id, populate_existing=True)

@@ -1894,8 +1894,10 @@ class SessionStartService:
         send `recorded` one. Then its environment is handed to the shutdown
         timer (`_hand_to_timer`), and a work item's slot opens once this
         commits. A Session no longer `starting` to send that Turn is left as it
-        is."""
+        is. Its project's row is held shared before the Session's (the lock
+        order, `SessionRecordService.lock_project`)."""
         records = self._records(db)
+        records.lock_project(session_id)
         if not _sends(db, records.lock_session(session_id), turn_id):
             return
         if not recorded:

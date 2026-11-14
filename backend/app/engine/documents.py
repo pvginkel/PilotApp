@@ -367,11 +367,14 @@ class DocumentService:
             or 0
         )
 
-    def lock_project(self, project: Project) -> None:
+    def lock_project(self, project: Project, *, shared: bool = False) -> None:
         """Hold the project's row until the transaction ends, the lock
-        `next_seq` takes for a birth's `seq`."""
+        `next_seq` takes for a birth's `seq`; `shared`, `FOR KEY SHARE`, the
+        lock a write naming the project in a foreign key takes."""
         self.db.execute(
-            select(Project.id).where(Project.id == project.id).with_for_update()
+            select(Project.id)
+            .where(Project.id == project.id)
+            .with_for_update(read=shared, key_share=shared)
         )
 
     def owner(self, document: Document) -> tuple[Project, Item | None]:

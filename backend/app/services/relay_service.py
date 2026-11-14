@@ -332,10 +332,12 @@ class RelayService:
         caller's transaction commits (§9.6). A person's message carries their
         `words`, which `message` ends with (DB assertion 251).
 
-        The controller's send goes first. On its `202`, under the Session's
-        lock: the Turn, its `send` record when a person wrote it, the Session
-        `running` with its current line set, and the environment's shutdown
-        timer cleared. A send that
+        The controller's send goes first, under the project's row held
+        shared, which a caller holding the Session's lock took before it
+        (`SessionRecordService.lock_project`). On its `202`, under the
+        Session's lock: the Turn, its `send` record when a person wrote it,
+        the Session `running` with its current line set, and the
+        environment's shutdown timer cleared. A send that
         fails before the `202` writes the Turn ended with its `error`, and a
         `server` record saying so (F125).
 
@@ -356,7 +358,9 @@ class RelayService:
             InvalidOperationException: The Session has no controller session,
                 or the controller has a turn in flight (`409 session-busy`)
         """
-        session = self._records(db).require_session(session_id)
+        records = self._records(db)
+        session = records.require_session(session_id)
+        records.lock_project(session_id)
         try:
             self._deliver_resuming(db, session, message)
         except ExternalServiceException as error:
@@ -371,7 +375,8 @@ class RelayService:
         """Send a `starting` Session's Turn written before its send, as the
         session start writes its brief and a Resume its own (§9.6), and relay it
         once the caller's transaction commits. As `send`, with the Turn's
-        `started_at` moved to the send.
+        `started_at` moved to the send, and the project's row taken shared
+        once the controller's call returns, before the Session's.
 
         A Turn the controller has already, sent before a cut or by another
         process (§8.2, §8.1), is not sent again; one whose send another
@@ -408,7 +413,9 @@ class RelayService:
             raise
         except ExternalServiceException as error:
             failure = error
-        session = self._records(db).lock_session(session.id)
+        records = self._records(db)
+        records.lock_project(session.id)
+        session = records.lock_session(session.id)
         if not _in_flight(db, turn.id):
             if (
                 failure is None
@@ -803,7 +810,9 @@ class RelayService:
         has moved on: it is neither running nor stopped, has another
         controller session, or its turn ended."""
         with scoped_session(self._container) as db:
-            session = self._records(db).lock_session(opening.session_id)
+            records = self._records(db)
+            records.lock_project(opening.session_id)
+            session = records.lock_session(opening.session_id)
             if (
                 session.state_code not in _RELAYED
                 or _moved_on(session, opening)
@@ -931,6 +940,7 @@ class RelayService:
         moved on."""
         with scoped_session(self._container) as db:
             records = self._records(db)
+            records.lock_project(opening.session_id)
             session = records.lock_session(opening.session_id)
             if (
                 session.state_code != SessionState.STOPPED
@@ -1068,9 +1078,9 @@ class RelayService:
         item done at that turn's end, not this one's. A worker's done run
         that registered nothing has the job after its turn placed here
         (`TurnEndReadService.run_ended`), and a pass that asked its writer its
-        clarification run (`ClarificationService.pass_ended`): a worker's and
-        a pass's turn end lock their project's row before their Session's,
-        the start's lock order. After the
+        clarification run (`ClarificationService.pass_ended`). Every turn end
+        locks its project's row before its Session's, the start's lock order:
+        a worker's and a pass's exclusively, any other's shared. After the
         commit, a work item's slot opens, the documents its done run
         registered are read, and the environment's shutdown timer is armed if
         nothing runs there.
@@ -1083,7 +1093,7 @@ class RelayService:
         record."""
         with scoped_session(self._container) as db:
             records = self._records(db)
-            _lock_placing_project(db, opening.session_id)
+            _lock_ending_project(records, opening.session_id)
             session = records.lock_session(opening.session_id)
             ended = _in_flight(db, opening.turn_id)
             if ended:
@@ -1245,23 +1255,22 @@ _RELAYED = (SessionState.RUNNING, SessionState.STOPPED)
 """The states in which a Session's turn in flight is relayed."""
 
 
-def _lock_placing_project(db: Session, session_id: uuid.UUID) -> None:
-    """The project's row of a Session whose turn's end may place a work item,
-    locked until the transaction ends and read as the lock found it: a
-    worker's, whose done run places the job after its turn, and a pass's, the
-    job after a worker's turn, whose end places its clarification run; any
-    other Session's is not locked."""
+def _lock_ending_project(records: SessionRecordService, session_id: uuid.UUID) -> None:
+    """The project's row of a Session at its turn's end, before the Session's
+    (`SessionRecordService.lock_project`): exclusively for a worker's, whose
+    done run places the job after its turn, and a pass's, the job after a
+    worker's turn, whose end places its clarification run; shared for any
+    other."""
+    db = records.db
     session = db.get_one(AgentSession, session_id)
-    if session.kind_code == WORK_KIND or (
-        db.scalar(select(Work.trigger_code).where(Work.id == session_id))
-        is WorkTrigger.WORKER_TURN_ENDED
-    ):
-        db.scalars(
-            select(Project)
-            .where(Project.id == session.project_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        ).one()
+    records.lock_project(
+        session_id,
+        exclusive=session.kind_code == WORK_KIND
+        or (
+            db.scalar(select(Work.trigger_code).where(Work.id == session_id))
+            is WorkTrigger.WORKER_TURN_ENDED
+        ),
+    )
 
 
 def _opening(db: Session, session_id: uuid.UUID) -> _Opening | None:

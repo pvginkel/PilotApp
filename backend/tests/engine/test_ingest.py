@@ -30,7 +30,7 @@ from app.engine.bus import (
     TreeHashMoved,
 )
 from app.engine.documents import DocumentService
-from app.engine.ingest import Ingested, PathKind, WorkerVersion
+from app.engine.ingest import Ingested, IngestService, PathKind, WorkerVersion
 from app.engine.paths import sha256_hex, tree_path
 from app.engine.tree import TreeDocument, TreeFile
 from app.exceptions import RecordNotFoundException
@@ -38,6 +38,7 @@ from app.extensions import db
 from app.models import (
     Attachment,
     Block,
+    Chat,
     Document,
     DocumentVersion,
     Environment,
@@ -50,6 +51,7 @@ from app.models import (
 )
 from app.models.reference import (
     AttachmentSource,
+    ChatKind,
     ErrorKind,
     ProjectState,
     SessionState,
@@ -61,13 +63,18 @@ from app.services.container import ServiceContainer
 from app.services.effect_service import EffectService
 from app.services.pilot_store_service import Brain
 from tests.support.fake_sidecar import FakeSidecar, Put
+from tests.support.locks import in_thread
 from tests.support.starts import configured_starts
-from tests.support.supervisor import Supervise
+from tests.support.supervisor import WAIT_SECONDS, Supervise
 from tests.support.turns import end_turns, turn_in_flight
 
 DRAFT = "---\ntitle: Badge colours\n---\n\nWhich colours for the badges?\n"
 
 RETITLED = "---\ntitle: Badge palette\n---\n\nWhich colours for the badges?\n"
+
+ASKING = "---\ntitle: Badge colours\n---\n\n```question id=Q1\ndefault: Blue\n```\n"
+
+ASKING_RETITLED = ASKING.replace("Badge colours", "Badge palette")
 
 BROKEN = "```decision id=D1\noptions:\n  - Dome\n"
 
@@ -2527,6 +2534,28 @@ def _committed_item(app: Flask, run_id: uuid.UUID) -> tuple[str, uuid.UUID]:
         return tree_path(project, session.get_one(Document, item.id).path), item.id
 
 
+def _committed_definition_chat(app: Flask) -> tuple[str, uuid.UUID, uuid.UUID]:
+    """A draft whose `project.md` asks Q1, and its definition chat with a
+    Turn in flight, committed: the draft's path, its id and the chat's."""
+    _, handbook_id = _committed_handbook(app)
+    chat_id = _committed_run(app, handbook_id)
+    container = app.container
+    with scoped_session(container) as session:
+        project = session.get_one(
+            Project, session.get_one(models.Session, chat_id).project_id
+        )
+        draft = container.document_service().bear_draft(project, ASKING)
+        session.add(
+            Chat(
+                id=chat_id,
+                project_id=project.id,
+                session_kind_code="chat",
+                kind_code=ChatKind.DEFINITION,
+            )
+        )
+        return f"draft-{project.number}/project.md", draft.id, chat_id
+
+
 def _save(
     app: Flask, path: str, content: str, run_id: uuid.UUID | None = None
 ) -> Ingested:
@@ -2889,6 +2918,128 @@ class TestIngestServiceRowLock:
             (VersionCause.BORN, HANDBOOK, None),
             (VersionCause.TURN, SHORTER, run_id),
         ]
+
+    def test_every_save_takes_its_projects_row_before_its_sessions(
+        self, committed_app: Flask
+    ) -> None:
+        """The order of a close, a tool call and a turn's end: a save waiting
+        on the project's row holds no lock on its Session's."""
+        path, document_id = _committed_handbook(committed_app)
+        run_id = _committed_run(committed_app, document_id)
+        with committed_app.app_context():
+            engine = db.engine
+        with scoped_session(committed_app.container) as session:
+            project_id = session.get_one(Document, document_id).project_id
+        save = _Save(committed_app, path, SHORTER, run_id)
+
+        with engine.connect() as holder, engine.connect() as other:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR UPDATE"),
+                {"id": project_id},
+            )
+            save.start()
+            try:
+                _wait_for_a_lock_wait(committed_app)
+                other.execute(
+                    sql("SELECT id FROM sessions WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": run_id},
+                )
+                other.rollback()
+            finally:
+                holder.rollback()
+                save.join(5)
+
+        assert save.error is None
+        assert _writing(committed_app, document_id) == run_id
+
+    def test_a_save_shares_its_projects_row(self, committed_app: Flask) -> None:
+        """`FOR KEY SHARE`: a save goes on while a change of the project's
+        standing holds its row, and saves of one project take it at once."""
+        path, document_id = _committed_handbook(committed_app)
+        with committed_app.app_context():
+            engine = db.engine
+        with scoped_session(committed_app.container) as session:
+            project_id = session.get_one(Document, document_id).project_id
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR NO KEY UPDATE"),
+                {"id": project_id},
+            )
+            try:
+                answer = _save(committed_app, path, SHORTER)
+            finally:
+                holder.rollback()
+
+        assert answer.held is False
+        with scoped_session(committed_app.container) as session:
+            assert session.get_one(Document, document_id).published_text == SHORTER
+
+    def test_a_drafts_retitling_save_and_its_definition_chats_answer_both_commit(
+        self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P-214: the save that writes the draft's title to the project's row
+        takes that row first, exclusively, as the chat's answer does, so an
+        answer made while the save holds the chat's Session waits for the
+        save, and neither deadlocks."""
+        path, draft_id, chat_id = _committed_definition_chat(committed_app)
+        container = committed_app.container
+        holding, release = threading.Event(), threading.Event()
+        in_turn = IngestService._in_turn
+
+        def held_in_turn(self: IngestService, session: models.Session) -> bool:
+            taken = in_turn(self, session)
+            if not holding.is_set():
+                holding.set()
+                assert release.wait(WAIT_SECONDS)
+            return taken
+
+        def save() -> Ingested:
+            with scoped_session(container) as session:
+                return container.ingest_service().ingest(
+                    path,
+                    ASKING_RETITLED.encode(),
+                    sha256_hex(ASKING),
+                    session.get_one(Environment, ENVIRONMENT_ID),
+                    session.get_one(models.Session, chat_id),
+                )
+
+        def answer() -> None:
+            with scoped_session(container) as session:
+                run = session.get_one(models.Session, chat_id)
+                container.pilot_store_service().answer(
+                    Brain(run.id, run.project_id, run.kind_code),
+                    "project.md/Q1",
+                    "Green",
+                    "ada",
+                    note=None,
+                    to=None,
+                    tool_use_id=None,
+                )
+
+        monkeypatch.setattr(IngestService, "_in_turn", held_in_turn)
+        saving = in_thread(save)
+        try:
+            assert holding.wait(WAIT_SECONDS)
+            answering = in_thread(answer)
+            _wait_for_a_lock_wait(committed_app)
+        finally:
+            release.set()
+
+        assert saving.result().held is False
+        answering.result()
+        with scoped_session(container) as session:
+            draft = session.get_one(Document, draft_id)
+            assert draft.project_id is not None
+            assert session.get_one(Project, draft.project_id).name == "Badge palette"
+            assert (
+                session.scalars(
+                    select(Block.answer).where(
+                        Block.document_id == draft_id, Block.local_id == "Q1"
+                    )
+                ).one()
+                == "Green"
+            )
 
     def test_a_save_while_its_brain_answers_waits_for_the_answer(
         self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch

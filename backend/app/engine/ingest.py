@@ -265,11 +265,14 @@ class IngestService:
             and self.record_service.pilots_own(item)
             else None
         )
-        if own is not None:
-            # The save may close the item: it takes the lock a close takes,
-            # the project's row before the Session's and the document's (the
-            # start's lock order).
-            self.document_service.lock_project(project)
+        # The project's row before the Session's and the document's, the
+        # order of a start, a close, a tool call and a turn's end: held as a
+        # close holds it where the save may close the item or write the
+        # draft's title to the project's row, else shared.
+        self.document_service.lock_project(
+            project,
+            shared=own is None and document.role_code is not DocumentRole.DRAFT,
+        )
         in_turn = session is not None and self._in_turn(session)
         self.document_service.lock(document)
         held_before = self.tree_service.held(project, document)
@@ -336,8 +339,8 @@ class IngestService:
         """Whether `session` has a Turn in flight, read under its row's lock,
         held until the transaction ends: every end of a Turn takes that lock,
         so a save and its session's turn end are taken one after the other.
-        Taken before the document's lock, the order a turn's end takes them
-        in."""
+        Taken after the project's row and before the document's, the order a
+        turn's end takes them in."""
         self.db.execute(
             select(AgentSession.id)
             .where(AgentSession.id == session.id)

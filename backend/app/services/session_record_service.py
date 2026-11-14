@@ -18,8 +18,8 @@ from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.exceptions import RecordNotFoundException
+from app.models import Project, SessionRecord, Turn, User
 from app.models import Session as AgentSession
-from app.models import SessionRecord, Turn, User
 from app.models.reference import RecordKind, SessionState
 from app.schemas.session_schema import (
     ClaudeRecordSchema,
@@ -228,6 +228,28 @@ class SessionRecordService:
         if session is None:
             raise RecordNotFoundException("Session", str(session_id))
         return session
+
+    def lock_project(self, session_id: uuid.UUID, *, exclusive: bool = False) -> None:
+        """The Session's Project's row, held until the transaction ends and
+        read as the lock found it: `FOR KEY SHARE`, or `FOR UPDATE` when
+        `exclusive`, for a transaction that may place an Item under it.
+        Taken before the Session's row, the lock order of a start, a close
+        and a tool call: an insert naming the Project in a foreign key, and
+        an `UPDATE` of a row the transaction wrote before, the Session's
+        among them, take the Project's row `FOR KEY SHARE`, which a
+        transaction holding it `FOR UPDATE` and waiting on the Session
+        deadlocks with.
+
+        Raises:
+            RecordNotFoundException: No Session has the id
+        """
+        session = self.require_session(session_id)
+        self.db.scalars(
+            select(Project)
+            .where(Project.id == session.project_id)
+            .with_for_update(read=not exclusive, key_share=not exclusive)
+            .execution_options(populate_existing=True)
+        ).one()
 
     def append(
         self,

@@ -6,6 +6,7 @@ called as its loop calls it, once the fake holds the turn. The loop's tests run
 it on a database of its own, from the send's commit, as the supervisor does."""
 
 import json
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -27,6 +28,8 @@ from app.app_config import HaltSetting
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
+from app.engine.documents import DocumentService
+from app.engine.record import MARKED, TURN_ENDED
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Chat,
@@ -81,6 +84,7 @@ from app.services.relay_service import (
     STARTING,
     RelayService,
     Words,
+    _opening,
 )
 from app.services.session_record_service import (
     RECORDS_WRITTEN_TOTAL,
@@ -97,9 +101,10 @@ from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
-from tests.support.locks import lock_waits
+from tests.support.locks import in_thread, lock_waits
 from tests.support.starts import configured_starts
 from tests.support.supervisor import (
+    WAIT_SECONDS,
     LogWaiter,
     Supervise,
     listening,
@@ -4153,6 +4158,76 @@ def _send_committed(
         assert turn.error is None
 
 
+def _committed_wait_run(
+    container: ServiceContainer, controller_session: str
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """A person, an open project, its timed wait and the wait's run, an idle
+    `wait_fired` job on the fake's headless session, committed: the run's
+    id, the wait's and the person's."""
+    with scoped_session(container) as db:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject=SUBJECT,
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        db.add(person)
+        db.flush()
+        project = Project(
+            created_by_user_id=person.id,
+            state_code=ProjectState.OPEN,
+            slug="camp",
+            name="Camp",
+        )
+        db.add(project)
+        _environment_row(db)
+        run = models.Session(
+            project_id=project.id,
+            environment_id=ENV,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            controller_session=controller_session,
+            token_hash=uuid.uuid4().hex,
+            state_code=SessionState.IDLE,
+        )
+        db.add(run)
+        db.flush()
+        wait = container.wait_service().add_timed_wait(
+            project, run, "The release", datetime.now(UTC) + timedelta(hours=1), None
+        )
+        container.record_service().place_work(
+            project,
+            run,
+            "Checking the wait",
+            trigger=WorkTrigger.WAIT_FIRED,
+            trigger_item_id=wait.id,
+        )
+        return run.id, wait.id, person.id
+
+
+def _close_wait(
+    container: ServiceContainer, run_id: uuid.UUID, wait_id: uuid.UUID
+) -> None:
+    """The run's own `done` on its wait, through pilot-store."""
+    with scoped_session(container) as db:
+        run = db.get_one(models.Session, run_id)
+        container.pilot_store_service().mark(
+            Brain(run.id, run.project_id, run.kind_code),
+            wait_id,
+            "done",
+            None,
+            None,
+            note="Read the release notes at noon; the deploy started.",
+        )
+
+
+def _closed_by(container: ServiceContainer, wait_id: uuid.UUID) -> tuple[Any, ...]:
+    with scoped_session(container) as db:
+        wait = db.get_one(Item, wait_id)
+        return wait.done_cause_code, wait.consumed_session_id
+
+
 def _read(container: ServiceContainer, run_id: uuid.UUID) -> models.Session:
     with scoped_session(container) as db:
         run = db.get_one(models.Session, run_id)
@@ -4294,6 +4369,149 @@ class TestRelayLoop:
 
         wait_until(lambda: placed() == [NEXT_TITLE], "the job placed")
         assert _read(container, run_id).state_code is SessionState.IDLE
+
+    @pytest.fixture
+    def wait_run(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> tuple[RelayService, str, uuid.UUID, uuid.UUID, uuid.UUID]:
+        """The relays after STARTUP and an idle wait's run: the service, the
+        controller session's name, the run's id, its wait's and its
+        person's."""
+        container = committed_app.container
+        relays, coordinator = _relay_service(container, supervise)
+        name = _headless(fake_controller, committed_controller_client)
+        run_id, wait_id, person_id = _committed_wait_run(container, name)
+        coordinator.fire_startup()
+        return relays, name, run_id, wait_id, person_id
+
+    @pytest.mark.parametrize(
+        "end", ["its result", "its stop", "its environment's stop"]
+    )
+    def test_a_wait_runs_turn_end_and_its_waits_close_both_commit(
+        self,
+        committed_app: Flask,
+        fake_controller: ServedFakeController,
+        wait_run: tuple[RelayService, str, uuid.UUID, uuid.UUID, uuid.UUID],
+        monkeypatch: pytest.MonkeyPatch,
+        end: str,
+    ) -> None:
+        """P-227: the run's `done` on its wait, late, as its turn ends. The
+        turn's end takes the project's row before the run's Session, as the
+        close does, so the close waits for it, and neither deadlocks."""
+        container = committed_app.container
+        relays, name, run_id, wait_id, person_id = wait_run
+        holding, release = threading.Event(), threading.Event()
+        ends: list[uuid.UUID] = []
+        turn_ended = DocumentService.turn_ended
+
+        def held_turn_ended(
+            self: DocumentService, session: models.Session
+        ) -> list[str]:
+            ends.append(session.id)
+            if not holding.is_set():
+                holding.set()
+                assert release.wait(WAIT_SECONDS)
+            return turn_ended(self, session)
+
+        def stopped() -> None:
+            with scoped_session(container) as db:
+                opening = _opening(db, run_id)
+            assert opening is not None
+            if end == "its stop":
+                relays._end_stopped(opening, None)
+            else:
+                relays._stopped_elsewhere(
+                    opening, StopCause.ENVIRONMENT_STOPPED, "Env-A stopped"
+                )
+
+        monkeypatch.setattr(DocumentService, "turn_ended", held_turn_ended)
+        ending = None
+        if end == "its result":
+            _send_committed(container, relays, run_id, person_id)
+            _turn_of(fake_controller, name, raw_turn("turn_text"))
+        else:
+            _running_committed(container, run_id)
+            if end == "its stop":
+                with scoped_session(container) as db:
+                    run = db.get_one(models.Session, run_id)
+                    run.state_code = SessionState.STOPPED
+                    run.stopped_at = datetime.now(UTC)
+            ending = in_thread(stopped)
+        assert holding.wait(WAIT_SECONDS)
+        closing = in_thread(lambda: _close_wait(container, run_id, wait_id))
+        wait_until(lambda: lock_waits(container) == 1, "the close waiting")
+        release.set()
+
+        closing.result()
+        if ending is None:
+            _idle(container, run_id)
+            with scoped_session(container) as db:
+                assert db.get_one(Item, run_id).done_cause_code == TURN_ENDED
+        else:
+            ending.result()
+        assert ends == [run_id]
+        assert all(turn.ended_at for turn in _committed_turns(container, run_id))
+        assert _closed_by(container, wait_id) == (MARKED, run_id)
+
+    @pytest.mark.parametrize("send", ["a send", "a written turn's send"])
+    def test_a_wait_runs_send_and_its_waits_close_both_commit(
+        self,
+        committed_app: Flask,
+        wait_run: tuple[RelayService, str, uuid.UUID, uuid.UUID, uuid.UUID],
+        monkeypatch: pytest.MonkeyPatch,
+        send: str,
+    ) -> None:
+        """The turn's start: the send takes the project's row before the
+        run's Session, as the close does, so a close made while the
+        controller's `202` is written waits for it, and neither deadlocks
+        (the deadlock a dev environment's suite met, 2026-11-12)."""
+        container = committed_app.container
+        relays, _, run_id, wait_id, person_id = wait_run
+        holding, release = threading.Event(), threading.Event()
+        accepted = RelayService._accepted
+
+        def held_accepted(self: RelayService, db: DbSession, turn: Turn) -> None:
+            holding.set()
+            assert release.wait(WAIT_SECONDS)
+            accepted(self, db, turn)
+
+        def sent_turn(turn_id: int) -> None:
+            with scoped_session(container) as db:
+                assert relays.send_turn(db, turn_id).error is None
+
+        monkeypatch.setattr(RelayService, "_accepted", held_accepted)
+        if send == "a send":
+            sending = in_thread(
+                lambda: _send_committed(container, relays, run_id, person_id)
+            )
+        else:
+            with scoped_session(container) as db:
+                run = db.get_one(models.Session, run_id)
+                run.state_code = SessionState.STARTING
+                run.turns = 1
+                written = Turn(
+                    session_id=run_id,
+                    seq=1,
+                    message="Check the wait",
+                    started_at=datetime.now(UTC),
+                )
+                db.add(written)
+                db.flush()
+                turn_id = written.id
+            sending = in_thread(lambda: sent_turn(turn_id))
+        assert holding.wait(WAIT_SECONDS)
+        closing = in_thread(lambda: _close_wait(container, run_id, wait_id))
+        wait_until(lambda: lock_waits(container) == 1, "the close waiting")
+        release.set()
+
+        sending.result()
+        closing.result()
+        assert _read(container, run_id).state_code is SessionState.RUNNING
+        assert _closed_by(container, wait_id) == (MARKED, run_id)
 
     def test_a_send_starts_the_relay_which_records_the_turn_as_it_comes(
         self,
