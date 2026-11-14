@@ -90,6 +90,16 @@ def pool_guard_installed() -> Generator[None]:
 
 
 @pytest.fixture(autouse=True)
+def no_leftover_after_commit_callbacks() -> Generator[None]:
+    """The test's thread holds no `after_commit()` callback a test before it
+    left uncommitted: the `ContextVar` outlives a test, and the next
+    `scoped_session` block would deliver them, on the shared bus."""
+    clear_after_commit_callbacks()
+    yield
+    clear_after_commit_callbacks()
+
+
+@pytest.fixture(autouse=True)
 def pool_guard(pool_guard_installed: None) -> Generator[PoolGuard]:
     """Fails the test where a thread checked out a second connection of a
     pool while it held one: in the test, its fixtures, or a thread a test
