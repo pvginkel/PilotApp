@@ -1,9 +1,9 @@
 """Testing endpoints for SSE integration tests.
 
 Provides endpoints to start demo tasks, trigger version events, send
-fake task events and force the next stream connect to refuse, enabling
-integration tests to exercise the SSE pipeline without requiring real
-domain logic.
+fake task events, force the next stream connect to refuse and take the
+stream down, enabling integration tests to exercise the SSE pipeline
+without requiring real domain logic.
 
 All endpoints are guarded by reject_if_not_testing() so they are
 only available when FLASK_ENV=testing.
@@ -26,6 +26,7 @@ from app.schemas.testing_sse import (
     DeploymentTriggerRequestSchema,
     DeploymentTriggerResponseSchema,
     ForceSSECallbackErrorQuerySchema,
+    SSEOutageQuerySchema,
     TaskEventRequestSchema,
     TaskEventResponseSchema,
     TaskStartRequestSchema,
@@ -241,5 +242,47 @@ def force_sse_callback_error(
     testing_service.set_forced_sse_connect_error(query.status)
 
     logger.info("Configured forced SSE connect error: status=%d", query.status)
+
+    return "", 204
+
+
+@testing_sse_bp.route("/sse/outage", methods=["POST"])
+@api.validate(query=SSEOutageQuerySchema, resp=SpectreeResponse(HTTP_204=None))
+@inject
+def start_sse_outage(
+    testing_service: TestingService = Provide[ServiceContainer.testing_service],
+) -> tuple[str, int]:
+    """Take the browser's stream down until DELETE /api/testing/sse/outage.
+
+    Every stream connect answers 503 meanwhile, which the browser counts as
+    a failed attempt. With ``silent``, the streams that are open send
+    nothing either, heartbeat included, as a connection that died without
+    saying so.
+
+    Query Parameters:
+        silent: Whether the open streams go silent (default false)
+
+    Returns:
+        204: The outage holds
+    """
+    query = SSEOutageQuerySchema.model_validate(request.args.to_dict())
+
+    testing_service.start_sse_outage(silent=query.silent)
+
+    return "", 204
+
+
+@testing_sse_bp.route("/sse/outage", methods=["DELETE"])
+@api.validate(resp=SpectreeResponse(HTTP_204=None))
+@inject
+def end_sse_outage(
+    testing_service: TestingService = Provide[ServiceContainer.testing_service],
+) -> tuple[str, int]:
+    """End the stream's outage: connects go through, open streams speak.
+
+    Returns:
+        204: No outage holds
+    """
+    testing_service.end_sse_outage()
 
     return "", 204
