@@ -216,6 +216,8 @@ export class TimelinePage {
         progressName: root.getByTestId('timeline.work.progress.name'),
         steps: {
           root: root.getByTestId('timeline.work.steps'),
+          /** Its body, which scrolls. */
+          body: root.getByTestId('timeline.work.steps.body'),
           heading: root.getByTestId('timeline.work.steps.heading'),
           items: root.getByTestId('timeline.work.steps.step'),
         },

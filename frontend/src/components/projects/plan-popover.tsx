@@ -6,6 +6,7 @@
  */
 
 import { useLayoutEffect, useRef } from 'react';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import { showCurrentStep, StepRing, StepRow, StepsButton, stepsTooltip, type Step } from '@/components/shared/steps-button';
 import type { ProjectHead } from '@/hooks/use-projects';
 import { planStepMark } from '@/lib/utils/status-labels';
@@ -39,19 +40,22 @@ export function PlanPage({ tasks }: { tasks: Task[] }) {
   const page = useRef<HTMLElement>(null);
   useLayoutEffect(() => showCurrentStep(page.current!), []);
   return (
-    <section ref={page} className="plan-page" aria-label="The plan" data-testid="project.plan-page">
-      <h2 data-testid="project.plan-page.heading">{`The plan${steps.length > 0 ? ` · ${done} of ${steps.length} done` : ''}`}</h2>
-      {steps.length > 0 ? (
-        <ol>
-          {steps.map((step) => (
-            <StepRow key={step.id} step={step} testId="project.plan.step" />
-          ))}
-        </ol>
-      ) : (
-        <p className="none" data-testid="project.plan-page.none">
-          No steps yet.
-        </p>
-      )}
-    </section>
+    <div className="plan-frame">
+      <section ref={page} className="plan-page scroll-view" aria-label="The plan" data-testid="project.plan-page">
+        <h2 data-testid="project.plan-page.heading">{`The plan${steps.length > 0 ? ` · ${done} of ${steps.length} done` : ''}`}</h2>
+        {steps.length > 0 ? (
+          <ol>
+            {steps.map((step) => (
+              <StepRow key={step.id} step={step} testId="project.plan.step" />
+            ))}
+          </ol>
+        ) : (
+          <p className="none" data-testid="project.plan-page.none">
+            No steps yet.
+          </p>
+        )}
+      </section>
+      <ScrollBar view={page} testId="project.plan-page.scrollbar" />
+    </div>
   );
 }

@@ -57,7 +57,7 @@ test.describe('The Chat tab’s composer', () => {
     expect(window.cut).toBeLessThanOrEqual(window.leading);
   });
 
-  test('lies over the transcript’s foot with no divider, under frosted glass, short of its scrollbar: the transcript padded by its height, its end clear of it, and kept at its end as the field grows', async ({
+  test('lies over the transcript’s foot with no divider, under frosted glass, across it: the transcript padded by its height, its end clear of it, and kept at its end as the field grows', async ({
     people,
     projects,
     controller,
@@ -100,7 +100,7 @@ test.describe('The Chat tab’s composer', () => {
         };
       });
     const at = await measure();
-    // Over the transcript's view at its foot, across it to its scrollbar.
+    // Over the transcript's view at its foot, across it.
     expect(at.left).toBeCloseTo(0, 0);
     expect(at.short).toBeCloseTo(0, 0);
     expect(at.foot).toBeCloseTo(0, 0);

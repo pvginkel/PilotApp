@@ -31,6 +31,7 @@ import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type R
 import { flushSync } from 'react-dom';
 import { ArrowLeft, X } from 'lucide-react';
 import { scrollToIn } from '@/components/overlay/scroll-to';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import { blockKey, FlashContext, GoToContext, useFlashes } from '@/components/timeline/flash';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
 import { DocTabContext } from '@/hooks/use-doc-tabs';
@@ -134,19 +135,12 @@ export function Overlay({
   // Its body for what it shows is where it was left, as its body mounts.
   const [left, setLeft] = useState(() => ({ showing, top: kept?.scroll ?? 0 }));
   if (left.showing !== showing) setLeft({ showing, top: kept?.scroll ?? 0 });
-  // A tab's head's and foot's text stand in its column, which the body's scrollbar narrows; the
-  // popover centres on the column of what lies under it, narrowed by a scrollbar as wide.
-  useLayoutEffect(() => {
-    if (view) return;
-    const element = sheet.current!.querySelector<HTMLElement>(':scope > .sheet-body')!;
-    sheet.current!.style.setProperty('--gutter', `${element.offsetWidth - element.clientWidth}px`);
-  }, [left, view]);
   // What its body draws may come after the body mounts, its read gone from the cache: the scroll is
   // set back once, as its column first draws, unless it scrolls first. The browser holds it to
   // what the body reaches.
   useLayoutEffect(() => {
     if (left.top === 0) return;
-    const element = sheet.current!.querySelector<HTMLElement>(':scope > .sheet-body')!;
+    const element = body.current!;
     const column = element.firstElementChild!;
     const setBack = () => {
       if (!draws(column)) return false;
@@ -164,7 +158,7 @@ export function Overlay({
     observer.observe(column);
     element.addEventListener('scroll', stop);
     return stop;
-  }, [left]);
+  }, [left, body]);
   const blockIn = (blockId: string) => body.current!.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
   // The block is drawn in the body.
   const goTo = (itemId: string, blockId: string, behavior: ScrollBehavior = smoothly()) => {
@@ -229,14 +223,16 @@ export function Overlay({
               )}
             </div>
             {strip}
-            <div
-              key={showing}
-              ref={body}
-              className="sheet-body"
-              onScroll={kept === null ? undefined : (event) => kept.keep(event.currentTarget.scrollTop)}
-              data-testid="overlay.body"
-            >
-              <div className="column">{children}</div>
+            <div key={showing} className="scroll-frame">
+              <div
+                ref={body}
+                className="sheet-body scroll-view"
+                onScroll={kept === null ? undefined : (event) => kept.keep(event.currentTarget.scrollTop)}
+                data-testid="overlay.body"
+              >
+                <div className="column">{children}</div>
+              </div>
+              <ScrollBar view={body} testId="overlay.scrollbar" />
             </div>
             {foot && (
               <div className="sheet-foot" data-testid="overlay.foot">

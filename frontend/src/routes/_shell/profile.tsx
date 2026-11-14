@@ -5,10 +5,12 @@
  * phone it lies over the home, the arrow to the home alone at its top-left.
  */
 
+import { useRef } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { JoinCallsSwitch } from '@/components/people/profile-membership';
 import { AlarmsSwitch, DeviceSwitch } from '@/components/people/profile-notifications';
 import { Avatar } from '@/components/shared/avatar';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import { HomeButton } from '@/components/shell/home-head';
 import { usePhone } from '@/hooks/use-phone';
 import { useOverHome } from '@/hooks/use-phone-home';
@@ -22,6 +24,7 @@ function Profile() {
   const person = usePerson();
   const phone = usePhone();
   const home = useOverHome(phone);
+  const page = useRef<HTMLDivElement>(null);
   return (
     <>
       {phone && (
@@ -29,35 +32,38 @@ function Profile() {
           <HomeButton onHome={home} />
         </div>
       )}
-      <div className="people-page" data-testid="profile">
-        <section>
-          <h1>Profile</h1>
-          <div className="profile-who">
-            <Avatar who={{ name: person.name, initials: person.initials, slot: person.avatar_slot }} />
-            <span data-testid="profile.name">{person.name}</span>
-          </div>
-          <dl className="profile-fields">
-            <dt>Handle</dt>
-            <dd>
-              <span className="handle" data-testid="profile.handle">
-                {person.handle}
-              </span>
-              <p>The short name that stands for you in Pilot&rsquo;s files. It cannot be changed.</p>
-            </dd>
-            <dt>Notifications</dt>
-            <dd>
-              <DeviceSwitch />
-            </dd>
-            <dt>Alarms</dt>
-            <dd>
-              <AlarmsSwitch on={person.alarms} />
-            </dd>
-            <dt>Projects</dt>
-            <dd>
-              <JoinCallsSwitch on={person.join_calls} />
-            </dd>
-          </dl>
-        </section>
+      <div className="scroll-frame">
+        <div ref={page} className="people-page scroll-view" data-testid="profile">
+          <section>
+            <h1>Profile</h1>
+            <div className="profile-who">
+              <Avatar who={{ name: person.name, initials: person.initials, slot: person.avatar_slot }} />
+              <span data-testid="profile.name">{person.name}</span>
+            </div>
+            <dl className="profile-fields">
+              <dt>Handle</dt>
+              <dd>
+                <span className="handle" data-testid="profile.handle">
+                  {person.handle}
+                </span>
+                <p>The short name that stands for you in Pilot&rsquo;s files. It cannot be changed.</p>
+              </dd>
+              <dt>Notifications</dt>
+              <dd>
+                <DeviceSwitch />
+              </dd>
+              <dt>Alarms</dt>
+              <dd>
+                <AlarmsSwitch on={person.alarms} />
+              </dd>
+              <dt>Projects</dt>
+              <dd>
+                <JoinCallsSwitch on={person.join_calls} />
+              </dd>
+            </dl>
+          </section>
+        </div>
+        <ScrollBar view={page} testId="profile.scrollbar" />
       </div>
     </>
   );

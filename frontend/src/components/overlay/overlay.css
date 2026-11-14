@@ -42,7 +42,7 @@
   .sheet-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
   .sheet-head .edited .avatar { align-self: center; }
   .sheet-head .btn-icon + .btn-icon { margin-left: -10px; }
-  .sheet-body { flex: 1; overflow-y: auto; scrollbar-gutter: stable; }
+  .sheet-body { overflow-y: auto; }
   .sheet-body .column { max-width: var(--column); padding: 20px 32px 40px; }
   .sheet-foot {
     flex: none;
@@ -160,23 +160,21 @@
 
   /* Off a phone a document is a tab (the mockup's 901px block): it takes the timeline's place under
      the tab line, on the page's own colour, its column where the timeline's is; the line's cross
-     closes it. The head's and the foot's text stand in the column's lane: --gutter is the body's
-     scrollbar (overlay.tsx). */
+     closes it. The head's and the foot's text stand in the column's lane. */
   @media (min-width: 901px) {
     .sheet.tabbed { --background: inherit; --card: inherit; z-index: 7; }
     .sheet.tabbed .sheet-body .column { margin: 0 auto; padding: 20px 24px 40px; }
-    .sheet.tabbed :is(.sheet-head, .sheet-foot) { --lane: max(0px, calc((100% - var(--gutter, 0px) - var(--column)) / 2)); }
-    .sheet.tabbed .sheet-head { padding-left: calc(var(--lane) + 24px); padding-right: calc(var(--lane) + 16px + var(--gutter, 0px)); }
-    .sheet.tabbed .sheet-foot { padding-left: calc(var(--lane) + 24px); padding-right: calc(var(--lane) + 24px + var(--gutter, 0px)); }
+    .sheet.tabbed :is(.sheet-head, .sheet-foot) { --lane: max(0px, calc((100% - var(--column)) / 2)); }
+    .sheet.tabbed .sheet-head { padding-left: calc(var(--lane) + 24px); padding-right: calc(var(--lane) + 16px); }
+    .sheet.tabbed .sheet-foot { padding-left: calc(var(--lane) + 24px); padding-right: calc(var(--lane) + 24px); }
 
     /* The session log off a phone (the mockup's `.log-pop`): a popover over the tab showing, 90 % of
-       the column's text width and centred on it, the column narrowed by the scrollbar of what it
-       lies over, as wide as its body's (--gutter, overlay.tsx); between the stage's top and bottom,
-       at most 560px high. */
+       the column's text width and centred on it; between the stage's top and bottom, at most 560px
+       high. */
     .sheet.pop {
-      --column-w: calc(min(var(--column), 100% - var(--gutter, 0px)) - 48px);
+      --column-w: calc(min(var(--column), 100%) - 48px);
       right: auto;
-      left: calc(max(0px, (100% - var(--gutter, 0px) - var(--column)) / 2) + 24px + var(--column-w) * 0.05);
+      left: calc(max(0px, (100% - var(--column)) / 2) + 24px + var(--column-w) * 0.05);
       z-index: 8;
       width: calc(var(--column-w) * 0.9);
       height: min(560px, calc(100% - 32px));

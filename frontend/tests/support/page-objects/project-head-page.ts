@@ -29,6 +29,8 @@ export class ProjectHeadPage {
   /** A phone's donut, alone, showing the Plan tab. */
   readonly donut: Locator;
   readonly plan: Locator;
+  /** The plan popover's body, which scrolls. */
+  readonly planBody: Locator;
   readonly planHeading: Locator;
   readonly planSteps: Locator;
   readonly members: Locator;
@@ -63,6 +65,7 @@ export class ProjectHeadPage {
     this.ring = page.getByTestId('project.step.ring');
     this.donut = page.getByTestId('project.donut');
     this.plan = page.getByTestId('project.plan');
+    this.planBody = page.getByTestId('project.plan.body');
     this.planHeading = page.getByTestId('project.plan.heading');
     this.planSteps = page.getByTestId('project.plan.step');
     this.members = page.getByTestId('project.members');

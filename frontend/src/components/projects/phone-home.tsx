@@ -7,9 +7,11 @@
  * keeps it: its arrow back, Esc and Back take it off.
  */
 
+import { useRef, type ReactNode } from 'react';
 import { useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { ArchivedRows, ProjectList } from '@/components/projects/project-column';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import { HomeHead } from '@/components/shell/home-head';
 import { usePerson } from '@/hooks/use-self';
 import { useEscape } from '@/lib/keys';
@@ -22,9 +24,9 @@ export function PhoneHome() {
   return (
     <div className="home" data-testid="home">
       <HomeHead self={person} />
-      <nav className="home-list" aria-label="Projects" data-testid="home.list">
+      <HomeList label="Projects">
         <ProjectList onArchived={() => void navigate({ to: '/', state: { homeView: 'archived' } })} />
-      </nav>
+      </HomeList>
     </div>
   );
 }
@@ -48,9 +50,22 @@ function ArchivedView() {
         </button>
         <h1>Archived</h1>
       </header>
-      <nav className="home-list" aria-label="Archived projects" data-testid="home.list">
+      <HomeList label="Archived projects">
         <ArchivedRows />
+      </HomeList>
+    </div>
+  );
+}
+
+/** The home's list, or the Archived view's, scrolling under its drawn bar. */
+function HomeList({ label, children }: { label: string; children: ReactNode }) {
+  const list = useRef<HTMLElement>(null);
+  return (
+    <div className="scroll-frame">
+      <nav ref={list} className="home-list scroll-view" aria-label={label} data-testid="home.list">
+        {children}
       </nav>
+      <ScrollBar view={list} testId="home.list.scrollbar" />
     </div>
   );
 }

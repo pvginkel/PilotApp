@@ -31,6 +31,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowDown, ArrowUp, Flag, TriangleAlert } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import { Time } from '@/components/shared/time';
 import { blockKey, FlashContext, GoToContext } from '@/components/timeline/flash';
 import { FoldsContext, useTimelineFolds } from '@/components/timeline/fold';
@@ -218,46 +219,49 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   }, [own]);
 
   return (
-    <div ref={feed} className="feed" onScroll={onScroll} inert={inert} data-testid="timeline">
-      <div ref={pins} className="pins">
-        {urgent.length > 0 && (
-          <div className="pinned" data-testid="timeline.banners">
-            <UrgentBanner item={urgent[0]} more={urgent.length - 1} onShow={() => show(urgent[0].id)} />
-          </div>
-        )}
-        {above.length > 0 && (
-          <button
-            type="button"
-            className="btn btn-soft btn-sm open-above"
-            onClick={() => scrollTo(articleOf(above[above.length - 1])!, 'start')}
-            data-testid="timeline.open-above"
-          >
-            <ArrowUp className="icon" aria-hidden="true" />
-            {above.length} open above
-          </button>
-        )}
+    <div className="scroll-frame feed-frame">
+      <div ref={feed} className="feed scroll-view" onScroll={onScroll} inert={inert} data-testid="timeline">
+        <div ref={pins} className="pins">
+          {urgent.length > 0 && (
+            <div className="pinned" data-testid="timeline.banners">
+              <UrgentBanner item={urgent[0]} more={urgent.length - 1} onShow={() => show(urgent[0].id)} />
+            </div>
+          )}
+          {above.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-soft btn-sm open-above"
+              onClick={() => scrollTo(articleOf(above[above.length - 1])!, 'start')}
+              data-testid="timeline.open-above"
+            >
+              <ArrowUp className="icon" aria-hidden="true" />
+              {above.length} open above
+            </button>
+          )}
+        </div>
+        <div ref={inner} className="feed-inner">
+          <FlashContext.Provider value={{ fresh, flashed }}>
+            <GoToContext.Provider value={goToBlock}>
+              <SectionsContext.Provider value={sections}>
+                <FoldsContext.Provider value={folds}>
+                  {placed && rowsOf(placed).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+                  {ready && <ProjectReady projectId={projectId} />}
+                  {finishedAt !== null && (
+                    <div className="divider finished" data-testid="timeline.divider.finished">
+                      <span>
+                        <Flag className="icon" aria-hidden="true" />
+                        Finished · <Time at={finishedAt} format="stamp" testId="timeline.divider.finished.time" />
+                      </span>
+                    </div>
+                  )}
+                  {question && <Item item={question} fresh={fresh.has(question.id)} onFlashed={() => flashed(question.id)} />}
+                </FoldsContext.Provider>
+              </SectionsContext.Provider>
+            </GoToContext.Provider>
+          </FlashContext.Provider>
+        </div>
       </div>
-      <div ref={inner} className="feed-inner">
-        <FlashContext.Provider value={{ fresh, flashed }}>
-          <GoToContext.Provider value={goToBlock}>
-            <SectionsContext.Provider value={sections}>
-              <FoldsContext.Provider value={folds}>
-                {placed && rowsOf(placed).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
-                {ready && <ProjectReady projectId={projectId} />}
-                {finishedAt !== null && (
-                  <div className="divider finished" data-testid="timeline.divider.finished">
-                    <span>
-                      <Flag className="icon" aria-hidden="true" />
-                      Finished · <Time at={finishedAt} format="stamp" testId="timeline.divider.finished.time" />
-                    </span>
-                  </div>
-                )}
-                {question && <Item item={question} fresh={fresh.has(question.id)} onFlashed={() => flashed(question.id)} />}
-              </FoldsContext.Provider>
-            </SectionsContext.Provider>
-          </GoToContext.Provider>
-        </FlashContext.Provider>
-      </div>
+      <ScrollBar view={feed} testId="timeline.scrollbar" />
     </div>
   );
 }

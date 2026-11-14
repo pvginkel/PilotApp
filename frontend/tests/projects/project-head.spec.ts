@@ -252,19 +252,19 @@ test.describe('The plan popover', () => {
       await projectHead.open(id);
       await projectHead.step.click();
       await expect(projectHead.planSteps).toHaveCount(60);
-      return scrolled(projectHead.plan);
+      return scrolled(projectHead.planBody);
     };
 
     // The first of two in progress, with done steps after it.
     let place = await opened(await plan(40, [30, 50]));
     expect(place.furthest).toBeGreaterThan(600);
-    expect(Math.abs(await underMiddle(projectHead.plan, projectHead.planStep(title(30)).root))).toBeLessThanOrEqual(1);
+    expect(Math.abs(await underMiddle(projectHead.planBody, projectHead.planStep(title(30)).root))).toBeLessThanOrEqual(1);
     expect(place.top).toBeGreaterThan(0);
     expect(place.top).toBeLessThan(place.furthest);
 
     // None in progress: the first not started.
     place = await opened(await plan(25, []));
-    expect(Math.abs(await underMiddle(projectHead.plan, projectHead.planStep(title(25)).root))).toBeLessThanOrEqual(1);
+    expect(Math.abs(await underMiddle(projectHead.planBody, projectHead.planStep(title(25)).root))).toBeLessThanOrEqual(1);
 
     // Near the list's start and near its end, the list stands at that end.
     place = await opened(await plan(1, [1]));
@@ -385,7 +385,7 @@ test.describe('The plan popover', () => {
 
     const box = (await projectHead.plan.boundingBox())!;
     expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
-    expect(await projectHead.plan.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+    expect(await projectHead.planBody.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
     await projectHead.planStep('Step s39').root.scrollIntoViewIfNeeded();
     await expect(projectHead.planStep('Step s39').root).toBeInViewport();
   });

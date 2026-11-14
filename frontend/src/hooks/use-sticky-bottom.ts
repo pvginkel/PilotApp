@@ -17,7 +17,8 @@
  *
  * Only the reader's own input lets go of the bottom: the wheel or a key moving up, a scroll while
  * a finger or pointer is down (a drag on the scrollbar, a selection), or an open that takes the
- * end out of reach. A scroll event alone is not taken as the reader's: when the content shrinks —
+ * end out of reach. The drawn scrollbar stands beside the container: a press on it comes as its
+ * `BAR_PRESS`, the wheel over it as the container's own wheel (scroll-bar.tsx). A scroll event alone is not taken as the reader's: when the content shrinks —
  * a table's columns rebalancing as a reply streams — the browser clamps the view, and the event
  * for that comes a frame later, often after the next delta has grown the content again, when it
  * looks just like a scroll up. DesignAssistant's hook let go there. A scroll down into the bottom
@@ -31,6 +32,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOwnGrowth } from '@/hooks/use-own-growth';
 import { isTestMode } from '@/lib/config/test-mode';
+import { BAR_PRESS } from '@/lib/scroll-bar';
 import { endUiState } from '@/lib/test/ui-state';
 
 /** Pixels from the bottom within which the view counts as stuck to it. */
@@ -122,6 +124,7 @@ export function useStickyBottom(
     container.addEventListener('scroll', onScroll, { passive: true });
     container.addEventListener('wheel', onWheel, { passive: true });
     container.addEventListener('pointerdown', press);
+    container.addEventListener(BAR_PRESS, press);
     container.addEventListener('touchstart', press, { passive: true });
     // Let go anywhere: a drag leaves the container.
     window.addEventListener('pointerup', release);
@@ -158,6 +161,7 @@ export function useStickyBottom(
       container.removeEventListener('scroll', onScroll);
       container.removeEventListener('wheel', onWheel);
       container.removeEventListener('pointerdown', press);
+      container.removeEventListener(BAR_PRESS, press);
       container.removeEventListener('touchstart', press);
       window.removeEventListener('pointerup', release);
       window.removeEventListener('pointercancel', release);

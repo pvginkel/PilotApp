@@ -8,10 +8,11 @@
  * (`new-project.tsx`), is a draft's with nothing in it: Draft empty and nothing attached.
  */
 
-import { useLayoutEffect, useRef, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { DocumentsTab, NewDocumentsTab } from '@/components/panel/documents-tab';
 import { DraftEmpty, DraftTab } from '@/components/panel/draft-tab';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import { useChatDot } from '@/hooks/use-chats';
 import { usePanelDocuments, type PanelDocuments } from '@/hooks/use-panel';
 import type { components } from '@/lib/api/generated/types';
@@ -134,25 +135,35 @@ export function NewPhonePanel({ tab }: { tab: NewPanelTab }) {
 }
 
 function NewPanelBody({ tab }: { tab: NewPanelTab }) {
-  return (
-    <div className="panel-body" role="tabpanel" data-testid="panel.body">
-      {tab === 'draft' ? <DraftEmpty /> : <NewDocumentsTab />}
-    </div>
-  );
+  return <ScrollingBody>{tab === 'draft' ? <DraftEmpty /> : <NewDocumentsTab />}</ScrollingBody>;
 }
 
 const labelOf = (draft: boolean) => (draft ? 'The draft and its documents' : 'The project’s chat and documents');
 
 function PanelBody({ projectId, draft, members, tab, documents, covered }: PhonePanelProps) {
-  return (
-    <div className={cn('panel-body', tab === 'chat' && 'chat')} role="tabpanel" data-testid="panel.body">
-      {tab === 'chat' ? (
+  if (tab === 'chat') {
+    return (
+      <div className="panel-body chat" role="tabpanel" data-testid="panel.body">
         <ProjectChat projectId={projectId} members={members} home="panel" covered={covered} />
-      ) : tab === 'draft' ? (
-        <DraftTab projectId={projectId} />
-      ) : (
-        <DocumentsTab projectId={projectId} draft={draft} documents={documents} />
-      )}
+      </div>
+    );
+  }
+  return (
+    <ScrollingBody>
+      {tab === 'draft' ? <DraftTab projectId={projectId} /> : <DocumentsTab projectId={projectId} draft={draft} documents={documents} />}
+    </ScrollingBody>
+  );
+}
+
+/** A tab's body that scrolls, under its drawn bar; the Chat tab's transcript scrolls alone. */
+function ScrollingBody({ children }: { children: ReactNode }) {
+  const body = useRef<HTMLDivElement>(null);
+  return (
+    <div className="scroll-frame">
+      <div ref={body} className="panel-body scroll-view" role="tabpanel" data-testid="panel.body">
+        {children}
+      </div>
+      <ScrollBar view={body} testId="panel.scrollbar" />
     </div>
   );
 }

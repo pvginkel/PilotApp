@@ -31,6 +31,7 @@ import type { Chats } from '../support/chats';
 import type { Controller } from '../support/controller';
 import { slowNetwork } from '../support/network';
 import { addressOf } from '../support/page-objects/timeline-page';
+import { DrawnBar, expectDrawnBar } from '../support/scroll-bar';
 import { projectAddress, type Projects } from '../support/projects';
 
 const ZONE = 'Europe/Amsterdam';
@@ -265,6 +266,50 @@ test.describe('The Chat tab', () => {
     expect(await scrollTop()).toBe(top);
     expect(Math.abs((await run.boundingBox())!.y - before.y)).toBeLessThan(1);
     expect(await fromBottom()).toBeGreaterThan(32);
+  });
+
+  test('lets go of its end on a drag of its drawn bar and under the wheel over the bar, what streams in after growing under the view; the bar runs down to the composer', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Bar'), members: [me.handle!] });
+    await timeline.open(project);
+    const { session } = await chats.start(project, 'Which route do we take?');
+    await controller.play(chats.store, session, [text('route', LONG)]);
+    await expect(chat.texts).toHaveCount(1);
+    const fromBottom = () => chat.body.evaluate((body) => body.scrollHeight - body.scrollTop - body.clientHeight);
+    await expect.poll(fromBottom).toBeLessThanOrEqual(1);
+    const bar = new DrawnBar(page, chat.body, 'chat.scrollbar');
+    await expectDrawnBar(chat.body);
+    const [track, composer] = await Promise.all([bar.root.boundingBox(), chat.composer.boundingBox()]);
+    expect(track!.y + track!.height).toBeCloseTo(composer!.y, 0);
+
+    await chat.body.hover();
+    const dragged = chat.sticky(false);
+    await bar.drag(page, -80);
+    await dragged;
+    await controller.play(chats.store, session, [text('back', LONG)]);
+    await expect(chat.texts).toHaveCount(2);
+    await expect.poll(fromBottom).toBeGreaterThan(300);
+
+    const stuck = chat.sticky(true);
+    await chat.body.hover();
+    await page.mouse.wheel(0, 100_000);
+    await stuck;
+    const { bar: box } = await bar.geometry();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const wheeled = chat.sticky(false);
+    await page.mouse.wheel(0, -300);
+    await wheeled;
+    await controller.play(chats.store, session, [text('lake', LONG)]);
+    await expect(chat.texts).toHaveCount(3);
+    await expect.poll(fromBottom).toBeGreaterThan(300);
   });
 
   test('a step list the reader opened at its end and closed again leaves the view at its end, following the reply streaming on', async ({
@@ -934,7 +979,7 @@ test.describe('The Chat tab on a phone', () => {
     expect(message.x + message.width).toBeGreaterThan(390 - 40);
     expect(message.x).toBeGreaterThan(390 * 0.09);
     expect(reply.x).toBeLessThan(32);
-    // The composer over its foot, across the column short of the transcript's scrollbar, over the tabs.
+    // The composer over its foot, across the column, over the tabs.
     const [composer, tabs] = await Promise.all([chat.composer.boundingBox(), phoneTabs.root.boundingBox()]);
     expect(composer!.x).toBe(0);
     expect(composer!.width).toBeCloseTo(await chat.body.evaluate((body) => body.clientWidth), 0);

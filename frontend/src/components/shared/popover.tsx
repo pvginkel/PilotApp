@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import { useDismiss } from '@/hooks/use-dismiss';
 import { cn } from '@/lib/utils';
 
@@ -17,7 +18,7 @@ interface PopoverProps {
   className: string;
   testId: string;
   trigger: (state: { open: boolean; toggle: () => void }) => ReactNode;
-  /** Called with the popover once it has opened and has its height. */
+  /** Called with the popover's scrolling body once it has opened and has its height. */
   onOpened?: (popover: HTMLElement) => void;
   children: ReactNode | ((close: () => void) => ReactNode);
 }
@@ -32,6 +33,7 @@ export function Popover({ label, anchorClassName, className, testId, trigger, on
   const close = useCallback(() => setOpen(false), []);
   const anchor = useDismiss('plan', open, close);
   const pop = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const opened = useRef(onOpened);
   useLayoutEffect(() => {
     opened.current = onOpened;
@@ -50,7 +52,7 @@ export function Popover({ label, anchorClassName, className, testId, trigger, on
       own.style.bottom = `calc(100% + ${GAP}px)`;
     }
     own.style.maxHeight = `${up ? above : below}px`;
-    opened.current?.(own);
+    opened.current?.(body.current!);
   }, [open]);
 
   return (
@@ -58,7 +60,10 @@ export function Popover({ label, anchorClassName, className, testId, trigger, on
       {trigger({ open, toggle: () => setOpen(!open) })}
       {open && (
         <div ref={pop} className={cn('popover', className)} role="dialog" aria-label={label} data-testid={testId}>
-          {typeof children === 'function' ? children(close) : children}
+          <div ref={body} className="popover-body scroll-view" data-testid={`${testId}.body`}>
+            {typeof children === 'function' ? children(close) : children}
+          </div>
+          <ScrollBar view={body} testId={`${testId}.scrollbar`} />
         </div>
       )}
     </div>

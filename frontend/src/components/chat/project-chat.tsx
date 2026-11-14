@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import { ChevronUp } from 'lucide-react';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import { useFlashes } from '@/components/timeline/flash';
 import { useChatReach } from '@/hooks/use-chat-reach';
 import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
@@ -213,10 +214,10 @@ interface ChatColumnProps {
 }
 
 /**
- * The chat where it stands: its transcript, scrolling, its composer over its foot, clear of its
- * scrollbar (mockup M3); a new project's too (`new-project.tsx`). The transcript is padded by the
- * composer's height, `--composer-h`, which grows as the composer is typed in, and so is what a
- * scroll into view keeps clear of.
+ * The chat where it stands: its transcript, scrolling, its composer over its foot, across it (mockup
+ * M3); a new project's too (`new-project.tsx`). The transcript is padded by the composer's height,
+ * `--composer-h`, which grows as the composer is typed in, and so is what a scroll into view keeps
+ * clear of; its drawn bar runs down to the composer.
  */
 export function ChatColumn({ home, covered, container, wrapper, composer, children }: ChatColumnProps) {
   const column = useRef<HTMLDivElement>(null);
@@ -225,18 +226,13 @@ export function ChatColumn({ home, covered, container, wrapper, composer, childr
   const foot = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
-    const box = scroller.current!;
     const composed = foot.current!;
-    const fit = () => {
-      column.current!.style.setProperty('--composer-h', `${composed.offsetHeight}px`);
-      composed.style.setProperty('--sb', `${box.offsetWidth - box.clientWidth}px`);
-    };
+    const fit = () => column.current!.style.setProperty('--composer-h', `${composed.offsetHeight}px`);
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(composed);
-    observer.observe(box);
     return () => observer.disconnect();
-  }, [scroller]);
+  }, []);
 
   return (
     <div
@@ -245,24 +241,27 @@ export function ChatColumn({ home, covered, container, wrapper, composer, childr
       inert={covered}
       data-testid={home === 'feed' ? 'project.chat' : 'panel.chat'}
     >
-      {/* The browser's own scroll anchoring off: it would move the view a second time. */}
-      <div
-        ref={scroller}
-        className="relative min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scroll-padding-bottom:var(--composer-h,0px)] [scrollbar-gutter:stable]"
-        data-testid="chat.body"
-      >
+      <div className="scroll-frame">
+        {/* The browser's own scroll anchoring off: it would move the view a second time. */}
         <div
-          ref={wrapper}
-          className={cn(
-            'flex min-h-full flex-col gap-4',
-            home === 'feed'
-              ? 'mx-auto w-full max-w-(--column) px-6 pt-5 pb-[calc(20px_+_var(--composer-h,0px))] text-base/[1.6] [--person-width:75%] max-[900px]:px-3'
-              : 'px-3.5 pt-2 pb-[calc(16px_+_var(--composer-h,0px))] text-base/[1.6]',
-          )}
-          data-testid="chat"
+          ref={scroller}
+          className="scroll-view relative overflow-y-auto [overflow-anchor:none] [scroll-padding-bottom:var(--composer-h,0px)]"
+          data-testid="chat.body"
         >
-          {children}
+          <div
+            ref={wrapper}
+            className={cn(
+              'flex min-h-full flex-col gap-4',
+              home === 'feed'
+                ? 'mx-auto w-full max-w-(--column) px-6 pt-5 pb-[calc(20px_+_var(--composer-h,0px))] text-base/[1.6] [--person-width:75%] max-[900px]:px-3'
+                : 'px-3.5 pt-2 pb-[calc(16px_+_var(--composer-h,0px))] text-base/[1.6]',
+            )}
+            data-testid="chat"
+          >
+            {children}
+          </div>
         </div>
+        <ScrollBar view={scroller} testId="chat.scrollbar" />
       </div>
       <div ref={foot} className="chat-foot">
         {composer}

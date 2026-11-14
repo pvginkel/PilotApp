@@ -63,10 +63,9 @@
     left: 0;
     z-index: 30;
     width: 380px;
-    padding: 0;
     border-color: hsl(var(--gold-edge));
-    overflow: hidden;
   }
+  .gold-pop > .popover-body { padding: 0; }
   .gold-pop .gold-line { padding: 10px 14px; border-bottom: 0; }
   .topbar :focus-visible, .home-head :focus-visible { outline-color: #fff; }
   .gold-pop :focus-visible { outline-color: hsl(var(--gold-foreground)); }
@@ -104,7 +103,7 @@
      a page under its head, on the page's colour; Archived a view of its own in its place ------- */
 
   .home { flex: 1; min-height: 0; display: flex; flex-direction: column; background: hsl(var(--background)); }
-  .home-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 16px; }
+  .home-list { overflow-y: auto; padding-bottom: 16px; }
   .home-list .tabs-head { padding-top: 14px; }
 
   /* ---- The profile menu ----------------------------------------------------------------- */
@@ -168,14 +167,15 @@
   @keyframes loading-bar { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 
   .tabs {
+    position: relative;
     grid-area: 2 / 1 / 3 / 2;
     min-height: 0;
     display: flex;
     flex-direction: column;
     border-right: 1px solid hsl(var(--border));
     background: hsl(var(--side));
-    overflow-y: auto;
   }
+  .tabs-view { display: flex; flex-direction: column; overflow-y: auto; }
 
   /* Not positioned on a wide window: the overlay in it lies over the side column too, placed on
      .app. With a drawer it is (below), and on a phone, and the overlay is placed on it. */

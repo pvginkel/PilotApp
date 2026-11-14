@@ -327,7 +327,7 @@ test.describe('Its popover', () => {
       await expect(item.progress).toHaveAttribute('title', new RegExp(`^${done - active.filter((index) => index < done).length} of 60 steps done`));
       await item.progress.click();
       await expect(item.steps.items).toHaveCount(60);
-      return scrolled(item.steps.root);
+      return scrolled(item.steps.body);
     };
     const shut = async () => {
       await item.progress.click();
@@ -336,11 +336,11 @@ test.describe('Its popover', () => {
 
     let place = await opened(40, [30, 50]);
     expect(place.furthest).toBeGreaterThan(600);
-    expect(Math.abs(await underMiddle(item.steps.root, item.steps.items.nth(30)))).toBeLessThanOrEqual(1);
+    expect(Math.abs(await underMiddle(item.steps.body, item.steps.items.nth(30)))).toBeLessThanOrEqual(1);
     await shut();
 
     place = await opened(25, []);
-    expect(Math.abs(await underMiddle(item.steps.root, item.steps.items.nth(25)))).toBeLessThanOrEqual(1);
+    expect(Math.abs(await underMiddle(item.steps.body, item.steps.items.nth(25)))).toBeLessThanOrEqual(1);
     await shut();
 
     place = await opened(58, [58]);
@@ -369,7 +369,7 @@ test.describe('Its popover', () => {
     const [feed, button, pop] = await Promise.all([timeline.root, item.progress, item.steps.root].map(async (locator) => (await locator.boundingBox())!));
     expect(pop.y + pop.height).toBeLessThanOrEqual(button.y);
     expect(pop.y).toBeGreaterThanOrEqual(feed.y);
-    expect(await item.steps.root.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
+    expect(await item.steps.body.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(true);
   });
 });
 

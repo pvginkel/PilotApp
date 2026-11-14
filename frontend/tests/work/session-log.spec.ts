@@ -26,6 +26,7 @@ import { projectAddress, type Projects } from '../support/projects';
 import { documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { attachmentAddress } from '../support/page-objects/timeline-page';
+import { DrawnBar } from '../support/scroll-bar';
 
 const ZONE = 'Europe/Amsterdam';
 test.use({ timezoneId: ZONE });
@@ -693,6 +694,45 @@ test.describe('A work item’s session log', () => {
     await controller.play(environment, 'claude-1', [text('three', long(3))]);
     await expect(sessionLog.texts).toHaveCount(3);
     await expect.poll(async () => (await sessionLog.scroll()).fromBottom).toBeLessThanOrEqual(1);
+  });
+
+  test('lets go of its end on a drag of its drawn bar and under the wheel over the bar, what streams in after growing under the view', async ({
+    page,
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await sessionLog.open(project, work);
+    const long = (n: number) => Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of survey ${n}.`).join('\n\n');
+    await controller.play(environment, 'claude-1', [text('one', long(1))]);
+    await expect(sessionLog.texts).toHaveCount(1);
+    await expect.poll(async () => (await sessionLog.scroll()).fromBottom).toBeLessThanOrEqual(1);
+    const bar = new DrawnBar(page, sessionLog.body, 'overlay.scrollbar');
+
+    await sessionLog.body.hover();
+    const dragged = sessionLog.sticky(false);
+    await bar.drag(page, -80);
+    await dragged;
+    await controller.play(environment, 'claude-1', [text('two', long(2))]);
+    await expect(sessionLog.texts).toHaveCount(2);
+    await expect.poll(async () => (await sessionLog.scroll()).fromBottom).toBeGreaterThan(1000);
+
+    const stuck = sessionLog.sticky(true);
+    await sessionLog.body.hover();
+    await page.mouse.wheel(0, 100_000);
+    await stuck;
+    const { bar: track } = await bar.geometry();
+    await page.mouse.move(track.x + track.width / 2, track.y + track.height / 2);
+    const wheeled = sessionLog.sticky(false);
+    await page.mouse.wheel(0, -600);
+    await wheeled;
+    await controller.play(environment, 'claude-1', [text('three', long(3))]);
+    await expect(sessionLog.texts).toHaveCount(3);
+    await expect.poll(async () => (await sessionLog.scroll()).fromBottom).toBeGreaterThan(1000);
   });
 
   test('at its end, opens a run of calls downward while its turn runs: the run’s line and the view stay where they stood, the end is let go, and what streams in after it grows under the view', async ({

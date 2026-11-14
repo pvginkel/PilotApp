@@ -354,7 +354,8 @@
     top: calc(100% + 6px);
     right: 0;
     z-index: 15;
-    padding: 10px 0;
+    display: flex;
+    flex-direction: column;
     border: 1px solid hsl(var(--border));
     border-radius: var(--radius);
     background: hsl(var(--background));
@@ -365,8 +366,10 @@
     text-align: left;
     white-space: normal;
     cursor: default;
-    overflow-y: auto;
+    overflow: hidden;
   }
+  /* What it holds, scrolling under its drawn bar once it reaches its bounds. */
+  .popover-body { padding: 10px 0; overflow-y: auto; }
   .popover h3 { margin: 0 0 6px; padding: 0 14px; font-size: var(--text-sm); font-weight: 600; color: hsl(var(--muted-foreground)); }
 
   /* ---- Steps behind a button (steps-button.tsx): the plan's donut and the plan popover
@@ -426,4 +429,39 @@
   .dialog-list li { margin: 4px 0; }
   .dialog-note { margin: 0 0 18px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* ---- A pane's drawn scrollbar (scroll-bar.tsx) ------------------------------------------- */
+
+  /* The pane, its own bar hidden, and what holds it and its drawn bar: positioned, so that the bar
+     stands over the pane's right edge. A frame in a column takes the pane's place in it. */
+  .scroll-frame { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .scroll-view { flex: 1; min-height: 0; scrollbar-width: none; }
+  /* Over what scrolls in the pane, its pinned banner among it; under a tab over the pane. */
+  .scrollbar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 6;
+    width: 12px;
+    opacity: 0;
+    pointer-events: none;
+    touch-action: none;
+    transition: opacity 150ms ease-out;
+  }
+  .scrollbar-thumb {
+    position: absolute;
+    top: 0;
+    right: 2px;
+    width: 6px;
+    border-radius: 999px;
+    background: hsl(var(--muted-foreground) / 0.45);
+    transition: width 120ms ease-out;
+  }
+  /* A touch screen keeps what it last tapped under the mouse: there the bar shows on a scroll alone. */
+  @media (hover: hover) {
+    :hover > .scrollbar { opacity: 1; pointer-events: auto; }
+  }
+  :has(:focus-visible) > .scrollbar, .scrollbar:is([data-scrolled], [data-dragging]) { opacity: 1; pointer-events: auto; }
+  .scrollbar:is(:hover, [data-dragging]) > .scrollbar-thumb { width: 10px; background: hsl(var(--muted-foreground) / 0.6); }
 }

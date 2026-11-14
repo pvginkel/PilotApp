@@ -7,11 +7,12 @@
  * what is under the top bar.
  */
 
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { HandleStep } from '@/components/people/handle-step';
 import { LoadingBar } from '@/components/shell/loading-bar';
 import { ProjectColumn } from '@/components/projects/project-column';
 import { LinksProvider } from '@/components/shared/linked-text';
+import { ScrollBar } from '@/components/shared/scroll-bar';
 import type { Drawer } from '@/components/shell/drawer';
 import { NotificationsOffer } from '@/components/shell/notifications-offer';
 import { TopBar } from '@/components/shell/top-bar';
@@ -28,6 +29,7 @@ interface DeskFrameProps {
 
 export function DeskFrame({ self, drawer, conditions, children }: DeskFrameProps) {
   const person = self !== undefined && isPerson(self) ? self : null;
+  const side = useRef<HTMLDivElement>(null);
   return (
     <>
       {person !== null && <NotificationsOffer handle={person.handle} />}
@@ -39,7 +41,10 @@ export function DeskFrame({ self, drawer, conditions, children }: DeskFrameProps
             <div className="app" data-drawer={drawer === null ? undefined : drawer.open ? 'open' : 'closed'} data-testid="shell.app">
               <LoadingBar />
               <nav className="tabs" aria-label="Projects" data-testid="shell.side">
-                <ProjectColumn />
+                <div ref={side} className="tabs-view scroll-view">
+                  <ProjectColumn />
+                </div>
+                <ScrollBar view={side} testId="shell.side.scrollbar" />
               </nav>
               {drawer !== null && <div className="drawer-scrim" onClick={drawer.close} data-testid="shell.scrim" />}
               <main className="centre" data-testid="shell.centre">
