@@ -16,12 +16,15 @@ A person's `alarm_seen_at` only moves forward. An alarm push moves it to when
 the latest begun of the conditions it named began, whether a browser took the
 push or not, so none of them is pushed again (DB 314); a condition begun after
 that, while the push was in flight too, alerts in a push of its own. Their
-going offline moves it to that moment, every condition holding having shown on
-the gold bar while they were online, so an outage begun before it does not
-alarm when it comes due after. A condition's end pushes nothing, and nothing
-is ever dismissed by push. The switch writes nothing else: it is turned on a
-page of Pilot, whose going offline counts what holds then as shown, so on
-alarms on the next condition that comes to hold (F142.1).
+going offline moves it to when they went offline, their last page's away or
+its beat plus ninety seconds, not the sweep's moment, every condition holding
+having shown on the gold bar while they were online, so an outage begun before
+it does not alarm when it comes due after. A page that expired and is not yet
+swept says that moment to the reconcile (`AppPageService.online_until`). A
+condition's end pushes nothing, and nothing is ever dismissed by push. The
+switch writes nothing else: it is turned on a page of Pilot, whose going
+offline counts what holds then as shown, so on alarms on the next condition
+that comes to hold (F142.1).
 
 The reconcile is the one loop of the job `alarm`: each person with the switch
 on and a browser subscribed, in their turn, pushed when a condition due began
@@ -29,8 +32,8 @@ after their `alarm_seen_at` and no page of theirs counts (`AppPageService`).
 The conditions service asks for it at each turn of a condition, STARTUP once,
 and the timer `alarm-due` when the conditions due differ from those the last
 reconcile read, as they do once the outage has held its time. A person's
-going offline is written by a loop of the job `alarm-seen`, off the thread
-that committed it.
+going offline is written in the transaction that takes them offline
+(`AppPageService.on_going_offline`).
 
 A person's pushes take turns under an advisory lock, so that two processes
 during a roll alert them once: the read, the push and the write in the turn's
@@ -39,13 +42,11 @@ another connection, the read let go before the push (`let_go`), so that
 across it no row or table is locked.
 """
 
-import itertools
 import threading
 import uuid
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from typing import TYPE_CHECKING
 
 from sqlalchemy import exists, or_, select, update
@@ -56,7 +57,7 @@ from app.models import PushSubscription, User
 from app.models.reference import UserKind
 from app.schemas.conditions import ConditionCode
 from app.services.advisory_turn import advisory_turn, let_go, turn_key
-from app.services.app_page_service import AppPageService, PresenceEvent, WentOffline
+from app.services.app_page_service import AppPageService
 from app.services.condition_service import ConditionService
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.web_push import Push, WebPushService
@@ -65,7 +66,6 @@ if TYPE_CHECKING:
     from app.services.container import ServiceContainer
 
 ALARM_JOB = "alarm"
-ALARM_SEEN_JOB = "alarm-seen"
 ALARM_DUE_TIMER = "alarm-due"
 
 ALARM_LOCK = 238
@@ -109,16 +109,16 @@ class AlarmService:
         base_url: str,
         outage_after_seconds: float,
     ) -> None:
-        """Register the `alarm` job, whose reconcile runs at STARTUP, the
-        `alarm-seen` job and the timer, and hear the conditions and the
-        pages; where the deployment pushes nothing, none of them.
+        """Register the `alarm` job, whose reconcile runs at STARTUP, and the
+        timer, hear the conditions, and write each going offline the pages
+        take; where the deployment pushes nothing, none of them.
 
         Args:
             container: Gives each transaction its database session
-            supervisor: Runs the reconciles and the goings offline
+            supervisor: Runs the reconciles and the timer
             condition_service: Says which conditions hold, and tells of each
                 turn
-            app_page_service: Says whether a person is online, and tells of
+            app_page_service: Says until when a person is online, and takes
                 their going offline
             web_push_service: Pushes to a person's browsers; with no key,
                 nothing alarms
@@ -132,7 +132,6 @@ class AlarmService:
         self._web_push = web_push_service
         self._url = f"{base_url}/"
         self._outage_after = timedelta(seconds=outage_after_seconds)
-        self._offline = itertools.count(1)
         self._lock = threading.Lock()
         self._reconciled: _Due = ()
         if web_push_service.public_key is None:
@@ -140,10 +139,9 @@ class AlarmService:
         supervisor.register_job(
             ALARM_JOB, needs_controller=False, reconcile=self._reconcile_at_startup
         )
-        supervisor.register_job(ALARM_SEEN_JOB, needs_controller=False)
         supervisor.register_timer(ALARM_DUE_TIMER, self.tick, needs_controller=False)
         condition_service.subscribe(self._start)
-        app_page_service.subscribe(self._heard)
+        app_page_service.on_going_offline(_seen)
 
     def holding(self) -> dict[ConditionCode, datetime]:
         """The conditions that hold now, each with when it began to hold."""
@@ -194,26 +192,6 @@ class AlarmService:
         # Again: a turn after the run's read is reconciled by a run after it.
         self._supervisor.start_loop(ALARM_JOB, self.reconcile, again=again)
 
-    def _heard(self, event: PresenceEvent) -> None:
-        if not isinstance(event, WentOffline):
-            return
-        # The moment the commit that took them offline is heard, not the
-        # loop's later one: a condition begun between the two alarms them.
-        at = datetime.now(UTC)
-        self._supervisor.start_loop(
-            ALARM_SEEN_JOB,
-            partial(self._went_offline, event.user_id, at),
-            key=next(self._offline),
-        )
-
-    def _went_offline(
-        self, person_id: uuid.UUID, at: datetime, handle: LoopHandle
-    ) -> None:
-        """A loop `alarm-seen:<n>`'s run: the person, gone offline `at`, shown
-        every condition that held then."""
-        with scoped_session(self._container) as db:
-            _seen(db, person_id, at)
-
     def _due(self, holding: Mapping[ConditionCode, datetime]) -> _Due:
         """The conditions of `holding` that alarm now, the latest begun
         first."""
@@ -234,12 +212,17 @@ class AlarmService:
         latest = due[0][1]
         with self._turn(person_id) as db:
             with let_go(db):
+                # Their pages read before their row: a sweep committed between
+                # the two wrote the going offline of the pages it deleted.
+                until = self._pages.online_until(db, person_id)
                 person = db.get_one(User, person_id)
-                seen = person.alarm_seen_at
+                # Past `until` they went offline then, shown every condition
+                # begun by it, as the sweep's going offline writes.
+                seen = max(filter(None, (person.alarm_seen_at, until)), default=None)
                 if (
                     not person.alarms
                     or (seen is not None and latest <= seen)
-                    or self._pages.online(db, person_id)
+                    or (until is not None and until > datetime.now(UTC))
                 ):
                     return
             self._web_push.push(

@@ -1,4 +1,4 @@
-"""The alarms (F142, F147; DB 238; DB decisions 70 and 74; V09, V13, V14): a
+"""The alarms (F142, F147; DB 238, 312; DB decisions 70 and 74; V09, V13, V14): a
 push to every browser of a person's, under the one tag `alarms`, when a
 condition that alarms has begun since they were last shown the conditions,
 while they are offline and their switch is on, on the fake push service.
@@ -27,7 +27,6 @@ from app.schemas.conditions import ConditionCode
 from app.services.alarm_service import (
     ALARM_JOB,
     ALARM_LOCK,
-    ALARM_SEEN_JOB,
     ALARM_TAG,
     AlarmService,
 )
@@ -205,17 +204,14 @@ def _away(
         built.pages.away(db, _person(db, handle), page_id)
 
 
-def _went_offline(
-    container: ServiceContainer,
-    built: _Built,
-    log: LogWaiter,
-    handle: str,
-    page_id: uuid.UUID,
-    count: int = 1,
-) -> None:
-    """The person's last page away, and the `count`th going offline written."""
-    _away(container, built, handle, page_id)
-    log.wait_for(rf"Loop {ALARM_SEEN_JOB}:{count} ended")
+def _sweep(container: ServiceContainer, built: _Built) -> None:
+    """The pages' expiry, as its timer runs it, committed."""
+    with scoped_session(container) as db:
+        built.pages.expire(db)
+
+
+def _ago(seconds: float) -> datetime:
+    return _now() - timedelta(seconds=seconds)
 
 
 def _seen_at(container: ServiceContainer, handle: str) -> datetime | None:
@@ -556,15 +552,14 @@ class TestAlarmServiceOffline:
         web_push_service: WebPushService,
         browsers: dict[str, FakeSubscription],
         supervise: Supervise,
-        log: LogWaiter,
     ) -> None:
+        """Written with the away that took them offline, in its commit."""
         built = _service(container, supervise, web_push_service)
-        _started(built, log)
         page = _online(container, "ada")
         holding = {ConditionCode.WEEK_HALT: _now()}
         _reconcile(built.service, holding)
 
-        _went_offline(container, built, log, "ada", page)
+        _away(container, built, "ada", page)
 
         seen = _seen_at(container, "ada")
         assert seen is not None and seen > holding[ConditionCode.WEEK_HALT]
@@ -578,16 +573,14 @@ class TestAlarmServiceOffline:
         web_push_service: WebPushService,
         browsers: dict[str, FakeSubscription],
         supervise: Supervise,
-        log: LogWaiter,
     ) -> None:
         """The outage comes due on a service whose wait it has held; Ben,
         offline throughout, is alarmed by it."""
         built = _service(container, supervise, web_push_service)
-        _started(built, log)
         page = _online(container, "ada")
         holding = {ConditionCode.OUTAGE: _now()}
         _reconcile(built.service, holding)
-        _went_offline(container, built, log, "ada", page)
+        _away(container, built, "ada", page)
         came_due = _service(
             container, supervise, web_push_service, outage_after_seconds=0
         )
@@ -606,11 +599,9 @@ class TestAlarmServiceOffline:
         web_push_service: WebPushService,
         browsers: dict[str, FakeSubscription],
         supervise: Supervise,
-        log: LogWaiter,
     ) -> None:
         built = _service(container, supervise, web_push_service)
-        _started(built, log)
-        _went_offline(container, built, log, "ada", _online(container, "ada"))
+        _away(container, built, "ada", _online(container, "ada"))
         since = _now()
 
         _reconcile(built.service, {ConditionCode.WEEK_HALT: since})
@@ -623,15 +614,13 @@ class TestAlarmServiceOffline:
         container: ServiceContainer,
         web_push_service: WebPushService,
         supervise: Supervise,
-        log: LogWaiter,
     ) -> None:
         later = _now() + LONG_AGO
         with scoped_session(container) as db:
             _person(db, "ada").alarm_seen_at = later
         built = _service(container, supervise, web_push_service)
-        _started(built, log)
 
-        _went_offline(container, built, log, "ada", _online(container, "ada"))
+        _away(container, built, "ada", _online(container, "ada"))
 
         assert _seen_at(container, "ada") == later
 
@@ -640,19 +629,91 @@ class TestAlarmServiceOffline:
         container: ServiceContainer,
         web_push_service: WebPushService,
         supervise: Supervise,
-        log: LogWaiter,
     ) -> None:
         built = _service(container, supervise, web_push_service)
-        _started(built, log)
         phone = _online(container, "ada")
         desktop = _online(container, "ada")
 
         _away(container, built, "ada", phone)
-        _went_offline(container, built, log, "ada", desktop)
+        assert _seen_at(container, "ada") is None
 
-        assert log.matching(rf"Loop {ALARM_SEEN_JOB}:\d+ started") == [
-            f"Loop {ALARM_SEEN_JOB}:1 started"
+        _away(container, built, "ada", desktop)
+        assert _seen_at(container, "ada") is not None
+
+    def test_a_page_expired_and_not_yet_swept_shows_them_what_held_while_it_counted(
+        self,
+        container: ServiceContainer,
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        browsers: dict[str, FakeSubscription],
+        supervise: Supervise,
+    ) -> None:
+        """V10: Ada's only page beat 95 s ago and is not yet swept, and the
+        week's halt began 200 s ago, while it counted (slice 038's P6 review,
+        F1, case 1). Ben, with no page, is alarmed."""
+        _online(container, "ada", beat_at=_ago(95))
+        built = _service(container, supervise, web_push_service)
+
+        _reconcile(built.service, {ConditionCode.WEEK_HALT: _ago(200)})
+
+        assert _pushes(fake_push_service, browsers["ada"]) == []
+        assert _pushes(fake_push_service, browsers["ben"]) == [_alarm(container, WEEK)]
+        assert set(_seen(container)) == {"ben"}
+
+    def test_an_outage_begun_after_their_page_expired_alarms_them_swept_after(
+        self,
+        container: ServiceContainer,
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        browsers: dict[str, FakeSubscription],
+        supervise: Supervise,
+    ) -> None:
+        """V10: Ada's page beat 95 s ago, the outage began 2 s ago, after she
+        went offline, and the sweep ran before it came due (slice 038's P6
+        review, F1, case 2). The sweep writes her going offline at the beat
+        plus ninety seconds, not at its own moment."""
+        beat = _ago(95)
+        _online(container, "ada", beat_at=beat)
+        built = _service(container, supervise, web_push_service, outage_after_seconds=0)
+        holding = {ConditionCode.OUTAGE: _ago(2)}
+
+        _sweep(container, built)
+
+        assert _seen_at(container, "ada") == beat + timedelta(seconds=EXPIRY_SECONDS)
+        _reconcile(built.service, holding)
+        assert _pushes(fake_push_service, browsers["ada"]) == [
+            _alarm(container, OUTAGE)
         ]
+
+    def test_a_start_after_a_downtime_alarms_nobody_what_their_last_page_showed(
+        self,
+        container: ServiceContainer,
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        browsers: dict[str, FakeSubscription],
+        supervise: Supervise,
+        log: LogWaiter,
+    ) -> None:
+        """V10: the backend was down past Ada's page's ninety seconds, with
+        the week's halt holding from before. STARTUP's reconcile and the first
+        sweep run on separate threads, in either order. Ben, with no page, is
+        alarmed."""
+        beat = _ago(EXPIRY_SECONDS + 110)
+        _online(container, "ada", beat_at=beat)
+        built = _service(container, supervise, web_push_service)
+        holding = {ConditionCode.WEEK_HALT: beat - timedelta(seconds=100)}
+
+        with patch.object(built.service, "holding", return_value=holding):
+            _started(built, log)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == []
+        assert _pushes(fake_push_service, browsers["ben"]) == [_alarm(container, WEEK)]
+        wait_until(
+            lambda: (
+                _seen_at(container, "ada") == beat + timedelta(seconds=EXPIRY_SECONDS)
+            ),
+            "the first sweep's going offline written",
+        )
 
 
 class TestAlarmServiceSwitch:
@@ -679,18 +740,16 @@ class TestAlarmServiceSwitch:
         web_push_service: WebPushService,
         browsers: dict[str, FakeSubscription],
         supervise: Supervise,
-        log: LogWaiter,
     ) -> None:
         """Turned on a page of Pilot, whose going offline shows what holds;
         with the switch off, the going offline shows it as much."""
         _switch(container, "ada", on=False)
         built = _service(container, supervise, web_push_service, outage_after_seconds=0)
-        _started(built, log)
         week = _now() - LONG_AGO
         _reconcile(built.service, {ConditionCode.WEEK_HALT: week})
         page = _online(container, "ada")
         _switch(container, "ada", on=True)
-        _went_offline(container, built, log, "ada", page)
+        _away(container, built, "ada", page)
         _reconcile(built.service, {ConditionCode.WEEK_HALT: week})
         assert _pushes(fake_push_service, browsers["ada"]) == []
 
@@ -983,7 +1042,7 @@ class TestAlarmServiceNoKey:
             patch.object(supervisor, "register_job") as register_job,
             patch.object(supervisor, "register_timer") as register_timer,
             patch.object(conditions, "subscribe") as hear_conditions,
-            patch.object(pages, "subscribe") as hear_pages,
+            patch.object(pages, "on_going_offline") as take_offline,
         ):
             AlarmService(
                 container=container,
@@ -998,4 +1057,4 @@ class TestAlarmServiceNoKey:
         register_job.assert_not_called()
         register_timer.assert_not_called()
         hear_conditions.assert_not_called()
-        hear_pages.assert_not_called()
+        take_offline.assert_not_called()

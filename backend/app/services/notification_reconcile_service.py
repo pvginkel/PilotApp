@@ -13,14 +13,17 @@ The reconcile of one member reads what waits on them
   dismissed by push: so Archive and Leave forget what they were shown;
 - while a page of theirs shows the project (`AppPageService`), every item that
   waits on them is shown, nothing pushed;
-- online with no page on it, nothing is pushed and their sightings stand;
+- online with no page on it, nothing is pushed;
 - offline with a browser subscribed, an item that waits with no sighting
   alerts; else a sighting of an item that no longer waits updates silently;
   else nothing is pushed.
 
-A push some browser of theirs took (`WebPushService.push`) shows them every
-item it named or counted, and the sightings of the others are deleted; one
-that none took shows them nothing, and their next reconcile pushes anew.
+Whatever is pushed, the sighting of an item that no longer waits on them is
+deleted (DB decision 157), so that it alerts when it comes to wait again; the
+silent update for one that stopped waiting while they were online elsewhere
+is not sent at their going offline. A push some browser of theirs took
+(`WebPushService.push`) shows them every item it named or counted; one that
+none took shows them nothing, and their next reconcile pushes anew.
 Nothing is retried: a push service's failure is logged and counted where the
 push is sent.
 
@@ -264,13 +267,13 @@ class NotificationReconcileService:
             due = self._compare(db, project_id, person_id)
             if due is None:
                 return None
+            # What the compare wrote, the sightings it deleted, the write does
+            # again; a compare at the window's end reads them as they were.
+            compare.rollback()
             if due.last_push is not None:
                 after = due.last_push + self._spacing
                 if after > datetime.now(UTC):
                     return after
-            # What the compare wrote, the other memberships' sightings deleted,
-            # the write does again.
-            compare.rollback()
             took = self._web_push.push(
                 person_id, due.notification.push(alert=due.alert), db
             )
@@ -283,7 +286,8 @@ class NotificationReconcileService:
                 db,
                 due.membership_ids,
                 due.holder_id,
-                due.notification.items if took else None,
+                due.notification.items,
+                shown=took,
             )
         return None
 
@@ -310,20 +314,21 @@ class NotificationReconcileService:
             )[holder.id]
         )
         if holder is None or notification is None:
-            _show(db, membership_ids, None, frozenset())
+            _show(db, membership_ids, None, frozenset(), shown=False)
             return None
         if self._pages.shows(db, person_id, project_id):
-            _show(db, membership_ids, holder.id, notification.items)
-            return None
-        # A closed membership's sightings go whatever is pushed: Leave forgets.
-        _show(db, membership_ids, holder.id, None)
-        if self._pages.online(db, person_id):
+            _show(db, membership_ids, holder.id, notification.items, shown=True)
             return None
         seen = set(
             db.scalars(
                 select(ItemSighting.item_id).where(ItemSighting.member_id == holder.id)
             )
         )
+        # A closed membership's sightings go whatever is pushed, Leave
+        # forgetting, and so does that of an item that no longer waits.
+        _show(db, membership_ids, holder.id, notification.items, shown=False)
+        if self._pages.online(db, person_id):
+            return None
         alert = not notification.items <= seen
         if not alert and seen <= notification.items:
             return None
@@ -365,22 +370,27 @@ def _show(
     db: Session,
     membership_ids: Collection[int],
     holder_id: int | None,
-    items: frozenset[uuid.UUID] | None,
+    items: frozenset[uuid.UUID],
+    *,
+    shown: bool,
 ) -> None:
     """The person's sightings in the project, on any of `membership_ids`,
-    made those of `items` on `holder_id`: every other deleted, and each of
-    `items` it lacks written. With `items` none, the holder's stand as they
-    are, and the other memberships' are deleted."""
+    brought in line with `items`, those that wait on them, on `holder_id`:
+    every other membership's deleted, and the holder's of an item not among
+    `items`; when `shown`, each of `items` the holder lacks written. With no
+    holder, every one deleted."""
     others = [member for member in membership_ids if member != holder_id]
     if others:
         db.execute(delete(ItemSighting).where(ItemSighting.member_id.in_(others)))
-    if holder_id is None or items is None:
+    if holder_id is None:
         return
     db.execute(
         delete(ItemSighting).where(
             ItemSighting.member_id == holder_id, ItemSighting.item_id.not_in(items)
         )
     )
+    if not shown:
+        return
     seen = set(
         db.scalars(
             select(ItemSighting.item_id).where(ItemSighting.member_id == holder_id)

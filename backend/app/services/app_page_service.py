@@ -7,7 +7,11 @@ and the project it shows. Its away deletes it. A page whose beat is
 `EXPIRY_SECONDS` old counts for nothing and is deleted: by the timer
 `app-page-expiry`, or by the next beat or away of its person, whichever comes
 first. A person is online while a page of theirs counts: derived, never
-stored (`online`).
+stored (`online`). A person goes offline at their last page's away, or, where
+their last pages expired, at the beat of the last to count plus
+`EXPIRY_SECONDS`, not at the sweep that deletes them; until that sweep their
+pages say so (`online_until`), and the hooks hear it in the transaction that
+deletes them (`on_going_offline`).
 
 The listeners hear two things, each once, after the commit of the request or
 the sweep that made it so: a project coming to be shown by a page of the
@@ -32,7 +36,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from app.exceptions import RecordNotFoundException
@@ -68,6 +72,9 @@ class WentOffline:
 
 type PresenceEvent = ShowingTurned | WentOffline
 type PresenceListener = Callable[[PresenceEvent], None]
+type GoingOfflineHook = Callable[[Session, uuid.UUID, datetime], None]
+"""Called with the transaction that takes a person offline, the person's id,
+and when they went offline."""
 
 
 class AppPageService:
@@ -82,12 +89,21 @@ class AppPageService:
         """
         self._expiry = timedelta(seconds=EXPIRY_SECONDS)
         self._listeners: tuple[PresenceListener, ...] = ()
+        self._going_offline: tuple[GoingOfflineHook, ...] = ()
         supervisor.register_timer(EXPIRY_TIMER, self.expire, needs_controller=False)
 
     def subscribe(self, listener: PresenceListener) -> None:
         """Call `listener` with each event once the transaction that made it
         so has committed, in the thread that committed it."""
         self._listeners = (*self._listeners, listener)
+
+    def on_going_offline(self, hook: GoingOfflineHook) -> None:
+        """Call `hook` in each write that takes a person offline, in its
+        transaction, before it commits, so that what `hook` writes commits
+        with the deletion of their last page or rolls back with it. They went
+        offline at the away of a page that counted, else at the beat of the
+        last of their pages to count plus `EXPIRY_SECONDS`."""
+        self._going_offline = (*self._going_offline, hook)
 
     def begin(
         self, db: Session, person: User, project_id: uuid.UUID | None
@@ -110,7 +126,7 @@ class AppPageService:
         page = AppPage(user_id=person.id, project_id=project_id, beat_at=now)
         db.add(page)
         db.flush()
-        self._tell(person.id, before, _shows([*live, page]))
+        self._tell(db, person.id, before, _shows([*live, page]))
         return page.id
 
     def beat(
@@ -141,7 +157,7 @@ class AppPageService:
         page.beat_at = now
         page.project_id = project_id
         db.flush()
-        self._tell(person.id, before, _shows(live))
+        self._tell(db, person.id, before, _shows(live))
 
     def away(self, db: Session, person: User, page_id: uuid.UUID) -> None:
         """The away of the page `page_id`, in `db`'s transaction: its App Page
@@ -156,7 +172,13 @@ class AppPageService:
             if page.id == page_id:
                 db.delete(page)
         db.flush()
-        self._tell(person.id, before, _shows(p for p in live if p.id != page_id))
+        self._tell(
+            db,
+            person.id,
+            before,
+            _shows(p for p in live if p.id != page_id),
+            self._offline_at(pages, now),
+        )
 
     def expire(self, db: Session) -> None:
         """The timer's run, in `db`'s transaction, the scheduler's: every page
@@ -178,7 +200,7 @@ class AppPageService:
             live = self._expire_pages(db, pages, now)
             expired += len(pages) - len(live)
             db.flush()
-            self._tell(user_id, before, _shows(live))
+            self._tell(db, user_id, before, _shows(live), self._offline_at(pages, now))
         if expired:
             logger.info("%d pages of Pilot expired", expired)
 
@@ -194,6 +216,16 @@ class AppPageService:
                 )
             )
         )
+
+    def online_until(self, db: Session, user_id: uuid.UUID) -> datetime | None:
+        """Until when the person is online by their pages not yet deleted:
+        the last beat among them plus `EXPIRY_SECONDS`. A moment past is when
+        they went offline, their pages expired and not yet swept. None with no
+        page of theirs."""
+        last = db.scalar(
+            select(func.max(AppPage.beat_at)).where(AppPage.user_id == user_id)
+        )
+        return None if last is None else last + self._expiry
 
     def shows(self, db: Session, user_id: uuid.UUID, project_id: uuid.UUID) -> bool:
         """Whether a page of the person's that counts shows the project."""
@@ -221,15 +253,26 @@ class AppPageService:
                 live.append(page)
         return live
 
+    def _offline_at(self, pages: Sequence[AppPage], now: datetime) -> datetime:
+        """When the person goes offline should the write at `now` leave none
+        of `pages`, theirs as read before it: at `now`, the away of one that
+        counts, else when the last of them to beat stopped counting."""
+        last = max((page.beat_at for page in pages), default=now)
+        return min(now, last + self._expiry)
+
     def _tell(
         self,
+        db: Session,
         user_id: uuid.UUID,
         before: list[uuid.UUID | None],
         after: list[uuid.UUID | None],
+        offline_at: datetime | None = None,
     ) -> None:
-        """Tell the listeners, once the transaction commits, what turned
+        """Tell the listeners, once `db`'s transaction commits, what turned
         between the person's pages as they were, `before`, and as they are
-        left, `after`: the project each shows, or none."""
+        left, `after`: the project each shows, or none; and the hooks, now,
+        their going offline. `offline_at` is when they went offline, given by
+        a write that can leave them no page."""
         was = {project for project in before if project is not None}
         now = {project for project in after if project is not None}
         events: list[PresenceEvent] = [
@@ -240,6 +283,9 @@ class AppPageService:
             for project in sorted(was - now)
         ]
         if before and not after:
+            assert offline_at is not None
+            for hook in self._going_offline:
+                hook(db, user_id, offline_at)
             events.append(WentOffline(user_id))
         if events:
             after_commit(partial(self._deliver, tuple(events)))

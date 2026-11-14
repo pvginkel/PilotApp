@@ -426,6 +426,105 @@ class TestOnline:
         assert not heard.service.online(session, person.id)
 
 
+class TestOnlineUntil:
+    def test_it_is_the_last_beat_among_their_pages_plus_ninety_seconds(
+        self, session: Session, heard: _Heard, person: User
+    ) -> None:
+        _page(session, person, beat_at=_ago(EXPIRY_SECONDS + 30))
+        last = _page(session, person, beat_at=_ago(20))
+        _page(session, _bea(session), beat_at=_ago(1))
+
+        assert heard.service.online_until(session, person.id) == last.beat_at + (
+            timedelta(seconds=EXPIRY_SECONDS)
+        )
+
+    def test_past_once_every_page_expired_unswept_it_is_when_they_went_offline(
+        self, session: Session, heard: _Heard, person: User
+    ) -> None:
+        last = _page(session, person, beat_at=_ago(EXPIRY_SECONDS + 5))
+        _page(session, person, beat_at=_ago(EXPIRY_SECONDS + 50))
+
+        until = heard.service.online_until(session, person.id)
+
+        assert until == last.beat_at + timedelta(seconds=EXPIRY_SECONDS)
+        assert until < datetime.now(UTC)
+
+    def test_with_no_page_of_theirs_it_is_none(
+        self, session: Session, heard: _Heard, person: User
+    ) -> None:
+        _page(session, _bea(session))
+
+        assert heard.service.online_until(session, person.id) is None
+
+
+class TestOnGoingOffline:
+    """A hook hears the person's going offline in the write's transaction,
+    with when they went offline (DB 312)."""
+
+    @staticmethod
+    def _hooked(heard: _Heard) -> list[tuple[Session, uuid.UUID, datetime, int]]:
+        """What each call of a hook on the service got, and how many events
+        the listener had heard at it."""
+        calls: list[tuple[Session, uuid.UUID, datetime, int]] = []
+        heard.service.on_going_offline(
+            lambda db, user_id, at: calls.append((db, user_id, at, len(heard.events)))
+        )
+        return calls
+
+    def test_the_away_of_the_last_page_calls_it_before_the_commit_at_the_away(
+        self, session: Session, heard: _Heard, person: User, project: Project
+    ) -> None:
+        calls = self._hooked(heard)
+        page = _page(session, person, project)
+        before = datetime.now(UTC)
+
+        heard.service.away(session, person, page.id)
+
+        [(db, user_id, at, told)] = calls
+        assert (db, user_id, told) == (session, person.id, 0)
+        assert before <= at <= datetime.now(UTC)
+
+    def test_an_expiry_calls_it_at_the_last_beat_plus_ninety_seconds_not_the_sweep(
+        self, session: Session, heard: _Heard, person: User
+    ) -> None:
+        calls = self._hooked(heard)
+        last = _page(session, person, beat_at=_ago(EXPIRY_SECONDS + 200))
+        _page(session, person, beat_at=_ago(EXPIRY_SECONDS + 300))
+
+        heard.service.expire(session)
+
+        assert [(user_id, at) for _, user_id, at, _ in calls] == [
+            (person.id, last.beat_at + timedelta(seconds=EXPIRY_SECONDS))
+        ]
+
+    def test_the_away_of_a_page_that_expired_calls_it_when_it_stopped_counting(
+        self, session: Session, heard: _Heard, person: User
+    ) -> None:
+        calls = self._hooked(heard)
+        page = _page(session, person, beat_at=_ago(EXPIRY_SECONDS + 30))
+
+        heard.service.away(session, person, page.id)
+
+        assert [(user_id, at) for _, user_id, at, _ in calls] == [
+            (person.id, page.beat_at + timedelta(seconds=EXPIRY_SECONDS))
+        ]
+
+    def test_a_write_that_leaves_them_a_page_calls_it_not(
+        self, session: Session, heard: _Heard, person: User, project: Project
+    ) -> None:
+        calls = self._hooked(heard)
+        _page(session, person, beat_at=_ago(EXPIRY_SECONDS + 1))
+        stays = _page(session, person)
+        page_id = heard.service.begin(session, person, project.id)
+
+        heard.service.beat(session, person, page_id, None)
+        heard.service.away(session, person, page_id)
+        heard.service.expire(session)
+
+        assert calls == []
+        assert [page for page, _, _ in _pages(session)] == [stays.id]
+
+
 class TestShows:
     def test_a_page_of_theirs_on_the_project_shows_it(
         self, session: Session, heard: _Heard, person: User, project: Project

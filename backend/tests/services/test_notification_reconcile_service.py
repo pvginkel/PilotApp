@@ -816,7 +816,7 @@ class TestNotificationReconcileServicePages:
         assert _seen(container, project_id) == {site}
         assert len(_pushes(fake_push_service, browsers["ada"])) == 1
 
-    def test_online_with_no_page_on_it_nothing_is_pushed_and_what_was_shown_stands(
+    def test_online_with_no_page_on_it_nothing_is_pushed_and_what_stopped_is_forgotten(
         self,
         container: ServiceContainer,
         browsers: dict[str, FakeSubscription],
@@ -824,20 +824,53 @@ class TestNotificationReconcileServicePages:
         web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
+        """V11 (D157): the sighting of what no longer waits is deleted, that
+        of what still waits stands, and what came to wait is not shown."""
         camp = _project(container)
         lake = _project(container, environment_id=None)
         built = _service(container, supervise, web_push_service)
         tent = _bear(container, camp, "decision", "Which tent?", DECISION)
+        site = _bear(container, camp, "decision", "Which site?", DECISION)
         _reconcile(built, camp)
         _page(container, project_id=lake)
 
-        _bear(container, camp, "decision", "Which site?", DECISION)
-        _reconcile(built, camp)
+        _bear(container, camp, "decision", "Which stove?", DECISION)
         _answer(container, "ada", tent, "Dome")
         _reconcile(built, camp)
 
         assert len(_pushes(fake_push_service, browsers["ada"])) == 1
-        assert _seen(container, camp) == {tent}
+        assert _seen(container, camp) == {site}
+
+    def test_an_ask_that_stopped_while_online_elsewhere_alerts_when_it_comes_back(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """V11 (D157): a work item she was shown stops waiting and waits again
+        while she is at her desk on Lake, another ask of Camp waiting
+        throughout; her going offline alerts."""
+        camp = _project(container)
+        lake = _project(container, environment_id=None)
+        built = _service(container, supervise, web_push_service)
+        _ask(container, camp, "Which site?")
+        worker = _work(container, camp, SessionState.STOPPED)
+        _reconcile(built, camp)
+        page = _page(container, project_id=lake)
+
+        _set_state(container, worker, SessionState.RUNNING)
+        _reconcile(built, camp)
+        _set_state(container, worker, SessionState.STOPPED)
+        _reconcile(built, camp)
+        _gone(container, page)
+        _reconcile_person(container, built)
+
+        assert [
+            (push.body, push.renotify)
+            for push in _pushes(fake_push_service, browsers["ada"])
+        ] == [("Building the camp, +1", True)] * 2
 
     def test_a_page_whose_beat_is_ninety_seconds_old_counts_for_nothing(
         self,
@@ -892,7 +925,7 @@ class TestNotificationReconcileServiceOffline:
         ]
         assert (_seen(container, camp), _seen(container, lake)) == ({tent}, {shore})
 
-    def test_going_offline_pushes_a_held_update_silently(
+    def test_going_offline_sends_no_update_for_one_that_stopped_while_online(
         self,
         container: ServiceContainer,
         browsers: dict[str, FakeSubscription],
@@ -900,6 +933,8 @@ class TestNotificationReconcileServiceOffline:
         web_push_service: WebPushService,
         supervise: Supervise,
     ) -> None:
+        """V11 (D157): what stopped while she was online elsewhere was
+        forgotten then."""
         project_id = _project(container)
         built = _service(container, supervise, web_push_service)
         tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
@@ -912,9 +947,31 @@ class TestNotificationReconcileServiceOffline:
         _gone(container, page)
         _reconcile_person(container, built)
 
-        assert _pushes(fake_push_service, browsers["ada"])[1:] == [
-            _push(container, project_id, "Which site?", site, alert=False)
-        ]
+        assert len(_pushes(fake_push_service, browsers["ada"])) == 1
+        assert _seen(container, project_id) == {site}
+
+    def test_offline_with_no_browser_what_stopped_is_forgotten(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """V11 (D157): Cal, who has no browser, was shown both on a page of
+        the project, now gone."""
+        project_id = _project(container, ("ada", "cal"))
+        built = _service(container, supervise, web_push_service)
+        page = _page(container, "cal", project_id)
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        site = _bear(container, project_id, "decision", "Which site?", DECISION)
+        _reconcile(built, project_id)
+        assert _seen(container, project_id, "cal") == {tent, site}
+
+        _gone(container, page)
+        _answer(container, "ada", tent, "Dome")
+        _reconcile(built, project_id)
+
+        assert _seen(container, project_id, "cal") == {site}
 
     def test_a_pages_away_that_takes_them_offline_pushes_what_was_held(
         self,
@@ -1019,6 +1076,38 @@ class TestNotificationReconcileServiceFailures:
             _push(container, project_id, "Which site?, +1")
         ]
         assert len(_seen(container, project_id)) == 2
+
+    def test_an_update_no_browser_took_forgets_what_stopped_so_its_return_alerts(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """V11 (D157): the silent update for the work item's stop reaches no
+        browser of hers; it comes to wait again once her browser takes pushes
+        again."""
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        site = _ask(container, project_id, "Which site?")
+        worker = _work(container, project_id, SessionState.STOPPED)
+        _reconcile(built, project_id)
+
+        fake_push_service.fail(browsers["ada"].endpoint, "error")
+        _set_state(container, worker, SessionState.RUNNING)
+        _reconcile(built, project_id)
+
+        assert _seen(container, project_id) == {site}
+
+        fake_push_service.fail(browsers["ada"].endpoint, None)
+        _set_state(container, worker, SessionState.STOPPED)
+        _reconcile(built, project_id)
+
+        assert [
+            (push.body, push.renotify)
+            for push in _pushes(fake_push_service, browsers["ada"])
+        ] == [("Building the camp, +1", True)] * 2
 
     def test_a_push_one_browser_of_theirs_took_shows_them_the_items(
         self,
@@ -1179,6 +1268,37 @@ class TestNotificationReconcileServiceSpacing:
         ] == [("Which tent?", True), ("Which stove?, +2", True)]
         last = _sent_at(container, project_id)
         assert last is not None and last - first >= timedelta(seconds=SPACING)
+
+    def test_an_update_due_inside_the_window_goes_out_at_its_end(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """What the compare forgot inside the window is rolled back, so that
+        the compare at its end still finds the update due."""
+        project_id = _project(container)
+        built = _service(
+            container, supervise, web_push_service, spacing_seconds=SPACING
+        )
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        site = _bear(container, project_id, "decision", "Which site?", DECISION)
+        _reconcile(built, project_id)
+        _answer(container, "ada", tent, "Dome")
+        during: list[set[uuid.UUID]] = []
+
+        built.service.reconcile(
+            project_id,
+            _Window(lambda waits: during.append(_seen(container, project_id))),
+        )
+
+        assert during == [{tent, site}]
+        assert _pushes(fake_push_service, browsers["ada"])[1:] == [
+            _push(container, project_id, "Which site?", site, alert=False)
+        ]
+        assert _seen(container, project_id) == {site}
 
     def test_a_change_undone_inside_the_window_pushes_nothing(
         self,
