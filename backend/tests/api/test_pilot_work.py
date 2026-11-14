@@ -864,6 +864,8 @@ class TestRegisterDebrief:
         [
             {"entries": [_entry()]},
             {"debrief": "", "entries": [_entry()]},
+            {"debrief": "   ", "entries": [_entry()]},
+            {"debrief": "\n", "entries": [_entry()]},
             {"debrief": "d" * 16_001, "entries": [_entry()]},
             {"debrief": "Fine."},
             {"debrief": "Fine.", "entries": []},
@@ -890,6 +892,8 @@ class TestRegisterDebrief:
         ids=[
             "no-debrief",
             "empty-debrief",
+            "blank-debrief",
+            "newline-debrief",
             "long-debrief",
             "no-entries",
             "empty-entries",

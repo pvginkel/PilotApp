@@ -19,7 +19,7 @@ from typing import Annotated, Any
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
-from pydantic import Field
+from pydantic import AfterValidator, Field
 from starlette.requests import Request
 
 from pilot_mcp.api import (
@@ -147,6 +147,13 @@ def _taking_for[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awaitabl
         return await tool(*args, **arguments)
 
     return call
+
+
+def _says_something(debrief: str) -> str:
+    """A blank debrief is refused here as its route refuses it."""
+    if not debrief.strip():
+        raise ValueError("a debrief has words")
+    return debrief
 
 
 def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
@@ -283,6 +290,7 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
                     " 16,000 characters"
                 ),
             ),
+            AfterValidator(_says_something),
         ],
         entries: Annotated[
             list[DebriefEntry],

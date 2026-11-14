@@ -4,7 +4,7 @@ for a worker session's tools (TD §4.5)."""
 import uuid
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.reference import ProgressState
 
@@ -255,6 +255,16 @@ class RegisterDebriefRequestSchema(BaseModel):
         max_length=MAX_DEBRIEF_ENTRIES,
         description="The run's accounts, in order",
     )
+
+    @field_validator("debrief")
+    @classmethod
+    def _says_something(cls, debrief: str) -> str:
+        """The store keeps a blank text as none
+        (`app/utils/empty_string_normalization.py`), and a Work's entries
+        stand only beside its debrief (DB 323)."""
+        if not debrief.strip():
+            raise ValueError("a debrief has words")
+        return debrief
 
 
 class RegisteredDebriefSchema(BaseModel):

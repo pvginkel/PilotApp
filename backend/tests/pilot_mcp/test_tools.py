@@ -583,6 +583,8 @@ class TestRegisterDebrief:
         "arguments",
         [
             {"debrief": "", "entries": [_entry()]},
+            {"debrief": "   ", "entries": [_entry()]},
+            {"debrief": "\n", "entries": [_entry()]},
             {"debrief": "d" * 16_001, "entries": [_entry()]},
             {"debrief": "Fine.", "entries": []},
             {"debrief": "Fine.", "entries": [_entry()] * 501},
@@ -603,6 +605,8 @@ class TestRegisterDebrief:
         ],
         ids=[
             "empty-debrief",
+            "blank-debrief",
+            "newline-debrief",
             "long-debrief",
             "no-entries",
             "long-entries",
