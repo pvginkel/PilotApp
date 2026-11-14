@@ -7,12 +7,15 @@ manager delivers events to it in-process.
 
 The wire protocol, which the frontend's SSE worker and provider read:
 
-- ``ready``, a named event with an empty data line, once the stream is
-  accepted; the browser counts as connected from it, not from the open.
+- ``ready``, a named event, once the stream is accepted, its data the
+  heartbeat's cadence, ``{"heartbeat": <seconds>}``; the browser counts as
+  connected from it, not from the open.
 - Domain events as unnamed messages, ``data: {"type": ..., "payload": ...}``
   (``format_event_frame``).
-- A ``: heartbeat`` comment after ``SSE_HEARTBEAT_INTERVAL`` seconds idle,
-  which is also how a browser that has gone is noticed: the write fails.
+- ``heartbeat``, a named event with an empty data line, after
+  ``SSE_HEARTBEAT_INTERVAL`` seconds idle, so that no two frames are further
+  apart: a browser that has heard nothing for longer counts the stream as
+  gone, and a browser that has gone is noticed when the write fails.
 - A refusal answers ``200`` too, with one named event ``rejected``,
   ``{"status": <code>, "message": <reason phrase>}``, and ends: a browser's
   ``EventSource`` does not reconnect a non-200, and the frontend's recovery
@@ -55,8 +58,7 @@ logger = logging.getLogger(__name__)
 
 sse_bp = Blueprint("sse", __name__, url_prefix="/sse")
 
-READY_FRAME = "event: ready\ndata:\n\n"
-HEARTBEAT_FRAME = ": heartbeat\n\n"
+HEARTBEAT_FRAME = "event: heartbeat\ndata:\n\n"
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,12 @@ def _rejected_frame(status: int) -> str:
     """
     payload = {"status": status, "message": HTTP_STATUS_CODES[status].upper()}
     return f"event: rejected\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
+
+
+def _ready_frame(heartbeat_interval: float) -> str:
+    """The ``ready`` event, naming the heartbeat's cadence in seconds."""
+    payload = {"heartbeat": heartbeat_interval}
+    return f"event: ready\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
 
 def _rejected_stream(status: int) -> Generator[str]:
@@ -191,7 +199,7 @@ def _stream(
         if connection.closed:
             # Refused by a shutting-down manager: end without ready
             return
-        yield READY_FRAME
+        yield _ready_frame(heartbeat_interval)
         while True:
             try:
                 frame = connection.next_frame(heartbeat_interval)
