@@ -8,9 +8,10 @@
  * fold.
  */
 
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import type { FormTestEvent } from '@/lib/test/test-events';
 import { test, expect } from '../support/fixtures';
-import { makeUnique } from '../support/helpers';
+import { makeUnique, waitTestEvent } from '../support/helpers';
 import { createDeploymentSseHelper } from '../support/helpers/deployment-sse';
 import { TimelinePage } from '../support/page-objects/timeline-page';
 import { projectAddress } from '../support/projects';
@@ -33,6 +34,9 @@ const takesFocus = (control: Locator) =>
     each.focus();
     return document.activeElement === each;
   });
+/** A fold's or an unfold's write has settled: until then the app takes no other press that writes (use-press.ts). */
+const settled = (page: Page, form: 'timeline.fold' | 'timeline.unfold') =>
+  waitTestEvent<FormTestEvent>(page, 'form', (event) => event.formId === form && event.phase === 'success');
 
 test.describe('An open item’s fold', () => {
   test('the kind in its head folds it to its head and about three lines, the last fading out, live on another page; folded, its controls take nothing and a press anywhere on it unfolds it', async ({
@@ -141,15 +145,19 @@ test.describe('An open item’s fold', () => {
     await page.keyboard.press('Enter');
     await expect(item.root).toHaveAttribute('data-folded', 'true');
     await expect(item.root).toBeFocused();
+    await settled(page, 'timeline.fold');
 
     await page.keyboard.press('Enter');
     await expect(item.root).toHaveAttribute('data-folded', 'false');
     await expect(item.kind).toBeFocused();
+    await settled(page, 'timeline.unfold');
 
     await page.keyboard.press('Enter');
     await expect(item.root).toHaveAttribute('data-folded', 'true');
+    await settled(page, 'timeline.fold');
     await page.keyboard.press('Space');
     await expect(item.root).toHaveAttribute('data-folded', 'false');
+    await settled(page, 'timeline.unfold');
 
     await item.kind.click();
     await expect(item.root).toHaveAttribute('data-folded', 'true');
