@@ -71,6 +71,11 @@ test.describe('Auto pilot turning on', () => {
     await expect(dialog.yes).toHaveText('Yes');
     await expect(dialog.no).toBeFocused();
     await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'false');
+    // Yes lets Pilot go ahead, its work: under the mouse its check gives way to the job's mark; No has none (F59.3).
+    await dialog.yes.hover();
+    await expect(dialog.yes.locator('.job-glyph')).toBeVisible();
+    await expect(dialog.yes.locator('.lucide-check')).toBeHidden();
+    await expect(dialog.no.locator('.job-glyph')).toHaveCount(0);
 
     await dialog.yes.click();
     await expect(dialog.root).toHaveCount(0);

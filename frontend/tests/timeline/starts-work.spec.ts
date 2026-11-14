@@ -4,9 +4,9 @@
  * its foot, and comes back off it; a phone, with no hover, shows none. Which buttons is the server's
  * reading per item, `close_starts_work`: of a one-ask item of Pilot's own its Send, a question's
  * carrying Lucide's send, and none of its options; a document's Send answers and its dialog's
- * Confirm; a review's Reviewed; never a notice's Read, nor an item a worker's run added. A stopped
- * work item's Resume always, its Close never, nor Stop. Pressed, the spinner takes the icon's
- * place, the mark's with it.
+ * Confirm; a review's Reviewed; never a notice's Read, an answer inside a document before its
+ * Send answers, nor an item a worker's run added. A stopped work item's Resume always, its Close
+ * never, nor Stop. Pressed, the spinner takes the icon's place, the mark's with it.
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -29,6 +29,8 @@ const TRIP = [
   '## Which stove?\n',
   '```decision id=D2\noptions:\n  - Gas\n  - Wood\nrecommend: Gas\n```\n',
 ].join('\n');
+// A question and an action, each answered inside the document before its Send answers.
+const KIT = ['## Where do we pitch?\n', '```question id=Q1\n```\n', '## Pack the stove\n', '```action id=A1\n```\n'].join('\n');
 
 /** The mouse off every button, on the top bar. */
 const away = (page: Page) => page.mouse.move(1, 1);
@@ -113,6 +115,29 @@ test.describe('A button that starts Pilot’s work', () => {
     await expect(question.answerSend.locator('.lucide-send')).toHaveCount(0);
     await restore();
     await expect(timeline.item(questionId).root).toHaveAttribute('data-state', 'done');
+  });
+
+  test('an answer inside a document of Pilot’s own, none: its question’s Send and its action’s Done keep their icons, the document’s close being its Send answers', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Inside starts none'), members: [me.handle!] });
+    const kitId = await projects.place(id, { kind: 'document', title: 'The kit', text: KIT, by_pilot: true });
+    expect((await projects.item(id, kitId)).close_starts_work).toBe(true);
+    await timeline.open(id);
+    const kit = timeline.item(kitId);
+
+    const where = kit.blockAt('Q1');
+    await where.answerField.fill('The north shore');
+    await expect(where.answerSend).toBeEnabled();
+    await expectUnmarked(where.answerSend);
+    await expect(where.answerSend.locator('.lucide-send')).toBeVisible();
+    const stove = kit.blockAt('A1');
+    await expect(stove.done).toBeEnabled();
+    await expectUnmarked(stove.done);
+    await expect(stove.done.locator('.lucide-check')).toBeVisible();
   });
 
   test('of an item a worker’s run added, none: its Send keeps its icon under the mouse', async ({ page, people, projects, timeline }) => {

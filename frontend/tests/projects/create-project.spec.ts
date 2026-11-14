@@ -573,6 +573,11 @@ test.describe('The setup', () => {
     // Failed, it can be acted on, which "N open above" counts; retried, no more.
     await expect(setup.root).toHaveAttribute('data-actionable', 'true');
 
+    // It starts Pilot's work: under the mouse its icon gives way to the job's mark (F59.3).
+    await setup.work.retry.hover();
+    await expect(setup.work.retry.locator('.job-glyph')).toBeVisible();
+    await expect(setup.work.retry.locator('.lucide-rotate-cw')).toBeHidden();
+
     const restarted = await chats.opening(id, slug);
     await setup.work.retry.click();
     const again = await restarted();

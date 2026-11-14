@@ -151,6 +151,12 @@ test.describe('Pilot’s job on a line', () => {
     await expect(job.root).toHaveCSS('color', await destructive(page));
     await expect(job.retry).toBeVisible();
     await expect(job.retry).toHaveText('Retry');
+    // It starts Pilot's work: under the mouse its icon gives way to the job's mark (F59.3).
+    await job.retry.hover();
+    await expect(job.retry.locator('.job-glyph')).toBeVisible();
+    await expect(job.retry.locator('.lucide-rotate-cw')).toBeHidden();
+    await away(page);
+    await expect(job.retry.locator('.lucide-rotate-cw')).toBeVisible();
     // The error is its session log's to say.
     await job.root.click();
     await expect(sessionLog.tail).toHaveAttribute('data-mark', 'failed');
