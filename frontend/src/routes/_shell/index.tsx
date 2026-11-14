@@ -1,11 +1,14 @@
 /**
- * The bare address opens the project the browser remembers while it is in the list, else the
- * list's first (F1.6, F133); with no project, the centre says so (F113).
+ * The bare address: on a phone the home (F98.6), the first entry under every project it opens;
+ * off one the project the browser remembers while it is in the list, else the list's first (F1.6,
+ * F133), and with no project the centre says so (F113).
  */
 
 import { createFileRoute, Navigate } from '@tanstack/react-router';
 import { FolderKanban } from 'lucide-react';
+import { PhoneHome } from '@/components/projects/phone-home';
 import { EmptyState } from '@/components/shared/empty-state';
+import { usePhone } from '@/hooks/use-phone';
 import { groupProjects, useProjectList } from '@/hooks/use-projects';
 import { browserState } from '@/lib/browser-state';
 
@@ -14,6 +17,10 @@ export const Route = createFileRoute('/_shell/')({
 });
 
 function Home() {
+  return usePhone() ? <PhoneHome /> : <DeskHome />;
+}
+
+function DeskHome() {
   const { data } = useProjectList();
   if (!data) return null;
   const { mine, others, finished } = groupProjects(data.projects);

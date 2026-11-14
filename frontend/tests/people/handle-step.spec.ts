@@ -64,10 +64,11 @@ test.describe('The handle step', () => {
 
     await expect(handleStep.heading).toHaveText('Choose your handle');
     await expect(shell.topBar).toHaveCount(0);
-    await expect(shell.drawerToggle).toHaveCount(0);
-    expect(await shell.drawerHead.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390 });
-    await expect(shell.drawerBrand).toHaveText('Pilot');
-    expect((await handleStep.root.boundingBox())!.y).toBeGreaterThanOrEqual((await shell.drawerHead.boundingBox())!.height);
+    await expect(shell.home).toHaveCount(0);
+    await expect(shell.homeButton).toHaveCount(0);
+    expect(await shell.homeHead.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390 });
+    await expect(shell.homeBrand).toHaveText('Pilot');
+    expect((await handleStep.root.boundingBox())!.y).toBeGreaterThanOrEqual((await shell.homeHead.boundingBox())!.height);
 
     await shell.user.click();
     await expect(shell.theme).toBeVisible();

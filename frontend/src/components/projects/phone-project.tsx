@@ -1,5 +1,6 @@
 /**
- * A project's screen on a phone (F98.3): its head in one line (`phone-head.tsx`), the tab showing,
+ * A project's screen on a phone (F98.3), over the home (F98.6): its head in one line
+ * (`phone-head.tsx`), its arrow showing the home again from any tab, the tab showing,
  * and the tabs at the bottom — Timeline, Chat, Plan and Documents; a draft's Chat, the definition
  * chat in the timeline's place, Create project at its end (D119), Draft and Documents. Each tab is
  * its icon over its name, the one showing in the primary's tint, its icon on a pill; Chat carries
@@ -47,7 +48,7 @@ interface PhoneProjectProps {
 
 export function PhoneProject({ projectId, project, overlaid, children }: PhoneProjectProps) {
   const draft = project?.state === 'draft';
-  const { tab, show, views, back, scroll, keep } = usePhoneTab(draft, overlaid);
+  const { tab, show, home, views, back, scroll, keep } = usePhoneTab(draft, overlaid);
   const { address } = useShownProject();
   const documents = usePanelDocuments(projectId);
   const unread = useChatDot(projectId);
@@ -77,7 +78,7 @@ export function PhoneProject({ projectId, project, overlaid, children }: PhonePr
           <div className="project">
             {project && (
               <div className="project-main" inert={overlaid}>
-                <PhoneHead project={project} onPlan={() => show('plan')} />
+                <PhoneHead project={project} onHome={home} onPlan={() => show('plan')} />
                 <div className="phone-page" data-tab={tab} data-testid="project.phone-page">
                   {draft ? (
                     <ProjectChat

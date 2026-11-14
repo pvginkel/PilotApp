@@ -1142,7 +1142,7 @@ test.describe('Switching projects', () => {
 test.describe('The head on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('is one line: the drawer’s button, the name, the switch without its label, the donut alone, the members, the notes’ button and the menu, with no ticket, repo or step button', async ({
+  test('is one line: the arrow to the home, the name, the switch without its label, the donut alone, the members, the notes’ button and the menu, with no ticket, repo or step button', async ({
     people,
     projects,
     projectHead,
@@ -1172,7 +1172,7 @@ test.describe('The head on a phone', () => {
     const head = await boxOf(projectHead.root);
     expect(head.height).toBe(52);
     const parts = [
-      shell.drawerToggle,
+      shell.homeButton,
       projectHead.name,
       projectHead.autopilot,
       projectHead.donut,
@@ -1252,7 +1252,7 @@ test.describe('The head on a phone', () => {
     expect(warning.y + warning.height / 2).toBeCloseTo(autopilot.y + autopilot.height / 2, -1);
   });
 
-  test('a tight head gives way in the name, cut to nothing, the drawer’s button and every other part keeping its size, the menu inside the head', async ({
+  test('a tight head gives way in the name, cut to nothing, the arrow to the home and every other part keeping its size, the menu inside the head', async ({
     page,
     people,
     projects,
@@ -1270,7 +1270,7 @@ test.describe('The head on a phone', () => {
     await projectHead.open(id);
 
     await expect(projectHead.menuButton).toBeVisible();
-    const kept = [shell.drawerToggle, projectHead.autopilot, projectHead.donut, projectHead.members, projectHead.notesButton, projectHead.menuButton];
+    const kept = [shell.homeButton, projectHead.autopilot, projectHead.donut, projectHead.members, projectHead.notesButton, projectHead.menuButton];
     const widths = async () => Promise.all(kept.map(async (locator) => (await boxOf(locator)).width));
     const whole = await widths();
     expect(whole[0]).toBe(36);
@@ -1291,7 +1291,7 @@ test.describe('The head on a phone', () => {
     await draftChipAgainstShared(people, projects, projectHead, timeline);
   });
 
-  test('a draft’s is its drawer’s button, its name and Draft chip, its members and its menu', async ({ people, projects, projectHead, shell }) => {
+  test('a draft’s is its arrow to the home, its name and Draft chip, its members and its menu', async ({ people, projects, projectHead, shell }) => {
     const me = await people.signIn();
     const name = makeUnique('Draft');
     const id = await projects.make({ name, state: 'draft', members: [me.handle!] });
@@ -1301,7 +1301,7 @@ test.describe('The head on a phone', () => {
     await expect(projectHead.draft).toHaveText('Draft');
     for (const absent of [projectHead.autopilot, projectHead.donut, projectHead.notesButton]) await expect(absent).toHaveCount(0);
     const head = await boxOf(projectHead.root);
-    const parts = await Promise.all([shell.drawerToggle, projectHead.name, projectHead.draft, projectHead.members, projectHead.menuButton].map(boxOf));
+    const parts = await Promise.all([shell.homeButton, projectHead.name, projectHead.draft, projectHead.members, projectHead.menuButton].map(boxOf));
     for (const box of parts) expect(box.y + box.height / 2).toBeCloseTo(head.y + head.height / 2, -1);
     expect(parts[4].x + parts[4].width).toBeLessThanOrEqual(390);
   });

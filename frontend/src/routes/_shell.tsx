@@ -1,9 +1,8 @@
 /**
  * The frame every screen sits in, the child route showing in its centre: off a phone the top bar
  * over the side column and the centre (`DeskFrame`), the side column at the narrow width a drawer
- * over the centre, opened from the top bar (F98.2); on a phone no top bar, the side column a
- * drawer over the centre (`PhoneFrame`, F98.3). Either drawer is closed by its scrim or by going
- * elsewhere.
+ * over the centre, opened from the top bar and closed by its scrim or by going elsewhere (F98.2);
+ * on a phone no top bar and no side column, the project list the home (`PhoneFrame`, F98.3).
  * At a first sign-in the handle step stands in their place (F137): no screen opens before it.
  * The page closes the notifications of what it shows on its device and beats while its person is
  * active in it (`use-app-page.ts`).
@@ -61,7 +60,7 @@ function Shell() {
   return (
     <>
       {phone ? (
-        <PhoneFrame self={self} drawer={drawer} conditions={conditions}>
+        <PhoneFrame self={self} conditions={conditions}>
           <Outlet />
         </PhoneFrame>
       ) : (

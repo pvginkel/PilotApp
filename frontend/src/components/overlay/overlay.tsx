@@ -19,8 +19,8 @@
  * buttons level with its title's first line; a strip under its head,
  * where what it shows has one, says what Pilot does on it (F28.9). On a phone it is a view pushed
  * over the tabs (F98.4): the whole screen over the head and the tabs, with no animation, no
- * backdrop, no maximize and no cross, an arrow back at the left of its head where the head's drawer
- * button stands; the arrow, Esc and Back take it off (`use-phone-tab.ts`), and its body keeps its
+ * backdrop, no maximize and no cross, an arrow back at the left of its head where the head's arrow
+ * to the home stands; the arrow, Esc and Back take it off (`use-phone-tab.ts`), and its body keeps its
  * scroll while another view lies over it, set back as it shows again once its read is drawn. There
  * it takes the focus as it opens, and again when what it shows replaces what had it, and gives it
  * back as it closes to what had it before, as a dialog does; the timeline under it takes none

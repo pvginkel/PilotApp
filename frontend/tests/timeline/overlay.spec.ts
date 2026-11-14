@@ -11,7 +11,7 @@
  * A done line's Open shows the document as it was done (F13.3), its answers closed (F31.2), a
  * finished project's included, with neither *Edited* nor Pilot's dots where Done fixed the text.
  * Switching projects closes it (F1.6), and on a phone it is a view, the whole screen over the head
- * and its drawer's button, with no maximize or cross, its arrow back taking it off (F98.4; the views
+ * and its arrow to the home, with no maximize or cross, its arrow back taking it off (F98.4; the views
  * whole in tests/projects/phone-views.spec.ts). Esc closes what lies over it, and never its tab.
  */
 
@@ -503,7 +503,7 @@ test.describe('On a phone', () => {
     expect(await projects.block(id, decision)).toMatchObject({ answer: 'Tunnel', by: { handle: me.handle } });
   });
 
-  test('a document’s view lies over the head and its drawer’s button, which its arrow back gives back to switch projects', async ({
+  test('a document’s view lies over the head and its arrow to the home, which its arrow back gives back to go to another project', async ({
     page,
     people,
     projects,
@@ -519,9 +519,9 @@ test.describe('On a phone', () => {
     await overlay.open(id, trip);
     await expect(overlay.root).toBeVisible();
 
-    // It lies over the head, the drawer's button under it, with no top bar's to open it from.
+    // It lies over the head, the arrow to the home under it.
     expect(
-      await shell.drawerToggle.evaluate((button) => {
+      await shell.homeButton.evaluate((button) => {
         const box = button.getBoundingClientRect();
         return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       }),
@@ -529,7 +529,8 @@ test.describe('On a phone', () => {
     await overlay.back.click();
     await expect(overlay.root).toHaveCount(0);
 
-    await shell.drawerToggle.click();
+    await shell.homeButton.click();
+    await expect(shell.home).toBeVisible();
     await projectList.tab(otherName).click();
     await expect(page).toHaveURL(projectAddress(other));
     await expect(overlay.root).toHaveCount(0);

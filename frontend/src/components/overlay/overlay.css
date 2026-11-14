@@ -6,8 +6,8 @@
      on its. */
   .sheet { --background: var(--side); --card: var(--side); }
 
-  /* What it lies over: a phone's view the centre, under the top bar, the drawer over it; off a
-     phone a tab and the session log's popover the stage. */
+  /* What it lies over: a phone's view the centre, under the gold bar; off a phone a tab and the
+     session log's popover the stage. */
   .sheet {
     position: absolute;
     inset: 0;
@@ -193,7 +193,7 @@
   }
 
   /* A phone: a view pushed over the tabs, the whole screen over the head and the tabs (F98.4; the
-     mockup's 900px block). Its arrow back stands where the head's drawer button stands, 8px from
+     mockup's 900px block). Its arrow back stands where the head's arrow to the home stands, 8px from
      the left and the top, at the top however tall its head. */
   @media (max-width: 900px) {
     .sheet-body .column { padding: 16px 16px 32px; }

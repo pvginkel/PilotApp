@@ -3,7 +3,7 @@
  * over the tabs (F98.4): the item as the timeline draws it, under the project's name and its plan
  * step, at most two lines, its option rows a thumb's height and
  * Other's console kept above the keyboard while it is typed in, answered in place as there; a
- * notification's link reached cold lies over the project's Timeline, and an item no longer open
+ * notification's link reached cold lies over the project's Timeline over the home, and an item no longer open
  * shows as it stands. A block's address shows its item alone at the block, or a card's document
  * at it; a quote's chip and a claimed action's link push the item alone over the tab they stand
  * on. A done line shows Undo alone among its actions, and a tap on it opens its view, whose head
@@ -55,7 +55,7 @@ const box = async (locator: Locator) => (await locator.boundingBox())!;
 test.describe('The item alone on a phone', () => {
   test.use({ viewport: PHONE, hasTouch: true });
 
-  test('a notification’s link reached cold shows the item alone over the whole screen, under the project’s name, its option rows a thumb’s height; Back lands on the project’s Timeline', async ({
+  test('a notification’s link reached cold shows the item alone over the whole screen, under the project’s name, its option rows a thumb’s height; Back lands on the project’s Timeline, and then on the home, never on the project before', async ({
     page,
     people,
     projects,
@@ -92,7 +92,7 @@ test.describe('The item alone on a phone', () => {
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await expect(timeline.item(decision).root).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL(projectAddress(before));
+    await expect(page).toHaveURL('/');
   });
 
   test('the item alone cuts a long plan step under the project’s name at two lines, ellipsized, its whole title its tooltip', async ({

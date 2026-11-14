@@ -1,13 +1,17 @@
 /**
  * The profile page (F134, opened from the profile menu, F126): who the person is and their
  * handle, shown and not editable (F137); the switch of this browser's notifications (F146.1) and,
- * beside it, the alarms switch (F142.1) and the switch *Join projects started on my behalf* (F134.2).
+ * beside it, the alarms switch (F142.1) and the switch *Join projects started on my behalf* (F134.2). On a
+ * phone it lies over the home, the arrow to the home alone at its top-left.
  */
 
 import { createFileRoute } from '@tanstack/react-router';
 import { JoinCallsSwitch } from '@/components/people/profile-membership';
 import { AlarmsSwitch, DeviceSwitch } from '@/components/people/profile-notifications';
 import { Avatar } from '@/components/shared/avatar';
+import { HomeButton } from '@/components/shell/home-head';
+import { usePhone } from '@/hooks/use-phone';
+import { useOverHome } from '@/hooks/use-phone-home';
 import { usePerson } from '@/hooks/use-self';
 
 export const Route = createFileRoute('/_shell/profile')({
@@ -16,36 +20,45 @@ export const Route = createFileRoute('/_shell/profile')({
 
 function Profile() {
   const person = usePerson();
+  const phone = usePhone();
+  const home = useOverHome(phone);
   return (
-    <div className="people-page" data-testid="profile">
-      <section>
-        <h1>Profile</h1>
-        <div className="profile-who">
-          <Avatar who={{ name: person.name, initials: person.initials, slot: person.avatar_slot }} />
-          <span data-testid="profile.name">{person.name}</span>
+    <>
+      {phone && (
+        <div className="home-bar">
+          <HomeButton onHome={home} />
         </div>
-        <dl className="profile-fields">
-          <dt>Handle</dt>
-          <dd>
-            <span className="handle" data-testid="profile.handle">
-              {person.handle}
-            </span>
-            <p>The short name that stands for you in Pilot&rsquo;s files. It cannot be changed.</p>
-          </dd>
-          <dt>Notifications</dt>
-          <dd>
-            <DeviceSwitch />
-          </dd>
-          <dt>Alarms</dt>
-          <dd>
-            <AlarmsSwitch on={person.alarms} />
-          </dd>
-          <dt>Projects</dt>
-          <dd>
-            <JoinCallsSwitch on={person.join_calls} />
-          </dd>
-        </dl>
-      </section>
-    </div>
+      )}
+      <div className="people-page" data-testid="profile">
+        <section>
+          <h1>Profile</h1>
+          <div className="profile-who">
+            <Avatar who={{ name: person.name, initials: person.initials, slot: person.avatar_slot }} />
+            <span data-testid="profile.name">{person.name}</span>
+          </div>
+          <dl className="profile-fields">
+            <dt>Handle</dt>
+            <dd>
+              <span className="handle" data-testid="profile.handle">
+                {person.handle}
+              </span>
+              <p>The short name that stands for you in Pilot&rsquo;s files. It cannot be changed.</p>
+            </dd>
+            <dt>Notifications</dt>
+            <dd>
+              <DeviceSwitch />
+            </dd>
+            <dt>Alarms</dt>
+            <dd>
+              <AlarmsSwitch on={person.alarms} />
+            </dd>
+            <dt>Projects</dt>
+            <dd>
+              <JoinCallsSwitch on={person.join_calls} />
+            </dd>
+          </dl>
+        </section>
+      </div>
+    </>
   );
 }

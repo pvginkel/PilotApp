@@ -250,10 +250,7 @@ test.describe('The plus', () => {
       await people.signIn();
       await page.goto('/');
       await waitForUiState(page, 'projects.list', 'ready');
-      // The bare address opens the list's first project, the seed's; going elsewhere closes the
-      // drawer, so it opens once that has landed.
-      await expect(page).toHaveURL(/\/projects\/[^/]+$/);
-      await shell.drawerToggle.tap();
+      await expect(shell.home).toBeVisible();
       await projectList.newProject.tap();
       await expect(page).toHaveURL('/projects/draft-new');
       await expect(projectHead.name).toHaveText('New project');
@@ -282,6 +279,11 @@ test.describe('The plus', () => {
       await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
       await expect(definitionChat.messageTexts).toHaveText(['A week by the lake.']);
       await controller.finish(chats.store, session, 'success', 'Noted.');
+
+      // The draft took the new project's entry, over the home.
+      await page.goBack();
+      await expect(page).toHaveURL('/');
+      await expect(shell.home).toBeVisible();
     });
   });
 });

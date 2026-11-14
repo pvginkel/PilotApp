@@ -11,7 +11,7 @@
  * it until the turn ends, the project document's renaming the project, and once a stream that went
  * down comes back up. On a phone the Documents tab lists the handbook under the project document,
  * by its title, and neither the head nor the project's menu has it; it opens as a view, the whole
- * screen over the head and its drawer's button, with no maximize or cross (F98.4), its arrow back
+ * screen over the head and its arrow to the home, with no maximize or cross (F98.4), its arrow back
  * taking it off, and switching projects closes it (F1.6). A link in either to the project's
  * attached material, by its path in the project's folder, opens the attachment where it hangs, the
  * draft's material on the opening, in a tab of its own, adding no entry, closing it showing the tab
@@ -643,7 +643,7 @@ test.describe('On a phone', () => {
     const draft = await projects.make({ name: makeUnique('Draft'), state: 'draft', members: [me.handle!] });
     await projectHead.open(id);
 
-    expect(await projectHead.controls()).toEqual(['shell.drawer-toggle', 'project.autopilot', 'project.donut', 'project.notes.button', 'project.menu.button']);
+    expect(await projectHead.controls()).toEqual(['shell.home-button', 'project.autopilot', 'project.donut', 'project.notes.button', 'project.menu.button']);
     await projectHead.menuButton.tap();
     await expect(projectHead.menuItems.first()).toBeVisible();
     await expect(projectHead.menuItems.filter({ hasText: /handbook/i })).toHaveCount(0);
@@ -679,7 +679,7 @@ test.describe('On a phone', () => {
     await expect(panel.handbook.root).toHaveCount(0);
   });
 
-  test('lies over the head and its drawer’s button, which its arrow back gives back to switch projects', async ({
+  test('lies over the head and its arrow to the home, which its arrow back gives back to go to another project', async ({
     page,
     people,
     projects,
@@ -694,9 +694,9 @@ test.describe('On a phone', () => {
     await overlay.openProjectDocument(id, 'handbook');
     await expect(overlay.root).toBeVisible();
 
-    // It lies over the head, the drawer's button under it, with no top bar's to open it from.
+    // It lies over the head, the arrow to the home under it.
     expect(
-      await shell.drawerToggle.evaluate((button) => {
+      await shell.homeButton.evaluate((button) => {
         const box = button.getBoundingClientRect();
         return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       }),
@@ -704,7 +704,8 @@ test.describe('On a phone', () => {
     await overlay.back.click();
     await expect(overlay.root).toHaveCount(0);
 
-    await shell.drawerToggle.click();
+    await shell.homeButton.click();
+    await expect(shell.home).toBeVisible();
     await projectList.tab(otherName).click();
     await expect(page).toHaveURL(projectAddress(other));
     await expect(overlay.root).toHaveCount(0);

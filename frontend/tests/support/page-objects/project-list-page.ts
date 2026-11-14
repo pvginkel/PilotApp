@@ -6,8 +6,9 @@ import { projectAddress } from '../projects';
 type Group = 'others' | 'finished';
 
 /**
- * The project list in the side column (F1), a tab's status icon, the pause (F1.3, F141), the plus
- * that starts a new project (F46.1), and the archived projects it opens (D012).
+ * The project list in the side column (F1), or on a phone in the home (F98.6), a tab's status icon,
+ * the pause (F1.3, F141), the plus that starts a new project (F46.1), and the archived projects it
+ * opens (D012, F128.2).
  */
 export class ProjectListPage {
   readonly head: Locator;
@@ -45,8 +46,8 @@ export class ProjectListPage {
     return waitTestEvent<FormTestEvent>(this.page, 'form', (event) => event.formId === 'projects.new' && event.phase === 'success');
   }
 
-  /** The tab named `name`, wherever it shows. */
-  tab(name: string, within: Locator = this.page.getByTestId('shell.side')): Locator {
+  /** The tab named `name`, in the side column or the phone's home unless `within` says where. */
+  tab(name: string, within: Locator = this.page.getByTestId('shell.side').or(this.page.getByTestId('home.list'))): Locator {
     return within
       .getByTestId('projects.tab')
       .filter({ has: this.page.getByTestId('projects.tab.name').getByText(name, { exact: true }) });

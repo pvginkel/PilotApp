@@ -1,8 +1,8 @@
 /**
  * The frame off a phone (F98.1, F111): the offer of the browser's notifications over the top bar
  * (F146.2), the top bar with the gold bar's badges, the side column with the project list beside
- * the centre. At the narrow width (F98.2) the side column is the phone's drawer over the centre,
- * behind its scrim, opened from the top bar's toggle, under the top bar. At a first sign-in the
+ * the centre. At the narrow width (F98.2) the side column is a drawer over the centre, behind its
+ * scrim, opened from the top bar's toggle, under the top bar. At a first sign-in the
  * handle step stands under the top bar in their place (F137). The loading bar lies at the top of
  * what is under the top bar.
  */

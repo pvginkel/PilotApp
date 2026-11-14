@@ -3,8 +3,8 @@
 
 @layer components {
   /* The project's head over its timeline, and the panel beside them. Neither is positioned: on a
-     phone the overlay's view lies over the centre, positioned where the frame gives a drawer
-     (shell.css). */
+     phone the overlay's view lies over the centre, positioned on a phone and where the frame gives
+     a drawer (shell.css). */
   .project { flex: 1; min-height: 0; display: flex; }
   .project-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   /* The timeline's place, under the head and the tab line: a document's tab lies over the timeline

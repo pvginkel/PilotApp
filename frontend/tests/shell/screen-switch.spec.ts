@@ -252,25 +252,21 @@ test.describe('A switch of screens', () => {
 test.describe('A switch of screens on a phone', () => {
   test.use({ viewport: PHONE, hasTouch: true });
 
-  test('to a project whose tab was touched reads its head and timeline from the touch; a wait of 200 ms shows the loading bar at the page’s top', async ({
+  test('from the home to a project whose row was touched reads its head and timeline from the touch; a wait of 200 ms shows the loading bar at the page’s top, over the home', async ({
     page,
     people,
     projects,
     projectList,
-    timeline,
     projectHead,
     shell,
   }) => {
     const me = await people.signIn();
-    const a = makeUnique('A');
-    const aId = await projects.makeWithSession({ name: a, members: [me.handle!] });
     const b = makeUnique('B');
     const bId = await projects.makeWithSession({ name: b, members: [me.handle!] });
     const c = makeUnique('C');
     await projects.makeWithSession({ name: c, members: [me.handle!] });
-    await timeline.open(aId);
-    await shell.drawerToggle.click();
-    await expect(shell.side).toBeVisible();
+    await shell.open('/');
+    await expect(shell.home).toBeVisible();
 
     const read = projectRead(page, bId);
     await projectList.tab(b).dispatchEvent('touchstart');
@@ -279,7 +275,7 @@ test.describe('A switch of screens on a phone', () => {
     const restore = await slowNetwork(page, 800);
     await projectList.tabName(c).tap();
     await expect(shell.loading).toBeVisible();
-    await expect(projectHead.name).toHaveText(a);
+    await expect(shell.home).toBeVisible();
     const bar = (await shell.loading.boundingBox())!;
     const app = (await shell.app.boundingBox())!;
     expect([bar.x, bar.width, bar.height]).toEqual([0, PHONE.width, 3]);

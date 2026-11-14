@@ -4,7 +4,7 @@
  * condition in the top bar, after Pilot's name, its full line its title; the week's halt's, which
  * carries its overrule (F135.2), a button opening a popover that holds its line and the overrule,
  * so that a stray click on the top bar spends no quota. On a phone a line per condition across the
- * page's top, over the screen's head, the drawer opening under it: the badge's icon and words on
+ * page's top, over the screen's head, the home's too: the badge's icon and words on
  * one line, without the time, cut where they do not fit, a button that opens a flyout holding the
  * condition's whole line and the overrule it offers. Each stands while its condition holds and goes when it ends;
  * nothing dismisses it. The time a condition began carries its date once that is an earlier day

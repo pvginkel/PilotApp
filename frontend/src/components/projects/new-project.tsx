@@ -24,7 +24,7 @@ import { ChatColumn } from '@/components/chat/project-chat';
 import { NewPanel, NewPhonePanel, type NewPanelTab } from '@/components/panel/panel';
 import { PanelDivider } from '@/components/panel/panel-divider';
 import { PhoneTabs } from '@/components/projects/phone-project';
-import { DrawerButton } from '@/components/shell/drawer';
+import { HomeButton } from '@/components/shell/home-head';
 import { useStartProject } from '@/hooks/use-chats';
 import { discussIn } from '@/hooks/use-discuss';
 import { usePhone } from '@/hooks/use-phone';
@@ -62,11 +62,11 @@ function DeskNewProject() {
 }
 
 function PhoneNewProject() {
-  const { tab, show } = usePhoneTab(true, false);
+  const { tab, show, home } = usePhoneTab(true, false);
   return (
     <div className="project">
       <div className="project-main">
-        <NewHead phone />
+        <NewHead onHome={home} />
         <div className="phone-page" data-tab={tab} data-testid="project.phone-page">
           <NewChat covered={tab !== 'timeline'} />
           {(tab === 'draft' || tab === 'documents') && <NewPhonePanel tab={tab} />}
@@ -77,11 +77,11 @@ function PhoneNewProject() {
   );
 }
 
-/** A draft's head with no draft yet: its name, "New project", and the Draft chip; on a phone the drawer's button first. */
-function NewHead({ phone = false, ref }: { phone?: boolean; ref?: Ref<HTMLElement> }) {
+/** A draft's head with no draft yet: its name, "New project", and the Draft chip; on a phone the arrow to the home first. */
+function NewHead({ onHome, ref }: { onHome?: () => void; ref?: Ref<HTMLElement> }) {
   return (
-    <header ref={ref} className={phone ? 'feed-head phone-head' : 'feed-head'} data-testid="project.head">
-      {phone && <DrawerButton />}
+    <header ref={ref} className={onHome ? 'feed-head phone-head' : 'feed-head'} data-testid="project.head">
+      {onHome && <HomeButton onHome={onHome} />}
       <h1 data-testid="project.name">New project</h1>
       <span className="chip draft-chip" data-testid="project.draft">
         Draft
@@ -144,7 +144,8 @@ function NewComposer({ moving, onDraft }: NewComposerProps) {
       // As Discuss asks for it, with nothing quoted: the draft's composer takes the focus once drawn.
       discussIn(draft.id, null);
       onDraft(draft.id);
-      void navigate({ to: '/projects/$address', params: { address: draft.address }, replace: true });
+      // On a phone the draft lies over the home, as the new project did.
+      void navigate({ to: '/projects/$address', params: { address: draft.address }, replace: true, state: ({ overHome }) => ({ overHome }) });
     });
   };
 

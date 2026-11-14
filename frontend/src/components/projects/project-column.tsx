@@ -1,7 +1,9 @@
 /**
  * The side column (F1): the project list, the person's projects first, then Other projects and
  * Finished, under its head's plus, which opens a new project's chat (F46.1); or the archived projects,
- * opened from the list's menu, with a back arrow (D012).
+ * opened from the list's menu, in its place under a back arrow (D012). The list and the archived
+ * projects are the phone's home's too (`phone-home.tsx`), where the plus opens the new project's
+ * chat over the home (F98.5).
  */
 
 import { useState } from 'react';
@@ -9,6 +11,8 @@ import { Link } from '@tanstack/react-router';
 import { Archive, ArrowLeft, ChevronDown, ChevronRight, Ellipsis, Plus } from 'lucide-react';
 import { ProjectTab } from '@/components/projects/project-tab';
 import { Menu, MenuItem } from '@/components/shared/menu';
+import { usePhone } from '@/hooks/use-phone';
+import { OVER_HOME } from '@/hooks/use-phone-home';
 import { useProjectOnScreen } from '@/hooks/use-project-address';
 import { groupProjects, useArchivedProjects, useProjectList, type ProjectTab as Project } from '@/hooks/use-projects';
 import { rememberInBrowser, useBrowserState, type Group } from '@/lib/browser-state';
@@ -20,7 +24,7 @@ export function ProjectColumn() {
 
 const GROUP_NAMES: Record<Group, string> = { others: 'Other projects', finished: 'Finished' };
 
-function ProjectList({ onArchived }: { onArchived: () => void }) {
+export function ProjectList({ onArchived }: { onArchived: () => void }) {
   const { data } = useProjectList();
   const onScreen = useProjectOnScreen();
   const { chevrons } = useBrowserState();
@@ -84,8 +88,16 @@ function ProjectList({ onArchived }: { onArchived: () => void }) {
 
 /** The plus: a new project's definition chat, nothing behind it on the server until its first message makes the draft (F46.1). */
 function NewProjectButton() {
+  const phone = usePhone();
   return (
-    <Link to="/projects/draft-new" className="btn btn-ghost btn-sm btn-icon" title="New project" aria-label="New project" data-testid="projects.new">
+    <Link
+      to="/projects/draft-new"
+      state={phone ? OVER_HOME : undefined}
+      className="btn btn-ghost btn-sm btn-icon"
+      title="New project"
+      aria-label="New project"
+      data-testid="projects.new"
+    >
       <Plus className="icon" aria-hidden="true" />
     </Link>
   );
@@ -122,7 +134,6 @@ function TabsGroup({ group, projects, open, onToggle }: TabsGroupProps) {
 }
 
 function ArchivedList({ onBack }: { onBack: () => void }) {
-  const { data } = useArchivedProjects();
   return (
     <div data-testid="projects.archived">
       <div className="tabs-head archived">
@@ -138,8 +149,18 @@ function ArchivedList({ onBack }: { onBack: () => void }) {
         </button>
         Archived
       </div>
+      <ArchivedRows />
+    </div>
+  );
+}
+
+/** The archived projects' tabs, or that there are none. */
+export function ArchivedRows() {
+  const { data } = useArchivedProjects();
+  return (
+    <>
       {data?.projects.length === 0 && <p className="tabs-none">None yet</p>}
       {data?.projects.map((project) => <ProjectTab key={project.id} project={project} archived />)}
-    </div>
+    </>
   );
 }

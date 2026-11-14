@@ -1,9 +1,9 @@
 /**
- * The top bar (F111), off a phone: at the narrow width the drawer's toggle first (F98.2), the
- * phone's drawer button in the bar's white; the logo on its tile and the name, the gold bar's badges
- * after it, and the signed-in person's avatar, which opens the profile menu (F126). At the handle
- * step it has no toggle and no badge, and its menu no Profile. The phone has none (F98.3): its
- * drawer opens on its colours.
+ * The top bar (F111), off a phone: at the narrow width the drawer's toggle first (F98.2), in the
+ * bar's white; the logo on its tile and the name, the gold bar's badges after it, and the signed-in
+ * person's avatar, which opens the profile menu (F126). At the handle step it has no toggle and no
+ * badge, and its menu no Profile. The phone has none (F98.3): its home's head takes its colours
+ * (F98.6).
  */
 
 import { DrawerToggle, type Drawer } from '@/components/shell/drawer';

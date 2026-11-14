@@ -1,18 +1,18 @@
 /**
  * The frame every screen sits in. Off a phone the top bar over the side column, which stands
  * beside the centre; at the narrow width, above 900 px and below 1200 px (F98.2, F111), the side
- * column is the phone's drawer, opened from the top bar's toggle, its first part, and lying under
- * the top bar over the centre, behind its scrim, with no head of its own; switching projects closes
- * it. On a phone (F98.3, F111) no top bar: a project's head is the page's top, the
- * drawer's button its first part, and a screen with no head has the button alone where a head's
- * stands; the drawer lies over the head and opens on the top bar's block of colour, its avatar
- * opening the profile menu; it stands on the project list's tint with no rule at its edge, and the
- * page behind it darkens as it slides in, 30% black in the light theme and 80% in the dark, the
- * scrim's opacity the share of its way the drawer has come; under reduced motion it comes and goes
- * at once. The browser's own bar takes the bottom tabs' tint on a phone, one colour with a project's
- * head and its tabs, by the theme-colors the page is served with, and the top bar's off it. The
- * project list's head is at base size and its icons 16px at every width. On a phone, the keyboard
- * shrinks the app rather than panning it.
+ * column is a drawer, opened from the top bar's toggle, its first part, and lying under the top bar
+ * over the centre, behind its scrim, with no head of its own; switching projects closes it. It
+ * stands on the project list's tint with no rule at its edge, and the page behind it darkens as it
+ * slides in, 30% black in the light theme and 80% in the dark, the scrim's opacity the share of its
+ * way the drawer has come; under reduced motion it comes and goes at once. On a phone (F98.3, F111)
+ * no top bar and no drawer: a project's head is the page's top, the arrow to the home its first
+ * part, and a screen with no head has the arrow alone where a head's stands; the home's head is
+ * the top bar's block of colour, a project head's height, its avatar opening the profile menu
+ * (F98.6). The browser's own bar takes the bottom tabs' tint on a phone, one colour with a
+ * project's head and its tabs, by the theme-colors the page is served with, and the top bar's off
+ * it. The project list's head is at base size and its icons 16px at every width. On a phone, the
+ * keyboard shrinks the app rather than panning it.
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -89,7 +89,8 @@ test.describe('The frame off a phone', () => {
 
     await expect(shell.topBar).toBeVisible();
     await expect(shell.drawerToggle).toHaveCount(0);
-    await expect(shell.drawerHead).toHaveCount(0);
+    await expect(shell.homeHead).toHaveCount(0);
+    await expect(shell.homeButton).toHaveCount(0);
     await expect(shell.scrim).toHaveCount(0);
     await expect(shell.side).toBeVisible();
     const top = (await shell.topBar.boundingBox())!;
@@ -120,7 +121,7 @@ test.describe('The frame at the narrow width', () => {
     await expect(shell.topBar).toBeVisible();
     await expect(shell.side).toBeHidden();
     await expect(shell.scrim).toBeHidden();
-    await expect(shell.drawerHead).toHaveCount(0);
+    await expect(shell.homeHead).toHaveCount(0);
     await expect(shell.drawerToggle).toHaveCount(1);
     await expect(shell.topBar.getByTestId('shell.drawer-toggle')).toBeVisible();
     await expect(shell.drawerToggle).toHaveAccessibleName('Projects');
@@ -187,83 +188,6 @@ test.describe('The frame at the narrow width', () => {
     await expect(page).toHaveURL(projectAddress(aId));
     await expect(shell.side).toBeHidden();
   });
-});
-
-test.describe('The frame on a phone', () => {
-  test.use({ viewport: PHONE });
-
-  test('has no top bar: a project’s head is the page’s top, the drawer’s button its first part, and the profile page has the button where the head’s stands', async ({
-    people,
-    projects,
-    projectHead,
-    profile,
-    shell,
-  }) => {
-    const me = await people.signIn();
-    const project = await projects.make({ name: makeUnique('Frame'), members: [me.handle!] });
-    await projectHead.open(project);
-
-    await expect(shell.topBar).toHaveCount(0);
-    expect(await projectHead.root.boundingBox()).toMatchObject({ x: 0, y: 0, width: PHONE.width });
-    await expect(shell.drawerToggle).toHaveCount(1);
-    await expect(projectHead.root.getByTestId('shell.drawer-toggle')).toBeVisible();
-    await expect(shell.drawerToggle).toHaveAccessibleName('Projects');
-    await expect(shell.drawerToggle).toHaveAttribute('aria-expanded', 'false');
-    const first = await projectHead.root.evaluate((head) => head.querySelector('button, a[href], input, select, [tabindex]')?.getAttribute('data-testid'));
-    expect(first).toBe('shell.drawer-toggle');
-    const inHead = (await shell.drawerToggle.boundingBox())!;
-    expect(inHead.x + inHead.width).toBeLessThanOrEqual((await projectHead.name.boundingBox())!.x);
-    expect(inHead.width).toBe(36);
-
-    await shell.open('/profile');
-    await expect(profile.root).toBeVisible();
-    await expect(shell.drawerToggle).toHaveCount(1);
-    const alone = (await shell.drawerToggle.boundingBox())!;
-    expect(alone.x).toBeCloseTo(inHead.x, 0);
-    expect(alone.y).toBeCloseTo(inHead.y, 0);
-    expect(alone.width).toBe(inHead.width);
-    expect((await profile.root.boundingBox())!.y).toBeGreaterThanOrEqual(alone.y + alone.height);
-  });
-
-  test('opens the drawer over the head on the top bar’s block of colour, its avatar opening the profile menu, the list’s head at base size', async ({
-    page,
-    people,
-    projects,
-    projectHead,
-    projectList,
-    shell,
-  }) => {
-    const me = await people.signIn({ name: 'Ada Example' });
-    const project = await projects.make({ name: makeUnique('Drawer'), members: [me.handle!] });
-    await projectHead.open(project);
-    await expect(shell.side).toBeHidden();
-
-    await shell.drawerToggle.click();
-    await expect(shell.drawerToggle).toHaveAttribute('aria-expanded', 'true');
-    await expect.poll(async () => (await shell.side.boundingBox())?.x).toBe(0);
-    expect(await shell.side.boundingBox()).toMatchObject({ y: 0, width: 300 });
-    expect(await shell.drawerHead.boundingBox()).toMatchObject({ x: 0, y: 0, width: 300, height: 52 });
-    await expect(shell.drawerHead).toHaveCSS('background-color', await colourOf(page, 'hsl(var(--primary))'));
-    await expect(shell.drawerBrand).toHaveText('Pilot');
-    await expect(shell.drawerBrand).toHaveCSS('color', 'rgb(255, 255, 255)');
-    await expect(shell.drawerBrand.locator('img.logo')).toHaveAttribute('src', '/logo.png');
-    await expect(shell.avatar).toHaveText('AE');
-    await expectListHead(projectList.head, '16px');
-
-    // The drawer lies over the head, its button under it.
-    expect(await shell.drawerToggle.evaluate((button) => {
-      const box = button.getBoundingClientRect();
-      return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
-    })).toBe(false);
-
-    await shell.user.click();
-    await expect(shell.profileName).toHaveText('Ada Example');
-    await expect(shell.theme).toBeVisible();
-    await expect(shell.profileMenu.getByRole('menuitem')).toHaveText(['Profile', 'Sign out']);
-    await shell.profileItem.click();
-    await expect(page).toHaveURL('/profile');
-    await expect(shell.side).toBeHidden();
-  });
 
   test('stands the drawer on the list’s tint with no rule at its edge, the page behind it darkening as far as it has come', async ({
     page,
@@ -312,6 +236,7 @@ test.describe('The frame on a phone', () => {
     shell,
   }) => {
     await people.signIn();
+    // At a stable address: the bare address moves on to a project, which closes the drawer.
     await shell.open('/profile');
     // The suite's pages reduce motion (fixtures-infrastructure.ts): this one moves first.
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -338,6 +263,72 @@ test.describe('The frame on a phone', () => {
     expect(closed.scrimOpacity).toBe(0);
     await expect(shell.side).toBeHidden();
     await expect(shell.side).toHaveCSS('visibility', 'hidden');
+  });
+});
+
+test.describe('The frame on a phone', () => {
+  test.use({ viewport: PHONE });
+
+  test('has no top bar and no drawer: a project’s head is the page’s top, the arrow to the home its first part, and the profile page has the arrow where the head’s stands', async ({
+    people,
+    projects,
+    projectHead,
+    profile,
+    shell,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Frame'), members: [me.handle!] });
+    await projectHead.open(project);
+
+    await expect(shell.topBar).toHaveCount(0);
+    await expect(shell.drawerToggle).toHaveCount(0);
+    await expect(shell.side).toHaveCount(0);
+    await expect(shell.scrim).toHaveCount(0);
+    expect(await projectHead.root.boundingBox()).toMatchObject({ x: 0, y: 0, width: PHONE.width });
+    await expect(shell.homeButton).toHaveCount(1);
+    await expect(projectHead.root.getByTestId('shell.home-button')).toBeVisible();
+    await expect(shell.homeButton).toHaveAccessibleName('All projects');
+    const first = await projectHead.root.evaluate((head) => head.querySelector('button, a[href], input, select, [tabindex]')?.getAttribute('data-testid'));
+    expect(first).toBe('shell.home-button');
+    const inHead = (await shell.homeButton.boundingBox())!;
+    expect(inHead.x + inHead.width).toBeLessThanOrEqual((await projectHead.name.boundingBox())!.x);
+    expect(inHead.width).toBe(36);
+
+    await shell.open('/profile');
+    await expect(profile.root).toBeVisible();
+    await expect(shell.homeButton).toHaveCount(1);
+    const alone = (await shell.homeButton.boundingBox())!;
+    expect(alone.x).toBeCloseTo(inHead.x, 0);
+    expect(alone.y).toBeCloseTo(inHead.y, 0);
+    expect(alone.width).toBe(inHead.width);
+    expect((await profile.root.boundingBox())!.y).toBeGreaterThanOrEqual(alone.y + alone.height);
+  });
+
+  test('opens on the home, its head the top bar’s block of colour, a project head’s height, its avatar opening the profile menu, the list’s head at base size', async ({
+    page,
+    people,
+    projectList,
+    shell,
+  }) => {
+    await people.signIn({ name: 'Ada Example' });
+    await shell.open('/');
+    await expect(shell.home).toBeVisible();
+
+    expect(await shell.homeHead.boundingBox()).toMatchObject({ x: 0, y: 0, width: PHONE.width, height: 52 });
+    await expect(shell.homeHead).toHaveCSS('background-color', await colourOf(page, 'hsl(var(--primary))'));
+    await expect(shell.homeBrand).toHaveText('Pilot');
+    await expect(shell.homeBrand).toHaveCSS('color', 'rgb(255, 255, 255)');
+    await expect(shell.homeBrand.locator('img.logo')).toHaveAttribute('src', '/logo.png');
+    await expect(shell.avatar).toHaveText('AE');
+    await expectListHead(projectList.head, '16px');
+
+    await shell.user.click();
+    await expect(shell.profileName).toHaveText('Ada Example');
+    await expect(shell.theme).toBeVisible();
+    await expect(shell.profileMenu.getByRole('menuitem')).toHaveText(['Profile', 'Sign out']);
+    await shell.profileItem.click();
+    await expect(page).toHaveURL('/profile');
+    await expect(shell.home).toHaveCount(0);
   });
 
   test('paints the browser’s own bar in the bottom tabs’ tint, in either scheme, one colour with a project’s head and its tabs, and in the top bar’s again off a phone', async ({

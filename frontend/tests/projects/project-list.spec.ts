@@ -162,7 +162,7 @@ test.describe('The project list', () => {
       }, span);
 
     expect(await faults(short, 0)).toEqual({ found: [], most: 1 });
-    // Down to the drawer's width on a phone 240px wide, the name breaking at another word every few pixels.
+    // Down to 204px, narrower than any screen draws a tab, the name breaking at another word every few pixels.
     const wrapped = await faults(long, 60);
     expect(wrapped.found).toEqual([]);
     expect(wrapped.most).toBeGreaterThan(2);
@@ -367,32 +367,6 @@ test.describe('The archived projects', () => {
     await expect(projectList.archived).toBeHidden();
     await expect(projectList.head).toHaveText('Projects');
     await expect(projectList.tab(mine, projectList.mine)).toBeVisible();
-  });
-});
-
-test.describe('The list on a narrow window', () => {
-  test.use({ viewport: { width: 390, height: 844 } });
-
-  test('switching projects closes the drawer', async ({ page, people, projects, projectList, shell }) => {
-    const me = await people.signIn();
-    const aId = await projects.make({ name: makeUnique('A'), members: [me.handle!] });
-    const b = makeUnique('B');
-    const bId = await projects.make({ name: b, members: [me.handle!] });
-    await projectList.open(aId);
-
-    await shell.drawerToggle.click();
-    await expect(shell.side).toBeVisible();
-    await projectList.tab(b).click();
-
-    await expect(page).toHaveURL(projectAddress(bId));
-    await expect(shell.side).toBeHidden();
-    await expect(shell.scrim).toBeHidden();
-
-    // Back on the project it was opened on, the drawer stays closed.
-    await page.goBack();
-    await expect(page).toHaveURL(projectAddress(aId));
-    await expect(shell.side).toBeHidden();
-    await expect(shell.scrim).toBeHidden();
   });
 });
 

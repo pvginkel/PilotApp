@@ -3,7 +3,7 @@
  * browser, at once and with no reload. Off a phone it is a badge in the top bar, left-aligned after
  * Pilot's name, the buttons' corner radius, its full line its title, the light theme's gold in both
  * themes at 4.5:1 or better; at 900px and below, with no top bar, it is a line across the page's
- * top, in gold tokens of its own, light and dark, the drawer opening under it: the badge's words on
+ * top, in gold tokens of its own, light and dark, the home under it as every screen: the badge's words on
  * one line, without the time, cut where they do not fit, a tap opening a flyout with the
  * condition's whole line and the overrule it offers (R26). It goes when the controller answers again, and nothing dismisses it. The time it began carries its date once that is an
  * earlier day than the viewer's today (R9). A stream that comes back up reads it again, covering a
@@ -119,7 +119,7 @@ test.describe('The gold bar', () => {
     expect(new Set(badgeBackgrounds).size).toBe(1);
 
     // On a phone: no top bar and no badge, a line across the page's top with the badge's words,
-    // the centre and the drawer under it; its whole line in the flyout a tap opens.
+    // the centre under it, the home's head included; its whole line in the flyout a tap opens.
     await page.setViewportSize(PHONE);
     await expect.poll(async () => (await shell.goldBar.boundingBox())?.width).toBe(PHONE.width);
     await expect(shell.topBar).toHaveCount(0);
@@ -136,9 +136,9 @@ test.describe('The gold bar', () => {
     expect(bar).toMatchObject({ x: 0, y: 0 });
     expect(centre.y).toBeCloseTo(bar.y + bar.height, 0);
     expect(centre.width).toBe(PHONE.width);
-    await shell.drawerToggle.click();
-    await expect.poll(async () => (await shell.side.boundingBox())?.x).toBe(0);
-    expect((await shell.side.boundingBox())!.y).toBeCloseTo(bar.y + bar.height, 0);
+    await shell.homeButton.click();
+    await expect(shell.home).toBeVisible();
+    expect((await shell.homeHead.boundingBox())!.y).toBeCloseTo(bar.y + bar.height, 0);
     await expect(shell.goldLine('outage')).toBeInViewport();
 
     // The line's own gold, at 4.5:1 or better, in either theme; the light one the badge's.

@@ -1,6 +1,6 @@
 /**
  * The profile menu (F126), opened from the signed-in person's avatar: off a phone in the top bar,
- * on a phone in the drawer's head. The template's user dropdown in the mockup's avatar, as
+ * on a phone in the home's head, its Profile opening over the home. The template's user dropdown in the mockup's avatar, as
  * FieldnotesApp has it: the name, the theme, Profile and Sign out, under the template's test ids,
  * which its sign-in specs look for. At the handle step it has no Profile. A person's Sign out
  * removes this browser's subscription first (F146.3); at the handle step there is none. Its foot
@@ -13,6 +13,8 @@ import { Avatar } from '@/components/shared/avatar';
 import { Menu, MenuItem } from '@/components/shared/menu';
 import { useAuthContext } from '@/contexts/auth-context';
 import { useSignOut } from '@/hooks/use-device-notifications';
+import { usePhone } from '@/hooks/use-phone';
+import { OVER_HOME } from '@/hooks/use-phone-home';
 import { isPerson, type Self } from '@/hooks/use-self';
 import { THEMES, type Theme } from '@/lib/browser-state';
 import { useTheme } from '@/lib/theme';
@@ -25,6 +27,7 @@ export function ProfileMenu({ self }: { self: Self }) {
   const { logout } = useAuthContext();
   const signOut = useSignOut();
   const navigate = useNavigate();
+  const phone = usePhone();
   const [theme, chooseTheme] = useTheme();
   const name = self.name ?? 'Unknown User';
   return (
@@ -67,7 +70,7 @@ export function ProfileMenu({ self }: { self: Self }) {
       </label>
       <hr className="menu-rule" />
       {isPerson(self) && (
-        <MenuItem icon={UserRound} onSelect={() => navigate({ to: '/profile' })} testId="shell.profile.page">
+        <MenuItem icon={UserRound} onSelect={() => navigate({ to: '/profile', state: phone ? OVER_HOME : undefined })} testId="shell.profile.page">
           Profile
         </MenuItem>
       )}

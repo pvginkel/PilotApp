@@ -9,7 +9,8 @@ type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCo
 /**
  * The frame every screen sits in: the offer of the browser's notifications, the top bar, its gold
  * badges, the week's halt's popover and its profile menu, the gold bar, its lines and their flyout,
- * the side column, on a phone the drawer with its head and its button, the keys list.
+ * the side column and at the narrow width its drawer, on a phone the home, its head and the arrow to
+ * it, the keys list.
  */
 export class ShellPage {
   /** The offer of the browser's notifications, across the page's top, and its two buttons. */
@@ -18,10 +19,15 @@ export class ShellPage {
   readonly offerNotNow: Locator;
   readonly topBar: Locator;
   readonly brand: Locator;
+  /** At the narrow width, the drawer's toggle, in the top bar. */
   readonly drawerToggle: Locator;
-  /** On a phone, the drawer's head, the top bar's block of colour, and Pilot's name in it. */
-  readonly drawerHead: Locator;
-  readonly drawerBrand: Locator;
+  /** On a phone, the home (F98.6): its head, the top bar's block of colour, and Pilot's name in it, and its list. */
+  readonly home: Locator;
+  readonly homeHead: Locator;
+  readonly homeBrand: Locator;
+  readonly homeList: Locator;
+  /** On a phone, the arrow to the home: a head's first part, or alone on a screen with no head. */
+  readonly homeButton: Locator;
   readonly goldBadges: Locator;
   /** The week's halt's popover off a phone, under its badge: its line, with the overrule. */
   readonly goldPopover: Locator;
@@ -57,8 +63,11 @@ export class ShellPage {
     this.topBar = page.getByTestId('app-shell.topbar');
     this.brand = this.topBar.locator('.brand');
     this.drawerToggle = page.getByTestId('shell.drawer-toggle');
-    this.drawerHead = page.getByTestId('shell.drawer-head');
-    this.drawerBrand = this.drawerHead.locator('.brand');
+    this.home = page.getByTestId('home');
+    this.homeHead = page.getByTestId('shell.home-head');
+    this.homeBrand = this.homeHead.locator('.brand');
+    this.homeList = page.getByTestId('home.list');
+    this.homeButton = page.getByTestId('shell.home-button');
     this.goldBadges = page.getByTestId('shell.gold-badges');
     this.goldPopover = page.getByTestId('shell.gold-badges.popover');
     this.app = page.getByTestId('shell.app');

@@ -10,8 +10,8 @@
  * it, which the phone neither reads nor changes. Discuss and *In the chat* show the Chat tab, a
  * draft's its Chat, a view taken off; an ask of the draft gone to shows the Draft tab at it.
  * Back (F98.5): leaving the Timeline is one entry, a change between the other tabs none, so Back
- * from any of them shows the Timeline and Back there leaves the project; switching projects is an
- * entry; a reload keeps the tab.
+ * from any of them shows the Timeline and Back there shows the home, the head's arrow showing it
+ * from any tab, and one project leads to another through it; a reload keeps the tab.
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -93,7 +93,7 @@ test.describe('The tabs at the bottom on a phone', () => {
     await expect(phoneTabs.tabs).toHaveText(['Timeline', 'Chat', 'Plan', 'Documents']);
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     for (const key of ['chat', 'plan', 'documents'] as const) await expect(phoneTabs.tab(key)).toHaveAttribute('aria-selected', 'false');
-    expect(await projectHead.controls()).toEqual(['shell.drawer-toggle', 'project.autopilot', 'project.donut', 'project.menu.button']);
+    expect(await projectHead.controls()).toEqual(['shell.home-button', 'project.autopilot', 'project.donut', 'project.menu.button']);
 
     const bar = await boxOf(phoneTabs.root);
     expect(bar.x).toBe(0);
@@ -257,7 +257,7 @@ test.describe('The tabs at the bottom on a phone', () => {
     expect(Math.abs(place.top - place.furthest)).toBeLessThanOrEqual(1);
   });
 
-  test('Back from Chat, Plan or Documents shows the Timeline, leaving it the one entry, and Back there leaves the project; a reload keeps the tab; switching projects is an entry, opening on the Timeline', async ({
+  test('Back from Chat, Plan or Documents shows the Timeline, leaving it the one entry, and Back there shows the home; a reload keeps the tab; the head’s arrow shows the home from any tab, whose row opens another project on its Timeline', async ({
     page,
     people,
     projects,
@@ -267,11 +267,9 @@ test.describe('The tabs at the bottom on a phone', () => {
     phoneTabs,
   }) => {
     const me = await people.signIn();
-    const before = await projects.makeWithSession({ name: makeUnique('Before'), members: [me.handle!] });
     const id = await projects.makeWithSession({ name: makeUnique('Back'), members: [me.handle!] });
     const otherName = makeUnique('Other');
     const other = await projects.makeWithSession({ name: otherName, members: [me.handle!] });
-    await timeline.open(before);
     await timeline.open(id);
 
     await phoneTabs.tab('chat').tap();
@@ -288,8 +286,8 @@ test.describe('The tabs at the bottom on a phone', () => {
     await expect(timeline.root).toBeVisible();
     await expect(page).toHaveURL(projectAddress(id));
     await page.goBack();
-    await expect(page).toHaveURL(projectAddress(before));
-    await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL('/');
+    await expect(shell.home).toBeVisible();
     await page.goForward();
     await expect(page).toHaveURL(projectAddress(id));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
@@ -300,18 +298,20 @@ test.describe('The tabs at the bottom on a phone', () => {
     await phoneTabs.tab('timeline').tap();
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await page.goBack();
-    await expect(page).toHaveURL(projectAddress(before));
+    await expect(page).toHaveURL('/');
     await page.goForward();
     await expect(page).toHaveURL(projectAddress(id));
 
     await phoneTabs.tab('chat').tap();
-    await shell.drawerToggle.tap();
+    await shell.homeButton.tap();
+    await expect(page).toHaveURL('/');
+    await expect(shell.home).toBeVisible();
     await projectList.tabName(otherName).tap();
     await expect(page).toHaveURL(projectAddress(other));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await page.goBack();
-    await expect(page).toHaveURL(projectAddress(id));
-    await expect(phoneTabs.tab('chat')).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL('/');
+    await expect(shell.home).toBeVisible();
   });
 
   test('every project opens on its Timeline, whatever panel the browser keeps for it, which the phone leaves as it is', async ({

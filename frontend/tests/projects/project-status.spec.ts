@@ -240,22 +240,20 @@ test.describe('A tab’s status icon', () => {
 test.describe('A tab’s status icon on the phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('a tap pauses and a tap resumes, the drawer staying open on the project shown', async ({ page, people, projects, projectList, shell }) => {
+  test('a tap on a row of the home pauses and a tap resumes, the home staying where it is', async ({ page, people, projects, projectList, shell }) => {
     const me = await people.signIn();
-    const shownId = await projects.make({ name: makeUnique('Shown'), members: [me.handle!] });
     const name = makeUnique('Tap');
     const id = await projects.make({ name, members: [me.handle!] });
-    await projectList.open(shownId);
-    await shell.drawerToggle.tap();
-    await expect(shell.side).toBeVisible();
+    await shell.open('/');
+    await expect(shell.home).toBeVisible();
     const icon = projectList.statusIcon(name);
 
     const paused = projectList.written(id, 'paused');
     await icon.root.tap();
     await paused;
     await expect(icon.root).toHaveAttribute('data-status', 'paused');
-    await expect(shell.side).toBeVisible();
-    await expect(page).toHaveURL(projectAddress(shownId));
+    await expect(shell.home).toBeVisible();
+    await expect(page).toHaveURL('/');
 
     const resumed = projectList.written(id, 'resumed');
     await icon.root.tap();
@@ -266,10 +264,9 @@ test.describe('A tab’s status icon on the phone', () => {
   test('shows the status, not the next action’s glyph, under the hover a phone keeps after a tap', async ({ page, people, projects, projectList, shell }) => {
     const me = await people.signIn();
     const name = makeUnique('Sticky');
-    const id = await projects.make({ name, members: [me.handle!] });
-    await projectList.open(id);
-    await shell.drawerToggle.tap();
-    await expect(shell.side).toBeVisible();
+    await projects.make({ name, members: [me.handle!] });
+    await shell.open('/');
+    await expect(shell.home).toBeVisible();
     const icon = projectList.statusIcon(name);
 
     // A phone cannot hover, and keeps :hover on what it tapped until the next tap elsewhere.

@@ -1,6 +1,9 @@
 /**
  * The phone's tab and the views pushed over it (F98.3 to F98.5), kept in the browser's history
- * entry and nothing of it in the browser's storage, so that Back and a reload find them. Leaving
+ * entry and nothing of it in the browser's storage, so that Back and a reload find them. A
+ * project's first entry, its Timeline's, lies on the home's (`use-phone-home.ts`), the home's put
+ * under it where it does not, so that Back from the Timeline, and the head's arrow from any tab,
+ * show the home, never the project before. Leaving
  * the Timeline, or a draft's Chat in its place, is an entry of its own, pushed over the Timeline's;
  * a change between the other tabs replaces it, so that Back from any of them shows the Timeline,
  * and on the Timeline Back is the browser's own. An entry that keeps no tab shows the Timeline, and
@@ -8,8 +11,8 @@
  * Chat. A view, an address the project's route opens over its screen, is an entry of its own,
  * pushed over the one it was opened from, whose tab it keeps under it, a view over a view on top of
  * it; Back takes it off. A view's address reached cold — a notification's link, a link from another
- * app, a typed address — lies over the project's Timeline, an entry of the Timeline put under it,
- * so that Back lands there. A view is kept by its path within the project (`project-paths.ts`), the
+ * app, a typed address — lies over the project's Timeline, entries of the home and the Timeline put
+ * under it, so that Back lands there and then on the home. A view is kept by its path within the project (`project-paths.ts`), the
  * same at each of the project's addresses. The panel the desktop keeps per project is neither read
  * nor changed.
  * A view keeps its scroll while another lies over it, as long as the page (R22): Back finds it
@@ -18,6 +21,7 @@
 
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useMatches, useRouter, type ParsedLocation } from '@tanstack/react-router';
+import { OVER_HOME, putHomeUnder } from '@/hooks/use-phone-home';
 import { ShownProjectContext } from '@/hooks/use-project-address';
 import { pathWithin } from '@/lib/project-paths';
 
@@ -58,6 +62,8 @@ interface PhoneScreen {
   tab: PhoneTab;
   /** Shows the tab, the views over it taken off first. */
   show: (tab: PhoneTab) => void;
+  /** Shows the home, from the head's arrow on any tab. */
+  home: () => void;
   /** The views showing, bottom to top, by their paths within the project. */
   views: readonly string[];
   /** Takes the view on top off. */
@@ -131,7 +137,7 @@ export function usePhoneTab(draft: boolean, overlaid: boolean): PhoneScreen {
     const { href, state } = history.location;
     if (to === 'timeline') {
       if (state.overTimeline === true) history.back();
-      else history.replace(href, {});
+      else history.replace(href, { overHome: state.overHome });
     } else if (tab === 'timeline') {
       history.push(href, { phoneTab: to, overTimeline: true });
     } else {
@@ -139,7 +145,8 @@ export function usePhoneTab(draft: boolean, overlaid: boolean): PhoneScreen {
     }
   };
 
-  // The entry a view's address opened at says it is one, once.
+  // The entry a view's address opened at says it is one, once, and a first entry that does not
+  // lie on the home's has it put under it, once.
   const said = useRef<string | undefined>(undefined);
   useLayoutEffect(() => {
     if (!settled) return;
@@ -149,20 +156,28 @@ export function usePhoneTab(draft: boolean, overlaid: boolean): PhoneScreen {
       show(to);
     }
     const { history } = router;
-    const key = shown.location.state.__TSR_key;
-    if (shown.unsaid === null || said.current === key || history.location.state.__TSR_key !== key) return;
+    const { state } = shown.location;
+    const key = state.__TSR_key;
+    // An address under the project's is a view, once the route has read whether it is a card's.
+    const first = pathWithin(shown.location.pathname) === '' && state.overTimeline !== true && state.overHome !== true;
+    if ((shown.unsaid === null && !first) || said.current === key || history.location.state.__TSR_key !== key) return;
     said.current = key;
-    const own = { phoneTab: kept, phoneViews: views };
     const href = history.location.href;
+    if (first) {
+      putHomeUnder(history, [{ href, state: { ...state, overHome: true } }]);
+      return;
+    }
+    const own = { phoneTab: kept, phoneViews: views };
     if (shown.unsaid === 'pushed') {
       history.replace(href, own);
       return;
     }
     // A view's address is the project route's, which shows its project.
-    history.replace(router.buildLocation({ to: '/projects/$address', params: { address: project!.address } }).href, {});
-    // The browser takes both a microtask later, as one entry, unless the first is taken now.
-    history.flush();
-    history.push(href, own);
+    const timeline = router.buildLocation({ to: '/projects/$address', params: { address: project!.address } }).href;
+    putHomeUnder(history, [
+      { href: timeline, state: OVER_HOME },
+      { href, state: own },
+    ]);
   });
 
   // The history keys every entry, the page's first included.
@@ -170,6 +185,8 @@ export function usePhoneTab(draft: boolean, overlaid: boolean): PhoneScreen {
   return {
     tab,
     show,
+    // Under a tab other than the Timeline lies the Timeline's entry.
+    home: () => router.history.go(kept === undefined ? -1 : -2),
     views,
     back: () => router.history.back(),
     scroll: scrolls.get(entry) ?? 0,

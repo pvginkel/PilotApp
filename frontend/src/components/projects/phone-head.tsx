@@ -1,5 +1,5 @@
 /**
- * A project's head on a phone (F2.8, F98.3), one line: the drawer's button; the name and its chip,
+ * A project's head on a phone (F2.8, F98.3), one line: the arrow to the home; the name and its chip,
  * with no ticket and no repo; the auto pilot switch without its label, its warning triangle after
  * it (F4.3), or the Finished chip in its place, the Archived and Finished chips their icon alone,
  * their word the tooltip's and a screen reader's; the plan's donut alone, a tap on it showing the Plan
@@ -17,20 +17,22 @@ import { Autopilot } from '@/components/projects/project-head';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
-import { DrawerButton } from '@/components/shell/drawer';
+import { HomeButton } from '@/components/shell/home-head';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 
 interface PhoneHeadProps {
   project: Project;
+  /** Shows the home. */
+  onHome: () => void;
   /** Shows the Plan tab. */
   onPlan: () => void;
 }
 
-export function PhoneHead({ project, onPlan }: PhoneHeadProps) {
+export function PhoneHead({ project, onHome, onPlan }: PhoneHeadProps) {
   const draft = project.state === 'draft';
   return (
     <header className="feed-head phone-head" data-testid="project.head">
-      <DrawerButton />
+      <HomeButton onHome={onHome} />
       <h1 data-testid="project.name">
         <LinkedText text={project.name ?? 'New project'} />
       </h1>

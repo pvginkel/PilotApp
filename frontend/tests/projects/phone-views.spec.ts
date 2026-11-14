@@ -2,14 +2,15 @@
  * The views on a phone (F98.4, F98.5): what opens from a tab — a document, an attachment, a
  * draft's material hung on nothing, the project document, the handbook, a work item's session log —
  * is a view pushed over it, the whole screen over the head and the tabs, with no animation; an
- * arrow back at the left of its head, where the head's drawer button stands, at the top however
+ * arrow back at the left of its head, where the head's arrow to the home stands, at the top however
  * tall its head, and no cross, maximize or backdrop. A view opened from a view lies on top of it,
  * an attachment's link to its document Back to it where it lies under it. Done in a document's
  * view closes it; Discuss in a view takes every view off and shows the Chat tab, the quote in its
  * composer, the session log's Discuss included. Back is the browser's: a view is an entry of its
  * own, and Back, the arrow or Esc takes it off and shows what lay under it, the tab it was opened
  * from; a reload keeps the tab and the views; a view's address reached cold lies over the
- * project's Timeline, so that Back lands there, at the project's id too, which gives way to its own
+ * project's Timeline over the home (F98.6), so that Back lands there and then on the home, never on
+ * the project before, at the project's id too, which gives way to its own
  * address, the views kept by their paths within the project, so that an attachment's link there is
  * still Back to its document, and so is one over views a browser kept by their addresses (P-261).
  * A view keeps its scroll while another lies over it,
@@ -59,7 +60,7 @@ function viewAsDrawn(page: Page) {
 test.describe('Views on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('a document opened from the Documents tab is a view over the head and the tabs, drawn at once in its place, its arrow back where the drawer’s button stands and at the top however tall its head, with no cross, maximize or backdrop; the arrow shows the Documents tab again, adding no entry', async ({
+  test('a document opened from the Documents tab is a view over the head and the tabs, drawn at once in its place, its arrow back where the arrow to the home stands and at the top however tall its head, with no cross, maximize or backdrop; the arrow shows the Documents tab again, adding no entry', async ({
     page,
     people,
     projects,
@@ -76,7 +77,7 @@ test.describe('Views on a phone', () => {
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
     await projectHead.open(id);
     await expect(projectHead.root).toBeVisible();
-    const drawer = (await shell.drawerToggle.boundingBox())!;
+    const home = (await shell.homeButton.boundingBox())!;
     const [head, tabs] = [(await projectHead.root.boundingBox())!, (await phoneTabs.root.boundingBox())!];
 
     await phoneTabs.tab('documents').tap();
@@ -95,10 +96,10 @@ test.describe('Views on a phone', () => {
 
     await expect(overlay.back).toBeVisible();
     const arrow = (await overlay.back.boundingBox())!;
-    expect(arrow.x).toBeCloseTo(drawer.x, 0);
-    expect(arrow.y).toBeCloseTo(drawer.y, 0);
-    expect(arrow.width).toBe(drawer.width);
-    expect(arrow.height).toBe(drawer.height);
+    expect(arrow.x).toBeCloseTo(home.x, 0);
+    expect(arrow.y).toBeCloseTo(home.y, 0);
+    expect(arrow.width).toBe(home.width);
+    expect(arrow.height).toBe(home.height);
     expect((await overlay.head.boundingBox())!.height).toBeGreaterThan(head.height);
     await expect(overlay.back).toHaveAccessibleName('Back');
     await expect(overlay.close).toHaveCount(0);
@@ -228,7 +229,7 @@ test.describe('Views on a phone', () => {
     expect(await overlay.scrollTop()).toBe(0);
   });
 
-  test('a view’s address reached cold lies over the Timeline, so that Back lands there; its attachment’s document link opens the document’s view, which lies under nothing', async ({
+  test('a view’s address reached cold lies over the Timeline over the home, so that Back lands there and then on the home, never on the project before; its attachment’s document link opens the document’s view, which lies under nothing', async ({
     page,
     people,
     projects,
@@ -256,10 +257,10 @@ test.describe('Views on a phone', () => {
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await expect(timeline.root).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL(projectAddress(before));
+    await expect(page).toHaveURL('/');
   });
 
-  test('a view’s address reached cold at the project’s id gives way to the project’s own, still a view over the Timeline, so that Back lands there', async ({
+  test('a view’s address reached cold at the project’s id gives way to the project’s own, still a view over the Timeline over the home, so that Back lands there and then on the home', async ({
     page,
     people,
     projects,
@@ -282,7 +283,7 @@ test.describe('Views on a phone', () => {
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
     await expect(timeline.root).toBeVisible();
     await page.goBack();
-    await expect(page).toHaveURL(projectAddress(before));
+    await expect(page).toHaveURL('/');
   });
 
   test('a document’s view reached at the project’s id lies under its attachment at the project’s own address: the attachment’s document link is Back to it, adding no entry', async ({
@@ -409,6 +410,8 @@ test.describe('Views on a phone', () => {
     await expect(phoneTabs.tab('documents')).toHaveAttribute('aria-selected', 'true');
     await page.goBack();
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
+    await page.goBack();
+    await expect(page).toHaveURL('/');
   });
 
   test('Discuss in a view over a view takes every view off and shows the Chat tab, the quote in its composer; Back from it shows the Timeline', async ({

@@ -12,7 +12,7 @@
  * tab. A draft's first tab is its definition chat. Each project's line, its tab showing and the
  * order the tabs showed in are kept in the browser (F133): after a reload the line is as it was
  * left, the project's own address shows its timeline beside it, and its row in the list, the
- * drawer's too, brings back the tab it was left on, at the tab's address in the entry's place, but
+ * narrow width's drawer's too, but not a phone's home's, brings back the tab it was left on, at the tab's address in the entry's place, but
  * the row of the project on screen, which goes to the project's own address (F1.6), in the entry's
  * place too, so that Back leaves the project (P-225). A tab is kept by its path within the project,
  * and one a browser kept by its address still opens, at the project's own (P-261).
@@ -714,7 +714,8 @@ test.describe('Each project’s line kept in the browser', () => {
     await expect(docTabs.root).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await shell.drawerToggle.click();
+    await shell.homeButton.click();
+    await expect(shell.home).toBeVisible();
     await projectList.tab(first).click();
     await expect(page).toHaveURL(projectAddress(one));
     await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
