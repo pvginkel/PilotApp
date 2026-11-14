@@ -8,6 +8,8 @@ import { createContext } from 'react';
  */
 export interface SseContextValue {
   isConnected: boolean;
+  /** An attempt to open the stream has failed since it last stood: it is being retried. */
+  retrying: boolean;
   requestId: string | null;
   /** Subscribe to a named SSE event; returns an unsubscribe function */
   addEventListener: (event: string, handler: (data: unknown) => void) => () => void;
@@ -19,6 +21,7 @@ export interface SseContextValue {
  */
 export const defaultSseContextValue: SseContextValue = {
   isConnected: false,
+  retrying: false,
   requestId: null,
   addEventListener: () => {
     throw new Error('useSseContext must be used within SseContextProvider');

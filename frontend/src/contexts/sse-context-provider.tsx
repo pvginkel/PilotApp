@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api/generated/client';
 import { isTestMode } from '@/lib/config/test-mode';
 import { emitTestEvent } from '@/lib/test/event-emitter';
@@ -15,9 +14,12 @@ interface SseContextProviderProps {
   children: ReactNode;
 }
 
-// Shown when a refused stream can't be recovered.
-const CONNECTION_LOST_MESSAGE =
-  'Connection to the server was lost. Please refresh the page to reconnect.';
+// The longest wait before a stream that failed is opened again.
+const MAX_RETRY_MS = 5000;
+
+// The stream counts as gone after this many of its heartbeat's cadences with
+// no frame.
+const SILENT_BEATS = 2;
 
 // Worker message types; they mirror the union in `src/workers/sse-worker.ts`.
 type WorkerMessage =
@@ -75,6 +77,19 @@ function parseRejection(data: unknown): { status: number; message: string } {
 }
 
 /**
+ * The cadence a `ready` event's data names, `{"heartbeat": <seconds>}`, in
+ * milliseconds, or null where it names none.
+ */
+function heartbeatOf(data: unknown): number | null {
+  try {
+    const { heartbeat } = JSON.parse(String(data)) as { heartbeat?: unknown };
+    return typeof heartbeat === 'number' && heartbeat > 0 ? heartbeat * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Determine if SharedWorker should be used based on environment
  */
 function shouldUseSharedWorker(): boolean {
@@ -117,18 +132,41 @@ const USE_SHARED_WORKER = shouldUseSharedWorker();
  * {type, payload} envelope. Both the SharedWorker and the direct EventSource
  * path unwrap the envelope and dispatch to local listeners by event name.
  *
- * Two control signals are named events. `ready` (no data) means the backend
- * accepted the stream; only then is the connection `isConnected`, since a
- * refused stream opens too. `rejected` means the backend refused it
- * (401/403): both paths close the stream instead of retrying it, check the
- * session, and open a new stream once the session is valid again.
+ * Three control signals are named events. `ready` means the backend accepted
+ * the stream, its data the heartbeat's cadence; only then is the connection
+ * `isConnected`, since a refused stream opens too. `heartbeat` comes after each
+ * cadence the stream was idle: a stream silent for SILENT_BEATS cadences has
+ * died without saying so, and is closed and opened again at once. `rejected`
+ * means the backend refused it (401/403): both paths close the stream instead
+ * of retrying it, check the session, and open a new stream once the session is
+ * valid again, or, where the check failed, after a backoff.
+ *
+ * A stream that fails is opened again after a backoff that grows to at most
+ * MAX_RETRY_MS, and at once when the browser comes back online; it is retried
+ * for as long as it takes. `retrying` says that an attempt has failed since it
+ * last stood. The page says the connection is down; nothing asks for a reload.
  *
  * Uses SharedWorker in production for cross-tab connection sharing, falls back to
  * direct EventSource in dev/test/iOS environments.
  */
 export function SseContextProvider({ children }: SseContextProviderProps) {
   const [isConnected, setIsConnected] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);
+  // Whether the stream stands, for the callbacks: an error while it stands is
+  // its drop, one while it does not a failed attempt.
+  const connectedRef = useRef(false);
+  const retryRef = useRef<{ count: number; timer: ReturnType<typeof setTimeout> | null }>({
+    count: 0,
+    timer: null,
+  });
+  // The direct path's silence: the cadence its stream's `ready` named, when it
+  // last heard a frame, and the timer that looks again.
+  const silenceRef = useRef<{ heartbeatMs: number | null; lastFrameAt: number; timer: ReturnType<typeof setTimeout> | null }>({
+    heartbeatMs: null,
+    lastFrameAt: 0,
+    timer: null,
+  });
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sharedWorkerRef = useRef<SharedWorker | null>(null);
@@ -140,34 +178,67 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
   // Internal listener registry: Map<eventName, Set<handler>>
   const listenersRef = useRef(new Map<string, Set<(data: unknown) => void>>());
 
-  // showError through a ref: ToastProvider builds a new context value on every
-  // render, so depending on showError would rebuild handleWorkerMessage, and
-  // with it the SharedWorker, on every toast. Requires ToastProvider above this
-  // provider (CoreProviders wraps SseProviders).
-  const { showError } = useToast();
-  const showErrorRef = useRef(showError);
-  useEffect(() => {
-    showErrorRef.current = showError;
-  }, [showError]);
+  const markConnected = useCallback((id: string) => {
+    connectedRef.current = true;
+    retryRef.current.count = 0;
+    setIsConnected(true);
+    setRetrying(false);
+    setRequestId(id);
+  }, []);
+
+  /**
+   * The stream is down: dropped where it stood, else an attempt to open it
+   * failed.
+   */
+  const markDown = useCallback(() => {
+    if (connectedRef.current) {
+      connectedRef.current = false;
+      setIsConnected(false);
+    } else {
+      setRetrying(true);
+    }
+  }, []);
+
+  const clearRetry = useCallback(() => {
+    if (retryRef.current.timer) {
+      clearTimeout(retryRef.current.timer);
+      retryRef.current.timer = null;
+    }
+  }, []);
+
+  /** Run `open` after the backoff, which doubles from 1 s to MAX_RETRY_MS. */
+  const scheduleRetry = useCallback((open: () => void) => {
+    clearRetry();
+    const retry = retryRef.current;
+    retry.count++;
+    const delay = Math.min(1000 * 2 ** (retry.count - 1), MAX_RETRY_MS);
+    console.debug(`SSE: retrying in ${delay}ms (attempt ${retry.count})`);
+    retry.timer = setTimeout(() => {
+      retry.timer = null;
+      open();
+    }, delay);
+  }, [clearRetry]);
 
   /**
    * Recover from a refused stream: check the session, then `reopen` when it is
    * valid, leave the redirect to login to the API client when it is gone, and
-   * otherwise tell the user to refresh the page.
+   * otherwise `reopen` after the backoff, which a refusal brings back here.
    */
   const recoverFromRejection = useCallback((status: number, reopen: () => void) => {
     // Only the status: the message comes from the backend's response.
     console.debug(`SSE stream rejected: status=${status}`);
+    connectedRef.current = false;
     setIsConnected(false);
 
     void probeSession().then(outcome => {
       if (outcome === 'valid') {
         reopen();
       } else if (outcome === 'failed') {
-        showErrorRef.current(CONNECTION_LOST_MESSAGE);
+        setRetrying(true);
+        scheduleRetry(reopen);
       }
     });
-  }, []);
+  }, [scheduleRetry]);
 
   /**
    * Dispatch an event to all registered handlers for a given event name
@@ -222,8 +293,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
 
     switch (message.type) {
       case 'connected':
-        setIsConnected(true);
-        setRequestId(message.requestId);
+        markConnected(message.requestId);
         break;
 
       case 'event':
@@ -232,11 +302,12 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
 
       case 'error':
         console.error('SSE connection error:', message.error);
-        setIsConnected(false);
+        markDown();
         break;
 
       case 'disconnected':
         console.debug('SSE disconnected:', message.reason);
+        connectedRef.current = false;
         setIsConnected(false);
         break;
 
@@ -252,7 +323,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       default:
         console.warn('Unknown worker message:', message);
     }
-  }, [dispatchEvent, recoverFromRejection]);
+  }, [dispatchEvent, markConnected, markDown, recoverFromRejection]);
 
   /**
    * Create SharedWorker connection
@@ -280,15 +351,27 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
     } catch (error) {
       console.error('Failed to create SharedWorker, falling back to direct connection:', error);
       useSharedWorker.current = false;
+      connectedRef.current = false;
       setIsConnected(false);
     }
   }, [handleWorkerMessage]);
+
+  const stopSilenceWatch = useCallback(() => {
+    const silence = silenceRef.current;
+    if (silence.timer) {
+      clearTimeout(silence.timer);
+      silence.timer = null;
+    }
+    silence.heartbeatMs = null;
+  }, []);
 
   /**
    * Create direct EventSource connection.
    * Uses onmessage to unwrap the {type, payload} envelope — same logic as the SharedWorker.
    */
   const createDirectConnection = useCallback(() => {
+    clearRetry();
+    stopSilenceWatch();
     const tabRequestId = makeUniqueToken(32);
 
     const params = new URLSearchParams({ request_id: tabRequestId });
@@ -296,12 +379,40 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
 
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
+    const silence = silenceRef.current;
+
+    const heard = () => {
+      silence.lastFrameAt = performance.now();
+    };
+
+    // Once SILENT_BEATS cadences have passed with no frame, the stream died
+    // without saying so: close it and open another at once.
+    const watchSilence = () => {
+      if (silence.heartbeatMs === null) {
+        return;
+      }
+      const left = silence.lastFrameAt + silence.heartbeatMs * SILENT_BEATS - performance.now();
+      if (left > 0) {
+        silence.timer = setTimeout(watchSilence, left);
+        return;
+      }
+      console.debug('SSE: stream silent, reconnecting');
+      eventSource.close();
+      markDown();
+      if (isTestMode()) {
+        emitTestEvent({ kind: 'sse', streamId: 'connection', phase: 'close', event: 'silent' });
+      }
+      createDirectConnectionRef.current?.();
+    };
 
     // Open is not connected: the backend may still refuse the stream. The
-    // connection counts from the `ready` event (no data line; don't read it).
-    eventSource.addEventListener('ready', () => {
-      setIsConnected(true);
-      setRequestId(tabRequestId);
+    // connection counts from the `ready` event, whose data names the
+    // heartbeat's cadence, from which on the stream is timed.
+    eventSource.addEventListener('ready', (event) => {
+      heard();
+      silence.heartbeatMs = heartbeatOf((event as MessageEvent).data);
+      watchSilence();
+      markConnected(tabRequestId);
 
       if (isTestMode()) {
         const payload: Omit<SseTestEvent, 'timestamp'> = {
@@ -315,12 +426,20 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       }
     });
 
+    eventSource.addEventListener('heartbeat', () => {
+      heard();
+      if (isTestMode()) {
+        emitTestEvent({ kind: 'sse', streamId: 'connection', phase: 'message', event: 'heartbeat' });
+      }
+    });
+
     // The backend refused the stream and is ending it. Close it before the
     // browser retries it, and open a new one only once the session is valid,
     // unless this stream was replaced or disconnected meanwhile.
     eventSource.addEventListener('rejected', (event) => {
       const { status, message } = parseRejection((event as MessageEvent).data);
       eventSource.close();
+      stopSilenceWatch();
 
       if (isTestMode()) {
         emitTestEvent({
@@ -342,6 +461,8 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
     // Single onmessage handler unwraps the {type, payload} envelope
     // and dispatches to local listeners — mirrors the SharedWorker logic.
     eventSource.onmessage = (e: MessageEvent) => {
+      heard();
+
       let envelope: { type: string; payload: unknown };
       try {
         envelope = JSON.parse(e.data);
@@ -370,15 +491,20 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       dispatchEvent(eventName, eventData);
     };
 
+    // Closed, so that the browser does not reconnect it on its own: the
+    // backoff is the one retry.
     eventSource.onerror = (event) => {
       if (isTestMode()) {
         console.debug('EventSource error (test mode):', event);
       } else {
         console.error('EventSource error:', event);
       }
-      setIsConnected(false);
+      eventSource.close();
+      stopSilenceWatch();
+      markDown();
+      scheduleRetry(() => createDirectConnectionRef.current?.());
     };
-  }, [dispatchEvent, recoverFromRejection]);
+  }, [clearRetry, dispatchEvent, markConnected, markDown, recoverFromRejection, scheduleRetry, stopSilenceWatch]);
 
   useEffect(() => {
     createDirectConnectionRef.current = createDirectConnection;
@@ -402,9 +528,12 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+    clearRetry();
+    stopSilenceWatch();
 
+    connectedRef.current = false;
     setIsConnected(false);
-  }, []);
+  }, [clearRetry, stopSilenceWatch]);
 
   /**
    * Reconnect SSE (for focus-based reconnection).
@@ -434,6 +563,25 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
     }
     createDirectConnection();
   }, [isConnected, createSharedWorkerConnection, createDirectConnection]);
+
+  // Back online, a stream that is down is tried at once, its backoff begun
+  // again.
+  useEffect(() => {
+    const onOnline = () => {
+      if (connectedRef.current) {
+        return;
+      }
+      retryRef.current.count = 0;
+      if (useSharedWorker.current) {
+        sharedWorkerRef.current?.port.postMessage({ type: 'reconnect' });
+        return;
+      }
+      eventSourceRef.current?.close();
+      createDirectConnection();
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [createDirectConnection]);
 
   // Establish connection on mount
   useEffect(() => {
@@ -482,6 +630,7 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
 
   const contextValue: SseContextValue = {
     isConnected,
+    retrying,
     requestId,
     addEventListener,
     reconnect,
