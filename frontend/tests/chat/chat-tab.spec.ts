@@ -673,6 +673,50 @@ test.describe('The Chat tab’s closed chats', () => {
     expect(await chat.top(chat.messages.first())).toBeLessThan(0);
   });
 
+  test('lets go of the place “Load previous” keeps on a drag of its drawn bar: what arrives after grows under the view', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Dragged'), members: [me.handle!] });
+    const first = await chats.start(project, 'Plan the route.');
+    await controller.play(chats.store, first.session, [text('route', LONG)]);
+    await controller.finish(chats.store, first.session, 'success', LONG);
+    await chats.idle(project);
+    await projects.transition(project, 'finished');
+    await projects.transition(project, 'reopened');
+    const second = await chats.start(project, 'And the tent?');
+    await controller.play(chats.store, second.session, [text('tent', TENT)]);
+    await controller.finish(chats.store, second.session, 'success', TENT);
+    await chats.idle(project);
+
+    await timeline.open(project);
+    await expect(chat.messageTexts).toHaveText(['And the tent?']);
+    await chat.body.hover();
+    await page.mouse.wheel(0, -100_000);
+    await expect.poll(() => chat.body.evaluate((body) => body.scrollTop)).toBe(0);
+    const at = await chat.top(chat.messages.first());
+    await chat.before.click();
+    await expect(chat.texts.first()).toContainText('Stage 30, by the lake.');
+    await expect.poll(async () => Math.abs((await chat.top(chat.messages.last())) - at)).toBeLessThanOrEqual(1);
+
+    const bar = new DrawnBar(page, chat.body, 'chat.scrollbar');
+    const scrollTop = () => chat.body.evaluate((body) => body.scrollTop);
+    const held = await scrollTop();
+    await bar.drag(page, 40);
+    await expect.poll(scrollTop).toBeGreaterThan(held + 100);
+    const dragged = await scrollTop();
+    await chats.send(project, 'And the boat?');
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?', 'And the boat?']);
+    await page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+    expect(await scrollTop()).toBe(dragged);
+  });
+
   test('keeps the chats loaded before while the page lives: back from the Documents tab or another project they show again, and after a reload the latest alone', async ({
     page,
     people,

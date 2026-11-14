@@ -36,6 +36,7 @@ import { usePerson } from '@/hooks/use-self';
 import { useStandIns } from '@/hooks/use-stand-ins';
 import { useStickyBottom } from '@/hooks/use-sticky-bottom';
 import type { components } from '@/lib/api/generated/types';
+import { BAR_PRESS } from '@/lib/scroll-bar';
 import { cn } from '@/lib/utils';
 import { ChatEmptyState, type ChatHome } from './chat-empty-state';
 import { ChatSection, messageKey } from './chat-section';
@@ -45,8 +46,8 @@ import { StandIns } from './person-message';
 
 type Member = components['schemas']['ProjectHeadSchema.e86ccd6.MemberSchema'];
 
-/** The reader's own input, which lets go of the line *load more* keeps in place. */
-const READER = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+/** The reader's own input, a press on the drawn bar among it, which lets go of the line *load more* keeps in place. */
+const READER = ['wheel', 'touchstart', 'pointerdown', 'keydown', BAR_PRESS] as const;
 
 interface ProjectChatProps {
   projectId: string;
