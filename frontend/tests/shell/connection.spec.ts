@@ -148,6 +148,40 @@ test.describe('A dropped connection', () => {
     await expect(shell.connection).toHaveCount(0, { timeout: 10_000 });
   });
 
+  test('takes every press over an open dialog and an open menu, which stand as they stood', async ({ page, people, shell, outage, deploymentSse }) => {
+    await people.signIn();
+    await shell.open('/profile');
+    await deploymentSse.ensureConnected();
+
+    // The keys list is a modal dialog, which turns the body's pointer events off while it is open.
+    await page.keyboard.press('?');
+    await expect(shell.keys).toBeVisible();
+    await outage.drop();
+    await expect(shell.connectionBadge).toHaveText('Retrying…');
+    const keys = (await shell.keys.boundingBox())!;
+    const inDialog = { x: keys.x + 4, y: keys.y + 4, width: 0, height: 0 };
+    const beside = { x: 4, y: 4, width: 0, height: 0 };
+    for (const box of [inDialog, beside]) {
+      expect(await pressLandsOn(page, box)).toBe('shell.connection');
+      await page.mouse.click(box.x, box.y);
+    }
+    await expect(shell.keys).toBeVisible();
+    await outage.end();
+    await expect(shell.connection).toHaveCount(0, { timeout: 10_000 });
+    await page.keyboard.press('Escape');
+    await expect(shell.keys).toHaveCount(0);
+
+    // A menu closes on a press outside it.
+    await shell.user.click();
+    await expect(shell.profileMenu).toBeVisible();
+    await outage.drop();
+    await expect(shell.connectionBadge).toHaveText('Retrying…');
+    await page.mouse.click(beside.x, beside.y);
+    await expect(shell.profileMenu).toBeVisible();
+    await outage.end();
+    await expect(shell.connection).toHaveCount(0, { timeout: 10_000 });
+  });
+
   test('tints at once while the browser is offline, and opens the stream at once when it is back online', async ({
     page,
     context,

@@ -298,6 +298,8 @@
     position: fixed;
     inset: 0;
     z-index: 60;
+    /* An open modal dialog turns the body's pointer events off (Radix's dismissable layer). */
+    pointer-events: auto;
     display: grid;
     place-items: center;
     background: hsl(var(--scrim));

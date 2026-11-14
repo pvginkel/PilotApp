@@ -42,7 +42,13 @@ export function ConnectionTint() {
   }, [isConnected]);
   if (online && !late && (isConnected || !down)) return null;
   return (
-    <div className="link-down" data-testid="shell.connection">
+    <div
+      className="link-down"
+      // An open dialog or menu closes on a press that reaches the document (Radix's dismissable
+      // layer, `use-dismiss.ts`).
+      onPointerDown={(event) => event.stopPropagation()}
+      data-testid="shell.connection"
+    >
       <span className="link-badge" role="status" data-testid="shell.connection.badge">
         <LoaderCircle className="icon animate-spin" aria-hidden="true" />
         {retrying ? 'Retrying…' : 'Connecting…'}
