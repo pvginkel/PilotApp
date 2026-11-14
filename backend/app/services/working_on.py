@@ -111,7 +111,8 @@ class Hold:
     held, starting or running."""
     asked_in: uuid.UUID | None
     """While the run waits on the person: the open document it registered
-    that they answer, the first on the timeline; else none."""
+    that they answer, the first on the timeline that is theirs with no Block
+    held, else its first (`_asked_in`); else none."""
 
     @property
     def doing(self) -> Doing:
@@ -624,28 +625,60 @@ def _documents_of(
     )
 
 
+def _answerable(document: type[Item]) -> ColumnElement[bool]:
+    """The Item `document` is the person's with no Block held: not among the
+    Items bound as `pilots`, and with no Block among those bound as
+    `held`."""
+    held_blocks = (
+        select(Block.id)
+        .where(
+            Block.document_id == document.id,
+            Block.id.in_(bindparam("held", expanding=True)),
+        )
+        .correlate_except(Block)
+    )
+    return and_(
+        ~document.id.in_(bindparam("pilots", expanding=True)), ~held_blocks.exists()
+    )
+
+
 @cache
-def _first_documents() -> Select[uuid.UUID, uuid.UUID | None]:
+def _documents_asked() -> Select[uuid.UUID, uuid.UUID | None]:
     """Each Work bound as `works`, with the first open registered document
-    on the timeline of the run it begins, or none."""
+    on the timeline of the run it begins that is the person's with no Block
+    held (`_answerable`), else the run's first, or none."""
     start = aliased(Work)
+    answerable = aliased(Item)
     return select(
         start.id,
-        _documents_of(start.id, aliased(Item)).limit(1).scalar_subquery(),
+        func.coalesce(
+            _documents_of(start.id, answerable)
+            .where(_answerable(answerable))
+            .limit(1)
+            .scalar_subquery(),
+            _documents_of(start.id, aliased(Item)).limit(1).scalar_subquery(),
+        ),
     ).where(start.id.in_(bindparam("works", expanding=True)))
 
 
 def _asked_in(
-    db: Session, work_ids: Collection[uuid.UUID]
+    reading: Reading, work_ids: Collection[uuid.UUID]
 ) -> dict[uuid.UUID, uuid.UUID]:
-    """The first open registered document on the timeline of the run each
-    Work of `work_ids` begins, by the Work's id, where it has one: while the
-    run holds a Block with nothing of it in flight, the one the person
-    answers."""
+    """The open registered document the person answers while the run each
+    Work of `work_ids` begins holds a Block with nothing of it in flight, by
+    the Work's id, where the run has one, as `reading` reads them: the first
+    on the run's timeline that is theirs with no Block held, so that another
+    run's hold on an earlier one sends them to one they can answer; else the
+    run's first."""
     return {
         work_id: document_id
-        for work_id, document_id in db.execute(
-            _first_documents(), {"works": list(work_ids)}
+        for work_id, document_id in reading.db.execute(
+            _documents_asked(),
+            {
+                "works": list(work_ids),
+                "pilots": list(reading.found),
+                "held": list(reading.held_ids),
+            },
         )
         if document_id is not None
     }
@@ -668,7 +701,7 @@ def holds(reading: Reading, document_ids: Collection[uuid.UUID]) -> Holds:
         for block_id, _ in placed
         if named[block_id].holding and not named[block_id].going_on
     }
-    asked = _asked_in(reading.db, waiting) if waiting else {}
+    asked = _asked_in(reading, waiting) if waiting else {}
     held: dict[int, Hold] = {}
     undone: set[int] = set()
     for block_id, document_id in placed:

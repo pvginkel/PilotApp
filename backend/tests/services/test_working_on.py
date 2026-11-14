@@ -556,6 +556,80 @@ class TestAResearch:
         )
 
 
+class TestTheDocumentItWaitsOn:
+    """While a run holding a Block waits on the person, the document it
+    waits on (`asked_in`): the first open document of the run that is theirs
+    with no Block held, so that in an overlap of two runs, the other holding
+    a Block of an earlier one, it is one they can answer; else the run's
+    first."""
+
+    def _overlapping(
+        self, camp: Camp, *texts: str
+    ) -> tuple[Item, models.Session, list[Item], models.Session]:
+        """A claimed action whose run registered `texts` and waits on the
+        person, and another run, running, that claims the action A1 of the
+        first of them."""
+        writer = camp.worker()
+        cut_over = camp.registered(writer, CLAIMED)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+        registered = [camp.registered(doing, text) for text in texts]
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        other = camp.worker(conversation="conversation-3")
+        camp.claim(registered[0], "A1", other)
+        return cut_over, doing, registered, other
+
+    @pytest.mark.parametrize(
+        "first",
+        [CLAIMED, CLAIMED_AND_OPEN],
+        ids=["the-first-pilots", "the-first-with-a-block-held"],
+    )
+    def test_another_runs_hold_on_its_first_document_points_at_the_next(
+        self, camp: Camp, first: str
+    ) -> None:
+        cut_over, doing, (actions, asked), other = self._overlapping(
+            camp, first, QUESTION
+        )
+
+        assert camp.reading(cut_over, actions, asked) == {
+            cut_over.id: PilotsWork(Doing.WAITING_ON_ANSWER, doing.id, False, asked.id),
+            **(
+                {actions.id: PilotsWork(Doing.DOING, other.id, True, None)}
+                if first == CLAIMED
+                else {}
+            ),
+        }
+        assert (
+            holds(Reading(camp.session), [cut_over.id])
+            .held[camp.block(cut_over, "A1").id]
+            .asked_in
+            == asked.id
+        )
+
+        camp.ended(other)
+        camp.ended(camp.job_after(other))
+
+        # The other run done with its Block, the first is the person's again.
+        assert camp.of(cut_over) == PilotsWork(
+            Doing.WAITING_ON_ANSWER, doing.id, False, actions.id
+        )
+
+    def test_with_none_the_person_can_answer_it_points_at_the_runs_first(
+        self, camp: Camp
+    ) -> None:
+        cut_over, doing, (actions, second), _ = self._overlapping(
+            camp, CLAIMED_AND_OPEN, CLAIMED
+        )
+        camp.claim(second, "A1", camp.worker(conversation="conversation-4"))
+
+        assert camp.of(cut_over) == PilotsWork(
+            Doing.WAITING_ON_ANSWER, doing.id, False, actions.id
+        )
+
+
 class TestACancel:
     """A Cancel on an open registered document of a run that is the
     person's (DB 297 to 299): offered while nothing of the run is in flight

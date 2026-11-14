@@ -957,6 +957,42 @@ class TestItemServiceTakeOver:
         assert refused.value.cause == WAITS_ON.format(document=path)
         assert camp.of(cut_over) is not None
 
+    @pytest.mark.parametrize(
+        "first",
+        [CLAIMED_ALONE, CLAIMED],
+        ids=["the-first-pilots", "the-first-with-a-block-held"],
+    )
+    def test_in_an_overlap_of_two_runs_it_names_one_the_person_can_answer(
+        self, container: ServiceContainer, camp: Camp, first: str
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        actions = camp.registered(doing, first)
+        asked = camp.registered(doing, QUESTION)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        camp.claim(actions, "A1", camp.worker(conversation="conversation-3"))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_over(ADA, cut_over.id)
+
+        path = tree_path(camp.project, camp.session.get_one(Document, asked.id).path)
+        assert refused.value.cause == WAITS_ON.format(document=path)
+
+    def test_with_none_the_person_can_answer_it_names_the_runs_first(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        actions = camp.registered(doing, CLAIMED_ALONE)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        camp.claim(actions, "A1", camp.worker(conversation="conversation-3"))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_over(ADA, cut_over.id)
+
+        path = tree_path(camp.project, camp.session.get_one(Document, actions.id).path)
+        assert refused.value.cause == WAITS_ON.format(document=path)
+
     def test_one_whose_holding_run_registered_a_document_not_read_yet_is_refused(
         self, container: ServiceContainer, camp: Camp
     ) -> None:

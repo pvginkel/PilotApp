@@ -3740,6 +3740,34 @@ class TestPilotsWork:
         }
         assert _entry(camp, question)["pilots_work"] is None
 
+    def test_in_an_overlap_of_two_runs_it_carries_one_they_can_answer(
+        self, camp: Camp
+    ) -> None:
+        writer = camp.worker()
+        cut_over = camp.registered(writer, _CUT_OVER)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+        actions = camp.registered(doing, _CUT_OVER)
+        question = camp.registered(doing, _PITCH)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        other = camp.worker(conversation="conversation-3")
+        camp.claim(actions, "A1", other)
+        building = _link(doing, "Building the camp")
+        asked_in = _link(question, "Where do we pitch?")
+
+        entry = _entry(camp, cut_over)
+
+        assert entry["pilots_work"] == _pilots(
+            "waiting_on_answer", building, False, asked_in
+        )
+        assert _blocks(entry)["A1"]["held"]["asked_in"] == asked_in
+        assert _entry(camp, actions)["pilots_work"] == _pilots(
+            "doing", _link(other, "Building the camp"), True
+        )
+
     def test_the_document_it_carries_untitled_is_named_by_its_file(
         self, camp: Camp
     ) -> None:
