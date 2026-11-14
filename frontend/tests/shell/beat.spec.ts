@@ -29,6 +29,16 @@ function nextBeat(page: Page, id: string): Promise<Response> {
   return page.waitForResponse((response) => response.request().method() === 'PUT' && pathOf(response.request()) === `${PAGES}/${id}`);
 }
 
+/** The page's next beat after its first that names `project`, answered. */
+function nextBeatOf(page: Page, id: string, project: string): Promise<Response> {
+  return page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      pathOf(response.request()) === `${PAGES}/${id}` &&
+      (response.request().postDataJSON() as { project_id: string | null }).project_id === project,
+  );
+}
+
 /** The page's away for the page `id`. */
 function away(page: Page, id: string): Promise<Request> {
   return page.waitForRequest((request) => request.method() === 'POST' && pathOf(request) === `${PAGES}/${id}/away`);
@@ -121,9 +131,11 @@ test.describe("A page's beat", () => {
     // eslint-disable-next-line no-restricted-properties -- The page's own clock, read to pause it.
     await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
 
-    const beat = nextBeat(page, id);
+    // A beat asked for while the first was in flight goes after it with the project then shown, and
+    // may be answered after this; with the clock still, only the change beats the next project.
+    const beat = nextBeatOf(page, id, there);
     await tab.click();
-    expect((await beat).request().postDataJSON()).toEqual({ project_id: there });
+    expect((await beat).status()).toBe(204);
   });
 
   for (const form of ['a draft’s name', 'a slug', 'an id'] as const) {
