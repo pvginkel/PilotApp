@@ -4594,6 +4594,44 @@ class TestDebrief:
             ("P1.code ", 1, 120),
         ]
 
+    def test_entries_read_in_their_positions_not_as_stored(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """DB 326: the sections are the runs of names in the entries'
+        positions, whatever order their rows were stored in."""
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.IDLE)
+        container.record_service().work_done(work.id, REPLIED)
+        session.get_one(Work, work.id).debrief = DEBRIEF
+        for position, section, role in (
+            (3, "P2 · The server", "code-reviewer"),
+            (2, "P2 · The server", "code-writer"),
+            (1, "P1 · The client", "code-writer"),
+        ):
+            session.add(
+                DebriefEntry(
+                    work_id=work.id,
+                    position=position,
+                    section=section,
+                    role=role,
+                    round=1,
+                    duration=60,
+                )
+            )
+            session.flush()
+
+        sections = container.timeline_service().debrief(work.id).sections
+
+        assert [
+            (each.name, [entry.role for entry in each.entries]) for each in sections
+        ] == [
+            ("P1 · The client", ["code-writer"]),
+            ("P2 · The server", ["code-writer", "code-reviewer"]),
+        ]
+
 
 @pytest.mark.usefixtures("person")
 class TestProjectDocument:
