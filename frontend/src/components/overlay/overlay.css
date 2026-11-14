@@ -158,6 +158,49 @@
   /* The head's environment link and the dot before it, on one line. */
   .log-env { display: inline-flex; align-items: baseline; gap: inherit; }
 
+  /* The debrief's way to the full one, in its head (the mockup's `.debrief-more`). */
+  .debrief-more { flex: none; }
+  .debrief-more .icon { margin: 0 -4px 0 -2px; }
+
+  /* The full debrief (the mockup's `debriefFull()`): the sections as a table that goes to each,
+     then every entry in its section. */
+  .db-index { width: 100%; margin: 2px 0 8px; border-collapse: collapse; font-size: var(--text-sm); }
+  .db-index th { padding: 4px 8px; border-bottom: 1px solid hsl(var(--border)); text-align: left; font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .db-index td { padding: 4px 8px; border-bottom: 1px solid hsl(var(--border) / 0.6); font-variant-numeric: tabular-nums; }
+  /* A section's name on one line, cut short with an ellipsis. */
+  .db-index td:first-child { width: 100%; max-width: 0; }
+  .db-index td:first-child button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .db-index th:not(:first-child), .db-index td:not(:first-child) { width: 1%; white-space: nowrap; text-align: right; }
+  .db-index tbody tr { cursor: pointer; }
+  @media (hover: hover) { .db-index tbody tr:hover { background: hsl(var(--muted)); } }
+  .db-section { margin-top: 20px; scroll-margin-top: 8px; }
+  .db-section h3 { margin: 0 0 6px; font-size: var(--text-base); font-weight: 600; line-height: 1.4; }
+  .db-entries { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .db-entry { padding-left: 12px; border-left: 2px solid hsl(var(--border)); }
+  .db-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: var(--text-sm); }
+  .db-meta { display: inline-flex; align-items: baseline; gap: 8px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+  .db-meta .outcome { font-size: var(--text-xs); }
+  .db-meta .outcome.failed { color: hsl(var(--warning-text)); }
+  .db-text { margin-top: 2px; line-height: 1.5; }
+  /* An entry with no words, a result or neither: its role and its time alone, muted. */
+  .db-entry.figure { color: hsl(var(--muted-foreground)); }
+  .db-round { margin-top: 4px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
+  .db-round .round-n { margin-right: 8px; font-weight: 600; white-space: nowrap; }
+  .db-round .why { color: hsl(var(--foreground)); }
+
   /* Off a phone a document is a tab (the mockup's 901px block): it takes the timeline's place under
      the tab line, on the page's own colour, its column where the timeline's is; the line's cross
      closes it. The head's and the foot's text stand in the column's lane. */
@@ -188,6 +231,8 @@
     .sheet.pop .sheet-head h2 { font-size: var(--text-base); }
     .sheet.pop .sheet-head .sub { gap: 6px; }
     .sheet.pop .sheet-body .column { max-width: none; padding: 12px 16px 14px; }
+    /* The full debrief's: taller (the mockup's `.plan-sheet`). */
+    .sheet.pop.tall { height: min(640px, calc(100% - 32px)); }
   }
 
   /* A phone: a view pushed over the tabs, the whole screen over the head and the tabs (F98.4; the

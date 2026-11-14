@@ -10,7 +10,8 @@
  * wherever it hangs, a draft's material hung on nothing (F36.6). The handbook's address, and the
  * project document's, open it (F129.4, F37.4), and a work item's session log's opens it (F69):
  * off a phone a popover over the tab showing, the one the line showed last, as its own address
- * draws it (F69.1); a done work item's debrief's, under it, opens the debrief there (F26.9).
+ * draws it (F69.1); a done work item's debrief's, under it, opens the debrief there (F26.9), and
+ * its full debrief's, under that, the full debrief in the debrief's place (F26.10).
  * Another project's address closes them. A draft has its
  * definition chat in the timeline's place (F46.1), once the head says it is one, Create project at
  * its end once the project can be created (D119). Off a phone, what opens as a document is a tab
@@ -136,9 +137,10 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
       {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
     </>
   );
+  const full = logRoute === '/_shell/projects/$address/sessions/$sessionId/debrief/full';
   const log =
-    sessionId === undefined ? null : logRoute === '/_shell/projects/$address/sessions/$sessionId/debrief' ? (
-      <DebriefOverlay projectId={projectId} sessionId={sessionId} />
+    sessionId === undefined ? null : full || logRoute === '/_shell/projects/$address/sessions/$sessionId/debrief' ? (
+      <DebriefOverlay projectId={projectId} sessionId={sessionId} full={full} />
     ) : (
       <SessionLogOverlay projectId={projectId} sessionId={sessionId} />
     );

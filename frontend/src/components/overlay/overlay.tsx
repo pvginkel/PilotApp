@@ -8,8 +8,9 @@
  * back as it closes to what had it before where the focus is lost then. Off a phone the session
  * log is a popover over the tab showing (F69.1): in one place and of one size, 90 % of the
  * column's text width, centred on it and between the stage's top and bottom, at most 560 px high,
- * not scrolling with what lies under it; its cross, Esc and a press outside it close it, and so
- * does a click on a link to its own address, its opener's. It takes the focus as it opens, and
+ * not scrolling with what lies under it; the full debrief's is of the same width and place and at
+ * most 640 px high, an arrow back to the debrief at the left of its head (F26.10). Its cross, Esc
+ * and a press outside it close it, and so does a click on a link to its own address, its opener's. It takes the focus as it opens, and
  * gives it back as it closes to what had it before where the focus is lost then.
  * Its body keeps its scroll while what it shows is read again, and starts at its top for each thing
  * it shows afresh. A segment in it goes to
@@ -47,6 +48,10 @@ interface OverlayProps {
   at?: { item: string; block: string } | null;
   /** Its head's titles: the title and the line under it. */
   titles: ReactNode;
+  /** Off a phone, before its titles: the arrow back in its frame, the full debrief's to the debrief. */
+  back?: ReactNode;
+  /** Off a phone its popover is the taller frame: the full debrief's. */
+  tall?: boolean;
   /** Its head's buttons, once what it shows is read: Pilot's job on it, its Undo, Discuss. */
   acts?: ReactNode;
   /** Under its head: what Pilot does on a document that is Pilot's. */
@@ -65,6 +70,8 @@ export function Overlay({
   showing,
   at = null,
   titles,
+  back = null,
+  tall = false,
   acts = null,
   strip = null,
   foot,
@@ -186,7 +193,7 @@ export function Overlay({
         <SectionsContext.Provider value={sections}>
           <section
             ref={sheet}
-            className={cn('sheet', inTab && 'tabbed', pop && 'pop')}
+            className={cn('sheet', inTab && 'tabbed', pop && 'pop', pop && tall && 'tall')}
             role={inTab ? 'tabpanel' : 'dialog'}
             aria-labelledby={titlesId}
             tabIndex={-1}
@@ -204,7 +211,9 @@ export function Overlay({
                 >
                   <ArrowLeft className="icon" aria-hidden="true" />
                 </button>
-              ) : null}
+              ) : (
+                back
+              )}
               <div id={titlesId} className="titles">
                 {titles}
               </div>
