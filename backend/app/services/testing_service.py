@@ -33,6 +33,9 @@ class TestingService:
     # Forced refusal status for the next SSE stream connect (single-shot)
     _forced_sse_connect_error: int | None = None
 
+    # The SSE outage: None with none, else whether the open streams are silent
+    _sse_outage: bool | None = None
+
     # ── Test session management ──────────────────────────────────────
 
     def create_session(
@@ -144,3 +147,26 @@ class TestingService:
         if error:
             logger.info("Consumed forced SSE connect error: status=%d", error)
         return error
+
+    def start_sse_outage(self, silent: bool) -> None:
+        """Fail every SSE stream connect until `end_sse_outage()`.
+
+        Args:
+            silent: The streams that are open send nothing either, heartbeat
+                included, as a connection that died without saying so
+        """
+        TestingService._sse_outage = silent
+        logger.info("Started SSE outage: silent=%s", silent)
+
+    def end_sse_outage(self) -> None:
+        """Let SSE stream connects through again, and open streams speak."""
+        TestingService._sse_outage = None
+        logger.info("Ended SSE outage")
+
+    def sse_connects_fail(self) -> bool:
+        """Whether an SSE outage fails the stream connects."""
+        return TestingService._sse_outage is not None
+
+    def sse_streams_silent(self) -> bool:
+        """Whether an SSE outage keeps the open streams silent."""
+        return TestingService._sse_outage is True
