@@ -645,7 +645,8 @@ class BriefService:
         ).all()
         named = []
         for document_id, path, text, block_id, local_id in rows:
-            # A named block is a block of a registered document read.
+            # A named block is of a registered document read, or of an item of
+            # Pilot's own, born published.
             assert text is not None
             block = next(
                 block for block in dsl.parse(text).blocks if block.local_id == local_id

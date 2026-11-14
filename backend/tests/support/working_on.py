@@ -198,6 +198,13 @@ class Camp:
             )
         return item
 
+    def own(self, kind: str, title: str, text: str) -> Item:
+        """An item of Pilot's own, added by a chat of the project."""
+        chat = self._session("chat", SessionState.RUNNING, None)
+        return self.container.document_service().bear_item(
+            self.project, kind, title, chat, text
+        )
+
     def block(self, document: Item, local_id: str) -> Block:
         return self.session.scalars(
             select(Block).where(

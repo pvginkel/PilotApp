@@ -191,10 +191,10 @@ class NewItem(BaseModel):
     claims: list[Annotated[str, Field(pattern=BLOCK_ID)]] = Field(
         default_factory=list,
         description=(
-            "The actions of workers' documents a work item does that you"
-            " claimed, by their blocks' ids, `<item id>/<local id>`: each"
-            " block's line names this work item, and the job after its turn"
-            " names them for their `done`"
+            "The actions of workers' documents or of items you added that a"
+            " work item does and you claimed, by their blocks' ids, `<item"
+            " id>/<local id>`: each block's line names this work item, and the"
+            " job after its turn names them for their `done`"
         ),
     )
     cards: list[Annotated[str, Field(min_length=1)]] | None = Field(

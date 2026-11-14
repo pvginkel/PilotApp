@@ -380,8 +380,8 @@ class InventedWorkCreateSchema(BaseModel):
         default_factory=list,
         description=(
             "The claimed actions it does, by their blocks' ids: open actions of "
-            "registered documents of the project, as a pass's `add_item` names "
-            "them"
+            "registered documents of the project or of its items of Pilot's own, "
+            "as a pass's `add_item` names them"
         ),
         examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/A1"]],
     )

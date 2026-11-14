@@ -3,9 +3,10 @@ an action, undo, Done on a document, Read and Reviewed; Finish's close of the
 open items (F5.1); Archive's and Reopen's close of the archive question (DB
 265); the switch's Yes to the confirmations it answers (F4.2);
 a work item's place and its done at its turn's end (DB Work, decision 44);
-the claimed actions a work item is named for at its `add_item` (DB
-decision 64); an item of Pilot's own done at the save that writes its last
-open block's `done` (DB 163); a person's fold of an open item and their
+the claimed actions a work item is named for at its `add_item`, of a
+registered document or an item of Pilot's own (DB decision 64, widened by
+D4); an item of Pilot's own done at the save that writes its last open
+block's `done` (DB 163); a person's fold of an open item and their
 unfold (DB decision 75); the chat's cancel of an ask Pilot added, on a
 person's word (DB 297); and a stopped work item's close for good, a person's
 or Pilot's (DB decision 78).
@@ -24,9 +25,12 @@ item's ended run open continues its conversation in the same transaction
 (decision 44, review 1): the session start places the continuation, and every
 document of the run is consumed by it, its Undo gone. A person's close of an
 item of Pilot's own places the job after it in the same transaction (F59; DB
-decision 45), whose brief consumes the item, but one the chat records on their
-behalf, whose own turn carries the ruling out; an Undo before that brief
-withdraws the job (`Jobs`).
+decision 45), whose brief consumes the item, and an Undo before that brief
+withdraws the job (`Jobs`). One the chat records on their behalf, whose own
+turn carries the ruling out, places none and is consumed on the spot by the
+chat's Session; an item of Pilot's own that a save closes, writing its last
+open block's `done`, by the Session the save is credited to. Neither offers
+an Undo after it (D5), as after a brief; a notice's Read keeps its Undo.
 """
 
 import uuid
@@ -195,6 +199,7 @@ class RecordService:
         via: AnswerChannel = AnswerChannel.APP,
         note: str | None = None,
         to: str | None = None,
+        session_id: uuid.UUID | None = None,
     ) -> None:
         """`user`'s answer to block `local_id`, through `via`, with `note`:
         an option's label, `Agree`, `Yes` or `No`, or free words; `deferred`
@@ -205,7 +210,8 @@ class RecordService:
         a done item holds from `user` already (`answered_so`) is taken as done
         and changes nothing, ahead of every refusal; the chat's is refused as
         any answer to a done item, since its tool call would show as an
-        answer given."""
+        answer given. The chat's is made in the brain's Session `session_id`,
+        which takes an item of Pilot's own the answer closes (`_mark`)."""
         project, item = self._closing(document)
         if via is AnswerChannel.APP and self.answered_so(
             document, local_id, user, answer, note=note, to=to
@@ -260,7 +266,9 @@ class RecordService:
                 to=to,
             )
         self.document_service.publish(document, text)
-        self._done_by_its_answer(project, item, document, blocks, user, at, via=via)
+        self._done_by_its_answer(
+            project, item, document, blocks, user, at, via=via, session_id=session_id
+        )
 
     def answered_so(
         self,
@@ -326,7 +334,14 @@ class RecordService:
             )
         self.document_service.publish(document, text)
         self._done_by_its_answer(
-            project, item, document, blocks, user, at, via=AnswerChannel.APP
+            project,
+            item,
+            document,
+            blocks,
+            user,
+            at,
+            via=AnswerChannel.APP,
+            session_id=None,
         )
 
     def undo(self, item: Item) -> None:
@@ -464,9 +479,15 @@ class RecordService:
         )
 
     def done(
-        self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP
+        self,
+        item: Item,
+        user: User,
+        *,
+        via: AnswerChannel = AnswerChannel.APP,
+        session_id: uuid.UUID | None = None,
     ) -> None:
-        """Done on a document (F32.5), given through `via`: first every
+        """Done on a document (F32.5), given through `via`, the chat's in the
+        brain's Session `session_id` (`answer`): first every
         unanswered block that has a recommendation answered with it, `user`'s,
         `via: recommended`; then a `done` Document Version of the published
         text and the item's mark. Refused while a block has neither, a claimed
@@ -520,7 +541,9 @@ class RecordService:
             if text != document.published_text:
                 self.document_service.publish(document, text)
         self.document_service.cut_version(document, VersionCause.DONE)
-        self._mark(project, item, document, cause, user, at, via=via)
+        self._mark(
+            project, item, document, cause, user, at, via=via, session_id=session_id
+        )
 
     def read(
         self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP
@@ -528,14 +551,20 @@ class RecordService:
         """Read on a notice, given through `via`: the item's mark, the text
         untouched. Read through the app on a notice `user`'s own Read closed
         is taken as done and changes nothing, ahead of every refusal."""
-        self._mark_by_kind(item, user, NOTICE, "Read", via)
+        self._mark_by_kind(item, user, NOTICE, "Read", via, None)
 
     def reviewed(
-        self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP
+        self,
+        item: Item,
+        user: User,
+        *,
+        via: AnswerChannel = AnswerChannel.APP,
+        session_id: uuid.UUID | None = None,
     ) -> None:
-        """Reviewed on a review, given through `via`: the item's mark, the
-        text untouched; one sent again is taken as a Read is."""
-        self._mark_by_kind(item, user, REVIEW, "Reviewed", via)
+        """Reviewed on a review, given through `via`, the chat's in the
+        brain's Session `session_id` (`answer`): the item's mark, the text
+        untouched; one sent again is taken as a Read is."""
+        self._mark_by_kind(item, user, REVIEW, "Reviewed", via, session_id)
 
     def close_unanswered(self, project: Project, user: User, at: datetime) -> None:
         """Finish's close (F5.1): every open item of the project but the
@@ -810,16 +839,18 @@ class RecordService:
     ) -> list[Block]:
         """The Blocks `block_ids`, each `<item id>/<local id>`, that a work
         item added to `project` may be named for as the claimed actions it
-        does (DB 261): open actions, a claim not yet done among them, of open
-        registered documents of the project, each document's row held until
+        does (DB 261, widened by D4): open actions, a claim not yet done among
+        them, of open registered documents of the project or of its open
+        items of Pilot's own (`pilots_own`), each document's row held until
         the transaction ends, in the caller's, which holds the project's row.
 
         Raises:
             RecordNotFoundException: an item is not of the project, or its
                 document has no such block.
-            InvalidOperationException: a block is named twice; an item is no
-                registered document, is done, or has not been read yet; a
-                block is no action, or is answered.
+            InvalidOperationException: a block is named twice; an item is
+                neither a registered document nor an item of Pilot's own, is
+                done, or has not been read yet; a block is no action, or is
+                answered.
         """
 
         def refusal(block: dsl.Block, path: str) -> str | None:
@@ -832,7 +863,16 @@ class RecordService:
             return None
 
         return self._nameable(
-            project, block_ids, operation, "claims an action", "action", refusal
+            project,
+            block_ids,
+            operation,
+            "action",
+            refusal,
+            pilots_own=True,
+            unnamed=(
+                "is neither a registered document nor an item of Pilot's own:"
+                " Pilot claims an action of a worker's document or of its own item"
+            ),
         )
 
     def researchable(
@@ -861,7 +901,16 @@ class RecordService:
             return None
 
         return self._nameable(
-            project, block_ids, operation, "researches a block", "block", refusal
+            project,
+            block_ids,
+            operation,
+            "block",
+            refusal,
+            pilots_own=False,
+            unnamed=(
+                "is no registered document: Pilot researches a block of a worker's"
+                " document"
+            ),
         )
 
     def _nameable(
@@ -869,15 +918,18 @@ class RecordService:
         project: Project,
         block_ids: Sequence[str],
         operation: str,
-        verb: str,
         noun: str,
         refusal: Callable[[dsl.Block, str], str | None],
+        *,
+        pilots_own: bool,
+        unnamed: str,
     ) -> list[Block]:
-        """The Blocks `block_ids` of open registered documents of `project`
-        for none of which `refusal`, given the block and its document's tree
-        path, gives a reason, each document's row held until the transaction
-        ends. A refusal of an item no registered document says what Pilot
-        does, `verb`, and one of a block named twice names it `noun`."""
+        """The Blocks `block_ids` of open registered documents of `project`,
+        and with `pilots_own` of its open items of Pilot's own, for none of
+        which `refusal`, given the block and its document's tree path, gives
+        a reason, each document's row held until the transaction ends. A
+        refusal of any other item says `unnamed` of it, and one of a block
+        named twice names it `noun`."""
         named: list[tuple[Item, Document, str]] = []
         for block_id in block_ids:
             item_id, _, local_id = block_id.partition("/")
@@ -885,12 +937,11 @@ class RecordService:
             if item is None or item.project_id != project.id:
                 raise RecordNotFoundException("Item", item_id)
             document = self.db.get(Document, item.id)
-            if document is None or document.source_path is None:
-                raise InvalidOperationException(
-                    operation,
-                    f"item {item.id} is no registered document: Pilot {verb} of a"
-                    " worker's document",
-                )
+            if document is None or not (
+                document.source_path is not None
+                or (pilots_own and self.pilots_own(item))
+            ):
+                raise InvalidOperationException(operation, f"item {item.id} {unnamed}")
             named.append((item, document, local_id))
         documents = {document.id: document for _, document, _ in named}
         for document_id in sorted(documents):
@@ -953,15 +1004,23 @@ class RecordService:
         self.view_service.timeline_moved(self.db.get_one(Project, item.project_id))
 
     def done_by_its_save(
-        self, project: Project, item: Item, document: Document, before: str
+        self,
+        project: Project,
+        item: Item,
+        document: Document,
+        before: str,
+        session: AgentSession | None,
     ) -> None:
         """An agent's save of `item`, an item of Pilot's own (`pilots_own`),
         merged and published under the project's row and the document's, its
-        published text before the save `before`: where the save wrote the
-        `done` of its last open block, a `done` Document Version of the
-        published text and the item done at the save by Pilot, its Done Cause
-        `settled` (DB 163), and no job after it. An item done already, or of
-        an archived project (D012), stays as it is."""
+        published text before the save `before`, credited to `session`, none
+        for a save no Session's: where the save wrote the `done` of its last
+        open block, a `done` Document Version of the published text and the
+        item done at the save by Pilot, its Done Cause `settled` (DB 163), and
+        no job after it; consumed on the spot by `session`, so that it offers
+        no Undo (D5), as a Wait Pilot marks. A save no Session's took nothing,
+        and the item keeps its Undo. An item done already, or of an archived
+        project (D012), stays as it is."""
         if item.done_at is not None or project.archived:
             return
         if not _wrote_last_done(before, _published(document)):
@@ -970,7 +1029,10 @@ class RecordService:
             select(User).where(User.kind_code == UserKind.AGENT)
         ).one()
         self.document_service.cut_version(document, VersionCause.DONE)
-        self._mark(project, item, document, SETTLED, pilot, _now())
+        at = _now()
+        self._mark(project, item, document, SETTLED, pilot, at)
+        if session is not None:
+            _consume(item, session.id, at)
 
     def in_the_plan(self, project: Project, task_id: str) -> bool:
         """Whether the project's plan has the task `task_id`, not removed."""
@@ -987,7 +1049,13 @@ class RecordService:
         )
 
     def _mark_by_kind(
-        self, item: Item, user: User, kind: str, mark: str, via: AnswerChannel
+        self,
+        item: Item,
+        user: User,
+        kind: str,
+        mark: str,
+        via: AnswerChannel,
+        session_id: uuid.UUID | None,
     ) -> None:
         if self.references.form(self.db, item.kind_code) != PROSE:
             raise InvalidOperationException(
@@ -1007,7 +1075,16 @@ class RecordService:
                 operation, f"a {item.kind_code} item is not marked {mark}"
             )
         _not_done(item, operation)
-        self._mark(project, item, document, MARKED, user, _now(), via=via)
+        self._mark(
+            project,
+            item,
+            document,
+            MARKED,
+            user,
+            _now(),
+            via=via,
+            session_id=session_id,
+        )
 
     def _undo_refusal(self, item: Item) -> str | None:
         """Why a prose item takes no undo now, or none."""
@@ -1062,10 +1139,20 @@ class RecordService:
         at: datetime,
         *,
         via: AnswerChannel,
+        session_id: uuid.UUID | None,
     ) -> None:
         """A one-ask item, done when its one block is answered (F32.3)."""
         if item is not None and len(blocks) == 1:
-            self._mark(project, item, document, ANSWERED, user, at, via=via)
+            self._mark(
+                project,
+                item,
+                document,
+                ANSWERED,
+                user,
+                at,
+                via=via,
+                session_id=session_id,
+            )
 
     def _mark(
         self,
@@ -1077,7 +1164,15 @@ class RecordService:
         at: datetime,
         *,
         via: AnswerChannel = AnswerChannel.APP,
+        session_id: uuid.UUID | None = None,
     ) -> None:
+        """The item done at `at` by `user`, its Done Cause `cause`, given
+        through `via`: a registered document's close owes its write-back
+        (`owes_write_back`) and may continue its run (`_release`); a person's
+        close of an item of
+        Pilot's own, but a notice's Read, places the job after it, or, the
+        chat's, is consumed by the brain's Session `session_id`, whose own
+        turn carries it out (D5)."""
         item.done_at = at
         item.done_cause_code = cause
         item.done_by_user_id = user.id
@@ -1091,18 +1186,24 @@ class RecordService:
             self._release(project, item)
         elif (
             user.kind_code is UserKind.PERSON
-            and via is not AnswerChannel.CHAT
             and item.kind_code != NOTICE
             and self.pilots_own(item)
         ):
-            self.jobs().item_done(project, item)
+            if via is AnswerChannel.CHAT:
+                # A record through the chat names the brain's Session
+                # (`PilotStoreService`).
+                assert session_id is not None
+                _consume(item, session_id, at)
+            else:
+                self.jobs().item_done(project, item)
 
     def pilots_own(self, item: Item) -> bool:
         """Whether a session of Pilot's own, one handed `pilot-store`, added
         the item: a person's close of it, but a notice's Read, starts the job
         after it (DB Work Trigger `item_done`); Pilot's own close, made by a
         session acting on the item already, starts none, nor does one the chat
-        records on a person's behalf, whose own turn carries it out."""
+        records on a person's behalf, whose own turn carries it out and which
+        that turn's Session consumes (D5)."""
         return (
             self.db.scalar(
                 select(SessionKind.surface)
@@ -1286,6 +1387,13 @@ def done_refusal(item: Item) -> str | None:
     if item.done_cause_code == CANCELLED:
         return CLOSED_FOR_GOOD
     return "it is done"
+
+
+def _consume(item: Item, session_id: uuid.UUID, at: datetime) -> None:
+    """The done `item` consumed at `at` by the Session `session_id`, which
+    took it: it offers no Undo from now (DB 164)."""
+    item.consumed_at = at
+    item.consumed_session_id = session_id
 
 
 def resume_message(written: list[str], unread: list[str]) -> str:

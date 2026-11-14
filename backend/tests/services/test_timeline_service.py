@@ -3859,6 +3859,52 @@ class TestPilotsWork:
         }
         assert _blocks(_entry(camp, trip))["Q2"]["held"] is None
 
+    def test_a_claimed_action_of_an_item_of_pilots_own_is_held_and_handed_back(
+        self, camp: Camp
+    ) -> None:
+        """A claim names an action of an item of Pilot's own too (D4): its
+        hold, its claim and a Cancel's hand-back read as a worker's
+        document's do, the item linked by its title."""
+        own = camp.own("action", "The cut-over", _CUT_OVER)
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(own, "A1", doing)
+        question = camp.registered(doing, _PITCH)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        building = _link(doing, "Building the camp")
+        asked_in = _link(question, "Where do we pitch?")
+
+        entry = _entry(camp, own)
+
+        assert entry["pilots_work"] == _pilots(
+            "waiting_on_answer", building, False, asked_in
+        )
+        assert _blocks(entry)["A1"]["held"] == {
+            "doing": "waiting_on_answer",
+            "work": building,
+            "pulse": False,
+            "asked_in": asked_in,
+        }
+        assert _blocks(entry)["A1"]["claim"] == {"work": building, "undone": False}
+        assert _entry(camp, question)["cancel"] == {
+            "takes_back": [
+                {
+                    "document": _link(own, "The cut-over"),
+                    "block": "A1",
+                    "heading": None,
+                    "kind": "action",
+                    "research": False,
+                }
+            ],
+            "also_closes": [],
+        }
+
+        camp.container.item_service().cancel(ADA, question.id)
+
+        blocks = _blocks(_entry(camp, own))
+        assert blocks["A1"]["held"] is None
+        assert blocks["A1"]["claim"] == {"work": building, "undone": True}
+
     def test_no_cancel_is_offered_while_the_run_goes_on(self, camp: Camp) -> None:
         writer = camp.worker()
         cut_over = camp.registered(writer, _CUT_OVER)

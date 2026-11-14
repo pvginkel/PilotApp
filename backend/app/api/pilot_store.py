@@ -88,8 +88,9 @@ def add_item(
             with faults, a wait's list empty or naming one twice, a card that
             is no ticket id, a due time not ahead, material that cannot be
             copied, a claim that is not an open action of a registered
-            document, a research of a block that is answered or not in an open
-            registered document, or a start the project refuses: the reason
+            document or of an item of Pilot's own, a research of a block that
+            is answered or not in an open registered document, or a start the
+            project refuses: the reason
         502: The controller did not answer, or refused for a reason of its own
     """
     body = AddItemRequestSchema.model_validate(request.get_json())

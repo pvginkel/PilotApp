@@ -336,9 +336,11 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         environment Pilot makes from `repo`, on your placement, its first turn
         your `brief` followed by Pilot's own lines; `state` answers whether it
         is `starting` or `held` at the gate, and `held` why — say so to the
-        person. A work item that does actions you claimed names them in
-        `claims`: each stays open and yours until its `done`, its line naming
-        this work item, the latest that names it. A work item that checks a
+        person. A work item that does actions you claimed, of workers'
+        documents or of items you added, names them in `claims`: each stays
+        open and yours until its `done`, its line naming this work item, the
+        latest that names it, and an item you added is done, with no undo,
+        once its last open block's `done` is written. A work item that checks a
         fact for blocks you left unanswered names them in `researches`: each
         line names this work item, the latest that names it, and the job
         after its turn gives them to you to route. A wait is recorded with its
@@ -350,11 +352,11 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         wait's list empty or naming one twice, a card that is no ticket id, a
         due time not ahead, an attachment or a plan task not of your project,
         material that cannot be copied, a claim that is not an open action of
-        a registered document of your project, a research of a block that is
-        answered or not in an open registered document of your project, or a
-        start the project refuses is refused with the reason, each fault with
-        its line, and nothing is added. Answers `{id, path, state, held,
-        effect}`."""
+        a registered document or of an item you added of your project, a
+        research of a block that is answered or not in an open registered
+        document of your project, or a start the project refuses is refused
+        with the reason, each fault with its line, and nothing is added.
+        Answers `{id, path, state, held, effect}`."""
         return await api.add_item(_authorization(ctx), _tool_use_id(ctx), item)
 
     @mcp.tool()
@@ -449,16 +451,17 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         """Record a person's answer to a block, given in the chat, on their
         behalf: `for` names them by handle, `value` is the answer and `note`
         their words. A deferral they ask for is `deferred` with `to`. It is
-        their answer, through the chat, which they can undo; it replaces the
-        block's answer, yours included, while the item is open, and the answer
-        to an item's one block is its Done. In a draft's definition chat, a
-        block of the draft is `project.md/<local id>`; its answer has no undo,
-        and answering it again replaces it. A block not of your project, a
-        block of `project.md` outside its draft's definition chat, a `for`
-        that names no person, an answer the block does not take, an item that
-        is done, or a registered document whose file has not been read yet is
-        refused with the reason, and nothing is recorded. Answers
-        `{effect}`, the call's effect line."""
+        their answer, through the chat; it replaces the block's answer, yours
+        included, while the item is open, and the answer to an item's one
+        block is its Done, which they can undo, but on an item you added: you
+        carry that Done out in this turn, and it has no undo. In a draft's
+        definition chat, a block of the draft is `project.md/<local id>`; its
+        answer has no undo, and answering it again replaces it. A block not
+        of your project, a block of `project.md` outside its draft's
+        definition chat, a `for` that names no person, an answer the block
+        does not take, an item that is done, or a registered document whose
+        file has not been read yet is refused with the reason, and nothing is
+        recorded. Answers `{effect}`, the call's effect line."""
         return await api.answer(
             _authorization(ctx),
             _tool_use_id(ctx),
@@ -514,7 +517,9 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         claimed action counts once its `done` is written; and on an open wait,
         with your `note`, which closes it for good. A registered document's
         Done writes its answers back and resumes its worker once none of its
-        run's documents is open. An item not of your project, a `for` that
+        run's documents is open. A `done` or `reviewed` for a person on an
+        item you added is yours to carry out in this turn, and has no undo.
+        An item not of your project, a `for` that
         names no person, a mark its kind does not take, an item that is done,
         a document with a block neither answered nor recommended, or, without
         `for`, one with a block unanswered or a claimed action not yet done, a

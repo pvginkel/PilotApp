@@ -130,7 +130,8 @@ class IngestService:
         published text and published; the opening's is never read, and one
         that differs is reverted whole, never held. Either's faults replace
         the path's `parse` Save Errors. A published save of an item of
-        Pilot's own that writes the `done` of its last open block closes it
+        Pilot's own that writes the `done` of its last open block closes it,
+        consumed by the Session the save is credited to
         (`RecordService.done_by_its_save`). Refused for a path the store does
         not sync.
         """
@@ -301,7 +302,9 @@ class IngestService:
             self._raise(environment, path, ErrorKind.REVERTED, faults)
             tree_text = merged.text
             if own is not None:
-                self.record_service.done_by_its_save(project, own, document, before)
+                self.record_service.done_by_its_save(
+                    project, own, document, before, session
+                )
         # No turn end is left to cut the Version of a save that landed after
         # its session's turn ended.
         versioned = (

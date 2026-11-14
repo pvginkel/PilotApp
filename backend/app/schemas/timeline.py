@@ -258,7 +258,8 @@ class WorkLinkSchema(BaseModel):
 
 
 class DocumentLinkSchema(BaseModel):
-    """A registered document a line links: its id and its title."""
+    """A document a line links, a registered document or, where it holds a
+    claimed action, an item of Pilot's own: its id and its title."""
 
     id: uuid.UUID = Field(description="The item's id, its document's address")
     title: str = Field(

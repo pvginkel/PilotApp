@@ -542,7 +542,8 @@ class TestPilotStoreServiceAnswer:
         person: User,
     ) -> None:
         """A close the chat records on a person's behalf is theirs, and the
-        chat's own turn carries it out (P-182)."""
+        chat's own turn carries it out (P-182), which takes the item: no Undo
+        after it (D5)."""
         run = _brain(session, project, environment)
         item = _bear(container, project, run, "decision", "Which tent?", DECISION)
 
@@ -559,6 +560,8 @@ class TestPilotStoreServiceAnswer:
         assert (item.done_cause_code, item.done_by_user_id) == ("answered", person.id)
         assert _effect_record(session, run)["toolUseId"] is None
         assert _jobs_after(session, item) == []
+        assert item.consumed_session_id == run.id
+        assert container.record_service().offers_undo(item) is False
 
     def test_a_deferral_the_person_asks_for_is_recorded_with_its_to(
         self,
@@ -967,6 +970,7 @@ class TestPilotStoreServiceMark:
         )
 
         assert (item.done_cause_code, item.done_by_user_id) == ("marked", person.id)
+        assert item.consumed_session_id == run.id
         assert _block(session, item, "D1").answer == "Dome"
         assert (line.verb, line.label) == ("Marked done", "Camp plan")
         assert _effect_record(session, run)["effect"] == {
@@ -979,10 +983,10 @@ class TestPilotStoreServiceMark:
         assert _jobs_after(session, item) == []
 
     @pytest.mark.parametrize(
-        ("kind", "title", "text", "mark", "verb"),
+        ("kind", "title", "text", "mark", "verb", "undo"),
         [
-            ("notice", "The lake is open", NOTICE, "read", "Marked read"),
-            ("review", "Camp survey", REVIEW, "reviewed", "Marked reviewed"),
+            ("notice", "The lake is open", NOTICE, "read", "Marked read", True),
+            ("review", "Camp survey", REVIEW, "reviewed", "Marked reviewed", False),
         ],
     )
     @pytest.mark.usefixtures("placing")
@@ -998,7 +1002,10 @@ class TestPilotStoreServiceMark:
         text: str,
         mark: Any,
         verb: str,
+        undo: bool,
     ) -> None:
+        """A notice's Read keeps its Undo; a review's Reviewed is carried out
+        by the chat's turn, which takes it (D5)."""
         run = _brain(session, project, environment)
         item = _bear(container, project, run, kind, title, text)
 
@@ -1007,6 +1014,7 @@ class TestPilotStoreServiceMark:
         assert (item.done_cause_code, item.done_by_user_id) == ("marked", person.id)
         assert (line.verb, line.label) == (verb, title)
         assert _jobs_after(session, item) == []
+        assert container.record_service().offers_undo(item) is undo
 
     def test_without_for_done_is_pilots_on_a_document_it_settled_whole(
         self,
@@ -2723,6 +2731,38 @@ class TestPilotStoreServiceAddWork:
             (added.item.id, _block(session, document, "A2").id),
         ]
         assert _block(session, document, "A1").answer == "Pilot does it"
+
+    def test_a_work_item_is_named_for_an_open_action_of_an_item_of_pilots_own(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """D4: a claim names an action of an item a session of Pilot's own
+        added, as one of a worker's document."""
+        run = _brain(session, project, environment, "job")
+        own = _bear(container, project, run, "document", "Cut-over", CUT_OVER)
+
+        added = _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Rotating the CI token",
+                repo=REPO,
+                cwd="/work/Example",
+                brief=BRIEF,
+                claims=[f"{own.id}/A1", f"{own.id}/A2"],
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        assert _claims(session) == [
+            (added.item.id, _block(session, own, "A1").id),
+            (added.item.id, _block(session, own, "A2").id),
+        ]
 
     def test_a_retrys_work_item_names_the_block_again_the_earlier_kept(
         self,

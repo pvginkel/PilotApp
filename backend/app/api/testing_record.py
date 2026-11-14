@@ -321,9 +321,10 @@ def create_work(
             claimed or researched block's item is not of the project, or its
             document has no such block
         409: A claim that is not an open action of a registered document of
-            the project, a research of a block that is answered or not in an
-            open registered document of it, no controller is configured, or
-            the project is finished or archived: the reason
+            the project or of an item of Pilot's own of it, a research of a
+            block that is answered or not in an open registered document of
+            it, no controller is configured, or the project is finished or
+            archived: the reason
     """
     data = InventedWorkCreateSchema.model_validate(request.get_json())
     work = test_data_service.work(

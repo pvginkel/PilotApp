@@ -1533,6 +1533,8 @@ class TestIngestServiceOwnItemDone:
         assert item.done_at is not None
         assert (item.done_cause_code, item.done_by_user_id) == ("settled", agent.id)
         assert _jobs_after(session, item.id) == []
+        # Consumed by the Session the save is credited to: no Undo (D5).
+        assert item.consumed_session_id == brain.id
 
     def test_a_held_save_closes_nothing(
         self,

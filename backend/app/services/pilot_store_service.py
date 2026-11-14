@@ -252,7 +252,8 @@ class PilotStoreService:
         (F66, §5.4), on the brain's placement (F61.1); its Session `held` or
         `starting`, as the gate leaves it (F141.4); named for the claimed
         actions its `claims` give, each an open action of a registered
-        document of the project (F21.6; DB 261), and for the blocks its
+        document of the project or of an item of Pilot's own of it (F21.6; DB
+        261, widened by D4), and for the blocks its
         `researches` give, whose facts it checks, each unanswered in an open
         registered document of the project (F52.3; DB 293). A wait is recorded
         with its title, a card wait's `cards` and `states`, a timed wait's
@@ -407,7 +408,9 @@ class PilotStoreService:
         block `block_id`, `<item id>/<local id>`, or `project.md/<local id>`,
         a block of the draft, in its definition chat (F47.4), recorded on
         their behalf through the chat, with `note` and, for `deferred`, `to`
-        (F42.1, F86.2): the record's own answer, an item's undo included. The
+        (F42.1, F86.2): the record's own answer, an item's undo included, but
+        that an item of Pilot's own it closes is consumed by the brain's
+        Session, whose turn carries it out, and offers no undo (D5). The
         call `tool_use_id`'s effect is "Answered · <local id> · <title>", the
         draft's title its own, else its file's name.
 
@@ -458,6 +461,7 @@ class PilotStoreService:
             via=AnswerChannel.CHAT,
             note=note,
             to=to,
+            session_id=brain.session_id,
         )
         block = self.db.scalars(
             select(Block).where(
@@ -488,7 +492,8 @@ class PilotStoreService:
         """`mark` on the item for the person whose handle is `person`, given
         through the chat (F86.3): Done on a document, with its
         recommendations, Read on a notice, Reviewed on a review, as the record
-        marks them. Without `person`,
+        marks them, Done and Reviewed on an item of Pilot's own consumed by
+        the brain's Session, which offers no undo (D5). Without `person`,
         Pilot's own Done on a document it settled whole (DB decision 42), or
         on a registered document of one block it settled, or on an open wait,
         with its `note` (F27.4, DB 300). The call `tool_use_id`'s effect is
@@ -535,11 +540,15 @@ class PilotStoreService:
             user = self._person(person)
             match mark:
                 case "done":
-                    self.record_service.done(item, user, via=AnswerChannel.CHAT)
+                    self.record_service.done(
+                        item, user, via=AnswerChannel.CHAT, session_id=brain.session_id
+                    )
                 case "read":
                     self.record_service.read(item, user, via=AnswerChannel.CHAT)
                 case "reviewed":
-                    self.record_service.reviewed(item, user, via=AnswerChannel.CHAT)
+                    self.record_service.reviewed(
+                        item, user, via=AnswerChannel.CHAT, session_id=brain.session_id
+                    )
         line = EffectLine(MARKED[mark], self._title(item), item_id=item.id)
         self.effect_service.record(
             brain.session_id,

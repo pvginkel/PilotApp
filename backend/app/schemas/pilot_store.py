@@ -340,7 +340,8 @@ class AddItemRequestSchema(BaseModel):
         default_factory=list,
         description=(
             "The claimed actions a work item does, by their blocks' ids: open"
-            " actions of registered documents of the project (DB decision 64)"
+            " actions of registered documents of the project or of its items of"
+            " Pilot's own (DB decision 64, widened by D4)"
         ),
         examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/A1"]],
     )

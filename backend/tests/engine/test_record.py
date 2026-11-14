@@ -4505,13 +4505,22 @@ class TestRecordServiceItemDone:
         )
         records = container.record_service()
 
+        chat = item.created_by_session_id
+
         match close:
             case "answer":
-                records.answer(document, "D1", person, "Tunnel", via=AnswerChannel.CHAT)
+                records.answer(
+                    document,
+                    "D1",
+                    person,
+                    "Tunnel",
+                    via=AnswerChannel.CHAT,
+                    session_id=chat,
+                )
             case "done":
-                records.done(item, person, via=AnswerChannel.CHAT)
+                records.done(item, person, via=AnswerChannel.CHAT, session_id=chat)
             case "reviewed":
-                records.reviewed(item, person, via=AnswerChannel.CHAT)
+                records.reviewed(item, person, via=AnswerChannel.CHAT, session_id=chat)
 
         assert (item.done_cause_code, item.done_by_user_id) == (cause, person.id)
         assert _jobs_after(session, item) == []
@@ -4639,13 +4648,16 @@ def _saved(
     item: Item,
     document: Document,
     text: str,
+    *,
+    by: models.Session | None,
 ) -> None:
-    """An agent's save of the item as the ingest takes it: `text` published,
-    and the item done by it where it closes it."""
+    """An agent's save of the item as the ingest takes it, credited to `by`,
+    none for a save no Session's: `text` published, and the item done by it
+    where it closes it."""
     before = document.published_text
     assert before is not None
     container.document_service().publish(document, text)
-    container.record_service().done_by_its_save(project, item, document, before)
+    container.record_service().done_by_its_save(project, item, document, before, by)
 
 
 @pytest.mark.usefixtures("placing")
@@ -4660,11 +4672,12 @@ class TestRecordServiceDoneByItsSave:
         container: ServiceContainer,
         opened: Project,
     ) -> None:
+        brain = _brain(session, opened)
         item, document = _bear(
-            session, container, opened, _brain(session, opened), "action", "Key", ACTION
+            session, container, opened, brain, "action", "Key", ACTION
         )
 
-        _saved(container, opened, item, document, _done_by_pilot(ACTION))
+        _saved(container, opened, item, document, _done_by_pilot(ACTION), by=brain)
 
         assert item.done_at is not None
         assert (item.done_cause_code, item.done_by_user_id) == (
@@ -4680,11 +4693,12 @@ class TestRecordServiceDoneByItsSave:
         opened: Project,
         person: User,
     ) -> None:
+        brain = _brain(session, opened)
         item, document = _bear(
             session,
             container,
             opened,
-            _brain(session, opened),
+            brain,
             "document",
             "Cut-over",
             CUT_OVER,
@@ -4694,7 +4708,7 @@ class TestRecordServiceDoneByItsSave:
         assert answered is not None
         assert item.done_at is None
 
-        _saved(container, opened, item, document, _done_by_pilot(answered))
+        _saved(container, opened, item, document, _done_by_pilot(answered), by=brain)
 
         assert item.done_cause_code == "settled"
         assert _jobs_after(session, item) == []
@@ -4706,10 +4720,11 @@ class TestRecordServiceDoneByItsSave:
         opened: Project,
         person: User,
     ) -> None:
+        brain = _brain(session, opened)
         item, document = _bear(
-            session, container, opened, _brain(session, opened), "action", "Key", ACTION
+            session, container, opened, brain, "action", "Key", ACTION
         )
-        _saved(container, opened, item, document, _done_by_pilot(ACTION))
+        _saved(container, opened, item, document, _done_by_pilot(ACTION), by=brain)
 
         with pytest.raises(InvalidOperationException, match="the item is done"):
             container.record_service().done_action(document, "A1", person)
@@ -4747,11 +4762,10 @@ class TestRecordServiceDoneByItsSave:
         text: str,
         saved: str,
     ) -> None:
-        item, document = _bear(
-            session, container, opened, _brain(session, opened), kind, "Camp", text
-        )
+        brain = _brain(session, opened)
+        item, document = _bear(session, container, opened, brain, kind, "Camp", text)
 
-        _saved(container, opened, item, document, saved)
+        _saved(container, opened, item, document, saved, by=brain)
 
         assert item.done_at is None
 
@@ -4761,15 +4775,24 @@ class TestRecordServiceDoneByItsSave:
         container: ServiceContainer,
         opened: Project,
     ) -> None:
-        """Its block was done before that save."""
+        """Its block was done before that save. The save that closed it was no
+        Session's, which leaves its Undo."""
+        brain = _brain(session, opened)
         item, document = _bear(
-            session, container, opened, _brain(session, opened), "action", "Key", ACTION
+            session, container, opened, brain, "action", "Key", ACTION
         )
         done = _done_by_pilot(ACTION)
-        _saved(container, opened, item, document, done)
+        _saved(container, opened, item, document, done, by=None)
         container.record_service().undo(item)
 
-        _saved(container, opened, item, document, done + "\nThe deploy read it.\n")
+        _saved(
+            container,
+            opened,
+            item,
+            document,
+            done + "\nThe deploy read it.\n",
+            by=brain,
+        )
 
         assert item.done_at is None
 
@@ -4783,11 +4806,12 @@ class TestRecordServiceDoneByItsSave:
             "  - Tunnel\n",
             "  - Tunnel\nanswer: Dome\nby: agent\nat: 2026-11-05T10:00:00Z\n",
         )
+        brain = _brain(session, opened)
         item, document = _bear(
             session,
             container,
             opened,
-            _brain(session, opened),
+            brain,
             "document",
             "Cut-over",
             settled,
@@ -4798,7 +4822,7 @@ class TestRecordServiceDoneByItsSave:
             settled.replace("title: Cut-over\n", "title: Cut-over, both halves\n")
             + "\n```action id=A2\n```\n"
         )
-        _saved(container, opened, item, document, widened)
+        _saved(container, opened, item, document, widened, by=brain)
         assert item.done_at is None
 
         _saved(
@@ -4810,6 +4834,7 @@ class TestRecordServiceDoneByItsSave:
                 "```action id=A2\n",
                 "```action id=A2\ndone: 2026-11-05T11:00:00Z\nby: agent\n",
             ),
+            by=brain,
         )
 
         assert item.done_cause_code == "settled"
@@ -4834,14 +4859,253 @@ class TestRecordServiceDoneByItsSave:
         opened.archived = True
         session.flush()
 
-        _saved(container, opened, finished, finished_document, _done_by_pilot(ACTION))
-        _saved(container, opened, archived, archived_document, _done_by_pilot(ACTION))
+        _saved(
+            container,
+            opened,
+            finished,
+            finished_document,
+            _done_by_pilot(ACTION),
+            by=brain,
+        )
+        _saved(
+            container,
+            opened,
+            archived,
+            archived_document,
+            _done_by_pilot(ACTION),
+            by=brain,
+        )
 
         assert (finished.done_cause_code, finished.done_by_user_id) == (
             "finished",
             person.id,
         )
         assert archived.done_at is None
+
+
+@pytest.mark.usefixtures("placing")
+class TestRecordServiceLastDoneTakesUndo:
+    """When the done that closes an item of Pilot's own is written, by Pilot
+    doing the action itself or by the job after a worker did a claimed one,
+    the item offers no Undo from then on; Pilot's own close of an item with
+    no done written keeps it (D5; V13)."""
+
+    def test_the_save_that_closes_it_is_consumed_by_the_session_it_is_credited_to(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        brain = _brain(session, opened)
+        item, document = _bear(
+            session, container, opened, brain, "action", "Key", ACTION
+        )
+        records = container.record_service()
+
+        _saved(container, opened, item, document, _done_by_pilot(ACTION), by=brain)
+
+        assert item.done_cause_code == "settled"
+        assert (item.consumed_at, item.consumed_session_id) == (item.done_at, brain.id)
+        assert records.offers_undo(item) is False
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(item)
+        assert refused.value.cause == "a session has taken the item's answers"
+        assert item.done_at is not None
+
+    def test_the_jobs_save_of_a_claimed_actions_done_closes_it_with_no_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        """A worker did the action Pilot claimed of its own item (D4): the job
+        after its turn writes the `done`."""
+        item, document = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "action",
+            "Rotate the CI token",
+            CLAIMED_ACTION,
+        )
+        records = container.record_service()
+        records.give(
+            opened,
+            _work_item(session, container, opened),
+            records.claimable(opened, [f"{item.id}/A1"], "add a work item"),
+        )
+        job = _brain(session, opened)
+        job.kind_code = "job"
+        session.flush()
+
+        _saved(
+            container,
+            opened,
+            item,
+            document,
+            CLAIMED_ACTION.replace(
+                "at: 2026-10-12T09:30:00Z\n",
+                "at: 2026-10-12T09:30:00Z\ndone: 2026-10-12T11:00:00Z\n",
+            ),
+            by=job,
+        )
+
+        assert (item.done_cause_code, item.done_by_user_id) == (
+            "settled",
+            _agent(session).id,
+        )
+        assert item.consumed_session_id == job.id
+        assert records.offers_undo(item) is False
+        assert _jobs_after(session, item) == []
+
+    def test_a_save_no_sessions_leaves_its_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        item, document = _bear(
+            session, container, opened, _brain(session, opened), "action", "Key", ACTION
+        )
+
+        _saved(container, opened, item, document, _done_by_pilot(ACTION), by=None)
+
+        assert item.done_cause_code == "settled"
+        assert item.consumed_at is None
+        assert container.record_service().offers_undo(item) is True
+
+    def test_pilots_own_close_with_no_done_written_keeps_its_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        item, _ = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "document",
+            "Camp plan",
+            SETTLED,
+        )
+        records = container.record_service()
+
+        records.done(item, _agent(session))
+
+        assert item.done_cause_code == "settled"
+        assert item.consumed_at is None
+        assert records.offers_undo(item) is True
+
+
+@pytest.mark.usefixtures("placing")
+class TestRecordServiceChatsRuling:
+    """The chat's record of a person's answer, Done or Reviewed on an item of
+    Pilot's own consumes it for the chat's Session, as a Wait Pilot marks is
+    consumed on the spot: no Undo after it, as after a job's brief; a notice's
+    Read keeps its Undo (R11, D5; V12)."""
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "close"),
+        [
+            pytest.param("decision", DECISION, "answer", id="answered"),
+            pytest.param("document", RECOMMENDED, "done", id="done"),
+            pytest.param("review", REVIEW, "reviewed", id="reviewed"),
+        ],
+    )
+    def test_its_close_is_consumed_by_the_chat_and_offers_no_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+        kind: str,
+        text: str,
+        close: str,
+    ) -> None:
+        brain = _brain(session, opened)
+        item, document = _bear(session, container, opened, brain, kind, "Camp", text)
+        records = container.record_service()
+
+        match close:
+            case "answer":
+                records.answer(
+                    document,
+                    "D1",
+                    person,
+                    "Tunnel",
+                    via=AnswerChannel.CHAT,
+                    session_id=brain.id,
+                )
+            case "done":
+                records.done(item, person, via=AnswerChannel.CHAT, session_id=brain.id)
+            case "reviewed":
+                records.reviewed(
+                    item, person, via=AnswerChannel.CHAT, session_id=brain.id
+                )
+
+        assert (item.consumed_at, item.consumed_session_id) == (item.done_at, brain.id)
+        assert records.offers_undo(item) is False
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(item)
+        assert refused.value.cause == "a session has taken the item's answers"
+        assert item.done_by_user_id == person.id
+        assert _jobs_after(session, item) == []
+
+    def test_a_notices_read_through_the_chat_keeps_its_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        notice, _ = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "notice",
+            "Palette",
+            NOTICE,
+        )
+        records = container.record_service()
+
+        records.read(notice, person, via=AnswerChannel.CHAT)
+
+        assert notice.consumed_at is None
+        assert records.offers_undo(notice) is True
+        records.undo(notice)
+        assert notice.done_at is None
+
+    def test_a_workers_document_the_chat_closes_is_left_to_its_run(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        """A registered document is consumed by the continuation of its run,
+        not by the chat (`_release`)."""
+        brain = _brain(session, project)
+        item, document = _registered(
+            session, container, project, project_session, DECISION
+        )
+        records = container.record_service()
+
+        records.answer(
+            document,
+            "D1",
+            person,
+            "Tunnel",
+            via=AnswerChannel.CHAT,
+            session_id=brain.id,
+        )
+
+        assert item.done_cause_code == "answered"
+        assert item.consumed_at is None
+        assert records.offers_undo(item) is True
 
 
 class TestRecordServicePilotsOwn:
@@ -5926,7 +6190,14 @@ class TestRecordServiceCallOff:
         )
         standing, _ = _bear(session, container, opened, brain, "action", "Key", ACTION)
         records = container.record_service()
-        records.answer(document, "D1", person, "Tunnel", via=AnswerChannel.CHAT)
+        records.answer(
+            document,
+            "D1",
+            person,
+            "Tunnel",
+            via=AnswerChannel.CHAT,
+            session_id=brain.id,
+        )
 
         with pytest.raises(InvalidOperationException) as done:
             records.call_off(answered, person)
@@ -5981,8 +6252,9 @@ def _work_item(
 
 class TestRecordServiceClaims:
     """The claimed actions a work item is named for at its `add_item`: open
-    actions of registered documents of its project (DB 261), one Claim
-    Assignment each, never changed (DB 260; decision 64)."""
+    actions of registered documents of its project or of its items of
+    Pilot's own (DB 261, widened by D4), one Claim Assignment each, never
+    changed (DB 260; decision 64)."""
 
     def test_open_actions_a_claim_among_them_are_given_to_the_work_item(
         self,
@@ -6083,7 +6355,7 @@ class TestRecordServiceClaims:
             + cause.format(path=tree_path(project, document.path))
         )
 
-    def test_an_item_no_registered_document_done_or_unread_is_refused(
+    def test_an_item_neither_registered_nor_pilots_own_done_or_unread_is_refused(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -6091,7 +6363,8 @@ class TestRecordServiceClaims:
         project_session: models.Session,
         person: User,
     ) -> None:
-        pilots, _ = _bear(
+        """A worker's item it did not register is neither."""
+        unregistered, _ = _bear(
             session,
             container,
             project,
@@ -6112,17 +6385,81 @@ class TestRecordServiceClaims:
         records = container.record_service()
 
         refusals = []
-        for item in (pilots, done, unread):
+        for item in (unregistered, done, unread):
             with pytest.raises(InvalidOperationException) as refused:
                 records.claimable(project, [f"{item.id}/A1"], "add a work item")
             refusals.append(refused.value.cause)
 
         assert refusals == [
-            f"item {pilots.id} is no registered document: Pilot claims an action"
-            " of a worker's document",
+            f"item {unregistered.id} is neither a registered document nor an item"
+            " of Pilot's own: Pilot claims an action of a worker's document or of"
+            " its own item",
             f"{tree_path(project, done_document.path)} is done",
             "its file has not been read yet: it is read at the end of the turn"
             " that registered it",
+        ]
+
+    def test_open_actions_of_an_item_of_pilots_own_are_given_to_the_work_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        brain = _brain(session, opened)
+        claimed, claimed_document = _bear(
+            session, container, opened, brain, "action", "Rotate", CLAIMED_ACTION
+        )
+        unclaimed, unclaimed_document = _bear(
+            session, container, opened, brain, "action", "Key", ACTION
+        )
+        records = container.record_service()
+        blocks = records.claimable(
+            opened, [f"{claimed.id}/A1", f"{unclaimed.id}/A1"], "add a work item"
+        )
+        work = _work_item(session, container, opened)
+
+        records.give(opened, work, blocks)
+
+        assert [block.id for block in blocks] == [
+            _block(session, claimed_document, "A1").id,
+            _block(session, unclaimed_document, "A1").id,
+        ]
+        assert sorted(
+            session.scalars(
+                select(models.ClaimAssignment.block_id).where(
+                    models.ClaimAssignment.work_id == work.id
+                )
+            )
+        ) == sorted(block.id for block in blocks)
+
+    @pytest.mark.usefixtures("placing")
+    def test_an_item_of_pilots_own_that_is_done_or_no_open_action_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        brain = _brain(session, opened)
+        done, done_document = _bear(
+            session, container, opened, brain, "action", "Key", ACTION
+        )
+        container.record_service().done_action(done_document, "A1", person)
+        decision, decision_document = _bear(
+            session, container, opened, brain, "decision", "Tent", DECISION
+        )
+        records = container.record_service()
+
+        refusals = []
+        for item, local_id in ((done, "A1"), (decision, "D1")):
+            with pytest.raises(InvalidOperationException) as refused:
+                records.claimable(opened, [f"{item.id}/{local_id}"], "add a work item")
+            refusals.append(refused.value.cause)
+
+        assert refusals == [
+            f"{tree_path(opened, done_document.path)} is done",
+            f"block D1 of {tree_path(opened, decision_document.path)} is a"
+            " decision, not an action",
         ]
 
     def test_an_item_of_another_project_or_a_block_it_lacks_is_not_found(
@@ -6295,6 +6632,33 @@ class TestRecordServiceResearches:
             "its file has not been read yet: it is read at the end of the turn"
             " that registered it",
         ]
+
+    def test_an_item_of_pilots_own_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        """Researches stay on registered documents (D4)."""
+        item, _ = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "decision",
+            "Tent",
+            DECISION,
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().researchable(
+                opened, [f"{item.id}/D1"], "add a work item"
+            )
+
+        assert refused.value.cause == (
+            f"item {item.id} is no registered document: Pilot researches a block"
+            " of a worker's document"
+        )
 
     def test_an_item_of_another_project_or_a_block_it_lacks_is_not_found(
         self,

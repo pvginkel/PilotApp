@@ -1172,13 +1172,15 @@ class TimelineService:
 
         def link(item_id: uuid.UUID) -> DocumentLinkSchema:
             title, source_path = titles[item_id]
-            # `asked_in` names a registered document alone (`working_on`), a
-            # claim or a research is of one (DB 261, 293), and a Cancel closes
-            # registered documents alone (DB 298).
-            assert source_path is not None
-            return DocumentLinkSchema(
-                id=item_id, title=title or PurePosixPath(source_path).name
-            )
+            if title is None:
+                # An untitled document is a registered one, named by its file
+                # (F35): `asked_in` names a registered document alone
+                # (`working_on`), a Cancel closes registered documents alone
+                # (DB 298), and a claim's other document, an item of Pilot's
+                # own, is born titled and saved titled (`dsl.validate`).
+                assert source_path is not None
+                title = PurePosixPath(source_path).name
+            return DocumentLinkSchema(id=item_id, title=title)
 
         def document(item_id: uuid.UUID | None) -> DocumentLinkSchema | None:
             return None if item_id is None else link(item_id)

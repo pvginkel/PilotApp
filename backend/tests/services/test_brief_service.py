@@ -724,6 +724,15 @@ at: 2026-10-26T09:00:00Z
 """
 
 
+OWN_CLAIMED = """```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-26T09:00:00Z
+```
+"""
+"""An item of Pilot's own whose one action Pilot claimed for a worker (D4)."""
+
+
 HOSTS = """# Plan review for 060
 
 ```decision id=D1
@@ -961,6 +970,49 @@ class TestWorkerTurnEnded:
             ' myself"\n'
             f"- {path} ({cut_over.id}) A4 open, its claim gone"
         )
+
+    def test_a_claimed_action_of_an_item_of_pilots_own_is_named_by_its_path(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        """A claim names an action of an item of Pilot's own too (D4), given
+        as a worker's document's is, for its `done`."""
+        chat = models.Session(
+            project_id=opened.id,
+            kind_code="chat",
+            cwd="/work/PilotProjects",
+            token_hash="9" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(chat)
+        session.flush()
+        own = container.document_service().bear_item(
+            opened, "action", "Salt the stock", chat, OWN_CLAIMED
+        )
+        run = _worker_run(session, container, opened, None)
+        session.add(
+            ClaimAssignment(
+                work_id=run.id,
+                block_id=session.scalars(
+                    select(Block.id).where(
+                        Block.document_id == own.id, Block.local_id == "A1"
+                    )
+                ).one(),
+            )
+        )
+        session.flush()
+        _turn_ended(session, container, run, "")
+
+        path = session.get_one(Document, own.id).path
+        assert briefs.job(opened, _after(run), AT, AT).split("\n\n")[3].split("\n")[
+            -2:
+        ] == [
+            "The claimed actions given to this work item, as they stand:",
+            f"- {path} ({own.id}) A1 open, claimed",
+        ]
 
     def test_the_stage_sessions_debrief_follows_what_is_attached_whole(
         self,
