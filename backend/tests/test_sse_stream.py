@@ -9,8 +9,14 @@ registered, and a refused stream never receives an event. Every answer is a
 `rejected` event and ends. The token is the access-token cookie, as an
 `EventSource` sends it, and Flask's test client reads the stream a frame at a
 time (`buffered=False`).
+
+The frames the browser times its stream by are Pilot's too (F149): `ready`
+names the heartbeat's cadence, and an idle stream sends a `heartbeat` event,
+which a browser sees, where the template's comment reached no page.
 """
 
+import json
+import time
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -19,9 +25,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
+from app.config import Environment, Settings
 from app.services.sse_connection_manager import SSEConnectionManager
 
-READY = "event: ready\ndata:\n\n"
+HEARTBEAT = "event: heartbeat\ndata:\n\n"
 REJECTED_403 = 'event: rejected\ndata: {"status":403,"message":"FORBIDDEN"}\n\n'
 
 
@@ -33,6 +40,8 @@ class _Streams:
         self.client = app.test_client()
         self.on_connect = on_connect
         self.manager: SSEConnectionManager = app.container.sse_connection_manager()
+        self.heartbeat: int = app.container.config().sse_heartbeat_interval
+        self.ready = f'event: ready\ndata: {{"heartbeat":{self.heartbeat}}}\n\n'
 
     @contextmanager
     def open(self, request_id: str, token: str) -> Iterator[Iterator[str]]:
@@ -57,7 +66,7 @@ class _Streams:
     def subject_of(self, request_id: str, token: str) -> str | None:
         """Connect as the token: the subject the connection is bound to."""
         with self.open(request_id, token) as frames:
-            assert next(frames) == READY
+            assert next(frames) == self.ready
             info = self.manager.get_connection_info(request_id)
             assert info is not None
             return info.subject
@@ -127,3 +136,36 @@ class TestWithoutOidc:
         token = local.session_token(roles=["editor"], subject="session-editor")
 
         assert local.subject_of("req-ts-ok", token) == "session-editor"
+
+
+class TestTheFramesTheBrowserTimes:
+    def test_ready_names_the_heartbeat_s_cadence(self, local: _Streams) -> None:
+        with local.open("req-ready", local.session_token(roles=["editor"])) as frames:
+            event, data, _, _ = next(frames).split("\n")
+
+        assert event == "event: ready"
+        assert json.loads(data.removeprefix("data: ")) == {"heartbeat": local.heartbeat}
+
+    def test_an_idle_stream_sends_a_heartbeat_event_each_cadence(
+        self, local: _Streams
+    ) -> None:
+        with local.open("req-idle", local.session_token(roles=["editor"])) as frames:
+            assert next(frames) == local.ready
+            started = time.perf_counter()
+
+            assert next(frames) == HEARTBEAT
+            assert time.perf_counter() - started >= local.heartbeat
+            assert next(frames) == HEARTBEAT
+
+    def test_a_production_backend_beats_every_five_seconds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SSE_HEARTBEAT_INTERVAL", raising=False)
+
+        settings = Settings.load(Environment(FLASK_ENV="production", _env_file=None))
+
+        assert settings.sse_heartbeat_interval == 5
+
+    def test_a_cadence_that_is_not_positive_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            Environment(SSE_HEARTBEAT_INTERVAL=0, _env_file=None)
