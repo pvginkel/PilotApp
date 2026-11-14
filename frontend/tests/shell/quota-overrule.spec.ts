@@ -139,13 +139,11 @@ test.describe('The week’s overrule', () => {
   });
 
   test('is refused, with the reason, where the browser missed the reading that changed the offer', async ({
-    page,
-    backendUrl,
-    auth,
     people,
     controller,
     conditions,
     shell,
+    outage,
     deploymentSse,
     toastHelper,
   }) => {
@@ -155,21 +153,19 @@ test.describe('The week’s overrule', () => {
     await deploymentSse.ensureConnected();
     await expect(shell.goldBadge('week_halt')).toHaveText(WEEK_BADGE);
 
-    // The stream goes down and stays down: its next connect is refused, and the session check
-    // that would open it again fails.
-    const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
-    expect(refusal.status()).toBe(204);
-    await auth.forceError(500);
-    await page.evaluate(() => window.__sseForceReconnect!());
-    await toastHelper.expectErrorToast(/refresh the page/i);
+    // The stream goes down and stays down, each attempt to open it again failing. The page lies
+    // under its tint (F149), which takes every press: the spec's presses go to the buttons under
+    // it, as presses on their way when the stream went.
+    await outage.drop();
+    await expect(shell.connection).toBeVisible();
 
     // The week reaches the second limit, where run-out is offered: the browser does not hear it.
     await controller.usage({ seven_day: 0.98, five_hour: 0.1 });
     await expect.poll(async () => (await conditions.read()).find((condition) => condition.code === 'week_halt')?.offer).toBe('run_out');
-    await shell.goldBadge('week_halt').click();
+    await shell.goldBadge('week_halt').dispatchEvent('click');
     await expect(shell.goldOverrule(shell.goldPopover)).toHaveText('Go on to 97%');
 
-    await shell.goldOverrule(shell.goldPopover).click();
+    await shell.goldOverrule(shell.goldPopover).dispatchEvent('click');
     // The click closes the popover, whatever the answer: before the toast, whose dismissal is a
     // press outside it.
     await expect(shell.goldPopover).toHaveCount(0);
@@ -181,14 +177,12 @@ test.describe('The week’s overrule', () => {
 
   test('says the target the server set, where the browser missed the reading that moved it', async ({
     page,
-    backendUrl,
-    auth,
     people,
     controller,
     conditions,
     shell,
+    outage,
     deploymentSse,
-    toastHelper,
   }) => {
     await people.signIn();
     await controller.usage({ seven_day: 0.92, five_hour: 0.1 });
@@ -196,21 +190,19 @@ test.describe('The week’s overrule', () => {
     await deploymentSse.ensureConnected();
     await expect(shell.goldBadge('week_halt')).toHaveText(WEEK_BADGE);
 
-    // The stream goes down and stays down, as in the refusal's spec.
-    const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
-    expect(refusal.status()).toBe(204);
-    await auth.forceError(500);
-    await page.evaluate(() => window.__sseForceReconnect!());
-    await toastHelper.expectErrorToast(/refresh the page/i);
+    // The stream goes down and stays down, the presses going under the tint, as in the refusal's
+    // spec.
+    await outage.drop();
+    await expect(shell.connection).toBeVisible();
 
     // The week moves on under the second limit, the allowance's target with it: the browser does
     // not hear it, and its button still says the old one.
     await controller.usage({ seven_day: 0.93, five_hour: 0.1 });
     await expect.poll(async () => (await conditions.read()).find((condition) => condition.code === 'week_halt')?.target).toBe(0.98);
-    await shell.goldBadge('week_halt').click();
+    await shell.goldBadge('week_halt').dispatchEvent('click');
     await expect(shell.goldOverrule(shell.goldPopover)).toHaveText('Go on to 97%');
 
-    await shell.goldOverrule(shell.goldPopover).click();
+    await shell.goldOverrule(shell.goldPopover).dispatchEvent('click');
     await expect(page.getByTestId('app-shell.toast.item').getByText(goOnTo(98), { exact: true })).toBeVisible();
   });
 });

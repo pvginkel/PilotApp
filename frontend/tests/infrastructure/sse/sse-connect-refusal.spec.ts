@@ -9,7 +9,7 @@
  *
  * These are Pilot's role cases: the app reads and writes as `editor` alone.
  * The refusal itself and the app's recovery from `rejected` (the /api/auth/self
- * probe, the login redirect, the toast) are the template's, tested in
+ * probe, the login redirect, the retry) are tested in
  * `sse-auth-recovery.spec.ts`.
  */
 import type { Page } from '@playwright/test';

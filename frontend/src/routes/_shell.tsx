@@ -9,10 +9,12 @@
  * active in it (`use-app-page.ts`).
  * Every text under the side column and the centre links through the link settings read here.
  * Once it shows, a route keeps the screen showing while it reads its own (`screen-reads.ts`).
+ * While the connection to the server is down or slow, the page lies under its tint (F149).
  */
 
 import { useEffect, useState } from 'react';
 import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router';
+import { ConnectionTint } from '@/components/shell/connection-tint';
 import { DeskFrame } from '@/components/shell/desk-frame';
 import { KeysList } from '@/components/shell/keys-list';
 import { PhoneFrame } from '@/components/shell/phone-frame';
@@ -68,6 +70,7 @@ function Shell() {
         </DeskFrame>
       )}
       {keysList && <KeysList onClose={() => setKeysList(false)} />}
+      <ConnectionTint />
     </>
   );
 }

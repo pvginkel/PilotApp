@@ -399,13 +399,12 @@ test.describe('The list on a narrow window', () => {
 test.describe('Refetching', () => {
   test('the list reads the record again when the window comes back into focus, the stream down', async ({
     page,
-    backendUrl,
-    auth,
     people,
     projects,
     projectList,
+    shell,
+    outage,
     deploymentSse,
-    toastHelper,
   }) => {
     const me = await people.signIn();
     const mine = await projects.make({ name: makeUnique('Mine'), members: [me.handle!] });
@@ -413,13 +412,10 @@ test.describe('Refetching', () => {
     await deploymentSse.ensureConnected();
 
     // A new project raises `project_changed`, which an open stream would bring in. The stream goes
-    // down and stays down: its next connect is refused, and the session check that would open it
-    // again fails.
-    const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
-    expect(refusal.status()).toBe(204);
-    await auth.forceError(500);
-    await page.evaluate(() => window.__sseForceReconnect!());
-    await toastHelper.expectErrorToast(/refresh the page/i);
+    // down and stays down, each attempt to open it again failing: the page lies under its tint
+    // (F149), and the list under it.
+    await outage.drop();
+    await expect(shell.connection).toBeVisible();
     expect((await deploymentSse.getStatus()).isConnected).toBe(false);
 
     const later = makeUnique('Later');

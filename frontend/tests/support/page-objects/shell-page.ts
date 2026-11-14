@@ -46,6 +46,9 @@ export class ShellPage {
   readonly profileVersion: Locator;
   readonly keys: Locator;
   readonly keysBackdrop: Locator;
+  /** The tint of a dropped connection, over the whole page (F149), and its badge. */
+  readonly connection: Locator;
+  readonly connectionBadge: Locator;
 
   constructor(private readonly page: Page) {
     this.offer = page.getByTestId('shell.notifications-offer');
@@ -76,6 +79,8 @@ export class ShellPage {
     this.profileVersion = page.getByTestId('shell.profile.version');
     this.keys = page.getByTestId('shell.keys');
     this.keysBackdrop = page.getByTestId('shell.keys.backdrop');
+    this.connection = page.getByTestId('shell.connection');
+    this.connectionBadge = page.getByTestId('shell.connection.badge');
   }
 
   /** The top bar's badge for a condition off a phone, by its code. */

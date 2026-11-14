@@ -289,4 +289,38 @@
   @media (prefers-reduced-motion: reduce) {
     .app[data-drawer], .app[data-drawer] :is(.tabs, .drawer-scrim) { transition: none; }
   }
+
+  /* ---- A dropped connection (connection-tint.tsx; the mockup's .link-down and .link-badge): the
+     whole page under the drawer's scrim, fading in as its darkening does, over a dialog and under
+     a toast; a badge in its middle, the gold badge's shape in the page's colours ------------- */
+
+  .link-down {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    place-items: center;
+    background: hsl(var(--scrim));
+    animation: link-in 160ms ease-out;
+  }
+  @keyframes link-in { from { opacity: 0; } }
+  .link-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 12px 0 10px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    box-shadow: var(--shadow-lg);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .link-badge .icon { width: 16px; height: 16px; color: hsl(var(--primary)); }
+  @media (prefers-reduced-motion: reduce) {
+    .link-down { animation: none; }
+  }
 }

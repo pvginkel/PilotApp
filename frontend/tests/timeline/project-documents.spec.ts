@@ -437,14 +437,12 @@ test.describe('Live', () => {
 test.describe('A stream that comes back up', () => {
   for (const role of ['handbook', 'draft'] as const) {
     test(`reads again the ${role === 'handbook' ? 'handbook' : 'project document'} open in the overlay, saved while the stream was down`, async ({
-      page,
-      backendUrl,
-      auth,
       people,
       projects,
       overlay,
+      shell,
+      outage,
       deploymentSse,
-      toastHelper,
     }) => {
       const me = await people.signIn();
       const name = makeUnique('Down');
@@ -453,17 +451,15 @@ test.describe('A stream that comes back up', () => {
       await deploymentSse.ensureConnected();
       await expect(overlay.empty).toBeVisible();
 
-      // The stream goes down and stays down: its next connect is refused, and the session check
-      // that would open it again fails.
-      const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
-      expect(refusal.status()).toBe(204);
-      await auth.forceError(500);
-      await page.evaluate(() => window.__sseForceReconnect!());
-      await toastHelper.expectErrorToast(/refresh the page/i);
+      // The stream goes down and stays down, each attempt to open it again failing: the page says so
+      // under its tint (F149).
+      await outage.drop();
+      await expect(shell.connection).toBeVisible();
       expect((await deploymentSse.getStatus()).isConnected).toBe(false);
 
       // The save's event reaches no one: the stream is down.
       await projects.saveProjectDocument(id, role, role === 'handbook' ? HANDBOOK : `# ${name}\n\nHow the trip is planned.\n`);
+      await outage.end();
       await deploymentSse.connect();
       await expect(overlay.document).toContainText('How the trip is planned.');
       await expect(overlay.empty).toHaveCount(0);

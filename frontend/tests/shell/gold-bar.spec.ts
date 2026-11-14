@@ -206,13 +206,11 @@ test.describe('The gold bar', () => {
 
   test('is read again when the stream comes back up, showing an outage that began while it was down', async ({
     page,
-    backendUrl,
-    auth,
     people,
     shell,
+    outage,
     controller,
     deploymentSse,
-    toastHelper,
   }) => {
     // The backend reads the controller answering at its fleet stream's reconnect, whose backoff
     // grows while the outage holds.
@@ -223,19 +221,17 @@ test.describe('The gold bar', () => {
     await waitForUiState(page, 'shell.conditions', 'ready');
     await expect(shell.goldBadge('outage')).toHaveCount(0);
 
-    // The stream goes down and stays down: its next connect is refused, and the session check
-    // that would open it again fails.
-    const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
-    expect(refusal.status()).toBe(204);
-    await auth.forceError(500);
-    await page.evaluate(() => window.__sseForceReconnect!());
-    await toastHelper.expectErrorToast(/refresh the page/i);
+    // The stream goes down and stays down, each attempt to open it again failing: the page says so
+    // under its tint (F149).
+    await outage.drop();
+    await expect(shell.connection).toBeVisible();
     expect((await deploymentSse.getStatus()).isConnected).toBe(false);
 
     // The outage turns on while it is down: the browser does not hear it.
     await controller.outage(true);
     await expect(shell.goldBadge('outage')).toHaveCount(0);
 
+    await outage.end();
     await deploymentSse.connect();
     await expect(shell.goldBadge('outage')).toHaveText(BADGE);
 

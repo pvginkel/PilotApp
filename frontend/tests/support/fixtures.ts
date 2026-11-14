@@ -4,7 +4,7 @@
  *
  * `people` signs the spec in as a fresh person, `projects` puts projects on the record, `links` sets
  * what links in text, `controller` drives the worker's fake controller, `haltSettings` sets what the
- * backend's usage halts do to the work items, `shell` is the frame every
+ * backend's usage halts do to the work items, `outage` takes the page's stream down, `shell` is the frame every
  * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
  * list, `projectHead` a project's head, `timeline` its timeline, `overlay` a document opened, in its
  * tab or its view, or the session log over the timeline,
@@ -28,6 +28,7 @@ import { expect } from '@playwright/test';
 
 import { BrowserPush } from './browser-push';
 import { Chats } from './chats';
+import { Outage } from './connection';
 import { Conditions, Controller } from './controller';
 import { Device } from './device';
 import { infrastructureFixtures } from './fixtures-infrastructure';
@@ -56,6 +57,7 @@ interface DomainFixtures {
   links: Links;
   controller: Controller;
   haltSettings: HaltSettings;
+  outage: Outage;
   shell: ShellPage;
   handleStep: HandleStepPage;
   profile: ProfilePage;
@@ -106,6 +108,11 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
     // The usage under the limits first: no halt holds while its setting changes back.
     await controller.restore();
     await haltSettings.set({});
+  },
+  outage: async ({ page, backendUrl }, use) => {
+    const outage = new Outage(page, backendUrl);
+    await use(outage);
+    await outage.end();
   },
   conditions: [
     async ({ playwright, _serviceManager }, use) => {

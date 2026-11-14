@@ -6,7 +6,9 @@
  * ends it. The app must not retry that
  * stream in a loop. It checks the session through /api/auth/self, and then
  * opens a new stream when the session is valid, leaves the redirect to login
- * to the API client on 401, and shows a connection-lost toast otherwise.
+ * to the API client on 401, and otherwise opens a new stream after the
+ * backoff, which a refusal brings back to the check: no toast asks for a
+ * reload, and the page's tint says the stream is down (F149, F112).
  *
  * `POST /api/testing/sse/force-callback-error` makes the next connect refuse
  * once, `auth.forceError()` decides the session check, and the test-only
@@ -176,7 +178,7 @@ for (const path of PATHS) {
       expect((await loginRequest).url()).toContain('redirect=');
     });
 
-    test('shows the connection-lost toast when the session check fails', async ({
+    test('opens a new stream after the backoff when the session check fails, with no toast', async ({
       page,
       frontendUrl,
       backendUrl,
@@ -194,20 +196,16 @@ for (const path of PATHS) {
       await forceReconnect(page);
       await expectRejected(page, 403);
 
-      await toastHelper.expectErrorToast(/refresh the page/i);
-
-      // The stream stays closed: no new stream within 3 s, and not connected.
-      const reconnected = await waitForSseEvent(page, {
+      // The check failed once: the stream is opened again a second later, and the refusal, armed
+      // once, is not met again.
+      await waitForSseEvent(page, {
         streamId: 'connection',
         phase: 'open',
         event: 'connected',
-        timeoutMs: 3000,
-      }).then(
-        () => true,
-        () => false
-      );
-      expect(reconnected).toBe(false);
-      expect((await deploymentSse.getStatus()).isConnected).toBe(false);
+        timeoutMs: 15000,
+      });
+      await expect.poll(async () => (await deploymentSse.getStatus()).isConnected).toBe(true);
+      await toastHelper.expectNoToast();
     });
   });
 }

@@ -237,30 +237,26 @@ test.describe('Live updates', () => {
   });
 
   test('a stream that comes back up reads again what it missed while it was down', async ({
-    page,
-    backendUrl,
-    auth,
     people,
     projects,
     timeline,
+    shell,
+    outage,
     deploymentSse,
-    toastHelper,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Down'), members: [me.handle!] });
     await timeline.open(id);
     await deploymentSse.ensureConnected();
 
-    // The stream goes down and stays down: its next connect is refused, and the session check
-    // that would open it again fails.
-    const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
-    expect(refusal.status()).toBe(204);
-    await auth.forceError(500);
-    await page.evaluate(() => window.__sseForceReconnect!());
-    await toastHelper.expectErrorToast(/refresh the page/i);
+    // The stream goes down and stays down, each attempt to open it again failing: the page says so
+    // under its tint (F149).
+    await outage.drop();
+    await expect(shell.connection).toBeVisible();
     expect((await deploymentSse.getStatus()).isConnected).toBe(false);
 
     const missed = await projects.place(id, { kind: 'notice', title: 'Missed', text: 'One.\n' });
+    await outage.end();
     await deploymentSse.connect();
     await expect(timeline.item(missed).root).toBeVisible();
   });

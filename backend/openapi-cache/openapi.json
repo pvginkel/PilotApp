@@ -7384,6 +7384,19 @@
         "title": "RegisteredDocumentSchema",
         "type": "object"
       },
+      "SSEOutageQuerySchema.6b6ce9f": {
+        "description": "Query parameters for POST /api/testing/sse/outage.",
+        "properties": {
+          "silent": {
+            "default": false,
+            "description": "The streams that are open send nothing either, heartbeat included, as a connection that died without saying so.",
+            "title": "Silent",
+            "type": "boolean"
+          }
+        },
+        "title": "SSEOutageQuerySchema",
+        "type": "object"
+      },
       "SelfResponseSchema.d1d9f70": {
         "description": "The signed-in person, as the app's shell and the handle step draw them.",
         "properties": {
@@ -19159,6 +19172,77 @@
           }
         ],
         "summary": "Make the next SSE stream connect refuse the connection.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/sse/outage": {
+      "delete": {
+        "description": "Returns:     204: No outage holds",
+        "operationId": "delete__api_testing_sse_outage",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "End the stream's outage: connects go through, open streams speak.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "post": {
+        "description": "Every stream connect answers 503 meanwhile, which the browser counts as a failed attempt. With ``silent``, the streams that are open send nothing either, heartbeat included, as a connection that died without saying so.\n\nQuery Parameters:     silent: Whether the open streams go silent (default false)\n\nReturns:     204: The outage holds",
+        "operationId": "post__api_testing_sse_outage",
+        "parameters": [
+          {
+            "description": "The streams that are open send nothing either, heartbeat included, as a connection that died without saying so.",
+            "in": "query",
+            "name": "silent",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "The streams that are open send nothing either, heartbeat included, as a connection that died without saying so.",
+              "title": "Silent",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Take the browser's stream down until DELETE /api/testing/sse/outage.",
         "tags": [],
         "x-required-role": "editor"
       }
