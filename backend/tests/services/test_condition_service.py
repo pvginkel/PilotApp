@@ -1,27 +1,32 @@
 """The conditions that hold all work, which the gold bar shows (UC *The gold
 bar*; F125, F135.7, F144.4; design 2 §13.4; design 5 D8): the outage, the
 store's update and the usage halts, read, and
-told to every person's connections at once when one turns. Read off test
-connections' queues."""
+told to every person's connections at once when one turns, the outage's turn
+on a loop of its own. Read off test connections' queues; the outage's turns
+on a database of their own, as the supervisor runs the loop."""
 
 import json
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from queue import Empty
 from typing import Any
 
 import pytest
+from flask import Flask
 from sqlalchemy.orm import Session as DbSession
 
 from app.app_config import HaltSetting
+from app.database import scoped_session
 from app.models import UsageReading, User, WindowShare
 from app.models.reference import UsageWindow
-from app.services.condition_service import ConditionService
+from app.services.condition_service import CONDITIONS_JOB, ConditionService
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.services.usage_halts import UsageHalts
 from tests.support.store_updates import hold, lift
+from tests.support.supervisor import WAIT_SECONDS, Supervise
 
 
 @pytest.fixture
@@ -34,10 +39,13 @@ def conditions(
     container: ServiceContainer,
     controller_outage: ControllerOutage,
     manager: SSEConnectionManager,
+    supervise: Supervise,
 ) -> ConditionService:
-    """A service of its own, on the test's outage."""
+    """A service of its own, on the test's outage and a supervisor of its
+    own, which never starts: the outage's turns are told by no loop."""
+    supervisor, _ = supervise(container, controller_configured=False)
     return ConditionService(
-        container, controller_outage, container.usage_halts(), manager
+        container, supervisor, controller_outage, container.usage_halts(), manager
     )
 
 
@@ -58,6 +66,14 @@ def _frames(connection: SSEConnection) -> list[dict[str, Any]]:
             return queued
         assert frame is not None
         queued.append(json.loads(frame.removeprefix("data: ")))
+
+
+def _next(connection: SSEConnection) -> dict[str, Any]:
+    """The connection's next frame, which another thread sends."""
+    frame = connection.next_frame(timeout=WAIT_SECONDS)
+    assert frame is not None
+    parsed: dict[str, Any] = json.loads(frame.removeprefix("data: "))
+    return parsed
 
 
 def _usage(db: DbSession, *, week: float, five_hour: float) -> UsageReading:
@@ -168,6 +184,7 @@ class TestConditionService:
         controller_outage: ControllerOutage,
         manager: SSEConnectionManager,
         session: DbSession,
+        supervise: Supervise,
         week_halt: HaltSetting,
         five_hour_halt: HaltSetting,
     ) -> None:
@@ -179,7 +196,10 @@ class TestConditionService:
             week_halt=week_halt,
             five_hour_halt=five_hour_halt,
         )
-        conditions = ConditionService(container, controller_outage, halts, manager)
+        supervisor, _ = supervise(container, controller_configured=False)
+        conditions = ConditionService(
+            container, supervisor, controller_outage, halts, manager
+        )
         _usage(session, week=0.92, five_hour=0.8)
 
         held = conditions.conditions().model_dump(mode="json")["conditions"]
@@ -261,29 +281,95 @@ class TestConditionService:
         [frame] = _frames(connections[0])
         assert [c["code"] for c in frame["payload"]["conditions"]] == ["five_hour_halt"]
 
+    def test_each_listener_hears_every_tell(
+        self, conditions: ConditionService, controller_outage: ControllerOutage
+    ) -> None:
+        heard: list[tuple[str, bool]] = []
+        for name in ("first", "second"):
+            conditions.subscribe(
+                lambda name=name: heard.append((name, controller_outage.holds))
+            )
+
+        conditions.tell()
+        controller_outage.call_unanswered()
+        conditions.tell()
+
+        assert heard == [
+            ("first", False),
+            ("second", False),
+            ("first", True),
+            ("second", True),
+        ]
+
+
+class TestConditionServiceOutageTurn:
+    """The outage's turns, told on the loop `conditions`, on a database of
+    their own."""
+
+    @pytest.fixture
+    def outage(self) -> ControllerOutage:
+        return ControllerOutage()
+
+    @pytest.fixture
+    def told(
+        self,
+        committed_app: Flask,
+        outage: ControllerOutage,
+        supervise: Supervise,
+    ) -> ConditionService:
+        """A service on `outage`, its supervisor started."""
+        container: ServiceContainer = committed_app.container
+        supervisor, coordinator = supervise(container, controller_configured=False)
+        service = ConditionService(
+            container,
+            supervisor,
+            outage,
+            container.usage_halts(),
+            container.sse_connection_manager(),
+        )
+        coordinator.fire_startup()
+        return service
+
+    @pytest.fixture
+    def committed_connections(
+        self, committed_app: Flask
+    ) -> Iterator[list[SSEConnection]]:
+        manager = committed_app.container.sse_connection_manager()
+        opened: list[SSEConnection] = []
+        yield opened
+        for connection in opened:
+            manager.on_disconnect(connection)
+
     def test_every_persons_connections_hear_each_turn_at_once(
         self,
-        container: ServiceContainer,
-        conditions: ConditionService,
-        controller_outage: ControllerOutage,
-        manager: SSEConnectionManager,
-        connections: list[SSEConnection],
-        person: User,
+        committed_app: Flask,
+        told: ConditionService,
+        outage: ControllerOutage,
+        committed_connections: list[SSEConnection],
     ) -> None:
-        ben = container.test_data_service().person("ben", "Ben Example")
-        connections.extend(
+        container: ServiceContainer = committed_app.container
+        manager = container.sse_connection_manager()
+        with scoped_session(container):
+            data = container.test_data_service()
+            ada_subject = data.person("ada", "Ada Example").subject
+            ben_subject = data.person("ben", "Ben Example").subject
+        assert ada_subject is not None
+        assert ben_subject is not None
+        committed_connections.extend(
             [
-                manager.on_connect("ada-1", person.subject),
-                manager.on_connect("ben-1", ben.subject),
+                manager.on_connect("ada-1", ada_subject),
+                manager.on_connect("ben-1", ben_subject),
                 manager.on_connect("newcomer-1", "subject-newcomer"),
             ]
         )
-        ada, ben_tab, newcomer = connections
+        ada, ben, newcomer = committed_connections
 
-        controller_outage.call_unanswered()
-        since = controller_outage.since
+        outage.call_unanswered()
+        since = outage.since
         assert since is not None
-        controller_outage.probe_answered()
+        heard_on = (_next(ada), _next(ben))
+        outage.probe_answered()
+        heard_off = (_next(ada), _next(ben))
 
         on = {
             "type": "conditions_changed",
@@ -303,27 +389,31 @@ class TestConditionService:
             },
         }
         off = {"type": "conditions_changed", "payload": {"conditions": []}}
-        assert (_frames(ada), _frames(ben_tab)) == ([on, off], [on, off])
+        assert (heard_on, heard_off) == ((on, on), (off, off))
         assert _frames(newcomer) == []
 
-    def test_each_listener_hears_every_tell(
-        self, conditions: ConditionService, controller_outage: ControllerOutage
+    def test_each_listener_hears_each_turn_on_the_loop_not_the_turning_thread(
+        self, told: ConditionService, outage: ControllerOutage
     ) -> None:
-        heard: list[tuple[str, bool]] = []
+        heard: list[tuple[str, str, bool]] = []
+        turned = threading.Semaphore(0)
+
+        def hear(name: str) -> None:
+            heard.append((name, threading.current_thread().name, outage.holds))
+            turned.release()
+
         for name in ("first", "second"):
-            conditions.subscribe(
-                lambda name=name: heard.append((name, controller_outage.holds))
-            )
+            told.subscribe(lambda name=name: hear(name))
 
-        controller_outage.call_unanswered()
-        controller_outage.probe_answered()
-        conditions.tell()
+        outage.call_unanswered()
+        assert all(turned.acquire(timeout=WAIT_SECONDS) for _ in range(2))
+        outage.probe_answered()
+        assert all(turned.acquire(timeout=WAIT_SECONDS) for _ in range(2))
 
+        loop = f"job-{CONDITIONS_JOB}"
         assert heard == [
-            ("first", True),
-            ("second", True),
-            ("first", False),
-            ("second", False),
-            ("first", False),
-            ("second", False),
+            ("first", loop, True),
+            ("second", loop, True),
+            ("first", loop, False),
+            ("second", loop, False),
         ]

@@ -47,6 +47,7 @@ from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
+from app.utils.pool_guard import PoolGuard
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.supervisor import (
@@ -816,6 +817,32 @@ class TestHaltFileServiceLoop:
         wait_until(lambda: _committed_requested(container) is None, "the delete taken")
 
         assert _file(fake_controller) is None
+
+    def test_a_write_that_first_meets_an_unanswered_controller_holds_one_connection(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        pool_guard: PoolGuard,
+    ) -> None:
+        container = committed_app.container
+        project_id, _ = _committed_rows(committed_app, fake_controller)
+        with scoped_session(container) as db:
+            db.get_one(Project, project_id).paused = True
+        # The gold bar's conditions hear the outage, as at a running app's
+        # start.
+        container.condition_service()
+        halt_files, _ = _service(container, supervise)
+        fake_controller.outage()
+
+        with pytest.raises(ExternalServiceException):
+            # The mark commits; the write, under the Environment's row, turns
+            # the outage on.
+            _settle(halt_files)
+
+        assert container.controller_outage().holds
+        assert pool_guard.drain() == []
 
     def test_startup_deletes_a_file_owed_from_the_rows(
         self,

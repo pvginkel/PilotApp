@@ -128,6 +128,7 @@ def _service(
         supervisor=supervisor,
         condition_service=ConditionService(
             container,
+            supervisor,
             outage,
             container.usage_halts(),
             container.sse_connection_manager(),
@@ -736,31 +737,43 @@ class TestAlarmServiceConditions:
         container: ServiceContainer,
         supervise: Supervise,
         web_push_service: WebPushService,
+        log: LogWaiter,
     ) -> None:
         built = _service(container, supervise, web_push_service)
+        _started(built, log)
+        asked = (ALARM_JOB, built.service.reconcile, {"again": True})
+
+        def reconciles() -> int:
+            return [
+                (call.args[0], call.args[1], call.kwargs)
+                for call in start.call_args_list
+            ].count(asked)
 
         with patch.object(
             built.supervisor, "start_loop", wraps=built.supervisor.start_loop
         ) as start:
+            # Each turn is told on the conditions' loop.
             built.outage.call_unanswered()
+            wait_until(lambda: reconciles() == 1, "the turn on's reconcile asked")
             built.outage.probe_answered()
+            wait_until(lambda: reconciles() == 2, "the turn off's reconcile asked")
 
-        assert [
-            (call.args[0], call.args[1], call.kwargs) for call in start.call_args_list
-        ] == [(ALARM_JOB, built.service.reconcile, {"again": True})] * 2
+        assert reconciles() == 2
 
     def test_startup_asks_for_the_reconcile(
         self,
         container: ServiceContainer,
         supervise: Supervise,
         web_push_service: WebPushService,
+        log: LogWaiter,
     ) -> None:
         built = _service(container, supervise, web_push_service)
 
         with patch.object(
             built.supervisor, "start_loop", wraps=built.supervisor.start_loop
         ) as start:
-            built.coordinator.fire_startup()
+            # The reconcile runs on the supervisor's startup thread.
+            _started(built, log)
 
         assert [(call.args[0], call.args[1]) for call in start.call_args_list] == [
             (ALARM_JOB, built.service.reconcile)
@@ -959,6 +972,7 @@ class TestAlarmServiceNoKey:
         supervisor, _ = supervise(container, controller_configured=False)
         conditions = ConditionService(
             container,
+            supervisor,
             ControllerOutage(),
             container.usage_halts(),
             container.sse_connection_manager(),

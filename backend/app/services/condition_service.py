@@ -5,9 +5,9 @@ week's and the five-hour usage halts (F135.7; `UsageHalts`).
 
 When one turns on or off, its listeners hear of it, the alarms among them, and
 every person's connections at once, as one event carrying the conditions that
-hold then (SSE-2): the outage's turn as its listener, a halt's as the usage
-watcher tells it. Only the process that holds a connection delivers to it,
-and the outage is each process's own.
+hold then (SSE-2): the outage's turn on the loop `conditions`, a halt's as the
+usage watcher tells it. Only the process that holds a connection delivers to
+it, and the outage is each process's own.
 """
 
 from collections.abc import Callable
@@ -22,10 +22,13 @@ from app.schemas.conditions import ConditionCode, ConditionSchema, ConditionsSch
 from app.services.controller_outage import ControllerOutage
 from app.services.sse_connection_manager import SSEConnectionManager, Target
 from app.services.store_update_service import unlifted
+from app.services.supervisor import LoopHandle, Supervisor
 from app.services.usage_halts import UsageHalts
 
 if TYPE_CHECKING:
     from app.services.container import ServiceContainer
+
+CONDITIONS_JOB = "conditions"
 
 EVENT_NAME = "conditions_changed"
 """The SSE event the conditions travel as, `ConditionsSchema`'s shape."""
@@ -45,16 +48,28 @@ class ConditionService:
     def __init__(
         self,
         container: "ServiceContainer",
+        supervisor: Supervisor,
         controller_outage: ControllerOutage,
         usage_halts: UsageHalts,
         sse_connection_manager: SSEConnectionManager,
     ) -> None:
+        """Register the job `conditions`, and hear the outage's turns.
+
+        Args:
+            container: Gives each read its database session
+            supervisor: Runs the loop that tells of the outage's turn
+            controller_outage: The outage, a condition, whose turns are told
+            usage_halts: Decides which halts hold
+            sse_connection_manager: Every person's connections
+        """
         self._container = container
+        self._supervisor = supervisor
         self._outage = controller_outage
         self._halts = usage_halts
         self._manager = sse_connection_manager
         self._listeners: tuple[ConditionListener, ...] = ()
-        controller_outage.subscribe(self.tell)
+        supervisor.register_job(CONDITIONS_JOB, needs_controller=False)
+        controller_outage.subscribe(self._outage_turned)
 
     def conditions(self) -> ConditionsSchema:
         """The conditions that hold now."""
@@ -62,8 +77,7 @@ class ConditionService:
             return self._conditions(db)
 
     def subscribe(self, listener: ConditionListener) -> None:
-        """Call `listener` at every `tell()`, in the thread that tells, which
-        may be inside another transaction."""
+        """Call `listener` at every `tell()`, in the thread that tells."""
         self._listeners = (*self._listeners, listener)
 
     def tell(self) -> None:
@@ -84,6 +98,16 @@ class ConditionService:
             self._manager.send_event(
                 Target.subject(subject), payload, EVENT_NAME, "conditions"
             )
+
+    def _outage_turned(self) -> None:
+        # The outage turns in the thread of the controller call that met it,
+        # which may hold a connection of the pool and a row's lock: the tell
+        # reads on a session of its own, so it runs on a loop of its own.
+        self._supervisor.start_loop(CONDITIONS_JOB, self._tell_turn, again=True)
+
+    def _tell_turn(self, handle: LoopHandle) -> None:
+        """The loop `conditions`' run: the outage's turn told (`tell()`)."""
+        self.tell()
 
     def _conditions(self, db: Session) -> ConditionsSchema:
         since = self._outage.since
@@ -133,7 +157,7 @@ class ConditionService:
         return ConditionsSchema(conditions=held)
 
     def _open_session(self) -> Session:
-        # Not `scoped_session`: the outage turns inside other transactions,
-        # a request's among them, whose session is the same provider.
+        # Not `scoped_session`: a request reads the conditions, whose session
+        # is the same provider.
         session: Session = self._container.session_maker()()
         return session

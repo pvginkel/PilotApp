@@ -9,7 +9,9 @@ and at the probe's first success while the fleet stream is not down.
 
 A listener runs in the thread that turned it, after every turn, on or off,
 and reads the state as it then is: of two turns at once, the listener that
-runs last reads the one that stands.
+runs last reads the one that stands. That thread may hold a connection of the
+pool, a row's lock with it, across the call that turned it: a listener opens
+no session there.
 """
 
 import logging

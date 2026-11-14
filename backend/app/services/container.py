@@ -697,6 +697,7 @@ class ServiceContainer(containers.DeclarativeContainer):
     condition_service = providers.Singleton(
         ConditionService,
         container=__self__,
+        supervisor=supervisor,
         controller_outage=controller_outage,
         usage_halts=usage_halts,
         sse_connection_manager=sse_connection_manager,
