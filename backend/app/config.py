@@ -273,7 +273,11 @@ class Environment(BaseSettings):
     )
     SSE_HEARTBEAT_INTERVAL: int = Field(
         default=5,
-        description="SSE heartbeat interval in seconds (5 for development, 30 for production)",
+        gt=0,
+        description=(
+            "Seconds an SSE stream stays idle before its heartbeat; the browser counts "
+            "its stream gone after two of them without a frame"
+        ),
     )
     SSE_QUEUE_MAX_FRAMES: int = Field(
         default=1000,
@@ -353,7 +357,7 @@ class Settings(BaseModel):
     # ── use_sse ────────────────────────────────────────────────────────
 
     frontend_version_url: str = "http://localhost:3500/version.json"
-    sse_heartbeat_interval: int = 5  # Resolved: 30 for production via load()
+    sse_heartbeat_interval: int = 5
     sse_queue_max_frames: int = 1000
 
     @field_validator("stage", mode="before")
@@ -436,7 +440,7 @@ class Settings(BaseModel):
 
         This method:
         1. Loads Environment from environment variables
-        2. Computes derived values (sse_heartbeat_interval)
+        2. Computes derived values
         3. Builds default SQLAlchemy engine options
         4. Constructs and returns a Settings instance
 
@@ -448,11 +452,6 @@ class Settings(BaseModel):
         """
         if env is None:
             env = Environment()
-
-        # Compute sse_heartbeat_interval: 30 for production, else use env value
-        sse_heartbeat_interval = (
-            30 if env.FLASK_ENV == "production" else env.SSE_HEARTBEAT_INTERVAL
-        )
 
         # Resolve OIDC audience: fall back to client_id if not explicitly set
         oidc_audience = env.OIDC_AUDIENCE or env.OIDC_CLIENT_ID
@@ -529,7 +528,7 @@ class Settings(BaseModel):
             oidc_refresh_cookie_name=env.OIDC_REFRESH_COOKIE_NAME,
             # use_sse
             frontend_version_url=env.FRONTEND_VERSION_URL,
-            sse_heartbeat_interval=sse_heartbeat_interval,
+            sse_heartbeat_interval=env.SSE_HEARTBEAT_INTERVAL,
             sse_queue_max_frames=env.SSE_QUEUE_MAX_FRAMES,
         )
 
