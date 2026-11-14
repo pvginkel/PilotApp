@@ -5,8 +5,8 @@ and about three lines, the same for every member, set and cleared by a
 person's fold and unfold and cleared by the Item's close, so that no done
 Item is folded (DB 316 to 318).
 
-Revision ID: 0030
-Revises: 0029
+Revision ID: 0032
+Revises: 0031
 Create Date: 2026-11-13
 
 """
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0030"
-down_revision: str | None = "0029"
+revision: str = "0032"
+down_revision: str | None = "0031"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
