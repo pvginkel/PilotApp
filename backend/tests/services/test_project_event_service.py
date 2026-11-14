@@ -325,6 +325,7 @@ class TestProjectEventService:
                     "nudge_owed": False,
                     "retried": None,
                     "progress": [],
+                    "debriefed": False,
                 },
             },
         }
@@ -401,8 +402,8 @@ class TestProjectEventService:
             str(project_session.id),
         )
         assert frame["payload"]["work"]["progress"] == [
-            {"code": "test", "label": "Test", "state": "active"},
-            {"code": "docs", "label": "Docs", "state": "pending"},
+            {"code": "test", "label": "Test", "state": "active", "why": None},
+            {"code": "docs", "label": "Docs", "state": "pending", "why": None},
         ]
 
     def test_a_move_of_a_session_with_no_work_item_sends_nothing(

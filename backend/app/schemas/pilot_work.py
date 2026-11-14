@@ -155,28 +155,16 @@ class ProgressStepSchema(BaseModel):
         description="The step's words on the tile", examples=["P3 · second review"]
     )
     state: ProgressState = Field(description="Where it stands", examples=["active"])
-
-
-class ProgressSchema(BaseModel):
-    """The work item's list of steps as it stands."""
-
-    steps: list[ProgressStepSchema] = Field(description="Its steps, in order")
-
-
-class PublishedStepSchema(ProgressStepSchema):
-    """A step of the work item's list, as its worker's call answers it."""
-
     why: str | None = Field(
         description="The short line under its label; none where not given",
         examples=["The reviewer found the migration's downgrade left the column"],
     )
 
 
-class PublishedProgressSchema(BaseModel):
-    """The work item's list of steps as it stands, as its worker's call
-    answers it."""
+class ProgressSchema(BaseModel):
+    """The work item's list of steps as it stands."""
 
-    steps: list[PublishedStepSchema] = Field(description="Its steps, in order")
+    steps: list[ProgressStepSchema] = Field(description="Its steps, in order")
 
 
 class DebriefEntryRequestSchema(BaseModel):

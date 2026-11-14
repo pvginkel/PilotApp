@@ -1151,6 +1151,11 @@ class TestPilotServerHanded:
         assert run.environment_id is not None and run.controller_session is not None
         created = fake.session(run.environment_id, run.controller_session)
         assert created.create_body == body
+        # A check acting as the session is handed what it was (V22).
+        assert fake.session_env(run.environment_id, run.controller_session) == {
+            "PILOT_TOKEN": token,
+            "PILOT_MCP_URL": MCP_URL,
+        }
 
     @pytest.mark.parametrize("kind", ["chat", "job"])
     def test_a_brain_sessions_create_hands_pilot_store(
@@ -7573,7 +7578,7 @@ class TestContinueRun:
         assert timeline.work(continuation.id).progress == []
         assert timeline.work(run.id).progress == [
             ProgressStepSchema(
-                code="P1.code", label="P1 · code", state=ProgressState.DONE
+                code="P1.code", label="P1 · code", state=ProgressState.DONE, why=None
             )
         ]
 

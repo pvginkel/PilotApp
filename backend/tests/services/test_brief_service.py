@@ -20,6 +20,7 @@ from app.models import (
     Chat,
     ClaimAssignment,
     ClarificationRun,
+    DebriefEntry,
     Document,
     Environment,
     Item,
@@ -52,6 +53,7 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
+from app.schemas.pilot_work import DebriefEntryRequestSchema
 from app.services.brief_service import (
     FOLLOW_UP_END,
     RESTARTED,
@@ -61,6 +63,7 @@ from app.services.brief_service import (
     is_restarted,
 )
 from app.services.container import ServiceContainer
+from app.services.pilot_work_service import Worker
 from app.services.session_record_service import SessionRecordService
 from app.services.turn_end_read_service import READ_FAILED
 from app.services.wait_service import ReportedTransition
@@ -688,6 +691,13 @@ class TestSetup:
 WORKER_ENV = "example-soup-3f2a1c"
 ENDED = datetime(2026, 10, 26, 9, 29, 50, tzinfo=UTC)
 LAST_WORDS = "Fixed the stock.\n\n  Registered the notes; ending the turn.\n"
+
+DEBRIEF = "It went well, if slowly.\n  The second review was worth it.\n"
+"""A stage session's debrief, invented, its words as given: the brief keeps
+its indent and leaves off its end."""
+
+ENTRY_WORDS = "The tests held; one flake, not mine."
+"""A role's account in the debrief, which no brief carries."""
 STOCK = "# The stock\n\nLeek, not onion.\n"
 CUT_OVER = """# The cut-over
 
@@ -951,6 +961,79 @@ class TestWorkerTurnEnded:
             ' myself"\n'
             f"- {path} ({cut_over.id}) A4 open, its claim gone"
         )
+
+    def test_the_stage_sessions_debrief_follows_what_is_attached_whole(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """F52.4, DB 328: as given, after the documents registered and the
+        files attached, before the claimed actions; the roles' entries left
+        out (design 3 §5.3)."""
+        documents = container.document_service()
+        cut_over = documents.register(
+            opened, project_session, "/work/Soup/cut-over.md"
+        ).item
+        documents.publish_read(
+            session.get_one(Document, cut_over.id), CUT_OVER, project_session.id
+        )
+        run = _worker_run(session, container, opened, None)
+        session.add(
+            ClaimAssignment(
+                work_id=run.id,
+                block_id=session.scalars(
+                    select(Block.id).where(
+                        Block.document_id == cut_over.id, Block.local_id == "A1"
+                    )
+                ).one(),
+            )
+        )
+        _attached(session, opened, run, "stock.txt")
+        session.add(
+            ItemAttachment(
+                item_id=run.id,
+                attachment_id=session.scalars(
+                    select(Attachment.id).where(Attachment.filename == "stock.txt")
+                ).one(),
+                position=1,
+                attached_at=AT,
+            )
+        )
+        session.flush()
+        container.pilot_work_service().register_debrief(
+            Worker(run.id, opened.id, WORKER_ENV, run.id),
+            DEBRIEF,
+            [
+                DebriefEntryRequestSchema(
+                    section="Test phase",
+                    round=1,
+                    role="test-agent",
+                    duration=60,
+                    words=ENTRY_WORDS,
+                )
+            ],
+        )
+        _turn_ended(session, container, run, "")
+
+        brief = briefs.job(opened, _after(run), AT, AT)
+
+        path = session.get_one(Document, cut_over.id).path
+        assert brief.split("\n\n")[3] == (
+            f'The work item: "Fixing the stock" ({run.id}), repository'
+            " example/Soup, environment example-soup-3f2a1c, session claude-7;"
+            " its turn ended 2026-10-26T09:29:50Z.\n"
+            "Registered nothing this run.\n"
+            "Attached on the work item: 1 file (timeline.json lists it).\n"
+            "The stage session's debrief, as given:\n"
+            f"{DEBRIEF.rstrip()}\n"
+            "The claimed actions given to this work item, as they stand:\n"
+            f"- {path} ({cut_over.id}) A1 open, claimed"
+        )
+        assert ENTRY_WORDS not in brief
+        assert "test-agent" not in brief
 
     def test_a_continuation_names_the_claimed_actions_of_the_run_it_continues(
         self,
@@ -1401,6 +1484,53 @@ class TestWriterAnswered:
             '- taste "Taste it" · n3: Two spoons\n'
             "- the plan · n2: Add a sweep task"
         )
+
+    def test_a_debrief_its_session_gave_follows_what_it_registered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        """DB 328: the pass after the clarification run's turn is handed the
+        run's own debrief, its entries left out; the work item's it clarifies
+        stays the work item's."""
+        asking, _ = self._asked(
+            session,
+            container,
+            opened,
+            {"/work/Soup/cut-over.md": CACHE},
+            [("/work/Soup/cut-over.md", "D2", "Which cache?")],
+        )
+        clarifying = self._clarifying(
+            session, container, opened, asking, "The OpenAPI one.", "Clarify it"
+        )
+        worker_id = session.get_one(Work, asking.id).trigger_item_id
+        assert worker_id is not None
+        for work_id, debrief in ((clarifying.id, DEBRIEF), (worker_id, "Not this.")):
+            session.get_one(Work, work_id).debrief = debrief
+            session.add(
+                DebriefEntry(
+                    work_id=work_id,
+                    position=1,
+                    section="Test phase",
+                    round=1,
+                    role="test-agent",
+                    duration=60,
+                    words=ENTRY_WORDS,
+                )
+            )
+        session.flush()
+
+        brief = briefs.job(opened, _after(clarifying), AT, AT)
+
+        assert brief.split("\n\n")[3].endswith(
+            f"Registered this run: nothing. {ASKS_NOTHING}\n"
+            "The stage session's debrief, as given:\n"
+            f"{DEBRIEF.rstrip()}"
+        )
+        assert ENTRY_WORDS not in brief
+        assert "Not this." not in brief
 
     def test_a_reply_that_did_not_keep_the_headings_is_quoted_whole(
         self,

@@ -757,6 +757,13 @@ class WorkSchema(BaseModel):
             "emptied the list (F145.1)"
         )
     )
+    debriefed: bool = Field(
+        description=(
+            "Whether it is done and its session gave its debrief (F85.5), which "
+            "the Debrief on its done line opens (F26.6, F26.9); false while it "
+            "is open, for a run that gave none and for a job"
+        )
+    )
 
 
 class JobSchema(BaseModel):
@@ -1157,6 +1164,58 @@ class ItemDocumentSchema(TimelineItemSchema):
             "no text"
         ),
         examples=["---\ntitle: Camp plan\n---\n\nFood and nights.\n"],
+    )
+
+
+class DebriefEntrySchema(BaseModel):
+    """One account of a work item's debrief, its values as the workflow gave
+    them (F85.5; DB 326)."""
+
+    round: int = Field(description="Its round of its section, 1 or more", examples=[2])
+    role: str = Field(description="Whose account it is", examples=["code-reviewer"])
+    duration: int = Field(
+        description="The time its turn took, in whole seconds", examples=[540]
+    )
+    words: str | None = Field(
+        description="The account, in its own words; null with `passed` and with neither",
+        examples=["The review went quickly; one finding, and a fair one."],
+    )
+    passed: bool | None = Field(
+        description="A pass or a fail in place of words; null with `words` and with neither",
+        examples=[False],
+    )
+    why: str | None = Field(
+        description="Why the round it opens was needed; null where it opens none",
+        examples=["The reviewer found the migration's downgrade left the column"],
+    )
+
+
+class DebriefSectionSchema(BaseModel):
+    """A section of the full debrief: a run of consecutive entries of one
+    section's name, in the order given, derived at the read (F26.10; DB 326)."""
+
+    name: str = Field(
+        description="The section's name, as given", examples=["P3 · The client"]
+    )
+    rounds: int = Field(description="The number of distinct rounds in it", examples=[2])
+    duration: int = Field(
+        description="The sum of its entries' times, in whole seconds", examples=[1260]
+    )
+    entries: list[DebriefEntrySchema] = Field(
+        description="Its entries, in the order given"
+    )
+
+
+class DebriefSchema(BaseModel):
+    """A done work item's debrief, as its Debrief opens it and the full debrief
+    shows it (F26.9, F26.10)."""
+
+    debrief: str = Field(
+        description="The stage session's own account of how the run went, as given",
+        examples=["It went well, if slowly: the second review was worth it."],
+    )
+    sections: list[DebriefSectionSchema] = Field(
+        description="Its entries in their sections, in the order given"
     )
 
 

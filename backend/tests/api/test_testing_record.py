@@ -28,6 +28,7 @@ from app.config import Environment as SettingsEnvironment
 from app.models import (
     Attachment,
     ClarificationRun,
+    DebriefEntry,
     Document,
     DocumentVersion,
     Environment,
@@ -135,6 +136,10 @@ def _registrations_path(item_id: uuid.UUID | str) -> str:
 
 def _progress_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/progress"
+
+
+def _debrief_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/debrief"
 
 
 def _worker_attachments_path(item_id: uuid.UUID | str) -> str:
@@ -1930,6 +1935,13 @@ ENDPOINTS = [
     (_worker_attachments_path(NO_ROW), {"path": "/work/Camp/notes.md"}),
     (_progress_path(NO_ROW), {"steps": []}),
     (
+        _debrief_path(NO_ROW),
+        {
+            "debrief": "Hi",
+            "entries": [{"section": "S", "round": 1, "role": "r", "duration": 0}],
+        },
+    ),
+    (
         _writer_questions_path(NO_ROW),
         {"questions": [{"block": "Q1", "question": "Which?"}]},
     ),
@@ -2280,9 +2292,14 @@ class TestCreateProgress:
             200,
             {
                 "steps": [
-                    {"code": "P1.code", "label": "P1 · code", "state": "done"},
-                    {"code": "test", "label": "Test", "state": "active"},
-                    {"code": "docs", "label": "Docs", "state": "pending"},
+                    {
+                        "code": "P1.code",
+                        "label": "P1 · code",
+                        "state": "done",
+                        "why": None,
+                    },
+                    {"code": "test", "label": "Test", "state": "active", "why": None},
+                    {"code": "docs", "label": "Docs", "state": "pending", "why": None},
                 ]
             },
         )
@@ -2311,6 +2328,50 @@ class TestCreateProgress:
 
         assert (response.status_code, response.get_json()) == (200, {"steps": []})
         assert _count(session, ProgressStep) == 0
+
+    def test_a_steps_why_is_stored_and_answered_with_it(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        """DB 327: on any step, a step without one answering none."""
+        why = "The reviewer found the downgrade left the column"
+
+        response = client.post(
+            _progress_path(work_item.id),
+            json={
+                "steps": [
+                    {"code": "P1.code", "label": "P1 · code", "state": "done"},
+                    {"code": "P1.code-2", "label": "P1 · code 2", "why": why},
+                ]
+            },
+        )
+
+        assert (response.status_code, response.get_json()) == (
+            200,
+            {
+                "steps": [
+                    {
+                        "code": "P1.code",
+                        "label": "P1 · code",
+                        "state": "done",
+                        "why": None,
+                    },
+                    {
+                        "code": "P1.code-2",
+                        "label": "P1 · code 2",
+                        "state": "pending",
+                        "why": why,
+                    },
+                ]
+            },
+        )
+        assert [
+            step.why
+            for step in session.scalars(
+                select(ProgressStep)
+                .where(ProgressStep.work_id == work_item.id)
+                .order_by(ProgressStep.position)
+            )
+        ] == [None, why]
 
     def test_an_item_that_is_no_work_item_is_not_found(
         self, client: FlaskClient, item: Item
@@ -2377,6 +2438,9 @@ class TestCreateProgress:
             {"steps": [{"code": "test", "label": "Test", "state": "failed"}]},
             {"steps": [{"code": "c" * 65, "label": "Test"}]},
             {"steps": [{"code": "test", "label": "l" * 121}]},
+            {"steps": [{"code": "test", "label": "Test", "why": ""}]},
+            {"steps": [{"code": "test", "label": "Test", "why": "w" * 121}]},
+            {"steps": [{"code": "test", "label": "Test", "note": "x"}]},
             {"steps": [{"code": f"s{n}", "label": "Step"} for n in range(101)]},
         ],
         ids=[
@@ -2386,6 +2450,9 @@ class TestCreateProgress:
             "a state outside the three",
             "a code past 64",
             "a label past 120",
+            "an empty why",
+            "a why past 120",
+            "a field it does not know",
             "a list past 100",
         ],
     )
@@ -2400,6 +2467,189 @@ class TestCreateProgress:
 
         assert response.status_code == 400
         assert _count(session, ProgressStep) == 0
+
+
+DEBRIEF = {
+    "debrief": "It went well, if slowly.",
+    "entries": [
+        {
+            "section": "P1 · The client",
+            "round": 1,
+            "role": "code-writer",
+            "duration": 540,
+            "words": "Fine.",
+        },
+        {
+            "section": "P1 · The client",
+            "round": 2,
+            "role": "code-reviewer",
+            "duration": 0,
+            "why": "The downgrade left the column",
+        },
+        {
+            "section": "Completion check",
+            "round": 1,
+            "role": "sweep",
+            "duration": 600,
+            "passed": False,
+        },
+    ],
+}
+"""A stage session's debrief, invented, as its call gives it."""
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateDebrief:
+    @pytest.fixture
+    def work_item(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session, its turn running."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo=WORK_REPO
+        )
+        return run
+
+    def test_it_stores_the_debrief_as_the_worker_does_and_answers_its_count(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        response = client.post(_debrief_path(work_item.id), json=DEBRIEF)
+
+        assert (response.status_code, response.get_json()) == (201, {"entries": 3})
+        assert session.get_one(Work, work_item.id).debrief == DEBRIEF["debrief"]
+        assert [
+            (
+                entry.position,
+                entry.section,
+                entry.round,
+                entry.role,
+                entry.duration,
+                entry.words,
+                entry.passed,
+                entry.why,
+            )
+            for entry in session.scalars(
+                select(DebriefEntry)
+                .where(DebriefEntry.work_id == work_item.id)
+                .order_by(DebriefEntry.position)
+            )
+        ] == [
+            (1, "P1 · The client", 1, "code-writer", 540, "Fine.", None, None),
+            (
+                2,
+                "P1 · The client",
+                2,
+                "code-reviewer",
+                0,
+                None,
+                None,
+                "The downgrade left the column",
+            ),
+            (3, "Completion check", 1, "sweep", 600, None, False, None),
+        ]
+
+    def test_a_second_conflicts_and_changes_nothing(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        client.post(_debrief_path(work_item.id), json=DEBRIEF)
+
+        response = client.post(
+            _debrief_path(work_item.id),
+            json={"debrief": "Again.", "entries": DEBRIEF["entries"][:1]},
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot register the debrief of work item {work_item.id} because it"
+            " has its debrief already"
+        )
+        assert session.get_one(Work, work_item.id).debrief == DEBRIEF["debrief"]
+        assert _count(session, DebriefEntry) == 3
+
+    def test_an_item_that_is_no_work_item_is_not_found(
+        self, client: FlaskClient, item: Item
+    ) -> None:
+        for item_id in (item.id, uuid.uuid4()):
+            response = client.post(_debrief_path(item_id), json=DEBRIEF)
+
+            assert response.status_code == 404
+
+    def test_a_session_with_no_turn_running_is_refused(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        work_item.state_code = SessionState.IDLE
+        session.flush()
+
+        response = client.post(_debrief_path(work_item.id), json=DEBRIEF)
+
+        assert response.status_code == 403
+        assert _count(session, DebriefEntry) == 0
+
+    def test_a_work_item_whose_start_gave_it_no_environment_conflicts(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        work_item.environment_id = None
+        session.flush()
+
+        response = client.post(_debrief_path(work_item.id), json=DEBRIEF)
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot register the debrief of work item {work_item.id} because"
+            f" work item {work_item.id} has no environment yet"
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"debrief": "", "entries": DEBRIEF["entries"]},
+            {"debrief": "  ", "entries": DEBRIEF["entries"]},
+            {"debrief": "Fine.", "entries": []},
+            {"debrief": "Fine.", "entries": [{**DEBRIEF["entries"][0], "round": 0}]},
+            {
+                "debrief": "Fine.",
+                "entries": [{**DEBRIEF["entries"][0], "passed": True}],
+            },
+            {
+                "debrief": "Fine.",
+                "entries": [{**DEBRIEF["entries"][0], "step": "P1.code"}],
+            },
+        ],
+        ids=[
+            "an empty debrief",
+            "a blank debrief",
+            "no entries",
+            "a round of 0",
+            "words and passed",
+            "a field it does not know",
+        ],
+    )
+    def test_a_body_the_worker_s_call_refuses_is_invalid(
+        self,
+        client: FlaskClient,
+        session: Session,
+        work_item: models.Session,
+        body: dict[str, Any],
+    ) -> None:
+        response = client.post(_debrief_path(work_item.id), json=body)
+
+        assert response.status_code == 400
+        assert session.get_one(Work, work_item.id).debrief is None
+        assert _count(session, DebriefEntry) == 0
 
 
 @pytest.mark.usefixtures("person")

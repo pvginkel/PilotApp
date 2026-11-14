@@ -1207,6 +1207,7 @@ class TestGetTimeline:
             "nudge_owed": False,
             "retried": None,
             "progress": [],
+            "debriefed": False,
         }
 
     def test_a_block_s_own_section_rides_with_its_text(

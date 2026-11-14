@@ -336,13 +336,14 @@ class BriefService:
         `/pre-rule`, then the work item's line, the documents the run
         registered in the order registered, each published or its read failed
         with the reason the read recorded, else that it registered nothing,
-        the files attached on the work item, and the claimed actions it was
-        given (`_given`) and the blocks it researched (`_researched`); then
-        every open note and the deferrals without a home, the pass's
-        (F57.4)."""
+        the files attached on the work item, the stage session's debrief
+        (`_debriefed`), and the claimed actions it was given (`_given`) and
+        the blocks it researched (`_researched`); then every open note and the
+        deferrals without a home, the pass's (F57.4)."""
         lines: list[str | None] = [self._run_line(run_id)]
         lines.extend(self._registered(run_id) or ["Registered nothing this run."])
         lines.append(self._attached(run_id))
+        lines.extend(self._debriefed(run_id))
         lines.extend(self._given(run_id))
         lines.extend(self._researched(run_id))
         return _frame(
@@ -368,8 +369,9 @@ class BriefService:
         document its pass asked about, in timeline order, the questions as
         asked and the writer's answer as the document records it
         (`_clarified`); then the files attached on the run and what it
-        registered, as any run's, and that this pass asks nothing; then every
-        open note and the deferrals without a home."""
+        registered, as any run's, and that this pass asks nothing, and the
+        debrief its session gave (`_debriefed`); then every open note and the
+        deferrals without a home."""
         item = self.db.get_one(Item, run.id)
         worker_id = self.db.get_one(Work, run.pass_id).trigger_item_id
         # A clarification run's pass is the job after a worker's turn (DB 254),
@@ -391,6 +393,7 @@ class BriefService:
             lines.extend([*registered, ASKS_NOTHING])
         else:
             lines.append(f"Registered this run: nothing. {ASKS_NOTHING}")
+        lines.extend(self._debriefed(run.id))
         return _frame(
             PRE_RULE_SKILL,
             "the writer answered",
@@ -474,6 +477,16 @@ class BriefService:
                 for item_id, path, failed in registered
             ),
         ]
+
+    def _debriefed(self, run_id: uuid.UUID) -> list[str]:
+        """The debrief the run's session gave, whole and as given, under its
+        heading (F52.4; design 3 §5.3; DB 328), the space it ends in left off
+        so that the next line follows it; none where it gave none. Its
+        entries, the roles' accounts, stay out."""
+        debrief = self.db.scalar(select(Work.debrief).where(Work.id == run_id))
+        if debrief is None:
+            return []
+        return ["The stage session's debrief, as given:", debrief.rstrip()]
 
     def _attached(self, run_id: uuid.UUID) -> str | None:
         """The files attached on the work item, counted; None for none."""

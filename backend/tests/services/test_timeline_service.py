@@ -22,6 +22,7 @@ from app.models import (
     Block,
     ClaimAssignment,
     ClarificationRun,
+    DebriefEntry,
     Document,
     DocumentVersion,
     DoneCause,
@@ -63,6 +64,9 @@ from app.schemas.pilot_work import ProgressStepRequestSchema, ProgressStepSchema
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.schemas.timeline import (
     AttachmentSchema,
+    DebriefEntrySchema,
+    DebriefSchema,
+    DebriefSectionSchema,
     DoneCauseCode,
     HeldReason,
     ItemKindCode,
@@ -351,9 +355,31 @@ def _worker(work: Item, environment: Environment) -> Worker:
 
 
 def _step(
-    code: str, label: str, state: ProgressState | None = None
+    code: str, label: str, state: ProgressState | None = None, why: str | None = None
 ) -> ProgressStepRequestSchema:
-    return ProgressStepRequestSchema(code=code, label=label, state=state)
+    return ProgressStepRequestSchema(code=code, label=label, state=state, why=why)
+
+
+DEBRIEF = "It went well, if slowly.\n\nThe second review was worth it."
+"""A stage session's debrief, invented."""
+
+
+def _debriefed(
+    session: DbSession, work: Item, *entries: dict[str, Any], debrief: str = DEBRIEF
+) -> None:
+    """The work item's debrief and its `entries`, in their order, as its
+    session's call stores them; an entry's `round` 1 and `duration` 60 unless
+    it gives its own."""
+    session.get_one(Work, work.id).debrief = debrief
+    session.add_all(
+        DebriefEntry(
+            work_id=work.id,
+            position=position,
+            **({"round": 1, "duration": 60} | entry),
+        )
+        for position, entry in enumerate(entries, start=1)
+    )
+    session.flush()
 
 
 def _work(
@@ -2177,6 +2203,7 @@ class TestTimeline:
             "nudge_owed": False,
             "retried": None,
             "progress": [],
+            "debriefed": False,
         }
 
     def test_a_job_is_pilots_own_work(
@@ -2645,15 +2672,91 @@ class TestWorkStatus:
 
         assert found[first.id].progress == [
             ProgressStepSchema(
-                code="P1.code", label="P1 · code", state=ProgressState.DONE
+                code="P1.code", label="P1 · code", state=ProgressState.DONE, why=None
             ),
-            ProgressStepSchema(code="test", label="Test", state=ProgressState.ACTIVE),
-            ProgressStepSchema(code="docs", label="Docs", state=ProgressState.PENDING),
+            ProgressStepSchema(
+                code="test", label="Test", state=ProgressState.ACTIVE, why=None
+            ),
+            ProgressStepSchema(
+                code="docs", label="Docs", state=ProgressState.PENDING, why=None
+            ),
         ]
         assert found[second.id].progress == [
-            ProgressStepSchema(code="write", label="Write", state=ProgressState.PENDING)
+            ProgressStepSchema(
+                code="write", label="Write", state=ProgressState.PENDING, why=None
+            )
         ]
         assert found[quiet.id].progress == []
+
+    def test_a_steps_why_is_carried_as_the_last_call_gave_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """F145.1, DB 327: under its label; a step given without one has none,
+        and a call that leaves it out takes it away."""
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        publish = container.pilot_work_service().set_progress
+        why = "The reviewer found the downgrade left the column"
+        publish(
+            _worker(work, environment),
+            [
+                _step("P1.code", "P1 · code", ProgressState.DONE),
+                _step("P1.code-2", "P1 · code 2", ProgressState.ACTIVE, why),
+            ],
+        )
+
+        timeline = container.timeline_service()
+        assert timeline.work(work.id).progress == [
+            ProgressStepSchema(
+                code="P1.code", label="P1 · code", state=ProgressState.DONE, why=None
+            ),
+            ProgressStepSchema(
+                code="P1.code-2",
+                label="P1 · code 2",
+                state=ProgressState.ACTIVE,
+                why=why,
+            ),
+        ]
+
+        publish(_worker(work, environment), [_step("P1.code-2", "P1 · code 2")])
+
+        assert [step.why for step in timeline.work(work.id).progress] == [None]
+
+    def test_a_done_work_item_says_whether_its_session_gave_its_debrief(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """F26.6, DB 329: from the turn's end, never while it is open; a run
+        that gave none and a job say no."""
+        project = _make(container)
+        running = _work(session, project, environment, SessionState.RUNNING)
+        _debriefed(session, running, {"section": "Test", "role": "test-agent"})
+        done = _work(session, project, environment, SessionState.IDLE)
+        _debriefed(session, done, {"section": "Test", "role": "test-agent"})
+        quiet = _work(session, project, environment, SessionState.IDLE)
+        job = _job(session, project, environment, SessionState.IDLE)
+        for each in (done, quiet, job):
+            container.record_service().work_done(each.id, REPLIED)
+
+        found = work_status(
+            session,
+            [running.id, done.id, quiet.id, job.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+        )
+
+        assert {item_id: each.debriefed for item_id, each in found.items()} == {
+            running.id: False,
+            done.id: True,
+            quiet.id: False,
+            job.id: False,
+        }
 
     def test_a_list_emptied_lists_none(
         self,
@@ -4341,6 +4444,155 @@ class TestItemDocument:
             "project_id": str(project.id),
             "text": _document(session, item).published_text,
         }
+
+
+@pytest.mark.usefixtures("person")
+class TestDebrief:
+    """A done work item's debrief, as its Debrief opens it and the full
+    debrief shows it (F26.9, F26.10; DB 326, 329)."""
+
+    def test_an_unknown_item_has_none(self, container: ServiceContainer) -> None:
+        item_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.timeline_service().debrief(item_id)
+
+        assert raised.value.message == f"Debrief of work item {item_id} was not found"
+
+    def test_an_open_one_a_done_one_without_and_a_job_have_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        running = _work(session, project, environment, SessionState.RUNNING)
+        _debriefed(session, running, {"section": "Test", "role": "test-agent"})
+        quiet = _work(session, project, environment, SessionState.IDLE)
+        job = _job(session, project, environment, SessionState.IDLE)
+        for each in (quiet, job):
+            container.record_service().work_done(each.id, REPLIED)
+
+        for item in (running, quiet, job):
+            with pytest.raises(RecordNotFoundException) as raised:
+                container.timeline_service().debrief(item.id)
+            assert (
+                raised.value.message == f"Debrief of work item {item.id} was not found"
+            )
+
+    def test_it_reads_whole_with_its_entries_in_their_sections(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """Each run of one section's name is a section, the same name further
+        on one of its own; its rounds the distinct ones, its time the sum;
+        each entry as given, in the order given."""
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.IDLE)
+        container.record_service().work_done(work.id, REPLIED)
+        why = "The reviewer found the downgrade left the column"
+        _debriefed(
+            session,
+            work,
+            {"section": "P1 · The client", "role": "code-writer", "words": "Fine."},
+            {"section": "P1 · The client", "role": "code-reviewer", "duration": 120},
+            {
+                "section": "P1 · The client",
+                "round": 2,
+                "role": "code-writer",
+                "words": "Fixed it.",
+                "why": why,
+            },
+            {"section": "Completion check", "role": "sweep", "passed": False},
+            {"section": "Completion check", "role": "consult", "words": "A flake."},
+            {"section": "P2 · The server", "role": "code-writer", "duration": 0},
+            {
+                "section": "Completion check",
+                "round": 3,
+                "role": "sweep",
+                "duration": 900,
+                "passed": True,
+            },
+        )
+
+        def entry(**given: Any) -> DebriefEntrySchema:
+            return DebriefEntrySchema(
+                **{
+                    "round": 1,
+                    "duration": 60,
+                    "words": None,
+                    "passed": None,
+                    "why": None,
+                }
+                | given
+            )
+
+        assert container.timeline_service().debrief(work.id) == DebriefSchema(
+            debrief=DEBRIEF,
+            sections=[
+                DebriefSectionSchema(
+                    name="P1 · The client",
+                    rounds=2,
+                    duration=240,
+                    entries=[
+                        entry(role="code-writer", words="Fine."),
+                        entry(role="code-reviewer", duration=120),
+                        entry(round=2, role="code-writer", words="Fixed it.", why=why),
+                    ],
+                ),
+                DebriefSectionSchema(
+                    name="Completion check",
+                    rounds=1,
+                    duration=120,
+                    entries=[
+                        entry(role="sweep", passed=False),
+                        entry(role="consult", words="A flake."),
+                    ],
+                ),
+                DebriefSectionSchema(
+                    name="P2 · The server",
+                    rounds=1,
+                    duration=0,
+                    entries=[entry(role="code-writer", duration=0)],
+                ),
+                DebriefSectionSchema(
+                    name="Completion check",
+                    rounds=1,
+                    duration=900,
+                    entries=[entry(round=3, role="sweep", duration=900, passed=True)],
+                ),
+            ],
+        )
+
+    def test_names_are_grouped_as_given_and_never_read(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """D159: a name differing only in its case or its space is a section
+        of its own; Pilot reads no code, role or round out of it."""
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.IDLE)
+        container.record_service().work_done(work.id, REPLIED)
+        _debriefed(
+            session,
+            work,
+            {"section": "P1.code", "role": "a"},
+            {"section": "p1.code", "role": "b"},
+            {"section": "P1.code ", "role": "c", "round": 7},
+            {"section": "P1.code ", "role": "c", "round": 7},
+        )
+
+        sections = container.timeline_service().debrief(work.id).sections
+
+        assert [(each.name, each.rounds, each.duration) for each in sections] == [
+            ("P1.code", 1, 60),
+            ("p1.code", 1, 60),
+            ("P1.code ", 1, 120),
+        ]
 
 
 @pytest.mark.usefixtures("person")

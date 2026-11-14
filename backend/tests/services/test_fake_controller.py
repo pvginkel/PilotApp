@@ -85,6 +85,7 @@ class TestFakeController:
             "put-file",
             "file-text",
             "remove-file",
+            "session-env",
             "busy",
             "play",
             "finish",
@@ -246,6 +247,37 @@ class TestFakeController:
         http.post("/environments/env-1/sessions/headless", json=body, headers=BEARER)
 
         assert fake.session("env-1", "claude-1").create_body == body
+
+    def test_a_sessions_env_is_handed_by_name_as_its_create_gave_it(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        """A value keeps every `=` after the name's; a create with no `env`
+        hands none."""
+        fake.add_environment("env-1", status="running")
+        http.post(
+            "/environments/env-1/sessions/headless",
+            json={"env": ["PILOT_TOKEN=a=b", "PILOT_MCP_URL=http://mcp.test/x"]},
+            headers=BEARER,
+        )
+        http.post("/environments/env-1/sessions/headless", json={}, headers=BEARER)
+
+        given = http.post(
+            "/fake/session-env", json={"env_id": "env-1", "name": "claude-1"}
+        )
+        none = http.post(
+            "/fake/session-env", json={"env_id": "env-1", "name": "claude-2"}
+        )
+        unknown = http.post(
+            "/fake/session-env", json={"env_id": "env-1", "name": "claude-3"}
+        )
+
+        assert (given.status_code, given.get_json()) == (
+            200,
+            {"PILOT_TOKEN": "a=b", "PILOT_MCP_URL": "http://mcp.test/x"},
+        )
+        assert (none.status_code, none.get_json()) == (200, {})
+        assert unknown.status_code == 404
+        assert unknown.get_json()["type"] == "not-found"
 
     def test_create_refuses_an_env_name_of_the_environments_own(
         self, fake: FakeController, http: Client

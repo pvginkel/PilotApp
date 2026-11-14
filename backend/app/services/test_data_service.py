@@ -41,6 +41,7 @@ from app.models import (
     Block,
     Chat,
     ClarificationRun,
+    DebriefEntry,
     Document,
     Environment,
     Item,
@@ -67,7 +68,10 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
-from app.schemas.pilot_work import ProgressStepRequestSchema
+from app.schemas.pilot_work import (
+    DebriefEntryRequestSchema,
+    ProgressStepRequestSchema,
+)
 from app.schemas.testing_record import (
     InventedFileSchema,
     InventedProjectCreateSchema,
@@ -931,6 +935,31 @@ class TestDataService:
         """
         worker = self._worker(item_id, f"set the progress of work item {item_id}")
         return self.pilot_work_service.set_progress(worker, steps)
+
+    def register_debrief(
+        self,
+        item_id: uuid.UUID,
+        debrief: str,
+        entries: Sequence[DebriefEntryRequestSchema],
+    ) -> list[DebriefEntry]:
+        """The work item's debrief, `debrief` and its `entries` in their
+        order, stored once as its worker's `register_debrief` stores it
+        (F85.5; DB 323 to 325), while the session's turn is in flight; its
+        line shows it once the turn ends (DB 329).
+
+        Returns:
+            The entries stored, in order.
+
+        Raises:
+            RecordNotFoundException: no work item has the id.
+            AuthorizationException: its session has no turn running, as
+                `PilotWorkService.register_debrief` refuses it.
+            InvalidOperationException: its start has given its session no
+                environment yet, or it has its debrief already, as
+                `PilotWorkService.register_debrief` refuses it.
+        """
+        worker = self._worker(item_id, f"register the debrief of work item {item_id}")
+        return self.pilot_work_service.register_debrief(worker, debrief, entries)
 
     def work(
         self,

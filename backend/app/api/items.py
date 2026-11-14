@@ -8,7 +8,8 @@ is working on and a block it holds refusing an answer, Done or paste-back (DB
 take over hands a document Pilot is working on to the person (F28.9), and a
 Cancel on a document of a run that holds a block ends the run (DB 297 to
 299). And an item's document, read on its own as the overlay draws it (F28,
-F13.3)."""
+F13.3), and a done work item's debrief, as its Debrief opens it and the full
+debrief shows it (F26.9, F26.10)."""
 
 import uuid
 from typing import Any
@@ -20,7 +21,7 @@ from spectree import Response as SpectreeResponse
 from app.api.caller import caller
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.items import ActionDoneRequestSchema, AnswerRequestSchema
-from app.schemas.timeline import ItemDocumentSchema
+from app.schemas.timeline import DebriefSchema, ItemDocumentSchema
 from app.services.container import ServiceContainer
 from app.services.item_service import ItemService
 from app.services.timeline_service import TimelineService
@@ -54,6 +55,34 @@ def get_item_document(
         404: No item has the id, or it has no document: work and waits
     """
     return timeline_service.item_document(item_id)
+
+
+@items_bp.route("/<uuid:item_id>/debrief", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=DebriefSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    )
+)
+@inject
+def get_item_debrief(
+    item_id: uuid.UUID,
+    timeline_service: TimelineService = Provide[ServiceContainer.timeline_service],
+) -> Any:
+    """Read the done work item's debrief: the stage session's own words, and
+    every entry in its section, the sections derived at this read (F26.9,
+    F26.10; DB 326).
+
+    Returns:
+        200: The debrief
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No work item has the id, it is not done, or its session gave no
+            debrief
+    """
+    return timeline_service.debrief(item_id)
 
 
 @items_bp.route("/<uuid:item_id>/blocks/<block_id>/answer", methods=["POST"])

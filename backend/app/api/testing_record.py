@@ -10,7 +10,7 @@ repository, started in an
 environment of Pilot's own the stage's own controller creates, named for the
 claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
-its effect, and the list of steps it publishes; a pre-ruling pass's questions to a registered document's writer,
+its effect, the list of steps it publishes and the debrief it gives; a pre-ruling pass's questions to a registered document's writer,
 and its clarification run, with the writer's reply or to run; a person's
 answer the brain records through the project's open chat, with
 its effect; the store's update, made or its lift asked, as `update-store`
@@ -42,6 +42,8 @@ from app.schemas.pilot_store import RecordedSchema
 from app.schemas.pilot_work import (
     ProgressSchema,
     ProgressStepSchema,
+    RegisterDebriefRequestSchema,
+    RegisteredDebriefSchema,
     SetProgressRequestSchema,
 )
 from app.schemas.testing_record import (
@@ -660,8 +662,8 @@ def create_progress(
     Returns:
         200: The list as it stands
         400: The body is not a list of at most 100 steps, each a code of 1 to
-            64 characters, a label of 1 to 120 and an optional state, or the
-            stage is prd
+            64 characters, a label of 1 to 120, an optional state and an
+            optional why of 1 to 120, or the stage is prd
         403: Its session has no turn running
         404: No work item has the id
         409: Its session has no environment yet, or a code is repeated,
@@ -671,10 +673,50 @@ def create_progress(
     steps = test_data_service.set_progress(item_id, data.steps)
     return ProgressSchema(
         steps=[
-            ProgressStepSchema(code=step.code, label=step.label, state=step.state_code)
+            ProgressStepSchema(
+                code=step.code, label=step.label, state=step.state_code, why=step.why
+            )
             for step in steps
         ]
     ).model_dump(mode="json"), 200
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/debrief", methods=["POST"])
+@api.validate(
+    json=RegisterDebriefRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_201=RegisteredDebriefSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_debrief(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Store the work item's debrief, the stage session's own words and its
+    entries in the call's order, once, as its worker's `register_debrief`
+    does (F85.5; DB 323 to 325), while the session's turn is in flight; its
+    done line carries the Debrief once the turn ends (DB 329).
+
+    Returns:
+        201: The debrief stored: the number of its entries
+        400: The body is not a debrief of 1 to 16,000 characters and 1 to 500
+            entries, each a section of 1 to 120 characters, a round of 1 or
+            more, a role of 1 to 64, a duration of 0 seconds or more, at most
+            one of words of 1 to 4,000 and passed, and an optional why of 1 to
+            120, or the stage is prd
+        403: Its session has no turn running
+        404: No work item has the id
+        409: Its session has no environment yet, or the work item has its
+            debrief already, nothing changed: the reason
+    """
+    data = RegisterDebriefRequestSchema.model_validate(request.get_json())
+    entries = test_data_service.register_debrief(item_id, data.debrief, data.entries)
+    return RegisteredDebriefSchema(entries=len(entries)).model_dump(mode="json"), 201
 
 
 @testing_record_bp.route("/items/<uuid:item_id>/writer-questions", methods=["POST"])

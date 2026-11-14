@@ -95,9 +95,9 @@ test.describe('The progress button', () => {
     });
 
     expect(await projects.setProgress(work, [step('a', 'done'), step('b', 'active'), step('c')])).toEqual([
-      { code: 'a', label: 'Step a', state: 'done' },
-      { code: 'b', label: 'Step b', state: 'active' },
-      { code: 'c', label: 'Step c', state: 'pending' },
+      { code: 'a', label: 'Step a', state: 'done', why: null },
+      { code: 'b', label: 'Step b', state: 'active', why: null },
+      { code: 'c', label: 'Step c', state: 'pending', why: null },
     ]);
     await expect(item.progress).toHaveText('Step b');
     await expect(item.row).toHaveText('Step b');
@@ -192,8 +192,8 @@ test.describe('The progress button', () => {
     await expect(item.running).toBeVisible();
     await expect(item.progress).toHaveText('Step b');
     expect((await projects.work(project, work)).progress).toEqual([
-      { code: 'a', label: 'Step a', state: 'done' },
-      { code: 'b', label: 'Step b', state: 'active' },
+      { code: 'a', label: 'Step a', state: 'done', why: null },
+      { code: 'b', label: 'Step b', state: 'active', why: null },
     ]);
   });
 

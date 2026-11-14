@@ -21,8 +21,8 @@ from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.pilot_work import (
     AttachedFilesSchema,
     AttachFileRequestSchema,
-    PublishedProgressSchema,
-    PublishedStepSchema,
+    ProgressSchema,
+    ProgressStepSchema,
     RegisterDebriefRequestSchema,
     RegisterDocumentRequestSchema,
     RegisteredDebriefSchema,
@@ -134,7 +134,7 @@ def attach_file(
 @api.validate(
     json=SetProgressRequestSchema,
     resp=SpectreeResponse(
-        HTTP_200=PublishedProgressSchema,
+        HTTP_200=ProgressSchema,
         HTTP_400=ApiErrorResponseSchema,
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
@@ -167,7 +167,7 @@ def set_progress(
 @api.validate(
     json=SetProgressStepRequestSchema,
     resp=SpectreeResponse(
-        HTTP_200=PublishedProgressSchema,
+        HTTP_200=ProgressSchema,
         HTTP_400=ApiErrorResponseSchema,
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
@@ -231,9 +231,9 @@ def register_debrief(
 
 
 def _progress(steps: Sequence[ProgressStep]) -> dict[str, Any]:
-    answer = PublishedProgressSchema(
+    answer = ProgressSchema(
         steps=[
-            PublishedStepSchema(
+            ProgressStepSchema(
                 code=step.code, label=step.label, state=step.state_code, why=step.why
             )
             for step in steps

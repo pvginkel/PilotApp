@@ -1,20 +1,23 @@
 """A project's timeline as a screen draws it (F8, F12, F13, F18, F31, F78); a
 document read on its own, an item's, as it was done (F13.3), the project's
-draft or its handbook (F37.4, F129.4); and the items waiting on a person,
-which a tab's badge counts (F1.4, F94.5)."""
+draft or its handbook (F37.4, F129.4); a done work item's debrief (F26.9,
+F26.10); and the items waiting on a person, which a tab's badge counts (F1.4,
+F94.5)."""
 
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from functools import cache, partial
+from itertools import groupby
+from operator import attrgetter
 from pathlib import PurePosixPath
 from typing import Any, cast
 
 import pilot_dsl as dsl
 from sqlalchemy import ColumnElement, Select, and_, bindparam, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, defer
 
 from app.engine.claims import standing
 from app.engine.documents import ARCHIVE_QUESTION, OPENING, PROSE, awaits_read
@@ -34,6 +37,7 @@ from app.models import (
     Block,
     Chat,
     ClaimAssignment,
+    DebriefEntry,
     Document,
     DocumentVersion,
     Effect,
@@ -83,6 +87,9 @@ from app.schemas.timeline import (
     ClarificationSchema,
     ConfirmationReasonSchema,
     CurrentLineSchema,
+    DebriefEntrySchema,
+    DebriefSchema,
+    DebriefSectionSchema,
     DeferralSchema,
     DocumentLinkSchema,
     DoneCauseCode,
@@ -248,11 +255,13 @@ def _work_rows() -> Select[
     User,
     uuid.UUID,
     datetime,
+    bool,
 ]:
     """`work_status`'s rows, built once, of the work items bound as `ids`:
     each Session with its Environment's id and name, its Work, its Project's
-    pause, the User who stopped it and the id and creation of the job its
-    Retry placed."""
+    pause, the User who stopped it, the id and creation of the job its
+    Retry placed, and whether its item is done with a debrief. The Work's
+    debrief is left unread: the line shows none of it."""
     stopper = aliased(User)
     retry = aliased(AgentSession)
     return (
@@ -265,13 +274,16 @@ def _work_rows() -> Select[
             stopper,
             retry.id,
             retry.created_at,
+            and_(Item.done_at.is_not(None), Work.debrief.is_not(None)),
         )
         .join(Work, Work.id == AgentSession.id)
+        .join(Item, Item.id == AgentSession.id)
         .outerjoin(Environment, Environment.id == AgentSession.environment_id)
         .join(Project, Project.id == AgentSession.project_id)
         .outerjoin(stopper, stopper.id == AgentSession.stopped_by_user_id)
         .outerjoin(retry, retry.id == Work.retried_by_id)
         .where(AgentSession.id.in_(bindparam("ids", expanding=True)))
+        .options(defer(Work.debrief))
     )
 
 
@@ -304,8 +316,9 @@ def work_status(
     none (DB 107). A job's is Pilot's own (F59.1), the setup's and its
     Retries' the setup (F49); a retried one's names the job its Retry
     placed, created at the press. Its progress is its list of
-    steps, in order (F145.1). One Pilot closed for good has its reason as
-    its note (DB 346)."""
+    steps, in order, each with its why (F145.1). One Pilot closed for good has
+    its reason as its note (DB 346). One done whose session gave its debrief
+    says so, and one still open never does (DB 329)."""
     if not item_ids:
         return {}
     rows = db.execute(_work_rows(), {"ids": list(item_ids)}).all()
@@ -316,7 +329,9 @@ def work_status(
         .order_by(ProgressStep.work_id, ProgressStep.position)
     ):
         progress.setdefault(step.work_id, []).append(
-            ProgressStepSchema(code=step.code, label=step.label, state=step.state_code)
+            ProgressStepSchema(
+                code=step.code, label=step.label, state=step.state_code, why=step.why
+            )
         )
     failed = [
         session.id for session, *_ in rows if session.state_code is SessionState.FAILED
@@ -475,6 +490,7 @@ def work_status(
                 None if retry_id is None else RetriedSchema(id=retry_id, at=retried_at)
             ),
             progress=progress.get(session.id, []),
+            debriefed=debriefed,
         )
         for (
             session,
@@ -485,8 +501,31 @@ def work_status(
             stopped_by,
             retry_id,
             retried_at,
+            debriefed,
         ) in rows
     }
+
+
+def debrief_sections(entries: Iterable[DebriefEntry]) -> list[DebriefSectionSchema]:
+    """The full debrief's sections, derived from `entries` in their order
+    (F26.10; DB 326): each run of consecutive entries of one section's name,
+    by that name, with the number of distinct rounds in it and the sum of its
+    entries' times; the same name further on starts a section of its own."""
+    sections: list[DebriefSectionSchema] = []
+    for name, run in groupby(entries, key=attrgetter("section")):
+        section = list(run)
+        sections.append(
+            DebriefSectionSchema(
+                name=name,
+                rounds=len({entry.round for entry in section}),
+                duration=sum(entry.duration for entry in section),
+                entries=[
+                    DebriefEntrySchema.model_validate(entry, from_attributes=True)
+                    for entry in section
+                ],
+            )
+        )
+    return sections
 
 
 def writer_asked(
@@ -664,6 +703,30 @@ class TimelineService:
                 update={"title": parsed.title, "summary": parsed.front_matter.summary}
             )
         return ItemDocumentSchema(project_id=project.id, text=text, **dict(entry))
+
+    def debrief(self, item_id: uuid.UUID) -> DebriefSchema:
+        """The done work item's debrief, as its Debrief opens it and the full
+        debrief shows it (F26.9, F26.10): the stage session's own words, and
+        every entry in its section (`debrief_sections`). An open one shows
+        none (DB 329).
+
+        Raises:
+            RecordNotFoundException: no work item has the id, it is not
+                done, or its session gave no debrief.
+        """
+        debrief = self.db.scalar(
+            select(Work.debrief)
+            .join(Item, Item.id == Work.id)
+            .where(Work.id == item_id, Item.done_at.is_not(None))
+        )
+        if debrief is None:
+            raise RecordNotFoundException("Debrief of work item", str(item_id))
+        entries = self.db.scalars(
+            select(DebriefEntry)
+            .where(DebriefEntry.work_id == item_id)
+            .order_by(DebriefEntry.position)
+        )
+        return DebriefSchema(debrief=debrief, sections=debrief_sections(entries))
 
     def project_document(
         self, project_id: uuid.UUID, role: DocumentRole

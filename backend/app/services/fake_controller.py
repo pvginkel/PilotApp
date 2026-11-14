@@ -439,6 +439,7 @@ class FakeController:
             "put-file": self.put_file,
             "file-text": self.file_text,
             "remove-file": self.remove_file,
+            "session-env": self.session_env,
             "busy": self.busy,
             "play": self.play,
             "finish": self.finish,
@@ -636,6 +637,18 @@ class FakeController:
         with self._changed:
             if self._environment(env_id).files.pop(_pod_path(path), None) is None:
                 raise _no_such_path(path)
+
+    @validate_call
+    def session_env(self, env_id: str, name: str) -> dict[str, str]:
+        """The variables the session's create gave its process, its `env` as
+        given, by name: a work item's `PILOT_MCP_URL` and `PILOT_TOKEN` among
+        them, so that a check calls Pilot's MCP server as the session does."""
+        with self._changed:
+            given = self._session(env_id, name).create_body.get("env") or []
+        return {
+            variable: value
+            for variable, _, value in (entry.partition("=") for entry in given)
+        }
 
     @validate_call
     def busy(self, env_id: str, name: str) -> None:

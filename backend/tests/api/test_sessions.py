@@ -40,8 +40,8 @@ LOCAL_ADMIN = "local-user"
 SUBJECT = "subject-ada"
 
 STEPS = [
-    {"code": "test", "label": "Test", "state": "active"},
-    {"code": "docs", "label": "Docs", "state": "pending"},
+    {"code": "test", "label": "Test", "state": "active", "why": None},
+    {"code": "docs", "label": "Docs", "state": "pending", "why": None},
 ]
 """A work item's list of steps, as its status carries it."""
 

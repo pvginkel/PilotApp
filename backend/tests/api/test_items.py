@@ -8,6 +8,7 @@ F13.3), and a person's request of a wait (F27.3)."""
 import json
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from queue import Empty
 from typing import Any
 
@@ -19,7 +20,16 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.engine.paths import tree_path
-from app.models import Document, Environment, Item, Project, User, WaitFiring
+from app.models import (
+    DebriefEntry,
+    Document,
+    Environment,
+    Item,
+    Project,
+    User,
+    WaitFiring,
+    Work,
+)
 from app.models.reference import FiringCause, ProjectState, SessionState
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.schemas.timeline import ItemDocumentSchema
@@ -287,6 +297,146 @@ class TestGetItemDocument:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.get(f"{ITEMS}/{uuid.uuid4()}/document").status_code == 401
+
+
+def _debriefed(
+    container: ServiceContainer,
+    session: Session,
+    camp: Project,
+    run: models.Session,
+    *,
+    done: bool,
+) -> None:
+    """The run's work item, its debrief given with two entries, its turn
+    ended where `done`."""
+    container.record_service().place_work(
+        camp, run, "Build the camp", repo="example/Camp"
+    )
+    session.get_one(Work, run.id).debrief = "It went well, if slowly."
+    session.add_all(
+        [
+            DebriefEntry(
+                work_id=run.id,
+                position=1,
+                section="P1 · The client",
+                round=1,
+                role="code-writer",
+                duration=540,
+                words="Fine.",
+            ),
+            DebriefEntry(
+                work_id=run.id,
+                position=2,
+                section="Completion check",
+                round=2,
+                role="sweep",
+                duration=600,
+                passed=False,
+                why="The sweep went red",
+            ),
+        ]
+    )
+    session.flush()
+    if done:
+        container.record_service().work_done(
+            run.id, datetime(2026, 11, 14, 9, 30, tzinfo=UTC)
+        )
+
+
+@pytest.mark.usefixtures("person")
+class TestGetItemDebrief:
+    def test_a_done_work_items_debrief_is_answered_in_its_sections(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        _debriefed(container, session, camp, run, done=True)
+        _sign_in(client)
+
+        response = client.get(f"{ITEMS}/{run.id}/debrief")
+
+        assert (response.status_code, response.get_json()) == (
+            200,
+            {
+                "debrief": "It went well, if slowly.",
+                "sections": [
+                    {
+                        "name": "P1 · The client",
+                        "rounds": 1,
+                        "duration": 540,
+                        "entries": [
+                            {
+                                "round": 1,
+                                "role": "code-writer",
+                                "duration": 540,
+                                "words": "Fine.",
+                                "passed": None,
+                                "why": None,
+                            }
+                        ],
+                    },
+                    {
+                        "name": "Completion check",
+                        "rounds": 1,
+                        "duration": 600,
+                        "entries": [
+                            {
+                                "round": 2,
+                                "role": "sweep",
+                                "duration": 600,
+                                "words": None,
+                                "passed": False,
+                                "why": "The sweep went red",
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+
+    def test_an_open_work_item_and_an_unknown_id_have_none(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        """DB 329: no work item shows its debrief while it runs."""
+        _debriefed(container, session, camp, run, done=False)
+        _sign_in(client)
+
+        for item_id in (run.id, uuid.uuid4()):
+            response = client.get(f"{ITEMS}/{item_id}/debrief")
+
+            assert response.status_code == 404
+            assert _error(response) == f"Debrief of work item {item_id} was not found"
+
+    def test_an_id_that_is_no_uuid_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        assert client.get(f"{ITEMS}/camp/debrief").status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        _debriefed(container, session, camp, run, done=True)
+        _sign_in(client, roles=())
+
+        assert client.get(f"{ITEMS}/{run.id}/debrief").status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.get(f"{ITEMS}/{uuid.uuid4()}/debrief").status_code == 401
 
 
 @pytest.mark.usefixtures("person")

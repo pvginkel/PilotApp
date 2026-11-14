@@ -1264,6 +1264,162 @@
         "title": "OverruleKind",
         "type": "string"
       },
+      "DebriefSchema.1fdd8ae": {
+        "description": "A done work item's debrief, as its Debrief opens it and the full debrief\nshows it (F26.9, F26.10).",
+        "properties": {
+          "debrief": {
+            "description": "The stage session's own account of how the run went, as given",
+            "examples": [
+              "It went well, if slowly: the second review was worth it."
+            ],
+            "title": "Debrief",
+            "type": "string"
+          },
+          "sections": {
+            "description": "Its entries in their sections, in the order given",
+            "items": {
+              "$ref": "#/components/schemas/DebriefSchema.1fdd8ae.DebriefSectionSchema"
+            },
+            "title": "Sections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "debrief",
+          "sections"
+        ],
+        "title": "DebriefSchema",
+        "type": "object"
+      },
+      "DebriefSchema.1fdd8ae.DebriefEntrySchema": {
+        "description": "One account of a work item's debrief, its values as the workflow gave\nthem (F85.5; DB 326).",
+        "properties": {
+          "duration": {
+            "description": "The time its turn took, in whole seconds",
+            "examples": [
+              540
+            ],
+            "title": "Duration",
+            "type": "integer"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A pass or a fail in place of words; null with `words` and with neither",
+            "examples": [
+              false
+            ],
+            "title": "Passed"
+          },
+          "role": {
+            "description": "Whose account it is",
+            "examples": [
+              "code-reviewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "round": {
+            "description": "Its round of its section, 1 or more",
+            "examples": [
+              2
+            ],
+            "title": "Round",
+            "type": "integer"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the round it opens was needed; null where it opens none",
+            "examples": [
+              "The reviewer found the migration's downgrade left the column"
+            ],
+            "title": "Why"
+          },
+          "words": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account, in its own words; null with `passed` and with neither",
+            "examples": [
+              "The review went quickly; one finding, and a fair one."
+            ],
+            "title": "Words"
+          }
+        },
+        "required": [
+          "round",
+          "role",
+          "duration",
+          "words",
+          "passed",
+          "why"
+        ],
+        "title": "DebriefEntrySchema",
+        "type": "object"
+      },
+      "DebriefSchema.1fdd8ae.DebriefSectionSchema": {
+        "description": "A section of the full debrief: a run of consecutive entries of one\nsection's name, in the order given, derived at the read (F26.10; DB 326).",
+        "properties": {
+          "duration": {
+            "description": "The sum of its entries' times, in whole seconds",
+            "examples": [
+              1260
+            ],
+            "title": "Duration",
+            "type": "integer"
+          },
+          "entries": {
+            "description": "Its entries, in the order given",
+            "items": {
+              "$ref": "#/components/schemas/DebriefSchema.1fdd8ae.DebriefEntrySchema"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "name": {
+            "description": "The section's name, as given",
+            "examples": [
+              "P3 · The client"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "rounds": {
+            "description": "The number of distinct rounds in it",
+            "examples": [
+              2
+            ],
+            "title": "Rounds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "rounds",
+          "duration",
+          "entries"
+        ],
+        "title": "DebriefSectionSchema",
+        "type": "object"
+      },
       "DeploymentTriggerRequestSchema.6b6ce9f": {
         "description": "Request schema for triggering version deployment events in testing mode.",
         "properties": {
@@ -4442,12 +4598,28 @@
             "examples": [
               "active"
             ]
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The short line under its label; none where not given",
+            "examples": [
+              "The reviewer found the migration's downgrade left the column"
+            ],
+            "title": "Why"
           }
         },
         "required": [
           "code",
           "label",
-          "state"
+          "state",
+          "why"
         ],
         "title": "ProgressStepSchema",
         "type": "object"
@@ -4949,6 +5121,11 @@
             ],
             "description": "Its one current line; null while no turn is in flight"
           },
+          "debriefed": {
+            "description": "Whether it is done and its session gave its debrief (F85.5), which the Debrief on its done line opens (F26.6, F26.9); false while it is open, for a run that gave none and for a job",
+            "title": "Debriefed",
+            "type": "boolean"
+          },
           "environment": {
             "anyOf": [
               {
@@ -5114,7 +5291,8 @@
           "stopped_cause",
           "nudge_owed",
           "retried",
-          "progress"
+          "progress",
+          "debriefed"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -5626,12 +5804,28 @@
             "examples": [
               "active"
             ]
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The short line under its label; none where not given",
+            "examples": [
+              "The reviewer found the migration's downgrade left the column"
+            ],
+            "title": "Why"
           }
         },
         "required": [
           "code",
           "label",
-          "state"
+          "state",
+          "why"
         ],
         "title": "ProgressStepSchema",
         "type": "object"
@@ -7099,85 +7293,6 @@
           "address"
         ],
         "title": "ProjectLookupQuerySchema",
-        "type": "object"
-      },
-      "PublishedProgressSchema.ce33d8b": {
-        "description": "The work item's list of steps as it stands, as its worker's call\nanswers it.",
-        "properties": {
-          "steps": {
-            "description": "Its steps, in order",
-            "items": {
-              "$ref": "#/components/schemas/PublishedProgressSchema.ce33d8b.PublishedStepSchema"
-            },
-            "title": "Steps",
-            "type": "array"
-          }
-        },
-        "required": [
-          "steps"
-        ],
-        "title": "PublishedProgressSchema",
-        "type": "object"
-      },
-      "PublishedProgressSchema.ce33d8b.ProgressState": {
-        "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
-        "enum": [
-          "pending",
-          "active",
-          "done"
-        ],
-        "title": "ProgressState",
-        "type": "string"
-      },
-      "PublishedProgressSchema.ce33d8b.PublishedStepSchema": {
-        "description": "A step of the work item's list, as its worker's call answers it.",
-        "properties": {
-          "code": {
-            "description": "The run's name for the step",
-            "examples": [
-              "P3.review-2"
-            ],
-            "title": "Code",
-            "type": "string"
-          },
-          "label": {
-            "description": "The step's words on the tile",
-            "examples": [
-              "P3 · second review"
-            ],
-            "title": "Label",
-            "type": "string"
-          },
-          "state": {
-            "$ref": "#/components/schemas/PublishedProgressSchema.ce33d8b.ProgressState",
-            "description": "Where it stands",
-            "examples": [
-              "active"
-            ]
-          },
-          "why": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The short line under its label; none where not given",
-            "examples": [
-              "The reviewer found the migration's downgrade left the column"
-            ],
-            "title": "Why"
-          }
-        },
-        "required": [
-          "code",
-          "label",
-          "state",
-          "why"
-        ],
-        "title": "PublishedStepSchema",
         "type": "object"
       },
       "PushEndpointQuerySchema.efd40b8": {
@@ -10241,12 +10356,28 @@
             "examples": [
               "active"
             ]
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The short line under its label; none where not given",
+            "examples": [
+              "The reviewer found the migration's downgrade left the column"
+            ],
+            "title": "Why"
           }
         },
         "required": [
           "code",
           "label",
-          "state"
+          "state",
+          "why"
         ],
         "title": "ProgressStepSchema",
         "type": "object"
@@ -11122,6 +11253,11 @@
             ],
             "description": "Its one current line; null while no turn is in flight"
           },
+          "debriefed": {
+            "description": "Whether it is done and its session gave its debrief (F85.5), which the Debrief on its done line opens (F26.6, F26.9); false while it is open, for a run that gave none and for a job",
+            "title": "Debriefed",
+            "type": "boolean"
+          },
           "environment": {
             "anyOf": [
               {
@@ -11287,7 +11423,8 @@
           "stopped_cause",
           "nudge_owed",
           "retried",
-          "progress"
+          "progress",
+          "debriefed"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -11773,6 +11910,11 @@
             ],
             "description": "Its one current line; null while no turn is in flight"
           },
+          "debriefed": {
+            "description": "Whether it is done and its session gave its debrief (F85.5), which the Debrief on its done line opens (F26.6, F26.9); false while it is open, for a run that gave none and for a job",
+            "title": "Debriefed",
+            "type": "boolean"
+          },
           "environment": {
             "anyOf": [
               {
@@ -11938,7 +12080,8 @@
           "stopped_cause",
           "nudge_owed",
           "retried",
-          "progress"
+          "progress",
+          "debriefed"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -12220,12 +12363,28 @@
             "examples": [
               "active"
             ]
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The short line under its label; none where not given",
+            "examples": [
+              "The reviewer found the migration's downgrade left the column"
+            ],
+            "title": "Why"
           }
         },
         "required": [
           "code",
           "label",
-          "state"
+          "state",
+          "why"
         ],
         "title": "ProgressStepSchema",
         "type": "object"
@@ -12883,6 +13042,84 @@
           }
         ],
         "summary": "Cancel a document of a run that holds a block of another document, as the signed-in person, while the document is theirs and nothing of the run is in flight: every open document of the run is done at once, `cancelled`, by them, with no Undo, no write-back and no continuation, so that the run is ended and the blocks it held are theirs again.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/debrief": {
+      "get": {
+        "description": "Returns:     200: The debrief     401: No one is signed in     403: The caller lacks the editor role     404: No work item has the id, it is not done, or its session gave no         debrief",
+        "operationId": "get__api_items_{item_id}_debrief",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebriefSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the done work item's debrief: the stage session's own words, and every entry in its section, the sections derived at this read (F26.9, F26.10; DB 326).",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -17676,6 +17913,94 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/items/{item_id}/debrief": {
+      "post": {
+        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120, or the stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or the work item has its         debrief already, nothing changed: the reason",
+        "operationId": "post__api_testing_items_{item_id}_debrief",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDebriefRequestSchema.ce33d8b"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredDebriefSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Store the work item's debrief, the stage session's own words and its entries in the call's order, once, as its worker's `register_debrief` does (F85.5; DB 323 to 325), while the session's turn is in flight; its done line carries the Debrief once the turn ends (DB 329).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/items/{item_id}/done": {
       "post": {
         "description": "Returns:     204: The document is done     400: The stage is prd     404: No item has the id     409: The project has no session, the item is no document or is done,         or a block of it is unanswered",
@@ -17739,7 +18064,7 @@
     },
     "/api/testing/items/{item_id}/progress": {
       "post": {
-        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120 and an optional state, or the         stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or a code is repeated,         nothing changed: the reason",
+        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120, an optional state and an         optional why of 1 to 120, or the stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or a code is repeated,         nothing changed: the reason",
         "operationId": "post__api_testing_items_{item_id}_progress",
         "parameters": [
           {
@@ -21560,7 +21885,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublishedProgressSchema.ce33d8b"
+                  "$ref": "#/components/schemas/ProgressSchema.ce33d8b"
                 }
               }
             },
@@ -21629,7 +21954,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PublishedProgressSchema.ce33d8b"
+                  "$ref": "#/components/schemas/ProgressSchema.ce33d8b"
                 }
               }
             },
