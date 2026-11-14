@@ -4,12 +4,18 @@
  * Maintains a single EventSource connection to the SSE endpoint and forwards
  * events to all connected tabs via MessagePort. The backend sends all domain
  * events as unnamed data-only messages with a {type, payload} envelope, so the
- * worker uses a single `onmessage` handler to capture them. Two control signals
- * are named events: `ready` (no data) once the backend has accepted the stream,
- * and `rejected` when it refused it.
+ * worker uses a single `onmessage` handler to capture them. Three control
+ * signals are named events: `ready` once the backend has accepted the stream,
+ * its data the heartbeat's cadence (`{"heartbeat": <seconds>}`), `heartbeat`
+ * (no data) after each cadence the stream was idle, and `rejected` when the
+ * backend refused it.
  *
  * The stream counts as connected on `ready`, not on `onopen`: a refused stream
- * opens too, before its `rejected` event.
+ * opens too, before its `rejected` event. It counts as gone once SILENT_BEATS
+ * of its cadences pass with no frame, a connection that died without saying
+ * so: the worker closes it, tells the tabs `disconnected` and opens another at
+ * once. A stream that fails is closed and opened again after a backoff that
+ * grows to at most 5 s.
  *
  * A `rejected` stream is terminal: the worker closes it and does not reconnect
  * until a tab sends `reconnect` (after refreshing the session).
@@ -48,7 +54,17 @@ let eventSource: EventSource | null = null;
 let currentRequestId: string | null = null;
 let retryCount = 0;
 let retryTimeout: ReturnType<typeof setTimeout> | null = null;
-const maxRetryDelay = 60000; // 60 seconds
+const maxRetryDelay = 5000;
+
+// The stream counts as gone after this many of its heartbeat's cadences with
+// no frame.
+const SILENT_BEATS = 2;
+
+// The cadence the current stream's `ready` named, in milliseconds; null before
+// it, and for a backend whose `ready` names none, whose stream is not timed.
+let heartbeatMs: number | null = null;
+let lastFrameAt = 0;
+let silenceTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Cache the last version event so late-joining tabs receive it immediately
 let lastVersionPayload: unknown = null;
@@ -102,6 +118,41 @@ function hasTestModePorts(): boolean {
 }
 
 /**
+ * Stop timing the stream's silence.
+ */
+function stopSilenceWatch(): void {
+  if (silenceTimeout) {
+    clearTimeout(silenceTimeout);
+    silenceTimeout = null;
+  }
+  heartbeatMs = null;
+}
+
+/**
+ * Look at how long the stream has been silent: once SILENT_BEATS cadences have
+ * passed with no frame, close it, tell the tabs, and open another at once;
+ * else look again when they would have.
+ */
+function watchSilence(): void {
+  if (heartbeatMs === null) {
+    return;
+  }
+  const left = lastFrameAt + heartbeatMs * SILENT_BEATS - performance.now();
+  if (left > 0) {
+    silenceTimeout = setTimeout(watchSilence, left);
+    return;
+  }
+
+  console.debug('SSE worker: Stream silent, reconnecting');
+  const message: WorkerMessage = { type: 'disconnected', reason: 'silent' };
+  if (hasTestModePorts()) {
+    message.__testEvent = createTestEvent('connection', 'close', 'silent');
+  }
+  broadcast(message);
+  createEventSource();
+}
+
+/**
  * Close the SSE connection and clean up resources
  */
 function closeConnection(): void {
@@ -113,6 +164,7 @@ function closeConnection(): void {
     clearTimeout(retryTimeout);
     retryTimeout = null;
   }
+  stopSilenceWatch();
   currentRequestId = null;
   retryCount = 0;
   lastVersionPayload = null;
@@ -153,6 +205,11 @@ function createEventSource(): void {
     eventSource.close();
     eventSource = null;
   }
+  if (retryTimeout) {
+    clearTimeout(retryTimeout);
+    retryTimeout = null;
+  }
+  stopSilenceWatch();
 
   readyReceived = false;
 
@@ -165,7 +222,12 @@ function createEventSource(): void {
 
   console.debug(`SSE worker: Creating EventSource for requestId=${currentRequestId}`);
 
-  eventSource = new EventSource(url);
+  const source = new EventSource(url);
+  eventSource = source;
+
+  const heard = () => {
+    lastFrameAt = performance.now();
+  };
 
   eventSource.onopen = () => {
     // Open is not connected: the backend may still refuse the stream. Tabs hear
@@ -177,6 +239,8 @@ function createEventSource(): void {
   // Single onmessage handler captures all envelope events from the backend.
   // Each message contains {type, payload} — unwrap and broadcast to tabs.
   eventSource.onmessage = (e: MessageEvent) => {
+    heard();
+
     let envelope: { type: string; payload: unknown };
     try {
       envelope = JSON.parse(e.data);
@@ -211,10 +275,14 @@ function createEventSource(): void {
     broadcast(message);
   };
 
-  // The backend sends `ready` as a named event with no data once it has
-  // accepted the stream. Don't read `event.data` here.
-  eventSource.addEventListener('ready', () => {
+  // The backend sends `ready` as a named event once it has accepted the
+  // stream, its data the heartbeat's cadence in seconds. From it on, the
+  // stream is timed.
+  eventSource.addEventListener('ready', (event) => {
     readyReceived = true;
+    heard();
+    heartbeatMs = heartbeatOf((event as MessageEvent).data);
+    watchSilence();
 
     const message: WorkerMessage = {
       type: 'connected',
@@ -228,6 +296,12 @@ function createEventSource(): void {
     }
 
     broadcast(message);
+  });
+
+  // The backend sends `heartbeat` (no data) after each cadence the stream was
+  // idle.
+  eventSource.addEventListener('heartbeat', () => {
+    heard();
   });
 
   // The backend sends `rejected` as a named event with a JSON payload
@@ -285,6 +359,13 @@ function createEventSource(): void {
 
     console.error('SSE worker: EventSource error:', event);
 
+    // Closed, so that the browser does not reconnect it on its own: the
+    // backoff below is the one retry.
+    source.close();
+    eventSource = null;
+    readyReceived = false;
+    stopSilenceWatch();
+
     const errorMessage: WorkerMessage = {
       type: 'error',
       error: 'SSE connection error',
@@ -300,6 +381,19 @@ function createEventSource(): void {
 
     scheduleReconnect();
   };
+}
+
+/**
+ * The cadence a `ready` event's data names, in milliseconds, or null where it
+ * names none.
+ */
+function heartbeatOf(data: unknown): number | null {
+  try {
+    const { heartbeat } = JSON.parse(String(data)) as { heartbeat?: unknown };
+    return typeof heartbeat === 'number' && heartbeat > 0 ? heartbeat * 1000 : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
