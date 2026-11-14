@@ -16,11 +16,11 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 import requests
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError
 from pydantic.alias_generators import to_camel
 from urllib3.exceptions import HTTPError
 
@@ -54,14 +54,6 @@ EnvironmentStatus = Literal[
 HeadlessStatus = Literal["starting", "idle", "busy", "interrupting", "ended", "error"]
 EnvironmentWait = Literal["ready", "settled"]
 UsageWindowCode = Literal["five_hour", "seven_day"]
-StaleReason = Literal[
-    "no-reading-yet",
-    "no-credential",
-    "token-expired",
-    "token-rejected",
-    "rate-limited",
-    "endpoint-error",
-]
 
 
 class ControllerProblemType(StrEnum):
@@ -159,15 +151,18 @@ class _Capabilities(_ControllerModel):
     capacity_exempt: _Enabled
 
 
-class ControllerEnvironment(_ControllerModel):
-    """An environment as the controller projects it."""
+class ReportedEnvironment(_ControllerModel):
+    """An environment as the controller projects it, its status in the
+    controller's words. The fleet stream and its connect's list give one in a
+    status Pilot does not know as this alone, every other as a
+    ControllerEnvironment."""
 
     env_id: str
     name: str | None = None
     managed_by: str | None = None
     """The client that manages it, recorded by a create with `managed: true`."""
     repo: str
-    status: EnvironmentStatus
+    status: str
     pod: ControllerPod | None = None
     setup_running: bool
     capabilities: _Capabilities
@@ -179,21 +174,44 @@ class ControllerEnvironment(_ControllerModel):
         return self.capabilities.capacity_exempt.enabled
 
 
+class ControllerEnvironment(ReportedEnvironment):
+    """An environment as the controller projects it, in a status Pilot knows."""
+
+    status: EnvironmentStatus
+
+
+_Environment = Annotated[
+    ControllerEnvironment | ReportedEnvironment, Field(union_mode="left_to_right")
+]
+"""An environment in a status Pilot knows, else one in any other: a projection
+that is neither fails the parse."""
+
+
 class EnvironmentList(_ControllerModel):
-    items: list[ControllerEnvironment]
+    items: list[_Environment]
     unprojectable: list[str]
     """Environments still there that the controller could not describe."""
 
 
-class SessionView(_ControllerModel):
-    """A row of an environment's session set: its list, and a `sessions` frame."""
+class ReportedSession(_ControllerModel):
+    """A row of an environment's session set, its state and mode in the
+    controller's words. A `sessions` frame gives one in a state or a mode Pilot
+    does not know as this alone, every other as a SessionView."""
 
     name: str
     title: str
-    state: Literal["running", "stopped"]
-    mode: Literal["interactive", "headless"]
+    state: str
+    mode: str
     working: bool
     session_id: str | None = None
+
+
+class SessionView(ReportedSession):
+    """A row of an environment's session set, in a state and a mode Pilot
+    knows: its list, and a `sessions` frame."""
+
+    state: Literal["running", "stopped"]
+    mode: Literal["interactive", "headless"]
 
 
 class SessionSnapshot(_ControllerModel):
@@ -239,13 +257,21 @@ class HeadlessCreateRequest(_ControllerModel):
     non-empty list implies `sandbox`."""
 
 
-class ControllerUsageWindow(_ControllerModel):
-    """One window's figure in a usage reading."""
+class ReportedUsageWindow(_ControllerModel):
+    """One window's figure in a usage reading, its code in the controller's
+    words. A reading gives a window whose code Pilot does not know as this
+    alone, every other as a ControllerUsageWindow."""
 
-    window: UsageWindowCode
+    window: str
     share: float
     """The window's use as a fraction, unclamped: it may pass 1."""
     resets_at: datetime
+
+
+class ControllerUsageWindow(ReportedUsageWindow):
+    """One window's figure in a usage reading, a window Pilot knows."""
+
+    window: UsageWindowCode
 
 
 class ControllerUsageReading(_ControllerModel):
@@ -255,8 +281,14 @@ class ControllerUsageReading(_ControllerModel):
     """When the endpoint answered these figures; None before its first answer."""
     stale: bool
     """The latest poll got no answer: the figures are the last answer's."""
-    stale_reason: StaleReason | None
-    windows: list[ControllerUsageWindow]
+    stale_reason: str | None
+    """Why, in the controller's words: the log's alone (DB decision 67)."""
+    windows: list[
+        Annotated[
+            ControllerUsageWindow | ReportedUsageWindow,
+            Field(union_mode="left_to_right"),
+        ]
+    ]
     """A window the endpoint left out is missing; empty before the first answer."""
 
 
@@ -321,7 +353,8 @@ ResponseFrame = RawFrame | ResultFrame | IncompleteFrame
 
 @dataclass(frozen=True)
 class StateFrame:
-    environment: ControllerEnvironment
+    environment: ReportedEnvironment
+    """A ControllerEnvironment, unless its status is one Pilot does not know."""
 
 
 @dataclass(frozen=True)
@@ -334,7 +367,8 @@ class SessionsFrame:
     """An environment's whole session set."""
 
     env_id: str
-    sessions: tuple[SessionView, ...]
+    sessions: tuple[ReportedSession, ...]
+    """Each a SessionView, unless its state or mode is one Pilot does not know."""
 
 
 @dataclass(frozen=True)
@@ -368,7 +402,13 @@ class _GoneData(_ControllerModel):
 
 class _SessionsData(_ControllerModel):
     env_id: str
-    sessions: list[SessionView]
+    sessions: list[
+        Annotated[SessionView | ReportedSession, Field(union_mode="left_to_right")]
+    ]
+
+
+class _StateData(RootModel[_Environment]):
+    pass
 
 
 class _ProblemData(_ControllerModel):
@@ -1014,7 +1054,7 @@ def _response_frame(event: _Event, operation: str) -> ResponseFrame:
 
 def _fleet_frame(event: _Event, operation: str) -> FleetFrame | None:
     if event.name == "state":
-        return StateFrame(_parse(ControllerEnvironment, event.data, operation))
+        return StateFrame(_parse(_StateData, event.data, operation).root)
     if event.name == "gone":
         return GoneFrame(_parse(_GoneData, event.data, operation).env_id)
     if event.name == "sessions":

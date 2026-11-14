@@ -8,8 +8,10 @@ latest recorded and its figures or `stale` differ from that one's, as a Usage
 Reading with a Window Share per window (DB 274): after a restart, or a
 reconnect, the seed is compared with the last recorded. A reading with no
 figures, `no-reading-yet` from a controller just started, leaves the latest
-as it is. Why a reading is stale is the log's alone. Each reading recorded is
-told to the listeners, the halts' watcher, once its commit is done.
+as it is, as does one whose every window is one Pilot does not know: such a
+window is logged and left out. Why a reading is stale is the log's alone. Each
+reading recorded is told to the listeners, the halts' watcher, once its commit
+is done.
 
 Two processes overlapping in a roll each receive every reading: the table's
 lock, held from the comparison to the commit, lets one of them record it.
@@ -30,7 +32,10 @@ from sqlalchemy.orm import Session
 from app.database import scoped_session
 from app.models import UsageReading, WindowShare
 from app.models.reference import UsageWindow
-from app.services.controller_client import ControllerUsageReading
+from app.services.controller_client import (
+    ControllerUsageReading,
+    ControllerUsageWindow,
+)
 
 if TYPE_CHECKING:
     from app.services.container import ServiceContainer
@@ -120,7 +125,16 @@ class UsageService:
         """Record the reading the controller served when it is one to record,
         and hold its figures unless they are older than the latest recorded;
         a reading recorded tells the listeners once its commit is done."""
-        if reading.taken_at is None or not reading.windows:
+        windows: list[ControllerUsageWindow] = []
+        for window in reading.windows:
+            if isinstance(window, ControllerUsageWindow):
+                windows.append(window)
+            else:
+                logger.warning(
+                    "Usage window %s is one Pilot does not know: left out",
+                    window.window,
+                )
+        if reading.taken_at is None or not windows:
             logger.info(
                 "Usage reading without figures (%s): the latest recorded stands",
                 reading.stale_reason,
@@ -131,7 +145,7 @@ class UsageService:
             reading.stale,
             {
                 UsageWindow(window.window): WindowFigure(window.share, window.resets_at)
-                for window in reading.windows
+                for window in windows
             },
         )
         recorded: int | None = None

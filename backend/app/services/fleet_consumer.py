@@ -5,6 +5,10 @@ readings handed to the usage service (design 4 §6).
 On every connect it subscribes to `/stream`, lists the environments, applies the
 list, and then the frames. It updates the rows that exist and creates none.
 
+An environment's status or a session's state or mode Pilot does not know is
+logged and never fails the stream: such an environment's row takes the
+controller's word for its status, and `environment()` gives none for it.
+
 The stream down is the controller unreachable (design 2 §13.4): its failure to
 open or its drop turns the outage on, and its reconnect turns it off.
 """
@@ -27,6 +31,8 @@ from app.services.controller_client import (
     EnvironmentList,
     FleetFrame,
     GoneFrame,
+    ReportedEnvironment,
+    ReportedSession,
     SessionsFrame,
     SessionView,
     StateFrame,
@@ -71,12 +77,12 @@ class FleetConsumer:
         self._outage = controller_outage
         self._lock = threading.Lock()
         self._environments: dict[str, ControllerEnvironment] = {}
-        self._sessions: dict[str, tuple[SessionView, ...]] = {}
+        self._sessions: dict[str, tuple[ReportedSession, ...]] = {}
         supervisor.register_job(
             FLEET_JOB, needs_controller=True, reconcile=self._reconcile
         )
 
-    def sessions(self, env_id: str) -> tuple[SessionView, ...] | None:
+    def sessions(self, env_id: str) -> tuple[ReportedSession, ...] | None:
         """The environment's session set, as the latest `sessions` frame gave it;
         None while the stream is down, and for an environment it has not given."""
         with self._lock:
@@ -84,7 +90,8 @@ class FleetConsumer:
 
     def environment(self, env_id: str) -> ControllerEnvironment | None:
         """The environment as the latest list or `state` frame gave it; None
-        while the stream is down, and for an environment it has not given."""
+        while the stream is down, for an environment it has not given, and for
+        one in a status Pilot does not know."""
         with self._lock:
             return self._environments.get(env_id)
 
@@ -128,9 +135,15 @@ class FleetConsumer:
         reported = sorted(listing.items, key=lambda environment: environment.env_id)
         listed = {environment.env_id for environment in reported}
         listed.update(listing.unprojectable)
+        known: list[ControllerEnvironment] = []
+        for environment in reported:
+            if isinstance(environment, ControllerEnvironment):
+                known.append(environment)
+            else:
+                _unknown_status(environment)
         with self._lock:
             self._environments.update(
-                (environment.env_id, environment) for environment in reported
+                (environment.env_id, environment) for environment in known
             )
         with scoped_session(self._container) as db:
             for environment in reported:
@@ -144,9 +157,15 @@ class FleetConsumer:
 
     def _apply(self, frame: FleetFrame) -> None:
         match frame:
-            case StateFrame(environment=environment):
+            case StateFrame(environment=ControllerEnvironment() as environment):
                 with self._lock:
                     self._environments[environment.env_id] = environment
+                with scoped_session(self._container) as db:
+                    _report(db, environment, datetime.now(UTC))
+            case StateFrame(environment=environment):
+                _unknown_status(environment)
+                with self._lock:
+                    self._environments.pop(environment.env_id, None)
                 with scoped_session(self._container) as db:
                     _report(db, environment, datetime.now(UTC))
             case GoneFrame(env_id=env_id):
@@ -161,13 +180,31 @@ class FleetConsumer:
                         .execution_options(synchronize_session=False)
                     )
             case SessionsFrame(env_id=env_id, sessions=sessions):
+                for view in sessions:
+                    if not isinstance(view, SessionView):
+                        logger.warning(
+                            "Session %s of environment %s is in a state or a mode "
+                            "Pilot does not know: %s, %s",
+                            view.name,
+                            env_id,
+                            view.state,
+                            view.mode,
+                        )
                 with self._lock:
                     self._sessions[env_id] = sessions
             case UsageFrame(reading=reading):
                 self._container.usage_service().receive(reading)
 
 
-def _report(db: Session, environment: ControllerEnvironment, seen_at: datetime) -> None:
+def _unknown_status(environment: ReportedEnvironment) -> None:
+    logger.warning(
+        "Environment %s is in a status Pilot does not know: %s",
+        environment.env_id,
+        environment.status,
+    )
+
+
+def _report(db: Session, environment: ReportedEnvironment, seen_at: datetime) -> None:
     """Update the environment's row, if Pilot has one, from the controller's
     report; an update holds the row's lock. An exempt environment is never
     armed (DB Environment `stop_due_at`)."""

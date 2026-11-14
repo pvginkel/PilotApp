@@ -55,9 +55,9 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
 
-from pydantic import AwareDatetime, ValidationError, validate_call
+from pydantic import AfterValidator, AwareDatetime, ValidationError, validate_call
 from werkzeug.exceptions import HTTPException
 from werkzeug.routing import Map, Rule
 from werkzeug.wrappers import Request, Response
@@ -69,7 +69,6 @@ from app.services.controller_client import (
     WAIT_MS_CAP,
     EnvironmentStatus,
     HeadlessStatus,
-    UsageWindowCode,
 )
 
 if TYPE_CHECKING:
@@ -134,15 +133,23 @@ create records as the environment's `managedBy`."""
 
 _KEEPALIVE = b": keepalive\n\n"
 
-StaleCause = Literal[
-    "no-credential", "token-expired", "token-rejected", "rate-limited", "endpoint-error"
-]
-"""Why a poll that ran got no answer: the stale reasons but `no-reading-yet`."""
 
-_WINDOW_LENGTH: dict[UsageWindowCode, timedelta] = {
+def _failed_poll(reason: str) -> str:
+    if reason == "no-reading-yet":
+        raise ValueError("no-reading-yet is no reason of a poll that ran")
+    return reason
+
+
+StaleCause = Annotated[str, AfterValidator(_failed_poll)]
+"""Why a poll that ran got no answer: any stale reason but `no-reading-yet`,
+`no-credential`, `token-expired`, `token-rejected`, `rate-limited` and
+`endpoint-error` among them, or one Pilot does not know."""
+
+_WINDOW_LENGTH: dict[str, timedelta] = {
     "five_hour": timedelta(hours=5),
     "seven_day": timedelta(days=7),
 }
+"""Each window's length; a window of another code is a week long."""
 
 _NO_READING_YET: dict[str, Any] = {
     "takenAt": None,
@@ -203,6 +210,9 @@ class FakeEnvironment:
     capped: bool = False
     unprojectable: bool = False
     unreadable: bool = False
+    served_status: str | None = None
+    """The status it is reported in, in place of `status`: one Pilot may not
+    know."""
     sandbox_profile: bool = True
     """Whether its pod was composed with the sandbox AppArmor profile, which a
     boxed create needs."""
@@ -233,7 +243,7 @@ class FakeEnvironment:
             "managedBy": self.managed_by,
             "repo": self.repo,
             "ref": "main",
-            "status": self.status,
+            "status": self.served_status or self.status,
             "mode": "normal",
             "statusReason": None,
             "pod": pod,
@@ -266,6 +276,9 @@ class FakeSession:
     box: tuple[str, ...] | None = None
     """The roots of its box on its environment's tree, which every turn's spawn
     rebuilds the box from; None for a session with no box."""
+    served_state: str = "running"
+    served_mode: str = "headless"
+    """The state and the mode its view reports: ones Pilot may not know."""
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -286,8 +299,8 @@ class FakeSession:
         return {
             "name": self.name,
             "title": "An example session",
-            "state": "running",
-            "mode": "headless",
+            "state": self.served_state,
+            "mode": self.served_mode,
             "cwd": self.cwd,
             "lastActivityAt": "2026-01-01T00:00:00Z",
             "working": self.status in ("busy", "interrupting"),
@@ -435,6 +448,8 @@ class FakeController:
             "not-whitelisted": self.not_whitelisted,
             "unprojectable": self.unprojectable,
             "unreadable": self.unreadable,
+            "serve-status": self.serve_status,
+            "serve-session": self.serve_session,
             "no-sandbox-profile": self.no_sandbox_profile,
             "put-file": self.put_file,
             "file-text": self.file_text,
@@ -602,6 +617,32 @@ class FakeController:
             self._environment(env_id).unreadable = on
 
     @validate_call
+    def serve_status(self, env_id: str, status: str | None) -> None:
+        """The controller reports the environment in `status`, one Pilot may not
+        know, in its list, its reads and its `state` frames, one of which
+        announces it; None reports its own status again."""
+        with self._changed:
+            environment = self._environment(env_id)
+            environment.served_status = status
+            self._publish(self._state_frame(environment))
+
+    @validate_call
+    def serve_session(
+        self,
+        env_id: str,
+        name: str,
+        state: str = "running",
+        mode: str = "headless",
+    ) -> None:
+        """The controller reports the session in `state` and `mode`, ones Pilot
+        may not know, in its list and its `sessions` frames, one of which
+        announces it."""
+        with self._changed:
+            session = self._session(env_id, name)
+            session.served_state, session.served_mode = state, mode
+            self._publish(self._sessions_frame(env_id))
+
+    @validate_call
     def no_sandbox_profile(self, env_id: str, on: bool = True) -> None:
         """The environment's pod was composed without the sandbox AppArmor
         profile: a boxed create is `409 capability-unavailable`."""
@@ -728,18 +769,23 @@ class FakeController:
         five_hour_resets_at: AwareDatetime | None = None,
         seven_day_resets_at: AwareDatetime | None = None,
         taken_at: AwareDatetime | None = None,
+        other_windows: dict[str, float] | None = None,
     ) -> None:
         """The poll got an answer, taken at `taken_at`, now by default: the
         reading fresh, with each window given a share, a window given none
-        left out. A window resets at the time given, else at the one the last
-        answer served it with, a restart of the controller's between, else its
-        length past `taken_at`. A `usage` frame goes out unless only `takenAt`
-        moved."""
+        left out, and after them each of `other_windows`, a code Pilot may not
+        know, with its share. A window resets at the time given, else at the
+        one the last answer served it with, a restart of the controller's
+        between, else its length past `taken_at`. A `usage` frame goes out
+        unless only `takenAt` moved."""
         taken = (taken_at or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
-        given: dict[UsageWindowCode, tuple[float | None, datetime | None]] = {
+        given: dict[str, tuple[float | None, datetime | None]] = {
             "five_hour": (five_hour, five_hour_resets_at),
             "seven_day": (seven_day, seven_day_resets_at),
         }
+        given.update(
+            (code, (share, None)) for code, share in (other_windows or {}).items()
+        )
         with self._changed:
             windows: list[dict[str, Any]] = []
             for window, (share, resets_at) in given.items():
@@ -749,7 +795,7 @@ class FakeController:
                     resets = _utc_second(resets_at)
                 else:
                     resets = self._window_resets.get(window) or _utc_second(
-                        taken + _WINDOW_LENGTH[window]
+                        taken + _WINDOW_LENGTH.get(window, timedelta(days=7))
                     )
                 windows.append({"window": window, "share": share, "resetsAt": resets})
             self._window_resets = {w["window"]: w["resetsAt"] for w in windows}

@@ -16,7 +16,12 @@ from app.database import scoped_session
 from app.models import Environment, UsageReading, WindowShare
 from app.models.reference import UsageWindow
 from app.services.container import ServiceContainer
-from app.services.controller_client import ControllerClient, HeadlessCreateRequest
+from app.services.controller_client import (
+    ControllerClient,
+    HeadlessCreateRequest,
+    ReportedSession,
+    SessionView,
+)
 from app.services.fleet_consumer import (
     FLEET_STREAM_CONNECTED,
     GONE,
@@ -157,6 +162,103 @@ class TestFleetConsumer:
         consume()
 
         assert _column(container, "env-a", "last_state") == "running"
+
+    def test_one_listed_in_a_status_pilot_does_not_know_keeps_its_words(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        fleet_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        fake_controller.add_environment("env-a", status="running")
+        fake_controller.serve_status("env-a", "hibernating")
+        _add(
+            container,
+            Environment(id="env-a", name="Alpha", exempt=False, last_state="stopped"),
+        )
+
+        consumer, _ = consume()
+
+        assert _column(container, "env-a", "last_state") == "hibernating"
+        assert consumer.environment("env-a") is None
+        assert fleet_log.matching(r"Environment env-a .*") == [
+            "Environment env-a is in a status Pilot does not know: hibernating"
+        ]
+        wait_until(lambda: not container.controller_outage().holds, "the outage off")
+
+    def test_a_status_pilot_does_not_know_leaves_the_stream_up(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        fleet_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        fake_controller.add_environment("env-a", status="running")
+        _add(container, Environment(id="env-a", name="Alpha", exempt=False))
+        consumer, _ = consume()
+        assert consumer.environment("env-a") is not None
+
+        fake_controller.serve_status("env-a", "hibernating")
+
+        wait_until(
+            lambda: _column(container, "env-a", "last_state") == "hibernating",
+            "the controller's word",
+        )
+        assert consumer.environment("env-a") is None
+        fake_controller.serve_status("env-a", None)
+        wait_until(
+            lambda: _column(container, "env-a", "last_state") == "running",
+            "a status Pilot knows again",
+        )
+        known = consumer.environment("env-a")
+        assert known is not None and known.status == "running"
+        assert fleet_log.matching(r"Environment env-a .*") == [
+            "Environment env-a is in a status Pilot does not know: hibernating"
+        ]
+        assert fleet_log.matching(r"Loop fleet raised.*") == []
+        assert len(fleet_log.matching(r"Fleet stream connected.*")) == 1
+        assert not container.controller_outage().holds
+
+    def test_a_session_pilot_does_not_know_leaves_the_stream_up(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        fleet_log: LogWaiter,
+    ) -> None:
+        fake_controller.add_environment("env-a", status="running")
+        consumer, _ = consume()
+        created = committed_controller_client.create_headless_session(
+            "env-a", HeadlessCreateRequest(cwd="/work/Example")
+        )
+        wait_until(lambda: bool(consumer.sessions("env-a")), "the new session set")
+
+        fake_controller.serve_session(
+            "env-a", created.name, state="parked", mode="scheduled"
+        )
+
+        def view() -> ReportedSession:
+            [view] = consumer.sessions("env-a") or ()
+            return view
+
+        wait_until(lambda: view().state == "parked", "the controller's words")
+        assert not isinstance(view(), SessionView)
+        assert (view().name, view().mode, view().working) == (
+            created.name,
+            "scheduled",
+            False,
+        )
+        assert fleet_log.matching(r"Session .* does not know.*") == [
+            f"Session {created.name} of environment env-a is in a state or a mode "
+            "Pilot does not know: parked, scheduled"
+        ]
+        assert fleet_log.matching(r"Loop fleet raised.*") == []
+        assert not committed_app.container.controller_outage().holds
 
     def test_a_state_frame_updates_the_row(
         self,
@@ -632,6 +734,40 @@ class TestUsageReadings:
         assert [shares[UsageWindow.SEVEN_DAY] for _, _, shares in recorded] == (
             recorded_shares
         )
+
+    def test_a_reading_pilot_reads_in_part_leaves_the_stream_up(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        fleet_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        week = UsageWindow.SEVEN_DAY
+        fake_controller.usage(
+            seven_day=0.5, other_windows={"seven_day_opus": 0.3}, taken_at=TAKEN_AT
+        )
+        consume()
+        _recorded(container, 1)
+
+        fake_controller.usage_stale("quota-endpoint-moved")
+        recorded = _recorded(container, 2)
+        fake_controller.usage(
+            other_windows={"seven_day_opus": 0.4},
+            taken_at=TAKEN_AT + timedelta(minutes=20),
+        )
+        fleet_log.wait_for(r"Usage reading without figures \(None\): .*")
+
+        assert recorded == [
+            (TAKEN_AT, False, {week: 0.5}),
+            (TAKEN_AT, True, {week: 0.5}),
+        ]
+        assert _readings(container) == recorded
+        assert len(fleet_log.matching(r".*; stale \(quota-endpoint-moved\)")) == 1
+        assert fleet_log.matching(r"Loop fleet raised.*") == []
+        assert len(fleet_log.matching(r"Fleet stream connected.*")) == 1
+        assert not container.controller_outage().holds
 
 
 class _ListHook(ServedFakeController):

@@ -81,6 +81,8 @@ class TestFakeController:
             "not-whitelisted",
             "unprojectable",
             "unreadable",
+            "serve-status",
+            "serve-session",
             "no-sandbox-profile",
             "put-file",
             "file-text",
@@ -135,6 +137,58 @@ class TestFakeController:
         listing = http.get("/environments", headers=BEARER).get_json()
         assert [item["envId"] for item in listing["items"]] == ["env-2"]
         assert listing["unprojectable"] == ["env-1"]
+
+    def test_an_environment_is_served_in_the_status_given_until_none(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        response = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(response.response)
+        assert next(frames) == b""
+        next(frames)
+        next(frames)
+
+        http.post(
+            "/fake/serve-status", json={"env_id": "env-1", "status": "hibernating"}
+        )
+        served = next(frames)
+        listing = http.get("/environments", headers=BEARER).get_json()
+        read = http.get("/environments/env-1", headers=BEARER).get_json()
+        fake.serve_status("env-1", None)
+        own = next(frames)
+        fake.close()
+        response.close()
+
+        assert served.startswith(b"event: state\n")
+        assert b'"status":"hibernating"' in served
+        assert [item["status"] for item in listing["items"]] == ["hibernating"]
+        assert read["status"] == "hibernating"
+        assert b'"status":"running"' in own
+
+    def test_a_session_is_served_in_the_state_and_mode_given(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        http.post("/environments/env-1/sessions/headless", headers=BEARER)
+
+        http.post(
+            "/fake/serve-session",
+            json={
+                "env_id": "env-1",
+                "name": "claude-1",
+                "state": "parked",
+                "mode": "scheduled",
+            },
+        )
+
+        [view] = http.get("/environments/env-1/sessions", headers=BEARER).get_json()[
+            "sessions"
+        ]
+        assert (view["name"], view["state"], view["mode"]) == (
+            "claude-1",
+            "parked",
+            "scheduled",
+        )
 
     def test_a_verb_on_an_unknown_environment_is_not_found(self, http: Client) -> None:
         response = http.post("/fake/restart", json={"env_id": "env-9"})
@@ -724,7 +778,34 @@ class TestFakeController:
         self, fake: FakeController
     ) -> None:
         with pytest.raises(ValidationError):
-            fake.usage_stale("no-reading-yet")  # type: ignore[arg-type]
+            fake.usage_stale("no-reading-yet")
+
+    def test_usage_stale_takes_a_reason_pilot_does_not_know(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.usage_stale("quota-endpoint-moved")
+
+        assert http.get("/usage", headers=BEARER).get_json() == {
+            **NO_READING_YET,
+            "staleReason": "quota-endpoint-moved",
+        }
+
+    def test_other_windows_are_served_after_the_known_ones(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        taken = datetime(2026, 10, 26, 19, tzinfo=UTC)
+
+        fake.usage(seven_day=0.5, other_windows={"seven_day_opus": 0.2}, taken_at=taken)
+
+        windows = http.get("/usage", headers=BEARER).get_json()["windows"]
+        assert windows == [
+            {"window": "seven_day", "share": 0.5, "resetsAt": "2026-11-02T19:00:00Z"},
+            {
+                "window": "seven_day_opus",
+                "share": 0.2,
+                "resetsAt": "2026-11-02T19:00:00Z",
+            },
+        ]
 
     def test_a_verb_takes_a_reset_in_utc_alone(self, http: Client) -> None:
         naive = http.post(

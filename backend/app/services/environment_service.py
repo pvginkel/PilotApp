@@ -50,6 +50,7 @@ from app.services.controller_client import (
     ControllerEnvironment,
     ControllerProblem,
     ControllerProblemType,
+    ReportedEnvironment,
 )
 from app.services.supervisor import Supervisor
 
@@ -85,7 +86,7 @@ _AT_REST = ("running", *_FAILED_SETTLES)
 
 
 def reported_columns(
-    environment: ControllerEnvironment, seen_at: datetime
+    environment: ReportedEnvironment, seen_at: datetime
 ) -> dict[str, Any]:
     """The columns of an Environment row the controller's report gives (§13.1).
 

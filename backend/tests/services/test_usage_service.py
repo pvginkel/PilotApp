@@ -48,8 +48,10 @@ def _reading(
     taken_at: datetime = TAKEN_AT,
     stale_reason: str | None = None,
     week_resets_at: datetime = WEEK_RESETS_AT,
+    other_windows: dict[str, float] | None = None,
 ) -> ControllerUsageReading:
-    """A reading as the controller serves it; stale with a reason."""
+    """A reading as the controller serves it; stale with a reason; with
+    `other_windows`, windows of codes Pilot does not know, after its own."""
     windows: list[dict[str, Any]] = []
     if five_hour is not None:
         windows.append(
@@ -66,6 +68,10 @@ def _reading(
                 "share": seven_day,
                 "resetsAt": week_resets_at.isoformat(),
             }
+        )
+    for code, share in (other_windows or {}).items():
+        windows.append(
+            {"window": code, "share": share, "resetsAt": WEEK_RESETS_AT.isoformat()}
         )
     return ControllerUsageReading.model_validate(
         {
@@ -164,6 +170,48 @@ class TestUsageService:
             f"Usage reading without figures ({without_figures['staleReason']}): "
             "the latest recorded stands"
         ]
+
+    def test_a_window_pilot_does_not_know_is_left_out(
+        self, usage: UsageService, session: Session, usage_log: LogWaiter
+    ) -> None:
+        usage.receive(_reading(other_windows={"seven_day_opus": 0.3}))
+
+        assert _count(session) == 1
+        assert latest(session) == _usage()
+        assert usage_log.matching(r"Usage window .*") == [
+            "Usage window seven_day_opus is one Pilot does not know: left out"
+        ]
+
+    def test_a_reading_with_no_window_pilot_knows_is_one_without_figures(
+        self, usage: UsageService, session: Session, usage_log: LogWaiter
+    ) -> None:
+        usage.receive(_reading(0.5))
+
+        usage.receive(
+            _reading(
+                None,
+                None,
+                taken_at=TAKEN_AT + timedelta(minutes=10),
+                other_windows={"seven_day_opus": 0.3},
+            )
+        )
+
+        assert _count(session) == 1
+        assert latest(session) == _usage(0.5)
+        assert usage_log.matching(r"Usage reading without figures.*") == [
+            "Usage reading without figures (None): the latest recorded stands"
+        ]
+
+    def test_a_stale_reason_pilot_does_not_know_is_the_logs(
+        self, usage: UsageService, session: Session, usage_log: LogWaiter
+    ) -> None:
+        usage.receive(_reading())
+
+        usage.receive(_reading(stale_reason="quota-endpoint-moved"))
+
+        assert _count(session) == 2
+        assert latest(session) == _usage(stale=True)
+        assert len(usage_log.matching(r".*; stale \(quota-endpoint-moved\)")) == 1
 
     def test_a_reading_without_figures_before_the_first_records_none(
         self, usage: UsageService, session: Session

@@ -22,6 +22,7 @@ from app.services.controller_client import (
     FILE_SIZE_CAP,
     LISTING_PAGE_CAP,
     ControllerClient,
+    ControllerEnvironment,
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
@@ -33,8 +34,11 @@ from app.services.controller_client import (
     HeadlessCreateRequest,
     IncompleteFrame,
     RawFrame,
+    ReportedEnvironment,
+    ReportedUsageWindow,
     ResultFrame,
     SessionsFrame,
+    SessionView,
     StateFrame,
     UsageFrame,
 )
@@ -154,6 +158,20 @@ class TestControllerClient:
         )
         assert b.exempt is False
         assert b.pod is None
+
+    def test_list_environments_gives_one_in_a_status_pilot_does_not_know_as_reported(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.add_environment("env-a", status="running")
+        fake_controller.add_environment("env-b", status="running")
+        fake_controller.serve_status("env-b", "hibernating")
+
+        a, b = controller_client.list_environments().items
+
+        assert isinstance(a, ControllerEnvironment) and a.status == "running"
+        assert not isinstance(b, ControllerEnvironment)
+        assert isinstance(b, ReportedEnvironment)
+        assert (b.env_id, b.status, b.exempt) == ("env-b", "hibernating", False)
 
     def test_a_wrong_credential_is_a_failure_no_caller_switches_on(
         self, fake_controller: ServedFakeController, health_service: HealthService
@@ -1489,6 +1507,72 @@ class TestControllerClient:
         assert swept == SessionsFrame(ENV, ())
         assert gone == GoneFrame(ENV)
 
+    def test_the_fleet_stream_gives_a_status_pilot_does_not_know_as_reported(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        with controller_client.open_fleet_stream() as stream:
+            frames = iter(stream)
+            assert isinstance(next(frames), UsageFrame)
+            assert isinstance(next(frames), SessionsFrame)
+            running.serve_status(ENV, "hibernating")
+            unknown = next(frames)
+            running.serve_status(ENV, None)
+            known = next(frames)
+
+        assert isinstance(unknown, StateFrame) and isinstance(known, StateFrame)
+        assert not isinstance(unknown.environment, ControllerEnvironment)
+        assert (unknown.environment.env_id, unknown.environment.status) == (
+            ENV,
+            "hibernating",
+        )
+        assert isinstance(known.environment, ControllerEnvironment)
+        assert known.environment.status == "running"
+
+    def test_the_fleet_stream_gives_a_session_pilot_does_not_know_as_reported(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        session_name: str,
+    ) -> None:
+        with controller_client.open_fleet_stream() as stream:
+            frames = iter(stream)
+            assert isinstance(next(frames), UsageFrame)
+            assert isinstance(next(frames), SessionsFrame)
+            running.serve_session(ENV, session_name, state="parked")
+            parked = next(frames)
+            running.serve_session(ENV, session_name, mode="scheduled")
+            scheduled = next(frames)
+
+        assert isinstance(parked, SessionsFrame) and isinstance(
+            scheduled, SessionsFrame
+        )
+        [parked_view], [scheduled_view] = parked.sessions, scheduled.sessions
+        assert not isinstance(parked_view, SessionView)
+        assert not isinstance(scheduled_view, SessionView)
+        assert (parked_view.name, parked_view.state, parked_view.mode) == (
+            session_name,
+            "parked",
+            "headless",
+        )
+        assert (scheduled_view.state, scheduled_view.mode) == ("running", "scheduled")
+
+    @pytest.mark.parametrize("status", ["running", "hibernating"])
+    def test_a_state_frame_of_another_shape_fails_the_stream(
+        self, health_service: HealthService, status: str
+    ) -> None:
+        body = [
+            b"event: state\ndata: "
+            + json.dumps({"envId": ENV, "status": status}).encode()
+            + b"\n\n"
+        ]
+        with _scripted("200 OK", [("Content-Type", "text/event-stream")], body) as url:
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
+            with client.open_fleet_stream() as stream:
+                with pytest.raises(ExternalServiceException) as caught:
+                    next(iter(stream))
+
+        assert caught.value.cause.startswith("the controller's answer does not parse")
+
     def test_the_fleet_stream_carries_a_create_rename_reset_and_delete(
         self, fake_controller: ServedFakeController, controller_client: ControllerClient
     ) -> None:
@@ -1609,6 +1693,50 @@ class TestControllerClient:
         )
         assert stale.reading.taken_at == fresh.reading.taken_at
         assert stale.reading.windows == fresh.reading.windows
+
+    def test_a_usage_frame_reads_a_stale_reason_and_a_window_pilot_does_not_know(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        resets_at = datetime(2026, 10, 29, 10, tzinfo=UTC)
+        fake_controller.usage(
+            seven_day=0.4,
+            seven_day_resets_at=resets_at,
+            other_windows={"seven_day_opus": 0.2},
+            taken_at=datetime(2026, 10, 26, 19, tzinfo=UTC),
+        )
+        fake_controller.usage_stale("quota-endpoint-moved")
+
+        with controller_client.open_fleet_stream() as stream:
+            usage = next(iter(stream))
+
+        assert isinstance(usage, UsageFrame)
+        assert usage.reading.stale_reason == "quota-endpoint-moved"
+        week, opus = usage.reading.windows
+        assert week == ControllerUsageWindow(
+            window="seven_day", share=0.4, resets_at=resets_at
+        )
+        assert not isinstance(opus, ControllerUsageWindow)
+        assert isinstance(opus, ReportedUsageWindow)
+        assert (opus.window, opus.share) == ("seven_day_opus", 0.2)
+
+    @pytest.mark.parametrize("window", ["seven_day", "seven_day_opus"])
+    def test_a_usage_window_of_another_shape_fails_the_stream(
+        self, health_service: HealthService, window: str
+    ) -> None:
+        reading = {
+            "takenAt": "2026-10-26T19:00:00Z",
+            "stale": False,
+            "staleReason": None,
+            "windows": [{"window": window, "share": 0.4}],
+        }
+        body = [b"event: usage\ndata: " + json.dumps(reading).encode() + b"\n\n"]
+        with _scripted("200 OK", [("Content-Type", "text/event-stream")], body) as url:
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
+            with client.open_fleet_stream() as stream:
+                with pytest.raises(ExternalServiceException) as caught:
+                    next(iter(stream))
+
+        assert caught.value.cause.startswith("the controller's answer does not parse")
 
     def test_a_usage_frame_of_another_shape_fails_the_stream(
         self, health_service: HealthService
