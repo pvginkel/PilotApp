@@ -241,13 +241,17 @@ test.describe('The bare address off a phone', () => {
     people,
     projects,
     projectList,
+    projectHead,
     phoneTabs,
     shell,
   }) => {
     const me = await people.signIn();
     await projects.make({ name: makeUnique('A'), members: [me.handle!] });
-    const bId = await projects.makeWithSession({ name: makeUnique('B'), members: [me.handle!] });
+    const bName = makeUnique('B');
+    const bId = await projects.makeWithSession({ name: bName, members: [me.handle!] });
     await projectList.open(bId);
+    // The browser writes the project it remembers as the project's page mounts, past the list's ready.
+    await expect(projectHead.name).toHaveText(bName);
     await shell.open('/');
     await expect(page).toHaveURL(projectAddress(bId));
     await expect(shell.home).toHaveCount(0);
