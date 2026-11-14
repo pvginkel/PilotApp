@@ -166,6 +166,8 @@ test.describe('Views on a phone', () => {
     const sent = await projects.place(id, { kind: 'document', title: 'The van', text: TRIP });
     await timeline.item(sent).card.open.tap();
     await overlay.blockAt('A1').done.tap();
+    // One press that writes at a time (F148): the next waits for this one's answer.
+    await expect(overlay.blockAt('A1').answered).toBeVisible();
     await overlay.blockAt('A2').done.tap();
     await overlay.send.tap();
     await expect(overlay.root).toHaveCount(0);

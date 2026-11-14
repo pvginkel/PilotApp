@@ -187,6 +187,8 @@ test.describe('Documents in tabs', () => {
     await expect(page).toHaveURL(documentAddress(id, trip));
 
     await overlay.blockAt('D1').option('Tunnel').click();
+    // One press that writes at a time (F148): the next waits for this one's answer.
+    await expect(overlay.blockAt('D1').answered).toBeVisible();
     await overlay.blockAt('Q1').answerField.fill('By the lake');
     await overlay.blockAt('Q1').answerSend.click();
     await overlay.send.click();
@@ -822,6 +824,8 @@ test.describe('The focus and a tab', () => {
     await expect(overlay.title).toHaveText('The trip');
     await expect(row).toBeFocused();
     await overlay.blockAt('D1').option('Dome').click();
+    // One press that writes at a time (F148): the next waits for this one's answer.
+    await expect(overlay.blockAt('D1').answered).toBeVisible();
     await overlay.blockAt('Q1').answerField.fill('By the lake');
     await overlay.blockAt('Q1').answerSend.click();
     await overlay.send.click();

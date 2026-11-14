@@ -1,8 +1,8 @@
 /**
  * Auto pilot's switch: each flip a transition on the record by the person (F4.1). A refused flip
  * reads the project's head again, and where the project already stands as the flip asked, as after
- * a second tap's flip or one from a page left stale, the flip is answered as done and nothing is
- * toasted; any other refusal is the flip's error, which the query client's handler toasts.
+ * a flip from a page left stale, the flip is answered as done and nothing is toasted; any other
+ * refusal is the flip's error, which the query client's handler toasts.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';

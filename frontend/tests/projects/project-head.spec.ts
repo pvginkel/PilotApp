@@ -539,7 +539,7 @@ test.describe('Auto pilot', () => {
     expect((await projects.head(id)).autopilot).toBe(false);
   });
 
-  test('a fast double tap turns it on, the second tap’s refusal read against the project and toasting nothing', async ({
+  test('a fast double tap turns it on once: the second tap, while the first waits, does nothing, and nothing is toasted', async ({
     page,
     people,
     projects,
@@ -558,7 +558,8 @@ test.describe('Auto pilot', () => {
     await projectHead.autopilot.dblclick();
     await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'true');
     await fetches.landed();
-    expect(flips).toEqual(['autopilot_on', 'autopilot_on']);
+    // One press that writes at a time (F148).
+    expect(flips).toEqual(['autopilot_on']);
     await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'true');
     await expect(appShell.toastItems).toHaveCount(0);
     expect((await projects.head(id)).autopilot).toBe(true);
