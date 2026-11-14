@@ -23,13 +23,14 @@ import secrets
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, Integer, cast, func, literal, select
 from sqlalchemy.orm import Session
 
 from app.exceptions import AuthenticationException
+from app.models import Project, SessionKind
 from app.models import Session as AgentSession
-from app.models import SessionKind
-from app.models.reference import Surface
+from app.models.reference import SessionState, Surface
+from app.services.advisory_turn import let_go, turn_key
 from app.services.controller_client import HeadlessCreateRequest
 from app.services.session_scope import ScopedCreate
 
@@ -47,6 +48,10 @@ them (`pilot_mcp/server.py`)."""
 
 
 _BEARER = "Bearer "
+
+SEND_LOCK = 226
+"""The first key of a Session's send lock, an advisory lock of two keys, its
+second drawn from the Session's id (`turn_key`)."""
 
 
 def token_hash(token: str) -> str:
@@ -86,6 +91,45 @@ def bearer_session(
         )
     session, its_surface = found
     return session, Surface(its_surface)
+
+
+def hold_send(db: Session, session_id: uuid.UUID) -> None:
+    """Hold the Session's send lock until the transaction ends. The start
+    loop's send takes it before any row and before the controller's call
+    (`RelayService.send_turn`), so that a gate reading the Session with no
+    turn running waits for that send's commit (`turn_running`) while no
+    Project row is locked across the call."""
+    db.execute(select(func.pg_advisory_xact_lock(*_send_keys(session_id))))
+
+
+def turn_running(db: Session, session: AgentSession) -> bool:
+    """Whether `session`, as a gate's lookup read it, has a turn running. One
+    read with none is read again once a send under way has committed: the
+    start loop's holds the Session's send lock from before the controller's
+    call to its commit (`hold_send`), a chat's its Project's row shared
+    (`RelayService.send`). The gate waits for the lock shared, then takes the
+    row `FOR UPDATE`, the first lock of a tool call, and lets both go with the
+    savepoint that took them (`let_go`). A call its turn makes once the
+    controller answered `202` so reads the Session as that commit left it
+    (§9.6)."""
+    if session.state_code == SessionState.RUNNING:
+        return True
+    with let_go(db):
+        db.execute(select(func.pg_advisory_xact_lock_shared(*_send_keys(session.id))))
+        db.execute(
+            select(Project.id).where(Project.id == session.project_id).with_for_update()
+        )
+        state = db.get_one(AgentSession, session.id, populate_existing=True).state_code
+    return state == SessionState.RUNNING
+
+
+def _send_keys(
+    session_id: uuid.UUID,
+) -> tuple[ColumnElement[int], ColumnElement[int]]:
+    return (
+        cast(literal(SEND_LOCK), Integer),
+        cast(literal(turn_key(session_id.bytes)), Integer),
+    )
 
 
 def no_turn(surface: Surface, session_id: uuid.UUID) -> str:

@@ -1,24 +1,38 @@
 """Pilot's MCP server as a headless create hands it to a session (TD §4.5;
 F84, F84.1, V02): the token minted for the create, its hash, the `mcpConfig`
 entry that names the server at its surface's endpoint, and the endpoint beside
-the token in the `env`; and a bearer resolved to its Session."""
+the token in the `env`; a bearer resolved to its Session, and whether its
+turn runs, read past a send under way (P-226)."""
 
 import hashlib
 import json
 from urllib.parse import urlparse
 
 import pytest
+from flask import Flask
+from sqlalchemy import text as sql
 from sqlalchemy.orm import Session as DbSession
 
-from app import models
+from app import extensions, models
+from app.database import scoped_session
 from app.exceptions import AuthenticationException
-from app.models import Project
-from app.models.reference import SessionState, Surface
+from app.models import Project, User
+from app.models.reference import SessionState, Surface, UserKind
+from app.services.advisory_turn import turn_key
 from app.services.controller_client import HeadlessCreateRequest
-from app.services.pilot_server import PilotServer, bearer_session, token_hash
+from app.services.pilot_server import (
+    SEND_LOCK,
+    PilotServer,
+    bearer_session,
+    hold_send,
+    token_hash,
+    turn_running,
+)
 from app.services.session_scope import ScopedCreate
 from pilot_mcp.server import STORE_PATH as SERVED_STORE_PATH
 from pilot_mcp.server import WORK_PATH as SERVED_WORK_PATH
+from tests.support.locks import in_thread, lock_waits
+from tests.support.supervisor import wait_until
 
 URL = "https://pilot-mcp.example.com/mcp"
 
@@ -256,3 +270,107 @@ class TestBearerSession:
             bearer_session(session, authorization, Surface.STORE)
 
         assert refused.value.message == message
+
+
+def _committed_session(committed_app: Flask, state: SessionState) -> models.Session:
+    """A chat's Session in `state` and its project, committed, detached."""
+    with scoped_session(committed_app.container) as db:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        db.add(person)
+        db.flush()
+        project = Project(created_by_user_id=person.id)
+        db.add(project)
+        db.flush()
+        run = _session(db, project, "chat")
+        run.state_code = state
+        db.flush()
+        db.expunge(run)
+        return run
+
+
+class TestTurnRunning:
+    def test_a_session_read_with_its_turn_running_is_admitted(
+        self, session: DbSession, project: Project
+    ) -> None:
+        assert turn_running(session, _session(session, project, "chat"))
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            SessionState.HELD,
+            SessionState.STARTING,
+            SessionState.IDLE,
+            SessionState.STOPPED,
+        ],
+    )
+    def test_one_with_no_turn_running_is_read_again_and_refused(
+        self, session: DbSession, project: Project, state: SessionState
+    ) -> None:
+        run = _session(session, project, "chat")
+        run.state_code = state
+        session.flush()
+
+        assert not turn_running(session, run)
+
+    @pytest.mark.parametrize("send", ["a chat's send", "the start loop's send"])
+    @pytest.mark.parametrize(
+        ("outcome", "running"), [("commits", True), ("rolls back", False)]
+    )
+    def test_one_read_while_a_send_is_under_way_is_read_as_the_send_ends(
+        self, committed_app: Flask, send: str, outcome: str, running: bool
+    ) -> None:
+        """P-226: a call made once the controller answered the send's `202`,
+        before the send's transaction ends, waits on what the send holds, a
+        chat's its project's row shared, the start loop's the Session's send
+        lock, and reads the Session as that end left it."""
+        container = committed_app.container
+        run = _committed_session(committed_app, SessionState.STARTING)
+
+        def read() -> bool:
+            with scoped_session(container) as db:
+                return turn_running(db, db.get_one(models.Session, run.id))
+
+        with container.session_maker()() as sending:
+            if send == "a chat's send":
+                sending.execute(
+                    sql("SELECT id FROM projects WHERE id = :id FOR KEY SHARE"),
+                    {"id": run.project_id},
+                )
+            else:
+                hold_send(sending, run.id)
+            sending.execute(
+                sql("UPDATE sessions SET state_code = 'running' WHERE id = :id"),
+                {"id": run.id},
+            )
+            reading = in_thread(read)
+            wait_until(lambda: lock_waits(container) == 1, "the read waiting")
+            if outcome == "commits":
+                sending.commit()
+            else:
+                sending.rollback()
+
+            assert reading.result() is running
+
+    def test_its_locks_are_let_go_once_read(self, committed_app: Flask) -> None:
+        run = _committed_session(committed_app, SessionState.IDLE)
+        with committed_app.app_context():
+            engine = extensions.db.engine
+
+        with scoped_session(committed_app.container) as db:
+            assert not turn_running(db, db.get_one(models.Session, run.id))
+            with engine.connect() as other:
+                other.execute(
+                    sql("SELECT id FROM projects WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": run.project_id},
+                )
+                assert other.scalar(
+                    sql("SELECT pg_try_advisory_xact_lock(:first, :second)"),
+                    {"first": SEND_LOCK, "second": turn_key(run.id.bytes)},
+                )
+                other.rollback()

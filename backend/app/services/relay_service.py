@@ -117,7 +117,7 @@ from app.services.current_line import (
     while_starting,
 )
 from app.services.environment_service import EnvironmentService
-from app.services.pilot_server import PilotServer
+from app.services.pilot_server import PilotServer, hold_send
 from app.services.quota_wall import turn_shows_wall
 from app.services.session_record_service import (
     SessionRecordService,
@@ -333,11 +333,12 @@ class RelayService:
         `words`, which `message` ends with (DB assertion 251).
 
         The controller's send goes first, under the project's row held
-        shared, which a caller holding the Session's lock took before it
-        (`SessionRecordService.lock_project`). On its `202`, under the
-        Session's lock: the Turn, its `send` record when a person wrote it,
-        the Session `running` with its current line set, and the
-        environment's shutdown timer cleared. A send that
+        shared to the commit, which a caller holding the Session's lock took
+        before it (`SessionRecordService.lock_project`): a tool call the turn
+        makes once the controller answers waits on it (`turn_running`). On
+        its `202`, under the Session's lock: the Turn, its `send` record when
+        a person wrote it, the Session `running` with its current line set,
+        and the environment's shutdown timer cleared. A send that
         fails before the `202` writes the Turn ended with its `error`, and a
         `server` record saying so (F125).
 
@@ -375,8 +376,11 @@ class RelayService:
         """Send a `starting` Session's Turn written before its send, as the
         session start writes its brief and a Resume its own (§9.6), and relay it
         once the caller's transaction commits. As `send`, with the Turn's
-        `started_at` moved to the send, and the project's row taken shared
-        once the controller's call returns, before the Session's.
+        `started_at` moved to the send, the Session's send lock held from
+        before the controller's call to the commit (`hold_send`), and the
+        project's row taken shared once the call returns, before the
+        Session's: a tool call the turn makes once the controller answers
+        waits for the commit (`turn_running`).
 
         A Turn the controller has already, sent before a cut or by another
         process (§8.2, §8.1), is not sent again; one whose send another
@@ -397,7 +401,9 @@ class RelayService:
         turn = db.get(Turn, turn_id)
         if turn is None:
             raise RecordNotFoundException("Turn", str(turn_id))
-        session = self._records(db).require_session(turn.session_id)
+        records = self._records(db)
+        session = records.require_session(turn.session_id)
+        hold_send(db, session.id)
         name = _controller_session(session)
         recorded = _recorded_turn(db, session.id, name)
         failure: ExternalServiceException | None = None
@@ -413,7 +419,6 @@ class RelayService:
             raise
         except ExternalServiceException as error:
             failure = error
-        records = self._records(db)
         records.lock_project(session.id)
         session = records.lock_session(session.id)
         if not _in_flight(db, turn.id):

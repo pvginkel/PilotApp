@@ -195,13 +195,24 @@ test.describe('A question', () => {
     const lines = () =>
       block.answerField.evaluate((field: HTMLTextAreaElement) => {
         const style = getComputedStyle(field);
+        const line = parseFloat(style.lineHeight);
         const text = field.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-        return { width: field.offsetWidth, shown: Math.round(text / parseFloat(style.lineHeight)), cut: field.scrollHeight - field.clientHeight };
+        const cut = field.scrollHeight - field.clientHeight;
+        // The height its text takes, read as the field reads it to size itself, its own put back
+        // before anything is drawn.
+        const height = field.style.height;
+        field.style.height = 'auto';
+        const needed = field.scrollHeight;
+        field.style.height = height;
+        return { width: field.offsetWidth, shown: Math.round(text / line), cut, empty: Math.round((field.clientHeight - needed) / line) };
       });
-    /** The field once it is `narrower` or wider than `than` and holds its lines whole. */
+    /**
+     * The field once it is `narrower` or wider than `than` and holds its lines whole, none empty
+     * under them: a field made wider keeps its height until the next frame sizes it.
+     */
     const sized = async (narrower: boolean, than: { width: number }) => {
       await expect.poll(async () => Math.sign((await lines()).width - than.width)).toBe(narrower ? -1 : 1);
-      await expect.poll(lines).toMatchObject({ cut: 0 });
+      await expect.poll(lines).toMatchObject({ cut: 0, empty: 0 });
       return lines();
     };
 

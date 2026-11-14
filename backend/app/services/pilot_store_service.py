@@ -78,7 +78,7 @@ from app.services.controller_client import (
 )
 from app.services.effect_service import Change, EffectLine, EffectService
 from app.services.environment_service import EnvironmentService
-from app.services.pilot_server import bearer_session, no_turn
+from app.services.pilot_server import bearer_session, no_turn, turn_running
 from app.services.pilot_work_service import ATTACHED, attached_label, material
 from app.services.project_service import ProjectService, project_name
 from app.services.session_scope import project_folder
@@ -217,7 +217,8 @@ class PilotStoreService:
 
     def admit(self, authorization: str | None) -> Brain:
         """The chat's or the job's Session whose bearer `authorization`
-        carries, while its turn runs.
+        carries, while its turn runs: a call made before the send of its turn
+        commits is read once it has (`turn_running`).
 
         Raises:
             AuthenticationException: no bearer, or one no Session has.
@@ -230,7 +231,7 @@ class PilotStoreService:
                 f"Cannot call pilot-store because session {session.id} is a"
                 f" {session.kind_code} session, not a chat's or a job's"
             )
-        if session.state_code != SessionState.RUNNING:
+        if not turn_running(self.db, session):
             raise AuthorizationException(no_turn(Surface.STORE, session.id))
         return Brain(session.id, session.project_id, session.kind_code)
 

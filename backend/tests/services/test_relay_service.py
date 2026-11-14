@@ -73,6 +73,7 @@ from app.services.halt_file_service import HaltFileService
 from app.services.job_service import NEXT_TITLE
 from app.services.pilot_server import PilotServer, token_hash
 from app.services.pilot_store_service import Brain
+from app.services.pilot_work_service import Worker
 from app.services.relay_service import (
     CONTINUE,
     ENVIRONMENT_STOPPED,
@@ -118,6 +119,7 @@ MCP_URL = "https://pilot-mcp.example.com/mcp"
 SUBJECT = "subject-ada"
 STOP_AFTER = timedelta(minutes=30)
 SUPERVISOR_LOGGER = "app.services.supervisor"
+TOKEN = "the-runs-token"
 
 
 @pytest.fixture(autouse=True)
@@ -4206,6 +4208,53 @@ def _committed_wait_run(
         return run.id, wait.id, person.id
 
 
+def _bearer(container: ServiceContainer, run_id: uuid.UUID) -> None:
+    """The Session's bearer `TOKEN`, committed."""
+    with scoped_session(container) as db:
+        db.get_one(models.Session, run_id).token_hash = token_hash(TOKEN)
+
+
+def _written_turn(container: ServiceContainer, run_id: uuid.UUID) -> int:
+    """The Session `starting` with its first Turn written before its send,
+    as a start writes its brief, committed; the Turn's id."""
+    with scoped_session(container) as db:
+        run = db.get_one(models.Session, run_id)
+        run.state_code = SessionState.STARTING
+        run.turns = 1
+        written = Turn(
+            session_id=run_id,
+            seq=1,
+            message="Check the wait",
+            started_at=datetime.now(UTC),
+        )
+        db.add(written)
+        db.flush()
+        return written.id
+
+
+def _turn_sent(container: ServiceContainer, relays: RelayService, turn_id: int) -> None:
+    with scoped_session(container) as db:
+        assert relays.send_turn(db, turn_id).error is None
+
+
+def _held_after_the_controllers_202(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[threading.Event, threading.Event]:
+    """Each send held once the controller has its turn, before its
+    transaction goes on: set the first event then, and wait for the second."""
+    holding, release = threading.Event(), threading.Event()
+    for method in ("_deliver_resuming", "_deliver_once"):
+        delivered = getattr(RelayService, method)
+
+        def held(self: RelayService, *args: Any, delivered: Any = delivered) -> None:
+            delivered(self, *args)
+            holding.set()
+            assert release.wait(WAIT_SECONDS)
+
+        monkeypatch.setattr(RelayService, method, held)
+    return holding, release
+
+
 def _close_wait(
     container: ServiceContainer, run_id: uuid.UUID, wait_id: uuid.UUID
 ) -> None:
@@ -4512,6 +4561,77 @@ class TestRelayLoop:
         closing.result()
         assert _read(container, run_id).state_code is SessionState.RUNNING
         assert _closed_by(container, wait_id) == (MARKED, run_id)
+
+    @pytest.mark.parametrize("send", ["a send", "a written turn's send"])
+    def test_a_brains_call_before_its_sends_commit_is_admitted_once_it_lands(
+        self,
+        committed_app: Flask,
+        wait_run: tuple[RelayService, str, uuid.UUID, uuid.UUID, uuid.UUID],
+        monkeypatch: pytest.MonkeyPatch,
+        send: str,
+    ) -> None:
+        """P-226: a pilot-store call the turn makes once the controller
+        answered `202`, before the send's commit, waits at the gate for that
+        commit and is admitted, never refused "has no turn running"."""
+        container = committed_app.container
+        relays, _, run_id, _, person_id = wait_run
+        _bearer(container, run_id)
+        holding, release = _held_after_the_controllers_202(monkeypatch)
+        if send == "a send":
+            sending = in_thread(
+                lambda: _send_committed(container, relays, run_id, person_id)
+            )
+        else:
+            turn_id = _written_turn(container, run_id)
+            sending = in_thread(lambda: _turn_sent(container, relays, turn_id))
+        assert holding.wait(WAIT_SECONDS)
+
+        def admitted() -> Brain:
+            with scoped_session(container):
+                return container.pilot_store_service().admit(f"Bearer {TOKEN}")
+
+        admitting = in_thread(admitted)
+        wait_until(lambda: lock_waits(container) == 1, "the call waiting")
+        release.set()
+
+        sending.result()
+        run = _read(container, run_id)
+        assert admitting.result() == Brain(run_id, run.project_id, "job")
+        assert run.state_code is SessionState.RUNNING
+
+    def test_a_workers_call_before_its_briefs_send_commits_is_admitted_once_it_lands(
+        self,
+        committed_app: Flask,
+        running: tuple[RelayService, str, uuid.UUID, uuid.UUID],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """P-226: as a brain's, a worker's first pilot-work call, made before
+        the start loop's send commits."""
+        container = committed_app.container
+        relays, _, run_id, _ = running
+        with scoped_session(container) as db:
+            run = db.get_one(models.Session, run_id)
+            container.record_service().place_work(
+                db.get_one(Project, run.project_id), run, "Renaming the badge"
+            )
+        _bearer(container, run_id)
+        turn_id = _written_turn(container, run_id)
+        holding, release = _held_after_the_controllers_202(monkeypatch)
+        sending = in_thread(lambda: _turn_sent(container, relays, turn_id))
+        assert holding.wait(WAIT_SECONDS)
+
+        def admitted() -> Worker:
+            with scoped_session(container):
+                return container.pilot_work_service().admit(f"Bearer {TOKEN}")
+
+        admitting = in_thread(admitted)
+        wait_until(lambda: lock_waits(container) == 1, "the call waiting")
+        release.set()
+
+        sending.result()
+        run = _read(container, run_id)
+        assert admitting.result() == Worker(run_id, run.project_id, ENV, run_id)
+        assert run.state_code is SessionState.RUNNING
 
     def test_a_send_starts_the_relay_which_records_the_turn_as_it_comes(
         self,

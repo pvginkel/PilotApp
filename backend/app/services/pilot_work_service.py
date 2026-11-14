@@ -48,7 +48,7 @@ from app.services.controller_client import (
     ControllerProblemType,
 )
 from app.services.effect_service import Change, EffectLine, EffectService
-from app.services.pilot_server import bearer_session, no_turn
+from app.services.pilot_server import bearer_session, no_turn, turn_running
 from app.services.work_status import work_moved
 
 REGISTERED = "Registered"
@@ -100,7 +100,8 @@ class PilotWorkService:
 
     def admit(self, authorization: str | None) -> Worker:
         """The work item's Session whose bearer `authorization` carries,
-        while its turn runs.
+        while its turn runs: a call made before the send of its turn commits
+        is read once it has (`turn_running`).
 
         Raises:
             AuthenticationException: no bearer, or one no Session has.
@@ -114,7 +115,7 @@ class PilotWorkService:
                 f"Cannot call pilot-work because session {session.id} is a"
                 f" {session.kind_code} session, not a work item's"
             )
-        if session.state_code != SessionState.RUNNING:
+        if not turn_running(self.db, session):
             raise AuthorizationException(no_turn(Surface.WORK, session.id))
         # A bearer is minted at its Session's create, which names its
         # environment.

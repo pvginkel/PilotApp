@@ -83,6 +83,7 @@ from app.services.clarification_service import asked, message, title
 from app.services.effect_service import EffectLine
 from app.services.job_service import JobService
 from app.services.people_service import PeopleService
+from app.services.pilot_server import turn_running
 from app.services.pilot_store_service import JOB, Brain, PilotStoreService
 from app.services.pilot_work_service import PilotWorkService, Worker
 from app.services.session_scope import STORE_REPO
@@ -1383,7 +1384,8 @@ class TestDataService:
         )
 
     def _chats_brain(self, project_id: uuid.UUID, operation: str) -> Brain:
-        """The brain of the project's open chat, its turn in flight.
+        """The brain of the project's open chat, its turn in flight, read as
+        pilot-store's gate reads it (`turn_running`).
 
         Raises:
             RecordNotFoundException: no project has the id.
@@ -1399,7 +1401,7 @@ class TestDataService:
         ).one_or_none()
         if chat is None:
             raise InvalidOperationException(operation, "the project has no chat open")
-        if chat.state_code != SessionState.RUNNING:
+        if not turn_running(self.db, chat):
             raise InvalidOperationException(operation, "its chat has no turn in flight")
         return Brain(chat.id, project_id, chat.kind_code)
 

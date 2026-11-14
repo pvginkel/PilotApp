@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { expect, type APIRequestContext, type APIResponse, type Page, type PlaywrightWorkerArgs } from '@playwright/test';
+import { expect, type APIRequestContext, type Page, type PlaywrightWorkerArgs } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
 import { FAKE_CONTROLLER_TOKEN, STORE_ENVIRONMENT } from './backend-env-extensions';
 import type { Controller } from './controller';
@@ -26,9 +26,6 @@ import { slugOf } from './projects';
 type Sent = components['schemas']['ChatTurnSchema.f9d9b43'];
 type ChatList = components['schemas']['ChatListSchema.f9d9b43'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
-
-/** The answer and the finish routes' refusal while the chat's session is not `running` (POST /api/testing/projects/<id>/chat/answers, …/chat/finish). */
-const NO_TURN_IN_FLIGHT = 'its chat has no turn in flight';
 
 /** The states of a job's session in which the server goes on with it. */
 const IN_FLIGHT = ['held', 'starting', 'running'];
@@ -222,17 +219,9 @@ export class Chats {
     person: string,
     { note, toolUseId }: { note?: string; toolUseId?: string } = {},
   ): Promise<void> {
-    // The store's session works on the turn before the backend has written its send accepted, the
-    // chat's session `running`; until then the answer is refused, with nothing recorded.
-    let response!: APIResponse;
-    await expect
-      .poll(async () => {
-        response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/answers`, {
-          data: { block, value, for: person, note, tool_use_id: toolUseId },
-        });
-        return response.status() === 409 && (await response.text()).includes(NO_TURN_IN_FLIGHT);
-      })
-      .toBe(false);
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/answers`, {
+      data: { block, value, for: person, note, tool_use_id: toolUseId },
+    });
     expect(response.status(), await response.text()).toBe(201);
   }
 
@@ -242,16 +231,9 @@ export class Chats {
    * /api/testing/projects/<id>/chat/cancellations): the effect of the call `toolUseId` names.
    */
   async cancel(projectId: string, item: string, person: string, { toolUseId }: { toolUseId?: string } = {}): Promise<void> {
-    // As `answer()`: refused until the backend has written the chat's send accepted.
-    let response!: APIResponse;
-    await expect
-      .poll(async () => {
-        response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/cancellations`, {
-          data: { item, for: person, tool_use_id: toolUseId },
-        });
-        return response.status() === 409 && (await response.text()).includes(NO_TURN_IN_FLIGHT);
-      })
-      .toBe(false);
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/cancellations`, {
+      data: { item, for: person, tool_use_id: toolUseId },
+    });
     expect(response.status(), await response.text()).toBe(201);
   }
 
@@ -261,16 +243,9 @@ export class Chats {
    * act (POST /api/testing/projects/<id>/chat/stops): the effect of the call `toolUseId` names.
    */
   async stopWork(projectId: string, item: string, { reason, toolUseId }: { reason?: string; toolUseId?: string } = {}): Promise<void> {
-    // As `answer()`: refused until the backend has written the chat's send accepted.
-    let response!: APIResponse;
-    await expect
-      .poll(async () => {
-        response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/stops`, {
-          data: { item, reason, tool_use_id: toolUseId },
-        });
-        return response.status() === 409 && (await response.text()).includes(NO_TURN_IN_FLIGHT);
-      })
-      .toBe(false);
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/stops`, {
+      data: { item, reason, tool_use_id: toolUseId },
+    });
     expect(response.status(), await response.text()).toBe(201);
   }
 
@@ -279,14 +254,7 @@ export class Chats {
    * in flight (F86.5), with `archive` Finish and archive, the archive the turn's author's.
    */
   async finish(projectId: string, { archive = false } = {}): Promise<void> {
-    // As `answer()`: refused until the backend has written the chat's send accepted.
-    let response!: APIResponse;
-    await expect
-      .poll(async () => {
-        response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/finish`, { data: { archive } });
-        return response.status() === 409 && (await response.text()).includes(NO_TURN_IN_FLIGHT);
-      })
-      .toBe(false);
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/finish`, { data: { archive } });
     expect(response.status(), await response.text()).toBe(201);
   }
 
