@@ -119,6 +119,18 @@ def _coerce_status_int(value: object) -> object:
     return value
 
 
+class SSEOutageQuerySchema(BaseModel):
+    """Query parameters for POST /api/testing/sse/outage."""
+
+    silent: bool = Field(
+        default=False,
+        description=(
+            "The streams that are open send nothing either, heartbeat included, "
+            "as a connection that died without saying so."
+        ),
+    )
+
+
 class ForceSSECallbackErrorQuerySchema(BaseModel):
     """Query parameters for /api/testing/sse/force-callback-error."""
 
