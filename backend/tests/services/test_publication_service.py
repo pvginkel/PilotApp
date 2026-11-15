@@ -6,14 +6,16 @@ Parts (F152.3, F152.4; DB decisions 79 and 81, the assertions of §4.31 and
 
 The rule that protects the most: a publication writes only the rows that
 differ, and a row keeps its identity wherever the call names the same fact
-again (`TestRepublished`)."""
+again (`TestRepublished`). What the call no longer names goes, and only
+that (`TestRewritten`; F152.17, decision 81 point 4)."""
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from flask import Flask
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session as DbSession
 
 from app.database import scoped_session
@@ -69,6 +71,7 @@ CLAUDE_CODE = {"component": "claude-code", "version": "2.1.317"}
 DEEPER = "c81d5e02f7a9b3d64"
 """Claude Code's id of a second invented sub-agent."""
 RECIPES = "Find where the recipes are scaled"
+LOGGER = "app.services.publication_service"
 
 
 def _at(minutes: int) -> str:
@@ -1494,6 +1497,431 @@ class TestRepublished:
             )
         ).one() == (held.id, "msg_0002", before)
         assert _count(session, Transcript) == 1
+
+
+class TestRewritten:
+    """A transcript whose file no longer has what Pilot holds of it, published
+    whole: Pilot follows the file. What the call no longer names goes with
+    what hangs on it, the rest stays as it was, and the Transcript stays
+    whatever its file lost."""
+
+    def test_the_calls_a_file_lost_go_with_what_hangs_on_them(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=_calls()[:2]))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(deleted=2),
+            "tool_calls": Written(deleted=3),
+            "events": Written(deleted=1),
+            "context_parts": Written(deleted=1),
+        }
+        assert _ids(session) == ids | {
+            "calls": ids["calls"][:2],
+            "tool_calls": ids["tool_calls"][:3],
+            "events": ids["events"][:2],
+            "context_parts": ids["context_parts"][:3],
+        }
+
+    def test_the_number_of_calls_lost_is_logged_with_the_conversation(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        publications.publish(_camp())
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            publications.publish(_camp(calls=_calls()[:1]))
+
+        assert [
+            record.getMessage() for record in caplog.records if record.name == LOGGER
+        ] == [f"Transcript {CAMP} no longer has 3 of the calls Pilot held"]
+
+    def test_a_sub_agents_lost_calls_are_logged_with_its_thread(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        publications.publish(
+            sub_agent(calls=[call(1), call(2, predecessor="msg_0001")])
+        )
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            publications.publish(sub_agent(calls=[call(1)]))
+
+        assert [
+            record.getMessage() for record in caplog.records if record.name == LOGGER
+        ] == [f"Transcript {CAMP}/{SUB_AGENT} no longer has 1 of the calls Pilot held"]
+        assert session.scalars(select(Call.message_id)).all() == ["msg_0001"]
+
+    def test_nothing_is_logged_where_no_call_is_lost(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Other facts the file lost are no lost call."""
+        publications.publish(_camp())
+        calls = _calls()
+        calls[2]["tool_calls"].pop()
+        calls[1]["events"].pop()
+
+        with caplog.at_level(logging.DEBUG, LOGGER):
+            publications.publish(_camp())
+            publications.publish(
+                _camp(calls=[*calls, call(5, prompt=3, predecessor="msg_0004")])
+            )
+
+        assert [record for record in caplog.records if record.name == LOGGER] == []
+
+    def test_a_call_lost_from_the_middle_goes_and_the_ones_after_it_move_up(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The Call that followed the lost one keeps its identity, and names
+        the Call the file now has before it."""
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        del calls[2]
+        calls[2]["predecessor"] = "msg_0002"
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(updated=1, deleted=1),
+            "tool_calls": Written(deleted=2),
+            "context_parts": Written(deleted=1),
+        }
+        first, second, _, fourth = ids["calls"]
+        assert session.execute(
+            select(
+                Call.id, Call.message_id, Call.position, Call.predecessor_id
+            ).order_by(Call.position)
+        ).all() == [
+            (first, "msg_0001", 1, None),
+            (second, "msg_0002", 2, first),
+            (fourth, "msg_0004", 3, second),
+        ]
+        session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+
+    def test_a_call_the_file_has_in_a_lost_calls_place_stands_there(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        calls[3] = call(9, prompt=3, predecessor="msg_0003")
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(inserted=1, deleted=1),
+            "tool_calls": Written(deleted=1),
+            "events": Written(deleted=1),
+        }
+        session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        after = _ids(session)
+        assert after["calls"][:3] == ids["calls"][:3]
+        assert session.execute(
+            select(Call.id, Call.message_id).where(Call.position == 4)
+        ).all() == [(after["calls"][3], "msg_0009")]
+        assert after["calls"][3] != ids["calls"][3]
+
+    def test_a_lost_calls_tool_call_the_file_has_under_another_call_stays(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """A Tool Call is found again by its `tool_use_id`, so the one a kept
+        Call now requested keeps its identity through its old Call's loss."""
+        publications.publish(_camp())
+        held = _tool_call_id(session, "toolu_0003")
+        calls = _calls()[:2]
+        calls[1]["tool_calls"].append(_calls()[2]["tool_calls"][0])
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(deleted=2),
+            "tool_calls": Written(updated=1, deleted=2),
+            "events": Written(deleted=1),
+            "context_parts": Written(deleted=1),
+        }
+        assert session.execute(
+            select(ToolCall.id, Call.position)
+            .join(Call, Call.id == ToolCall.call_id)
+            .where(ToolCall.tool_use_id == "toolu_0003")
+        ).one() == (held, 2)
+
+    def test_a_tool_call_a_kept_call_no_longer_requested_goes(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        calls[2]["tool_calls"].pop()
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "tool_calls": Written(deleted=1),
+        }
+        gone = ids["tool_calls"][4]
+        assert _ids(session) == ids | {
+            "tool_calls": [held for held in ids["tool_calls"] if held != gone]
+        }
+        assert session.scalars(
+            select(ToolCall.tool_use_id).order_by(ToolCall.id)
+        ).all() == ["toolu_0001", "toolu_0002", SPAWNING, "toolu_0003", "toolu_0005"]
+
+    def test_an_event_and_a_context_part_past_a_kept_calls_last_go(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        calls[1]["events"].pop()
+        del calls[0]["context_parts"][1:]
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "events": Written(deleted=1),
+            "context_parts": Written(deleted=2),
+        }
+        assert _ids(session) == ids | {
+            "events": [ids["events"][0], ids["events"][2]],
+            "context_parts": [ids["context_parts"][0], ids["context_parts"][3]],
+        }
+
+    def test_a_launch_the_file_lost_goes_with_its_versions_prompts_and_hook_runs(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        resumed = _second_launch(
+            prompts=[prompt(received_at=_at(10), characters=31, hook_runs=[hook_run()])]
+        )
+        publications.publish(_camp(launches=[_first_launch(), resumed]))
+        ids = _ids(session)
+        versions = _count(session, ComponentVersion)
+
+        with writes(session) as wrote:
+            publications.publish(_camp(launches=[_first_launch()], calls=_calls()[:3]))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "launches": Written(deleted=1),
+            "launch_components": Written(deleted=2),
+            "prompts": Written(deleted=1),
+            "hook_runs": Written(deleted=1),
+            "calls": Written(deleted=1),
+            "tool_calls": Written(deleted=1),
+            "events": Written(deleted=1),
+        }
+        assert _ids(session) == ids | {
+            "launches": ids["launches"][:1],
+            "prompts": ids["prompts"][:2],
+            "hook_runs": ids["hook_runs"][:2],
+            "calls": ids["calls"][:3],
+            "tool_calls": ids["tool_calls"][:5],
+            "events": ids["events"][:2],
+        }
+        assert session.scalars(select(LaunchComponent.launch_id)).all() == (
+            ids["launches"][:1] * 2
+        )
+        assert _count(session, ComponentVersion) == versions
+
+    def test_a_call_that_followed_a_lost_launchs_prompt_stays_under_the_one_it_names(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        calls[3]["prompt"] = 2
+
+        with writes(session) as wrote:
+            publications.publish(_camp(launches=[_first_launch()], calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "launches": Written(deleted=1),
+            "launch_components": Written(deleted=2),
+            "prompts": Written(deleted=1),
+            "calls": Written(updated=1),
+        }
+        assert _ids(session) == ids | {
+            "launches": ids["launches"][:1],
+            "prompts": ids["prompts"][:2],
+        }
+        assert session.scalars(
+            select(Call.prompt_id).order_by(Call.position)
+        ).all() == [ids["prompts"][i] for i in (0, 0, 1, 1)]
+
+    def test_a_prompt_and_a_hook_run_past_their_parents_last_go(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The first Launch lost its second Prompt, and its first Prompt its
+        second Hook Run; the Calls after the lost Prompt follow the resumed
+        Launch's, now the file's second."""
+        publications.publish(_camp())
+        ids = _ids(session)
+        first = _first_launch()
+        del first["prompts"][1:]
+        del first["prompts"][0]["hook_runs"][1:]
+        calls = _calls()
+        calls[3]["prompt"] = 2
+
+        with writes(session) as wrote:
+            publications.publish(_camp(launches=[first, _second_launch()], calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "prompts": Written(deleted=1),
+            "hook_runs": Written(deleted=1),
+            "calls": Written(updated=1),
+        }
+        opening, _, resuming = ids["prompts"]
+        assert _ids(session) == ids | {
+            "prompts": [opening, resuming],
+            "hook_runs": ids["hook_runs"][:1],
+        }
+        assert session.scalars(
+            select(Call.prompt_id).order_by(Call.position)
+        ).all() == [opening, opening, resuming, resuming]
+
+    def test_a_compaction_the_file_lost_goes(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        del calls[2]["compaction"]
+
+        with writes(session) as wrote:
+            publications.publish(_camp(compactions=[], calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "compactions": Written(deleted=1),
+            "calls": Written(updated=1),
+        }
+        assert _ids(session) == ids | {"compactions": []}
+        assert session.scalars(select(Call.compaction_id)).all() == [None] * 4
+
+    def test_a_version_a_launch_no_longer_ran_with_goes_from_it_alone(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        versions = _count(session, ComponentVersion)
+
+        with writes(session) as wrote:
+            publications.publish(
+                _camp(
+                    launches=[
+                        _first_launch(),
+                        _second_launch(components=[CLAUDE_CODE]),
+                    ]
+                )
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "launch_components": Written(deleted=1),
+        }
+        opened, resumed = ids["launches"]
+        assert session.execute(
+            select(LaunchComponent.launch_id, LaunchComponent.component_code).order_by(
+                LaunchComponent.launch_id, LaunchComponent.component_code
+            )
+        ).all() == [
+            (opened, "claude-code"),
+            (opened, "plugin:dev"),
+            (resumed, "claude-code"),
+        ]
+        assert _count(session, ComponentVersion) == versions
+
+    def test_a_sub_agent_whose_spawning_tool_call_goes_stays_and_keeps_its_name(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        main = publications.publish(_camp())
+        thread = publications.publish(sub_agent())
+        calls = _calls()
+        calls[1]["tool_calls"].pop()
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=2),
+            "tool_calls": Written(deleted=1),
+        }
+        assert session.execute(
+            select(
+                Transcript.main_id,
+                Transcript.spawned_by_id,
+                Transcript.spawned_by_tool_use_id,
+            ).where(Transcript.id == thread.id)
+        ).one() == (main.id, None, SPAWNING)
+
+    def test_a_sub_agent_is_joined_again_when_its_spawning_call_comes_back(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The Call that started it went, and its Tool Call with it; the one
+        the file has again is another row of the same name."""
+        publications.publish(_camp())
+        thread = publications.publish(sub_agent())
+        lost = _tool_call_id(session)
+        publications.publish(_camp(calls=_calls()[:1]))
+        assert _spawned_by(session, thread) is None
+
+        publications.publish(_camp())
+
+        back = _tool_call_id(session)
+        assert back != lost
+        assert _spawned_by(session, thread) == back
+
+    def test_a_transcript_whose_file_lost_everything_stays(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """F119.2: nothing removes a Transcript, a sub-agent's under its main
+        thread included; a reference code it named stays too."""
+        main = publications.publish(_camp())
+        thread = publications.publish(
+            sub_agent(calls=[call(1, tool_calls=[tool_call(40)])])
+        )
+        codes = {
+            entity: _count(session, entity)
+            for entity in (Model, Tool, EventKind, ContextPartKind, PromptSource)
+        }
+
+        publications.publish(whole(file_size=0))
+        publications.publish(sub_agent(file_size=0))
+
+        after = _ids(session)
+        assert set(after.pop("transcripts")) == {main.id, thread.id}
+        assert [table for table, held in after.items() if held] == []
+        assert _count(session, LaunchComponent) == 0
+        assert session.execute(
+            select(Transcript.main_id, Transcript.file_size).where(
+                Transcript.id == thread.id
+            )
+        ).one() == (main.id, 0)
+        assert {entity: _count(session, entity) for entity in codes} == codes
 
 
 class TestTurns:

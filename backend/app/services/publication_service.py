@@ -8,18 +8,36 @@ call names the same fact again: a Call by its `message_id`, a Tool Call by
 its `tool_use_id`, a Launch by its place among its Transcript's Launches, a
 Prompt, a Hook Run, a Compaction, an Event and a Context Part by their place
 under their parent. A row's place is its rank by `id` among its parent's
-rows: a row is only ever added after the last.
+rows: a row is only ever added after the last and removed from the end.
+
+What Pilot holds of the Transcript that the call no longer names goes, with
+what hangs on it: Pilot follows the file (DB decision 81 point 4; F152.17).
+The Transcript itself never goes (F119.2).
 
 Publications of one conversation, its main thread's and its sub-agents',
 take turns, so that a sub-agent's thread finds its main thread and its
 spawning Tool Call whichever comes first.
 """
 
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, get_args
 
-from sqlalchemy import Integer, Select, cast, func, literal, select, tuple_, update
+from sqlalchemy import (
+    BigInteger,
+    Integer,
+    Select,
+    any_,
+    cast,
+    delete,
+    func,
+    literal,
+    select,
+    tuple_,
+    update,
+)
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, aliased
 
@@ -59,6 +77,8 @@ from app.schemas.publication import (
 )
 from app.services.advisory_turn import turn_key
 
+logger = logging.getLogger(__name__)
+
 PUBLICATION_LOCK = 247
 """The first key of a conversation's turn (`advisory_turn`); the second is
 drawn from Claude Code's id of its main thread."""
@@ -74,6 +94,18 @@ _TOKEN_KINDS: tuple[CallTokenKind, ...] = get_args(CallTokenKind)
 type _Version = tuple[str, str]
 """A Component Version as a call names it: its Component's code and its
 version."""
+
+type _Surplus = dict[type[Any], list[Any]]
+"""The held rows past the last the call names under their parent, by
+entity."""
+
+
+def _name(publication: PublicationSchema) -> str:
+    """The Transcript as a message names it: its conversation, and its
+    sub-agent where it is one's thread."""
+    if publication.agent_id is None:
+        return publication.session_id
+    return f"{publication.session_id}/{publication.agent_id}"
 
 
 def _faults(publication: PublicationSchema) -> list[str]:
@@ -173,7 +205,9 @@ class PublicationService:
     def publish(self, publication: PublicationSchema) -> Transcript:
         """Take a whole publication of one Transcript, and return its row.
 
-        Its `replayed_size` is then its `file_size` (DB 605). An Environment,
+        Its `replayed_size` is then its `file_size` (DB 605). A Call Pilot
+        held of it that the call no longer names is removed with what hangs
+        on it, and their number logged. An Environment,
         a Repository, a Component Version and a reference code the call names
         that Pilot has no row for are written, the code as its own name and
         with what the call says of its category; one Pilot has met stands as
@@ -185,10 +219,7 @@ class PublicationService:
         """
         found = _faults(publication)
         if found:
-            name = publication.session_id
-            if publication.agent_id is not None:
-                name = f"{name}/{publication.agent_id}"
-            raise PublicationInvalidException(name, found)
+            raise PublicationInvalidException(_name(publication), found)
         self.db.execute(
             select(
                 func.pg_advisory_xact_lock(
@@ -202,11 +233,18 @@ class PublicationService:
         thread = self._thread(
             publication, versions[COLLECTOR, publication.collector.version]
         )
-        prompts = self._launches(thread, publication.launches, versions)
-        compactions = self._compactions(thread, publication.compactions)
+        surplus: _Surplus = {}
+        prompts = self._launches(thread, publication.launches, versions, surplus)
+        compactions = self._compactions(thread, publication.compactions, surplus)
         calls = publication.calls
         ids = self._calls(thread, calls, prompts, compactions)
         self._tool_calls(thread, calls, ids)
+        # Must follow `_tool_calls`, which moves a Tool Call the call names
+        # off a Call that goes here, and `_calls`, after which no Call the
+        # call names points at a Call, a Prompt or a Compaction that goes.
+        self._lose_calls(publication, ids)
+        for entity, gone in surplus.items():
+            self._remove(entity, [row.id for row in gone])
         self._hung(
             Event,
             thread,
@@ -442,10 +480,12 @@ class PublicationService:
         thread: Transcript,
         launches: list[PublishedLaunchSchema],
         versions: dict[_Version, int],
+        surplus: _Surplus,
     ) -> list[Prompt]:
         """The Transcript's Launches as the call has them, each with its
         versions, its Prompts and their Hook Runs; the Prompts' rows in the
-        file's order."""
+        file's order. A held Launch, Prompt or Hook Run past the call's last
+        is left to `surplus`."""
         rows = self._placed(
             self.db.scalars(
                 select(Launch)
@@ -457,6 +497,7 @@ class PublicationService:
                 for launch in launches
             ],
             Launch,
+            surplus,
             transcript_id=thread.id,
         )
         self.db.flush()
@@ -473,9 +514,13 @@ class PublicationService:
                 component
             )
         for row, launch in zip(rows, launches, strict=True):
+            ran_with = used_by.get(row.id, {})
+            named = {used.component for used in launch.components}
+            for code in ran_with.keys() - named:
+                self.db.delete(ran_with[code])
             for used in launch.components:
                 version_id = versions[used.component, used.version]
-                held = used_by.get(row.id, {}).get(used.component)
+                held = ran_with.get(used.component)
                 if held is None:
                     self.db.add(
                         LaunchComponent(
@@ -504,6 +549,7 @@ class PublicationService:
                     for prompt in launch.prompts
                 ],
                 Prompt,
+                surplus,
                 transcript_id=thread.id,
                 launch_id=row.id,
             )
@@ -522,16 +568,20 @@ class PublicationService:
                 ran.get(prompt_row.id, []),
                 [run.model_dump() for run in prompt.hook_runs],
                 HookRun,
+                surplus,
                 prompt_id=prompt_row.id,
             )
         self.db.flush()
         return prompts
 
     def _compactions(
-        self, thread: Transcript, compactions: list[PublishedCompactionSchema]
+        self,
+        thread: Transcript,
+        compactions: list[PublishedCompactionSchema],
+        surplus: _Surplus,
     ) -> list[Compaction]:
         """The Transcript's Compactions as the call has them, in the file's
-        order."""
+        order. A held one past the call's last is left to `surplus`."""
         rows = self._placed(
             self.db.scalars(
                 select(Compaction)
@@ -549,6 +599,7 @@ class PublicationService:
                 for compaction in compactions
             ],
             Compaction,
+            surplus,
             transcript_id=thread.id,
         )
         self.db.flush()
@@ -563,8 +614,9 @@ class PublicationService:
     ) -> dict[str, int]:
         """The Transcript's Calls as the call has them, their `position` their
         place in it; the id of each Call Pilot holds of it, by its
-        `message_id`. A Call Pilot has not met takes an id before it is
-        written, so that one written beside it names it as its predecessor."""
+        `message_id`, one the call no longer names included. A Call Pilot has
+        not met takes an id before it is written, so that one written beside
+        it names it as its predecessor."""
         held = {
             row.message_id: row
             for row in self.db.scalars(
@@ -628,11 +680,26 @@ class PublicationService:
         self.db.flush()
         return ids
 
+    def _lose_calls(self, publication: PublicationSchema, ids: dict[str, int]) -> None:
+        """Remove the Calls of `ids` that the call no longer names, with what
+        hangs on them, and log their number (DB decision 81 point 4)."""
+        named = {call.message_id for call in publication.calls}
+        lost = [
+            call_id for message_id, call_id in ids.items() if message_id not in named
+        ]
+        if lost:
+            self._remove(Call, lost)
+            logger.warning(
+                "Transcript %s no longer has %d of the calls Pilot held",
+                _name(publication),
+                len(lost),
+            )
+
     def _tool_calls(
         self, thread: Transcript, calls: list[PublishedCallSchema], ids: dict[str, int]
     ) -> None:
         """The Tool Calls the call names, each under the Call that requested
-        it."""
+        it; a held one it no longer names is removed."""
         held = {
             row.tool_use_id: row
             for row in self.db.scalars(
@@ -666,6 +733,13 @@ class PublicationService:
                 else:
                     _set(row, facts)
         self.db.flush()
+        named = {
+            requested.tool_use_id for call in calls for requested in call.tool_calls
+        }
+        self._remove(
+            ToolCall,
+            [row.id for tool_use_id, row in held.items() if tool_use_id not in named],
+        )
 
     def _hung(
         self,
@@ -676,7 +750,7 @@ class PublicationService:
     ) -> None:
         """The rows of `entity`, an Event's or a Context Part's, under each
         Call as `facts` has them by the Call's `message_id`, in the file's
-        order."""
+        order; a held one past the last its Call has is removed."""
         held: dict[int, list[Any]] = self._grouped(
             select(entity)
             .join(Call, Call.id == entity.call_id)
@@ -684,10 +758,12 @@ class PublicationService:
             .order_by(entity.id),
             "call_id",
         )
+        surplus: _Surplus = {}
         for message_id, rows in facts.items():
             call_id = ids[message_id]
-            self._placed(held.get(call_id, []), rows, entity, call_id=call_id)
+            self._placed(held.get(call_id, []), rows, entity, surplus, call_id=call_id)
         self.db.flush()
+        self._remove(entity, [row.id for row in surplus.get(entity, [])])
 
     def _join(self, session_id: str) -> None:
         """Join each sub-agent's thread of the conversation to the Tool Call
@@ -723,10 +799,12 @@ class PublicationService:
         held: Sequence[Row],
         facts: list[dict[str, Any]],
         entity: type[Row],
+        surplus: _Surplus,
         **parent: Any,
     ) -> list[Row]:
         """The rows of `facts`, each the held row at its place with those
-        facts, else a new row of `parent`'s."""
+        facts, else a new row of `parent`'s. The held rows past the last of
+        `facts` are left to `surplus`, for `_remove`."""
         rows: list[Row] = []
         for place, values in enumerate(facts):
             if place < len(held):
@@ -736,7 +814,22 @@ class PublicationService:
                 row = entity(**parent, **values)
                 self.db.add(row)
             rows.append(row)
+        if len(held) > len(facts):
+            surplus.setdefault(entity, []).extend(held[len(facts) :])
         return rows
+
+    def _remove(self, entity: type[Any], ids: Sequence[int]) -> None:
+        """Delete the entity's rows of those ids, in one statement, so that
+        rows that name each other go together. Its keys take what hangs on
+        each: a Launch's versions and Prompts, a Prompt's Hook Runs, a Call's
+        Tool Calls, Events and Context Parts; a Tool Call that goes leaves
+        the sub-agent's thread it started with no spawning call."""
+        if ids:
+            self.db.execute(
+                delete(entity).where(
+                    entity.id == any_(literal(list(ids), ARRAY(BigInteger)))
+                )
+            )
 
     def _grouped[Row](self, rows: Select[Row], parent: str) -> dict[int, list[Row]]:
         """The rows in their order, under each one's `parent` column."""
