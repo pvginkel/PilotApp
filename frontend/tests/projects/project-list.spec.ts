@@ -79,7 +79,7 @@ test.describe('The project list', () => {
     await expect(status(between)).toHaveText('1 of 3 done');
     await expect(status(one)).toHaveText('Step b');
     // Every step in progress, in the plan's order.
-    await expect(status(two)).toHaveText('Step a; Step c');
+    await expect(status(two)).toHaveText('Step a · Step c');
     await expect(status(all)).toHaveText('All steps done');
   });
 
@@ -105,8 +105,8 @@ test.describe('The project list', () => {
       });
     const tab = projectList.tab(name);
     const line = tab.getByTestId('projects.tab.step');
-    await expect(line).toHaveText(`${long('a').title}; ${long('b').title}`);
-    await expect(line).toHaveAttribute('title', `${long('a').title}; ${long('b').title}`);
+    await expect(line).toHaveText(`${long('a').title} · ${long('b').title}`);
+    await expect(line).toHaveAttribute('title', `${long('a').title} · ${long('b').title}`);
     await expect(tab.getByTestId('projects.tab.badge')).toHaveText('1');
     expect(await lines(line)).toEqual({ lines: 2, cut: true });
     expect(await line.evaluate((element) => getComputedStyle(element).webkitLineClamp)).toBe('2');

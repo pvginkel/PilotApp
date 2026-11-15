@@ -51,7 +51,7 @@ interface StatusLine {
 
 /**
  * "Draft" while the project is in the chat, "Finished <date>" once finished, else every step in
- * progress, in the plan's order, "; " between them, which the tab cuts at two lines (F1.1); with
+ * progress, in the plan's order, " · " between them, which the tab cuts at two lines (F1.1); with
  * none in progress, the step reading.
  */
 export function projectStatusLine(tab: Pick<ProjectTab, 'state' | 'finished_at' | 'progress'>): StatusLine {
@@ -62,7 +62,7 @@ export function projectStatusLine(tab: Pick<ProjectTab, 'state' | 'finished_at' 
       return { text: 'Finished', at: tab.finished_at };
     case 'open': {
       const going = tab.progress.in_progress;
-      return { text: going.length > 0 ? going.join('; ') : stepReading(tab.progress).text, at: null };
+      return { text: going.length > 0 ? going.join(' · ') : stepReading(tab.progress).text, at: null };
     }
     default: {
       const unknown: never = tab.state;

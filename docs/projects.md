@@ -265,7 +265,7 @@ focused and taking words.
   without a title) with its status icon after its last word (below), its ticket, on one line, the
   name giving way to it, and its status line, at most two lines, ellipsized, its whole text
   its tooltip: "Draft"; "Finished" and the day it finished; else every step in progress, in the
-  plan's order, "; " between them, or with none in progress the step reading's "Not started", "N of
+  plan's order, " · " between them, or with none in progress the step reading's "Not started", "N of
   M done" or "All steps done" (`projectStatusLine()`, D181). The step reading, `stepReading()` in
   `frontend/src/lib/utils/status-labels.ts`, is the head's step button's and a work item's progress
   button's ([`work.md`](work.md)): the first step in progress, ", …" after it while more are. The
