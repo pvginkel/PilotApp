@@ -22,8 +22,10 @@ Whatever is pushed, the sighting of an item that no longer waits on them is
 deleted (DB decision 157), so that it alerts when it comes to wait again; the
 silent update for one that stopped waiting while they were online elsewhere
 is not sent at their going offline. A push some browser of theirs took
-(`WebPushService.push`) shows them every item it named or counted; one that
-none took shows them nothing, and their next reconcile pushes anew.
+(`WebPushService.push`) shows them every item it named or counted; an alert
+that none took shows them nothing, and their next reconcile pushes anew, while
+a silent update that none took has still forgotten what stopped, so their next
+reconcile pushes nothing.
 Nothing is retried: a push service's failure is logged and counted where the
 push is sent.
 

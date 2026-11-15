@@ -1159,7 +1159,8 @@ class TimelineService:
             if taken_documents
             else ()
         ):
-            # A held block is of a document read (DB 261, 293).
+            # A held block is of a registered document read, or of an item of
+            # Pilot's own, born published (DB 261, 293).
             assert text is not None
             for block in dsl.parse(text).blocks:
                 sections[(document_id, block.local_id)] = block

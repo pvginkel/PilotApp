@@ -1161,8 +1161,8 @@ class SessionStartService:
         transaction. The caller holds the project's row; the Sessions are
         locked before any Item, which a turn's end locks after its Session.
         The open chat's Session is locked first, whatever its state: a
-        message's send moves it to `running` under that lock alone, not the
-        project's row (`ChatService.send`)."""
+        message's send moves it to `running` under that lock, which it takes
+        after the project's row shared (`ChatService.send`)."""
         chat_id = db.scalar(
             select(Chat.id).where(
                 Chat.project_id == project.id, Chat.closed_at.is_(None)
