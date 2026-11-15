@@ -128,7 +128,11 @@ class TestStartControllerClient:
     ) -> None:
         container = _container(
             test_settings.model_copy(update={"flask_env": "production"}),
-            AppSettings(controller_url=fake_controller.url, controller_token="a-token"),
+            AppSettings(
+                controller_url=fake_controller.url,
+                controller_token="a-token",
+                store_environment_id="store-env",
+            ),
         )
 
         start_controller_client(container)
@@ -151,12 +155,31 @@ class TestStartControllerClient:
         self, app: Flask, test_settings: Settings, fake_controller: ServedFakeController
     ) -> None:
         container = _container(
-            test_settings, AppSettings(controller_url=fake_controller.url)
+            test_settings,
+            AppSettings(
+                controller_url=fake_controller.url, store_environment_id="store-env"
+            ),
         )
 
         start_controller_client(container)
 
         assert "controller" in _checks(app, container)
+
+    @pytest.mark.parametrize("flask_env", ["development", "production"])
+    def test_a_controller_with_no_store_environment_does_not_start(
+        self, test_settings: Settings, flask_env: str
+    ) -> None:
+        """P-357: with no store named, a work item's turn ends and the job
+        after it cannot be placed, the item left on its running line."""
+        container = _container(
+            test_settings.model_copy(update={"flask_env": flask_env}),
+            AppSettings(
+                controller_url="http://controller.example", controller_token="t"
+            ),
+        )
+
+        with pytest.raises(ConfigurationError, match="STORE_ENVIRONMENT_ID"):
+            start_controller_client(container)
 
     def test_the_client_verifies_the_controller_against_its_ca_file(
         self, app: Flask, test_settings: Settings, tmp_path: Path
@@ -169,6 +192,7 @@ class TestStartControllerClient:
                 AppSettings(
                     controller_url=tls_controller.url,
                     controller_ca_file=authority.ca_file,
+                    store_environment_id="store-env",
                 ),
             )
 
@@ -348,7 +372,9 @@ class TestRequirePilotServer:
             create_app(
                 test_settings.model_copy(update={"flask_env": "production"}),
                 app_settings=AppSettings(
-                    controller_url=fake_controller.url, controller_token="a-token"
+                    controller_url=fake_controller.url,
+                    controller_token="a-token",
+                    store_environment_id="store-env",
                 ),
             )
 

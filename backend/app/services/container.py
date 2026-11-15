@@ -140,7 +140,8 @@ def start_controller_client(container: "ServiceContainer") -> None:
     """Build the controller's client, which registers its readiness check, when
     a controller is configured.
 
-    Production refuses to start without one. The CLI builds the app without its
+    Production refuses to start without one, and any stage refuses a
+    controller with no `STORE_ENVIRONMENT_ID`. The CLI builds the app without its
     background services and never gets here, so a migration needs no
     controller's settings.
     """
@@ -152,6 +153,13 @@ def start_controller_client(container: "ServiceContainer") -> None:
             "CONTROLLER_URL and CONTROLLER_TOKEN must be set in production"
         )
     if app_config.controller_url is not None:
+        # Every brain session and the store's update run in the store
+        # environment: with a controller and none named, a work item's turn
+        # ends and the job after it cannot be placed (P-357).
+        if not app_config.store_environment_id:
+            raise ConfigurationError(
+                "STORE_ENVIRONMENT_ID must be set when CONTROLLER_URL is"
+            )
         container.controller_client()
 
 

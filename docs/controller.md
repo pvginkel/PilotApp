@@ -12,7 +12,9 @@ sessions the client drives are [`sessions.md`](sessions.md), and the threads it 
 ## The client
 
 `ControllerClient` (`backend/app/services/controller_client.py`) is the container's
-`controller_client` singleton, built at the server's start when `CONTROLLER_URL` is set. Every call
+`controller_client` singleton, built at the server's start when `CONTROLLER_URL` is set, which with `STORE_ENVIRONMENT_ID` empty refuses
+the start, on any stage: every brain session runs in the store, so a work item's turn would end with
+its job unplaceable (`start_controller_client`). Every call
 carries `Authorization: Bearer <CONTROLLER_TOKEN>` and verifies the controller's certificate
 against `CONTROLLER_CA_FILE` when that is set, and against requests' own trust otherwise.
 
