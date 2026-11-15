@@ -402,8 +402,8 @@
   .plan-step .step-notes:hover, .plan-step .step-notes[aria-expanded="true"] { color: hsl(var(--foreground)); }
   .plan-step .note-list { flex-basis: 100%; margin: 4px 0 2px; padding-left: 28px; }
   /* A step's why: a line of its own close under its label, a size down and muted, in the text's
-     weight under a step in progress too. */
-  .plan-step .why { display: block; margin-top: -1px; font-size: var(--text-sm); font-weight: 400; line-height: 1.4; color: hsl(var(--muted-foreground)); }
+     weight under a step in progress too; a path in it, the longest word of a why, breaks at the popover's edge. */
+  .plan-step .why { display: block; margin-top: -1px; font-size: var(--text-sm); font-weight: 400; line-height: 1.4; color: hsl(var(--muted-foreground)); overflow-wrap: anywhere; }
 
   /* ---- Dialogs (dialog.tsx) ------------------------------------------------------------- */
 

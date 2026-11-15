@@ -508,7 +508,7 @@ test.describe('On the phone', () => {
     expect(pop.x + pop.width).toBeLessThanOrEqual(390);
   });
 
-  test('a step’s why stands under its label, a long one wrapping within the popover, the button keeping the label alone', async ({
+  test('a step’s why stands under its label, a long one, a long path in it too, wrapping within the popover, the button keeping the label alone', async ({
     people,
     projects,
     timeline,
@@ -519,9 +519,9 @@ test.describe('On the phone', () => {
     await deploymentSse.ensureConnected();
     const tile = timeline.item(work);
     const item = tile.work;
-    // The longest a why may be: 120 characters.
-    const why = 'The second review found that the downgrade left the column behind and that no test ran the downgrade, so this runs again';
-    expect(why).toHaveLength(120);
+    // Up to 120 characters, a path in full among them, which has no place to break but within a word.
+    const why = 'The review found the downgrade left the column behind in backend/alembic/versions/0042_add_halt_file_column_to_usage.py';
+    expect(why).toHaveLength(119);
     await projects.setProgress(work, [step('a', 'done'), step('review-2', 'active', why)]);
     await expect(item.progressName).toHaveText('Step review-2');
     await expect(tile.root).not.toContainText(why);

@@ -241,7 +241,7 @@ the button's middle, as the head's step button's do, a top margin on its donut u
 **Its popover**, "Progress", lists the steps in order, a done one ticked and every active one
 highlighted, under the heading "Progress · N of M done", with no notes; a step's why stands under
 its label, on a line of its own close under it, a size down and muted, in the text's weight under
-a step in progress too, and wraps where it is long, nothing cutting it. Only the popover shows the
+a step in progress too, and wraps where it is long, a long path in it breaking anywhere, nothing cutting it. Only the popover shows the
 why: the button, its tooltip and the tile's line never do. It opens with its first
 active step, or with none its first not started, at the middle of the list's box, as the plan
 popover does ([`ui.md`](ui.md)). It follows the list live, opens from the button's left edge,
