@@ -93,3 +93,16 @@ class SyncProtocolUnsupportedException(BusinessLogicException):
             f" {minimum} to {maximum}"
         )
         super().__init__(message, error_code="SYNC_PROTOCOL_UNSUPPORTED")
+
+
+class PublicationInvalidException(ValidationException):
+    """Raised when a collector's publication contradicts itself or the
+    record's rules for a Transcript; `faults` names each one, and nothing of
+    the call is written."""
+
+    def __init__(self, transcript: str, faults: list[str]) -> None:
+        self.faults = faults
+        super().__init__(
+            f"Cannot take the publication of transcript {transcript} because "
+            + "; ".join(faults)
+        )

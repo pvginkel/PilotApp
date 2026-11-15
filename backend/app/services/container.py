@@ -58,6 +58,7 @@ from app.services.pilot_store_service import PilotStoreService
 from app.services.pilot_work_service import PilotWorkService
 from app.services.project_event_service import ProjectEventService
 from app.services.project_service import ProjectService
+from app.services.publication_service import PublicationService
 from app.services.push_subscription_service import PushSubscriptionService
 from app.services.quota_overrule_service import QuotaOverruleService
 from app.services.relay_service import RelayService
@@ -570,6 +571,10 @@ class ServiceContainer(containers.DeclarativeContainer):
         engine_bus=engine_bus,
         lifecycle_coordinator=lifecycle_coordinator,
     )
+
+    # A collector's publication of a transcript (F152.3)
+    publication_service = providers.Factory(PublicationService, db=db_session)
+
     testing_sync_service = providers.Factory(
         TestingSyncService,
         db=db_session,
