@@ -187,7 +187,12 @@ function ActionControls({ field, block, closable, saving, disabled, onAnswer, on
                 key={option.label}
                 type="button"
                 className={cn('btn', choice === null ? index === 0 && 'btn-primary' : chose === option.label && 'btn-soft')}
-                onClick={() => (choice === null ? pick(option.label) : choice.choose(option.label))}
+                onClick={() => {
+                  if (choice !== null) return choice.choose(option.label);
+                  // Its press answers, which Other's field, left open, would answer a second time.
+                  setOpened(false);
+                  pick(option.label);
+                }}
                 disabled={disabled}
                 title={option.text ?? undefined}
                 data-testid="timeline.block.act"

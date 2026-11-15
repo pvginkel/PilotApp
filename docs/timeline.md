@@ -488,7 +488,8 @@ answers*.
 - **An action** (`action.tsx`): without options, a paste-back field, "What to paste back, if
   anything", over Done; with options, a button each, and Other…, whose console sends its words as
   the answer: in a document the first is the primary and a press answers, in a one-ask item every
-  one is plain and a press chooses. The paste-back goes as the note of the Done, the option or the
+  one is plain and a press chooses. In a document an option's press closes Other's console, as a
+  confirmation's Yes closes No's. The paste-back goes as the note of the Done, the option or the
   words. While the answer saves its controls stand, disabled. An action Pilot claimed is open until its `done`. Unless its held line says so, it reads,
   while nothing saves, Pilot's avatar, "Pilot does it" and " · " the work item that does it, linked
   to its address, with the claim's note under it, over the controls: disabled in a document that is

@@ -197,6 +197,28 @@ test.describe('An action with options', () => {
     expect((await projects.block(id, trip)).answer).toBe('Half works');
   });
 
+  test('closes Other’s console as an option is pressed in a document of more than one ask, the words left in it answering nothing', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Two asks option'), members: [me.handle!] });
+    const text = ['## Try the lamp\n', OPTIONS, '## Where do we pitch?\n', '```question id=Q1\n```\n'].join('\n');
+    const trip = await projects.place(id, { kind: 'document', title: 'The evening', text });
+    await timeline.open(id);
+    const block = timeline.item(trip).blockAt('A1');
+
+    await block.other.click();
+    await block.field.fill('Half works');
+    await expect(block.console).toHaveCount(1);
+    await block.acts.first().click();
+    await expect(block.said.locator('.said')).toHaveText('Works');
+    await expect(block.console).toHaveCount(0);
+    await expect(block.other).toBeEnabled();
+    expect((await projects.block(id, trip)).answer).toBe('Works');
+  });
+
   test('closes Other’s console on Esc, keeping the paste-back and giving back the option chosen before it, after a reload too', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Esc'), members: [me.handle!] });
