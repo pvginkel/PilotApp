@@ -346,8 +346,8 @@ class TestAlarmServiceReconcile:
     @pytest.mark.parametrize(
         ("outage_age", "week_age", "text", "latest"),
         [
-            pytest.param(2, 1, f"{WEEK}, +1", "week", id="the-weeks-halt-latest"),
-            pytest.param(1, 2, f"{OUTAGE}, +1", "outage", id="the-outage-latest"),
+            pytest.param(2, 1, f"{WEEK}, 1 more", "week", id="the-weeks-halt-latest"),
+            pytest.param(1, 2, f"{OUTAGE}, 1 more", "outage", id="the-outage-latest"),
         ],
     )
     def test_its_text_is_the_conditions_due_the_latest_begun_first(
@@ -404,7 +404,7 @@ class TestAlarmServiceReconcile:
 
         assert _pushes(fake_push_service, browsers["ada"]) == [
             _alarm(container, WEEK),
-            _alarm(container, f"{OUTAGE}, +1"),
+            _alarm(container, f"{OUTAGE}, 1 more"),
         ]
         assert _seen_at(container, "ada") == outage
 
@@ -428,7 +428,7 @@ class TestAlarmServiceReconcile:
         _reconcile(built.service, {})
 
         assert _pushes(fake_push_service, browsers["ada"]) == [
-            _alarm(container, f"{OUTAGE}, +1")
+            _alarm(container, f"{OUTAGE}, 1 more")
         ]
 
     @pytest.mark.parametrize(("seconds", "due"), [(299, False), (301, True)])
@@ -476,7 +476,7 @@ class TestAlarmServiceReconcile:
         )
 
         assert _pushes(fake_push_service, browsers["ada"])[-1] == _alarm(
-            container, f"{OUTAGE}, +1"
+            container, f"{OUTAGE}, 1 more"
         )
 
     def test_pilot_has_no_alarm(
@@ -759,7 +759,7 @@ class TestAlarmServiceSwitch:
         )
 
         assert _pushes(fake_push_service, browsers["ada"]) == [
-            _alarm(container, f"{OUTAGE}, +1")
+            _alarm(container, f"{OUTAGE}, 1 more")
         ]
 
 

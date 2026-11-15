@@ -75,7 +75,7 @@ test.describe("A project's notification", () => {
     expect(await browserPush.pushes()).toEqual([
       {
         title: name,
-        body: 'Which site?, +1',
+        body: 'Which site?, 1 more',
         tag: projectId,
         url: expect.stringMatching(new RegExp(`${projectAddress(projectId)}$`)),
         renotify: true,

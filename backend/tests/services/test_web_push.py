@@ -40,7 +40,7 @@ PROJECT_ID = "5b7f3c1e-0d2a-4e8b-9c61-2f4a8d0e7b13"
 URL = f"http://localhost:3500/projects/{PROJECT_ID}"
 ALERT = Push(
     title="Garden sensors",
-    body="Pick the board, +1",
+    body="Pick the board, 1 more",
     tag=PROJECT_ID,
     url=URL,
     renotify=True,
@@ -117,17 +117,17 @@ class TestPushPayload:
     def test_it_carries_the_five_fields_as_json(self) -> None:
         assert _payload(ALERT) == {
             "title": "Garden sensors",
-            "body": "Pick the board, +1",
+            "body": "Pick the board, 1 more",
             "tag": PROJECT_ID,
             "url": URL,
             "renotify": True,
         }
 
     def test_the_text_is_plain_with_no_markdown_escape(self) -> None:
-        push = Push("A_b *c*", "Review [the plan] #1, +2", "t", URL, False)
+        push = Push("A_b *c*", "Review [the plan] #1, 2 more", "t", URL, False)
 
         assert _payload(push)["title"] == "A_b *c*"
-        assert _payload(push)["body"] == "Review [the plan] #1, +2"
+        assert _payload(push)["body"] == "Review [the plan] #1, 2 more"
 
     def test_a_text_that_fits_is_not_cut(self) -> None:
         overhead = len(Push("T", "", "t", URL, True).payload())

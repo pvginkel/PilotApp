@@ -8,7 +8,7 @@ Two conditions alarm: the controller unreachable, once it has held
 (F142.2), and the week's usage halt, at once. Which hold is the conditions
 service's, by their codes; the five-hour halt and the store's update alarm
 nobody. The text is the titles of those due, the latest begun first, the
-first alone or followed by ", +<n>" counting the others, under the one `tag`
+first alone or followed by ", <n> more" counting the others, under the one `tag`
 `alarms`, which the app closes wherever a page of Pilot opens. The outage is
 each process's own and off at a start.
 
@@ -92,7 +92,7 @@ first."""
 def _text(due: _Due) -> str:
     """The alarm's text for the conditions `due`, one at least."""
     first = ALARM_TITLES[due[0][0]]
-    return first if len(due) == 1 else f"{first}, +{len(due) - 1}"
+    return first if len(due) == 1 else f"{first}, {len(due) - 1} more"
 
 
 class AlarmService:

@@ -20,7 +20,7 @@ test.use({ channel: 'chromium', permissions: ['notifications'] });
 const ALARMS = 'alarms';
 
 function pushUnder(page: Page, tag: string, change: Partial<Push> = {}): Push {
-  return { title: 'Tents', body: 'Which tent?, +1', tag, url: new URL(`/projects/${tag}`, page.url()).href, renotify: true, ...change };
+  return { title: 'Tents', body: 'Which tent?, 1 more', tag, url: new URL(`/projects/${tag}`, page.url()).href, renotify: true, ...change };
 }
 
 test.describe("A device's notifications", () => {

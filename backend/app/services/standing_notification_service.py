@@ -36,7 +36,7 @@ class StandingNotification:
     """The project's name."""
     body: str
     """The items that wait on the member: the latest placed, by its title or
-    its kind's name, then ", +<n>" counting the others; plain text."""
+    its kind's name, then ", <n> more" counting the others; plain text."""
     url: str
     items: frozenset[uuid.UUID]
     """Every item that waits on the member, each named or counted in the
@@ -109,7 +109,7 @@ class StandingNotificationService:
         return StandingNotification(
             tag=str(project.id),
             title=_cut(project.name or _UNTITLED, _MAX_TITLE),
-            body=ask if len(mine) == 1 else f"{ask}, +{len(mine) - 1}",
+            body=ask if len(mine) == 1 else f"{ask}, {len(mine) - 1} more",
             url=f"{timeline}/items/{latest.id}" if len(mine) == 1 else timeline,
             items=frozenset(item.id for item in mine),
         )

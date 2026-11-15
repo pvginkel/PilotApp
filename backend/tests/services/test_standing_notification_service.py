@@ -353,7 +353,7 @@ class TestWhatWaits:
             "A storm comes.\n",
             urgent="true",
         )
-        assert _seen(container, session, project).body == "Storm, +1"
+        assert _seen(container, session, project).body == "Storm, 1 more"
 
     def test_an_item_for_one_member_waits_on_them_alone_and_is_not_counted_for_another(
         self,
@@ -384,7 +384,7 @@ class TestWhatWaits:
         seen = _should_see(container, session, project)
 
         assert seen["ada"] is not None and seen["ada"].body == "Which tent?"
-        assert seen["ben"] is not None and seen["ben"].body == "Which tent?, +1"
+        assert seen["ben"] is not None and seen["ben"].body == "Which tent?, 1 more"
 
     def test_a_document_whose_claims_a_running_work_item_holds_waits_on_no_one(
         self,
@@ -416,7 +416,7 @@ class TestWhatWaits:
         session.get_one(models.Session, doing.id).state_code = SessionState.FAILED
         session.flush()
 
-        assert _seen(container, session, project).body == "Build the camp, +1"
+        assert _seen(container, session, project).body == "Build the camp, 1 more"
 
 
 @pytest.mark.usefixtures("person")
@@ -439,7 +439,7 @@ class TestMessage:
             _bear(container, project, run, "question", title, QUESTION)
 
         # No plan step, no status line, nothing running and no open wait.
-        assert _seen(container, session, project).body == "Which tent?, +2"
+        assert _seen(container, session, project).body == "Which tent?, 2 more"
 
     def test_a_pause_changes_nothing(
         self,
@@ -464,7 +464,7 @@ class TestMessage:
         _decision(container, session, project, environment)
         _work(session, project, environment, SessionState.STOPPED, None)
 
-        assert _seen(container, session, project).body == "Work, +1"
+        assert _seen(container, session, project).body == "Work, 1 more"
 
     def test_the_records_texts_read_as_they_are_written(
         self,
@@ -560,14 +560,14 @@ class TestPush:
         notification = StandingNotification(
             tag="the-project",
             title="Camp",
-            body="Which tent?, +1",
+            body="Which tent?, 1 more",
             url="https://pilot.example.com/projects/the-project",
             items=frozenset({uuid.uuid4(), uuid.uuid4()}),
         )
 
         assert notification.push(alert=True) == Push(
             title="Camp",
-            body="Which tent?, +1",
+            body="Which tent?, 1 more",
             tag="the-project",
             url="https://pilot.example.com/projects/the-project",
             renotify=True,

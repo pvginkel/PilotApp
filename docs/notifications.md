@@ -183,8 +183,8 @@ line, no running work item, no pause, no plan task.
 - **The title** is the project's name, "New project" for a draft its draft has not named yet, cut
   to 250 characters, ending in "…" (D091).
 - **The body** names the latest placed of the items that wait on the member, by its title, or by
-  its kind's name, such as "Decision", when it has none, followed by ", +<n>" counting the others
-  when more wait (D145): `Which tent?, +2`.
+  its kind's name, such as "Decision", when it has none, followed by ", <n> more" counting the others
+  when more wait (D145): `Which tent?, 2 more`.
 - **The `url`** is absolute, on the stage's `BASEURL` (D091), on the project's address, its slug
   or a draft's `draft-<number>` ([`projects.md`](projects.md)): `<BASEURL>/projects/<address>/items/<item
   id>`, the item's permalink, when exactly one item waits on the member, and the project's
@@ -278,7 +278,7 @@ alone. The outage is each process's own, and off at a start.
 - **The title** is "Pilot", and **the `url`** the app, `<BASEURL>/`. Every alarm alerts.
 - **The body** names the conditions due by their titles, "The controller has been unreachable"
   and "The week's usage halt", the latest begun first, the outage first of two begun at once: the
-  first alone, or followed by ", +<n>" counting the others, so `The week's usage halt, +1`.
+  first alone, or followed by ", <n> more" counting the others, so `The week's usage halt, 1 more`.
 
 When a person was last shown the conditions is their `alarm_seen_at`, which only moves forward. An
 alarm push moves it to when the latest begun of the conditions it named began, whether a browser

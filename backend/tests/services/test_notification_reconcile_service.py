@@ -568,8 +568,8 @@ class TestNotificationReconcileServiceReconcile:
 
         assert _pushes(fake_push_service, browsers["ada"]) == [
             _push(container, project_id, "Which tent?", tent),
-            _push(container, project_id, "Which site?, +1"),
-            _push(container, project_id, "Storm shelter?, +2"),
+            _push(container, project_id, "Which site?, 1 more"),
+            _push(container, project_id, "Storm shelter?, 2 more"),
         ]
         assert _seen(container, project_id) == {tent, site, storm}
 
@@ -592,7 +592,7 @@ class TestNotificationReconcileServiceReconcile:
         _reconcile(built, project_id)
 
         assert _pushes(fake_push_service, browsers["ada"]) == [
-            _push(container, project_id, "Which site?, +1"),
+            _push(container, project_id, "Which site?, 1 more"),
             _push(container, project_id, "Which site?", site, alert=False),
         ]
         assert _seen(container, project_id) == {site}
@@ -688,7 +688,7 @@ class TestNotificationReconcileServiceReconcile:
         _reconcile(built, project_id)
 
         assert _pushes(fake_push_service, browsers["ada"]) == pushed
-        assert pushed == [_push(container, project_id, "Which tent?, +1")]
+        assert pushed == [_push(container, project_id, "Which tent?, 1 more")]
 
     def test_an_item_for_one_member_is_theirs_alone(
         self,
@@ -902,7 +902,7 @@ class TestNotificationReconcileServicePages:
         assert [
             (push.body, push.renotify)
             for push in _pushes(fake_push_service, browsers["ada"])
-        ] == [("Building the camp, +1", True)] * 2
+        ] == [("Building the camp, 1 more", True)] * 2
 
     def test_a_page_whose_beat_is_ninety_seconds_old_counts_for_nothing(
         self,
@@ -1105,7 +1105,7 @@ class TestNotificationReconcileServiceFailures:
         _reconcile(built, project_id)
 
         assert _pushes(fake_push_service, browsers["ada"]) == [
-            _push(container, project_id, "Which site?, +1")
+            _push(container, project_id, "Which site?, 1 more")
         ]
         assert len(_seen(container, project_id)) == 2
 
@@ -1139,7 +1139,7 @@ class TestNotificationReconcileServiceFailures:
         assert [
             (push.body, push.renotify)
             for push in _pushes(fake_push_service, browsers["ada"])
-        ] == [("Building the camp, +1", True)] * 2
+        ] == [("Building the camp, 1 more", True)] * 2
 
     def test_a_push_one_browser_of_theirs_took_shows_them_the_items(
         self,
@@ -1297,7 +1297,7 @@ class TestNotificationReconcileServiceSpacing:
         assert [
             (push.body, push.renotify)
             for push in _pushes(fake_push_service, browsers["ada"])
-        ] == [("Which tent?", True), ("Which stove?, +2", True)]
+        ] == [("Which tent?", True), ("Which stove?, 2 more", True)]
         last = _sent_at(container, project_id)
         assert last is not None and last - first >= timedelta(seconds=SPACING)
 
@@ -1397,10 +1397,10 @@ class TestNotificationReconcileServiceSpacing:
         assert [(push.tag, push.body) for push in _pushes(fake_push_service, ada)] == [
             (str(camp), "Which tent?"),
             (str(lake), "Which lake?"),
-            (str(camp), "Which site?, +1"),
+            (str(camp), "Which site?, 1 more"),
         ]
         assert [push.body for push in _pushes(fake_push_service, ben)] == [
-            "Which site?, +1"
+            "Which site?, 1 more"
         ]
 
     def test_a_rejoin_waits_for_the_window_of_the_push_before_its_leave(
@@ -1467,7 +1467,7 @@ class TestNotificationReconcileServiceSpacing:
         assert [
             (push.body, push.renotify)
             for push in _pushes(fake_push_service, browsers["ada"])
-        ][1:] == [("Which site?, +1", True)]
+        ][1:] == [("Which site?, 1 more", True)]
 
     def test_a_stop_before_a_persons_compare_pushes_nothing(
         self,
@@ -1520,7 +1520,7 @@ class TestNotificationReconcileServiceSpacing:
         assert during[0] == 1
         assert [push.body for push in _pushes(fake_push_service, browsers["ada"])] == [
             "Which tent?",
-            "Which stove?, +2",
+            "Which stove?, 2 more",
         ]
         last = _sent_at(container, project_id)
         assert last is not None and last - first >= timedelta(seconds=SPACING)
@@ -1652,8 +1652,8 @@ class TestNotificationReconcileServiceTwoProcesses:
 
         assert [push.body for push in _pushes(fake_push_service, browsers["ada"])] == [
             "Which tent?",
-            "Which site?, +1",
-            "Which stove?, +2",
+            "Which site?, 1 more",
+            "Which stove?, 2 more",
         ]
         assert len(_seen(container, project_id)) == 3
 
