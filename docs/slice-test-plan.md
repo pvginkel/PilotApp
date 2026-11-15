@@ -138,6 +138,34 @@ purpose drains it from the cap the `statement_cap` fixture hands it. A Playwrigh
 same way on any statement of its worker's backend, which runs the cap under `STATEMENT_CAP`, the
 `statementCap` fixture taking what it kept from `POST /api/testing/statement-cap/take`.
 
+A Playwright spec red only under load, green alone and on a quiet node, is traced with the
+backend's request diagnostics, which the Playwright backends take from the runner's environment
+(`frontend/tests/support/process/servers.ts` hands each backend `process.env`) and which are off
+unless asked for. Run the spec, or the folder it fails in, with them on and the backend's log on
+the console:
+
+```bash
+cexec modern-app sh -c 'cd frontend && DIAGNOSTICS_ENABLED=true PLAYWRIGHT_BACKEND_LOG_STREAM=true pnpm playwright test tests/<folder>/<spec>.spec.ts'
+```
+
+- **`DIAGNOSTICS_ENABLED=true`** turns on the request timing and query profiling
+  (`backend/app/services/diagnostics_service.py`): a request over `DIAGNOSTICS_SLOW_REQUEST_THRESHOLD_MS`
+  (default 500) logs `SLOW REQUEST <method> <path>: <total>ms total (<db>ms db, <python>ms python,
+  <n> queries)` and its five slowest queries, and a query over `DIAGNOSTICS_SLOW_QUERY_THRESHOLD_MS`
+  (default 100) logs `SLOW QUERY (<n>ms): <statement>`, all at WARNING. Lower the thresholds, for
+  instance `DIAGNOSTICS_SLOW_QUERY_THRESHOLD_MS=20`, to see what a loaded node stretches without
+  crossing the defaults; `DIAGNOSTICS_LOG_ALL_QUERIES=true` logs every query at DEBUG, a flood and a
+  last resort.
+- **`PLAYWRIGHT_BACKEND_LOG_STREAM=true`** streams each worker's backend output to the console, each
+  line prefixed `[worker-<n> backend]`, from its start, where otherwise it reaches only the failed
+  test's `backend.log` attachment (`preserveOutput: 'failures-only'` drops a passing test's). The
+  suite runner sets it already, so CI's log carries the backend's lines; a run from a session sets
+  it itself.
+
+The load is the other half: the slow line appears where the node is loaded, so run it alongside the
+suite or another environment's run, and read the line next to the failing test's name in the
+console. The worker databases of a run are dropped when it ends.
+
 Then the same verbs from the root of every other repo the slice touched, each where it declares
 them: `../PilotDeploy`, whose `test` reads `../PilotApp/docs/architecture/architecture.yaml` and so
 needs this checkout beside it, and a registry repo the slice changed in `/work/scratch/`
