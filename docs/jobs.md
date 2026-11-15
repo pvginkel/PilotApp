@@ -5,7 +5,8 @@ The backend's long-lived work runs as threads of its own process, under the supe
 consumer, a relay per session with a turn in flight, an interrupt per turn stopped under it, a start
 per session coming up, the release of the held ones, the usage halts' hard stop and the nudges, the
 halt file's writes and deletes, the reads and the write-backs of the documents a work item's run
-registered, the store's update, the notifications' and the alarms' pushes, and the timers.
+registered, the store's update, the outage's turn told, the notifications' and the alarms' pushes,
+and the timers.
 Every job resumes from rows, so nothing drains to completion: a roll or a crash costs a restart of
 the job, never its work.
 
@@ -32,18 +33,18 @@ the job, never its work.
 | `controller-probe` | a timer | while the controller is unreachable, asks whether it answers ([`controller.md`](controller.md)) |
 | `nudges` | a timer | asks for `start:nudges` while a nudge owed is held by nothing, or a wall decided missed still owes one ([`usage.md`](usage.md)) |
 | `store-update` | a timer | tells the conditions when the unlifted store's update turned, and runs the job `store-update` while one stands not waiting for the sync ([`store-update.md`](store-update.md)) |
+| `conditions` | a job with one loop | tells the outage's turn, off the thread of the call that met it: the conditions' listeners, then every person's connections ([`controller.md`](controller.md)) |
 | `notification:<project id>` | a loop of the job `notification` | reconciles each member of the project: pushes their browsers what waits on them that they have not been shown ([`notifications.md`](notifications.md)) |
 | `notification-person:<person id>` | a loop of the job `notification-person` | reconciles one person in each of their projects, once their pages come to show a project, cease to, or go offline ([`notifications.md`](notifications.md)) |
 | `alarm` | a job with one loop | pushes each person the conditions that alarm, begun since they were last shown them ([`notifications.md`](notifications.md)) |
-| `alarm-seen:<n>` | a loop of the job `alarm-seen` | records a person's going offline as their being shown every condition that held then ([`notifications.md`](notifications.md)) |
 | `app-page-expiry` | a timer | deletes the pages of Pilot whose beat is ninety seconds old, and tells what that turns ([`notifications.md`](notifications.md)) |
 | `alarm-due` | a timer | asks for the alarms' reconcile when the conditions due differ from those the last reconcile read ([`notifications.md`](notifications.md)) |
 | `wait-due` | a timer | fires each open timed wait whose due time has passed, once ([`waits.md`](waits.md)) |
 | `wait-batch` | a timer | places the run of each wait whose oldest pending firing is the quiet window old ([`waits.md`](waits.md)) |
 
-Each but the notifications', the alarms' and the timers `usage-halts`, `nudges`, `store-update`,
-`app-page-expiry` and `wait-due` needs the controller. With `CONTROLLER_URL` unset (the
-backend suite, a dev stack without the credential), none of them starts, and the log says so once at
+Each but the conditions', the notifications', the alarms' and the timers `usage-halts`, `nudges`,
+`store-update`, `app-page-expiry` and `wait-due` needs the controller. With `CONTROLLER_URL` unset
+(the backend suite, a dev stack without the credential), none of them starts, and the log says so once at
 STARTUP: `No controller configured (CONTROLLER_URL unset): the jobs and timers that need one do not
 start (<names>)`. Production refuses to start without `CONTROLLER_URL` and `CONTROLLER_TOKEN`; the
 check is in the server's background start, which the CLI, and so the `migrate` init container, never

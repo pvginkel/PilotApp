@@ -128,10 +128,20 @@ Project's row `FOR UPDATE`, then the Document's, the slot's and an Environment's
 continuation locks the documents it carries after its Session's, before the slot. A job's release
 holds its Project's row `FOR SHARE` before its Session's: its brief writes the Session's row a second
 time, whose foreign key's check then takes the Project's row, which an Item's birth holds
-exclusively. A worker's turn end holds its Project's row `FOR UPDATE` before its Session's, as it
-may place the job after its turn (below), and so does a pass's, the job after a worker's turn, as
-it may place its clarification run. The start loop's transactions lock no Project row, so no
-controller call is made while one is locked.
+exclusively. Every turn end, a stopped turn's included, takes its Project's row before its
+Session's (`SessionRecordService.lock_project`): a worker's `FOR UPDATE`, as it may place the job
+after its turn (below), and so does a pass's, the job after a worker's turn, as it may place its
+clarification run; any other's shared, `FOR KEY SHARE`. PostgreSQL checks a row's foreign keys
+again on an `UPDATE` of a row its transaction already wrote, so a transaction that writes its
+Session twice takes the Project's row `FOR KEY SHARE` late, which against a close holding that
+row and waiting on the Session deadlocks; taken first, it waits instead. A send's accept and a
+failed start take the row shared as well. The start loop's send (`send_turn`) holds the Session's
+send lock, an advisory lock of two keys, `(226, <a key drawn from the Session's id>)` (`hold_send`,
+`backend/app/services/pilot_server.py`), from before the controller's call to its commit, before
+any row, and takes the Project's row only once the call has returned, so the start loop makes no
+controller call while a Project row is locked; a tool call its turn makes before that commit
+waits on the send lock ([`mcp.md`](mcp.md)). A chat's send takes its Project's row shared before
+its Session's and holds it across the controller's call ([`chats.md`](chats.md)).
 
 **The start loop.** Once a `starting` Session's transaction commits, the loop `start:<session id>`
 runs the start from the rows, its environment first:

@@ -105,8 +105,9 @@ each with:
   claim or research of its first held block names otherwise, and null while `asking_writer`.
   `pulse` is whether the session doing that work is queued or held, starting or running, never
   while `awaiting_run` or `waiting_on_answer`. `asked_in`, `{id, title}`, the title the line's, the
-  file's name where the text gives none, is the run's first open document on the timeline while
-  `waiting_on_answer`, else null. `awaiting_read` tells a document with no text from one already
+  file's name where the text gives none, is the run's first open document on the timeline that is
+  the person's with no block held, else its first open document, while `waiting_on_answer`, else
+  null ([`round-trip.md`](round-trip.md)). `awaiting_read` tells a document with no text from one already
   read while another of its run awaits its read, both `awaiting_run`;
 - `cancel`, the Cancel the item offers ([`round-trip.md`](round-trip.md)), null while it offers none:
   `{takes_back, also_closes}`. `takes_back` are the blocks the run holds, in timeline order, each

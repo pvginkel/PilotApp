@@ -135,11 +135,13 @@ brain session that held the project folder's write lock as the sidecar read the 
   with no base hash is stale;
 - `held`, and `faults`: what held the save, or what the merge put back or took out.
 
-A save of a document runs in one transaction, under the row lock of the session it is credited to,
-when it is one's, then the document's, the order a turn's end takes them in, so that a save and its
-session's turn end are taken one after the other. A save of an item of Pilot's own takes its
-project's row `FOR UPDATE` before both, as a close takes it, since the save may close the item
-(step 6):
+A save of a document runs in one transaction, under its project's row, then the row lock of the
+session it is credited to, when it is one's, then the document's, the order a turn's end, a start,
+a close and a tool call take them in, so that a save and its session's turn end are taken one after
+the other. It holds the project's row shared, `FOR KEY SHARE`, which waits only for an exclusive
+holder, never for another save; a save of an item of Pilot's own holds it `FOR UPDATE`, as a close
+takes it, since the save may close the item (step 6), and so does a save of a draft's `project.md`,
+which may write its title to the project's row:
 
 1. The bytes are decoded. Bytes that are not UTF-8, and NUL, which PostgreSQL's `text` cannot
    hold, are replaced by U+FFFD with a fault at the line of the first; the answer carries the
@@ -161,7 +163,9 @@ project's row `FOR UPDATE` before both, as a close takes it, since the save may 
    registered document, that writes the `done` of its last open block, every block answered after
    it and one open before it now `done`, closes the item (`RecordService.done_by_its_save`,
    D138): a `done` version cut, as Pilot's Done cuts one, and the item done at the save by Pilot,
-   cause `settled`, with no job after it. An answer of Pilot's alone closes nothing, and an item
+   cause `settled`, with no job after it, consumed on the spot by the Session the save is credited
+   to, so that it offers no Undo (D226), as a wait Pilot marks. A save no Session's took nothing,
+   and the item it closes keeps its Undo. An answer of Pilot's alone closes nothing, and an item
    done already or of an archived project stays as it is.
 7. A late save not held cuts its session's `turn` version at once, where the published text moved
    since the last version (`cut_turn_version`, below), and raises `ProjectChanged`: no turn's end
@@ -275,8 +279,8 @@ merge carries the write to the file.
   one, answered `Archive` or `Keep` by `user`, its done `answered`: the menu's Archive closes it as
   its Archive and Reopen as its Keep. It holds the question's document row alone, under the hold of
   the project's row its caller took `FOR NO KEY UPDATE`, so that a change that stops the project's
-  sessions never takes the row `FOR UPDATE`, which a chat's send under way, holding its Session,
-  would deadlock with.
+  sessions never takes the row `FOR UPDATE`, which a chat's send under way holds shared across the
+  controller's call.
 - `autopilot_yes(project, user)`: the switch's Yes ([`projects.md`](projects.md)), under the
   project's row held `FOR UPDATE`: the documents of the confirmations it answers locked in id order,
   the confirmations read again within them, and each answered `Yes` by `user`, `via: autopilot`,
@@ -286,14 +290,18 @@ merge carries the write to the file.
 
 **A claimed action** (D085) is an action of a registered document the pre-ruling pass answered
 `Pilot does it`, `by: agent`, and whose `done` is not yet written: open, Pilot's, until then
-([`block-dsl.md`](block-dsl.md)). The work item that does it is the record's, not only its note's:
-the pass names the block in the `claims` of that work item's `add_item` ([`mcp.md`](mcp.md)), the
-work item first and the claim after it, and each naming is a Claim Assignment
-([`record.md`](record.md)). `claimable(project, block_ids, operation)` checks the named blocks
-before the work item starts, each document's row locked in id order after the project's: a block
-of another project's item, or one its document lacks, is a `RecordNotFoundException`; an item that
-is no registered document, is done or has not been read yet, a block that is no action or is
-answered, a claim not yet done excepted, and a block named twice are refused. `give(project, work,
+([`block-dsl.md`](block-dsl.md)). An open action of an item of Pilot's own (`pilots_own`), one Pilot
+hands to a work item, is claimed the same way (D224): the plan skill or the chat claims it, and the
+`done` the job after the work's turn writes closes the item on its last open block (above, step 6),
+so that it leaves the person's queue (PilotProjects' `rules/routing.md`). The work item that does it
+is the record's, not only its note's: Pilot names the block in the `claims` of that work item's
+`add_item` ([`mcp.md`](mcp.md)), the work item first and the claim after it, and each naming is a
+Claim Assignment ([`record.md`](record.md)). `claimable(project, block_ids, operation)` checks the
+named blocks before the work item starts, each document's row locked in id order after the
+project's: a block of another project's item, or one its document lacks, is a
+`RecordNotFoundException`; an item that is neither a registered document nor an item of Pilot's
+own, is done or has not been read yet, a block that is no action or is answered, a claim not yet
+done excepted, and a block named twice are refused. `give(project, work,
 blocks)` writes one row each once the work item is placed. A block named again later keeps its
 earlier rows, and the one whose work item has the highest `seq` stands (`claims.standing()`); a
 claimed action whose rows are none has no work item named. `claims.claimed()` is the claim as a
@@ -359,9 +367,12 @@ it in the close's transaction, through the port `Jobs` (`JobService.item_done`,
 [`work.md`](work.md)): an answer that marks a one-ask item done, an action's Done that does, Done
 and Reviewed. A close given `via` `chat`, which `pilot-store`'s `answer` and its `mark` with `for`
 record on a person's behalf ([`mcp.md`](mcp.md)), places none: the chat's own turn carries the
-ruling out (D139). Neither do a notice's Read, Pilot's own Done, its close at a save (above),
-Finish's close, a registered document's close, an item a worker's session added and the archive
-question, which no session added. `close_starts_work(db, project, items)` reads these two
+ruling out (D139), and the item is consumed on the spot by the chat's Session, which the record of
+a close through the chat names, so that it offers no Undo after it, as after a job's brief (D225).
+Neither do a notice's Read, Pilot's own Done, its close at a save (above), Finish's close, a
+registered document's close, an item a worker's session added and the archive question, which no
+session added. A notice's Read through the chat, which carries nothing out, keeps its Undo, as the
+app's does, and so does Pilot's own Done through `mark` with no `for`. `close_starts_work(db, project, items)` reads these two
 branches for the page, from the rows at each read (`close_starts_work` on a timeline entry,
 [`timeline.md`](timeline.md)): an open item a session of Pilot's own added, but a notice, and a
 registered document whose close would release its run's continuation; none while the project is

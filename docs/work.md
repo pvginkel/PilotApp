@@ -356,7 +356,9 @@ Code's own, the hour on a subscription within its usage limits.
   turn carrying the ruling out (D139), and neither do a notice's Read, Pilot's own Done, Pilot's
   close of an item of its own at the save that writes its last open block's `done` (D138), Finish's
   close, a registered document's close, an item a worker's session added and the archive question,
-  which no session added.
+  which no session added. The chat's close and the save's are consumed on the spot, by the chat's
+  Session and by the Session the save is credited to, so that neither offers an Undo after it, as
+  after a job's brief (D225, D226).
 - **A wait's firings**, trigger `wait_fired`, its trigger item the wait, titled `Checking "<wait
   title>"`: placed by the batcher once the wait's oldest pending firing is the quiet window old and
   no run of the wait is in flight, taking at its brief every firing still pending

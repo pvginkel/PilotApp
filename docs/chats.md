@@ -72,7 +72,8 @@ Which way a message goes is the project's open chat's to say, read with its Sess
   again where it is gone, its name holding another conversation among it, so that the words reach
   the chat's conversation, never a job's that took the name meanwhile
   ([`sessions.md`](sessions.md)). The chat's Session is locked from before
-  the send to the commit, so no close and no stop comes between them: a message that finds the chat
+  the send to the commit, after its project's row held shared, the lock order of a turn's end, so
+  no close and no stop comes between them: a message that finds the chat
   closed meanwhile starts the project's next chat, and one that finds its project archived is
   refused.
 - **Starting or held**: refused, "its chat is starting".

@@ -54,8 +54,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   `ck_items_created_by`). Its done is `done_at` with `done_cause_code`, and
   `done_by_user_id` when a user did it; `consumed_at` with `consumed_session_id` is a session
   taking its answers: a registered document's, the continuation of the run that registered it, from
-  its placement ([`round-trip.md`](round-trip.md)), and a wait's, the session whose `mark` closed
-  it, at the close ([`waits.md`](waits.md)). `folded` is an open item folded on the timeline, the
+  its placement ([`round-trip.md`](round-trip.md)); a wait's, the session whose `mark` closed
+  it, at the close ([`waits.md`](waits.md)); and an item of Pilot's own's, the job after it at its
+  brief, or at the close the chat's Session that recorded a person's close of it (D225) or the
+  Session whose save wrote its last open block's `done` (D226) ([`engine.md`](engine.md)). `folded` is an open item folded on the timeline, the
   same for every member, false by default: no done item is folded (`ck_items_folded`, `NOT folded OR
   done_at IS NULL`), and every write of `done_at` that closes the item clears it in the same
   `UPDATE` ([`timeline.md`](timeline.md), [`engine.md`](engine.md)).
@@ -105,7 +107,8 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   the repository it was made from, set together, and `delete_due_at`, when Pilot deletes it while
   it stays free, which only one of its own has ([`controller.md`](controller.md)).
   `halt_requested_at` says the halt file may be there: set before its write goes out, cleared once
-  its delete is answered ([`usage.md`](usage.md)).
+  its delete is answered; while it is set and the file wanted, the file is written again at every
+  tick ([`usage.md`](usage.md)).
 - `sessions`: a run of a Claude Code conversation in one environment, none while its start has not
   provided one, for one project, of a session kind, in a state (`held`, `starting`, `running`, `idle`, `stopped`, `ended`, `failed`), the held
   ones indexed by `created_at`, the gate's order:

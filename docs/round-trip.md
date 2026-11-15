@@ -90,18 +90,23 @@ of session <id> no longer awaits its read`).
 
 - **A clean text** is published as written (`publish_read`), and the timeline moves live.
 - **A failed read**: the controller's `404` (the file or the environment gone), `403
-  path-outside-work`, `409 not-a-file` or `413 file-too-large`, a `409 conflict` once its wait has
-  passed (below), or a text with faults (`its text holds faults: line N: …`). The document keeps no
+  path-outside-work`, `409 not-a-file` or `413 file-too-large`, a refusal of the controller's own
+  once its wait has passed (below), or a text with faults (`its text holds faults: line N: …`). The document keeps no
   text (`fail_read`, which emits `ProjectChanged` alone), and the registering Session's log gets the
   `server` record `{"type": "read-failed", "item", "path", "reason"}`, in no Turn.
-- **Made again**: a `409 conflict` (a link loop, a manifest the controller cannot read the layout
-  from, or the path changed during the call, which settles) is read again every 5 s until 5 minutes
-  have passed since its first refusal, and is then a failed read with the controller's last answer
-  (D112). The loop reads a round at a time, every document still owed in each, so that the run's
-  waits run side by side (`RefusalWaits`, `backend/app/services/refusal_waits.py`).
-- **Retried**: a read the controller does not answer, its `503 environment-unreadable`, or any other
-  refusal of its own raises, and the loop runs again after its backoff ([`jobs.md`](jobs.md)),
-  waiting the outage out. Each document is its own transaction: one failing leaves the others.
+- **Made again**, a refusal for a reason of the controller's own: its `409 conflict` (a link loop,
+  a manifest it cannot read the layout from, or the path changed during the call, which settles),
+  its `503 environment-unreadable`, or any other answer, a `401`, a `422` or a `500` among them. The
+  read is made again every 5 s until 5 minutes have passed since its first refusal, and is then a
+  failed read with the controller's last answer (D112, D222): the document shows *Did not load*,
+  Pilot's job after the turn goes ahead, and the continuation's message names it among those that
+  could not be read (below). The loop reads a round at a time, every document still owed in each,
+  so that the run's waits run side by side (`RefusalWaits`,
+  `backend/app/services/refusal_waits.py`). Unlike a write-back's, a read's wait does not first
+  sit out an environment coming up: a read takes no `409` from a bring-up.
+- **Retried**: a read the controller does not answer raises, and the loop runs again after its
+  backoff ([`jobs.md`](jobs.md)), waiting the outage out, with no wait started. Each document is
+  its own transaction: one failing leaves the others.
 
 A run that stops or fails reads nothing: its documents await their reads until the run of its
 Resume ends. A stopped run closed for good ([`work.md`](work.md)) is read once the close commits, or
@@ -202,7 +207,11 @@ continuations and its clarification runs, each with the job after its turn, the 
 
 While something of the run is in flight, a document it registered awaiting its read among them,
 Pilot is doing the action or researching the block; otherwise the run waits on the person's answer
-to the first of its open documents on the timeline. A held block takes no answer, Done or paste-back
+to the first of its open documents on the timeline that is the person's with no block held, else to
+the first of its open documents (`working_on.py`'s `_asked_in`): so where another run's work holds
+a block of an earlier one, or Pilot works on it, the strip and the take-over's refusal below name
+one the person can answer. Its Cancel is still refused while any open document of the run is
+Pilot's or has a block held (below). A held block takes no answer, Done or paste-back
 from the app's controls (above), and in a document that is the person's it is its section's line
 ([`timeline.md`](timeline.md)). A claimed action the run no longer holds, its `done` unwritten, is
 the person's again, its claim standing and its head saying that Pilot's work left it undone: where
@@ -374,7 +383,13 @@ documents is open, the continuation's Session holds it as any Session holds its 
   slot's lock, then an Environment's.
 - A pass's turn end that places its clarification run: the Project's row `FOR UPDATE`, then the
   pass's Session's, as a worker's turn end takes them; the conversation is read under the slot's
-  lock.
+  lock. Every other turn end takes the Project's row shared before its Session's
+  ([`sessions.md`](sessions.md)).
+- A save of a document, one Pilot's work holds included: the Project's row shared, or `FOR UPDATE`
+  where it may close an item of Pilot's own or writes a draft's title, then the Session it is
+  credited to, then the Document's ([`engine.md`](engine.md)).
+- A tool call's gate that reads its Session with no turn running: the Session's send lock shared,
+  then the Project's row `FOR UPDATE`, both let go once read ([`mcp.md`](mcp.md)).
 - A take-over: the Project's row `FOR UPDATE`, then each Session it stops in id order, as the relay
   takes them. A Cancel: the Project's row `FOR UPDATE`, then the run's Documents in id order. The
   app's answers, Dones and their refusals read what is Pilot's under the Project's row, which every

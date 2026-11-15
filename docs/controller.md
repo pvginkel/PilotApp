@@ -94,13 +94,19 @@ iteration ends without raising.
   `wait_ms` only, `IncompleteFrame(status)`. The stream is opened after the send's `202`: the
   controller holds a turn's result until the next send, so a stream opened before it delivers the
   previous turn's.
-- The fleet stream's frames: `StateFrame(environment)`, `GoneFrame(env_id)`,
+- The fleet stream's frames: `StateFrame(environment)`, a `ControllerEnvironment`, or a
+  `ReportedEnvironment` for one in a status Pilot does not know, `GoneFrame(env_id)`,
   `SessionsFrame(env_id, sessions)`, an environment's whole session set, each a `SessionView`
-  (`name`, `title`, `state`, `mode`, `working`, `session_id`), and `UsageFrame(reading)`, the
-  subscription's usage as the controller's poll last read it, a `ControllerUsageReading`
-  (`taken_at`, `stale`, `stale_reason`, `windows`, each `{window, share, resets_at}`), which the
-  controller sends first on every connect and then at each change of anything but `takenAt`
-  ([`usage.md`](usage.md)). The other channels' frames are not Pilot's and are skipped unread.
+  (`name`, `title`, `state`, `mode`, `working`, `session_id`), or a `ReportedSession` for one in a
+  state or a mode Pilot does not know, and `UsageFrame(reading)`, the subscription's usage as the
+  controller's poll last read it, a `ControllerUsageReading` (`taken_at`, `stale`, `stale_reason`,
+  text, `windows`, each `{window, share, resets_at}`, a `ReportedUsageWindow` for a code Pilot does
+  not know), which the controller sends first on every connect and then at each change of anything
+  but `takenAt` ([`usage.md`](usage.md)). Each `Reported…` model is its strict twin's base, the
+  closed set's field widened to text: the stream and its connect's list parse into the strict model
+  first, else into it, and a frame neither takes, malformed in any other way, fails the parse. The
+  REST calls, `get_environment`, the starts and stops and `list_sessions` among them, keep their
+  strict models. The other channels' frames are not Pilot's and are skipped unread.
 
 **Readiness.** The client registers the `controller` check, not critical, on the controller's own
 `/readyz`, with a 2 s timeout. That route asks for no bearer, so the check shows that the
@@ -125,12 +131,17 @@ controller's own `/readyz` `503` is JSON, not problem+json, so the probe reads i
 While it holds, the gate holds every start ([`sessions.md`](sessions.md)); a running turn's relay
 passes no gate and re-polls as it would. Each turn of it logs `The controller is unreachable:
 starts are held` or `The controller answers again: held starts go on`, and its listeners run in
-the thread that turned it: the start service releases the held starts at the off, and
-`ConditionService` (`backend/app/services/condition_service.py`) tells its own listeners, the
-alarms' reconcile among them ([`notifications.md`](notifications.md)), then sends the conditions
-to the browsers, the gold bar's (`GET /api/conditions`, [`ui.md`](ui.md)). A listener subscribes
-with `ConditionService.subscribe(listener)` and runs in the thread that told, which may be inside
-another transaction.
+the thread that turned it, the thread of the controller call that met it, which may hold a
+connection of the pool and a row's lock across that call, so a listener opens no session there:
+the start service releases the held starts at the off, and `ConditionService`
+(`backend/app/services/condition_service.py`) starts its loop `conditions` ([`jobs.md`](jobs.md)),
+whose run, `tell()`, tells its own listeners, the alarms' reconcile among them
+([`notifications.md`](notifications.md)), then sends the conditions to the browsers, the gold
+bar's (`GET /api/conditions`, [`ui.md`](ui.md)). A turn during the loop's run has it run once more,
+so a blip's two turns may be told as its last alone, the state that stands. A listener subscribes
+with `ConditionService.subscribe(listener)` and runs in the thread that told: the loop
+`conditions` for the outage's turn, and for a halt's and the store update's turn the thread that
+told after its commit.
 
 ## The fleet stream
 
@@ -148,7 +159,15 @@ environment id while the controller has none), `last_state` (the controller's `s
 environment exempt. A `gone` frame sets `last_state` `gone` alone, as does a connect's list for a
 row it neither describes nor names as unprojectable. In memory it keeps each environment's latest
 state and session set, `environment(env_id)` and `sessions(env_id)`, each None while the stream is
-down and for an environment it has not reported; the relays' watchdog reads them
+down and for an environment it has not reported;
+a value Pilot does not know in a closed set the stream parses, an environment's status, a session's
+state or mode, a usage window's code, is logged and never fails the stream, its connect or the
+outage: such an environment's row takes the controller's word as its `last_state` and is not
+marked gone, so no start takes it (below), and `environment(env_id)` gives none for it (`Environment
+<id> is in a status Pilot does not know: <status>`); such a session stays in its set as reported,
+the watchdog reading only its name and `working` (`Session <name> of environment <id> is in a state
+or a mode Pilot does not know: <state>, <mode>`); such a window is left out of the reading
+([`usage.md`](usage.md)); the relays' watchdog reads them
 ([`sessions.md`](sessions.md)). It writes no Session, and of the claim (below) only `stop_due_at`,
 which a report of the environment exempt clears.
 
@@ -382,15 +401,20 @@ admission-blocked`; with none, the node's cap, every create too; never an exempt
 `not_whitelisted` (a create of a repository of that owner is `403 namespace-not-whitelisted`),
 `no_sandbox_profile` (with `env_id`, `on`: that environment's boxed creates are `409
 capability-unavailable` until `on=False`),
-`unprojectable`, `session_env` (the variables the session's create gave its process, by name, a
+`unprojectable`, `serve_status` (the environment reported in a `status` Pilot may not know, in
+its list, its reads and its `state` frames, one of which announces it; None its own again),
+`serve_session` (the session's view reported in a `state` and a `mode` Pilot may not know, in its
+list and its `sessions` frames, one of which announces it), `session_env` (the variables the session's create gave its process, by name, a
 work item's `PILOT_MCP_URL` and `PILOT_TOKEN` among them, so that a check calls Pilot's MCP server as
 the session does), `busy`, `play` (the lines `claude` prints, answered with their offsets), `finish`
 (the turn's outcome: `success`, `error`, `interrupted`, `spawn-failure` or `ended`), `write_log`,
 `publish_state`, `publish_sessions`, `drop_streams`, `usage` (the poll answered, taken at
 `taken_at`, now by default: each window given a share, `five_hour` and `seven_day`, a window given
-none left out, resetting at `five_hour_resets_at` or `seven_day_resets_at`, else where the last
-answer had it, else its length past `taken_at`), `usage_stale` (the poll's latest call unanswered,
-for a `reason`, `token-expired` by default: the last answer's figures, stale),
+none left out, and after them each of `other_windows`, a code Pilot may not know with its share,
+resetting at `five_hour_resets_at` or `seven_day_resets_at`, else where the last answer had it,
+else its length past `taken_at`, a week for another code), `usage_stale` (the poll's latest call
+unanswered, for a `reason`, `token-expired` by default, any but `no-reading-yet`, one Pilot does
+not know among them: the last answer's figures, stale),
 `controller_restarted` (every stream ends, and the reading is `no-reading-yet` until a verb sets
 another; a window's reset is kept), `put_file` (a process in the environment
 writes the file, whatever its status; over HTTP its `content` is text), `remove_file`, `file_text`

@@ -140,7 +140,13 @@ An unknown project on either beat is `404`, and all three refuse a caller with n
 phone locked, switched off or out of reach goes offline: it is deleted by the timer
 `app-page-expiry`, on the scheduler's tick, or by the next beat or away of its person, whichever
 comes first. Between its ninety seconds and its deletion it counts for nothing already, so that a
-person with no other page reads offline before their going offline is told.
+person with no other page reads offline before their going offline is told. A person goes offline
+at their last page's away, or, where their last pages expired, at the beat of the last of them to
+count plus ninety seconds, never at the sweep's moment: until the sweep, their pages say so
+(`AppPageService.online_until`, the last beat among them plus ninety seconds), and the write that
+deletes their last page calls the hooks registered with `on_going_offline(hook)` in its own
+transaction, with that moment, so that what a hook writes commits with the deletion or rolls back
+with it.
 
 The service's listeners hear two things, each once, after the commit that made it so, on the
 committing thread, a request's or the scheduler's: `ShowingTurned(user_id, project_id, shown)`, a
@@ -200,14 +206,18 @@ their turn:
   item answered pushes nothing;
 - a page of theirs shows the project: every item that waits on them is shown, a sighting written for
   each and the others deleted, and nothing is pushed (D155);
-- online, with no page of theirs on the project: nothing is pushed, and their sightings stand;
+- online, with no page of theirs on the project: nothing is pushed;
 - offline with a browser subscribed: an item that waits with no sighting alerts; else a sighting of
   an item that no longer waits updates the notification silently, another item still waiting; else
-  nothing is pushed. Offline with no browser, nothing is pushed and their sightings stand.
+  nothing is pushed. Offline with no browser, nothing is pushed.
 
-A push some browser of theirs took shows them every item it named or counted: a sighting is written
-for each, and the others are deleted. One that none took writes no sighting, so that the member's
-next reconcile pushes anew. A closed membership's sightings are deleted at every compare, so that a
+Whatever is pushed, every compare deletes the sighting of an item that no longer waits on them, so
+that an item that comes to wait again alerts, as one they were never shown does (D157). So the
+silent update for an item that stopped waiting while they were online elsewhere is not sent at
+their going offline: its sighting is gone by then. A push some browser of theirs took shows them
+every item it named or counted, a sighting written for each. An alert that none took writes no
+sighting, so that the member's next reconcile pushes anew; a silent update that none took has still
+deleted the sightings of what stopped, so their next reconcile pushes nothing. A closed membership's sightings are deleted at every compare, so that a
 rejoin alerts anew. A change of the plan alone, or a retitle of an item, pushes nothing: what waits
 is unchanged.
 
@@ -224,14 +234,15 @@ person with a membership of the project open or with sightings. It runs:
 A person's reconcile is the loop `notification-person:<person id>` of the job
 `notification-person`, the person in each project with a membership of theirs open or with
 sightings, at each `ShowingTurned` and `WentOffline` of theirs: so a page that comes to show a
-project counts its items shown, and the pushes held while they were online go out as they go
+project counts its items shown, and an alert held while they were online goes out as they go
 offline.
 
 **The spacing.** A member's pushes in one project go out at most once in two seconds
 (`NOTIFICATION_SPACING_SECONDS`), from their last push tried there, taken or not, the latest
 `notification_sent_at` of their memberships of the project, a closed one's included, so that the
 window holds across a roll's two processes. The push writes it on the open membership. A push due
-inside the window is compared again at its end, the run waiting with no turn and no database
+inside the window rolls back what its compare wrote, the sightings it deleted among them, and is
+compared again at its end, reading them as they were, the run waiting with no turn and no database
 connection held: what goes out then is the latest state, so a burst of commits comes to one push,
 and a change undone inside the window to none. A run told to stop inside the window pushes nothing
 more, and logs each member it held as left to their next reconcile.
@@ -269,10 +280,13 @@ alone. The outage is each process's own, and off at a start.
 When a person was last shown the conditions is their `alarm_seen_at`, which only moves forward. An
 alarm push moves it to when the latest begun of the conditions it named began, whether a browser
 took the push or not, so that none of them is pushed again; a condition begun after that, while the
-push was in flight too, alerts in a push of its own. Their going offline moves it to that moment,
-every condition that held having shown on the gold bar while they were online, so that an outage
-begun before it does not alarm when it comes due after. For a page's expiry that moment is the
-sweep's. An outage that began before a condition an alarm named, and came due after that alarm,
+push was in flight too, alerts in a push of its own. Their going offline moves it to when they
+went offline, their last page's away or its beat plus ninety seconds (above), every condition that
+held having shown on the gold bar while they were online, so that an outage begun before it does
+not alarm when it comes due after. The reconcile reads a person's pages before their row, a sweep
+committed between the two having written the going offline of the pages it deleted: while their
+last beat plus ninety seconds is ahead they are online, and once it is past, their pages expired
+and not yet swept, they count as shown every condition begun by then. An outage that began before a condition an alarm named, and came due after that alarm,
 does not alarm either: it began before their `alarm_seen_at`. A condition's end pushes nothing.
 
 The reconcile is the one loop, `alarm`, of the job `alarm`: each person with the switch on and a
@@ -285,8 +299,9 @@ and no page of theirs counts. With nothing due it reads nobody. It runs:
 - at the timer `alarm-due`, when the conditions due, with when each began, differ from those the
   last reconcile read, as they do once the outage has held its time.
 
-A person's going offline is written by a loop `alarm-seen:<n>` of the job `alarm-seen`, its moment
-taken on the thread that committed it. The switch asks for no reconcile: it is turned on a page of
+A person's going offline is written in the transaction that takes them offline, the away's or the
+sweep's that deletes their last page, through the hook the alarms register
+(`AppPageService.on_going_offline`). The switch asks for no reconcile: it is turned on a page of
 Pilot, whose going offline counts what holds then as shown. A person's alarm turns take turns as a
 member's do, under `(238, <a key drawn from the person's id>)`, the read, the push and the write in
 the turn's one transaction, the read let go before the push, and take no spacing.
@@ -298,8 +313,8 @@ the turn's one transaction, the read let go before the push, and take no spacing
 | `VAPID_PRIVATE_KEY` | empty | the stage's VAPID key, P-256 in unencrypted PEM, which signs every push and whose public key browsers subscribe with; empty pushes nothing, and a backend with `FLASK_ENV=production`, as both deployed stages run, refuses to start so |
 | `OUTAGE_ALARM_AFTER_SECONDS` | 300 | how long the controller stays unreachable before its alarm is due; 0 or more |
 
-With no key, nothing is pushed: the jobs `notification`, `notification-person`, `alarm` and
-`alarm-seen` and the timer `alarm-due` are not registered, `GET /api/web-push` answers `null`, and
+With no key, nothing is pushed: the jobs `notification`, `notification-person` and `alarm`, the
+timer `alarm-due` and the alarms' hook on the going offline are not registered, `GET /api/web-push` answers `null`, and
 no browser can turn notifications on. A page's beat and the switches still move the record. The
 two seconds between a member's pushes and a page's ninety seconds are constants,
 `NOTIFICATION_SPACING_SECONDS` and `EXPIRY_SECONDS`. Each deployed stage's key is in

@@ -116,7 +116,8 @@ while the column is unwritten and no lift is asked:
    is retried once, in the order the jobs were made, by a person's Retry (`JobService.retry`,
    [`sessions.md`](sessions.md)). Each retry is a transaction of its own under the row's lock:
    - the retry is placed as Retry places one, behind the project's held jobs (`retried <id>`);
-   - a refusal is logged, and the job's Retry is left to a person (`left <id> to a person's Retry:
+   - a refusal rolls its transaction back, what the Retry wrote before it and the events it queued
+     with it, and is then logged, the job's Retry left to a person (`left <id> to a person's Retry:
      <reason>`);
    - a stopped turn still ending, which Retry refuses too, holds the lift to a later run (`lifts
      once <id>'s stopped turn ends`).

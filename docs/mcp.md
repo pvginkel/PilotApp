@@ -136,7 +136,14 @@ matched against `sessions.token_hash`, `401` with no bearer or one no Session ha
 Session whose kind's surface is not `pilot-work` or that is no work item's, and for one whose turn
 is not running, "Cannot call pilot-work because session <id> has no turn running", as `pilot-store`'s
 gate answers: a bearer acts only while its turn does, so the bearer of a run Finish or Archive
-stopped, or of one that has ended, adds nothing to the record. An answer outside 2xx is
+stopped, or of one that has ended, adds nothing to the record. A call that reads its Session with
+no turn running is read again once a send under way has committed (`turn_running`,
+`backend/app/services/pilot_server.py`): the gate waits for the Session's send lock shared, which
+the start loop's send holds from before the controller's call to its commit, then takes the
+project's row `FOR UPDATE`, which a chat's send holds shared to its commit, in a savepoint it
+rolls back, so it holds neither after ([`sessions.md`](sessions.md)). So a call the turn makes as
+soon as the controller has accepted it reads the Session `running`; one with no send under way is
+refused. Both gates read it so. An answer outside 2xx is
 the API's error envelope, its `error` the reason whole. A controller that does not answer, or that
 refuses for a reason of its own, is a `502`.
 
@@ -249,12 +256,13 @@ where `pilot_work` does: on the app, outside `/api/` and the OIDC gate, reached 
 loopback alone. Its gate is `PilotStoreService.admit`
 (`backend/app/services/pilot_store_service.py`): `401` as `pilot-work`'s, and `403` for a work
 item's Session ("… is a work session, not a chat's or a job's") and for a chat's or a job's whose
-turn is not running, so a bearer acts only while its turn does. A call acts on the bearer's project
+turn is not running, read as `pilot-work`'s gate reads it, a send under way waited for, so a bearer
+acts only while its turn does. A call acts on the bearer's project
 alone: an item, a block or an attachment of another project is a `404` "… was not found". `for`
 names a person by their handle, `404` "Person <handle> was not found" for one no person has, Pilot's
 `agent` and a service user's included. Every write locks the Project's row first, the order Finish
-takes, then the Session's, before any Document's, the order a store save of the brain's takes its Session's and its
-Document's in ([`engine.md`](engine.md)). A refusal of the record's is a `409` with the reason, the
+takes, then the Session's, before any Document's, the order a store save of the brain's takes the
+project's row, its Session's and its Document's in ([`engine.md`](engine.md)). A refusal of the record's is a `409` with the reason, the
 record unchanged, and a controller that does not answer or refuses for a reason of its own a `502`.
 
 - **`add_item(item)`**, `POST …/items`, answers `201` `{id, path, state, held, effect}`. `item` is
@@ -286,17 +294,23 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   gate holds it, `week_halt` or `five_hour_halt` ([`usage.md`](usage.md)), `paused`,
   `controller_unreachable` or `slot`, for the brain to say so. Each of
   `claims` names the work item for a claimed action, an open action of a registered document of the
-  project, checked before the start and written after it, so a refused claim starts nothing: each
+  project or of an item of Pilot's own of it (D224), checked before the start and written after it,
+  so a refused claim starts nothing: each
   stays open, held through that work item's run ([`round-trip.md`](round-trip.md)), its line naming
   the work item named for it last, and the job after that work item's turn names it for its `done`
-  ([`engine.md`](engine.md)). A claim's item not of the project, or a block its document lacks, is a
-  `404`; an item that is no registered document, is done or not yet read, a block that is no action
-  or is answered, and one named twice, a `409`. Each of `researches` names the work item for a block
+  ([`engine.md`](engine.md)); an item of Pilot's own is done, with no Undo, once the `done` of its
+  last open block is written. A claim's item not of the project, or a block its document lacks, is
+  a `404`; an item that is neither a registered document nor an item of Pilot's own ("… is neither
+  a registered document nor an item of Pilot's own: Pilot claims an action of a worker's document
+  or of its own item"), is done or not yet read, a block that is no action or is answered, and one
+  named twice, a `409`. Each of `researches` names the work item for a block
   of an open registered document of the project with neither an answer, a claim's included, nor a
   `done`, checked and written as a claim is: each is held through that work item's run, its line
   naming the work item named for it last, and the job after its turn names it for the pass to route
-  on what the work found. Its refusals are a claim's, but for the block's kind, which is any: "block
-  <id> of <path> is answered" and "… is done" among them. Each of
+  on what the work found. Its refusals are a claim's, but for an item of Pilot's own, refused as any
+  item that is no registered document ("… is no registered document: Pilot researches a block of a
+  worker's document"), and for the block's kind, which is any: "block <id> of <path> is answered"
+  and "… is done" among them. Each of
   `attachments` is an attachment of the project by its id, hung on the new item, or outside
   material, `<environment>:<path>`, copied in as `attach_file` copies it, a batch per source, every
   source's files under the caps of one call, hung in their order. The effect is "Added · <kind's
@@ -313,13 +327,16 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   person's answer to the block, `<item id>/<local id>`, recorded on their behalf as the record's own
   answer, `via` `chat`, with `note`, and `to` the task or `plan` a `deferred` returns at
   ([`engine.md`](engine.md)). "Answered · <local id> · <title>". An answer that closes an item of
-  Pilot's own places no job after it: the chat's own turn carries the ruling out (D139). A block of
+  Pilot's own places no job after it: the chat's own turn carries the ruling out (D139), and the
+  item is consumed on the spot by the chat's Session, so it offers no Undo (D225). A block of
   a draft's `project.md` is `project.md/<local id>`, which only that draft's definition chat
   answers, its title the draft's, else `project.md`; anywhere else it is a `409`. Its answer takes
   no Undo, the draft having no item.
 - **`mark(item, mark, for?, note?)`**, `POST …/marks`, answers `200` `{effect}`: `done` on a
   document, with its recommendations, `read` on a notice, `reviewed` on a review, for the person
-  `for` names, given through the chat as `answer` is, so that no job follows it; without `for`, Pilot's own Done on a document it settled whole, and on a registered
+  `for` names, given through the chat as `answer` is, so that no job follows it, and a `done` or a
+  `reviewed` on an item of Pilot's own is consumed by the chat's Session, with no Undo after it
+  (D225), where a notice's `read` keeps its Undo; without `for`, Pilot's own Done on a document it settled whole, and on a registered
   document of one block, whatever its kind, once that block is answered or deferred, a claimed
   action counting once its `done` is written; `read` and `reviewed` refused. A registered
   document's Done writes its answers back and continues its run once none of the run's documents is

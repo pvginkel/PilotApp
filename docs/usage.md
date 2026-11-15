@@ -28,14 +28,17 @@ The controller polls the subscription's usage and serves the reading as the flee
 frame (`UsageFrame`, [`controller.md`](controller.md)): `{takenAt, stale, staleReason, windows:
 [{window, share, resetsAt}]}`, a window `five_hour` or `seven_day`, its `share` a fraction of its
 quota that may pass 1, a window the endpoint left out missing, and, before the poll's first answer,
-`takenAt` null and no window. The stream sends it first on every connect, then at each change of
+`takenAt` null and no window. `staleReason` is read as text, whatever the controller names. A
+window of a code Pilot does not know is logged, `Usage window <code> is one Pilot does not know:
+left out`, and left out, so that a frame the controller extends still parses. The stream sends it first on every connect, then at each change of
 anything but `takenAt`; Pilot does not call the controller's `GET /usage`. Each stage reads the
 controller it runs on, `CONTROLLER_URL` ([`deployment.md`](deployment.md)).
 
 The fleet consumer hands every `usage` frame to `UsageService.receive`. A reading with figures is
 recorded, a `usage_readings` row with a `window_shares` row per window, when its `takenAt` is not
 older than the latest recorded and its figures or `stale` differ from that one's, so a reconnect's
-seed is not recorded again. A reading with no figures leaves the latest as it is. The comparison and
+seed is not recorded again. A reading with no figures leaves the latest as it is, and so does one
+whose every window is one Pilot does not know. The comparison and
 the insert run under `LOCK TABLE usage_readings IN EXCLUSIVE MODE`, which stamps `received_at` too,
 so two backends overlapping in a roll record a reading once. The latest recorded, by `id`, is the
 one the halts read; why a reading is stale is the log's alone. Each reading recorded is told to the
@@ -155,11 +158,17 @@ where the file is wanted, or set where it is not. Each is settled by a loop of i
 until nothing is owed; it writes the file wherever it is wanted, whatever the column says, and a
 delete the controller answers `404` counts as done. A call the controller does not answer, or
 refuses, its `409 conflict` while it works on the tree among the refusals, raises, and the loop
-runs again after its backoff. A pause or a resume, a halt's turn, and a work item's run's start
-or end, which moves the slots (`WorkSlots`), ask, once committed, for the sweep, the loop `halt-file`, which starts the loop
-of every environment owed. The timer `halt-file` sweeps on every tick, and so finds a work item the
-gate let through just before a halt or a pause; the job's reconcile at STARTUP settles every
-environment owed or whose column is set.
+runs again after its backoff, with no end, the supervisor logging each
+([`jobs.md`](jobs.md)). A write or a delete the controller keeps refusing is so retried until it
+lands, with nothing on screen (D221): the stop is still asked once the controller answers again.
+A pause or a resume, a halt's turn, and a work item's run's start or end, which moves the slots
+(`WorkSlots`), ask, once committed, for the sweep, the loop `halt-file`, which starts the loop of
+every environment owed. The timer `halt-file`, on every tick, and the job's reconcile at STARTUP
+start the loop of every environment owed or whose column is set, so the file is written again
+wherever it is wanted at every tick: a write lost after its mark, by a process that ended in its
+loop's backoff or by a deploy roll's old pod marking after the new pod's STARTUP, lands at the
+next tick of whichever process runs. The tick also finds a work item the gate let through just
+before a halt or a pause.
 
 **The hard stop.** While a halt whose setting is the hard stop holds, every decision of the watcher
 that finds a work item's Session `running` asks for the loop `start:hard-stop`
@@ -263,7 +272,9 @@ end not confirming it either, decides the wall **missed**, a per-model limit, wh
 track, among the causes. The nudges' loop then clears its nudge owed first, and it is the failed end
 it is: a work item waits on the person for a Resume, a job offers Retry, and a pass's questions go
 to the writer, unless its project is finished or archived. So a session is never nudged into a wall
-that will not lift, turn after turn.
+that will not lift, turn after turn. Until that reading comes, a wall no reading has decided keeps
+its nudge owed from the turn's end, and a job's Retry stays refused, until a reading decides it
+(D223).
 
 ## Each turn's tokens
 
