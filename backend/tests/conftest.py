@@ -42,6 +42,7 @@ from app.utils.statement_cap import StatementCap
 
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
+from tests.support.detect_flakes import DetectFlakes
 from tests.support.fake_controller import (
     ServedFakeController,
     client_of,
@@ -52,7 +53,7 @@ from tests.support.fake_push_service import (
     web_push_of,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
-from tests.support.suite_lock import HeldLock, hold_suite_lock
+from tests.support.suite_lock import HeldLock, hold_suite_lock, suite_lock_file
 from tests.support.supervisor import Supervise
 
 # The run's test suite lock, held while the run's config references it.
@@ -61,6 +62,14 @@ _SUITE_LOCK = pytest.StashKey[HeldLock | None]()
 _POOL_GUARD = PoolGuard()
 
 _STATEMENT_CAP = StatementCap()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """The detect-flakes mode (tests/support/detect_flakes.py) in every run a
+    session makes, on the controller and on each worker: where the test suite
+    lock is taken, so never in CI, a run on one process included."""
+    if suite_lock_file() is not None:
+        config.pluginmanager.register(DetectFlakes(), "detect_flakes")
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

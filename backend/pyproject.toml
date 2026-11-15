@@ -56,6 +56,7 @@ dev = [
     "watchdog[watchmedo]>=6.0.0,<7",
     "types-pyyaml>=6.0.12,<7",
     "pytest-xdist>=3.8.0,<4",
+    "pytest-rerunfailures>=16.7,<17",
 ]
 
 # Only app/ is a package; run.py and scripts/ are reached through the editable

@@ -80,6 +80,23 @@ cexec modern-app sh -c 'cd frontend && pnpm playwright test' 2>&1 | tail -3
 cexec go sh -c 'cd sidecar && go test -race ./...'
 ```
 
+Both suites run in the detect-flakes mode in every run a session makes, a targeted one included
+(F122.7): a failing test is rerun twice, and a test that passed only on a rerun keeps the run red,
+so a flake is no green, and "All three must be green" stands. The mode is on where the test suite
+lock is taken (below), so never in CI, whose Playwright run retries twice and passes on a flake and
+whose backend run reruns nothing. Past the cap of 10 failed tests a run, a failing test is not
+rerun (`frontend/tests/support/detect-flakes.ts`, `backend/tests/support/detect_flakes.py`). Each
+suite's output names the flaky tests apart from the failed:
+
+- **Playwright's summary** lists the tests that passed only on a rerun under `N flaky` and those
+  that failed every attempt under `N failed`. After it, `🔁 The run is red: …` says that a test
+  flaked, and `🔁 The cap of 10 failed tests a run was reached: …` names the tests past the cap,
+  which failed once and were not rerun.
+- **The backend's summary** has a `detect-flakes` section: `FLAKY <test> - passed only on a
+  rerun`, `FAILED <test> - failed every attempt` and `NOT RERUN <test> - failed once, past the
+  cap`, then the same two lines. Its last line counts the reruns, `N rerun`, and counts a flaky
+  test as passed: the exit code, 1, is what says the run is red.
+
 A Playwright run takes the test suite lock first: one run at a time across the project's
 environments, which share one node (`frontend/tests/support/test-suite-lock.ts`). A backend run on
 xdist's workers, as `kc project test` runs it, takes the same lock before its workers start and
