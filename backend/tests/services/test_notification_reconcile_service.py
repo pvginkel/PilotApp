@@ -130,6 +130,7 @@ def _service(
     *,
     engine_bus: EngineBus | None = None,
     spacing_seconds: float | None = 0.0,
+    clock: Callable[[], datetime] | None = None,
 ) -> _Built:
     """The reconcile on a supervisor of its own, hearing `engine_bus`, a bus
     of its own unless one is given, and the pages on the same supervisor. No
@@ -137,14 +138,18 @@ def _service(
     for the service's own."""
     supervisor, coordinator = supervise(container)
     pages = AppPageService(supervisor)
-    spacing = {} if spacing_seconds is None else {"spacing_seconds": spacing_seconds}
+    given: dict[str, Any] = {}
+    if spacing_seconds is not None:
+        given["spacing_seconds"] = spacing_seconds
+    if clock is not None:
+        given["clock"] = clock
     service = NotificationReconcileService(
         container=container,
         supervisor=supervisor,
         engine_bus=EngineBus() if engine_bus is None else engine_bus,
         app_page_service=pages,
         web_push_service=web_push_service,
-        **spacing,
+        **given,
     )
     return _Built(service, supervisor, coordinator, pages)
 
@@ -457,6 +462,33 @@ class _Window(RoundsHandle):
     def wait(self, seconds: float) -> bool:
         self.asked.append(seconds)
         return super().wait(seconds)
+
+
+class _Clock:
+    """A clock that stands still until the test moves it."""
+
+    def __init__(self) -> None:
+        self.now = datetime.now(UTC)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+class _ClockedWindow(_Window):
+    """A `_Window` whose waits take no time: each moves `clock` on by the
+    seconds asked, after `between` ran, so that the window ends where the
+    run waited for it to."""
+
+    def __init__(self, between: Callable[[int], None], clock: _Clock) -> None:
+        super().__init__(between)
+        self._clock = clock
+
+    def wait(self, seconds: float) -> bool:
+        self.asked.append(seconds)
+        self.waits += 1
+        self._between(self.waits)
+        self._clock.now += timedelta(seconds=seconds)
+        return self.stopping
 
 
 def _started(built: _Built, log: LogWaiter, *project_ids: uuid.UUID) -> None:
@@ -1338,8 +1370,9 @@ class TestNotificationReconcileServiceSpacing:
         camp = _project(container, ("ada", "ben"))
         lake = _project(container, environment_id=None)
         ada = _subscribe(container, fake_push_service, web_push_service, "ada")
+        clock = _Clock()
         built = _service(
-            container, supervise, web_push_service, spacing_seconds=SPACING
+            container, supervise, web_push_service, spacing_seconds=SPACING, clock=clock
         )
         _ask(container, camp)
         _reconcile(built, camp)
@@ -1358,7 +1391,7 @@ class TestNotificationReconcileServiceSpacing:
                     )
                 )
 
-        built.service.reconcile(camp, _Window(in_the_window))
+        built.service.reconcile(camp, _ClockedWindow(in_the_window, clock))
 
         assert during == [(2, 1)]
         assert [(push.tag, push.body) for push in _pushes(fake_push_service, ada)] == [

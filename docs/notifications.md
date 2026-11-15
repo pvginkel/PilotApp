@@ -246,6 +246,9 @@ compared again at its end, reading them as they were, the run waiting with no tu
 connection held: what goes out then is the latest state, so a burst of commits comes to one push,
 and a change undone inside the window to none. A run told to stop inside the window pushes nothing
 more, and logs each member it held as left to their next reconcile.
+The window is measured, and `notification_sent_at` stamped, on the service's `clock`, the UTC wall
+clock unless a test gives one, so that a test holds a window open by the clock it sets, not by how
+long the test took.
 
 **A member's turn.** A member's compare and push in one project take turns under a two-key advisory
 lock, `(224, <a 32-bit key drawn from the person's and the project's ids>)` (`advisory_turn`,

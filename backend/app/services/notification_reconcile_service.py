@@ -63,7 +63,7 @@ lock alone, no row or table locked, and no request or commit waits on them.
 
 import logging
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -102,6 +102,10 @@ type _Member = tuple[uuid.UUID, uuid.UUID]
 """A project's id and a person's, a member to reconcile."""
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 @dataclass(frozen=True)
 class _Due:
     """A member's push the compare found wanting, and what it read."""
@@ -129,6 +133,7 @@ class NotificationReconcileService:
         app_page_service: AppPageService,
         web_push_service: WebPushService,
         spacing_seconds: float = NOTIFICATION_SPACING_SECONDS,
+        clock: Callable[[], datetime] = _utc_now,
     ) -> None:
         """Register the `notification` job, whose reconcile runs at STARTUP,
         and the `notification-person` job, and hear the engine's bus and the
@@ -146,7 +151,11 @@ class NotificationReconcileService:
                 nothing is pushed
             spacing_seconds: The least time between two of a member's pushes
                 in one project
+            clock: The time the window is measured on and a push is stamped
+                with; a test sets it, so that a window does not depend on
+                how long the test took
         """
+        self._clock = clock
         self._container = container
         self._supervisor = supervisor
         self._pages = app_page_service
@@ -207,7 +216,7 @@ class NotificationReconcileService:
                 return
             members = [member for member, _ in spaced]
             wake = min(at for _, at in spaced)
-            if handle.wait(max((wake - datetime.now(UTC)).total_seconds(), 0.0)):
+            if handle.wait(max((wake - self._clock()).total_seconds(), 0.0)):
                 for project_id, person_id in members:
                     logger.info(
                         "The push of project %s's notification to %s is left to "
@@ -274,7 +283,7 @@ class NotificationReconcileService:
             compare.rollback()
             if due.last_push is not None:
                 after = due.last_push + self._spacing
-                if after > datetime.now(UTC):
+                if after > self._clock():
                     return after
             took = self._web_push.push(
                 person_id, due.notification.push(alert=due.alert), db
@@ -282,7 +291,7 @@ class NotificationReconcileService:
             db.execute(
                 update(ProjectMember)
                 .where(ProjectMember.id == due.holder_id)
-                .values(notification_sent_at=datetime.now(UTC))
+                .values(notification_sent_at=self._clock())
             )
             _show(
                 db,
