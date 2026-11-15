@@ -2,21 +2,29 @@ import { defineConfig, devices } from '@playwright/test';
 import * as path from 'path';
 import * as fs from 'fs';
 import { config } from 'dotenv';
+import { detectFlakes } from './tests/support/detect-flakes';
 
 const testEnvPath = path.resolve(process.cwd(), '.env.test');
 if (fs.existsSync(testEnvPath)) {
   config({ path: testEnvPath, quiet: true });
 }
 
+// The detect-flakes mode in every run a session makes (tests/support/detect-flakes.ts): a failing
+// test is rerun twice, one that passed only on a rerun keeps the run red, and past the cap a failing
+// test is not rerun. CI's run keeps the template's settings, run-suite passing --retries=2.
+const flakes = detectFlakes();
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  retries: flakes.retries,
+  failOnFlakyTests: flakes.failOnFlakyTests,
   workers: 2,
   // Exclude @slow tests by default unless INCLUDE_SLOW_TESTS=true
   grep: process.env.INCLUDE_SLOW_TESTS ? undefined : /^(?!.*@slow)/,
   reporter: [
+    ...flakes.reporters,
     ['list'],
     ['html', {
       outputFolder: 'playwright-report',

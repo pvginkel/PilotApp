@@ -97,7 +97,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty-three stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twenty-four stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -140,7 +140,13 @@ specs outrun on a node other environments load; a passing Playwright test's outp
 kept every test's folder, each with a `backend.log` holding its worker's whole log so far, so that
 `test-results/` grew with the square of the test count, some 500 MB a run, and a copy of it under
 a size cap left out the failing test's own log, the HTML report keeping every test's logs as
-attachments; a worker's service start in
+attachments; the detect-flakes mode of a session's runs, which `frontend/playwright.config.ts`
+takes from `detectFlakes()` in the app-owned `frontend/tests/support/detect-flakes.ts`: in a run
+that takes the test suite lock, two retries, `failOnFlakyTests` and, before the list reporter, the
+reporter that takes a failing test's retries away past the cap of 10 failed tests a run, where the
+template retries nothing, so that a session's run names each test that passed only on a rerun and
+stays red (F122.7), CI's run keeping the template's settings
+(`tests/infrastructure/detect-flakes.spec.ts` pins it); a worker's service start in
 `frontend/tests/support/process/servers.ts` and `frontend/tests/support/fixtures-infrastructure.ts`,
 which attaches the service's output to the worker's log from the spawn on and puts it in a failed
 start's error, where the template attached it once the service was ready, so that a start that
