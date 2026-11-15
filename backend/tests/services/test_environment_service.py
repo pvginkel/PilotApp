@@ -616,6 +616,16 @@ class TestTake:
 
         assert _taken(environments, session) is None
 
+    @pytest.mark.parametrize("claimed", [False, True], ids=["unclaimed", "claimed"])
+    def test_one_in_a_status_pilot_does_not_know_is_passed_over(
+        self, environments: EnvironmentService, session: Session, claimed: bool
+    ) -> None:
+        # The fleet stream keeps the controller's word for a status Pilot
+        # does not know in the row (slice 046's V05).
+        _own(session, state="hibernating", claimed=claimed)
+
+        assert _taken(environments, session) is None
+
     @pytest.mark.parametrize(
         "state",
         [
