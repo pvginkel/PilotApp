@@ -84,9 +84,8 @@ def get_current_user(
     )
 
     logger.info(
-        "Returned user info for subject=%s email=%s",
+        "Returned user info for subject=%s",
         auth_context.subject,
-        auth_context.email,
     )
 
     return user_info.model_dump(), 200
@@ -204,9 +203,8 @@ def callback(
     auth_context = auth_service.validate_token(token_response.access_token)
 
     logger.info(
-        "OIDC callback completed: subject=%s email=%s redirecting to %s",
+        "OIDC callback completed: subject=%s redirecting to %s",
         auth_context.subject,
-        auth_context.email,
         auth_state.redirect_url,
     )
 

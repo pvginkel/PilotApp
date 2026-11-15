@@ -97,7 +97,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty-four stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twenty-five stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -202,10 +202,14 @@ same thread hands back the outer session and commits and closes it, where the te
 of a request's session; the app's engine, which `create_app()` in `backend/app/__init__.py`
 hands to `configure_engine()` in the app-owned `backend/app/startup.py` before anything connects,
 where the template gives an app no place for a listener on its engine: this app's turns
-PostgreSQL's JIT off in every transaction; and the readiness check's migration lookup,
+PostgreSQL's JIT off in every transaction; the readiness check's migration lookup,
 `get_pending_migrations` in `backend/app/database.py`, which reads the current revision on the
 connection it holds, where the template's opened a second one beside it, as the pool guard showed
-in every Playwright spec. uv, the migration that keeps the app's loggers,
+in every Playwright spec; and the five INFO lines that name the signed-in caller, in `backend/app/utils/auth.py`
+(every authenticated request, and after a refresh), `backend/app/services/auth_service.py` (token validation)
+and `backend/app/api/auth.py` (`/api/auth/self` and the callback), which log the subject and the roles
+and no email, where the template's log the address too, so that a caller's sign-in name stays out of the
+pod's log (`tests/test_editor_gate.py` pins it). uv, the migration that keeps the app's loggers,
 the masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
 `modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
 `backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.

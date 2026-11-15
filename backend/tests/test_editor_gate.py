@@ -10,6 +10,7 @@ outcome is the caller's role, not the task's owner.
 sends it, never from an Authorization header, so the token tests send it there.
 """
 
+import logging
 import time
 from collections.abc import Generator
 from typing import Any
@@ -194,6 +195,43 @@ class TestOidcTokens:
         me = self._self(oidc_client, jwt_token, test_settings)
         assert me.status_code == 200
         assert me.get_json()["roles"] == ["editor"]
+
+    def test_a_signed_in_request_logs_the_subject_and_never_the_email(
+        self,
+        oidc_client: FlaskClient,
+        oidc_task_id: str,
+        token: Any,
+        test_settings: Settings,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        email = "ada.logged@example.com"
+        jwt_token = token(
+            {
+                "email": email,
+                "resource_access": {test_settings.oidc_audience: {"roles": ["editor"]}},
+            }
+        )
+
+        with caplog.at_level(logging.INFO):
+            assert (
+                _read(
+                    oidc_client, oidc_task_id, headers=self._bearer(jwt_token)
+                ).status_code
+                == 200
+            )
+            assert self._self(oidc_client, jwt_token, test_settings).status_code == 200
+
+        messages = [record.getMessage() for record in caplog.records]
+        for expected in (
+            "Token validated successfully for subject=",
+            "Request authenticated: subject=",
+            "Returned user info for subject=",
+        ):
+            assert any(
+                expected in message and f"subject={SUBJECT}" in message
+                for message in messages
+            ), expected
+        assert not [message for message in messages if email in message]
 
     def test_no_token_is_unauthenticated(
         self, oidc_client: FlaskClient, oidc_task_id: str

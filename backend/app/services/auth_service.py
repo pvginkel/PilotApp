@@ -445,9 +445,8 @@ class AuthService:
             AUTH_VALIDATION_DURATION_SECONDS.observe(max(duration, 0.0))
 
             logger.info(
-                "Token validated successfully for subject=%s email=%s roles=%s",
+                "Token validated successfully for subject=%s roles=%s",
                 subject,
-                email,
                 roles,
             )
 

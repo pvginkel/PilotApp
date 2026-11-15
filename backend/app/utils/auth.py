@@ -408,9 +408,8 @@ def authenticate_request(
 
         check_authorization(auth_context, auth_service, http_method, view_func)
         logger.info(
-            "Request authenticated: subject=%s email=%s roles=%s",
+            "Request authenticated: subject=%s roles=%s",
             auth_context.subject,
-            auth_context.email,
             auth_context.roles,
         )
         return
@@ -455,9 +454,8 @@ def authenticate_request(
     check_authorization(auth_context, auth_service, http_method, view_func)
 
     logger.info(
-        "Request authenticated (after refresh): subject=%s email=%s roles=%s",
+        "Request authenticated (after refresh): subject=%s roles=%s",
         auth_context.subject,
-        auth_context.email,
         auth_context.roles,
     )
 
