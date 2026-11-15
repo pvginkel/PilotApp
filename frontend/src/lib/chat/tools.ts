@@ -51,6 +51,8 @@ const STORE_VERBS: Record<string, [string, string]> = {
   attach_file: ['Attached', 'Attaching'],
   stop_work: ['Stopped a session', 'Stopping a session'],
   finish: ['Finished the project', 'Finishing the project'],
+  register_document: ['Registered a document', 'Registering a document'],
+  ask_writer: ['Asked the writer', 'Asking the writer'],
 };
 
 /** A worker's calls that publish its work item's steps. */

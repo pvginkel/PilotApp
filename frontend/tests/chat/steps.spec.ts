@@ -136,7 +136,10 @@ test.describe('A reply’s step lines', () => {
       ['tracker', 'mcp__youtrack__get_issue', { id: 'EX-1' }, 'Asking youtrack get issue', 'Asked youtrack get issue'],
       ['add', 'mcp__pilot__add_item', { kind: 'notice' }, 'Adding an item', 'Added an item'],
       ['cancel', 'mcp__pilot__cancel_ask', { item: 'invented', for: 'ada' }, 'Calling off an ask', 'Called off an ask'],
-      ['writer', 'mcp__pilot__ask_writer', { item: 'invented' }, 'Using ask_writer', 'Used ask_writer'],
+      ['writer', 'mcp__pilot__ask_writer', { item: 'invented' }, 'Asking the writer', 'Asked the writer'],
+      ['register', 'mcp__pilot__register_document', { path: '/work/invented.md' }, 'Registering a document', 'Registered a document'],
+      // A call of Pilot's with no words of its own reads by its tool's name.
+      ['unworded', 'mcp__pilot__invented_tool', {}, 'Using invented_tool', 'Used invented_tool'],
       ['steps', 'mcp__pilot__set_progress', { steps: [] }, 'Publishing its steps', 'Published its steps'],
       ['step', 'mcp__pilot__set_progress_step', { code: 'a', state: 'done' }, 'Moving a step', 'Moved a step'],
       ['skill', 'Skill', { skill: 'survey' }, 'Using Skill', 'Used Skill'],
