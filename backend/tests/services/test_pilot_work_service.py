@@ -47,6 +47,7 @@ from app.models.reference import (
     ProgressState,
     RecordKind,
     SessionState,
+    TurnCause,
     UserKind,
 )
 from app.schemas.pilot_work import (
@@ -866,6 +867,7 @@ def _turn_in_flight(session: DbSession, run: models.Session) -> Turn:
         seq=1,
         message="Refine the camp.",
         started_at=datetime.now(UTC),
+        cause_code=TurnCause.BRIEF,
     )
     session.add(turn)
     session.flush()

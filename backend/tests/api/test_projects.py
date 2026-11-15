@@ -37,6 +37,7 @@ from app.models.reference import (
     DocumentRole,
     SessionState,
     TransitionKind,
+    TurnCause,
 )
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.schemas.timeline import TimelineSchema
@@ -1714,6 +1715,7 @@ def _definition_chat(
             words=words,
             started_at=now,
             ended_at=now,
+            cause_code=TurnCause.PERSON,
         )
     )
     session.flush()

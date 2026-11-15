@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from app.models import (
@@ -31,6 +32,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TokenKind,
+    TurnCause,
 )
 from tests.support.database import violated_constraint
 
@@ -59,11 +61,18 @@ def _session(
 
 
 def _turn(run: Session, **overrides: object) -> Turn:
+    """A Turn of `run`: a person's where it is given an author, else the
+    server's brief."""
     values: dict[str, object] = {
         "session_id": run.id,
         "seq": 1,
         "message": "Fix the client for v4.",
         "started_at": SENT_AT,
+        "cause_code": (
+            TurnCause.BRIEF
+            if overrides.get("author_user_id") is None
+            else TurnCause.PERSON
+        ),
     }
     values.update(overrides)
     return Turn(**values)
@@ -251,6 +260,77 @@ class TestTurn:
         session.add(_turn(project_session, quote_item_id=item.id))
 
         assert violated_constraint(session) == "ck_turns_words"
+
+    @pytest.mark.parametrize(
+        "cause", [cause for cause in TurnCause if cause is not TurnCause.PERSON]
+    )
+    def test_the_servers_own_turn_keeps_its_cause(
+        self, session: DbSession, project_session: Session, cause: TurnCause
+    ) -> None:
+        sent = _turn(project_session, cause_code=cause)
+        session.add(sent)
+        session.flush()
+        session.expire(sent)
+
+        assert sent.cause_code is cause
+
+    def test_a_persons_turn_keeps_its_cause(
+        self, session: DbSession, project_session: Session, person: User
+    ) -> None:
+        sent = _turn(project_session, author_user_id=person.id, words="Blue, please.")
+        session.add(sent)
+        session.flush()
+        session.expire(sent)
+
+        assert sent.cause_code is TurnCause.PERSON
+
+    def test_a_turn_without_a_cause_is_refused(
+        self, session: DbSession, project_session: Session
+    ) -> None:
+        """Every Turn is classified by one Turn Cause (DB 352)."""
+        session.add(_turn(project_session, cause_code=None))
+
+        with pytest.raises(IntegrityError) as raised:
+            session.flush()
+        assert raised.value.orig.diag.column_name == "cause_code"
+
+    def test_a_cause_outside_the_closed_list_is_refused(
+        self, session: DbSession, project_session: Session
+    ) -> None:
+        with pytest.raises(DataError, match="turn_cause"):
+            session.execute(
+                text(
+                    "INSERT INTO turns (session_id, seq, message, started_at,"
+                    " cause_code) VALUES (:session, 1, 'Go.', now(), 'paused')"
+                ),
+                {"session": project_session.id},
+            )
+
+    @pytest.mark.parametrize(
+        ("authored", "cause"),
+        [
+            pytest.param(True, TurnCause.BRIEF, id="a-persons-as-the-servers"),
+            pytest.param(False, TurnCause.PERSON, id="the-servers-as-a-persons"),
+        ],
+    )
+    def test_a_turn_is_a_persons_exactly_when_it_has_an_author(
+        self,
+        session: DbSession,
+        project_session: Session,
+        person: User,
+        authored: bool,
+        cause: TurnCause,
+    ) -> None:
+        session.add(
+            _turn(
+                project_session,
+                author_user_id=person.id if authored else None,
+                words="Blue, please." if authored else None,
+                cause_code=cause,
+            )
+        )
+
+        assert violated_constraint(session) == "ck_turns_cause"
 
     def test_a_seq_is_one_turn_of_its_session(
         self, session: DbSession, project_session: Session, turn: Turn

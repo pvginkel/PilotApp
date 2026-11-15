@@ -27,7 +27,7 @@ from app.models import (
     Turn,
     Work,
 )
-from app.models.reference import ProgressState, SessionState
+from app.models.reference import ProgressState, SessionState, TurnCause
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.pilot_server import token_hash
@@ -1156,6 +1156,7 @@ class TestTheProgressRecordsNothing:
                 seq=1,
                 message="Refine the camp.",
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         session.flush()
@@ -1187,6 +1188,7 @@ class TestTheProgressRecordsNothing:
                 seq=1,
                 message="Refine the camp.",
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         session.flush()
@@ -1211,6 +1213,7 @@ class TestTheToolUseId:
                 seq=1,
                 message="Refine the camp.",
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         session.flush()

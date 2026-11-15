@@ -24,6 +24,7 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
+    TurnCause,
     UserKind,
 )
 from app.services.chat_close_service import CLOSED, ChatCloseService
@@ -132,6 +133,7 @@ def _chat(
             message="/chat",
             started_at=started,
             ended_at=None if in_flight else ended,
+            cause_code=TurnCause.BRIEF,
         )
     )
     if in_flight:
@@ -143,6 +145,7 @@ def _chat(
                 started_at=ended,
                 ended_at=ended,
                 error="the send failed",
+                cause_code=TurnCause.CARRY_ON,
             )
         )
     run.turns = 2 if in_flight else 1

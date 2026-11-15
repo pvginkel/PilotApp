@@ -31,7 +31,13 @@ from app.models import (
     Work,
     WriterQuestion,
 )
-from app.models.reference import AnswerChannel, ChatKind, ProjectState, SessionState
+from app.models.reference import (
+    AnswerChannel,
+    ChatKind,
+    ProjectState,
+    SessionState,
+    TurnCause,
+)
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.pilot_server import token_hash
@@ -139,7 +145,15 @@ def _brain(
     )
     db.add(run)
     db.flush()
-    db.add(Turn(session_id=run.id, seq=1, message="Go on.", started_at=now))
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message="Go on.",
+            started_at=now,
+            cause_code=TurnCause.BRIEF,
+        )
+    )
     db.flush()
     return run
 
@@ -189,7 +203,15 @@ def _work(
     )
     db.add(run)
     db.flush()
-    db.add(Turn(session_id=run.id, seq=1, message="Go.", started_at=datetime.now(UTC)))
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message="Go.",
+            started_at=datetime.now(UTC),
+            cause_code=TurnCause.BRIEF,
+        )
+    )
     container.record_service().place_work(project, run, "Pitching the tent")
     return run
 

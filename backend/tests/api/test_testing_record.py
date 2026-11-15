@@ -51,6 +51,7 @@ from app.models.reference import (
     ProgressState,
     ProjectState,
     SessionState,
+    TurnCause,
     UserKind,
     VersionCause,
     WorkTrigger,
@@ -2101,6 +2102,7 @@ def _turn_in_flight(session: Session, run: models.Session) -> Turn:
         seq=1,
         message="Build the camp.",
         started_at=datetime.now(UTC),
+        cause_code=TurnCause.BRIEF,
     )
     session.add(turn)
     session.flush()
@@ -3242,7 +3244,14 @@ class TestCreateChatStop:
         session.add(run)
         session.flush()
         session.add(
-            Turn(session_id=run.id, seq=1, message="Go.", started_at=now, ended_at=now)
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Go.",
+                started_at=now,
+                ended_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
         )
         container.record_service().place_work(project, run, "Building the camp")
         if chat:

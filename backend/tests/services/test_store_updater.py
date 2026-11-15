@@ -28,6 +28,7 @@ from app.models.reference import (
     ChatKind,
     ProjectState,
     SessionState,
+    TurnCause,
     UserKind,
     WorkTrigger,
 )
@@ -215,7 +216,15 @@ def _brain(
         )
     if briefed:
         now = datetime.now(UTC)
-        db.add(Turn(session_id=run.id, seq=1, message="Hi", started_at=now))
+        db.add(
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Hi",
+                started_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
+        )
         run.turns, run.turn_started_at = 1, now
     db.flush()
     return run
@@ -964,7 +973,7 @@ def _in_flight(
             briefed=False,
         )
         run_id = run.id
-        starts._relays.send(db, run_id, "Hi")
+        starts._relays.send(db, run_id, "Hi", TurnCause.BRIEF)
     return run_id
 
 

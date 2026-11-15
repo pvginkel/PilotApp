@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Chat, SessionRecord, Turn, User
-from app.models.reference import ChatKind, CloseCause, RecordKind, SessionState
+from app.models.reference import (
+    ChatKind,
+    CloseCause,
+    RecordKind,
+    SessionState,
+    TurnCause,
+)
 from app.services.session_record_service import SessionRecordService
 
 
@@ -135,6 +141,7 @@ class ChatWriter:
             message=f"/chat\n\n{words}" if author is not None and seq == 1 else words,
             words=None if author is None else words,
             started_at=datetime.now(UTC),
+            cause_code=TurnCause.FOLLOW_UP if author is None else TurnCause.PERSON,
         )
         self.db.add(turn)
         self.db.flush()

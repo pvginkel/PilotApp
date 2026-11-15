@@ -53,6 +53,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TokenKind,
+    TurnCause,
     UsageWindow,
     UserKind,
     VersionCause,
@@ -307,7 +308,11 @@ def _send(
     author: User | None = None,
 ) -> Turn:
     turn = relays.send(
-        db, run.id, message, words=None if author is None else Words(author.id, message)
+        db,
+        run.id,
+        message,
+        TurnCause.BRIEF if author is None else TurnCause.PERSON,
+        words=None if author is None else Words(author.id, message),
     )
     clear_after_commit_callbacks()
     return turn
@@ -421,6 +426,7 @@ class TestSend:
             session,
             idle.id,
             f"The chat's brief.\n\n{words}",
+            TurnCause.PERSON,
             words=Words(person.id, words),
         )
         clear_after_commit_callbacks()
@@ -430,6 +436,7 @@ class TestSend:
             f"The chat's brief.\n\n{words}",
             words,
         )
+        assert turn.cause_code is TurnCause.PERSON
         [send] = _records(session, idle.id)
         assert (send.record.kind_code, send.author, send.words) == (
             RecordKind.SEND,
@@ -451,6 +458,7 @@ class TestSend:
             session,
             idle.id,
             words,
+            TurnCause.PERSON,
             words=Words(person.id, words, quote_item_id=item.id),
         )
         clear_after_commit_callbacks()
@@ -527,6 +535,7 @@ class TestSend:
                 session,
                 idle.id,
                 "Rename the badge",
+                TurnCause.PERSON,
                 words=Words(person.id, "Rename the badge"),
             )
 
@@ -562,6 +571,7 @@ class TestSend:
                 session,
                 idle.id,
                 "Rename the badge",
+                TurnCause.PERSON,
                 words=Words(person.id, "Rename the badge"),
             )
 
@@ -857,7 +867,7 @@ class TestSend:
         run = _agent_session(session, project, None, SessionState.STARTING)
 
         with pytest.raises(InvalidOperationException):
-            relays.send(session, run.id, "Rename the badge")
+            relays.send(session, run.id, "Rename the badge", TurnCause.BRIEF)
 
         assert (
             session.scalars(select(Turn).where(Turn.session_id == run.id)).all() == []
@@ -868,7 +878,7 @@ class TestSend:
         self, session: DbSession, relays: RelayService
     ) -> None:
         with pytest.raises(RecordNotFoundException):
-            relays.send(session, uuid.uuid4(), "Rename the badge")
+            relays.send(session, uuid.uuid4(), "Rename the badge", TurnCause.BRIEF)
 
 
 class TestSendTurn:
@@ -879,6 +889,7 @@ class TestSendTurn:
             seq=1,
             message="The brief",
             started_at=datetime.now(UTC) - timedelta(minutes=5),
+            cause_code=TurnCause.BRIEF,
         )
         db.add(turn)
         db.flush()
@@ -931,6 +942,7 @@ class TestSendTurn:
         )
         brief = self._brief(session, run)
         brief.author_user_id, brief.words = person.id, "The brief"
+        brief.cause_code = TurnCause.PERSON
         session.flush()
 
         relays.send_turn(session, brief.id)
@@ -1066,7 +1078,11 @@ class TestSendTurn:
             run.token_hash = uuid.uuid4().hex
             run.state_code = SessionState.STARTING
             turn = Turn(
-                session_id=run.id, seq=3, message="Two", started_at=datetime.now(UTC)
+                session_id=run.id,
+                seq=3,
+                message="Two",
+                started_at=datetime.now(UTC),
+                cause_code=TurnCause.RESUME,
             )
             session.add(turn)
             session.flush()
@@ -1118,7 +1134,11 @@ class TestSendTurn:
             assert run.conversation_id == CAMP
             # A Turn written before its send, as the follow-up turn is (F79).
             turn = Turn(
-                session_id=run.id, seq=2, message="Two", started_at=datetime.now(UTC)
+                session_id=run.id,
+                seq=2,
+                message="Two",
+                started_at=datetime.now(UTC),
+                cause_code=TurnCause.FOLLOW_UP,
             )
             session.add(turn)
             run.state_code = SessionState.RUNNING
@@ -2274,6 +2294,7 @@ class TestFollowUpTurn:
             None,
         )
         assert follow_up.message == container.brief_service().follow_up([path])
+        assert follow_up.cause_code is TurnCause.FOLLOW_UP
         assert follow_up.message.startswith(f"Your save of `{path}` is held: `{path}:")
         assert (run.state_code, run.turns, run.turn_ended_at) == (
             SessionState.RUNNING,
@@ -2798,7 +2819,7 @@ class TestRelayWorkItem:
         work_item.state_code = SessionState.STOPPED
 
         with scoped_session(container) as db:
-            relays.send(db, work_item.id, CONTINUE)
+            relays.send(db, work_item.id, CONTINUE, TurnCause.RESUME)
 
         assert work_item.state_code == SessionState.RUNNING
         assert _moves(engine_events) == [
@@ -3344,6 +3365,7 @@ class TestStoppedUnderTheTurn:
                 seq=1,
                 message=CONTINUE,
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.RESUME,
             )
         )
         session.flush()
@@ -3369,6 +3391,7 @@ class TestStoppedUnderTheTurn:
             seq=1,
             message=CONTINUE,
             started_at=datetime.now(UTC),
+            cause_code=TurnCause.RESUME,
         )
         session.add(turn)
         session.flush()
@@ -4155,7 +4178,11 @@ def _send_committed(
 ) -> None:
     with scoped_session(container) as db:
         turn = relays.send(
-            db, run_id, "Rename the badge", words=Words(author_id, "Rename the badge")
+            db,
+            run_id,
+            "Rename the badge",
+            TurnCause.PERSON,
+            words=Words(author_id, "Rename the badge"),
         )
         assert turn.error is None
 
@@ -4226,6 +4253,7 @@ def _written_turn(container: ServiceContainer, run_id: uuid.UUID) -> int:
             seq=1,
             message="Check the wait",
             started_at=datetime.now(UTC),
+            cause_code=TurnCause.BRIEF,
         )
         db.add(written)
         db.flush()
@@ -4547,6 +4575,7 @@ class TestRelayLoop:
                     seq=1,
                     message="Check the wait",
                     started_at=datetime.now(UTC),
+                    cause_code=TurnCause.BRIEF,
                 )
                 db.add(written)
                 db.flush()
@@ -4777,7 +4806,15 @@ def _running_committed(
         run = db.get_one(models.Session, run_id)
         now = datetime.now(UTC)
         run.turns += 1
-        db.add(Turn(session_id=run_id, seq=run.turns, message=message, started_at=now))
+        db.add(
+            Turn(
+                session_id=run_id,
+                seq=run.turns,
+                message=message,
+                started_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
+        )
         run.state_code = SessionState.RUNNING
         run.turn_started_at = now
         run.turn_ended_at = None
@@ -4956,7 +4993,11 @@ class TestRestartRecovery:
         with scoped_session(container) as db:
             with pytest.raises(InvalidOperationException):
                 relays.send(
-                    db, run_id, "And the logo", words=Words(person_id, "And the logo")
+                    db,
+                    run_id,
+                    "And the logo",
+                    TurnCause.PERSON,
+                    words=Words(person_id, "And the logo"),
                 )
 
         loop_log.wait_for(rf"Loop relay:{run_id} started")
@@ -5073,6 +5114,7 @@ class TestEnvironmentRestartUnderARun:
         [brief, carried_on] = _committed_turns(container, run_id)
         assert brief.ended_at is not None and brief.error is None
         assert (carried_on.message, carried_on.author_user_id) == (CONTINUE, None)
+        assert carried_on.cause_code is TurnCause.CARRY_ON
         assert carried_on.ended_at is not None
         run = _read(container, run_id)
         assert run.controller_session == name
@@ -5340,7 +5382,7 @@ class TestEnvironmentRestartUnderAWorkItem:
                 fake.put_file(ENV, f"{folder}/README.md", b"An invented file.\n")
         coordinator.fire_startup()
         with scoped_session(container) as db:
-            relays.send(db, run_id, RESTART_BRIEF)
+            relays.send(db, run_id, RESTART_BRIEF, TurnCause.BRIEF)
         lines = raw_turn("turn_tool")
         offsets = fake.play(ENV, name, lines[:11])
         wait_until(
@@ -5398,6 +5440,7 @@ class TestEnvironmentRestartUnderAWorkItem:
             f" not read yet. Your brief again, whole:\n\n{RESTART_BRIEF}",
             None,
         )
+        assert resumed.cause_code is TurnCause.CARRY_ON
         _turn_of(fake_controller, name, raw_turn("turn_text"))
         _idle(container, run_id)
         with scoped_session(container) as db:
@@ -5585,7 +5628,7 @@ class TestTwoProcesses:
             creates = fake.calls.count(create)
 
             with scoped_session(container) as db:
-                turn = relays.send(db, run_id, "Rename the badge")
+                turn = relays.send(db, run_id, "Rename the badge", TurnCause.BRIEF)
                 assert turn.error is None
         finally:
             fake.close()

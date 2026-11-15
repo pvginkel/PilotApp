@@ -46,6 +46,7 @@ from app.models.reference import (
     ProjectState,
     SessionState,
     TaskStatus,
+    TurnCause,
     UsageWindow,
 )
 from app.schemas.testing_record import InventedProjectCreateSchema
@@ -739,6 +740,7 @@ class TestTheToolUseId:
                 seq=1,
                 message="Refine the camp.",
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         session.commit()
@@ -1170,7 +1172,13 @@ class TestStopWork:
         session.add(run)
         session.flush()
         session.add(
-            Turn(session_id=run.id, seq=1, message="Go.", started_at=datetime.now(UTC))
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Go.",
+                started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
+            )
         )
         container.record_service().place_work(project, run, "Pitching the tent")
         session.commit()
@@ -1207,7 +1215,13 @@ class TestStopWork:
         session.add(run)
         session.flush()
         session.add(
-            Turn(session_id=run.id, seq=1, message="Go.", started_at=datetime.now(UTC))
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Go.",
+                started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
+            )
         )
         container.record_service().place_work(project, run, "Pitching the tent")
         session.commit()
@@ -1701,7 +1715,11 @@ def _job(
     job = running_session(session, container, project, environment, kind="job")
     session.add(
         Turn(
-            session_id=job.id, seq=1, message="Pre-rule.", started_at=datetime.now(UTC)
+            session_id=job.id,
+            seq=1,
+            message="Pre-rule.",
+            started_at=datetime.now(UTC),
+            cause_code=TurnCause.BRIEF,
         )
     )
     session.commit()

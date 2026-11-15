@@ -40,6 +40,7 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
+    TurnCause,
     UserKind,
     VersionCause,
     WorkTrigger,
@@ -168,7 +169,13 @@ def _end(db: DbSession, container: ServiceContainer, run: models.Session) -> Non
     """The run's turn ended well, as the relay ends it: its `result` record,
     the Session idle, its work item done (decision 44)."""
     now = datetime.now(UTC)
-    turn = Turn(session_id=run.id, seq=1, message="Refine the camp.", started_at=now)
+    turn = Turn(
+        session_id=run.id,
+        seq=1,
+        message="Refine the camp.",
+        started_at=now,
+        cause_code=TurnCause.BRIEF,
+    )
     turn.ended_at = now
     db.add(turn)
     db.flush()
@@ -603,7 +610,13 @@ def _close(
     `person` (DB 345), its stopped turn ended, as its relay ends it, or still
     in flight."""
     now = datetime.now(UTC)
-    turn = Turn(session_id=run.id, seq=1, message="Refine the camp.", started_at=now)
+    turn = Turn(
+        session_id=run.id,
+        seq=1,
+        message="Refine the camp.",
+        started_at=now,
+        cause_code=TurnCause.BRIEF,
+    )
     db.add(turn)
     run.state_code = SessionState.STOPPED
     run.stopped_at = now

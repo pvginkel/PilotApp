@@ -65,6 +65,7 @@ from app.models.reference import (
     ProjectState,
     SessionState,
     TransitionKind,
+    TurnCause,
     UserKind,
     WorkTrigger,
 )
@@ -1153,7 +1154,13 @@ class TestDataService:
         )
         self.db.add(session)
         self.db.flush()
-        turn = Turn(session_id=session.id, seq=1, message=PASS_BRIEF, started_at=now)
+        turn = Turn(
+            session_id=session.id,
+            seq=1,
+            message=PASS_BRIEF,
+            started_at=now,
+            cause_code=TurnCause.BRIEF,
+        )
         self.db.add(turn)
         self.db.flush()
         brain = Brain(session.id, session.project_id, JOB)
@@ -1250,7 +1257,11 @@ class TestDataService:
         self.db.add(run)
         self.db.flush()
         turn = Turn(
-            session_id=run.id, seq=1, message=message(questions), started_at=now
+            session_id=run.id,
+            seq=1,
+            message=message(questions),
+            started_at=now,
+            cause_code=TurnCause.CLARIFICATION,
         )
         turn.ended_at = now
         self.db.add(turn)
@@ -1488,9 +1499,9 @@ class TestDataService:
         )
 
     def _saving_turn(self, session: AgentSession) -> None:
-        """A Turn of `session` in flight, opened when it has none: a save that
-        lands after its session's turn ended writes no document (design 1
-        §7)."""
+        """A Turn of `session` in flight, opened when it has none, sent as a
+        brief: a save that lands after its session's turn ended writes no
+        document (design 1 §7)."""
         in_flight = Turn.session_id == session.id, Turn.ended_at.is_(None)
         if self.db.scalar(select(exists().where(*in_flight))):
             return
@@ -1502,7 +1513,13 @@ class TestDataService:
             )
         )
         self.db.add(
-            Turn(session_id=session.id, seq=seq, message=SAVING_BRIEF, started_at=now)
+            Turn(
+                session_id=session.id,
+                seq=seq,
+                message=SAVING_BRIEF,
+                started_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
         )
         session.turns += 1
         session.turn_started_at, session.turn_ended_at = now, None

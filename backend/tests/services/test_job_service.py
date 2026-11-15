@@ -29,6 +29,7 @@ from app.models.reference import (
     SessionState,
     Surface,
     TransitionKind,
+    TurnCause,
     UserKind,
     WorkTrigger,
 )
@@ -196,6 +197,7 @@ class TestSetup:
         assert turn.message == container.brief_service().job(
             opened, session.get_one(Work, job.id), AT, AT
         )
+        assert turn.cause_code is TurnCause.BRIEF
         assert f"the opening item {opening.id} holds" in turn.message
 
     def test_its_create_is_boxed_to_the_projects_folder_with_pilot_store(
@@ -868,7 +870,13 @@ def _worker_run(
         for n in range(files)
     ]
     now = datetime.now(UTC)
-    turn = Turn(session_id=run.id, seq=1, message="Fix the stock.", started_at=now)
+    turn = Turn(
+        session_id=run.id,
+        seq=1,
+        message="Fix the stock.",
+        started_at=now,
+        cause_code=TurnCause.BRIEF,
+    )
     turn.ended_at = now
     db.add(turn)
     db.flush()
@@ -1930,6 +1938,7 @@ class TestWaitFired:
         assert _brief(container, job).message == container.brief_service().job(
             opened, work, job.created_at, job.created_at
         )
+        assert _brief(container, job).cause_code is TurnCause.WAIT_RUN
 
     def test_held_by_the_pause_it_takes_its_firings_at_the_release(
         self,

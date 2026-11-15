@@ -50,6 +50,7 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     TransitionKind,
+    TurnCause,
     UserKind,
     WorkTrigger,
 )
@@ -785,7 +786,13 @@ def _turn_ended(
 ) -> None:
     """The run's turn ended well at `ENDED` with `words`, as the relay ends
     it: its `result` record, the Session idle, its work item done."""
-    turn = Turn(session_id=run.id, seq=1, message="Fix the stock.", started_at=ENDED)
+    turn = Turn(
+        session_id=run.id,
+        seq=1,
+        message="Fix the stock.",
+        started_at=ENDED,
+        cause_code=TurnCause.BRIEF,
+    )
     turn.ended_at = ENDED
     db.add(turn)
     db.flush()
@@ -1435,7 +1442,13 @@ class TestWriterAnswered:
         )
         db.add(asking)
         db.flush()
-        turn = Turn(session_id=asking.id, seq=1, message="/pre-rule", started_at=ASKED)
+        turn = Turn(
+            session_id=asking.id,
+            seq=1,
+            message="/pre-rule",
+            started_at=ASKED,
+            cause_code=TurnCause.BRIEF,
+        )
         db.add(turn)
         container.record_service().place_work(
             project,
@@ -2336,6 +2349,7 @@ class TestFollowUp:
                 seq=2,
                 message=message,
                 author_user_id=None if author is None else author.id,
+                cause_code=TurnCause.FOLLOW_UP if author is None else TurnCause.PERSON,
             )
 
         assert is_follow_up(
@@ -2358,7 +2372,15 @@ SOUP = "5b0e7c2a-9d41-4f36-8a1e-3c7d6f2b9e10"
 def _briefed(db: DbSession, run: models.Session, message: str) -> None:
     """The run's first Turn, `message`, on the run's conversation."""
     run.conversation_id = SOUP
-    db.add(Turn(session_id=run.id, seq=1, message=message, started_at=ENDED))
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message=message,
+            started_at=ENDED,
+            cause_code=TurnCause.BRIEF,
+        )
+    )
     db.flush()
 
 
@@ -2555,6 +2577,7 @@ class TestRestarted:
                 seq=2,
                 message=message,
                 author_user_id=None if author is None else author.id,
+                cause_code=TurnCause.CARRY_ON if author is None else TurnCause.PERSON,
             )
 
         assert is_restarted(turn(f"{RESTARTED} You registered no documents."))

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Turn, UsageReading, WindowShare
-from app.models.reference import RecordKind, UsageWindow
+from app.models.reference import RecordKind, TurnCause, UsageWindow
 from app.services import quota_wall
 from app.services.container import ServiceContainer
 from app.services.quota_wall import (
@@ -150,7 +150,13 @@ class TestShowsWall:
 
 
 def _turn(db: DbSession, run: models.Session, seq: int) -> Turn:
-    turn = Turn(session_id=run.id, seq=seq, message="Rename the badge", started_at=AT)
+    turn = Turn(
+        session_id=run.id,
+        seq=seq,
+        message="Rename the badge",
+        started_at=AT,
+        cause_code=TurnCause.BRIEF,
+    )
     db.add(turn)
     db.flush()
     return turn

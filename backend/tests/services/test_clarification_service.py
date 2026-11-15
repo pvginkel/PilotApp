@@ -26,7 +26,7 @@ from app.models import (
     Work,
     WriterQuestion,
 )
-from app.models.reference import SessionState, WorkTrigger
+from app.models.reference import SessionState, TurnCause, WorkTrigger
 from app.services.clarification_service import (
     Asked,
     ClarificationService,
@@ -161,7 +161,13 @@ def _job(
     )
     db.add(job)
     db.flush()
-    turn = Turn(session_id=job.id, seq=1, message="/pre-rule", started_at=now)
+    turn = Turn(
+        session_id=job.id,
+        seq=1,
+        message="/pre-rule",
+        started_at=now,
+        cause_code=TurnCause.BRIEF,
+    )
     db.add(turn)
     container.record_service().place_work(
         project,
@@ -277,7 +283,11 @@ class TestAsked:
             session, container, project, WorkTrigger.WORKER_TURN_ENDED, run
         )
         follow_up = Turn(
-            session_id=asking.id, seq=2, message="held", started_at=datetime.now(UTC)
+            session_id=asking.id,
+            seq=2,
+            message="held",
+            started_at=datetime.now(UTC),
+            cause_code=TurnCause.FOLLOW_UP,
         )
         session.add(follow_up)
         session.flush()
@@ -398,6 +408,7 @@ class TestPassEnded:
         ) == ("work", environment.id, "conv-camp", "writer")
         [first] = session.scalars(select(Turn).where(Turn.session_id == clarifying.id))
         assert first.message == message(asked(session, asking.id))
+        assert first.cause_code is TurnCause.CLARIFICATION
         item = session.get_one(Item, clarifying.id)
         assert item.title == "Clarify cut-over.md and drain.md"
         work = session.get_one(Work, clarifying.id)

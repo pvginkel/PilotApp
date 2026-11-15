@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.exceptions import RecordNotFoundException
 from app.models import Block, Document, Effect, Item, Turn
-from app.models.reference import BlockKind, EffectKind, RecordKind
+from app.models.reference import BlockKind, EffectKind, RecordKind, TurnCause
 from app.services.container import ServiceContainer
 from app.services.effect_service import EFFECT, Change, EffectLine, EffectService
 from app.services.session_record_service import read_records
@@ -33,6 +33,7 @@ def _turn(db: DbSession, run: models.Session, seq: int, ended: bool = False) -> 
         message=f"Turn {seq}",
         started_at=now,
         ended_at=now if ended else None,
+        cause_code=TurnCause.BRIEF,
     )
     db.add(turn)
     db.flush()

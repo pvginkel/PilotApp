@@ -67,6 +67,7 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
+    TurnCause,
 )
 from app.services.brief_service import BriefService, Call
 from app.services.pilot_server import unheld_token_hash
@@ -235,7 +236,9 @@ class ChatService:
             message = f"{self.brief_service.message_from(project, person)}\n{message}"
         if changed:
             message = f"{STORE_NOTIFICATION}\n\n{message}"
-        turn = self.relay_service.send(self.db, session.id, message, words=words)
+        turn = self.relay_service.send(
+            self.db, session.id, message, TurnCause.PERSON, words=words
+        )
         if changed and turn.error is None:
             HANDBOOK_CHANGED_TOTAL.labels(project=str(project.id)).inc()
         return turn
@@ -388,6 +391,7 @@ class ChatService:
             quote_item_id=words.quote_item_id,
             quote_block_id=words.quote_block_id,
             started_at=now,
+            cause_code=TurnCause.PERSON,
         )
         self.db.add(turn)
         self.db.flush()

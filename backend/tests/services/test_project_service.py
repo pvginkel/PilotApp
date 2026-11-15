@@ -61,6 +61,7 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     TransitionKind,
+    TurnCause,
     UserKind,
     WorkTrigger,
 )
@@ -219,6 +220,7 @@ def _run(
                 seq=1,
                 message="Build the camp",
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         run.turns = 1
@@ -249,7 +251,11 @@ def _chat(
     if state is SessionState.RUNNING:
         session.add(
             Turn(
-                session_id=run.id, seq=1, message="/chat", started_at=datetime.now(UTC)
+                session_id=run.id,
+                seq=1,
+                message="/chat",
+                started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         run.turns = 1
@@ -1346,6 +1352,7 @@ def _definition_chat(
                 words=said,
                 started_at=now,
                 ended_at=None if in_flight and seq == len(words) else now,
+                cause_code=TurnCause.PERSON,
             )
         )
         # One flush each: the ids keep the Turns' order.

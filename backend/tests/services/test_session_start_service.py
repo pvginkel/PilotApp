@@ -61,6 +61,7 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     TransitionKind,
+    TurnCause,
     UsageWindow,
     UserKind,
     WorkTrigger,
@@ -508,7 +509,15 @@ def _chat(
     )
     db.add(run)
     db.flush()
-    db.add(Turn(session_id=run.id, seq=1, message=BRIEF, started_at=datetime.now(UTC)))
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message=BRIEF,
+            started_at=datetime.now(UTC),
+            cause_code=TurnCause.BRIEF,
+        )
+    )
     db.flush()
     return run
 
@@ -567,6 +576,7 @@ class TestStartWork:
         int(run.token_hash, 16)
         (brief,) = _turns(session, run.id)
         assert (brief.seq, brief.message, brief.author_user_id) == (1, BRIEF, None)
+        assert brief.cause_code is TurnCause.BRIEF
         assert brief.ended_at is None
         assert (run.turns, run.turn_started_at, run.turn_ended_at) == (
             1,
@@ -1185,7 +1195,15 @@ class TestPilotServerHanded:
         )
         session.add(run)
         session.flush()
-        session.add(Turn(session_id=run.id, seq=1, message=BRIEF, started_at=now))
+        session.add(
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message=BRIEF,
+                started_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
+        )
         session.flush()
         if kind == "job":
             container.record_service().place_work(
@@ -4173,6 +4191,7 @@ class TestResume:
 
         assert run.state_code == SessionState.STARTING
         brief, resumed = _turns(session, run.id)
+        assert resumed.cause_code is TurnCause.RESUME
         assert (resumed.seq, resumed.message, resumed.author_user_id) == (
             2,
             CONTINUE,
@@ -4257,7 +4276,8 @@ class TestResume:
 
         assert run.error is None
         _, resumed = _turns(session, run.id)
-        assert resumed.message == BRIEF
+        # Why it was sent, not what it carries.
+        assert (resumed.message, resumed.cause_code) == (BRIEF, TurnCause.RESUME)
         _run(starts, run)
         run = _read(session, run.id)
         assert run.state_code == SessionState.RUNNING
@@ -5756,6 +5776,7 @@ class TestNudge:
         run = _read(session, halted.id)
         assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
         _, nudged = _turns(session, run.id)
+        assert nudged.cause_code is TurnCause.NUDGE
         assert (nudged.seq, nudged.message, nudged.author_user_id) == (
             2,
             NUDGE,
@@ -7521,6 +7542,7 @@ class TestContinueRun:
             None,
             None,
         )
+        assert turn.cause_code is TurnCause.CONTINUATION
         work = session.get_one(Work, continuation.id)
         assert (work.trigger_item_id, work.trigger_code, work.repo) == (
             survey.id,
@@ -8105,7 +8127,15 @@ def _brain(
             kind_code="project",
         )
     )
-    db.add(Turn(session_id=run.id, seq=1, message=BRIEF, started_at=datetime.now(UTC)))
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message=BRIEF,
+            started_at=datetime.now(UTC),
+            cause_code=TurnCause.BRIEF,
+        )
+    )
     db.flush()
     starts.start_brain(db, project, run, CHATTING)
     return _read(db, run.id)
@@ -8453,7 +8483,13 @@ def _pass(
     )
     db.add(job)
     db.flush()
-    turn = Turn(session_id=job.id, seq=1, message="/pre-rule", started_at=now)
+    turn = Turn(
+        session_id=job.id,
+        seq=1,
+        message="/pre-rule",
+        started_at=now,
+        cause_code=TurnCause.BRIEF,
+    )
     db.add(turn)
     container.record_service().place_work(
         project,

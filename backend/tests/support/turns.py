@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Turn
+from app.models.reference import TurnCause
 
 
 def turn_in_flight(db: DbSession, run: models.Session) -> Turn:
@@ -27,6 +28,7 @@ def turn_in_flight(db: DbSession, run: models.Session) -> Turn:
         seq=(last or 0) + 1,
         message="Write the palette.",
         started_at=datetime.now(UTC),
+        cause_code=TurnCause.BRIEF,
     )
     db.add(turn)
     db.flush()

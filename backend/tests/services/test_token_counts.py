@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Environment, Project, TokenCount, Turn
-from app.models.reference import RecordKind, SessionState, TokenKind
+from app.models.reference import RecordKind, SessionState, TokenKind, TurnCause
 from app.services.container import ServiceContainer
 from app.services.token_counts import Spent, count_tokens, reported_before, spent
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -186,6 +186,7 @@ def turn(session: DbSession, project_session: models.Session) -> Turn:
         seq=1,
         message="Fix the client for v4.",
         started_at=datetime(2026, 10, 30, 9, 30, tzinfo=UTC),
+        cause_code=TurnCause.BRIEF,
     )
     session.add(sent)
     session.flush()
@@ -249,6 +250,7 @@ class _Conversation:
             seq=run.turns,
             message="Fix the client for v4.",
             started_at=datetime(2026, 10, 30, 9, 30, tzinfo=UTC),
+            cause_code=TurnCause.BRIEF,
         )
         self.db.add(sent)
         self.db.flush()

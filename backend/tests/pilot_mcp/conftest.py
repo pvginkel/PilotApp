@@ -15,6 +15,7 @@ from starlette.applications import Starlette
 from app import models
 from app.config import Settings
 from app.models import Environment, Project, Turn, User
+from app.models.reference import TurnCause
 from app.services.container import ServiceContainer
 from pilot_mcp.api import PilotStoreApi, PilotWorkApi
 from pilot_mcp.server import build_app
@@ -108,7 +109,13 @@ def brain(
     flight."""
     chat = running_session(session, container, project, environment, kind="chat")
     session.add(
-        Turn(session_id=chat.id, seq=1, message="Go on.", started_at=datetime.now(UTC))
+        Turn(
+            session_id=chat.id,
+            seq=1,
+            message="Go on.",
+            started_at=datetime.now(UTC),
+            cause_code=TurnCause.BRIEF,
+        )
     )
     session.commit()
     return chat

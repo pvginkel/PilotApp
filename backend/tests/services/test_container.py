@@ -41,6 +41,7 @@ from app.models.reference import (
     FiringCause,
     ProjectState,
     SessionState,
+    TurnCause,
     UserKind,
     WorkTrigger,
 )
@@ -526,7 +527,7 @@ class TestRelayWiring:
         coordinator.fire_startup()
         try:
             with scoped_session(container) as db:
-                relays.send(db, run_id, "Rename the badge")
+                relays.send(db, run_id, "Rename the badge", TurnCause.BRIEF)
             fake_controller.play("env-a", name, raw_turn("turn_text"))
             fake_controller.finish("env-a", name)
             wait_until(lambda: _turns_ended(container, run_id) == 1, "the turn ended")
@@ -582,7 +583,7 @@ class TestHaltFileWiring:
         coordinator.fire_startup()
         try:
             with scoped_session(container) as db:
-                relays.send(db, run_id, "Rename the badge")
+                relays.send(db, run_id, "Rename the badge", TurnCause.BRIEF)
             wait_until(
                 lambda: fake_controller.file_text("env-a", HALT_FILE) == "",
                 "the halt file written where the work item runs",
@@ -650,7 +651,7 @@ class TestHardStopWiring:
         coordinator.fire_startup()
         try:
             with scoped_session(container) as db:
-                relays.send(db, run_id, "Rename the badge")
+                relays.send(db, run_id, "Rename the badge", TurnCause.BRIEF)
             fake_controller.usage(seven_day=0.95, five_hour=0.1)
             wait_until(
                 lambda: _stopped_owed(container, run_id),
@@ -734,7 +735,7 @@ class TestNudgeWiring:
         coordinator.fire_startup()
         try:
             with scoped_session(container) as db:
-                relays.send(db, run_id, "Rename the badge")
+                relays.send(db, run_id, "Rename the badge", TurnCause.BRIEF)
             fake_controller.usage(seven_day=0.95, five_hour=0.1)
             wait_until(lambda: _halted(container), "the week's halt holding")
             fake_controller.finish("env-a", name)
@@ -867,6 +868,7 @@ class TestChatCloseWiring:
                     message="/chat",
                     started_at=ended,
                     ended_at=ended,
+                    cause_code=TurnCause.BRIEF,
                 )
             )
             chat_id = run.id

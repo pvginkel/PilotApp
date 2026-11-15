@@ -29,10 +29,12 @@ from app.models.reference import (
     RECORD_KIND,
     SESSION_STATE,
     TOKEN_KIND,
+    TURN_CAUSE,
     EffectKind,
     RecordKind,
     SessionState,
     TokenKind,
+    TurnCause,
 )
 
 
@@ -125,6 +127,12 @@ class Turn(db.Model):  # type: ignore[name-defined]
             " OR (quote_item_id IS NULL AND quote_block_id IS NULL))",
             name="ck_turns_words",
         ),
+        # A Turn with an author is a person's, and the server's own has none
+        # (DB §2.3, Turn; §2.11, Turn Cause).
+        CheckConstraint(
+            "(cause_code = 'person') = (author_user_id IS NOT NULL)",
+            name="ck_turns_cause",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -144,6 +152,8 @@ class Turn(db.Model):  # type: ignore[name-defined]
     """US dollars, the turn's own as its `result` line reports them, less what
     its conversation reported before it (`token_counts`), notional on a
     subscription; none without one (DB 275)."""
+    cause_code: Mapped[TurnCause] = mapped_column(TURN_CAUSE)
+    """Why Pilot sent it, given at the write (DB 352)."""
 
 
 class TokenCount(db.Model):  # type: ignore[name-defined]

@@ -15,7 +15,7 @@ from app import models
 from app.database import scoped_session
 from app.exceptions import AuthorizationException
 from app.models import Environment, Project, Turn
-from app.models.reference import RecordKind, SessionState
+from app.models.reference import RecordKind, SessionState, TurnCause
 from app.services.container import ServiceContainer
 from app.services.session_record_service import (
     SessionRecordService,
@@ -919,6 +919,7 @@ class TestSendRecords:
             message="The chat's brief.\n\nPlease look at the badge.",
             words="Please look at the badge.",
             started_at=datetime.now(UTC),
+            cause_code=TurnCause.PERSON,
         )
         session.add(turn)
         session.flush()

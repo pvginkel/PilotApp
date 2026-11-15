@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.models import Environment, Project, Turn, User
-from app.models.reference import RecordKind, SessionState, UserKind
+from app.models.reference import RecordKind, SessionState, TurnCause, UserKind
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
@@ -245,7 +245,10 @@ class TestRelayWatchdog:
         wait_until(lambda: metric_value(FLEET_STREAM_CONNECTED) == 1, "connected")
         wedged.wedge.add(name)
         with scoped_session(container) as db:
-            assert relays.send(db, run_id, "Rename the badge").error is None
+            assert (
+                relays.send(db, run_id, "Rename the badge", TurnCause.BRIEF).error
+                is None
+            )
         wait_until(lambda: metric_value(RELAYS_RUNNING) == 1, "relaying")
         lines = raw_turn("turn_tool")
         offsets = wedged.play(ENV, name, lines[:11])
@@ -601,6 +604,7 @@ class TestRun:
                 message="Build the camp",
                 started_at=now,
                 ended_at=None if in_flight else now,
+                cause_code=TurnCause.BRIEF,
             )
         )
         session.flush()

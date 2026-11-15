@@ -19,7 +19,13 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.models import Environment, Item, ProgressStep, Project, Turn, User
-from app.models.reference import ProgressState, RecordKind, SessionState, WorkTrigger
+from app.models.reference import (
+    ProgressState,
+    RecordKind,
+    SessionState,
+    TurnCause,
+    WorkTrigger,
+)
 from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
@@ -121,6 +127,7 @@ class TestGetSessionRecords:
             message="The chat's brief.\n\nWhat next?",
             words="What next?",
             started_at=datetime.now(UTC),
+            cause_code=TurnCause.PERSON,
         )
         session.add(turn)
         session.flush()
@@ -284,12 +291,14 @@ class TestGetSessionTurns:
                     message="The chat's brief.\n\nWhat next?",
                     words="What next?",
                     started_at=at,
+                    cause_code=TurnCause.PERSON,
                 ),
                 Turn(
                     session_id=project_session.id,
                     seq=1,
                     message="Survey the stylesheets.",
                     started_at=at,
+                    cause_code=TurnCause.BRIEF,
                 ),
             ]
         )
@@ -592,6 +601,7 @@ def _work_item(
             message="The brief",
             started_at=now,
             ended_at=None if state == SessionState.RUNNING else now,
+            cause_code=TurnCause.BRIEF,
         )
     )
     run.state_code = state
@@ -623,6 +633,7 @@ def _job(
             message="/plan",
             started_at=now,
             ended_at=None if state == SessionState.RUNNING else now,
+            cause_code=TurnCause.BRIEF,
         )
     )
     run.state_code = state

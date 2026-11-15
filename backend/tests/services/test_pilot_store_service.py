@@ -54,6 +54,7 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     TransitionKind,
+    TurnCause,
     UserKind,
     WorkTrigger,
 )
@@ -222,7 +223,15 @@ def _brain(
     )
     db.add(run)
     db.flush()
-    db.add(Turn(session_id=run.id, seq=1, message="Go on.", started_at=now))
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message="Go on.",
+            started_at=now,
+            cause_code=TurnCause.BRIEF,
+        )
+    )
     db.flush()
     return run
 
@@ -318,7 +327,15 @@ def _work(
     )
     db.add(run)
     db.flush()
-    db.add(Turn(session_id=run.id, seq=1, message="Pitch it.", started_at=now))
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message="Pitch it.",
+            started_at=now,
+            cause_code=TurnCause.BRIEF,
+        )
+    )
     container.record_service().place_work(project, run, "Pitching the tent")
     return run
 
@@ -1642,6 +1659,7 @@ class TestPilotStoreServiceFinish:
         [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
         turn.author_user_id = person.id
         turn.words = "Finish and archive it."
+        turn.cause_code = TurnCause.PERSON
         session.flush()
 
         _service(container).finish(_admitted(run), TOOL_USE_ID, archive=True)

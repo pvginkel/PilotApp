@@ -55,6 +55,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TransitionKind,
+    TurnCause,
     UsageWindow,
     UserKind,
     VersionCause,
@@ -475,6 +476,7 @@ def _turn(
         started_at=datetime.now(UTC),
         ended_at=datetime.now(UTC),
         error=error,
+        cause_code=TurnCause.BRIEF,
     )
     session.add(turn)
     session.flush()
@@ -1491,7 +1493,13 @@ class TestTimeline:
             trigger=WorkTrigger.WORKER_TURN_ENDED,
             trigger_item_id=run.id,
         )
-        turn = Turn(session_id=job.id, seq=1, message="Pre-rule.", started_at=ASKED)
+        turn = Turn(
+            session_id=job.id,
+            seq=1,
+            message="Pre-rule.",
+            started_at=ASKED,
+            cause_code=TurnCause.BRIEF,
+        )
         db.add(turn)
         db.flush()
         for local_id, question, at in (
@@ -4150,6 +4158,7 @@ class TestInTheChat:
                 seq=1,
                 message="Settle.",
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         session.flush()

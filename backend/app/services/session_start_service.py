@@ -152,6 +152,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TransitionKind,
+    TurnCause,
     UserKind,
     WorkTrigger,
 )
@@ -519,7 +520,15 @@ class SessionStartService:
         )
         db.add(session)
         db.flush()
-        db.add(Turn(session_id=session.id, seq=1, message=brief, started_at=now))
+        db.add(
+            Turn(
+                session_id=session.id,
+                seq=1,
+                message=brief,
+                started_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
+        )
         db.flush()
         work = self._container.record_service().place_work(
             project, session, title, plan_task_id, repo=repo
@@ -625,6 +634,7 @@ class SessionStartService:
             run_id,
             title,
             message,
+            TurnCause.CONTINUATION,
             released.id,
             f"continue {_work_named(db, run_id)}",
         )
@@ -654,7 +664,14 @@ class SessionStartService:
             InvalidOperationException: The project is finished or archived
         """
         session = self._resume_conversation(
-            db, project, run_id, title, message, None, f"place {title}"
+            db,
+            project,
+            run_id,
+            title,
+            message,
+            TurnCause.CLARIFICATION,
+            None,
+            f"place {title}",
         )
         db.add(ClarificationRun(id=session.id, pass_id=pass_id))
         db.flush()
@@ -673,6 +690,7 @@ class SessionStartService:
         run_id: uuid.UUID,
         title: str,
         message: str,
+        cause: TurnCause,
         trigger_item_id: uuid.UUID | None,
         operation: str,
     ) -> AgentSession:
@@ -684,7 +702,8 @@ class SessionStartService:
         environment from its placement on, held or not, so the environment is
         never free between the two (DB 240, §13.5), and continues the run's
         conversation, never reset (DB 241), on the run's cwd, agent, model and
-        effort, its first Turn `message`; its Work keeps the run's repository.
+        effort, its first Turn `message`, sent for `cause`; its Work keeps the
+        run's repository.
         It passes the gate as `start_work`'s does, and waits while another
         Session runs or starts on the conversation (DB 183): `held` while the
         gate is closed for it, else `starting`, its start run once this
@@ -719,7 +738,15 @@ class SessionStartService:
         )
         db.add(session)
         db.flush()
-        db.add(Turn(session_id=session.id, seq=1, message=message, started_at=now))
+        db.add(
+            Turn(
+                session_id=session.id,
+                seq=1,
+                message=message,
+                started_at=now,
+                cause_code=cause,
+            )
+        )
         db.flush()
         held = self._held(db, project, WORK_KIND, queued=False, session=session)
         if held is None:
@@ -1233,7 +1260,7 @@ class SessionStartService:
             raise InvalidOperationException(
                 operation, "its stopped turn is still ending"
             )
-        held = self._carry_on(db, project, session, CONTINUE)
+        held = self._carry_on(db, project, session, CONTINUE, TurnCause.RESUME)
         logger.info(
             "Session %s resumed%s",
             session_id,
@@ -1426,7 +1453,9 @@ class SessionStartService:
             or _latest_turn(db, session_id).ended_at is None
         ):
             return
-        held = self._carry_on(db, project, session, _nudge_words(db, session))
+        held = self._carry_on(
+            db, project, session, _nudge_words(db, session), TurnCause.NUDGE
+        )
         logger.info(
             "Session %s nudged%s",
             session_id,
@@ -1434,10 +1463,16 @@ class SessionStartService:
         )
 
     def _carry_on(
-        self, db: Session, project: Project, session: AgentSession, message: str
+        self,
+        db: Session,
+        project: Project,
+        session: AgentSession,
+        message: str,
+        cause: TurnCause,
     ) -> Held | None:
         """Under the project's row and the Session's lock, its last Turn
-        ended: a server-own Turn, `message`, or the ended Turn's message
+        ended: a server-own Turn sent for `cause`, `message`, or the ended
+        Turn's message
         while the Session has no conversation (R15's rule, so a failed
         start's carries its brief, or while no Turn of the Session has gone
         out, so a continuation's carries its message), and the Session
@@ -1460,6 +1495,7 @@ class SessionStartService:
                 else message
             ),
             started_at=now,
+            cause_code=cause,
         )
         db.add(turn)
         db.flush()
@@ -2020,12 +2056,22 @@ class SessionStartService:
         work = db.get_one(Work, session.id)
         if work.trigger_code is WorkTrigger.WAIT_FIRED:
             message = self._wait_run(db, project, session, work, at)
+            cause = TurnCause.WAIT_RUN
         else:
             work.autopilot = project.autopilot
             message = self._container.brief_service().job(
                 project, work, _triggered(db, session), at
             )
-        db.add(Turn(session_id=session.id, seq=1, message=message, started_at=at))
+            cause = TurnCause.BRIEF
+        db.add(
+            Turn(
+                session_id=session.id,
+                seq=1,
+                message=message,
+                started_at=at,
+                cause_code=cause,
+            )
+        )
         if work.trigger_code is WorkTrigger.ITEM_DONE:
             # The job after an item's close names the item.
             assert work.trigger_item_id is not None

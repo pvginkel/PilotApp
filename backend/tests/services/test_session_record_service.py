@@ -18,7 +18,7 @@ from app import models
 from app.database import scoped_session
 from app.exceptions import RecordNotFoundException
 from app.models import Environment, Project, SessionRecord, Turn, User
-from app.models.reference import RecordKind, SessionState, UserKind
+from app.models.reference import RecordKind, SessionState, TurnCause, UserKind
 from app.services.container import ServiceContainer
 from app.services.session_record_service import (
     RECORDS_WRITTEN_TOTAL,
@@ -59,6 +59,7 @@ def _turn(db: DbSession, run: models.Session, seq: int, author: User | None) -> 
         message=f"Message {seq}" if author is None else f"Brief.\n\nWords {seq}",
         words=None if author is None else f"Words {seq}",
         started_at=datetime.now(UTC),
+        cause_code=TurnCause.BRIEF if author is None else TurnCause.PERSON,
     )
     db.add(turn)
     db.flush()

@@ -2,8 +2,9 @@
 
 A reference entity with a fact about the category is a table: Item Kind, Done
 Cause, Confirmation Reason and Session Kind. The other twenty-one are PostgreSQL
-enums (DB §7.2). The revisions are the one place a value is added, a table's
-rows included.
+enums (DB §7.2), as is Turn Cause, Pilot's own of the analysis dashboard's
+(DB §2.11). The revisions are the one place a value is added, a table's rows
+included.
 """
 
 from enum import StrEnum
@@ -179,6 +180,36 @@ class ProgressState(StrEnum):
     DONE = "done"
 
 
+class TurnCause(StrEnum):
+    """A kind of reason Pilot sends a Turn (DB §2.11), given at the write and
+    never changed (DB 352). It says why the Turn was sent, not what it
+    carries: a Resume that sends a start's brief again is `resume`."""
+
+    BRIEF = "brief"
+    """The first Turn of a work item's run placed fresh, or of a job's run."""
+    PERSON = "person"
+    """A Turn with an author: a chat's message, the chat's brief before a
+    person's words among them, and a service user's call."""
+    CONTINUATION = "continuation"
+    """The first Turn of a new run on a conversation whose run's documents
+    all closed (F26.7)."""
+    CLARIFICATION = "clarification"
+    """The first Turn of a clarification run, the pass's questions to the
+    writer (DB decision 63)."""
+    RESUME = "resume"
+    """The Turn a person's Resume of a stopped or failed work item sends."""
+    NUDGE = "nudge"
+    """The owed nudge (DB 232)."""
+    FOLLOW_UP = "follow_up"
+    """The server's follow-up for saves still held at a turn's end (F79)."""
+    CARRY_ON = "carry_on"
+    """The Turn the relay sends after it re-created a controller session
+    that was gone (§9.6)."""
+    WAIT_RUN = "wait_run"
+    """The first Turn of a wait's run, a follow-up on the previous run's
+    conversation or the full brief."""
+
+
 def _enum_type(enum_class: type[StrEnum], name: str) -> Enum:
     # The database holds the values, not the member names.
     return Enum(
@@ -210,6 +241,7 @@ TASK_STATUS = _enum_type(TaskStatus, "task_status")
 USAGE_WINDOW = _enum_type(UsageWindow, "usage_window")
 TOKEN_KIND = _enum_type(TokenKind, "token_kind")
 PROGRESS_STATE = _enum_type(ProgressState, "progress_state")
+TURN_CAUSE = _enum_type(TurnCause, "turn_cause")
 
 # Autogenerate compares no enum type, so the schema tests check these against
 # the database's.
@@ -235,6 +267,7 @@ ENUM_TYPES = (
     USAGE_WINDOW,
     TOKEN_KIND,
     PROGRESS_STATE,
+    TURN_CAUSE,
 )
 
 

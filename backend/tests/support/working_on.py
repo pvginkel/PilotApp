@@ -25,7 +25,7 @@ from app.models import (
     Work,
     WriterQuestion,
 )
-from app.models.reference import SessionState, UserKind, WorkTrigger
+from app.models.reference import SessionState, TurnCause, UserKind, WorkTrigger
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from app.services.working_on import JobsOn, PilotsWork, Reading, jobs_on, pilots_work
@@ -228,7 +228,13 @@ class Camp:
 
     def ask_writer(self, pass_: models.Session, document: Item, local_id: str) -> None:
         """The pass asked the document's writer about one of its blocks."""
-        turn = Turn(session_id=pass_.id, seq=1, message="Pre-rule.", started_at=AT)
+        turn = Turn(
+            session_id=pass_.id,
+            seq=1,
+            message="Pre-rule.",
+            started_at=AT,
+            cause_code=TurnCause.BRIEF,
+        )
         self.session.add(turn)
         self.session.flush()
         self.session.add(

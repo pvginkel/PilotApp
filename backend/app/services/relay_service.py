@@ -95,7 +95,7 @@ from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Environment, Project, Turn, Work
 from app.models import Session as AgentSession
-from app.models.reference import RecordKind, SessionState, WorkTrigger
+from app.models.reference import RecordKind, SessionState, TurnCause, WorkTrigger
 from app.schemas.timeline import StopCause
 from app.services.brief_service import is_follow_up, is_restarted
 from app.services.chat_close_service import ChatCloseService
@@ -325,12 +325,14 @@ class RelayService:
         db: Session,
         session_id: uuid.UUID,
         message: str,
+        cause: TurnCause,
         *,
         words: Words | None = None,
     ) -> Turn:
-        """Send the Session a new Turn, `message`, and relay it once the
-        caller's transaction commits (§9.6). A person's message carries their
-        `words`, which `message` ends with (DB assertion 251).
+        """Send the Session a new Turn, `message`, sent for `cause`, and relay
+        it once the caller's transaction commits (§9.6). A person's message,
+        whose cause is `person`, carries their `words`, which `message` ends
+        with (DB assertion 251).
 
         The controller's send goes first, under the project's row held
         shared to the commit, which a caller holding the Session's lock took
@@ -365,10 +367,10 @@ class RelayService:
         try:
             self._deliver_resuming(db, session, message)
         except ExternalServiceException as error:
-            turn = self._new_turn(db, session_id, message, words)
+            turn = self._new_turn(db, session_id, message, cause, words)
             self._failed(db, turn, error)
             return turn
-        turn = self._new_turn(db, session_id, message, words)
+        turn = self._new_turn(db, session_id, message, cause, words)
         self._accepted(db, turn)
         return turn
 
@@ -670,7 +672,7 @@ class RelayService:
                 )
                 return
             message = self._carrying_on(db, session, opening)
-            turn = self._new_turn(db, session.id, message, None)
+            turn = self._new_turn(db, session.id, message, TurnCause.CARRY_ON, None)
             session.state_code = SessionState.RUNNING
             session.current_line = at_send(None, turn.started_at)
             _refresh_turns(db, session, turn)
@@ -872,6 +874,7 @@ class RelayService:
         db: Session,
         session_id: uuid.UUID,
         message: str,
+        cause: TurnCause,
         words: Words | None,
     ) -> Turn:
         records = self._records(db)
@@ -884,6 +887,7 @@ class RelayService:
             seq=(last or 0) + 1,
             message=message,
             started_at=datetime.now(UTC),
+            cause_code=cause,
         )
         if words is not None:
             turn.author_user_id = words.author_user_id
@@ -1230,7 +1234,7 @@ class RelayService:
         naming them (`BriefService.follow_up`), the Session `running` with it,
         and its relay run again once this commits to send it (F79)."""
         message = self._container.brief_service().follow_up(held)
-        turn = self._new_turn(db, session.id, message, None)
+        turn = self._new_turn(db, session.id, message, TurnCause.FOLLOW_UP, None)
         session.state_code = SessionState.RUNNING
         session.current_line = at_send(None, turn.started_at)
         _refresh_turns(db, session, turn)

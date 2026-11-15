@@ -60,6 +60,7 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     TransitionKind,
+    TurnCause,
     UserKind,
     VersionCause,
     WorkTrigger,
@@ -1081,6 +1082,7 @@ class TestSave:
             select(Turn).where(Turn.session_id == run.id).order_by(Turn.seq)
         ).all()
         assert [turn.ended_at for turn in turns][-1:] == [None]
+        assert turns[-1].cause_code is TurnCause.BRIEF
         assert sum(turn.ended_at is None for turn in turns) == 1
         assert (run.turns, run.turn_started_at, run.turn_ended_at) == (
             before + 1,
@@ -1753,6 +1755,7 @@ class TestRegisterDocument:
                 seq=1,
                 message="Build the camp.",
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         session.flush()
@@ -1802,6 +1805,7 @@ class TestAttachAsWorker:
                 seq=1,
                 message="Build the camp.",
                 started_at=datetime.now(UTC),
+                cause_code=TurnCause.BRIEF,
             )
         )
         session.flush()
@@ -1995,6 +1999,7 @@ class TestAskWriter:
         )
         [turn] = session.scalars(select(Turn).where(Turn.session_id == job.id))
         assert (turn.author_user_id, turn.ended_at) == (None, turn.started_at)
+        assert turn.cause_code is TurnCause.BRIEF
         assert [
             (question.turn_id, question.question)
             for question in session.scalars(
@@ -2116,6 +2121,7 @@ class TestClarify:
         )
         [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
         assert turn.message.startswith(f"Pilot asks about {REGISTERED}:\n- Q2: Which")
+        assert turn.cause_code is TurnCause.CLARIFICATION
         assert session.get_one(Work, run.id).repo == "example/Camp"
 
     def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
@@ -2178,6 +2184,7 @@ class TestClarify:
         item = session.get_one(Item, run.id)
         assert (item.title, item.done_at) == ("Clarify refinement.md", None)
         [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
+        assert turn.cause_code is TurnCause.CLARIFICATION
         assert (
             turn.message.startswith(f"Pilot asks about {REGISTERED}:"),
             turn.ended_at,
@@ -2356,7 +2363,14 @@ class TestStopInChat:
         session.add(run)
         session.flush()
         session.add(
-            Turn(session_id=run.id, seq=1, message="Go.", started_at=now, ended_at=now)
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Go.",
+                started_at=now,
+                ended_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
         )
         container.record_service().place_work(camp, run, "Pitching the tent")
         return run

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Environment, Project, TokenCount, Turn
-from app.models.reference import RecordKind, SessionState, TokenKind
+from app.models.reference import RecordKind, SessionState, TokenKind, TurnCause
 from app.services.container import ServiceContainer
 from app.services.token_counts import Spent, reported_before, spent
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -111,6 +111,7 @@ class _Recorded:
             message="Fix the client for v4.",
             started_at=datetime(2026, 11, 1, 9, 30, tzinfo=UTC),
             cost=None if figures is None else figures.cost,
+            cause_code=TurnCause.BRIEF,
         )
         self.db.add(turn)
         self.db.flush()

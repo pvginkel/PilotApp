@@ -43,6 +43,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TransitionKind,
+    TurnCause,
     UserKind,
     VersionCause,
 )
@@ -363,6 +364,7 @@ class TestSendStartsTheChat:
             None,
         )
         assert (turn.seq, turn.author_user_id, turn.words) == (1, person.id, WORDS)
+        assert turn.cause_code is TurnCause.PERSON
         assert turn.message == container.brief_service().project_chat(
             opened, person, WORDS, turn.started_at
         )
@@ -672,6 +674,7 @@ class TestSendToTheOpenChat:
             "Two",
             "Two",
         )
+        assert turn.cause_code is TurnCause.PERSON
         assert turn.error is None
         assert fake.sent == ["Two"]
         assert _read(session, run.id).state_code == SessionState.RUNNING
@@ -1613,6 +1616,7 @@ class TestDefinitionChat:
             SessionState.STARTING,
         )
         assert (turn.seq, turn.author_user_id, turn.words) == (1, person.id, WORDS)
+        assert turn.cause_code is TurnCause.PERSON
         assert turn.message == container.brief_service().definition_chat(
             draft, person, WORDS, turn.started_at
         )
@@ -1688,6 +1692,7 @@ class TestDefinitionChat:
             "Two",
             "Two",
         )
+        assert turn.cause_code is TurnCause.PERSON
         assert fake.sent == ["Two"]
         assert [chat.kind_code for chat in _chat_rows(session, draft)] == [
             ChatKind.DEFINITION
@@ -2031,6 +2036,7 @@ def _stopped_unsent(
         words=words,
         started_at=now,
         ended_at=now,
+        cause_code=TurnCause.PERSON,
     )
     db.add(turn)
     db.flush()
@@ -2119,6 +2125,7 @@ class TestNamedMessage:
                 message="continue",
                 started_at=now,
                 ended_at=now,
+                cause_code=TurnCause.CARRY_ON,
             )
         )
         session.flush()
@@ -2339,6 +2346,7 @@ def _committed_idle_chat(
                 words="One",
                 started_at=now,
                 ended_at=now,
+                cause_code=TurnCause.PERSON,
             )
         )
         return person_id, project_id, run.id
