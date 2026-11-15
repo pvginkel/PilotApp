@@ -128,7 +128,7 @@ function AgentCard({ call, agent, liveFrom }: { call: ToolCallView; agent: Agent
         {status && <span className="ml-1.5 inline-flex align-[-2px]">{status}</span>}
       </StepLine>
       {!open && running && agent.progress && (
-        <div className="truncate px-2.5 pb-1 pl-8 font-mono text-xs/[1.6] text-muted-foreground">{agent.progress}</div>
+        <div className="truncate px-2.5 pb-1 pl-8 text-xs/[1.6] text-muted-foreground">{agent.progress}</div>
       )}
       {open && (
         <div className="border-t px-2.5 py-1.5">
