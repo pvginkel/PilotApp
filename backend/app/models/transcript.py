@@ -71,10 +71,12 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     `file_size`, `file_modified_at`, `collected_at` and `read_under_id` are
     its last publication's; `replayed_size` the file's size at its last whole
     one (DB 605). A sub-agent's thread is held with no `main_id` until its
-    main thread is published, and with no `spawned_by_id` until the Tool Call
-    that started it is. That a thread's main has no `agent_id` (DB 534) and
-    that its spawning call lies under that main (DB 535) are the publication's
-    to keep: no key reaches them.
+    main thread is published. `spawned_by_tool_use_id` is the `tool_use_id`
+    its record names its spawning call by, and `spawned_by_id` the Tool Call
+    of that name once a thread of its conversation holds it (DB decision
+    79.16). That a thread's main has no `agent_id` (DB 534) and that its
+    spawning call lies under that main (DB 535) are the publication's to
+    keep: no key reaches them.
     """
 
     __tablename__ = "transcripts"
@@ -95,7 +97,8 @@ class Transcript(db.Model):  # type: ignore[name-defined]
         ),
         # A main thread has no main thread and no spawning call (DB 534).
         CheckConstraint(
-            "agent_id IS NOT NULL OR (main_id IS NULL AND spawned_by_id IS NULL)",
+            "agent_id IS NOT NULL OR (main_id IS NULL AND spawned_by_id IS NULL"
+            " AND spawned_by_tool_use_id IS NULL)",
             name="ck_transcripts_main_thread",
         ),
         # Only a main thread is hosted by an Environment (DB 536).
@@ -125,6 +128,7 @@ class Transcript(db.Model):  # type: ignore[name-defined]
             name="transcripts_spawned_by_id_fkey",
         )
     )
+    spawned_by_tool_use_id: Mapped[str | None] = mapped_column(Text)
     agent_type: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     working_directory: Mapped[str] = mapped_column(Text)

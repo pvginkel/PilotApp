@@ -4,8 +4,9 @@
 One call is one Transcript, a main thread's or one sub-agent's, with every
 fact of DB §2.6 and §2.7 the collector read off its file. A reference value is
 named by its code, a row Pilot holds by what the file names it by: a Call by
-its `message_id`, a Prompt and a Compaction by their place in the file. It
-carries nothing of the transcript's text (DB decision 79.41).
+its `message_id`, a Tool Call by its `tool_use_id`, a Prompt and a Compaction
+by their place in the file. It carries nothing of the transcript's text (DB
+decision 79.41).
 """
 
 from typing import Annotated, Literal
@@ -108,6 +109,77 @@ class PublishedCompactionSchema(_Published):
     )
 
 
+class PublishedToolCallSchema(_Published):
+    """A call of one tool a Call requested, with its result."""
+
+    tool_use_id: Name = Field(description="Claude's id of the request")
+    tool: Name = Field(
+        description="The Tool's code, Claude Code's name of it",
+        examples=["Bash", "mcp__youtrack__get_issues"],
+    )
+    mcp_server: Name | None = Field(
+        default=None, description="The MCP server the Tool is of, none for another"
+    )
+    first_argument: str | None = Field(
+        default=None,
+        description="The command, path or query it was given, cut to a line",
+    )
+    requested_at: AwareDatetime = Field(description="When it was requested")
+    returned_at: AwareDatetime | None = Field(
+        default=None, description="When its result arrived, none where none did"
+    )
+    failed: bool = Field(description="Whether the result was an error")
+    exit_code: int | None = Field(
+        default=None,
+        ge=-2_147_483_648,
+        le=2_147_483_647,
+        description="A command's exit code, where it was not zero",
+    )
+    interrupted: bool = Field(description="Whether the person interrupted it")
+    denial_kind: Name | None = Field(
+        default=None,
+        description="The Denial Kind's code, where the call was denied",
+        examples=["rule", "person", "hook"],
+    )
+    result_characters: Count | None = Field(
+        default=None, description="The size of the result the model was given"
+    )
+    saved_characters: Count | None = Field(
+        default=None,
+        description="The output's full size, where it was saved to disk",
+    )
+
+
+class PublishedEventSchema(_Published):
+    """An occurrence at one moment that no other part of the call records."""
+
+    kind: Name = Field(
+        description="The Event Kind's code", examples=["api_error", "interrupt"]
+    )
+    is_error: bool = Field(
+        description="Whether an Event of its kind counts as an error"
+    )
+    at: AwareDatetime = Field(description="When it occurred")
+    detail: str | None = Field(
+        default=None,
+        description="Its one qualifier as its source gives it: an API error's status",
+    )
+
+
+class PublishedContextPartSchema(_Published):
+    """A component of what a Call carried that no earlier Call of its Launch
+    did."""
+
+    kind: Name = Field(
+        description="The Context Part Kind's code",
+        examples=["system_prompt", "skill_body"],
+    )
+    name: str | None = Field(
+        default=None, description="Which one of its kind: the skill, the file"
+    )
+    characters: Count = Field(description="Its length")
+
+
 class PublishedCallSchema(_Published):
     """A request the Transcript made to the model, with its response."""
 
@@ -167,6 +239,21 @@ class PublishedCallSchema(_Published):
         default_factory=dict,
         description="The tokens billed, by Token Kind; a kind left out counts none",
     )
+    tool_calls: list[PublishedToolCallSchema] = Field(
+        default_factory=list,
+        description="The calls of a tool it requested, in the file's order",
+    )
+    events: list[PublishedEventSchema] = Field(
+        default_factory=list,
+        description=(
+            "The Events it marks, in the file's order: each on the last Call"
+            " before it, else the first"
+        ),
+    )
+    context_parts: list[PublishedContextPartSchema] = Field(
+        default_factory=list,
+        description="What it carried that no earlier Call of its Launch did",
+    )
 
 
 class PublicationSchema(_Published):
@@ -206,6 +293,13 @@ class PublicationSchema(_Published):
     )
     description: str | None = Field(
         default=None, description="The task a sub-agent's spawning call gave it"
+    )
+    spawned_by: Name | None = Field(
+        default=None,
+        description=(
+            "The `tool_use_id` of the call that started a sub-agent, where its"
+            " record names it"
+        ),
     )
     launches: list[PublishedLaunchSchema] = Field(
         default_factory=list,

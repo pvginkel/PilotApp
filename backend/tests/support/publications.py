@@ -7,6 +7,9 @@ from typing import Any
 from app.schemas.publication import PublicationSchema
 from tests.support.transcripts import CAMP, OPUS, STARTED, SUB_AGENT
 
+SPAWNING = "toolu_0031"
+"""The `tool_use_id` of the call that started the invented sub-agent."""
+
 
 def hook_run(**overrides: Any) -> dict[str, Any]:
     values: dict[str, Any] = {
@@ -45,6 +48,38 @@ def compaction(**overrides: Any) -> dict[str, Any]:
     return values | overrides
 
 
+def tool_call(place: int, **overrides: Any) -> dict[str, Any]:
+    """The Tool Call at `place` among the file's, its `tool_use_id` named for
+    it: a Bash command that returned within the minute."""
+    requested = STARTED + timedelta(minutes=place)
+    values: dict[str, Any] = {
+        "tool_use_id": f"toolu_{place:04}",
+        "tool": "Bash",
+        "first_argument": "ls recipes",
+        "requested_at": requested.isoformat(),
+        "returned_at": (requested + timedelta(seconds=4)).isoformat(),
+        "failed": False,
+        "interrupted": False,
+        "result_characters": 1_180,
+    }
+    return values | overrides
+
+
+def event(**overrides: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "kind": "api_error",
+        "is_error": True,
+        "at": (STARTED + timedelta(minutes=2, seconds=11)).isoformat(),
+        "detail": "529",
+    }
+    return values | overrides
+
+
+def context_part(**overrides: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {"kind": "system_prompt", "characters": 9_100}
+    return values | overrides
+
+
 def call(place: int, **overrides: Any) -> dict[str, Any]:
     """The Call at `place` in the file, its `message_id` named for it."""
     values: dict[str, Any] = {
@@ -80,5 +115,6 @@ def sub_agent(**overrides: Any) -> PublicationSchema:
         "agent_id": SUB_AGENT,
         "agent_type": "Explore",
         "description": "Find where the recipes are scaled",
+        "spawned_by": SPAWNING,
     }
     return whole(**values | overrides)

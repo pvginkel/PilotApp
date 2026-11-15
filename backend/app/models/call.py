@@ -194,6 +194,22 @@ class ToolCall(db.Model):  # type: ignore[name-defined]
     saved_characters: Mapped[int | None] = mapped_column(Integer)
 
 
+RECORDED_ELSEWHERE = (
+    "compaction",
+    "rewind",
+    "cache_miss",
+    "past_ttl",
+    "model_fallback",
+    "max_tokens",
+    "refusal",
+    "output_saved",
+    "denied",
+    "hook_error",
+)
+"""The Event Kinds whose occurrences a Compaction, a Call, a Tool Call and a
+Hook Run record, and no Event (DB 560)."""
+
+
 class EventKind(db.Model):  # type: ignore[name-defined]
     """A kind of occurrence the screen marks; `is_error` whether it counts as
     an error."""
@@ -212,12 +228,10 @@ class Event(db.Model):  # type: ignore[name-defined]
     __tablename__ = "events"
     __table_args__ = (
         Index("ix_events_call_id", "call_id"),
-        # The occurrences a Compaction, a Call, a Tool Call and a Hook Run
-        # record are stored as no Event (DB 560).
         CheckConstraint(
-            "kind_code NOT IN ('compaction', 'rewind', 'cache_miss', 'past_ttl',"
-            " 'model_fallback', 'max_tokens', 'refusal', 'output_saved', 'denied',"
-            " 'hook_error')",
+            "kind_code NOT IN ("
+            + ", ".join(f"'{kind}'" for kind in RECORDED_ELSEWHERE)
+            + ")",
             name="ck_events_kind",
         ),
     )

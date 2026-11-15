@@ -1,7 +1,8 @@
 """A whole publication of a transcript, written into the record: its
 Launches with their versions, its Prompts with their Hook Runs, its
-Compactions and its Calls with their tokens (F152.3, F152.4; DB decisions 79
-and 81, the assertions of §4.31 and §4.33).
+Compactions and its Calls with their tokens, Tool Calls, Events and Context
+Parts (F152.3, F152.4; DB decisions 79 and 81, the assertions of §4.31 and
+§4.33).
 
 The rule that protects the most: a publication writes only the rows that
 differ, and a row keeps its identity wherever the call names the same fact
@@ -23,7 +24,12 @@ from app.models import (
     CompactionTrigger,
     Component,
     ComponentVersion,
+    ContextPart,
+    ContextPartKind,
+    DenialKind,
     Environment,
+    Event,
+    EventKind,
     HookRun,
     Launch,
     LaunchComponent,
@@ -33,6 +39,8 @@ from app.models import (
     PromptSource,
     Repository,
     StopReason,
+    Tool,
+    ToolCall,
     Transcript,
 )
 from app.schemas.publication import PublicationSchema
@@ -42,18 +50,25 @@ from tests.support import transcripts
 from tests.support.database import Written, writes
 from tests.support.locks import in_thread, lock_waits
 from tests.support.publications import (
+    SPAWNING,
     call,
     compaction,
+    context_part,
+    event,
     hook_run,
     launch,
     prompt,
     sub_agent,
+    tool_call,
     whole,
 )
 from tests.support.supervisor import wait_until
 from tests.support.transcripts import CAMP, HAIKU, OPUS, OTHER, STARTED, SUB_AGENT
 
 CLAUDE_CODE = {"component": "claude-code", "version": "2.1.317"}
+DEEPER = "c81d5e02f7a9b3d64"
+"""Claude Code's id of a second invented sub-agent."""
+RECIPES = "Find where the recipes are scaled"
 
 
 def _at(minutes: int) -> str:
@@ -93,12 +108,77 @@ def _second_launch(**overrides: Any) -> dict[str, Any]:
 
 def _calls() -> list[dict[str, Any]]:
     """Four Calls: the third after the Compaction, a miss answered by the
-    model that was not asked for and cut off at the output cap."""
+    model that was not asked for and cut off at the output cap.
+
+    The first carries the context a Launch opens with. The second asks an
+    MCP tool and starts the sub-agent, and meets an API error and its retry.
+    The third runs a failing command whose output was saved and one a hook
+    blocked. The fourth's command the person interrupted."""
     return [
-        call(1, prompt=1, sent_at=_at(0)),
-        call(2, prompt=1, predecessor="msg_0001", thinking_tokens=640, effort="high"),
+        call(
+            1,
+            prompt=1,
+            sent_at=_at(0),
+            tool_calls=[tool_call(1)],
+            context_parts=[
+                context_part(),
+                context_part(kind="tool_schemas", characters=45_300),
+                context_part(
+                    kind="instruction_file", name="CLAUDE.md", characters=2_400
+                ),
+            ],
+        ),
+        call(
+            2,
+            prompt=1,
+            predecessor="msg_0001",
+            thinking_tokens=640,
+            effort="high",
+            tool_calls=[
+                tool_call(
+                    2,
+                    tool="mcp__pantry__find_items",
+                    mcp_server="pantry",
+                    first_argument="flour",
+                ),
+                tool_call(
+                    31, tool="Agent", first_argument=RECIPES, result_characters=640
+                ),
+            ],
+            events=[
+                event(),
+                event(
+                    kind="api_retry",
+                    is_error=False,
+                    at=(STARTED + timedelta(minutes=2, seconds=19)).isoformat(),
+                    detail=None,
+                ),
+            ],
+        ),
         call(
             3,
+            tool_calls=[
+                tool_call(
+                    3,
+                    first_argument="pytest tests/scaling",
+                    failed=True,
+                    exit_code=1,
+                    result_characters=2_000,
+                    saved_characters=412_000,
+                ),
+                tool_call(
+                    4,
+                    first_argument="git commit -m scaling",
+                    failed=True,
+                    denial_kind="hook",
+                    result_characters=96,
+                ),
+            ],
+            context_parts=[
+                context_part(
+                    kind="skill_body", name="recipe-scaling", characters=11_800
+                )
+            ],
             prompt=2,
             predecessor="msg_0002",
             compaction=1,
@@ -110,13 +190,21 @@ def _calls() -> list[dict[str, Any]]:
             attributed_plugin="kitchen",
             tokens={"input": 90, "cache_write_5m": 12_000, "output": 4_096},
         ),
-        call(4, prompt=3, predecessor="msg_0003"),
+        call(
+            4,
+            prompt=3,
+            predecessor="msg_0003",
+            tool_calls=[
+                tool_call(5, interrupted=True, returned_at=None, result_characters=None)
+            ],
+            events=[event(kind="interrupt", is_error=False, at=_at(11), detail=None)],
+        ),
     ]
 
 
 def _camp(**overrides: Any) -> PublicationSchema:
     """The main thread's publication: two Launches, three Prompts, a
-    Compaction and four Calls."""
+    Compaction and four Calls, with what each Call did."""
     values: dict[str, Any] = {
         "launches": [_first_launch(), _second_launch()],
         "compactions": [compaction(tokens_after=21_000, duration_ms=5_200)],
@@ -134,8 +222,32 @@ def _ids(db: DbSession) -> dict[str, list[Any]]:
     its rows' order."""
     return {
         entity.__tablename__: list(db.scalars(select(entity.id).order_by(entity.id)))
-        for entity in (Transcript, Launch, Prompt, HookRun, Compaction, Call)
+        for entity in (
+            Transcript,
+            Launch,
+            Prompt,
+            HookRun,
+            Compaction,
+            Call,
+            ToolCall,
+            Event,
+            ContextPart,
+        )
     }
+
+
+def _tool_call_id(db: DbSession, tool_use_id: str = SPAWNING) -> int:
+    """The id of the one Tool Call of that name Pilot holds."""
+    return db.scalars(
+        select(ToolCall.id).where(ToolCall.tool_use_id == tool_use_id)
+    ).one()
+
+
+def _spawned_by(db: DbSession, thread: Transcript) -> int | None:
+    """The Tool Call the thread is joined to as its spawning call."""
+    return db.scalars(
+        select(Transcript.spawned_by_id).where(Transcript.id == thread.id)
+    ).one()
 
 
 @pytest.fixture
@@ -399,15 +511,147 @@ class TestPublished:
             "kitchen",
         )
 
+    def test_a_tool_call_hangs_on_the_call_that_requested_it(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_camp())
+
+        assert session.execute(
+            select(
+                Call.position,
+                ToolCall.transcript_id,
+                ToolCall.tool_use_id,
+                ToolCall.tool_code,
+                ToolCall.first_argument,
+            )
+            .join(Call, Call.id == ToolCall.call_id)
+            .order_by(ToolCall.id)
+        ).all() == [
+            (1, thread.id, "toolu_0001", "Bash", "ls recipes"),
+            (2, thread.id, "toolu_0002", "mcp__pantry__find_items", "flour"),
+            (2, thread.id, SPAWNING, "Agent", RECIPES),
+            (3, thread.id, "toolu_0003", "Bash", "pytest tests/scaling"),
+            (3, thread.id, "toolu_0004", "Bash", "git commit -m scaling"),
+            (4, thread.id, "toolu_0005", "Bash", "ls recipes"),
+        ]
+
+    def test_a_tool_call_holds_when_it_ran_and_how_it_ended(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        facts = select(
+            ToolCall.requested_at,
+            ToolCall.returned_at,
+            ToolCall.failed,
+            ToolCall.exit_code,
+            ToolCall.interrupted,
+            ToolCall.denial_kind_code,
+            ToolCall.result_characters,
+            ToolCall.saved_characters,
+        )
+
+        def held(tool_use_id: str) -> tuple[Any, ...]:
+            return tuple(
+                session.execute(facts.where(ToolCall.tool_use_id == tool_use_id)).one()
+            )
+
+        def at(minutes: int, seconds: int = 0) -> datetime:
+            return STARTED + timedelta(minutes=minutes, seconds=seconds)
+
+        assert held("toolu_0001") == (
+            at(1),
+            at(1, 4),
+            False,
+            None,
+            False,
+            None,
+            1_180,
+            None,
+        )
+        assert held("toolu_0003") == (
+            at(3),
+            at(3, 4),
+            True,
+            1,
+            False,
+            None,
+            2_000,
+            412_000,
+        )
+        assert held("toolu_0004") == (
+            at(4),
+            at(4, 4),
+            True,
+            None,
+            False,
+            "hook",
+            96,
+            None,
+        )
+        assert held("toolu_0005") == (
+            at(5),
+            None,
+            False,
+            None,
+            True,
+            None,
+            None,
+            None,
+        )
+
+    def test_an_event_marks_its_call_in_the_files_order(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        assert session.execute(
+            select(Call.position, Event.kind_code, Event.at, Event.detail)
+            .join(Call, Call.id == Event.call_id)
+            .order_by(Event.id)
+        ).all() == [
+            (2, "api_error", STARTED + timedelta(minutes=2, seconds=11), "529"),
+            (2, "api_retry", STARTED + timedelta(minutes=2, seconds=19), None),
+            (4, "interrupt", STARTED + timedelta(minutes=11), None),
+        ]
+
+    def test_a_context_part_hangs_on_the_call_that_first_carried_it(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        assert session.execute(
+            select(
+                Call.position,
+                ContextPart.kind_code,
+                ContextPart.name,
+                ContextPart.characters,
+            )
+            .join(Call, Call.id == ContextPart.call_id)
+            .order_by(ContextPart.id)
+        ).all() == [
+            (1, "system_prompt", None, 9_100),
+            (1, "tool_schemas", None, 45_300),
+            (1, "instruction_file", "CLAUDE.md", 2_400),
+            (3, "skill_body", "recipe-scaling", 11_800),
+        ]
+
     @pytest.mark.parametrize(
         ("entity", "codes"),
         [
             (Component, ["claude-code", "collector", "plugin:dev"]),
             (CompactionTrigger, ["auto"]),
+            (
+                ContextPartKind,
+                ["instruction_file", "skill_body", "system_prompt", "tool_schemas"],
+            ),
+            (DenialKind, ["hook"]),
+            (EventKind, ["api_error", "api_retry", "interrupt"]),
             (MissCause, ["compaction"]),
             (Model, [HAIKU, OPUS]),
             (PromptSource, ["person", "task_notification"]),
             (StopReason, ["max_tokens"]),
+            (Tool, ["Agent", "Bash", "mcp__pantry__find_items"]),
         ],
     )
     def test_a_reference_code_pilot_has_not_met_is_written_named_by_its_code(
@@ -437,6 +681,50 @@ class TestPublished:
             (HAIKU, HAIKU),
             (OPUS, "Opus 4.5"),
         ]
+
+    def test_a_tool_is_written_with_the_mcp_server_it_is_of(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        assert session.execute(
+            select(Tool.code, Tool.mcp_server).order_by(Tool.code)
+        ).all() == [
+            ("Agent", None),
+            ("Bash", None),
+            ("mcp__pantry__find_items", "pantry"),
+        ]
+
+    def test_an_event_kind_is_written_with_whether_it_is_an_error(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        assert session.execute(
+            select(EventKind.code, EventKind.is_error).order_by(EventKind.code)
+        ).all() == [("api_error", True), ("api_retry", False), ("interrupt", False)]
+
+    def test_a_tool_and_an_event_kind_pilot_has_met_are_left_as_they_stand(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        session.add_all(
+            [
+                Tool(code="Bash", name="Shell", mcp_server="shell"),
+                EventKind(code="api_retry", name="Retry", is_error=True),
+            ]
+        )
+        session.flush()
+
+        publications.publish(_camp())
+
+        assert session.execute(
+            select(Tool.name, Tool.mcp_server).where(Tool.code == "Bash")
+        ).one() == ("Shell", "shell")
+        assert session.execute(
+            select(EventKind.name, EventKind.is_error).where(
+                EventKind.code == "api_retry"
+            )
+        ).one() == ("Retry", True)
 
     def test_a_transcript_with_nothing_in_it_is_held(
         self, session: DbSession, publications: PublicationService
@@ -573,6 +861,160 @@ class TestScope:
             select(Transcript.id, Transcript.main_id).order_by(Transcript.agent_id)
         ).all() == [(thread.id, main.id), (main.id, None)]
 
+    def test_a_sub_agents_thread_that_comes_second_is_joined_to_its_spawning_call(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        thread = publications.publish(sub_agent())
+
+        assert thread.spawned_by_tool_use_id == SPAWNING
+        assert thread.spawned_by_id == _tool_call_id(session)
+
+    def test_a_sub_agents_thread_that_comes_first_holds_its_spawning_calls_name(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """DB decision 79.16: the name is held until what it names is."""
+        thread = publications.publish(sub_agent())
+
+        assert (thread.spawned_by_tool_use_id, thread.spawned_by_id) == (
+            SPAWNING,
+            None,
+        )
+
+        publications.publish(_camp())
+
+        assert _spawned_by(session, thread) == _tool_call_id(session)
+
+    def test_a_spawning_call_its_thread_brings_later_is_joined(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(whole(calls=[call(1)]))
+        thread = publications.publish(sub_agent())
+
+        assert thread.spawned_by_id is None
+
+        publications.publish(
+            whole(
+                calls=[call(1, tool_calls=[tool_call(31, tool="Agent")])],
+                file_size=50_000,
+            )
+        )
+
+        assert _spawned_by(session, thread) == _tool_call_id(session)
+
+    def test_the_join_outlives_a_main_thread_published_again(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        thread = publications.publish(sub_agent())
+        spawning = _tool_call_id(session)
+
+        with writes(session) as wrote:
+            publications.publish(_camp())
+
+        assert wrote == {"transcripts": Written(updated=1)}
+        assert _spawned_by(session, thread) == spawning
+
+    def test_the_join_outlives_a_sub_agents_thread_published_again(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        thread = publications.publish(sub_agent())
+
+        with writes(session) as wrote:
+            again = publications.publish(sub_agent())
+
+        assert wrote == {"transcripts": Written(updated=1)}
+        assert again.id == thread.id
+        assert again.spawned_by_id == _tool_call_id(session)
+
+    def test_a_sub_agent_another_sub_agent_started_is_joined_to_that_ones_call(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """DB 535: its spawning call lies in a thread under its main thread."""
+        publications.publish(_camp())
+        deeper = publications.publish(
+            sub_agent(agent_id=DEEPER, agent_type="Plan", spawned_by="toolu_0041")
+        )
+
+        starter = publications.publish(
+            sub_agent(calls=[call(1, tool_calls=[tool_call(41, tool="Agent")])])
+        )
+
+        assert session.execute(
+            select(ToolCall.tool_use_id, ToolCall.transcript_id).where(
+                ToolCall.id == _spawned_by(session, deeper)
+            )
+        ).one() == ("toolu_0041", starter.id)
+
+    def test_a_sub_agent_whose_spawning_call_no_thread_holds_is_joined_to_none(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        thread = publications.publish(sub_agent(spawned_by="toolu_0099"))
+
+        assert (thread.spawned_by_tool_use_id, thread.spawned_by_id) == (
+            "toolu_0099",
+            None,
+        )
+
+    def test_a_sub_agent_is_joined_to_no_call_of_another_conversation(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp(session_id=OTHER))
+
+        thread = publications.publish(sub_agent())
+
+        assert thread.spawned_by_id is None
+
+    def test_a_sub_agent_is_joined_to_no_call_of_its_own(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(
+            sub_agent(calls=[call(1, tool_calls=[tool_call(31, tool="Agent")])])
+        )
+
+        assert thread.spawned_by_id is None
+
+    def test_a_name_two_other_threads_hold_joins_to_neither(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """A `tool_use_id` is unique within its Transcript alone."""
+        publications.publish(_camp())
+        publications.publish(
+            sub_agent(
+                agent_id=DEEPER,
+                spawned_by=None,
+                calls=[call(1, tool_calls=[tool_call(31, tool="Agent")])],
+            )
+        )
+
+        thread = publications.publish(sub_agent())
+
+        assert thread.spawned_by_id is None
+
+    def test_a_sub_agent_whose_record_names_another_call_is_joined_to_that_one(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        thread = publications.publish(sub_agent())
+
+        publications.publish(sub_agent(spawned_by="toolu_0001"))
+
+        assert _spawned_by(session, thread) == _tool_call_id(session, "toolu_0001")
+
+    def test_a_sub_agent_whose_record_names_no_call_any_more_is_joined_to_none(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        publications.publish(sub_agent())
+
+        thread = publications.publish(sub_agent(spawned_by=None))
+
+        assert (thread.spawned_by_tool_use_id, thread.spawned_by_id) == (None, None)
+
     def test_a_main_thread_takes_no_other_conversations_sub_agents(
         self, session: DbSession, publications: PublicationService
     ) -> None:
@@ -607,6 +1049,9 @@ class TestScope:
             HookRun,
             Compaction,
             Call,
+            ToolCall,
+            Event,
+            ContextPart,
             Repository,
         ],
     )
@@ -661,6 +1106,175 @@ class TestRepublished:
             .where(Call.position > 4)
             .order_by(Call.position)
         ).all() == [(5, after["calls"][3]), (6, after["calls"][4])]
+
+    def test_what_a_new_call_did_is_written_with_it(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        grown = [
+            *_calls(),
+            call(
+                5,
+                prompt=3,
+                predecessor="msg_0004",
+                tool_calls=[tool_call(6)],
+                events=[event(at=_at(13))],
+                context_parts=[context_part(kind="reminder", characters=310)],
+            ),
+        ]
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=grown, file_size=61_000))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(inserted=1),
+            "tool_calls": Written(inserted=1),
+            "events": Written(inserted=1),
+            "context_parts": Written(inserted=1),
+            "context_part_kinds": Written(inserted=1),
+        }
+        after = _ids(session)
+        for table in ("tool_calls", "events", "context_parts"):
+            assert after[table][:-1] == ids[table]
+        new = after["calls"][-1]
+        assert (
+            session.scalars(
+                select(ToolCall.call_id).where(ToolCall.tool_use_id == "toolu_0006")
+            ).one()
+            == new
+        )
+        assert (
+            session.scalars(
+                select(Event.call_id).where(Event.id == after["events"][-1])
+            ).one()
+            == new
+        )
+        assert session.execute(
+            select(ContextPart.call_id, ContextPart.kind_code).where(
+                ContextPart.id == after["context_parts"][-1]
+            )
+        ).one() == (new, "reminder")
+
+    def test_what_a_held_call_did_since_is_written_after_what_it_held(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        calls[1]["tool_calls"].append(tool_call(6))
+        calls[1]["events"].append(
+            event(kind="api_retry", is_error=False, at=_at(3), detail=None)
+        )
+        calls[0]["context_parts"].append(context_part(kind="reminder", characters=310))
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "tool_calls": Written(inserted=1),
+            "events": Written(inserted=1),
+            "context_parts": Written(inserted=1),
+            "context_part_kinds": Written(inserted=1),
+        }
+        after = _ids(session)
+        for table in ("tool_calls", "events", "context_parts"):
+            assert after[table][:-1] == ids[table]
+        assert session.execute(
+            select(Event.kind_code, Event.at)
+            .join(Call, Call.id == Event.call_id)
+            .where(Call.position == 2)
+            .order_by(Event.id)
+        ).all() == [
+            ("api_error", STARTED + timedelta(minutes=2, seconds=11)),
+            ("api_retry", STARTED + timedelta(minutes=2, seconds=19)),
+            ("api_retry", STARTED + timedelta(minutes=3)),
+        ]
+
+    def test_a_tool_call_that_returned_since_is_the_row_written(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        calls[3]["tool_calls"][0] |= {
+            "returned_at": _at(12),
+            "interrupted": False,
+            "result_characters": 512,
+        }
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "tool_calls": Written(updated=1),
+        }
+        assert _ids(session) == ids
+        assert session.execute(
+            select(
+                ToolCall.returned_at, ToolCall.interrupted, ToolCall.result_characters
+            ).where(ToolCall.tool_use_id == "toolu_0005")
+        ).one() == (STARTED + timedelta(minutes=12), False, 512)
+
+    def test_an_event_and_a_context_part_whose_facts_differ_are_written_in_place(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        calls = _calls()
+        calls[1]["events"][1]["detail"] = "second try"
+        calls[0]["context_parts"][1]["characters"] = 46_000
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "events": Written(updated=1),
+            "context_parts": Written(updated=1),
+        }
+        assert _ids(session) == ids
+        assert session.execute(
+            select(Event.kind_code, Event.detail).where(Event.id == ids["events"][1])
+        ).one() == ("api_retry", "second try")
+        assert session.execute(
+            select(ContextPart.kind_code, ContextPart.characters).where(
+                ContextPart.id == ids["context_parts"][1]
+            )
+        ).one() == ("tool_schemas", 46_000)
+
+    def test_a_tool_call_is_found_again_by_its_tool_use_id_under_another_call(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        held = _tool_call_id(session, "toolu_0001")
+        calls = _calls()
+        calls[1]["tool_calls"].append(calls[0]["tool_calls"].pop())
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "tool_calls": Written(updated=1),
+        }
+        assert session.execute(
+            select(ToolCall.id, Call.position)
+            .join(Call, Call.id == ToolCall.call_id)
+            .where(ToolCall.tool_use_id == "toolu_0001")
+        ).one() == (held, 2)
+
+    def test_two_conversations_tool_calls_of_one_name_are_two_tool_calls(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        publications.publish(_camp(session_id=OTHER))
+
+        assert _count(session, ToolCall) == 12
 
     def test_a_call_whose_facts_differ_is_the_row_written(
         self, session: DbSession, publications: PublicationService
@@ -906,6 +1520,28 @@ class TestTurns:
 
         assert second.result() == main_id
 
+    def test_a_sub_agents_thread_published_beside_its_main_thread_is_joined_to_its_call(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+
+        def published_second() -> Any:
+            with scoped_session(container):
+                thread = container.publication_service().publish(sub_agent())
+                return thread.spawned_by_id
+
+        first = container.session_maker()()
+        try:
+            PublicationService(first).publish(_camp())
+            spawning = _tool_call_id(first)
+            second = in_thread(published_second)
+            wait_until(lambda: lock_waits(container) == 1, "the second's turn waiting")
+            first.commit()
+        finally:
+            first.close()
+
+        assert second.result() == spawning
+
     def test_a_transcript_published_twice_at_once_is_one_transcript(
         self, committed_app: Flask
     ) -> None:
@@ -1009,6 +1645,49 @@ class TestRefused:
                 whole(calls=[call(1, requested_model=OPUS)]),
                 "call `msg_0001`: `requested_model` is its `model`",
             ),
+            (whole(spawned_by=SPAWNING), "a main thread has no `spawned_by`"),
+            (
+                whole(
+                    calls=[
+                        call(1, tool_calls=[tool_call(1)]),
+                        call(2, tool_calls=[tool_call(1)]),
+                    ]
+                ),
+                "call `msg_0002`: tool call `toolu_0001`: named twice",
+            ),
+            (
+                whole(calls=[call(1, tool_calls=[tool_call(1, exit_code=0)])]),
+                "call `msg_0001`: tool call `toolu_0001`: `exit_code` is 0",
+            ),
+            (
+                whole(calls=[call(1, tool_calls=[tool_call(1, denial_kind="hook")])]),
+                "call `msg_0001`: tool call `toolu_0001`: denied by a hook and not"
+                " `failed`",
+            ),
+            (
+                whole(
+                    calls=[
+                        call(
+                            1,
+                            tool_calls=[
+                                tool_call(
+                                    1,
+                                    tool="mcp__pantry__find_items",
+                                    mcp_server="pantry",
+                                ),
+                                tool_call(2, tool="mcp__pantry__find_items"),
+                            ],
+                        )
+                    ]
+                ),
+                "call `msg_0001`: tool call `toolu_0002`: the tool"
+                " `mcp__pantry__find_items` is given two `mcp_server`s",
+            ),
+            (
+                whole(calls=[call(1, events=[event(), event(is_error=False)])]),
+                "call `msg_0001`: event 2: the kind `api_error` is given as an"
+                " error and as none",
+            ),
         ],
     )
     def test_a_fault_refuses_the_call(
@@ -1025,6 +1704,43 @@ class TestRefused:
             publications.publish(publication)
 
         assert refused.value.faults == [fault]
+        assert wrote == {}
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "compaction",
+            "rewind",
+            "cache_miss",
+            "past_ttl",
+            "model_fallback",
+            "max_tokens",
+            "refusal",
+            "output_saved",
+            "denied",
+            "hook_error",
+        ],
+    )
+    def test_an_occurrence_another_entity_records_is_refused_as_an_event(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        kind: str,
+    ) -> None:
+        """DB 560."""
+        publication = whole(
+            calls=[call(1), call(2, events=[event(), event(kind=kind, is_error=False)])]
+        )
+
+        with (
+            writes(session) as wrote,
+            pytest.raises(PublicationInvalidException) as refused,
+        ):
+            publications.publish(publication)
+
+        assert refused.value.faults == [
+            f"call `msg_0002`: event 2: an occurrence of the kind `{kind}` is no event"
+        ]
         assert wrote == {}
 
     def test_every_fault_is_named_at_once(

@@ -4,23 +4,24 @@ decisions 79 and 81; F152.3, F152.4).
 A whole publication leaves Pilot holding what the call says of the
 Transcript, in the caller's transaction, and writes only the rows that
 differ. A row keeps its identity, and whatever Pilot set on it, wherever the
-call names the same fact again: a Call by its `message_id`, a Launch by its
-place among its Transcript's Launches, a Prompt, a Hook Run and a Compaction
-by their place under their parent. A row's place is its rank by `id` among
-its parent's rows: a row is only ever added after the last.
+call names the same fact again: a Call by its `message_id`, a Tool Call by
+its `tool_use_id`, a Launch by its place among its Transcript's Launches, a
+Prompt, a Hook Run, a Compaction, an Event and a Context Part by their place
+under their parent. A row's place is its rank by `id` among its parent's
+rows: a row is only ever added after the last.
 
 Publications of one conversation, its main thread's and its sub-agents',
-take turns, so that a sub-agent's thread and its main thread find each other
-whichever comes first.
+take turns, so that a sub-agent's thread finds its main thread and its
+spawning Tool Call whichever comes first.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, get_args
 
 from sqlalchemy import Integer, Select, cast, func, literal, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.exceptions import PublicationInvalidException
 from app.models import (
@@ -29,7 +30,12 @@ from app.models import (
     CompactionTrigger,
     Component,
     ComponentVersion,
+    ContextPart,
+    ContextPartKind,
+    DenialKind,
     Environment,
+    Event,
+    EventKind,
     HookRun,
     Launch,
     LaunchComponent,
@@ -39,8 +45,11 @@ from app.models import (
     PromptSource,
     Repository,
     StopReason,
+    Tool,
+    ToolCall,
     Transcript,
 )
+from app.models.call import RECORDED_ELSEWHERE
 from app.schemas.publication import (
     CallTokenKind,
     PublicationSchema,
@@ -57,6 +66,9 @@ drawn from Claude Code's id of its main thread."""
 COLLECTOR = "collector"
 """The Component a Transcript is read by."""
 
+HOOK = "hook"
+"""The Denial Kind of a Tool Call a hook blocked."""
+
 _TOKEN_KINDS: tuple[CallTokenKind, ...] = get_args(CallTokenKind)
 
 type _Version = tuple[str, str]
@@ -66,12 +78,12 @@ version."""
 
 def _faults(publication: PublicationSchema) -> list[str]:
     """What in the call contradicts the call itself or the record's rules for
-    a Transcript (DB 534, 536, 541, 542, 545), each in a line."""
+    a Transcript (DB 534, 536, 541, 542, 545, 560, 587), each in a line."""
     found: list[str] = []
     if publication.agent_id is None:
         found.extend(
             f"a main thread has no `{fact}`"
-            for fact in ("agent_type", "description")
+            for fact in ("agent_type", "description", "spawned_by")
             if getattr(publication, fact) is not None
         )
     else:
@@ -101,6 +113,9 @@ def _faults(publication: PublicationSchema) -> list[str]:
     prompts = sum(len(launch.prompts) for launch in publication.launches)
     compactions = len(publication.compactions)
     earlier: set[str] = set()
+    requested: set[str] = set()
+    servers: dict[str, str | None] = {}
+    errors: dict[str, bool] = {}
     for call in publication.calls:
         named = f"call `{call.message_id}`"
         if call.message_id in earlier:
@@ -121,6 +136,31 @@ def _faults(publication: PublicationSchema) -> list[str]:
         if call.requested_model == call.model:
             found.append(f"{named}: `requested_model` is its `model`")
         earlier.add(call.message_id)
+        for tool_call in call.tool_calls:
+            asked = f"{named}: tool call `{tool_call.tool_use_id}`"
+            if tool_call.tool_use_id in requested:
+                found.append(f"{asked}: named twice")
+            requested.add(tool_call.tool_use_id)
+            if tool_call.exit_code == 0:
+                found.append(f"{asked}: `exit_code` is 0")
+            if tool_call.denial_kind == HOOK and not tool_call.failed:
+                found.append(f"{asked}: denied by a hook and not `failed`")
+            server = servers.setdefault(tool_call.tool, tool_call.mcp_server)
+            if server != tool_call.mcp_server:
+                found.append(
+                    f"{asked}: the tool `{tool_call.tool}` is given two `mcp_server`s"
+                )
+        for place, event in enumerate(call.events, start=1):
+            marked = f"{named}: event {place}"
+            if event.kind in RECORDED_ELSEWHERE:
+                found.append(
+                    f"{marked}: an occurrence of the kind `{event.kind}` is no event"
+                )
+            if errors.setdefault(event.kind, event.is_error) != event.is_error:
+                found.append(
+                    f"{marked}: the kind `{event.kind}` is given as an error and"
+                    " as none"
+                )
     return found
 
 
@@ -135,7 +175,9 @@ class PublicationService:
 
         Its `replayed_size` is then its `file_size` (DB 605). An Environment,
         a Repository, a Component Version and a reference code the call names
-        that Pilot has no row for are written, the code as its own name.
+        that Pilot has no row for are written, the code as its own name and
+        with what the call says of its category; one Pilot has met stands as
+        it is.
 
         Raises:
             PublicationInvalidException: the call has faults; nothing is
@@ -162,7 +204,38 @@ class PublicationService:
         )
         prompts = self._launches(thread, publication.launches, versions)
         compactions = self._compactions(thread, publication.compactions)
-        self._calls(thread, publication.calls, prompts, compactions)
+        calls = publication.calls
+        ids = self._calls(thread, calls, prompts, compactions)
+        self._tool_calls(thread, calls, ids)
+        self._hung(
+            Event,
+            thread,
+            ids,
+            {
+                call.message_id: [
+                    {"kind_code": event.kind, "at": event.at, "detail": event.detail}
+                    for event in call.events
+                ]
+                for call in calls
+            },
+        )
+        self._hung(
+            ContextPart,
+            thread,
+            ids,
+            {
+                call.message_id: [
+                    {
+                        "kind_code": part.kind,
+                        "name": part.name,
+                        "characters": part.characters,
+                    }
+                    for part in call.context_parts
+                ]
+                for call in calls
+            },
+        )
+        self._join(publication.session_id)
         return thread
 
     def _meet_references(self, publication: PublicationSchema) -> None:
@@ -171,6 +244,8 @@ class PublicationService:
         that two publications wait on each other one way round only."""
         launches = publication.launches
         calls = publication.calls
+        requested = [tool_call for call in calls for tool_call in call.tool_calls]
+        events = [event for call in calls for event in call.events]
         self._meet(
             Component,
             [COLLECTOR]
@@ -190,10 +265,33 @@ class PublicationService:
             [prompt.source for launch in launches for prompt in launch.prompts],
         )
         self._meet(StopReason, [call.stop_reason for call in calls])
+        self._meet(
+            ContextPartKind,
+            [part.kind for call in calls for part in call.context_parts],
+        )
+        self._meet(DenialKind, [tool_call.denial_kind for tool_call in requested])
+        self._meet(
+            EventKind,
+            [event.kind for event in events],
+            {event.kind: {"is_error": event.is_error} for event in events},
+        )
+        self._meet(
+            Tool,
+            [tool_call.tool for tool_call in requested],
+            {
+                tool_call.tool: {"mcp_server": tool_call.mcp_server}
+                for tool_call in requested
+            },
+        )
 
-    def _meet(self, entity: type[Any], codes: Sequence[str | None]) -> None:
+    def _meet(
+        self,
+        entity: type[Any],
+        codes: Sequence[str | None],
+        facts: Mapping[str, dict[str, Any]] | None = None,
+    ) -> None:
         """Write the reference entity's row of each code Pilot has not met,
-        named by its code."""
+        named by its code, with the `facts` the call gives of its category."""
         named = {code for code in codes if code is not None}
         if not named:
             return
@@ -204,7 +302,10 @@ class PublicationService:
         if unmet:
             self.db.execute(
                 pg_insert(entity).on_conflict_do_nothing(),
-                [{"code": code, "name": code} for code in unmet],
+                [
+                    {"code": code, "name": code} | (facts[code] if facts else {})
+                    for code in unmet
+                ],
             )
 
     def _versions(self, publication: PublicationSchema) -> dict[_Version, int]:
@@ -287,6 +388,7 @@ class PublicationService:
             "working_directory": publication.working_directory,
             "repository_id": None,
             "environment_id": None,
+            "spawned_by_tool_use_id": publication.spawned_by,
             "agent_type": publication.agent_type,
             "description": publication.description,
             "file_size": publication.file_size,
@@ -458,9 +560,10 @@ class PublicationService:
         calls: list[PublishedCallSchema],
         prompts: list[Prompt],
         compactions: list[Compaction],
-    ) -> None:
+    ) -> dict[str, int]:
         """The Transcript's Calls as the call has them, their `position` their
-        place in it. A Call Pilot has not met takes an id before it is
+        place in it; the id of each Call Pilot holds of it, by its
+        `message_id`. A Call Pilot has not met takes an id before it is
         written, so that one written beside it names it as its predecessor."""
         held = {
             row.message_id: row
@@ -523,6 +626,97 @@ class PublicationService:
         for row, facts in met:
             _set(row, facts)
         self.db.flush()
+        return ids
+
+    def _tool_calls(
+        self, thread: Transcript, calls: list[PublishedCallSchema], ids: dict[str, int]
+    ) -> None:
+        """The Tool Calls the call names, each under the Call that requested
+        it."""
+        held = {
+            row.tool_use_id: row
+            for row in self.db.scalars(
+                select(ToolCall).where(ToolCall.transcript_id == thread.id)
+            )
+        }
+        for call in calls:
+            for requested in call.tool_calls:
+                facts: dict[str, Any] = {
+                    "call_id": ids[call.message_id],
+                    "tool_code": requested.tool,
+                    "first_argument": requested.first_argument,
+                    "requested_at": requested.requested_at,
+                    "returned_at": requested.returned_at,
+                    "failed": requested.failed,
+                    "exit_code": requested.exit_code,
+                    "interrupted": requested.interrupted,
+                    "denial_kind_code": requested.denial_kind,
+                    "result_characters": requested.result_characters,
+                    "saved_characters": requested.saved_characters,
+                }
+                row = held.get(requested.tool_use_id)
+                if row is None:
+                    self.db.add(
+                        ToolCall(
+                            transcript_id=thread.id,
+                            tool_use_id=requested.tool_use_id,
+                            **facts,
+                        )
+                    )
+                else:
+                    _set(row, facts)
+        self.db.flush()
+
+    def _hung(
+        self,
+        entity: type[Any],
+        thread: Transcript,
+        ids: dict[str, int],
+        facts: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """The rows of `entity`, an Event's or a Context Part's, under each
+        Call as `facts` has them by the Call's `message_id`, in the file's
+        order."""
+        held: dict[int, list[Any]] = self._grouped(
+            select(entity)
+            .join(Call, Call.id == entity.call_id)
+            .where(Call.transcript_id == thread.id)
+            .order_by(entity.id),
+            "call_id",
+        )
+        for message_id, rows in facts.items():
+            call_id = ids[message_id]
+            self._placed(held.get(call_id, []), rows, entity, call_id=call_id)
+        self.db.flush()
+
+    def _join(self, session_id: str) -> None:
+        """Join each sub-agent's thread of the conversation to the Tool Call
+        it names as its spawning call: the one of that `tool_use_id` in
+        another thread of the conversation, and none where no thread or more
+        than one holds it. A thread joined to that Tool Call already is not
+        written."""
+        holder = aliased(Transcript)
+        spawning = (
+            select(func.min(ToolCall.id))
+            .join(holder, holder.id == ToolCall.transcript_id)
+            .where(
+                holder.session_id == Transcript.session_id,
+                holder.id != Transcript.id,
+                ToolCall.tool_use_id == Transcript.spawned_by_tool_use_id,
+            )
+            .having(func.count() == 1)
+            .correlate(Transcript)
+            .scalar_subquery()
+        )
+        self.db.execute(
+            update(Transcript)
+            .where(
+                Transcript.session_id == session_id,
+                Transcript.agent_id.is_not(None),
+                Transcript.spawned_by_id.is_distinct_from(spawning),
+            )
+            .values(spawned_by_id=spawning)
+        )
 
     def _placed[Row](
         self,

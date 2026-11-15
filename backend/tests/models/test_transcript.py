@@ -223,6 +223,30 @@ class TestTranscript:
 
         assert violated_constraint(session) == "ck_transcripts_main_thread"
 
+    def test_a_main_thread_names_no_spawning_call(
+        self, session: DbSession, thread: Transcript
+    ) -> None:
+        thread.spawned_by_tool_use_id = "toolu_0031"
+
+        assert violated_constraint(session) == "ck_transcripts_main_thread"
+
+    def test_a_sub_agents_thread_names_a_spawning_call_pilot_does_not_hold(
+        self, session: DbSession, collector: ComponentVersion
+    ) -> None:
+        """DB decision 79.16."""
+        sub_agent = transcripts.transcript(
+            session,
+            collector,
+            agent_id=SUB_AGENT,
+            spawned_by_tool_use_id="toolu_0031",
+        )
+        session.expire(sub_agent)
+
+        assert (sub_agent.spawned_by_tool_use_id, sub_agent.spawned_by_id) == (
+            "toolu_0031",
+            None,
+        )
+
     def test_only_a_main_thread_is_hosted_by_an_environment(
         self,
         session: DbSession,
