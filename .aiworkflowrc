@@ -24,3 +24,10 @@ enabled = true
 # dev-holder note the driver writes beside it.
 [devlock]
 lease = "slices/.devlock.lock"
+
+# The OpenAPI cache is generated (scripts/regenerate-openapi.py), and the
+# frontend's is a symlink to the backend's: the dashboard's labeller counts
+# neither as code.
+[[file_classes]]
+class = "generated"
+paths = ["backend/openapi-cache/**", "frontend/openapi-cache", "frontend/openapi-cache/**"]
