@@ -2750,6 +2750,42 @@ class TestPilotStoreServiceAddWork:
         ]
         assert _block(session, document, "A1").answer == "Pilot does it"
 
+    def test_a_claimed_action_its_work_item_holds_has_no_handed_at(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """The action Pilot claimed was the person's, handed to them
+        earlier; the work item added for it holds it, so it is Pilot's. The
+        open action beside it stays theirs, as it was handed."""
+        run = _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+        handed = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+        for local_id in ("A1", "A2"):
+            _block(session, document, local_id).handed_at = handed
+        session.flush()
+
+        _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Rotating the CI token",
+                repo=REPO,
+                cwd="/work/Example",
+                brief=BRIEF,
+                claims=[f"{document.id}/A1"],
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        session.expire_all()
+        assert _block(session, document, "A1").handed_at is None
+        assert _block(session, document, "A2").handed_at == handed
+
     def test_a_work_item_is_named_for_an_open_action_of_an_item_of_pilots_own(
         self,
         session: DbSession,

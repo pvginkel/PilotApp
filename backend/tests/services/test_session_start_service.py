@@ -39,6 +39,7 @@ from app.engine.bus import EngineBus, EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Block,
+    ClaimAssignment,
     ClarificationRun,
     Document,
     Environment,
@@ -8833,9 +8834,15 @@ class TestQuotaWallsPass:
             NUDGE,
         )
 
+        asked = session.scalars(select(Block).where(Block.local_id == "D1")).one()
+        assert _handed_at(session, asked) is None
+
         continues._fail(session, asking.id, nudged.id, "refused", recorded=False)
 
         assert "_ContinuationFailed" in _callbacks()
+        # The failed pass leaves its document to the person, until its
+        # questions go to the writer.
+        assert _handed_at(session, asked) == _turns(session, asking.id)[-1].ended_at
         assert (
             session.scalars(
                 select(ClarificationRun).where(ClarificationRun.pass_id == asking.id)
@@ -8845,6 +8852,7 @@ class TestQuotaWallsPass:
         clear_after_commit_callbacks()
         continues._continuation_failed(asking.id)
         assert _clarifying(session, asking).state_code == SessionState.STARTING
+        assert _handed_at(session, asked) is None
 
 
 def _fired_job(
@@ -10938,3 +10946,203 @@ class TestRestHoldEnds:
             HoldKind.OUTAGE,
             None,
         )
+
+
+CUT_OVER_TEXT = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-11-02T09:00:00Z
+```
+"""
+
+
+def _claim_of(
+    db: DbSession, container: ServiceContainer, project: Project, run: models.Session
+) -> Block:
+    """A claimed action of a document another run registered, read at that
+    run's end with no pass after it, that the work item `run` is named for:
+    while `run` is in flight, its run holds the Block."""
+    db.add(Environment(id="writer-env", name="Writer-1", exempt=False))
+    db.flush()
+    writer = models.Session(
+        project_id=project.id,
+        environment_id="writer-env",
+        kind_code="work",
+        conversation_id="conv-writer",
+        cwd=CWD,
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.IDLE,
+    )
+    db.add(writer)
+    db.flush()
+    records = container.record_service()
+    records.place_work(project, writer, "Writing the cut-over", repo=REPO)
+    records.work_done(writer.id, datetime.now(UTC))
+    documents = container.document_service()
+    item = documents.register(project, writer, "/work/Example/docs/cut-over.md").item
+    documents.publish_read(db.get_one(Document, item.id), CUT_OVER_TEXT, writer.id)
+    block = db.scalars(select(Block).where(Block.document_id == item.id)).one()
+    db.add(ClaimAssignment(work_id=run.id, block_id=block.id))
+    db.flush()
+    clear_after_commit_callbacks()
+    return block
+
+
+def _handed_at(db: DbSession, block: Block) -> datetime | None:
+    db.expire_all()
+    return db.get_one(Block, block.id).handed_at
+
+
+class TestHandedAt:
+    """A Block's `handed_at` at the moves of the work item whose run holds it
+    (DB decision 79): written when the move leaves the Block to a person,
+    none again once the run holds it."""
+
+    def test_a_stop_hands_the_block_its_run_held_at_the_stop(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _running(starts, session, project)
+        block = _claim_of(session, container, project, run)
+        assert _handed_at(session, block) is None
+
+        stopped = starts.stop(session, run.id, person)
+
+        assert stopped.stopped_at is not None
+        assert _handed_at(session, block) == stopped.stopped_at
+
+    def test_a_resume_takes_the_block_back_and_its_next_stop_hands_it_later(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _running(starts, session, project)
+        _named(fake, run)
+        block = _claim_of(session, container, project, run)
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+        _turn_ends(starts, fake, run, "interrupted")
+        first = _handed_at(session, block)
+        assert first == _read(session, run.id).stopped_at
+
+        starts.resume(session, run.id)
+
+        assert _handed_at(session, block) is None
+        again = starts.stop(session, run.id, person)
+        assert again.stopped_at is not None and again.stopped_at > first
+        assert _handed_at(session, block) == again.stopped_at
+
+    def test_pilots_close_of_a_running_work_item_hands_it_at_the_close(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+        block = _claim_of(session, container, project, run)
+
+        closed = starts.close(
+            session,
+            run.id,
+            session.get_one(User, _pilot_id(session)),
+            reason="Replaced by another work item.",
+        )
+
+        assert closed.stopped_at is not None
+        assert _handed_at(session, block) == closed.stopped_at
+
+    def test_a_turn_that_ends_in_error_hands_it_at_the_turns_end(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+        _named(fake, run)
+        block = _claim_of(session, container, project, run)
+
+        _turn_ends(starts, fake, run, "error")
+
+        assert _read(session, run.id).state_code == SessionState.FAILED
+        ended = _turns(session, run.id)[-1].ended_at
+        assert ended is not None
+        assert _handed_at(session, block) == ended
+
+    def test_a_turn_that_ends_well_leaves_it_pilots_for_the_job_after_it(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """The run is done with the Block only once the job after its turn
+        has ended."""
+        run = _running(starts, session, project)
+        _named(fake, run)
+        block = _claim_of(session, container, project, run)
+
+        _turn_ends(starts, fake, run, "success")
+
+        assert _jobs_after(session, run.id) != []
+        assert _handed_at(session, block) is None
+
+    def test_a_start_that_fails_hands_it_at_the_failure(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        fake.capped()
+        run = _start(starts, session, project)
+        block = _claim_of(session, container, project, run)
+
+        _run(starts, run)
+
+        _assert_failed(session, run.id)
+        ended = _turns(session, run.id)[-1].ended_at
+        assert ended is not None
+        assert _handed_at(session, block) == ended
+
+    def test_the_walls_settle_of_a_wall_a_reading_decided_missed_hands_it(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+        _named(fake, run)
+        block = _claim_of(session, container, project, run)
+        _usage(session, week=0.5, five_hour=0.1)
+        assert run.environment_id is not None and run.controller_session is not None
+        fake.play(run.environment_id, run.controller_session, raw_turn("turn_wall"))
+        _turn_ends(starts, fake, run, "error")
+        clear_after_commit_callbacks()
+        # Owed its nudge at the wall, the work item is still in flight.
+        assert _read(session, run.id).nudge_owed_at is not None
+        assert _handed_at(session, block) is None
+        _usage(session, week=0.51, five_hour=0.1)
+        before = datetime.now(UTC)
+
+        _nudge(starts)
+
+        assert _read(session, run.id).nudge_owed_at is None
+        handed = _handed_at(session, block)
+        assert handed is not None and before <= handed <= datetime.now(UTC)

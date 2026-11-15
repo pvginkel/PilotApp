@@ -32,7 +32,9 @@ from app.engine.documents import DocumentService
 from app.engine.record import MARKED, TURN_ENDED
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
+    Block,
     Chat,
+    ClaimAssignment,
     ClarificationRun,
     Document,
     DocumentVersion,
@@ -2129,6 +2131,43 @@ def work_item(
     return idle
 
 
+def _claimed_by(
+    db: DbSession, container: ServiceContainer, project: Project, run: models.Session
+) -> Block:
+    """A claimed action of a document another run registered, read at that
+    run's end with no pass after it, that the work item `run` is named for:
+    while `run` is in flight, its run holds the Block."""
+    db.add(Environment(id="writer-env", name="Writer-1", exempt=False))
+    db.flush()
+    writer = models.Session(
+        project_id=project.id,
+        environment_id="writer-env",
+        kind_code="work",
+        conversation_id="conv-writer",
+        cwd="/work/Example",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.IDLE,
+    )
+    db.add(writer)
+    db.flush()
+    records = container.record_service()
+    records.place_work(project, writer, "Writing the cut-over")
+    records.work_done(writer.id, datetime.now(UTC))
+    documents = container.document_service()
+    item = documents.register(project, writer, "/work/Example/docs/cut-over.md").item
+    documents.publish_read(
+        db.get_one(Document, item.id),
+        "# The cut-over\n\n```action id=A1\nanswer: Pilot does it\nby: agent\n"
+        "at: 2026-11-02T09:00:00Z\n```\n",
+        writer.id,
+    )
+    block = db.scalars(select(Block).where(Block.document_id == item.id)).one()
+    db.add(ClaimAssignment(work_id=run.id, block_id=block.id))
+    db.flush()
+    clear_after_commit_callbacks()
+    return block
+
+
 def _item_done(db: DbSession, run: models.Session) -> tuple[Any, ...]:
     item = db.get_one(Item, run.id, populate_existing=True)
     return item.done_at, item.done_cause_code, item.done_by_user_id
@@ -3630,6 +3669,25 @@ class TestEnvironmentUnderATurn:
             WorkMoved(project.id, work_item.id),
             ProjectChanged(project.id),
         ]
+
+    def test_the_stop_hands_the_block_the_items_run_held(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        project: Project,
+        work_item: models.Session,
+        turn: Turn,
+    ) -> None:
+        block = _claimed_by(session, container, project, work_item)
+        fake_controller.set_status(ENV, "stopped")
+
+        _relay(relays, work_item)
+
+        assert work_item.state_code == SessionState.STOPPED
+        session.expire_all()
+        assert session.get_one(Block, block.id).handed_at == turn.ended_at
 
     def test_a_closed_runs_turn_its_environment_stopped_under_is_read(
         self,
@@ -5830,6 +5888,40 @@ class TestClarificationRun:
 
         assert asking.state_code is SessionState.IDLE
         assert _clarifications(session, asking) == []
+
+    @pytest.mark.parametrize(
+        ("outcome", "state"),
+        [("success", SessionState.IDLE), ("interrupted", SessionState.STOPPED)],
+    )
+    def test_a_pass_that_ends_or_is_interrupted_hands_its_documents_blocks(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        outcome: FinishOutcome,
+        state: SessionState,
+    ) -> None:
+        """The Blocks of the documents the pass went over become the
+        person's at its turn's end (DB decision 79, Block's `handed_at`)."""
+        run, cut_over, _ = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"), outcome)
+
+        _relay(relays, asking)
+
+        assert asking.state_code is state
+        session.expire_all()
+        block = session.scalars(
+            select(Block).where(
+                Block.document_id == cut_over.id, Block.local_id == "D1"
+            )
+        ).one()
+        assert asking.turn_ended_at is not None
+        assert block.handed_at == asking.turn_ended_at
 
     @pytest.mark.parametrize("stop", ["interrupted", "stopped"])
     def test_a_pass_stopped_after_asking_gets_none(

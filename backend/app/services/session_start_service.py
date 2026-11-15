@@ -177,6 +177,7 @@ from app.services.controller_client import (
 from app.services.controller_outage import ControllerOutage
 from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
+from app.services.handing import hand_over, sides
 from app.services.holds import turn_hold, turn_rest
 from app.services.pilot_server import PilotServer, unheld_token_hash
 from app.services.quota_wall import confirmed, decided, quota_back
@@ -1058,7 +1059,8 @@ class SessionStartService:
         """`person`'s Stop of a work item, in the caller's transaction (F67.1):
         its Session `stopped` where it is, as `_stop` writes it; one idle with
         its nudge owed, its run halted or paused at its turn's end, as Stop and
-        take over stops it (`_stop_at_rest`), not done (D097).
+        take over stops it (`_stop_at_rest`), not done (D097). A Block its
+        run held is handed to the person at the stop (`hand_over`).
 
         Returns:
             The Session, `stopped`
@@ -1076,6 +1078,7 @@ class SessionStartService:
         if session.kind_code == JOB_KIND:
             raise InvalidOperationException(operation, PILOTS_OWN)
         at = datetime.now(UTC)
+        handing = sides(db, session.project_id)
         if session.state_code in STOPPABLE:
             self._stop(db, session, person, at)
         elif (
@@ -1087,6 +1090,7 @@ class SessionStartService:
             raise InvalidOperationException(
                 operation, _STOP_REFUSALS[session.state_code]
             )
+        hand_over(db, handing, at)
         return session
 
     def close(
@@ -1105,7 +1109,8 @@ class SessionStartService:
         its Work's `done_note` (`RecordService.close_work`). The Session
         stays `stopped`, its stop as it was written, owed its nudge no more,
         its Hold ended, and holds its environment no more
-        (`EnvironmentService`). The
+        (`EnvironmentService`). A Block its run held until this close is
+        handed to the person at it (`hand_over`). The
         documents it registered are read once this commits, or once its
         stopped turn has ended (`TurnEndReadService.run_closed`).
 
@@ -1142,6 +1147,7 @@ class SessionStartService:
             raise InvalidOperationException(operation, refusal)
         before = session.state_code
         at = datetime.now(UTC)
+        handing = sides(db, project.id)
         if before != SessionState.STOPPED:
             if reason is not None and before in STOPPABLE:
                 self._stop(db, session, user, at)
@@ -1158,6 +1164,7 @@ class SessionStartService:
         )
         session.nudge_owed_at = None
         turn_hold(db, session, None, at)
+        hand_over(db, handing, at)
         self._container.turn_end_read_service().run_closed(db, session)
         logger.info(
             "Session %s closed for good by %s, %s", session_id, user.handle, before
@@ -1176,11 +1183,13 @@ class SessionStartService:
         Store Update stopped, is `stopped` by `person` now, its turn as it
         ended; one failed at the quota wall stays `failed`. None is owed its
         nudge afterwards, none has a Hold open, and the lift retries none: it
-        retries Pilot's stops alone (DB 280, 281)."""
+        retries Pilot's stops alone (DB 280, 281). The Blocks the stops leave
+        to a person are handed at them (`hand_over`)."""
         records = self._records(db)
-        for work_id in sorted(work_ids):
-            records.lock_session(work_id)
+        locked = [records.lock_session(work_id) for work_id in sorted(work_ids)]
         at = datetime.now(UTC)
+        # The Works are of one project, whose row the caller holds.
+        handing = sides(db, locked[0].project_id)
         for work_id in sorted(flying(db, work_ids)):
             session = db.get_one(AgentSession, work_id)
             before = session.state_code
@@ -1195,6 +1204,7 @@ class SessionStartService:
             logger.info(
                 "Session %s taken over by %s, %s", work_id, person.handle, before
             )
+        hand_over(db, handing, at)
 
     def stop_chat(
         self, db: Session, session_id: uuid.UUID, person: User, operation: str
@@ -1263,7 +1273,8 @@ class SessionStartService:
         transaction (F67.2): carried on by "continue" (`_carry_on`). The item
         stays one item (F26.7). A nudge owed to it, the hard stop's, is owed
         no more: the Resume stands in for it (DB 232), and the Hold of its
-        rest ends. A done work item's is
+        rest ends. A Block its run holds again is Pilot's, with no
+        `handed_at` (`hand_over`). A done work item's is
         refused, one closed for good among them, whose Session stays
         `stopped` (DB 347).
 
@@ -1310,7 +1321,9 @@ class SessionStartService:
             raise InvalidOperationException(
                 operation, "its stopped turn is still ending"
             )
+        handing = sides(db, project.id)
         held = self._carry_on(db, project, session, CONTINUE, TurnCause.RESUME)
+        hand_over(db, handing, datetime.now(UTC))
         logger.info(
             "Session %s resumed%s",
             session_id,
@@ -2019,8 +2032,9 @@ class SessionStartService:
         sends ended, and a `server` record saying so unless that Turn's failed
         send `recorded` one. Then its environment is handed to the shutdown
         timer (`_hand_to_timer`), and a work item's slot opens once this
-        commits. A Session no longer `starting` to send that Turn is left as it
-        is. Its project's row is held shared before the Session's (the lock
+        commits. A Block the failure leaves to a person is handed at it
+        (`hand_over`). A Session no longer `starting` to send that Turn is left
+        as it is. Its project's row is held shared before the Session's (the lock
         order, `SessionRecordService.lock_project`)."""
         records = self._records(db)
         records.lock_project(session_id)
@@ -2033,6 +2047,7 @@ class SessionStartService:
                 payload={"type": START_FAILED, "reason": reason},
             )
         session = records.lock_session(session_id)
+        handing = sides(db, session.project_id)
         turn = _latest_turn(db, session_id)
         if turn.ended_at is None:
             turn.ended_at = datetime.now(UTC)
@@ -2040,6 +2055,7 @@ class SessionStartService:
         session.state_code = SessionState.FAILED
         session.error = reason
         session.current_line = None
+        hand_over(db, handing, turn.ended_at)
         self._moved(session, state=True)
         self._hand_to_timer(db, session)
         self._slots.left(session, SessionState.STARTING)
@@ -2057,12 +2073,15 @@ class SessionStartService:
             # run's placement is an Item's birth.
             _standing(db, unlocked.project_id, births=True)
             session = self._records(db).lock_session(session_id)
+            handing = sides(db, session.project_id)
             self._container.clarification_service().pass_ended(session)
+            hand_over(db, handing, datetime.now(UTC))
 
     def _settle_missed(self, db: Session, session_id: uuid.UUID) -> None:
         """A Session at the quota wall that a reading decided missed,
         under its project's row and then its own, while it still is: the
-        failed end it is, its nudge owed no more, its Hold ended, and a
+        failed end it is, its nudge owed no more, its Hold ended, a Block it
+        leaves to a person handed (`hand_over`), and a
         pass's questions put to the writer now, unless its project is
         finished or archived, where nothing starts (the ruling on the wall;
         DB 254; F5.1, F128.1)."""
@@ -2075,10 +2094,13 @@ class SessionStartService:
             select(_missed().where(AgentSession.id == session_id).exists())
         ):
             return
+        at = datetime.now(UTC)
+        handing = sides(db, session.project_id)
         session.nudge_owed_at = None
-        turn_hold(db, session, None, datetime.now(UTC))
+        turn_hold(db, session, None, at)
         if session.kind_code == JOB_KIND and _closed(project) is None:
             self._container.clarification_service().pass_ended(session)
+        hand_over(db, handing, at)
         self._moved(session, state=True)
         logger.info(
             "Session %s: no reading confirmed the quota wall its turn ended at, "

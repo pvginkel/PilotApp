@@ -3,6 +3,7 @@ block's local id (F30.7): each the record's own write (F32.4), its refusals
 the caller's; and a person's request of a wait (F27.3)."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pilot_dsl as dsl
 import pytest
@@ -866,6 +867,32 @@ class TestItemServiceTakeOver:
         assert _waits(camp, camp.session.get_one(Item, job.id))
         assert _waits(camp, pitch) and _waits(camp, lake)
 
+    def test_the_blocks_the_stopped_pass_leaves_are_handed_at_its_stop(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        pitch = camp.registered(run, PITCH)
+        camp.ended(run)
+        job = camp.job_after(run)
+
+        container.item_service().take_over(ADA, pitch.id)
+
+        assert job.stopped_at is not None
+        assert [camp.block(pitch, each).handed_at for each in ("Q1", "D1")] == [
+            job.stopped_at,
+            job.stopped_at,
+        ]
+
+    def test_the_claim_the_stopped_run_hands_back_is_handed_at_its_stop(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+
+        container.item_service().take_over(ADA, cut_over.id)
+
+        assert doing.stopped_at is not None
+        assert camp.block(cut_over, "A1").handed_at == doing.stopped_at
+
     def test_the_clarification_run_asking_its_writer_is_stopped(
         self, container: ServiceContainer, camp: Camp, person: User
     ) -> None:
@@ -1088,6 +1115,20 @@ class TestItemServiceCancel:
         with pytest.raises(InvalidOperationException) as refused:
             items.undo(asked.id)
         assert refused.value.cause == "an item done as cancelled offers no undo"
+
+    def test_the_block_the_run_held_is_handed_at_the_cancel(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, asked, report = _asked(camp)
+        assert camp.block(cut_over, "A1").handed_at is None
+        before = datetime.now(UTC)
+
+        container.item_service().cancel(ADA, report.id)
+
+        handed = camp.block(cut_over, "A1").handed_at
+        assert handed is not None and before <= handed <= datetime.now(UTC)
+        # A Block of a document the Cancel closed is no one's to answer.
+        assert camp.block(asked, "Q1").handed_at is None
 
     def test_a_researched_block_whose_work_asked_first_is_the_persons_again(
         self, container: ServiceContainer, camp: Camp

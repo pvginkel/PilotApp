@@ -1,7 +1,8 @@
 """Block and Block Option (DB §2.2).
 
-Every attribute but the keys and `updated_at` is a cache of the Document's
-published text, rewritten in place on every change to it (DB §7.4).
+Every attribute but the keys, `updated_at` and `handed_at` is a cache of the
+Document's published text, rewritten in place on every change to it (DB
+§7.4).
 """
 
 import uuid
@@ -38,6 +39,10 @@ class Block(db.Model):  # type: ignore[name-defined]
 
     `deferred_to_task_id` names a Plan Task of the Document's Project, which
     no key can reach from this row: the engine checks it (DB assertion 203).
+
+    `handed_at` is the server's, read from no text: when the Block last came
+    from Pilot's side to a person's to answer, none while it is Pilot's and
+    none on one a person's from its put (`app.services.handing`).
     """
 
     __tablename__ = "blocks"
@@ -89,6 +94,7 @@ class Block(db.Model):  # type: ignore[name-defined]
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    handed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class BlockOption(db.Model):  # type: ignore[name-defined]

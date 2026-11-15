@@ -10,6 +10,7 @@ document of the run holding a block, while that run waits on the person, ends
 the run and hands the block back (DB 297 to 299)."""
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Block, Document, Item, Project
 from app.schemas.timeline import Doing
 from app.services.auth_service import AuthContext
+from app.services.handing import hand_over, sides
 from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
 from app.services.session_start_service import SessionStartService
@@ -272,7 +274,7 @@ class ItemService:
         project's row: every open document of the run closed at once by
         them, done `cancelled`, which offers no undo, owes no write-back and
         continues nothing, so that the run is ended and the blocks it held
-        are theirs again.
+        are theirs again, handed to them at the Cancel (`hand_over`).
 
         Raises:
             RecordNotFoundException: no item has the id, or it has no
@@ -304,9 +306,11 @@ class ItemService:
             raise InvalidOperationException(operation, RUN_IN_FLIGHT)
         if offer.pilots_in_run:
             raise InvalidOperationException(operation, RUN_PILOTS)
+        handing = sides(self.db, project.id)
         self.record_service.cancel(
             project, run_documents(self.db, offer.run_id), person, operation
         )
+        hand_over(self.db, handing, datetime.now(UTC))
 
     def _lock_project(self, item: Item) -> Project:
         """The item's project, its row locked as an item's close locks it,

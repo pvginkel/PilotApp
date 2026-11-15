@@ -13,8 +13,9 @@ transition stopped, whose relay records the interrupt's end after the
 transition commits.
 
 The tick ends the chat's controller session, under its Session's lock, before
-it closes the chat, its Session then `ended`; a controller that does not
-answer leaves the chat open for the next tick. A name that holds another
+it closes the chat, its Session then `ended`, its `ended_at` the close's
+instant; a controller that does not answer leaves the chat open for the next
+tick. A name that holds another
 conversation than the chat's is another session's, which the tick never ends
 (`ControllerClient.get_session_holding`). Create project, Finish, Reopen
 and Archive call no controller: a chat they close keeps its controller
@@ -180,10 +181,13 @@ class ChatCloseService:
                 session.controller_session,
                 session.conversation_id,
             )
+        at = datetime.now(UTC)
+        if session.controller_session is not None:
             session.state_code = SessionState.ENDED
+            session.ended_at = at
             session.current_line = None
             work_moved(self._container.engine_bus(), session, state=True)
-        self._close(db, self._records(db), chat, CloseCause.TIMEOUT, datetime.now(UTC))
+        self._close(db, self._records(db), chat, CloseCause.TIMEOUT, at)
 
     def _end(self, env_id: str, name: str, conversation_id: str | None) -> None:
         """End the controller session; one its environment no longer runs

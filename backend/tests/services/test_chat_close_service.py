@@ -213,7 +213,8 @@ class TestCloseOpen:
             (None, {"type": CLOSED, "cause": "finished"})
         ]
         assert _last(session, run.id) == {"type": CLOSED, "cause": "finished"}
-        assert run.state_code is SessionState.IDLE
+        # A transition's close ends no controller session: the Session stays.
+        assert (run.state_code, run.ended_at) == (SessionState.IDLE, None)
 
     def test_the_close_is_told_to_the_browsers_and_to_chat_md(
         self,
@@ -359,6 +360,8 @@ class TestCloseTimer:
             None,
             name,
         )
+        # The move to `ended` writes the Session's end, the close's instant.
+        assert run.ended_at == chat.closed_at
         assert store.sessions(STORE_ENVIRONMENT_ID) == []
 
     def test_a_name_another_conversation_holds_is_left_to_it(
@@ -481,8 +484,10 @@ class TestCloseTimer:
 
         closes.run_close_timer(session)
 
-        assert _chat_row(session, run).close_cause_code is CloseCause.TIMEOUT
+        chat = _chat_row(session, run)
+        assert chat.close_cause_code is CloseCause.TIMEOUT
         assert run.state_code is SessionState.ENDED
+        assert run.ended_at is not None and run.ended_at == chat.closed_at
 
     def test_a_controller_that_does_not_answer_leaves_the_chat_open(
         self,
@@ -518,6 +523,8 @@ class TestCloseTimer:
 
         assert _chat_row(session, run).close_cause_code is CloseCause.TIMEOUT
         assert run.state_code is SessionState.FAILED
+        # Only the move to `ended` writes the Session's end.
+        assert run.ended_at is None
         assert _last(session, run.id) == {"type": CLOSED, "cause": "timeout"}
         assert store.calls == []
 

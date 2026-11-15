@@ -43,6 +43,7 @@ from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Document, Item, Project, Work
 from app.models import Session as AgentSession
 from app.models.reference import ProjectState, SessionState, WorkTrigger
+from app.services.handing import hand_over, sides
 from app.services.pilot_server import unheld_token_hash
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
@@ -221,7 +222,8 @@ class JobService:
         instant at the project's next place, behind every job of the project
         already waiting, and briefed from the record as it stands when it
         starts (`_place`). The job retried is marked retried by it, which
-        takes Retry from its line and its line from the badge (F94.5).
+        takes Retry from its line and its line from the badge (F94.5). A Block
+        the Retry makes Pilot's again has no `handed_at` (`hand_over`).
 
         The project's row is locked before the job's Session, the order a
         placement keeps, so that two Retries of one job, a Finish or an
@@ -266,6 +268,7 @@ class JobService:
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
         assert work.trigger_code is not None and line.title is not None
+        handing = sides(self.db, project.id)
         retry = self._place(
             project,
             work.trigger_code,
@@ -275,6 +278,7 @@ class JobService:
             trigger_item_id=work.trigger_item_id,
             retried=work,
         )
+        hand_over(self.db, handing, datetime.now(UTC))
         work_moved(self.engine_bus, job)
         return retry
 

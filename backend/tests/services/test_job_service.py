@@ -1536,6 +1536,35 @@ class TestRetry:
         assert session.get_one(Item, retry.id).title == NEXT_TITLE
         assert _after(container, starts, opened, run) is None
 
+    def test_a_retry_of_the_pass_takes_its_documents_blocks_back_for_pilot(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+    ) -> None:
+        """The failed pass left its document to the person, its Block handed
+        then; under the Retry it is Pilot's again, with no `handed_at`."""
+        run, (notes,) = _worker_run(session, container, opened, 1)
+        container.document_service().publish_read(
+            session.get_one(models.Document, notes.id),
+            "# Which stock?\n\n```question id=Q1\n```\n",
+            run.id,
+        )
+        job = _after(container, starts, opened, run)
+        assert job is not None
+        failed = _ended(session, container, job)
+        block = session.scalars(
+            select(models.Block).where(models.Block.document_id == notes.id)
+        ).one()
+        block.handed_at = failed.turn_ended_at
+        session.flush()
+
+        _retry(container, starts, failed)
+
+        session.expire_all()
+        assert session.get_one(models.Block, block.id).handed_at is None
+
     def test_the_server_retries_none_on_its_own(
         self,
         container: ServiceContainer,

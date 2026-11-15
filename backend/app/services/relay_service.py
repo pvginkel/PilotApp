@@ -117,6 +117,7 @@ from app.services.current_line import (
     while_starting,
 )
 from app.services.environment_service import EnvironmentService
+from app.services.handing import Sides, hand_over, sides
 from app.services.holds import turn_rest
 from app.services.pilot_server import PilotServer, hold_send
 from app.services.quota_wall import turn_shows_wall
@@ -844,7 +845,9 @@ class RelayService:
         no one, with no current line; one stopped already keeps its stop. The
         documents it was writing are let go, as at a turn's end, and the
         environment's shutdown timer is armed. A work item's slot opens once
-        this commits."""
+        this commits. A Block its stop leaves to a person is handed then
+        (`hand_over`)."""
+        handing = _sides(db, session)
         self._records(db).append(
             session.id,
             RecordKind.SERVER,
@@ -867,6 +870,8 @@ class RelayService:
         self._container.document_service().turn_ended(session)
         self._closes.turn_ended(db, session)
         self._reads.run_closed(db, session)
+        if handing is not None:
+            hand_over(db, handing, now)
         self._environments.arm_shutdown_timer(db, _environment_id(session))
         logger.info("Session %s stopped under its turn: %s", session.id, reason)
 
@@ -1093,7 +1098,8 @@ class RelayService:
         a worker's and a pass's exclusively, any other's shared. After the
         commit, a work item's slot opens, the documents its done run
         registered are read, and the environment's shutdown timer is armed if
-        nothing runs there.
+        nothing runs there. A Block that the end of a work item's turn or a
+        job's leaves to a person is handed at the turn's end (`hand_over`).
 
         A later Turn in flight is a send the controller accepted once this
         turn's result was out, committed first: the Session stays `running`
@@ -1107,6 +1113,7 @@ class RelayService:
             session = records.lock_session(opening.session_id)
             ended = _in_flight(db, opening.turn_id)
             if ended:
+                handing = _sides(db, session)
                 records.append(
                     opening.session_id,
                     RecordKind.RESULT,
@@ -1146,6 +1153,8 @@ class RelayService:
                 self._moved(session, state=session.state_code != before)
                 self._slots.left(session, before)
                 self._closes.turn_ended(db, session)
+                if handing is not None:
+                    hand_over(db, handing, ended_at)
         if not ended:
             # Another process's relay ended the turn.
             self._streams.wake(opening.session_id)
@@ -1315,6 +1324,15 @@ def _opening(db: Session, session_id: uuid.UUID) -> _Opening | None:
         current_line=session.current_line,
         stopped=session.state_code == SessionState.STOPPED,
     )
+
+
+def _sides(db: Session, session: AgentSession) -> Sides | None:
+    """The Blocks of the Session's project that are Pilot's, read before a
+    work item's Session or a job's moves; none for a chat's, whose turns hold
+    no Block."""
+    if session.kind_code not in (WORK_KIND, JOB_KIND):
+        return None
+    return sides(db, session.project_id)
 
 
 def _moved_on(session: AgentSession, opening: _Opening) -> bool:

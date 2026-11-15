@@ -16,6 +16,7 @@ row is locked, so no controller call is made while it is held.
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -78,6 +79,7 @@ from app.services.controller_client import (
 )
 from app.services.effect_service import Change, EffectLine, EffectService
 from app.services.environment_service import EnvironmentService
+from app.services.handing import hand_over, sides
 from app.services.pilot_server import bearer_session, no_turn, turn_running
 from app.services.pilot_work_service import ATTACHED, attached_label, material
 from app.services.project_service import ProjectService, project_name
@@ -291,10 +293,13 @@ class PilotStoreService:
             researched = self.record_service.researchable(
                 project, item.researches, operation
             )
+            handing = sides(self.db, project.id) if claimed or researched else None
             added = self._work(project, item)
             work = self.db.get_one(Work, added.id)
             self.record_service.give(project, work, claimed)
             self.record_service.research(project, work, researched)
+            if handing is not None:
+                hand_over(self.db, handing, datetime.now(UTC))
             started = self.db.get_one(AgentSession, added.id)
             # The gate leaves a work item's start `held` or `starting`.
             state = "held" if started.state_code is SessionState.HELD else "starting"
