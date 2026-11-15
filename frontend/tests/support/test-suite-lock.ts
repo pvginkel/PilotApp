@@ -140,14 +140,14 @@ export async function acquireTestSuiteLock(
 }
 
 /**
- * Take the test suite lock for this run, in the runner's process (global setup), and hold it until
- * the runner ends. PLAYWRIGHT_SUITE_LOCK_WAIT bounds the wait in seconds; a run that gives up ends
- * here with LOCK_TIMEOUT_EXIT_CODE, having run nothing.
+ * Take the test suite lock for this run, in the runner's process (global setup), hold it until
+ * the runner ends, and say on taking it how long the run waited. PLAYWRIGHT_SUITE_LOCK_WAIT bounds
+ * the wait in seconds; a run that gives up ends here with LOCK_TIMEOUT_EXIT_CODE, having run
+ * nothing. `file` is the lock's file, null where none is taken; a test hands it one of its own.
  */
-export async function holdTestSuiteLock(): Promise<void> {
-  const file = testSuiteLockFile();
+export async function holdTestSuiteLock(file: string | null = testSuiteLockFile()): Promise<HeldLock | null> {
   if (!file) {
-    return;
+    return null;
   }
 
   const configured = Number(process.env.PLAYWRIGHT_SUITE_LOCK_WAIT);
@@ -157,9 +157,11 @@ export async function holdTestSuiteLock(): Promise<void> {
   // Only a bounded wait gives up.
   const limit = waitSeconds === null ? '' : formatSeconds(waitSeconds);
 
+  const asked = performance.now();
+  let lock: HeldLock;
   try {
-    // Never released here: the runner's end lets it go.
-    await acquireTestSuiteLock(file, {
+    // The run's setup never releases it: the runner's end lets it go.
+    lock = await acquireTestSuiteLock(file, {
       waitSeconds,
       holder: {
         environment: process.env.KUBECODER_ENVIRONMENT_ID ?? '',
@@ -183,7 +185,16 @@ export async function holdTestSuiteLock(): Promise<void> {
     );
     process.exit(LOCK_TIMEOUT_EXIT_CODE);
   }
-  console.log(`🔒 Holding the test suite lock (${file})`);
+  // The wait, 0 s included, so that a run's time splits into the wait for the lock and the run.
+  console.log(`🔒 Holding the test suite lock after waiting ${formatWait(performance.now() - asked)} (${file})`);
+  return lock;
+}
+
+/** A wait in whole seconds, in suite_lock.py's format_wait words. */
+export function formatWait(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return minutes > 0 ? `${minutes} min ${seconds % 60} s` : `${seconds} s`;
 }
 
 export function describeHolder(holder: HolderNote, now: Date = new Date()): string {

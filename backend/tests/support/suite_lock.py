@@ -128,8 +128,8 @@ def _take(handle: IO[str], until: float | None) -> bool:
 
 def hold_suite_lock() -> HeldLock | None:
     """Take the test suite lock for this run, or none where none is taken.
-    The run holds it for as long as it references the lock it is handed.
-    PYTEST_SUITE_LOCK_WAIT bounds the wait in seconds; a run that gives up
+    The run holds it for as long as it references the lock it is handed, and
+    says on taking it how long it waited. PYTEST_SUITE_LOCK_WAIT bounds the wait in seconds; a run that gives up
     ends here with LOCK_TIMEOUT_EXIT_CODE, having run nothing."""
     file = suite_lock_file()
     if file is None:
@@ -147,6 +147,7 @@ def hold_suite_lock() -> HeldLock | None:
             flush=True,
         )
 
+    asked = time.monotonic()
     try:
         lock = acquire_suite_lock(
             file,
@@ -169,7 +170,10 @@ def hold_suite_lock() -> HeldLock | None:
             f"Exit code {LOCK_TIMEOUT_EXIT_CODE}.",
             returncode=LOCK_TIMEOUT_EXIT_CODE,
         )
-    print(f"🔒 Holding the test suite lock ({file})", flush=True)
+    # The wait, 0 s included, so that a run's time splits into the wait for the
+    # lock and the run.
+    waited = format_wait(time.monotonic() - asked)
+    print(f"🔒 Holding the test suite lock after waiting {waited} ({file})", flush=True)
     return lock
 
 
@@ -188,6 +192,12 @@ def describe_holder(holder: HolderNote, now: datetime | None = None) -> str:
         f"the run in {holder['environment']} "
         f"(pid {holder.get('pid', '?')} on {holder.get('host', '?')}{since})"
     )
+
+
+def format_wait(seconds: float) -> str:
+    """A wait in whole seconds, in test-suite-lock.ts's formatWait words."""
+    minutes, rest = divmod(max(0, int(seconds)), 60)
+    return f"{minutes} min {rest} s" if minutes else f"{rest} s"
 
 
 def _format_seconds(seconds: float) -> str:

@@ -87,6 +87,9 @@ holds it until it ends (`backend/tests/support/suite_lock.py`, D152); a run on o
 count's above or a targeted `uv run pytest`, takes none. So `kc project test` takes the lock twice,
 once per suite. Each run waits for it without a bound, saying whose run holds it, so a run can take
 its suite's time and another's: size the command's timeout for both, up to the Bash tool's hour.
+On taking it, each run says how long it waited, in the same words in both suites and `0 s`
+included, so that a run's time splits into the wait for the lock and the run:
+`🔒 Holding the test suite lock after waiting 3 min 12 s (<file>)`.
 `kc project test` prints nothing while it waits, nor when a timeout kills it; the newest
 `/tmp/kc/project/test-*.log` has the waiting line from the start. With
 `PLAYWRIGHT_SUITE_LOCK_WAIT`, or the backend's `PYTEST_SUITE_LOCK_WAIT`, seconds set, a run that

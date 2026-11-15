@@ -13,6 +13,8 @@ import { expect, test } from '@playwright/test';
 import {
   acquireTestSuiteLock,
   describeHolder,
+  formatWait,
+  holdTestSuiteLock,
   type HolderNote,
   readHolderNote,
   testSuiteLockFile,
@@ -27,6 +29,24 @@ const SECOND: HolderNote = { environment: 'playwright-second', host: 'second-hos
 
 function isLocked(file: string): boolean {
   return spawnSync('flock', ['--nonblock', file, 'true']).status !== 0;
+}
+
+/** Run `body` with the lines it logs collected, and no bound on the lock's wait. */
+async function logOf(body: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const log = console.log;
+  const bound = process.env.PLAYWRIGHT_SUITE_LOCK_WAIT;
+  console.log = (...args: unknown[]) => lines.push(args.join(' '));
+  delete process.env.PLAYWRIGHT_SUITE_LOCK_WAIT;
+  try {
+    await body();
+  } finally {
+    console.log = log;
+    if (bound !== undefined) {
+      process.env.PLAYWRIGHT_SUITE_LOCK_WAIT = bound;
+    }
+  }
+  return lines;
 }
 
 test.describe('The test suite lock', () => {
@@ -130,6 +150,39 @@ test.describe('The test suite lock', () => {
     }
 
     await expect.poll(() => isLocked(file), { timeout: 5000 }).toBe(false);
+  });
+
+  test('says on taking it that the run waited none', async () => {
+    const lines = await logOf(async () => {
+      const lock = await holdTestSuiteLock(file);
+      expect(isLocked(file)).toBe(true);
+      lock?.release();
+    });
+
+    expect(lines).toEqual([`🔒 Holding the test suite lock after waiting 0 s (${file})`]);
+  });
+
+  test('says on taking it how long the run waited for the holder', async () => {
+    const first = await acquireTestSuiteLock(file, { waitSeconds: 1, holder: FIRST });
+    // Past the notice, so that the run says it waits before it holds.
+    const release = setTimeout(() => first.release(), 1500);
+    const lines = await logOf(async () => {
+      (await holdTestSuiteLock(file))?.release();
+    }).finally(() => clearTimeout(release));
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^⏳ Waiting for the test suite lock, held by the run in playwright-first /);
+    const held = /^🔒 Holding the test suite lock after waiting (\d+) s \((.+)\)$/.exec(lines[1]);
+    expect(held?.[2]).toBe(file);
+    expect(Number(held?.[1])).toBeGreaterThanOrEqual(1);
+  });
+
+  test('words a wait as a backend run does', () => {
+    // suite_lock.py's format_wait: whole seconds, minutes past 60 s.
+    expect(formatWait(400)).toBe('0 s');
+    expect(formatWait(59_900)).toBe('59 s');
+    expect(formatWait(192_400)).toBe('3 min 12 s');
+    expect(formatWait(3_600_000)).toBe('60 min 0 s');
   });
 
   test('is held by this run, taken in its runner', () => {

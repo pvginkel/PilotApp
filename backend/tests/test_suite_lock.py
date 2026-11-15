@@ -3,6 +3,7 @@ takes the lock a Playwright run takes, held until the run ends, and none
 outside KubeCoder."""
 
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -21,6 +22,7 @@ from tests.support.suite_lock import (
     SuiteLockTimeout,
     acquire_suite_lock,
     describe_holder,
+    format_wait,
     hold_suite_lock,
     read_holder_note,
     suite_lock_file,
@@ -223,8 +225,40 @@ class TestHoldSuiteLock:
         finally:
             lock.release()
         assert capsys.readouterr().out == (
-            f"🔒 Holding the test suite lock ({lock_file})\n"
+            f"🔒 Holding the test suite lock after waiting 0 s ({lock_file})\n"
         )
+
+    def test_says_how_long_it_waited_for_the_holder(
+        self, lock_file: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        first = acquire_suite_lock(lock_file, wait_seconds=0, holder=FIRST)
+        # Past the notice, so that the run says it waits before it holds.
+        release = threading.Timer(1.5, first.release)
+        release.start()
+        try:
+            lock = hold_suite_lock()
+        finally:
+            release.join()
+        assert lock is not None
+        lock.release()
+
+        waiting, holding = capsys.readouterr().out.splitlines()
+        assert waiting.startswith(
+            "⏳ Waiting for the test suite lock, held by the run in pytest-first "
+        )
+        held = re.fullmatch(
+            rf"🔒 Holding the test suite lock after waiting (\d+) s \({re.escape(str(lock_file))}\)",
+            holding,
+        )
+        assert held is not None, holding
+        assert int(held.group(1)) >= 1
+
+    def test_words_a_wait_as_a_playwright_run_does(self) -> None:
+        # test-suite-lock.ts's formatWait: whole seconds, minutes past 60 s.
+        assert format_wait(0.4) == "0 s"
+        assert format_wait(59.9) == "59 s"
+        assert format_wait(192.4) == "3 min 12 s"
+        assert format_wait(3600) == "60 min 0 s"
 
     def test_gives_up_after_its_bound_having_run_nothing(
         self,
