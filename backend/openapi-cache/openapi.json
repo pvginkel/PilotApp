@@ -1112,6 +1112,27 @@
         "title": "SessionState",
         "type": "string"
       },
+      "CollectorProtocolRangeSchema.e156e3e": {
+        "description": "The protocol versions the server accepts of a collector, both ends\nincluded: a 426's body.",
+        "properties": {
+          "max": {
+            "description": "The newest protocol version accepted",
+            "title": "Max",
+            "type": "integer"
+          },
+          "min": {
+            "description": "The oldest protocol version accepted",
+            "title": "Min",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "CollectorProtocolRangeSchema",
+        "type": "object"
+      },
       "ConditionsSchema.6c014b4": {
         "description": "The conditions that hold now, which the gold bar shows.",
         "properties": {
@@ -7295,6 +7316,895 @@
         "title": "ProjectLookupQuerySchema",
         "type": "object"
       },
+      "PublicationSchema.e156e3e": {
+        "additionalProperties": false,
+        "description": "One Transcript as its file stands, read whole.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Claude Code's id of the sub-agent, none on a main thread",
+            "title": "Agent Id"
+          },
+          "agent_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A sub-agent's type, as its record names it",
+            "title": "Agent Type"
+          },
+          "calls": {
+            "description": "Its Calls, in the file's order: the first has position 1",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedCallSchema"
+            },
+            "title": "Calls",
+            "type": "array"
+          },
+          "collector": {
+            "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedVersionSchema",
+            "description": "The collector's version that read the file"
+          },
+          "compactions": {
+            "description": "Its Compactions, in the file's order",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedCompactionSchema"
+            },
+            "title": "Compactions",
+            "type": "array"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The task a sub-agent's spawning call gave it",
+            "title": "Description"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id of the environment a main thread ran in, none where its lines name none",
+            "title": "Environment"
+          },
+          "file_modified_at": {
+            "description": "The file's time",
+            "format": "date-time",
+            "title": "File Modified At",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "The file's size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "File Size",
+            "type": "integer"
+          },
+          "launches": {
+            "description": "A main thread's Launches, in the file's order",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedLaunchSchema"
+            },
+            "title": "Launches",
+            "type": "array"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The name of the checkout that holds the working directory, none for a directory under no checkout",
+            "title": "Repository"
+          },
+          "session_id": {
+            "description": "Claude Code's id of the main thread",
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          },
+          "spawned_by": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The `tool_use_id` of the call that started a sub-agent, where its record names it",
+            "title": "Spawned By"
+          },
+          "working_directory": {
+            "description": "The directory it was first launched in, as its first line has it",
+            "title": "Working Directory",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "file_size",
+          "file_modified_at",
+          "collector",
+          "working_directory"
+        ],
+        "title": "PublicationSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedCallSchema": {
+        "additionalProperties": false,
+        "description": "A request the Transcript made to the model, with its response.",
+        "properties": {
+          "attributed_plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The plugin Claude Code says the Call acted under",
+            "title": "Attributed Plugin"
+          },
+          "attributed_skill": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The skill Claude Code says the Call acted under",
+            "title": "Attributed Skill"
+          },
+          "compaction": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Compaction its chain crossed on the way to its predecessor, by its place among the Transcript's Compactions",
+            "title": "Compaction"
+          },
+          "completed_at": {
+            "description": "When the response's last line was written",
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "context_parts": {
+            "description": "What it carried that no earlier Call of its Launch did",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedContextPartSchema"
+            },
+            "title": "Context Parts",
+            "type": "array"
+          },
+          "effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The request's reasoning effort, in Claude Code's word",
+            "title": "Effort"
+          },
+          "events": {
+            "description": "The Events it marks, in the file's order: each on the last Call before it, else the first",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedEventSchema"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "message_id": {
+            "description": "Claude's id of the response",
+            "minLength": 1,
+            "title": "Message Id",
+            "type": "string"
+          },
+          "miss_cause": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Miss Cause's code, on a cache miss",
+            "title": "Miss Cause"
+          },
+          "model": {
+            "description": "The code of the Model that answered",
+            "examples": [
+              "claude-opus-4-5"
+            ],
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "predecessor": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The `message_id` of the nearest earlier Call on its chain",
+            "title": "Predecessor"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Prompt it follows, by its place among the Transcript's Prompts: its Launches' in order, each one's in order",
+            "title": "Prompt"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The code of the Model asked for, where it differs",
+            "title": "Requested Model"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When the request was sent, where the version records it",
+            "title": "Sent At"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Stop Reason's code, where the end was not the ordinary one",
+            "title": "Stop Reason"
+          },
+          "thinking_tokens": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The output tokens spent on thinking",
+            "title": "Thinking Tokens"
+          },
+          "tokens": {
+            "additionalProperties": {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "description": "The tokens billed, by Token Kind; a kind left out counts none",
+            "propertyNames": {
+              "enum": [
+                "input",
+                "cache_write_5m",
+                "cache_write_1h",
+                "cache_read",
+                "output"
+              ]
+            },
+            "title": "Tokens",
+            "type": "object"
+          },
+          "tool_calls": {
+            "description": "The calls of a tool it requested, in the file's order",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedToolCallSchema"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          }
+        },
+        "required": [
+          "message_id",
+          "completed_at",
+          "model"
+        ],
+        "title": "PublishedCallSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedCompactionSchema": {
+        "additionalProperties": false,
+        "description": "A compaction of the Transcript's context.",
+        "properties": {
+          "at": {
+            "description": "When its boundary was written",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How long it took, where the version records it",
+            "title": "Duration Ms"
+          },
+          "tokens_after": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The context it left, where the version records it",
+            "title": "Tokens After"
+          },
+          "tokens_before": {
+            "description": "The context it compacted",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Tokens Before",
+            "type": "integer"
+          },
+          "trigger": {
+            "description": "The Compaction Trigger's code",
+            "examples": [
+              "auto",
+              "manual"
+            ],
+            "minLength": 1,
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "trigger",
+          "tokens_before"
+        ],
+        "title": "PublishedCompactionSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedComponentSchema": {
+        "additionalProperties": false,
+        "description": "A version of one piece of software a Launch ran with.",
+        "properties": {
+          "component": {
+            "description": "The Component's code",
+            "examples": [
+              "claude-code",
+              "plugin:dev"
+            ],
+            "minLength": 1,
+            "title": "Component",
+            "type": "string"
+          },
+          "released_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When it was released, where the collector can tell",
+            "title": "Released At"
+          },
+          "version": {
+            "description": "The version, as the collector names it",
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "component"
+        ],
+        "title": "PublishedComponentSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedContextPartSchema": {
+        "additionalProperties": false,
+        "description": "A component of what a Call carried that no earlier Call of its Launch\ndid.",
+        "properties": {
+          "characters": {
+            "description": "Its length",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Characters",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "The Context Part Kind's code",
+            "examples": [
+              "system_prompt",
+              "skill_body"
+            ],
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Which one of its kind: the skill, the file",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "kind",
+          "characters"
+        ],
+        "title": "PublishedContextPartSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedEventSchema": {
+        "additionalProperties": false,
+        "description": "An occurrence at one moment that no other part of the call records.",
+        "properties": {
+          "at": {
+            "description": "When it occurred",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its one qualifier as its source gives it: an API error's status",
+            "title": "Detail"
+          },
+          "is_error": {
+            "description": "Whether an Event of its kind counts as an error",
+            "title": "Is Error",
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "The Event Kind's code",
+            "examples": [
+              "api_error",
+              "interrupt"
+            ],
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "is_error",
+          "at"
+        ],
+        "title": "PublishedEventSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedHookRunSchema": {
+        "additionalProperties": false,
+        "description": "A run of one hook command at the end of a Prompt's run.",
+        "properties": {
+          "command": {
+            "description": "The command it ran",
+            "title": "Command",
+            "type": "string"
+          },
+          "duration_ms": {
+            "description": "How long it ran",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "failed": {
+            "description": "Whether it reported an error",
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "prevented_end": {
+            "description": "Whether it kept the run from ending",
+            "title": "Prevented End",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "command",
+          "duration_ms",
+          "failed",
+          "prevented_end"
+        ],
+        "title": "PublishedHookRunSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedLaunchSchema": {
+        "additionalProperties": false,
+        "description": "A start of a Claude Code process on the main thread.",
+        "properties": {
+          "components": {
+            "description": "The versions it ran with, one of each Component",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedComponentSchema"
+            },
+            "minItems": 1,
+            "title": "Components",
+            "type": "array"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The time of its last line that carries one, none while it runs",
+            "title": "Ended At"
+          },
+          "prompts": {
+            "description": "The inputs it received, in the file's order",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedPromptSchema"
+            },
+            "title": "Prompts",
+            "type": "array"
+          },
+          "started_at": {
+            "description": "The time of the first line the Launch wrote",
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "started_at",
+          "components"
+        ],
+        "title": "PublishedLaunchSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedPromptSchema": {
+        "additionalProperties": false,
+        "description": "An input a Launch received.",
+        "properties": {
+          "characters": {
+            "description": "Its length",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Characters",
+            "type": "integer"
+          },
+          "hook_runs": {
+            "description": "The hook runs at its run's end, in order",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedHookRunSchema"
+            },
+            "title": "Hook Runs",
+            "type": "array"
+          },
+          "received_at": {
+            "description": "When it was queued",
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "source": {
+            "description": "The Prompt Source's code",
+            "examples": [
+              "person",
+              "hook"
+            ],
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "received_at",
+          "source",
+          "characters"
+        ],
+        "title": "PublishedPromptSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedToolCallSchema": {
+        "additionalProperties": false,
+        "description": "A call of one tool a Call requested, with its result.",
+        "properties": {
+          "denial_kind": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Denial Kind's code, where the call was denied",
+            "examples": [
+              "rule",
+              "person",
+              "hook"
+            ],
+            "title": "Denial Kind"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": -2147483648,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A command's exit code, where it was not zero",
+            "title": "Exit Code"
+          },
+          "failed": {
+            "description": "Whether the result was an error",
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "first_argument": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The command, path or query it was given, cut to a line",
+            "title": "First Argument"
+          },
+          "interrupted": {
+            "description": "Whether the person interrupted it",
+            "title": "Interrupted",
+            "type": "boolean"
+          },
+          "mcp_server": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The MCP server the Tool is of, none for another",
+            "title": "Mcp Server"
+          },
+          "requested_at": {
+            "description": "When it was requested",
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "result_characters": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The size of the result the model was given",
+            "title": "Result Characters"
+          },
+          "returned_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When its result arrived, none where none did",
+            "title": "Returned At"
+          },
+          "saved_characters": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The output's full size, where it was saved to disk",
+            "title": "Saved Characters"
+          },
+          "tool": {
+            "description": "The Tool's code, Claude Code's name of it",
+            "examples": [
+              "Bash",
+              "mcp__youtrack__get_issues"
+            ],
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Claude's id of the request",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_use_id",
+          "tool",
+          "requested_at",
+          "failed",
+          "interrupted"
+        ],
+        "title": "PublishedToolCallSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedVersionSchema": {
+        "additionalProperties": false,
+        "description": "The collector's version that read the file.",
+        "properties": {
+          "released_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When it was released, where the collector can tell",
+            "title": "Released At"
+          },
+          "version": {
+            "description": "The version, as the collector names it",
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "PublishedVersionSchema",
+        "type": "object"
+      },
       "PushEndpointQuerySchema.efd40b8": {
         "description": "The browser's subscription to delete, by its endpoint.",
         "properties": {
@@ -12705,6 +13615,70 @@
           }
         },
         "summary": "Get current authenticated user information.",
+        "tags": []
+      }
+    },
+    "/api/collector/publications": {
+      "post": {
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks. The body is the transcript as its file stands.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds the transcript as the call says. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. No call of this collector's is taken   until its bearer is the server's. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. No call is taken until the collector speaks a   version in the range. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, what in the call   contradicts itself or the record's rules for a transcript. The same   call is refused again; the collector's other transcripts are not. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
+        "operationId": "post__api_collector_publications",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationSchema.e156e3e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.e156e3e"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "A collector's publication of one transcript, a main thread's or one sub-agent's: one call, one transaction.",
         "tags": []
       }
     },

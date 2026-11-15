@@ -66,6 +66,16 @@ class TestAppSettings:
 
         assert settings.youtrack_webhook_token == "an-invented-webhook-token"
 
+    def test_the_collectors_routes_refuse_every_call_by_default(self) -> None:
+        assert AppSettings().collector_token == ""
+
+    def test_load_reads_the_collectors_bearer_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(COLLECTOR_TOKEN="an-invented-collector-token")
+        )
+
+        assert settings.collector_token == "an-invented-collector-token"
+
     def test_load_refuses_a_put_limit_below_one_byte(self) -> None:
         with pytest.raises(ValueError):
             AppEnvironment(SYNC_PUT_MAX_BYTES=0)
@@ -439,6 +449,7 @@ class TestAppSettings:
             sync_token="example-token",
             store_environment_id="example-env-1",
             youtrack_webhook_token="an-invented-webhook-token",
+            collector_token="an-invented-collector-token",
         )
 
         assert settings.dump_for_logging() == {
@@ -446,6 +457,7 @@ class TestAppSettings:
             "sync_token": "***",
             "store_environment_id": "'example-env-1'",
             "youtrack_webhook_token": "***",
+            "collector_token": "***",
             "sync_put_max_bytes": "2097152",
             "sync_heartbeat_seconds": "15.0",
             "ticket_url_template": "None",
@@ -551,6 +563,7 @@ class TestAppSettings:
             "sync_token": "***",
             "store_environment_id": repr(""),
             "youtrack_webhook_token": "***",
+            "collector_token": "***",
             "sync_put_max_bytes": "2097152",
             "sync_heartbeat_seconds": "15.0",
             "ticket_url_template": repr("https://tracker.example.com/{id}"),

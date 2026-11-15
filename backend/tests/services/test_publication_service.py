@@ -19,7 +19,11 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session as DbSession
 
 from app.database import scoped_session
-from app.exceptions import PublicationInvalidException
+from app.exceptions import (
+    AuthenticationException,
+    CollectorProtocolUnsupportedException,
+    PublicationInvalidException,
+)
 from app.models import (
     Call,
     Compaction,
@@ -47,13 +51,19 @@ from app.models import (
 )
 from app.schemas.publication import PublicationSchema
 from app.services.container import ServiceContainer
-from app.services.publication_service import PublicationService
+from app.services.publication_service import (
+    COLLECTOR_PROTOCOL_MAX,
+    COLLECTOR_PROTOCOL_MIN,
+    PublicationService,
+)
 from tests.support import transcripts
 from tests.support.database import Written, writes
 from tests.support.locks import in_thread, lock_waits
 from tests.support.publications import (
+    COLLECTOR_TOKEN,
     SPAWNING,
     call,
+    collector_headers,
     compaction,
     context_part,
     event,
@@ -1939,7 +1949,9 @@ class TestTurns:
 
         first = container.session_maker()()
         try:
-            main_id = PublicationService(first).publish(_camp()).id
+            main_id = (
+                PublicationService(first, container.app_config()).publish(_camp()).id
+            )
             second = in_thread(published_second)
             wait_until(lambda: lock_waits(container) == 1, "the second's turn waiting")
             first.commit()
@@ -1960,7 +1972,7 @@ class TestTurns:
 
         first = container.session_maker()()
         try:
-            PublicationService(first).publish(_camp())
+            PublicationService(first, container.app_config()).publish(_camp())
             spawning = _tool_call_id(first)
             second = in_thread(published_second)
             wait_until(lambda: lock_waits(container) == 1, "the second's turn waiting")
@@ -1986,7 +1998,9 @@ class TestTurns:
 
         first = container.session_maker()()
         try:
-            thread_id = PublicationService(first).publish(_camp()).id
+            thread_id = (
+                PublicationService(first, container.app_config()).publish(_camp()).id
+            )
             second = in_thread(published_second)
             wait_until(lambda: lock_waits(container) == 1, "the second's turn waiting")
             first.commit()
@@ -2005,6 +2019,59 @@ class TestTurns:
                 4,
                 5,
             ]
+
+
+class TestAdmitted:
+    """The gate a collector's call passes before it is read."""
+
+    def test_a_call_with_the_bearer_in_the_served_version_is_let_through(
+        self, publications: PublicationService
+    ) -> None:
+        headers = collector_headers()
+
+        publications.admit(
+            headers["Authorization"], headers["X-Pilot-Collector-Protocol"]
+        )
+
+    @pytest.mark.parametrize(
+        "authorization",
+        [None, "", "Bearer", "Bearer another-token", COLLECTOR_TOKEN],
+    )
+    def test_a_call_without_the_bearer_is_refused(
+        self, publications: PublicationService, authorization: str | None
+    ) -> None:
+        with pytest.raises(AuthenticationException, match="the collector's bearer"):
+            publications.admit(authorization, str(COLLECTOR_PROTOCOL_MAX))
+
+    @pytest.mark.parametrize("authorization", ["Bearer ", "Bearer", ""])
+    def test_every_call_is_refused_while_the_token_is_empty(
+        self, session: DbSession, container: ServiceContainer, authorization: str
+    ) -> None:
+        settings = container.app_config().model_copy(update={"collector_token": ""})
+        publications = PublicationService(session, settings)
+
+        with pytest.raises(AuthenticationException):
+            publications.admit(authorization, str(COLLECTOR_PROTOCOL_MAX))
+
+    @pytest.mark.parametrize("version", [None, "", "0", "2", "one", "+1", "1.0"])
+    def test_a_version_outside_the_range_is_refused_with_the_range(
+        self, publications: PublicationService, version: str | None
+    ) -> None:
+        with pytest.raises(CollectorProtocolUnsupportedException) as refused:
+            publications.admit(collector_headers()["Authorization"], version)
+
+        assert (refused.value.minimum, refused.value.maximum) == (
+            COLLECTOR_PROTOCOL_MIN,
+            COLLECTOR_PROTOCOL_MAX,
+        )
+        assert refused.value.error_code == "COLLECTOR_PROTOCOL_UNSUPPORTED"
+        assert repr(version) in refused.value.message
+
+    def test_the_bearer_is_asked_for_before_the_version(
+        self, publications: PublicationService
+    ) -> None:
+        with pytest.raises(AuthenticationException):
+            publications.admit("Bearer another-token", "2")
 
 
 class TestRefused:

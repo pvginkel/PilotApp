@@ -53,6 +53,7 @@ from tests.support.fake_push_service import (
     web_push_of,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
+from tests.support.publications import COLLECTOR_TOKEN
 from tests.support.suite_lock import HeldLock, hold_suite_lock, suite_lock_file
 from tests.support.supervisor import Supervise
 
@@ -146,11 +147,12 @@ def statement_cap(statement_cap_installed: None) -> Generator[StatementCap]:
 @pytest.fixture(scope="session")
 def test_app_settings() -> AppSettings:
     """The app settings, with the store's sync configured as the fake sidecar
-    calls it."""
+    calls it, and the collector's bearer."""
     # The fake sidecar reads its change stream up to a heartbeat.
     return AppSettings(
         sync_token=SYNC_TOKEN,
         store_environment_id=STORE_ENVIRONMENT_ID,
+        collector_token=COLLECTOR_TOKEN,
         sync_heartbeat_seconds=0.01,
     )
 

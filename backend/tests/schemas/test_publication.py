@@ -171,6 +171,9 @@ class TestPublicationSchema:
             ("calls", 0, "tokens", "cache_write", "[key]")
         ]
 
+    def test_a_files_size_is_one_every_json_reader_takes_exactly(self) -> None:
+        assert whole(file_size=2**53 - 1).file_size == 9_007_199_254_740_991
+
     def test_a_time_names_its_offset(self) -> None:
         assert _refused(file_modified_at="2026-11-12T09:42:00") == [
             ("file_modified_at",)
@@ -180,6 +183,7 @@ class TestPublicationSchema:
         ("overrides", "where"),
         [
             ({"file_size": -1}, ("file_size",)),
+            ({"file_size": 2**53}, ("file_size",)),
             (
                 {"calls": [call(1, tokens={"output": -1})]},
                 ("calls", 0, "tokens", "output"),

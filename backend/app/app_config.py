@@ -68,6 +68,13 @@ class AppEnvironment(BaseSettings):
             "refuses every delivery"
         ),
     )
+    COLLECTOR_TOKEN: str = Field(
+        default="",
+        description=(
+            "The collector's bearer for /api/collector; empty refuses every "
+            "call of a collector's"
+        ),
+    )
     SYNC_PUT_MAX_BYTES: int = Field(
         default=2 * 1024 * 1024,
         gt=0,
@@ -298,6 +305,10 @@ class AppSettings(BaseModel):
     deliveries carries in `X-YouTrack-Token` (F136.1): empty refuses every
     delivery."""
 
+    collector_token: Annotated[str, Sensitive] = ""
+    """The bearer a collector publishes with (F152.3): empty refuses every
+    call of a collector's."""
+
     sync_put_max_bytes: int = 2 * 1024 * 1024
     """The largest body a sync PUT takes."""
 
@@ -473,6 +484,7 @@ class AppSettings(BaseModel):
             sync_token=env.SYNC_TOKEN,
             store_environment_id=env.STORE_ENVIRONMENT_ID,
             youtrack_webhook_token=env.YOUTRACK_WEBHOOK_TOKEN,
+            collector_token=env.COLLECTOR_TOKEN,
             sync_put_max_bytes=env.SYNC_PUT_MAX_BYTES,
             sync_heartbeat_seconds=env.SYNC_HEARTBEAT_SECONDS,
             ticket_url_template=env.TICKET_URL_TEMPLATE or None,

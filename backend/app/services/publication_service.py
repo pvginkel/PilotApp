@@ -19,7 +19,9 @@ take turns, so that a sub-agent's thread finds its main thread and its
 spawning Tool Call whichever comes first.
 """
 
+import hmac
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, get_args
@@ -41,7 +43,12 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, aliased
 
-from app.exceptions import PublicationInvalidException
+from app.app_config import AppSettings
+from app.exceptions import (
+    AuthenticationException,
+    CollectorProtocolUnsupportedException,
+    PublicationInvalidException,
+)
 from app.models import (
     Call,
     Compaction,
@@ -78,6 +85,17 @@ from app.schemas.publication import (
 from app.services.advisory_turn import turn_key
 
 logger = logging.getLogger(__name__)
+
+COLLECTOR_PROTOCOL_MIN = 1
+"""The oldest protocol version the server takes of a collector."""
+
+COLLECTOR_PROTOCOL_MAX = 1
+"""The newest protocol version the server takes of a collector. A change to a
+request or response shape of the collector's routes bumps it, and
+`COLLECTOR_PROTOCOL_MIN` with it when the server cannot serve the old
+collector."""
+
+_VERSION = re.compile(r"[0-9]+")
 
 PUBLICATION_LOCK = 247
 """The first key of a conversation's turn (`advisory_turn`); the second is
@@ -197,10 +215,41 @@ def _faults(publication: PublicationSchema) -> list[str]:
 
 
 class PublicationService:
-    """Writes a publication into the record, on the caller's transaction."""
+    """Admits a collector's call, and writes its publication into the record
+    on the caller's transaction."""
 
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, app_settings: AppSettings) -> None:
         self.db = db
+        self.app_settings = app_settings
+
+    def admit(self, authorization: str | None, protocol: str | None) -> None:
+        """Let a collector's call through, its two headers' values given.
+
+        Refused, in this order: without the collector's bearer, and always
+        while `COLLECTOR_TOKEN` is empty; in a protocol version outside the
+        accepted range. A refused call touches nothing.
+
+        Raises:
+            AuthenticationException: the call does not carry the bearer.
+            CollectorProtocolUnsupportedException: the version is outside
+                the range, or the call names none.
+        """
+        token = self.app_settings.collector_token
+        if not token or not hmac.compare_digest(
+            (authorization or "").encode(), f"Bearer {token}".encode()
+        ):
+            raise AuthenticationException(
+                "Cannot take the collector's call because the request does not"
+                " carry the collector's bearer"
+            )
+        if (
+            protocol is None
+            or not _VERSION.fullmatch(protocol)
+            or not COLLECTOR_PROTOCOL_MIN <= int(protocol) <= COLLECTOR_PROTOCOL_MAX
+        ):
+            raise CollectorProtocolUnsupportedException(
+                protocol, COLLECTOR_PROTOCOL_MIN, COLLECTOR_PROTOCOL_MAX
+            )
 
     def publish(self, publication: PublicationSchema) -> Transcript:
         """Take a whole publication of one Transcript, and return its row.

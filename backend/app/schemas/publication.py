@@ -21,6 +21,11 @@ Count = Annotated[int, Field(ge=0, le=2_147_483_647)]
 """A number of tokens, characters or milliseconds, which an `integer` column
 holds."""
 
+Size = Annotated[int, Field(ge=0, le=9_007_199_254_740_991)]
+"""A file's size in bytes, up to the largest integer every JSON reader takes
+exactly, 2^53 - 1: a bound past it reaches the frontend's OpenAPI cache
+rounded, through the JavaScript that writes it."""
+
 Place = Annotated[int, Field(ge=1, le=2_147_483_647)]
 """A row's place among its Transcript's rows of its entity, in the file's
 order, from 1."""
@@ -30,6 +35,14 @@ CallTokenKind = Literal[
 ]
 """A Token Kind a Call's tokens are counted by: one nothing is within (DB
 547)."""
+
+
+class CollectorProtocolRangeSchema(BaseModel):
+    """The protocol versions the server accepts of a collector, both ends
+    included: a 426's body."""
+
+    min: int = Field(description="The oldest protocol version accepted")
+    max: int = Field(description="The newest protocol version accepted")
 
 
 class _Published(BaseModel):
@@ -264,9 +277,7 @@ class PublicationSchema(_Published):
         default=None,
         description="Claude Code's id of the sub-agent, none on a main thread",
     )
-    file_size: int = Field(
-        ge=0, le=9_223_372_036_854_775_807, description="The file's size in bytes"
-    )
+    file_size: Size = Field(description="The file's size in bytes")
     file_modified_at: AwareDatetime = Field(description="The file's time")
     collector: PublishedVersionSchema = Field(
         description="The collector's version that read the file"

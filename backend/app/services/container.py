@@ -573,7 +573,9 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
 
     # A collector's publication of a transcript (F152.3)
-    publication_service = providers.Factory(PublicationService, db=db_session)
+    publication_service = providers.Factory(
+        PublicationService, db=db_session, app_settings=app_config
+    )
 
     testing_sync_service = providers.Factory(
         TestingSyncService,

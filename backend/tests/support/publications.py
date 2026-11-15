@@ -1,14 +1,27 @@
 """Publications of an invented transcript, as a collector sends one: each
-helper gives a part of the call, and `whole` the call, validated."""
+helper gives a part of the call, and `whole` the call, validated;
+`collector_headers` the headers it is sent under."""
 
 from datetime import timedelta
 from typing import Any
 
 from app.schemas.publication import PublicationSchema
+from app.services.publication_service import COLLECTOR_PROTOCOL_MAX
 from tests.support.transcripts import CAMP, OPUS, STARTED, SUB_AGENT
+
+COLLECTOR_TOKEN = "an-invented-collector-token"
+"""The collector's bearer the test app is set with."""
 
 SPAWNING = "toolu_0031"
 """The `tool_use_id` of the call that started the invented sub-agent."""
+
+
+def collector_headers() -> dict[str, str]:
+    """The headers every call of a collector's carries."""
+    return {
+        "Authorization": f"Bearer {COLLECTOR_TOKEN}",
+        "X-Pilot-Collector-Protocol": str(COLLECTOR_PROTOCOL_MAX),
+    }
 
 
 def hook_run(**overrides: Any) -> dict[str, Any]:

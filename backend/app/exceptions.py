@@ -95,6 +95,20 @@ class SyncProtocolUnsupportedException(BusinessLogicException):
         super().__init__(message, error_code="SYNC_PROTOCOL_UNSUPPORTED")
 
 
+class CollectorProtocolUnsupportedException(BusinessLogicException):
+    """Raised when a collector's call speaks a protocol version outside the
+    range the server accepts; answered 426 with the range."""
+
+    def __init__(self, version: str | None, minimum: int, maximum: int) -> None:
+        self.minimum = minimum
+        self.maximum = maximum
+        message = (
+            f"Cannot take the collector's call because protocol version {version!r}"
+            f" is outside {minimum} to {maximum}"
+        )
+        super().__init__(message, error_code="COLLECTOR_PROTOCOL_UNSUPPORTED")
+
+
 class PublicationInvalidException(ValidationException):
     """Raised when a collector's publication contradicts itself or the
     record's rules for a Transcript; `faults` names each one, and nothing of
