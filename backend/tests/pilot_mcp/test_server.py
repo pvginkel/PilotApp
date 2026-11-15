@@ -938,7 +938,8 @@ STORE_SURFACE = {
                     "default": None,
                     "description": (
                         "Why the work item is closed for good, in a line its done"
-                        " line carries: give it for a work item you replaced, and"
+                        " line carries: give it for a work item you replaced or one a"
+                        " person dropped, and"
                         " leave it out to stop one a person may resume"
                     ),
                     "title": "Reason",
@@ -955,7 +956,8 @@ STORE_SURFACE = {
         " moot. A turn in flight is interrupted and the conversation kept; the item"
         " shows it stopped by Pilot, and a person can resume it. With `reason`,"
         " the work item is closed for good in the same act: one you replaced with"
-        " another, which nobody is to resume. It is stopped where it was not, one"
+        " another, or one a person dropped with nothing in its place, their words"
+        " the reason, which nobody is to resume. It is stopped where it was not, one"
         " stopped earlier included, and done as cancelled, by you: its line shows"
         " the cancelled mark and your reason, it waits on nobody, and it takes no"
         " Resume and no undo. The documents its run put to a person stay open. An"
