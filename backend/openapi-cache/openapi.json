@@ -97,7 +97,7 @@
             "title": "Cards"
           },
           "claims": {
-            "description": "The claimed actions a work item does, by their blocks' ids: open actions of registered documents of the project or of its items of Pilot's own (DB decision 64, widened by D4)",
+            "description": "The claimed actions a work item does, by their blocks' ids: open actions of registered documents of the project or of its items of Pilot's own (DB decision 64, widened by D224)",
             "examples": [
               [
                 "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/A1"
@@ -4308,7 +4308,7 @@
                 "type": "null"
               }
             ],
-            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline; null otherwise"
+            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline that is theirs with no block held, else the run's first; null otherwise"
           },
           "doing": {
             "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.Doing",
@@ -4531,7 +4531,7 @@
                 "type": "null"
               }
             ],
-            "description": "While `waiting_on_answer`: the run's open document the person answers, the first on the timeline, which the strip links; null otherwise"
+            "description": "While `waiting_on_answer`: the run's open document the person answers, the first on the timeline that is theirs with no block held, else the run's first, which the strip links; null otherwise"
           },
           "doing": {
             "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.Doing",
@@ -6402,7 +6402,7 @@
                 "type": "null"
               }
             ],
-            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline; null otherwise"
+            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline that is theirs with no block held, else the run's first; null otherwise"
           },
           "doing": {
             "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.Doing",
@@ -10066,7 +10066,7 @@
                 "type": "null"
               }
             ],
-            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline; null otherwise"
+            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline that is theirs with no block held, else the run's first; null otherwise"
           },
           "doing": {
             "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.Doing",
@@ -10289,7 +10289,7 @@
                 "type": "null"
               }
             ],
-            "description": "While `waiting_on_answer`: the run's open document the person answers, the first on the timeline, which the strip links; null otherwise"
+            "description": "While `waiting_on_answer`: the run's open document the person answers, the first on the timeline that is theirs with no block held, else the run's first, which the strip links; null otherwise"
           },
           "doing": {
             "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.Doing",

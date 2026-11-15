@@ -19,7 +19,7 @@ The reconcile of one member reads what waits on them
   else nothing is pushed.
 
 Whatever is pushed, the sighting of an item that no longer waits on them is
-deleted (DB decision 157), so that it alerts when it comes to wait again; the
+deleted (D157), so that it alerts when it comes to wait again; the
 silent update for one that stopped waiting while they were online elsewhere
 is not sent at their going offline. A push some browser of theirs took
 (`WebPushService.push`) shows them every item it named or counted; an alert

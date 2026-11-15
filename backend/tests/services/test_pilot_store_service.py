@@ -543,7 +543,7 @@ class TestPilotStoreServiceAnswer:
     ) -> None:
         """A close the chat records on a person's behalf is theirs, and the
         chat's own turn carries it out (P-182), which takes the item: no Undo
-        after it (D5)."""
+        after it (D225)."""
         run = _brain(session, project, environment)
         item = _bear(container, project, run, "decision", "Which tent?", DECISION)
 
@@ -1005,7 +1005,7 @@ class TestPilotStoreServiceMark:
         undo: bool,
     ) -> None:
         """A notice's Read keeps its Undo; a review's Reviewed is carried out
-        by the chat's turn, which takes it (D5)."""
+        by the chat's turn, which takes it (D225)."""
         run = _brain(session, project, environment)
         item = _bear(container, project, run, kind, title, text)
 
@@ -2740,7 +2740,7 @@ class TestPilotStoreServiceAddWork:
         project: Project,
         environment: Environment,
     ) -> None:
-        """D4: a claim names an action of an item a session of Pilot's own
+        """D224: a claim names an action of an item a session of Pilot's own
         added, as one of a worker's document."""
         run = _brain(session, project, environment, "job")
         own = _bear(container, project, run, "document", "Cut-over", CUT_OVER)

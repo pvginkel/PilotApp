@@ -120,7 +120,7 @@ class ClaimAssignment(db.Model):  # type: ignore[name-defined]
 
     That the Work is a worker's run of the Block's Project, and the Block an
     open action of a registered document of it or of an item of Pilot's own
-    of it (DB 261, widened by D4), is the server's check at the `add_item`:
+    of it (DB 261, widened by D224), is the server's check at the `add_item`:
     no key reaches the Block's Project from this row.
     """
 

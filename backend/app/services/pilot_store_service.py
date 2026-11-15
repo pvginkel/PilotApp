@@ -253,7 +253,7 @@ class PilotStoreService:
         `starting`, as the gate leaves it (F141.4); named for the claimed
         actions its `claims` give, each an open action of a registered
         document of the project or of an item of Pilot's own of it (F21.6; DB
-        261, widened by D4), and for the blocks its
+        261, widened by D224), and for the blocks its
         `researches` give, whose facts it checks, each unanswered in an open
         registered document of the project (F52.3; DB 293). A wait is recorded
         with its title, a card wait's `cards` and `states`, a timed wait's
@@ -410,7 +410,7 @@ class PilotStoreService:
         their behalf through the chat, with `note` and, for `deferred`, `to`
         (F42.1, F86.2): the record's own answer, an item's undo included, but
         that an item of Pilot's own it closes is consumed by the brain's
-        Session, whose turn carries it out, and offers no undo (D5). The
+        Session, whose turn carries it out, and offers no undo (D225). The
         call `tool_use_id`'s effect is "Answered · <local id> · <title>", the
         draft's title its own, else its file's name.
 
@@ -493,7 +493,7 @@ class PilotStoreService:
         through the chat (F86.3): Done on a document, with its
         recommendations, Read on a notice, Reviewed on a review, as the record
         marks them, Done and Reviewed on an item of Pilot's own consumed by
-        the brain's Session, which offers no undo (D5). Without `person`,
+        the brain's Session, which offers no undo (D225). Without `person`,
         Pilot's own Done on a document it settled whole (DB decision 42), or
         on a registered document of one block it settled, or on an open wait,
         with its `note` (F27.4, DB 300). The call `tool_use_id`'s effect is

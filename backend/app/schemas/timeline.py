@@ -317,7 +317,8 @@ class HoldSchema(BaseModel):
     asked_in: DocumentLinkSchema | None = Field(
         description=(
             "While its run waits on the person: the run's open document they "
-            "answer, the first on the timeline; null otherwise"
+            "answer, the first on the timeline that is theirs with no block "
+            "held, else the run's first; null otherwise"
         )
     )
 
@@ -359,8 +360,8 @@ class PilotsWorkSchema(BaseModel):
     asked_in: DocumentLinkSchema | None = Field(
         description=(
             "While `waiting_on_answer`: the run's open document the person "
-            "answers, the first on the timeline, which the strip links; null "
-            "otherwise"
+            "answers, the first on the timeline that is theirs with no block "
+            "held, else the run's first, which the strip links; null otherwise"
         )
     )
 

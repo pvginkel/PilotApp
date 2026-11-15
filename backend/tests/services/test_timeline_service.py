@@ -3890,7 +3890,7 @@ class TestPilotsWork:
     def test_a_claimed_action_of_an_item_of_pilots_own_is_held_and_handed_back(
         self, camp: Camp
     ) -> None:
-        """A claim names an action of an item of Pilot's own too (D4): its
+        """A claim names an action of an item of Pilot's own too (D224): its
         hold, its claim and a Cancel's hand-back read as a worker's
         document's do, the item linked by its title."""
         own = camp.own("action", "The cut-over", _CUT_OVER)

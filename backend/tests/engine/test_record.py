@@ -4918,7 +4918,7 @@ class TestRecordServiceLastDoneTakesUndo:
         container: ServiceContainer,
         opened: Project,
     ) -> None:
-        """A worker did the action Pilot claimed of its own item (D4): the job
+        """A worker did the action Pilot claimed of its own item (D224): the job
         after its turn writes the `done`."""
         item, document = _bear(
             session,
@@ -6253,7 +6253,7 @@ def _work_item(
 class TestRecordServiceClaims:
     """The claimed actions a work item is named for at its `add_item`: open
     actions of registered documents of its project or of its items of
-    Pilot's own (DB 261, widened by D4), one Claim Assignment each, never
+    Pilot's own (DB 261, widened by D224), one Claim Assignment each, never
     changed (DB 260; decision 64)."""
 
     def test_open_actions_a_claim_among_them_are_given_to_the_work_item(
@@ -6639,7 +6639,7 @@ class TestRecordServiceResearches:
         container: ServiceContainer,
         opened: Project,
     ) -> None:
-        """Researches stay on registered documents (D4)."""
+        """Researches stay on registered documents (D224)."""
         item, _ = _bear(
             session,
             container,

@@ -730,7 +730,7 @@ by: agent
 at: 2026-10-26T09:00:00Z
 ```
 """
-"""An item of Pilot's own whose one action Pilot claimed for a worker (D4)."""
+"""An item of Pilot's own whose one action Pilot claimed for a worker (D224)."""
 
 
 HOSTS = """# Plan review for 060
@@ -978,7 +978,7 @@ class TestWorkerTurnEnded:
         briefs: BriefService,
         opened: Project,
     ) -> None:
-        """A claim names an action of an item of Pilot's own too (D4), given
+        """A claim names an action of an item of Pilot's own too (D224), given
         as a worker's document's is, for its `done`."""
         chat = models.Session(
             project_id=opened.id,

@@ -5,7 +5,7 @@ open items (F5.1); Archive's and Reopen's close of the archive question (DB
 a work item's place and its done at its turn's end (DB Work, decision 44);
 the claimed actions a work item is named for at its `add_item`, of a
 registered document or an item of Pilot's own (DB decision 64, widened by
-D4); an item of Pilot's own done at the save that writes its last open
+D224); an item of Pilot's own done at the save that writes its last open
 block's `done` (DB 163); a person's fold of an open item and their
 unfold (DB decision 75); the chat's cancel of an ask Pilot added, on a
 person's word (DB 297); and a stopped work item's close for good, a person's
@@ -30,7 +30,7 @@ withdraws the job (`Jobs`). One the chat records on their behalf, whose own
 turn carries the ruling out, places none and is consumed on the spot by the
 chat's Session; an item of Pilot's own that a save closes, writing its last
 open block's `done`, by the Session the save is credited to. Neither offers
-an Undo after it (D5), as after a brief; a notice's Read keeps its Undo.
+an Undo after it (D225, D226), as after a brief; a notice's Read keeps its Undo.
 """
 
 import uuid
@@ -839,7 +839,7 @@ class RecordService:
     ) -> list[Block]:
         """The Blocks `block_ids`, each `<item id>/<local id>`, that a work
         item added to `project` may be named for as the claimed actions it
-        does (DB 261, widened by D4): open actions, a claim not yet done among
+        does (DB 261, widened by D224): open actions, a claim not yet done among
         them, of open registered documents of the project or of its open
         items of Pilot's own (`pilots_own`), each document's row held until
         the transaction ends, in the caller's, which holds the project's row.
@@ -1018,7 +1018,7 @@ class RecordService:
         open block, a `done` Document Version of the published text and the
         item done at the save by Pilot, its Done Cause `settled` (DB 163), and
         no job after it; consumed on the spot by `session`, so that it offers
-        no Undo (D5), as a Wait Pilot marks. A save no Session's took nothing,
+        no Undo (D226), as a Wait Pilot marks. A save no Session's took nothing,
         and the item keeps its Undo. An item done already, or of an archived
         project (D012), stays as it is."""
         if item.done_at is not None or project.archived:
@@ -1172,7 +1172,7 @@ class RecordService:
         close of an item of
         Pilot's own, but a notice's Read, places the job after it, or, the
         chat's, is consumed by the brain's Session `session_id`, whose own
-        turn carries it out (D5)."""
+        turn carries it out (D225)."""
         item.done_at = at
         item.done_cause_code = cause
         item.done_by_user_id = user.id
@@ -1203,7 +1203,7 @@ class RecordService:
         after it (DB Work Trigger `item_done`); Pilot's own close, made by a
         session acting on the item already, starts none, nor does one the chat
         records on a person's behalf, whose own turn carries it out and which
-        that turn's Session consumes (D5)."""
+        that turn's Session consumes (D225)."""
         return (
             self.db.scalar(
                 select(SessionKind.surface)
