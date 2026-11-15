@@ -912,6 +912,28 @@ class TestWorkerTurnEnded:
             "Registered nothing this run."
         ]
 
+    def test_a_run_that_registered_nothing_carries_its_whole_final_message(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        """P-291: a finding stated only in the body of a silent turn's final
+        message reaches the pass, quoted whole, in place of the last line."""
+        run = _worker_run(session, container, opened, None)
+        _turn_ended(session, container, run, LAST_WORDS)
+
+        assert briefs.job(opened, _after(run), AT, AT).split("\n\n")[3:] == [
+            f'The work item: "Fixing the stock" ({run.id}), repository'
+            " example/Soup, environment example-soup-3f2a1c, session claude-7;"
+            " its turn ended 2026-10-26T09:29:50Z.\n"
+            "Registered nothing this run. Its final message, whole:\n"
+            "> Fixed the stock.\n"
+            ">\n"
+            ">   Registered the notes; ending the turn."
+        ]
+
     def test_the_claimed_actions_it_was_given_are_named_as_they_stand(
         self,
         session: DbSession,

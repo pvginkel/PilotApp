@@ -335,13 +335,18 @@ class BriefService:
         """The job after the turn of the worker's run `run_id` (design 3 D2):
         `/pre-rule`, then the work item's line, the documents the run
         registered in the order registered, each published or its read failed
-        with the reason the read recorded, else that it registered nothing,
-        the files attached on the work item, the stage session's debrief
+        with the reason the read recorded, else that it registered nothing and
+        the whole text its turn ended with, which the line then leaves out
+        (P-291), the files attached on the work item, the stage session's debrief
         (`_debriefed`), and the claimed actions it was given (`_given`) and
         the blocks it researched (`_researched`); then every open note and the
         deferrals without a home, the pass's (F57.4)."""
-        lines: list[str | None] = [self._run_line(run_id)]
-        lines.extend(self._registered(run_id) or ["Registered nothing this run."])
+        registered = self._registered(run_id)
+        lines: list[str | None] = [self._run_line(run_id, last_line=bool(registered))]
+        if registered:
+            lines.extend(registered)
+        else:
+            lines.extend(self._registered_nothing(run_id))
         lines.append(self._attached(run_id))
         lines.extend(self._debriefed(run_id))
         lines.extend(self._given(run_id))
@@ -661,11 +666,11 @@ class BriefService:
             holds(Reading(self.db), {document_id for document_id, *_ in named}).held
         )
 
-    def _run_line(self, run_id: uuid.UUID) -> str:
+    def _run_line(self, run_id: uuid.UUID, *, last_line: bool) -> str:
         """The work item's line: its title and id, the plan's task it serves,
         its repository, environment and controller session, each that it
-        has, its turn's end and its last line, the text its turn ended
-        with."""
+        has, its turn's end and, where `last_line`, its last line, the text
+        its turn ended with."""
         item = self.db.get_one(Item, run_id)
         session = self.db.get_one(AgentSession, run_id)
         repo = self.db.get_one(Work, run_id).repo
@@ -694,22 +699,45 @@ class BriefService:
         ]
         line = ", ".join(fact for fact in facts if fact is not None)
         line += f"; its turn ended {utc_time(item.done_at)}"
-        last = self._last_line(run_id)
+        last = self._last_line(run_id) if last_line else None
         if last is not None:
             line += f' — the item\'s last line: "{last}"'
         return f"{line}."
 
-    def _last_line(self, run_id: uuid.UUID) -> str | None:
-        """The last line of the text the run's turn ended with, its `result`
-        record's; None when it ended with none."""
+    def _registered_nothing(self, run_id: uuid.UUID) -> list[str]:
+        """That the run registered nothing, and where its turn ended with
+        text, the whole of it, quoted: a finding the worker stated only there
+        is all the pass has to go on (P-291)."""
+        lines = [line.rstrip() for line in self._final_text(run_id).splitlines()]
+        while lines and not lines[0]:
+            lines.pop(0)
+        while lines and not lines[-1]:
+            lines.pop()
+        if not lines:
+            return ["Registered nothing this run."]
+        return [
+            "Registered nothing this run. Its final message, whole:",
+            *(f"> {line}" if line else ">" for line in lines),
+        ]
+
+    def _final_text(self, run_id: uuid.UUID) -> str:
+        """The text the run's turn ended with, its `result` record's; empty
+        when it ended with none."""
         # A run done at its turn's end has its `result` record.
         (result,) = read_records(
             self.db, run_id, kind=RecordKind.RESULT, limit=1, newest_first=True
         )
         text = result.record.payload.get("result")
-        if not isinstance(text, str):
-            return None
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        return text if isinstance(text, str) else ""
+
+    def _last_line(self, run_id: uuid.UUID) -> str | None:
+        """The last line of the text the run's turn ended with; None when it
+        ended with none."""
+        lines = [
+            line.strip()
+            for line in self._final_text(run_id).splitlines()
+            if line.strip()
+        ]
         return lines[-1] if lines else None
 
     def _read_failures(self, run_id: uuid.UUID, registered: int) -> dict[str, str]:

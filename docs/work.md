@@ -382,9 +382,13 @@ work item you add is held until a person resumes it.` Then by trigger:
 - **A worker's turn ended**: `/pre-rule`, kind `a worker's turn ended`; the work item's line, `The
   work item: "<title>" (<id>)`, its plan task, repository, environment by its id and controller
   session by its name, each that it has, `; its turn ended <stamp>` and ` — the item's last line:
-  "<line>"`, the last non-blank line of the text its turn ended with, where there is one; then
+  "<line>"`, the last non-blank line of the text its turn ended with, where there is one and the run
+  registered a document; then
   `Registered this run, in the order registered:` and a line per document, `- <path> (<item id>) —
-  published` or `— read failed: <reason>`, or `Registered nothing this run.`; then `Attached on the
+  published` or `— read failed: <reason>`, or `Registered nothing this run.`, which, where the turn
+  ended with text, goes on ` Its final message, whole:` and the text, each line quoted with `> `
+  (a blank one `>`), the work item's line then leaving its last line out, so that a finding stated
+  only in a silent turn's message reaches the pass whole (P-291); then `Attached on the
   work item: 1 file (timeline.json lists it).` or `<N> files (timeline.json lists them).` where some
   are; then, where its session gave its debrief, `The stage session's debrief, as given:` and the
   words on the lines after it, the whitespace they end in left off, none of its entries carried,
