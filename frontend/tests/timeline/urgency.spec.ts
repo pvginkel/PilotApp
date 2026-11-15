@@ -295,6 +295,52 @@ test.describe('“N open above”', () => {
     await expect(timeline.openAbove).toHaveCount(0);
   });
 
+  test('counts a failed job’s Retry above, on a done line, as the badge does', async ({ people, projects, timeline, chats, controller }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Retried line'), members: [me.handle!] });
+    // A done line, Pilot's job after its answer failed.
+    const asked = await projects.place(id, { kind: 'question', title: 'Which lake?', text: QUESTION, by_pilot: true });
+    const started = await chats.opening(id);
+    await projects.answer(asked, 'Q1', 'Lake Como');
+    await controller.finish(chats.store, await started(), 'error', 'The model is overloaded.');
+    await answered(projects, id, 14);
+    await timeline.open(id);
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+
+    await expect(timeline.item(asked).root).toHaveAttribute('data-state', 'done');
+    await expect(timeline.item(asked).job.retry).toHaveCount(1);
+    await expect(timeline.item(asked).root).toHaveAttribute('data-actionable', 'true');
+    await expect(timeline.item(asked).root).not.toBeInViewport();
+    await expect(timeline.openAbove).toHaveText('1 open above');
+    await timeline.openAbove.click();
+    await expect(timeline.item(asked).root).toBeInViewport();
+    await expect(timeline.openAbove).toHaveCount(0);
+  });
+
+  test('counts a failed job’s Retry above, on a wait, as the badge does', async ({ people, projects, timeline, waits, chats, controller }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Retried wait'), members: [me.handle!] });
+    // A wait, the run its firing took failed.
+    const key = `W${makeUniqueToken(6).toUpperCase()}`;
+    const wait = await waits.add(id, { kind: 'card_wait', title: 'The lake’s card', cards: [`${key}-1`], states: ['Done'] });
+    expect(await waits.transition({ card: `${key}-1`, from: 'In Progress', to: 'Done', by: 'pieter' })).toBe(1);
+    const opened = await chats.opening(id);
+    await waits.run(wait);
+    await controller.finish(chats.store, await opened(), 'error', 'The model is overloaded.');
+    await answered(projects, id, 14);
+    await timeline.open(id);
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+
+    await expect(timeline.item(wait).root).toHaveAttribute('data-state', 'open');
+    await expect(timeline.item(wait).job.retry).toHaveCount(1);
+    await expect(timeline.item(wait).root).toHaveAttribute('data-actionable', 'true');
+    await expect(timeline.item(wait).root).not.toBeInViewport();
+    await expect(timeline.openAbove).toHaveText('1 open above');
+    await timeline.openAbove.click();
+    await expect(timeline.item(wait).root).toBeInViewport();
+    await expect(timeline.openAbove).toHaveCount(0);
+  });
+
   test('stays away for done lines above and for open items below', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Below'), members: [me.handle!] });

@@ -4,7 +4,7 @@
  * and on its project's live event (F80.2; use-project-events.ts).
  */
 
-import { RESUMABLE } from '@/hooks/use-work-acts';
+import { offersRetry, RESUMABLE } from '@/hooks/use-work-acts';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
@@ -57,11 +57,14 @@ export const isLine = (item: TimelineItem) => item.work === null || !item.work.p
 /**
  * Whether an item can be acted on, which "N open above" counts (F11): open, and a prose item but
  * the opening that is not Pilot's, a notice urgent or not, whichever member it is for; or a work
- * item stopped or failed, until it is retried, and not while its nudge is owed. Never work that
- * runs, starts or is held, nor a wait. It is what waits on a person (F94.5) less two of its
- * filters, a notice's urgency and the member an item is for.
+ * item stopped or failed, until it is retried, and not while its nudge is owed; and any item, a
+ * wait or a done line included, whose Pilot's job it shows stopped or failed with its Retry
+ * offered (`offersRetry`). Never work that runs, starts or is held, nor a wait whose job
+ * offers no Retry. It is what waits on a person (F94.5) less two of its filters, a notice's urgency and
+ * the member an item is for.
  */
 export function isActionable(item: TimelineItem): boolean {
+  if (item.job !== null && offersRetry(item.job.work)) return true;
   if (item.done !== null) return false;
   switch (item.form) {
     case 'prose':

@@ -366,8 +366,10 @@ timeline's place ([`chats.md`](chats.md)).
   above them (D186; `isActionable`, `hooks/use-timeline.ts`; each item's article carries it as
   `data-actionable`): an open prose item but the opening that Pilot is not working on, a notice
   urgent or not and an item for whichever member alike, and a work item stopped or failed, until it
-  is retried and not while its nudge is owed. A done line, work that runs, starts, is held or is
-  idle, and a wait never count. Its click scrolls the nearest of them to the top. The chip counts
+  is retried and not while its nudge is owed. An item of any kind, a done line or a wait included,
+  counts too while the job it shows is failed or stopped with its Retry offered (`offersRetry`),
+  as the badge counts it. Work that runs, starts, is held or is idle, and a done line or a wait with
+  no Retry on it never count. Its click scrolls the nearest of them to the top. The chip counts
   what anyone could act on; the project's badge, its status and the notification count what waits
   on the person ([`projects.md`](projects.md), [`notifications.md`](notifications.md)).
 
