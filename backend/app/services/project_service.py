@@ -891,8 +891,10 @@ class ProjectService:
         """The project paused or resumed: the reasons of its held work items
         and of those whose nudge is owed moved (`held_reason`); once the
         transaction commits, the halt file written where its work items run
-        or deleted where nothing holds it any more (F141.3), and on a resume
-        the gate asked again (F141.5) and the nudges owed sent (DB 232)."""
+        or deleted where nothing holds it any more (F141.3), the gate asked
+        again, which on a resume lets its held starts go on (F141.5) and
+        either way turns their Holds to the reason it then reads (DB 362),
+        and on a resume the nudges owed sent (DB 232)."""
         for session in self.db.scalars(
             select(AgentSession).where(
                 AgentSession.project_id == project.id,
@@ -904,8 +906,8 @@ class ProjectService:
         ):
             work_moved(self.engine_bus, session)
         after_commit(self.halt_file_service.request)
+        after_commit(self.session_start_service.release_held)
         if not project.paused:
-            after_commit(self.session_start_service.release_held)
             after_commit(self.session_start_service.send_nudges)
 
     def _activities(

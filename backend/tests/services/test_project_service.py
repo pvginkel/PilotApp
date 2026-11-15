@@ -3058,6 +3058,54 @@ class TestTransition:
         )
 
     @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open", "paused": True}, TransitionKind.RESUMED),
+            ({"state": "open"}, TransitionKind.PAUSED),
+        ],
+    )
+    def test_a_pause_and_a_resume_ask_the_gate_again_once_they_commit(
+        self,
+        container: ServiceContainer,
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        """F141.5: the resume lets the held starts go on; and either turns
+        their Holds to the reason the gate then reads (DB 362)."""
+        made = _make(container, name="Camp", **spec)
+        starts = container.session_start_service()
+        after_commit_module.clear_after_commit_callbacks()
+        try:
+            container.project_service().transition(ADA, made.id, kind)
+
+            assert starts.release_held in after_commit_module._callbacks.get()
+        finally:
+            after_commit_module.clear_after_commit_callbacks()
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open", "autopilot": True}, TransitionKind.AUTOPILOT_OFF),
+            ({"state": "open", "paused": True}, TransitionKind.AUTOPILOT_ON),
+        ],
+    )
+    def test_a_change_that_keeps_the_pause_asks_the_gate_nothing(
+        self,
+        container: ServiceContainer,
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        starts = container.session_start_service()
+        after_commit_module.clear_after_commit_callbacks()
+        try:
+            container.project_service().transition(ADA, made.id, kind)
+
+            assert starts.release_held not in after_commit_module._callbacks.get()
+        finally:
+            after_commit_module.clear_after_commit_callbacks()
+
+    @pytest.mark.parametrize(
         ("spec", "kind", "nudged"),
         [
             ({"state": "open", "paused": True}, TransitionKind.RESUMED, True),

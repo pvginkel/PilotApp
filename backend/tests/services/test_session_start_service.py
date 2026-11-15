@@ -6,7 +6,8 @@ release (§13.4, §8.2; F141.5; DB 229, 230; V16, V24); the conversation of a ru
 whose documents are all closed continued as a new work item (decision 44;
 F26.7, F65; DB 241); a usage halt's hard stop (F135.6; DB 269); the nudge
 owed to a work item the hard stop stopped or whose turn ended under a halt or
-a pause (F135.3, F141.3; DB 232).
+a pause (F135.3, F141.3; DB 232); the Hold of each period a start is held
+(DB §2.5, Hold; 360 to 362, 559).
 
 The start's write and its loop's run are on the test's session: the run is
 called as its loop calls it. `TestStartLoop` and `TestHeldLoop` run the loops
@@ -41,6 +42,7 @@ from app.models import (
     ClarificationRun,
     Document,
     Environment,
+    Hold,
     Item,
     PlanTask,
     ProgressStep,
@@ -55,6 +57,7 @@ from app.models import (
     WriterQuestion,
 )
 from app.models.reference import (
+    HoldKind,
     ProgressState,
     ProjectState,
     RecordKind,
@@ -9357,3 +9360,868 @@ class TestTakeOver:
         assert WorkMoved(camp.project.id, job.id) in moves
         assert WorkMoved(camp.project.id, run.id) in moves
         assert ProjectChanged(camp.project.id) in moves
+
+
+def _holds(db: DbSession, run_id: uuid.UUID) -> list[Hold]:
+    """The Session's Holds, in the order written."""
+    return list(
+        db.scalars(select(Hold).where(Hold.session_id == run_id).order_by(Hold.id))
+    )
+
+
+def _kinds(db: DbSession, run_id: uuid.UUID) -> list[tuple[HoldKind, bool]]:
+    """The kind of each of the Session's Holds, in the order written, and
+    whether it is open."""
+    return [(hold.kind_code, hold.ended_at is None) for hold in _holds(db, run_id)]
+
+
+def _queued_job(
+    container: ServiceContainer, db: DbSession, project: Project
+) -> models.Session:
+    """A job held before its brief, as its placement writes one: its rows
+    alone, the gate not yet read for it."""
+    job = models.Session(
+        project_id=project.id,
+        kind_code="job",
+        cwd=STORE_REPO,
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.HELD,
+    )
+    db.add(job)
+    db.flush()
+    container.record_service().place_work(
+        project, job, "Deciding what is next", trigger=WorkTrigger.ITEM_DONE
+    )
+    return job
+
+
+class TestHoldOpens:
+    """A Hold opens where a Session is written `held`, of the kind of the
+    gate's reason, in the gate's order (DB 360, 362; V05)."""
+
+    def test_a_start_the_gate_lets_go_has_none(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _start(starts, session, project)
+
+        assert run.state_code == SessionState.STARTING
+        assert _holds(session, run.id) == []
+
+    @pytest.mark.parametrize(
+        ("week", "five_hour", "kind"),
+        [
+            (0.9, 0.1, HoldKind.WEEK_HALT),
+            (0.5, 0.75, HoldKind.FIVE_HOUR_HALT),
+            (0.95, 0.8, HoldKind.WEEK_HALT),
+        ],
+    )
+    def test_a_start_under_a_usage_halt_is_held_by_that_halt(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        week: float,
+        five_hour: float,
+        kind: HoldKind,
+    ) -> None:
+        _usage(session, week=week, five_hour=five_hour)
+
+        work = _held(starts, session, project)
+
+        (hold,) = _holds(session, work.id)
+        assert (hold.kind_code, hold.ended_at) == (kind, None)
+        # The moment its Session was written `held`.
+        assert hold.started_at == _read(session, work.id).turn_started_at
+
+    def test_a_start_in_a_paused_project_is_held_by_the_pause(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        project.paused = True
+        session.flush()
+
+        work = _held(starts, session, project)
+
+        assert _kinds(session, work.id) == [(HoldKind.PAUSE, True)]
+
+    def test_a_start_while_the_controller_is_unreachable_is_held_by_the_outage(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+
+        work = _held(starts, session, project)
+
+        assert _kinds(session, work.id) == [(HoldKind.OUTAGE, True)]
+
+    def test_a_start_with_no_slot_free_is_held_by_the_slot(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _occupying(session, project, 1)
+
+        work = _held(slotted, session, project)
+
+        assert _kinds(session, work.id) == [(HoldKind.SLOT, True)]
+
+    def test_the_kind_is_the_first_reason_in_the_gates_order(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        """Three Sessions the pause holds are three Holds, whatever else
+        would hold each."""
+        _occupying(session, project, 1)
+        controller_outage.call_unanswered()
+        project.paused = True
+        session.flush()
+
+        works = [_held(slotted, session, project) for _ in range(3)]
+
+        assert [_kinds(session, work.id) for work in works] == [
+            [(HoldKind.PAUSE, True)]
+        ] * 3
+
+    def test_a_chats_start_under_the_stores_update_is_held_by_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        hold(session)
+
+        chat = _brain(starts, session, project)
+        clear_after_commit_callbacks()
+
+        assert chat.state_code == SessionState.HELD
+        assert _kinds(session, chat.id) == [(HoldKind.STORE_UPDATE, True)]
+
+    def test_a_chat_the_gate_lets_go_has_none(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        chat = _brain(starts, session, project)
+        clear_after_commit_callbacks()
+
+        assert chat.state_code == SessionState.STARTING
+        assert _holds(session, chat.id) == []
+
+    def test_a_job_behind_another_of_its_project_is_held_by_the_queue(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _job(container, session, project, environment, SessionState.RUNNING)
+        job = _queued_job(container, session, project)
+
+        starts.start_brain(session, project, job, "place the job")
+        clear_after_commit_callbacks()
+
+        assert _read(session, job.id).state_code == SessionState.HELD
+        assert _kinds(session, job.id) == [(HoldKind.QUEUE, True)]
+
+    @pytest.mark.usefixtures("continues")
+    def test_a_continuation_waiting_for_its_conversation_is_held_by_it(
+        self,
+        container: ServiceContainer,
+        continues: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _ended_run(session, container, fake, project)
+        refinement = _read_at_its_end(
+            session, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        asking = _pass(session, container, project, run, (refinement, "D1", "Which?"))
+        container.clarification_service().pass_ended(asking)
+        clarifying = _clarifying(session, asking)
+        clarifying.state_code = SessionState.RUNNING
+        session.flush()
+
+        container.record_service().answer(
+            session.get_one(Document, refinement.id), "D1", person, "The lake"
+        )
+        clear_after_commit_callbacks()
+
+        continuation = _released(session, refinement)
+        assert continuation.state_code == SessionState.HELD
+        assert _kinds(session, continuation.id) == [(HoldKind.CONVERSATION, True)]
+        # The clarification run, which the gate let go, has none.
+        assert _holds(session, clarifying.id) == []
+
+        clarifying.state_code = SessionState.IDLE
+        session.flush()
+        _release(continues)
+
+        assert _read(session, continuation.id).state_code == SessionState.STARTING
+        assert _kinds(session, continuation.id) == [(HoldKind.CONVERSATION, False)]
+
+    def test_a_resume_the_gate_holds_opens_one(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        controller_outage.call_unanswered()
+
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        assert run.state_code == SessionState.HELD
+        (held,) = _holds(session, run.id)
+        assert (held.kind_code, held.ended_at) == (HoldKind.OUTAGE, None)
+        assert held.started_at == _turns(session, run.id)[-1].started_at
+
+    def test_a_resume_the_gate_lets_go_opens_none(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        assert run.state_code == SessionState.STARTING
+        assert _holds(session, run.id) == []
+
+    def test_a_nudge_the_gate_holds_leaves_the_session_one_open_hold(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starts = _services(container, supervise, project_max=1)[0]
+        halted = _halted_end(starts, fake, session, project)
+        _usage(session, week=0.5, five_hour=0.1)
+        _running(starts, session, project)
+
+        _nudge(starts)
+        clear_after_commit_callbacks()
+
+        assert _read(session, halted.id).state_code == SessionState.HELD
+        assert [
+            hold.kind_code
+            for hold in _holds(session, halted.id)
+            if hold.ended_at is None
+        ] == [HoldKind.SLOT]
+
+
+class TestHoldOfAStartSentBack:
+    """A `starting` Session a call the controller does not answer sends back
+    to `held` (DB 230) is held by the gate's reason as it then reads."""
+
+    def test_it_is_held_by_the_outage(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        run = _start(starts, session, project)
+        assert _holds(session, run.id) == []
+        fake.outage(answer="none")
+
+        _run(starts, run)
+        clear_after_commit_callbacks()
+
+        assert _read(session, run.id).state_code == SessionState.HELD
+        assert controller_outage.holds
+        assert _kinds(session, run.id) == [(HoldKind.OUTAGE, True)]
+
+    def test_a_pause_made_since_its_start_comes_before_the_outage(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _start(starts, session, project)
+        project.paused = True
+        session.flush()
+        fake.outage(answer="none")
+
+        _run(starts, run)
+        clear_after_commit_callbacks()
+
+        assert _read(session, run.id).state_code == SessionState.HELD
+        assert _kinds(session, run.id) == [(HoldKind.PAUSE, True)]
+
+    def test_one_whose_gate_reads_no_outage_is_held_by_the_outage_its_call_met(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        """The outage is one process's memory: the gate that reads the
+        Session may hold none by the time the Session is written back."""
+        starts = _services(container, supervise, outage=ControllerOutage())[0]
+        run = _start(starts, session, project)
+        fake.outage(answer="none")
+
+        _run(starts, run)
+        clear_after_commit_callbacks()
+
+        assert controller_outage.holds
+        assert _read(session, run.id).state_code == SessionState.HELD
+        assert starts.held(session, project, _read(session, run.id)) is None
+        assert _kinds(session, run.id) == [(HoldKind.OUTAGE, True)]
+
+    def test_a_job_sent_back_behind_none_is_held_by_the_outage(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _job(container, session, project, environment, SessionState.STARTING)
+        fake.outage(answer="none")
+
+        _run(starts, _read(session, job.id))
+        clear_after_commit_callbacks()
+
+        assert _read(session, job.id).state_code == SessionState.HELD
+        assert _kinds(session, job.id) == [(HoldKind.OUTAGE, True)]
+
+
+class TestHoldTurns:
+    """A reason that changes while a Session waits ends its Hold and starts
+    the next at the same moment (DB 362), where the release reads the gate
+    for it: every move of the gate asks for the release."""
+
+    def test_the_slot_takes_the_outages_place(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        starts = _services(container, supervise, work_max=1, project_max=1)[0]
+        _occupying(session, _project_named(session, person, "site"), 1)
+        controller_outage.call_unanswered()
+        work = _held(starts, session, project)
+
+        controller_outage.probe_answered()
+        _release(starts)
+
+        assert _read(session, work.id).state_code == SessionState.HELD
+        outage, slot = _holds(session, work.id)
+        assert (outage.kind_code, slot.kind_code) == (HoldKind.OUTAGE, HoldKind.SLOT)
+        assert outage.started_at < slot.started_at
+        assert (outage.ended_at, slot.ended_at) == (slot.started_at, None)
+
+    def test_a_pause_takes_the_slots_place_and_gives_it_back_at_the_resume(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        _occupying(session, project, 1)
+        work = _held(slotted, session, project)
+
+        _transition(session, project, person, TransitionKind.PAUSED)
+        _release(slotted)
+
+        assert _kinds(session, work.id) == [
+            (HoldKind.SLOT, False),
+            (HoldKind.PAUSE, True),
+        ]
+
+        _transition(session, project, person, TransitionKind.RESUMED)
+        _release(slotted)
+
+        assert _read(session, work.id).state_code == SessionState.HELD
+        assert _kinds(session, work.id) == [
+            (HoldKind.SLOT, False),
+            (HoldKind.PAUSE, False),
+            (HoldKind.SLOT, True),
+        ]
+        first, pause, second = _holds(session, work.id)
+        assert (first.ended_at, pause.ended_at) == (pause.started_at, second.started_at)
+
+    def test_a_halt_takes_the_pauses_place(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        project.paused = True
+        session.flush()
+        work = _held(starts, session, project)
+
+        _usage(session, week=0.95, five_hour=0.1)
+        _release(starts)
+
+        assert _kinds(session, work.id) == [
+            (HoldKind.PAUSE, False),
+            (HoldKind.WEEK_HALT, True),
+        ]
+
+    def test_the_five_hour_halt_takes_the_weeks_place(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _usage(session, week=0.95, five_hour=0.8)
+        work = _held(starts, session, project)
+
+        _usage(session, week=0.5, five_hour=0.8)
+        _release(starts)
+
+        assert _kinds(session, work.id) == [
+            (HoldKind.WEEK_HALT, False),
+            (HoldKind.FIVE_HOUR_HALT, True),
+        ]
+
+    def test_a_store_updates_start_takes_the_outages_place_and_its_lift_gives_it_back(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        chat = _brain(starts, session, project)
+        clear_after_commit_callbacks()
+        assert _kinds(session, chat.id) == [(HoldKind.OUTAGE, True)]
+
+        update = hold(session)
+        _release(starts)
+
+        assert _kinds(session, chat.id) == [
+            (HoldKind.OUTAGE, False),
+            (HoldKind.STORE_UPDATE, True),
+        ]
+
+        lift(session, update)
+        _release(starts)
+
+        assert _read(session, chat.id).state_code == SessionState.HELD
+        assert _kinds(session, chat.id) == [
+            (HoldKind.OUTAGE, False),
+            (HoldKind.STORE_UPDATE, False),
+            (HoldKind.OUTAGE, True),
+        ]
+
+    def test_the_queue_takes_the_pauses_place(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        _job(container, session, project, environment, SessionState.RUNNING)
+        _transition(session, project, person, TransitionKind.PAUSED)
+        job = _queued_job(container, session, project)
+        starts.start_brain(session, project, job, "place the job")
+        clear_after_commit_callbacks()
+
+        _transition(session, project, person, TransitionKind.RESUMED)
+        _release(starts)
+
+        assert _read(session, job.id).state_code == SessionState.HELD
+        assert _kinds(session, job.id) == [
+            (HoldKind.PAUSE, False),
+            (HoldKind.QUEUE, True),
+        ]
+
+    def test_the_reason_read_again_keeps_its_hold(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        work = _held(starts, session, project)
+        (opened,) = _holds(session, work.id)
+        started = opened.started_at
+
+        _release(starts)
+        _release(starts)
+
+        (kept,) = _holds(session, work.id)
+        assert (kept.id, kept.started_at, kept.ended_at) == (opened.id, started, None)
+
+    def test_a_session_held_with_no_hold_gets_one_at_the_gates_next_read(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        """No Hold is back-filled: a Session held before Holds were written
+        has one from the release's first read of it on."""
+        job = _fired_job(container, session, project, environment)
+        _transition(session, project, person, TransitionKind.PAUSED)
+        assert _holds(session, job.id) == []
+        before = datetime.now(UTC)
+
+        _release(starts)
+
+        (opened,) = _holds(session, job.id)
+        assert (opened.kind_code, opened.ended_at) == (HoldKind.PAUSE, None)
+        assert opened.started_at >= before
+
+    @pytest.mark.parametrize(
+        ("project_max", "state", "kinds"),
+        [
+            (3, SessionState.STARTING, [(HoldKind.OUTAGE, False)]),
+            (
+                1,
+                SessionState.HELD,
+                [(HoldKind.OUTAGE, False), (HoldKind.SLOT, True)],
+            ),
+        ],
+    )
+    def test_an_outage_hold_is_ended_or_turned_by_the_process_whose_gate_reads_it_next(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        project_max: int,
+        state: SessionState,
+        kinds: list[tuple[HoldKind, bool]],
+    ) -> None:
+        """The outage is one process's memory: another's, or the next one's
+        after it died, reads the gate with its own."""
+        met = ControllerOutage()
+        first = _services(container, supervise, outage=met)[0]
+        met.call_unanswered()
+        work = _held(first, session, project)
+        assert _kinds(session, work.id) == [(HoldKind.OUTAGE, True)]
+        _occupying(session, project, 1)
+        second = _services(
+            container, supervise, outage=ControllerOutage(), project_max=project_max
+        )[0]
+
+        _release(second)
+        clear_after_commit_callbacks()
+
+        assert met.holds
+        assert _read(session, work.id).state_code == state
+        assert _kinds(session, work.id) == kinds
+
+
+class TestHoldEnds:
+    """Each way out of `held` ends the Session's Hold, at that moment."""
+
+    def test_the_release_that_lets_it_go_ends_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        work = _held(starts, session, project)
+        controller_outage.probe_answered()
+        before = datetime.now(UTC)
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _read(session, work.id).state_code == SessionState.STARTING
+        (ended,) = _holds(session, work.id)
+        assert ended.kind_code == HoldKind.OUTAGE
+        assert ended.ended_at is not None and ended.ended_at >= before
+
+    def test_a_stop_ends_it_at_the_stop(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        work = _held(starts, session, project)
+
+        starts.stop(session, work.id, person)
+        clear_after_commit_callbacks()
+
+        run = _read(session, work.id)
+        (ended,) = _holds(session, work.id)
+        assert run.state_code == SessionState.STOPPED
+        assert ended.ended_at == run.stopped_at
+        # Stopped, the release reads the gate for it no more.
+        _release(starts)
+        assert _kinds(session, work.id) == [(HoldKind.OUTAGE, False)]
+
+    def test_a_stop_of_a_starting_session_writes_none(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _start(starts, session, project)
+
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+
+        assert _read(session, run.id).state_code == SessionState.STOPPED
+        assert _holds(session, run.id) == []
+
+    def test_pilots_close_of_a_held_work_item_ends_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        work = _held(starts, session, project)
+        pilot = session.get_one(User, _pilot_id(session))
+
+        starts.close(session, work.id, pilot, reason="Superseded by the new plan")
+        clear_after_commit_callbacks()
+
+        run = _read(session, work.id)
+        (ended,) = _holds(session, work.id)
+        assert run.state_code == SessionState.STOPPED
+        assert (ended.kind_code, ended.ended_at) == (HoldKind.OUTAGE, run.stopped_at)
+
+    def test_a_chats_stop_ends_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        hold(session)
+        chat = _brain(starts, session, project)
+        clear_after_commit_callbacks()
+
+        starts.stop_chat(session, chat.id, person, "stop Pilot's answer")
+        clear_after_commit_callbacks()
+
+        run = _read(session, chat.id)
+        (ended,) = _holds(session, chat.id)
+        assert run.state_code == SessionState.STOPPED
+        assert (ended.kind_code, ended.ended_at) == (
+            HoldKind.STORE_UPDATE,
+            run.stopped_at,
+        )
+
+    def test_a_projects_stop_ends_each_of_its_held_sessions(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """A Finish's and an Archive's: the pause that held three Sessions
+        leaves three ended Holds."""
+        project.paused = True
+        session.flush()
+        works = [_held(starts, session, project) for _ in range(3)]
+        at = datetime.now(UTC)
+
+        starts.stop_project(session, project, person, at)
+        clear_after_commit_callbacks()
+
+        for work in works:
+            (ended,) = _holds(session, work.id)
+            assert (ended.kind_code, ended.ended_at) == (HoldKind.PAUSE, at)
+
+    def test_a_stop_and_take_over_ends_a_held_jobs(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        job = _queued_job(container, session, project)
+        starts.start_brain(session, project, job, "place the job")
+        clear_after_commit_callbacks()
+        assert _kinds(session, job.id) == [(HoldKind.OUTAGE, True)]
+
+        starts.take_over(session, [job.id], person)
+        clear_after_commit_callbacks()
+
+        run = _read(session, job.id)
+        (ended,) = _holds(session, job.id)
+        assert (run.state_code, run.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert ended.ended_at == run.stopped_at
+
+    def test_a_withdrawal_ends_it(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        _transition(session, project, person, TransitionKind.PAUSED)
+        job = _queued_job(container, session, project)
+        starts.start_brain(session, project, job, "place the job")
+        clear_after_commit_callbacks()
+        at = datetime.now(UTC)
+
+        starts.withdraw(session, job, at)
+        clear_after_commit_callbacks()
+
+        (ended,) = _holds(session, job.id)
+        assert _read(session, job.id).state_code == SessionState.STOPPED
+        assert (ended.kind_code, ended.ended_at) == (HoldKind.PAUSE, at)
+
+
+class TestHoldsAtOnce:
+    """Each Hold is written under its Session's lock, so writers at once
+    leave the Session one open Hold (DB 362, 559). No loop of theirs runs:
+    the supervisor never starts."""
+
+    def test_two_releases_at_once_turn_a_hold_once(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            db.get_one(Project, project_id).paused = True
+        work_id = _committed_work(starts, container, project_id)
+        with scoped_session(container) as db:
+            assert _kinds(db, work_id) == [(HoldKind.PAUSE, True)]
+            # The pause's place taken by the outage, which both releases read.
+            db.get_one(Project, project_id).paused = False
+        container.controller_outage().call_unanswered()
+        holder = container.session_maker()()
+        try:
+            holder.execute(
+                text("SELECT id FROM sessions WHERE id = :id FOR UPDATE"),
+                {"id": work_id},
+            )
+            releases = [in_thread(lambda: _release(starts)) for _ in range(2)]
+            wait_until(lambda: lock_waits(container) == 2, "both releases waiting")
+            holder.rollback()
+        finally:
+            holder.close()
+
+        for release in releases:
+            release.result()
+        assert _committed(container, work_id).state_code == SessionState.HELD
+        with scoped_session(container) as db:
+            pause, outage = _holds(db, work_id)
+            assert (pause.kind_code, outage.kind_code) == (
+                HoldKind.PAUSE,
+                HoldKind.OUTAGE,
+            )
+            assert (pause.ended_at, outage.ended_at) == (outage.started_at, None)
+
+    def test_a_stop_and_a_release_at_once_leave_it_ended(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        container.controller_outage().call_unanswered()
+        work_id = _committed_work(starts, container, project_id)
+
+        def stop() -> None:
+            with scoped_session(container) as db:
+                person = db.scalars(
+                    select(User).where(User.kind_code == UserKind.PERSON)
+                ).one()
+                starts.stop(db, work_id, person)
+
+        holder = container.session_maker()()
+        try:
+            holder.execute(
+                text("SELECT id FROM sessions WHERE id = :id FOR UPDATE"),
+                {"id": work_id},
+            )
+            stopping = in_thread(stop)
+            wait_until(lambda: lock_waits(container) == 1, "the Stop waiting")
+            releasing = in_thread(lambda: _release(starts))
+            wait_until(lambda: lock_waits(container) == 2, "the release waiting")
+            holder.rollback()
+        finally:
+            holder.close()
+
+        stopping.result()
+        releasing.result()
+        assert _committed(container, work_id).state_code == SessionState.STOPPED
+        with scoped_session(container) as db:
+            assert _kinds(db, work_id) == [(HoldKind.OUTAGE, False)]

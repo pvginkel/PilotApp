@@ -52,6 +52,13 @@ work item it still holds has its line told again, its reason read anew. The
 probe, the controller's readiness call, runs on the scheduler's tick while the
 outage holds.
 
+Each period a Session's start is `held` is a Hold, of the kind of the gate's
+reason (`holds`; DB 360 to 362): opened in the transaction that writes the
+Session `held`, turned where the release reads another reason for it, and
+ended as it leaves `held`, let go, stopped or withdrawn. A project's pause
+and a Store Update's start ask for the release too, which moves no Session
+on and turns the Holds of those it reads.
+
 The lock order (P-45). A start, a Resume and the release take their locks in
 one order: the Project's row, then the Session's, then the slot's
 (`WorkSlots.lock`), then an Environment's, the release taking a job's
@@ -156,6 +163,7 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
+from app.schemas.timeline import HeldReason
 from app.services.controller_client import (
     ControllerClient,
     ControllerEnvironment,
@@ -168,6 +176,7 @@ from app.services.controller_client import (
 from app.services.controller_outage import ControllerOutage
 from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
+from app.services.holds import turn_hold
 from app.services.pilot_server import PilotServer, unheld_token_hash
 from app.services.quota_wall import confirmed, decided, quota_back
 from app.services.relay_service import (
@@ -536,6 +545,7 @@ class SessionStartService:
         if held is None:
             self._begin(db, session)
         else:
+            turn_hold(db, session, held, now)
             after_commit(_HeldWritten(self))
             logger.info("Session %s is held at its start: %s", session.id, held.reason)
         return work
@@ -587,6 +597,7 @@ class SessionStartService:
             self._begin(db, session)
         else:
             session.state_code = SessionState.HELD
+            turn_hold(db, session, held, datetime.now(UTC))
             after_commit(_HeldWritten(self))
         self._moved(session, state=True)
         logger.info(
@@ -762,6 +773,7 @@ class SessionStartService:
         if held is None:
             self._begin(db, session)
         else:
+            turn_hold(db, session, held, now)
             after_commit(_HeldWritten(self))
             logger.info("Session %s is held at its start: %s", session.id, held.reason)
         return session
@@ -893,10 +905,12 @@ class SessionStartService:
         moved to `starting` under its lock while it is still `held` and the
         gate is open for it, a work item's slot counted under the slot's
         lock, a job's queue read (`queued`) and its brief composed if it has
-        none yet (`_brief`), its loop run once that commits. One the gate
-        still holds has its work item's line told again: a halt's turn, the
-        outage's, the slot's count or a job's end, which asked for the run,
-        may have moved its reason. So has each work item whose nudge is owed,
+        none yet (`_brief`), its loop run once that commits, its Hold ended.
+        One the gate still holds has its Hold turned to the reason read
+        (`turn_hold`) and its work item's line told again: a halt's turn, the
+        pause's, a Store Update's, the outage's, the slot's count or a job's
+        end, which asked for the run, may have moved its reason. So has each
+        work item whose nudge is owed,
         the hard stop's or a turn's end's under a halt: a halt's turn may have
         moved the halt its line names (decision 66)."""
         with scoped_session(self._container) as db:
@@ -1306,21 +1320,21 @@ class SessionStartService:
         if session.state_code != SessionState.HELD:
             return
         project = db.get_one(Project, session.project_id, populate_existing=True)
-        if (
-            self._held(
-                db,
-                project,
-                session.kind_code,
-                queued=_queued(db, session),
-                session=session,
-            )
-            is not None
-        ):
+        held = self._held(
+            db,
+            project,
+            session.kind_code,
+            queued=_queued(db, session),
+            session=session,
+        )
+        now = datetime.now(UTC)
+        turn_hold(db, session, held, now)
+        if held is not None:
             self._moved(session)
             return
         session.state_code = SessionState.STARTING
         if _unbriefed(session):
-            self._brief(db, project, session, datetime.now(UTC))
+            self._brief(db, project, session, now)
         self._begin(db, session)
         self._moved(session, state=True)
         logger.info("Session %s goes on from held", session_id)
@@ -1354,12 +1368,15 @@ class SessionStartService:
         `stopped-unsent` record its last, and its loop sends nothing more, and
         a job held before its brief has none. Its environment is handed to the
         shutdown timer (`_hand_to_timer`); a start held before it had one arms
-        none. A work item's slot opens once this commits."""
+        none. A held start's Hold ends. A work item's slot opens once this
+        commits."""
         before = session.state_code
         session.state_code = SessionState.STOPPED
         session.stopped_at = at
         session.stopped_by_user_id = person.id
         session.current_line = None
+        if before == SessionState.HELD:
+            turn_hold(db, session, None, at)
         if before == SessionState.RUNNING:
             self._relays.request_interrupt(session.id)
         elif not _unbriefed(session):
@@ -1522,6 +1539,7 @@ class SessionStartService:
             self._begin(db, session)
         else:
             session.state_code = SessionState.HELD
+            turn_hold(db, session, held, now)
             after_commit(_HeldWritten(self))
         self._moved(session, state=True)
         return held
@@ -1619,11 +1637,30 @@ class SessionStartService:
         self, db: Session, session_id: uuid.UUID, error: ControllerUnreachable
     ) -> None:
         """The Session back to `held` where its rows stand, the outage on,
-        while it is still `starting` (DB 230)."""
+        while it is still `starting` (DB 230), its Hold opened for the
+        gate's reason as it reads now, which a halt, the pause or a Store
+        Update comes before the outage in."""
         session = self._records(db).lock_session(session_id)
         if session.state_code != SessionState.STARTING:
             return
+        # The queue counts a job behind the others while it is held.
         session.state_code = SessionState.HELD
+        held = self._held(
+            db,
+            db.get_one(Project, session.project_id, populate_existing=True),
+            session.kind_code,
+            queued=_queued(db, session),
+            session=session,
+        )
+        # The outage that sent it back may be off by this read, in this
+        # process or the one whose gate reads it next: its Hold is the
+        # outage's then.
+        turn_hold(
+            db,
+            session,
+            held or Held(HeldReason.CONTROLLER_UNREACHABLE),
+            datetime.now(UTC),
+        )
         self._moved(session, state=True)
         after_commit(_HeldWritten(self))
         logger.warning("Session %s is held: %s", session_id, error)
@@ -2116,12 +2153,13 @@ class SessionStartService:
         """A job held before its brief, its Session locked by the caller,
         withdrawn at `at` by its trigger item's Undo or its wait's close:
         `stopped` by no one, with no Turn, as a Stop leaves a job held before
-        its brief, so the gate never starts it. It held no slot and no
-        environment; the project's next job goes on once what held this one
-        moves."""
+        its brief, so the gate never starts it, its Hold ended. It held no
+        slot and no environment; the project's next job goes on once what
+        held this one moves."""
         session.state_code = SessionState.STOPPED
         session.stopped_at = at
         session.current_line = None
+        turn_hold(db, session, None, at)
         self._moved(session, state=True)
         logger.info("Session %s withdrawn before its brief", session.id)
 

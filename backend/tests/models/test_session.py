@@ -1,8 +1,9 @@
-"""Session, Turn, Token Count, Session Record, Effect and Writer Question: what
-a row must hold."""
+"""Session, Turn, Hold, Token Count, Session Record, Effect and Writer
+Question: what a row must hold."""
 
 import hashlib
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,6 +17,7 @@ from app.models import (
     Document,
     Effect,
     Environment,
+    Hold,
     Item,
     Project,
     Session,
@@ -29,6 +31,7 @@ from app.models.reference import (
     AttachmentSource,
     BlockKind,
     EffectKind,
+    HoldKind,
     RecordKind,
     SessionState,
     TokenKind,
@@ -408,6 +411,107 @@ class TestTurn:
         session.expire(turn)
 
         assert turn.cost == Decimal("0.0023345450000000004")
+
+
+class TestHold:
+    """DB §2.5, Hold; assertions 360 to 362 and 559."""
+
+    def test_a_hold_keeps_its_session_its_kind_and_its_period(
+        self, session: DbSession, project_session: Session
+    ) -> None:
+        ended = SENT_AT + timedelta(seconds=39)
+        session.add_all(
+            [
+                Hold(
+                    session_id=project_session.id,
+                    kind_code=HoldKind.SLOT,
+                    started_at=SENT_AT,
+                    ended_at=ended,
+                ),
+                Hold(
+                    session_id=project_session.id,
+                    kind_code=HoldKind.PAUSE,
+                    started_at=ended,
+                ),
+            ]
+        )
+        session.flush()
+        session.expire_all()
+
+        assert session.execute(
+            select(Hold.kind_code, Hold.started_at, Hold.ended_at)
+            .where(Hold.session_id == project_session.id)
+            .order_by(Hold.id)
+        ).all() == [(HoldKind.SLOT, SENT_AT, ended), (HoldKind.PAUSE, ended, None)]
+
+    def test_every_kind_is_stored(
+        self, session: DbSession, project: Project, environment: Environment
+    ) -> None:
+        for kind in HoldKind:
+            run = _session(project, environment, token_hash=uuid.uuid4().hex)
+            session.add(run)
+            session.flush()
+            session.add(Hold(session_id=run.id, kind_code=kind, started_at=SENT_AT))
+        session.flush()
+
+        assert set(session.scalars(select(Hold.kind_code))) == set(HoldKind)
+
+    def test_a_session_has_at_most_one_open_hold(
+        self, session: DbSession, project_session: Session
+    ) -> None:
+        session.add_all(
+            Hold(session_id=project_session.id, kind_code=kind, started_at=SENT_AT)
+            for kind in (HoldKind.SLOT, HoldKind.PAUSE)
+        )
+
+        assert violated_constraint(session) == "uq_holds_open_session_id"
+
+    def test_a_hold_never_ends_before_it_started(
+        self, session: DbSession, project_session: Session
+    ) -> None:
+        session.add(
+            Hold(
+                session_id=project_session.id,
+                kind_code=HoldKind.OUTAGE,
+                started_at=SENT_AT,
+                ended_at=SENT_AT - timedelta(microseconds=1),
+            )
+        )
+
+        assert violated_constraint(session) == "ck_holds_period"
+
+    def test_a_hold_may_end_the_moment_it_started(
+        self, session: DbSession, project_session: Session
+    ) -> None:
+        session.add(
+            Hold(
+                session_id=project_session.id,
+                kind_code=HoldKind.OUTAGE,
+                started_at=SENT_AT,
+                ended_at=SENT_AT,
+            )
+        )
+
+        session.flush()
+
+    def test_a_hold_keeps_a_session_waiting(self, session: DbSession) -> None:
+        session.add(
+            Hold(session_id=uuid.uuid4(), kind_code=HoldKind.QUEUE, started_at=SENT_AT)
+        )
+
+        assert violated_constraint(session) == "holds_session_id_fkey"
+
+    def test_a_kind_outside_the_list_is_refused(
+        self, session: DbSession, project_session: Session
+    ) -> None:
+        with pytest.raises(DataError):
+            session.execute(
+                text(
+                    "INSERT INTO holds (session_id, kind_code, started_at)"
+                    " VALUES (:id, 'paused', now())"
+                ),
+                {"id": project_session.id},
+            )
 
 
 class TestTokenCount:

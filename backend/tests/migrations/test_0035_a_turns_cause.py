@@ -3,13 +3,8 @@ leaves them, each placed from its rows: the revision's downgrade builds
 0034's schema in the test's transaction."""
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
-from alembic.config import Config
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
-from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
@@ -25,25 +20,17 @@ from app.services.session_start_service import (
     NUDGE_AFTER_A_PAUSE,
     NUDGE_AFTER_A_STOP,
 )
+from tests.support.revisions import run_revision
 from tests.support.working_on import Camp
 
-_BACKEND_DIR = Path(__file__).resolve().parents[2]
 AT = datetime(2026, 11, 15, 9, 30, tzinfo=UTC)
 BRIEF = "Build the camp."
 FOLLOW_UP = f"Your save of `notes.md` is held: `notes.md: x`.\n{FOLLOW_UP_END}"
 
 
 def _run(db: DbSession, step: str) -> None:
-    """Revision 0035's `step`, `upgrade` or `downgrade`, on the test's
-    transaction; what the session holds is read again after an upgrade."""
-    config = Config(str(_BACKEND_DIR / "alembic.ini"))
-    config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
-    revision = ScriptDirectory.from_config(config).get_revision("0035")
-    assert revision is not None
-    with Operations.context(MigrationContext.configure(db.connection())):
-        getattr(revision.module, step)()
-    if step == "upgrade":
-        db.expire_all()
+    """Revision 0035's `step`, `upgrade` or `downgrade`."""
+    run_revision(db, "0035", step)
 
 
 def _columns(db: DbSession) -> set[str]:

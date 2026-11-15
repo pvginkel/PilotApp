@@ -2,9 +2,9 @@
 
 A reference entity with a fact about the category is a table: Item Kind, Done
 Cause, Confirmation Reason and Session Kind. The other twenty-one are PostgreSQL
-enums (DB §7.2), as is Turn Cause, Pilot's own of the analysis dashboard's
-(DB §2.11). The revisions are the one place a value is added, a table's rows
-included.
+enums (DB §7.2), as are Turn Cause and Hold Kind, Pilot's own of the analysis
+dashboard's (DB §2.11). The revisions are the one place a value is added, a
+table's rows included.
 """
 
 from enum import StrEnum
@@ -210,6 +210,30 @@ class TurnCause(StrEnum):
     conversation or the full brief."""
 
 
+class HoldKind(StrEnum):
+    """A kind of reason Pilot keeps a Session waiting (DB §2.11): the gate's
+    reasons, one to one (`start_gate.held_reason`), in the gate's order."""
+
+    WEEK_HALT = "week_halt"
+    """The week's usage halt, which itself stays computed and unstored."""
+    FIVE_HOUR_HALT = "five_hour_halt"
+    """The five-hour usage halt."""
+    PAUSE = "pause"
+    """The Session's project is paused."""
+    STORE_UPDATE = "store_update"
+    """A Store Update is unlifted."""
+    OUTAGE = "outage"
+    """The controller is unreachable, as the process that held the Session
+    met it."""
+    SLOT = "slot"
+    """No slot is free for a work item."""
+    QUEUE = "queue"
+    """A job waits behind another job of its project."""
+    CONVERSATION = "conversation"
+    """A work item waits while another run on its conversation, in its
+    environment, is running or starting."""
+
+
 def _enum_type(enum_class: type[StrEnum], name: str) -> Enum:
     # The database holds the values, not the member names.
     return Enum(
@@ -242,6 +266,7 @@ USAGE_WINDOW = _enum_type(UsageWindow, "usage_window")
 TOKEN_KIND = _enum_type(TokenKind, "token_kind")
 PROGRESS_STATE = _enum_type(ProgressState, "progress_state")
 TURN_CAUSE = _enum_type(TurnCause, "turn_cause")
+HOLD_KIND = _enum_type(HoldKind, "hold_kind")
 
 # Autogenerate compares no enum type, so the schema tests check these against
 # the database's.
@@ -268,6 +293,7 @@ ENUM_TYPES = (
     TOKEN_KIND,
     PROGRESS_STATE,
     TURN_CAUSE,
+    HOLD_KIND,
 )
 
 

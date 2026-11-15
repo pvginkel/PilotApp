@@ -1,4 +1,5 @@
-"""Session, Turn and Session Record (DB §2.3), with the columns the record gives them."""
+"""Session, Turn and Session Record (DB §2.3), and a Session's Hold (DB §2.5),
+with the columns the record gives them."""
 
 import uuid
 from datetime import datetime
@@ -26,11 +27,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.extensions import db
 from app.models.reference import (
     EFFECT_KIND,
+    HOLD_KIND,
     RECORD_KIND,
     SESSION_STATE,
     TOKEN_KIND,
     TURN_CAUSE,
     EffectKind,
+    HoldKind,
     RecordKind,
     SessionState,
     TokenKind,
@@ -154,6 +157,33 @@ class Turn(db.Model):  # type: ignore[name-defined]
     subscription; none without one (DB 275)."""
     cause_code: Mapped[TurnCause] = mapped_column(TURN_CAUSE)
     """Why Pilot sent it, given at the write (DB 352)."""
+
+
+class Hold(db.Model):  # type: ignore[name-defined]
+    """One period in which Pilot kept a Session from running for one reason
+    outside it: written when the gate first keeps the Session and ended once,
+    when the gate lets it go or its reason changes (DB §2.5, Hold; 360, 362).
+    Nothing reads one to decide anything."""
+
+    __tablename__ = "holds"
+    __table_args__ = (
+        # One Hold of a Session at a time, whatever writes at once: a reason
+        # that changes ends one Hold and starts the next (DB 362, 559).
+        Index(
+            "uq_holds_open_session_id",
+            "session_id",
+            unique=True,
+            postgresql_where=text("ended_at IS NULL"),
+        ),
+        CheckConstraint("ended_at >= started_at", name="ck_holds_period"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sessions.id"))
+    kind_code: Mapped[HoldKind] = mapped_column(HOLD_KIND)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """None while the Session is held."""
 
 
 class TokenCount(db.Model):  # type: ignore[name-defined]

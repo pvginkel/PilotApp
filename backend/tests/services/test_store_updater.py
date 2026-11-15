@@ -839,6 +839,32 @@ class TestTimer:
         _tick(updater, container)
         assert told == [None, None]
 
+    def test_it_asks_the_gate_again_once_each_time_the_update_turns(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The command that makes an update tells no one: the tick has the
+        release read the gate for the held jobs and Chats, whose reason, and
+        Hold, the update moved (DB 362)."""
+        release = f"{START_JOB}:{RELEASE_KEY}"
+        loops = _asked(updater, monkeypatch)
+
+        _tick(updater, container)
+        assert release not in loops
+        update = hold(session)
+        _tick(updater, container)
+        assert loops.count(release) == 1
+        _tick(updater, container)
+        assert loops.count(release) == 1
+        # Lifted elsewhere, by another process: the tick finds it gone.
+        lift(session, update)
+        _tick(updater, container)
+        _tick(updater, container)
+        assert loops.count(release) == 2
+
     def test_it_runs_the_sequence_while_an_update_stands_not_waiting_for_the_sync(
         self,
         updater: StoreUpdater,

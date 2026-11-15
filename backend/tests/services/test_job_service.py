@@ -22,8 +22,18 @@ from app import models
 from app.database import scoped_session
 from app.engine.views import ViewService, utc_time
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Item, Project, ProjectTransition, Turn, User, WaitFiring, Work
+from app.models import (
+    Hold,
+    Item,
+    Project,
+    ProjectTransition,
+    Turn,
+    User,
+    WaitFiring,
+    Work,
+)
 from app.models.reference import (
+    HoldKind,
     ProjectState,
     RecordKind,
     SessionState,
@@ -592,10 +602,50 @@ class TestQueue:
         assert starts.held(session, opened, second) == Held(HeldReason.QUEUE)
 
 
+def _holds(db: DbSession, job: models.Session) -> list[Hold]:
+    """The job's Holds, in the order written."""
+    return list(
+        db.scalars(select(Hold).where(Hold.session_id == job.id).order_by(Hold.id))
+    )
+
+
 class TestQueueRelease:
     """The release lets a project's earliest held job go on, its brief
     composed then from the record as it stands (F59, F59.2, F141.4; V11,
     V23)."""
+
+    def test_a_job_behind_another_is_held_by_the_queue_until_it_is_briefed(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        """DB 360, 362: its wait behind the first job is one Hold, ended the
+        moment the release lets it go and briefs it."""
+        first = _setup(container, starts, opened)
+        _in(session, first, SessionState.RUNNING)
+
+        second = _setup(container, starts, opened, LATER)
+
+        assert _holds(session, first) == []
+        (queued,) = _holds(session, second)
+        assert (queued.kind_code, queued.ended_at) == (HoldKind.QUEUE, None)
+
+        _release(starts)
+
+        assert _read(session, second).state_code is SessionState.HELD
+        assert _holds(session, second) == [queued]
+        assert queued.ended_at is None
+
+        _in(session, first, SessionState.IDLE)
+        _release(starts)
+
+        second = _read(session, second)
+        assert second.state_code is SessionState.STARTING
+        assert _holds(session, second) == [queued]
+        assert queued.ended_at == _brief(container, second).started_at
 
     @pytest.mark.usefixtures("placing")
     def test_released_only_the_earliest_job_goes_on_whatever_the_loops_order(
@@ -1269,8 +1319,13 @@ class TestWithdraw:
         held = jobs.unbriefed(session.get_one(Item, document.id))
         assert held == job
 
+        (paused,) = _holds(session, job)
+        assert (paused.kind_code, paused.ended_at) == (HoldKind.PAUSE, None)
+
         jobs.withdraw(job, LATER)
 
+        # Its Hold ends with it, never before it started.
+        assert paused.ended_at == max(LATER, paused.started_at)
         line = session.get_one(Item, job.id)
         assert (job.state_code, job.stopped_at, job.stopped_by_user_id) == (
             SessionState.STOPPED,

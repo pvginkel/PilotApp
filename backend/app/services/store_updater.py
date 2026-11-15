@@ -41,9 +41,9 @@ update is unlifted and not waiting for the sync, so a roll, a crash or an
 outage costs a restart of the sequence and never a phase: a second process
 meets the columns the first wrote, and a reset cut before `reset_at` is made
 again. The command that makes an update and asks its lift tells no one: the
-timer tells the conditions when the unlifted update is not the one this
-process last told of, made or lifted elsewhere, at the tick's commit, and the
-lift tells them at its commit.
+timer asks the gate again and tells the conditions when the unlifted update
+is not the one this process last told of, made or lifted elsewhere, at the
+tick's commit, and the lift does both at its commit.
 """
 
 import logging
@@ -345,14 +345,17 @@ class StoreUpdater:
         self._container.condition_service().tell()
 
     def _turned(self, update_id: int | None) -> None:
-        """The conditions told when the unlifted update is not the one this
-        process last told of. The tick calls it once it commits: the
-        conditions read on a session of their own, which the tick's
-        connection, held until then, would wait for beside it."""
+        """The gate asked again and the conditions told when the unlifted
+        update is not the one this process last told of: a held job's or
+        Chat's reason may have moved, and its Hold turns with it (DB 362).
+        The tick calls it once it commits: the conditions read on a session
+        of their own, which the tick's connection, held until then, would
+        wait for beside it."""
         with self._lock:
             if update_id == self._told:
                 return
             self._told = update_id
+        self._starts.release_held()
         self._container.condition_service().tell()
 
 
