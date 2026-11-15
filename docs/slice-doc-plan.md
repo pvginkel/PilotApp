@@ -86,7 +86,11 @@ last slice, `delivered <date>`; shipped, with other slices still to come, `parti
 slice planned but did not ship is never left `planned` under a closed slice and never ticked: take
 it out of the slice's Features cell in §3 (`(not …)`), set the row `unplanned`, and say in its note
 which slice left it out and that the close-out report names it, so the close-out session can place
-or drop it. `python3 ../PilotAppSpecs/design/tools/check_ledger.py` lists what is owed and what
+or drop it. Where a slice leaves out one aspect of a feature whose every slice has then shipped, the
+row stays `partial` and its Feature cell carries `(unplaced: <the aspect>)` right after the id, the
+close-out report naming the aspect; a sub-feature a card outside PilotApp's slices delivers is
+marked `(placed: <card>)`, and its parent may stay `partial` (the marks' rules are on the ledger's
+page). `python3 ../PilotAppSpecs/design/tools/check_ledger.py` lists what is owed and what
 disagrees; it is a gate below.
 
 ## What "up to date" means here
