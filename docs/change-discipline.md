@@ -22,8 +22,7 @@ topic docs beside this one.
   where the ledger and its check read it as built whole.
 - **The rulings are decisions, not suggestions**: `understanding.md` §2, `feed-model.md`,
   `tech-design-options.md` §7 and `ui-conventions.md`; the rows of the spec repo's `decisions.md`,
-  which win where they disagree with those; and the decisions taken for now in its
-  `considerations.md`. A plan or an implementation that disagrees with one is wrong, however
+  which win where they disagree with those. A plan or an implementation that disagrees with one is wrong, however
   convenient.
 - **Its technical choices are suggestions, not rulings** (D018). How the design record and the
   mockup build a feature, a transport, a library, a component's shape or a split between
