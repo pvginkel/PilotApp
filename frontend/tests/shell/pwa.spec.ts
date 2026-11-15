@@ -40,8 +40,8 @@ test.describe('The PWA shell', () => {
     await shell.open('/profile');
   });
 
-  test('is titled “Pilot — AI powered work orchestration”', async ({ page }) => {
-    await expect(page).toHaveTitle('Pilot — AI powered work orchestration');
+  test('is titled “Pilot - AI powered work orchestration”', async ({ page }) => {
+    await expect(page).toHaveTitle('Pilot - AI powered work orchestration');
   });
 
   test('serves the manifest the page head names, with its icons and no colour for the browser’s bar', async ({ page }) => {

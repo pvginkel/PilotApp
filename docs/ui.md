@@ -524,7 +524,7 @@ and the manifest's icons (`icon-192.png`, `icon-512.png` and the maskable `icon-
 from the blue renders, and the top bar's `logo.png`, the phone home's head's too, from the 96px white
 one, three times the bar's 32px, the bar being the theme's blue itself (D020). Beside them stand
 `public/`'s manifest (`manifest.json`), which names no `theme_color`, and service worker, `sw.js`;
-the page head links the manifest, names the page "Pilot — AI powered work orchestration" (D205) and sets
+the page head links the manifest, names the page "Pilot - AI powered work orchestration" (D205) and sets
 the three `theme-color`s of the browser's bar (above), a standing edit of the template's
 `index.html` (`CLAUDE.md`). `registerServiceWorker()`
 (`src/lib/service-worker.ts`) registers the worker when the shell's module loads, on any page,
