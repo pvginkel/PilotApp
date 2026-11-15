@@ -13,7 +13,8 @@ keeps it red from the reports; and --max-suite-reruns counts reruns, where the
 cap counts failed tests, so the marker's condition rules out the rerun of a
 test that failed past the cap. Each test's first failure claims a slot, a file
 created in a directory the controller makes, so that the count spans the run's
-processes. tests/test_conftest.py pins it on runs of its own.
+processes. On xdist's workers, the rerun plugin's store goes local
+(pytest_sessionstart). tests/test_conftest.py pins it on runs of its own.
 """
 
 from functools import partial
@@ -23,6 +24,7 @@ from tempfile import mkdtemp
 from typing import Any
 
 import pytest
+from pytest_rerunfailures import ClientStatusDB, StatusDB
 
 # How many times a failing test is rerun.
 RERUNS = 2
@@ -67,6 +69,20 @@ class DetectFlakes:
         else:
             self._slots = Path(mkdtemp(prefix="pytest-detect-flakes-"))
             self._owns_slots = True
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_sessionstart(self, session: pytest.Session) -> None:
+        """On a worker, the rerun plugin's status store a run on one process
+        has. Its store on xdist's workers serves only the rerun of a test whose
+        worker crashed, at two calls to the controller a test, which its server
+        reads a byte at a time: some 5 ms a test on eight processes, 36 s of
+        the backend's run. A crashed worker's test fails, as without the
+        mode."""
+        config = session.config
+        store = getattr(config, "failures_db", None)
+        if self._is_worker and isinstance(store, ClientStatusDB):
+            store.sock.close()
+            config.failures_db = StatusDB()  # type: ignore[attr-defined]
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_configure_node(self, node: Any) -> None:

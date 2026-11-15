@@ -232,12 +232,28 @@ class TestDetectFlakes:
     ) -> None:
         # The run's conftest imports the mode from this backend's tests.
         monkeypatch.setenv("PYTHONPATH", str(_BACKEND_DIR))
+        flakes.makepyfile(
+            test_store="""
+from pytest_rerunfailures import StatusDB
+
+
+def test_d_a_worker_keeps_its_rerun_store_local(request) -> None:
+    # Not the controller's, two calls a test away (detect_flakes.py).
+    assert type(request.config.failures_db) is StatusDB
+"""
+        )
 
         result = flakes.runpytest_subprocess(
-            "-p", "no:cacheprovider", "-n", "2", "-k", "a_passes or b_fails"
+            "-p",
+            "no:cacheprovider",
+            "-n",
+            "2",
+            "-k",
+            "a_passes or b_fails or d_a_worker",
         )
 
         assert self.attempts(flakes) == {"a": 2, "b": 3}
+        assert result.parseoutcomes() == {"passed": 2, "failed": 1, "rerun": 3}
         assert result.ret == pytest.ExitCode.TESTS_FAILED
         result.stdout.fnmatch_lines(
             [
