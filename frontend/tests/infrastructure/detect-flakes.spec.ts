@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
-import { detectFlakes, RERUNS } from '../support/detect-flakes';
+import RerunCapReporter, { detectFlakes, RERUN_CAP, RERUNS } from '../support/detect-flakes';
 
 const FRONTEND = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const PLAYWRIGHT = join(FRONTEND, 'node_modules/@playwright/test');
@@ -125,9 +125,18 @@ test.describe('The detect-flakes mode', () => {
     );
   });
 
-  test('is on in a session’s run alone, CI’s keeping the template’s settings', () => {
+  test('is on in a session’s run alone, CI’s keeping the template’s settings', async () => {
     expect(detectFlakes(false)).toEqual({ retries: 0, failOnFlakyTests: false, reporters: [] });
-    expect(detectFlakes(true)).toMatchObject({ retries: RERUNS, failOnFlakyTests: true });
+    expect(detectFlakes(true)).toEqual({
+      retries: RERUNS,
+      failOnFlakyTests: true,
+      reporters: [[MODULE, { cap: RERUN_CAP }]],
+    });
     expect(RERUNS).toBe(2);
+    // The operator, 2026-11-15: "Cap at 10".
+    expect(RERUN_CAP).toBe(10);
+    // Playwright loads a reporter by its module's path and takes its default export.
+    const loaded = (await import(MODULE)) as { default: unknown };
+    expect(loaded.default).toBe(RerunCapReporter);
   });
 });

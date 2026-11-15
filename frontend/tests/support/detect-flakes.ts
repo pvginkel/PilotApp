@@ -30,7 +30,7 @@ export const RERUNS = 2;
 export const RERUN_CAP = 10;
 
 /** The settings of the mode that the Playwright config takes. */
-export interface DetectFlakes {
+interface DetectFlakes {
   retries: number;
   failOnFlakyTests: boolean;
   /** Before the list reporter, so that it reads a test's retries once this reporter has set them. */
