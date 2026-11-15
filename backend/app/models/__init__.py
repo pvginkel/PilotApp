@@ -6,6 +6,19 @@ Import all models here so Alembic can detect them for migration auto-generation.
 from app.models.app_page import AppPage
 from app.models.attachment import Attachment, ItemAttachment
 from app.models.block import Block, BlockOption
+from app.models.call import (
+    Call,
+    ContextPart,
+    ContextPartKind,
+    DenialKind,
+    Event,
+    EventKind,
+    MissCause,
+    Model,
+    StopReason,
+    Tool,
+    ToolCall,
+)
 from app.models.chat import Chat, ChatRead
 from app.models.document import Document, DocumentVersion
 from app.models.environment import Environment
@@ -20,6 +33,7 @@ from app.models.reference import (
     DoneCause,
     ItemKind,
     SessionKind,
+    TokenKind,
 )
 from app.models.save_error import SaveError
 from app.models.session import (
@@ -32,6 +46,19 @@ from app.models.session import (
     WriterQuestion,
 )
 from app.models.store_update import StoreUpdate
+from app.models.transcript import (
+    Compaction,
+    CompactionTrigger,
+    Component,
+    ComponentVersion,
+    HookRun,
+    Launch,
+    LaunchComponent,
+    Prompt,
+    PromptSource,
+    Repository,
+    Transcript,
+)
 from app.models.usage import UsageReading, WindowShare
 from app.models.user import User
 from app.models.wait import CardTransition, Wait, WaitFiring

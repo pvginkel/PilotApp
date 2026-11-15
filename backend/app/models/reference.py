@@ -1,15 +1,15 @@
 """The reference entities (DB §2.4).
 
 A reference entity with a fact about the category is a table: Item Kind, Done
-Cause, Confirmation Reason and Session Kind. The other twenty-one are PostgreSQL
-enums (DB §7.2), as are Turn Cause and Hold Kind, Pilot's own of the analysis
+Cause, Confirmation Reason, Session Kind and Token Kind. The other twenty are
+PostgreSQL enums (DB §7.2), as are Turn Cause and Hold Kind, Pilot's own of the analysis
 dashboard's (DB §2.11). The revisions are the one place a value is added, a
 table's rows included.
 """
 
 from enum import StrEnum
 
-from sqlalchemy import Boolean, CheckConstraint, Enum, Text
+from sqlalchemy import Boolean, CheckConstraint, Enum, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
@@ -161,17 +161,6 @@ class UsageWindow(StrEnum):
     SEVEN_DAY = "seven_day"
 
 
-class TokenKind(StrEnum):
-    """A kind of token a Turn's model calls count, as `claude`'s `result` line
-    names them: read fresh, written to the prompt cache, read from it, written
-    by the model."""
-
-    INPUT = "input"
-    CACHE_WRITE = "cache_write"
-    CACHE_READ = "cache_read"
-    OUTPUT = "output"
-
-
 class ProgressState(StrEnum):
     """Where a step of a run's list stands; not Task Status, the plan's own."""
 
@@ -263,7 +252,6 @@ CLOSE_CAUSE = _enum_type(CloseCause, "close_cause")
 EFFECT_KIND = _enum_type(EffectKind, "effect_kind")
 TASK_STATUS = _enum_type(TaskStatus, "task_status")
 USAGE_WINDOW = _enum_type(UsageWindow, "usage_window")
-TOKEN_KIND = _enum_type(TokenKind, "token_kind")
 PROGRESS_STATE = _enum_type(ProgressState, "progress_state")
 TURN_CAUSE = _enum_type(TurnCause, "turn_cause")
 HOLD_KIND = _enum_type(HoldKind, "hold_kind")
@@ -290,7 +278,6 @@ ENUM_TYPES = (
     EFFECT_KIND,
     TASK_STATUS,
     USAGE_WINDOW,
-    TOKEN_KIND,
     PROGRESS_STATE,
     TURN_CAUSE,
     HOLD_KIND,
@@ -349,3 +336,23 @@ class SessionKind(db.Model):  # type: ignore[name-defined]
     name: Mapped[str] = mapped_column(Text)
     surface: Mapped[str] = mapped_column(Text)
     on_timeline: Mapped[bool] = mapped_column(Boolean)
+
+
+class TokenKind(db.Model):  # type: ignore[name-defined]
+    """A kind of token a model call counts: read fresh, written to the prompt
+    cache, read from it, written by the model, and a cache write by its
+    lifetime, five minutes or an hour.
+
+    `within_code` is the coarser kind a finer one is part of. A Turn's Token
+    Counts take the kinds within none; a Call's tokens, a column each on its
+    row, the kinds nothing is within (DB 547).
+    """
+
+    __tablename__ = "token_kinds"
+    __table_args__ = (
+        CheckConstraint("within_code <> code", name="ck_token_kinds_within"),
+    )
+
+    code: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    within_code: Mapped[str | None] = mapped_column(ForeignKey("token_kinds.code"))

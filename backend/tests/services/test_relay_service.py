@@ -54,7 +54,6 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
-    TokenKind,
     TurnCause,
     UsageWindow,
     UserKind,
@@ -99,6 +98,7 @@ from app.services.session_scope import project_folder
 from app.services.sse_connection_manager import SSEConnection
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
+from app.services.token_counts import CACHE_READ, CACHE_WRITE, INPUT, OUTPUT
 from app.services.turn_end_read_service import READ_JOB, TurnEndReadService
 from app.services.usage_halts import UsageHalts
 from app.utils import after_commit as after_commit_module
@@ -1823,7 +1823,7 @@ class TestRelay:
         assert _records(session, idle.id) == []
 
 
-def _spent(db: DbSession, turn: Turn) -> tuple[dict[TokenKind, int], Decimal | None]:
+def _spent(db: DbSession, turn: Turn) -> tuple[dict[str, int], Decimal | None]:
     """The Turn's Token Counts by kind, and its cost."""
     counts = db.execute(
         select(TokenCount.token_kind_code, TokenCount.tokens).where(
@@ -1835,12 +1835,12 @@ def _spent(db: DbSession, turn: Turn) -> tuple[dict[TokenKind, int], Decimal | N
 
 def _tokens(
     input_tokens: int, cache_write: int, cache_read: int, output: int
-) -> dict[TokenKind, int]:
+) -> dict[str, int]:
     return {
-        TokenKind.INPUT: input_tokens,
-        TokenKind.CACHE_WRITE: cache_write,
-        TokenKind.CACHE_READ: cache_read,
-        TokenKind.OUTPUT: output,
+        INPUT: input_tokens,
+        CACHE_WRITE: cache_write,
+        CACHE_READ: cache_read,
+        OUTPUT: output,
     }
 
 

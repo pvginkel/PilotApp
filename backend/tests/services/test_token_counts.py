@@ -14,13 +14,22 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Environment, Project, TokenCount, Turn
-from app.models.reference import RecordKind, SessionState, TokenKind, TurnCause
+from app.models.reference import RecordKind, SessionState, TurnCause
 from app.services.container import ServiceContainer
-from app.services.token_counts import Spent, count_tokens, reported_before, spent
+from app.services.token_counts import (
+    CACHE_READ,
+    CACHE_WRITE,
+    INPUT,
+    OUTPUT,
+    Spent,
+    count_tokens,
+    reported_before,
+    spent,
+)
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import raw_turn
 
-KINDS = (TokenKind.INPUT, TokenKind.CACHE_WRITE, TokenKind.CACHE_READ, TokenKind.OUTPUT)
+KINDS = (INPUT, CACHE_WRITE, CACHE_READ, OUTPUT)
 
 
 def _result_line(name: str) -> dict[str, Any]:
@@ -33,7 +42,7 @@ def _result_line(name: str) -> dict[str, Any]:
     return line
 
 
-def _tokens(*counts: int) -> dict[TokenKind, int]:
+def _tokens(*counts: int) -> dict[str, int]:
     return dict(zip(KINDS, counts, strict=True))
 
 
@@ -61,7 +70,7 @@ class TestSpent:
         ],
     )
     def test_a_result_line_reports_its_runs_tokens_and_cost(
-        self, name: str, tokens: dict[TokenKind, int], cost: str
+        self, name: str, tokens: dict[str, int], cost: str
     ) -> None:
         assert spent(_result_line(name)) == Spent(tokens, Decimal(cost))
 
@@ -193,7 +202,7 @@ def turn(session: DbSession, project_session: models.Session) -> Turn:
     return sent
 
 
-def _spent(db: DbSession, turn: Turn) -> tuple[dict[TokenKind, int], Decimal | None]:
+def _spent(db: DbSession, turn: Turn) -> tuple[dict[str, int], Decimal | None]:
     counts = db.execute(
         select(TokenCount.token_kind_code, TokenCount.tokens).where(
             TokenCount.turn_id == turn.id
@@ -291,15 +300,15 @@ def _no_callbacks() -> Iterator[None]:
 
 
 def _figures(
-    line: dict[str, Any], tokens: dict[TokenKind, int], cost: float
+    line: dict[str, Any], tokens: dict[str, int], cost: float
 ) -> dict[str, Any]:
     """The `result` line `line`, its `modelUsage` reporting `tokens` on one
     model and its cost `cost`."""
     fields = {
-        TokenKind.INPUT: "inputTokens",
-        TokenKind.CACHE_WRITE: "cacheCreationInputTokens",
-        TokenKind.CACHE_READ: "cacheReadInputTokens",
-        TokenKind.OUTPUT: "outputTokens",
+        INPUT: "inputTokens",
+        CACHE_WRITE: "cacheCreationInputTokens",
+        CACHE_READ: "cacheReadInputTokens",
+        OUTPUT: "outputTokens",
     }
     return {
         **line,

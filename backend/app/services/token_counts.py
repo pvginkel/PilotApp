@@ -33,16 +33,22 @@ from sqlalchemy.orm import Session
 
 from app.models import Session as AgentSession
 from app.models import TokenCount, Turn
-from app.models.reference import RecordKind, TokenKind
+from app.models.reference import RecordKind
 from app.services.session_record_service import read_records
 
+INPUT = "input"
+CACHE_WRITE = "cache_write"
+CACHE_READ = "cache_read"
+OUTPUT = "output"
+
 _FIELDS = {
-    TokenKind.INPUT: "inputTokens",
-    TokenKind.CACHE_WRITE: "cacheCreationInputTokens",
-    TokenKind.CACHE_READ: "cacheReadInputTokens",
-    TokenKind.OUTPUT: "outputTokens",
+    INPUT: "inputTokens",
+    CACHE_WRITE: "cacheCreationInputTokens",
+    CACHE_READ: "cacheReadInputTokens",
+    OUTPUT: "outputTokens",
 }
-"""Each kind's field in a model's entry of `modelUsage`."""
+"""The field in a model's entry of `modelUsage` of each Token Kind a Turn is
+counted in."""
 
 # The `result` lines of a Turn read at a time, newest first.
 _PAGE = 8
@@ -54,7 +60,7 @@ class Spent:
     tokens of every kind, summed over the models it called, and the cost in
     US dollars, None where the line gives none."""
 
-    tokens: Mapping[TokenKind, int]
+    tokens: Mapping[str, int]
     cost: Decimal | None
 
     def less(self, before: "Spent | None") -> "Spent":
@@ -91,7 +97,7 @@ def spent(line: Any) -> Spent | None:
         isinstance(model, dict) for model in models.values()
     ):
         return None
-    tokens: dict[TokenKind, int] = {}
+    tokens: dict[str, int] = {}
     for kind, field in _FIELDS.items():
         counts = [model.get(field, 0) for model in models.values()]
         if not all(_is_count(count) for count in counts):

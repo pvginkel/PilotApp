@@ -34,12 +34,13 @@ from app.models.reference import (
     HoldKind,
     RecordKind,
     SessionState,
-    TokenKind,
     TurnCause,
 )
 from tests.support.database import violated_constraint
 
 SENT_AT = datetime(2026, 10, 19, 9, 30, tzinfo=UTC)
+TURN_KINDS = ("input", "cache_write", "cache_read", "output")
+"""The Token Kinds a Turn is counted in."""
 
 ASSISTANT_LINE = {
     "type": "assistant",
@@ -518,7 +519,7 @@ class TestTokenCount:
     def test_a_turn_is_counted_per_kind(self, session: DbSession, turn: Turn) -> None:
         session.add_all(
             TokenCount(turn_id=turn.id, token_kind_code=kind, tokens=tokens)
-            for kind, tokens in zip(TokenKind, (6, 31_400, 0, 820), strict=True)
+            for kind, tokens in zip(TURN_KINDS, (6, 31_400, 0, 820), strict=True)
         )
         session.flush()
 
@@ -528,18 +529,16 @@ class TestTokenCount:
             )
         ).all()
         assert dict(counts) == {
-            TokenKind.INPUT: 6,
-            TokenKind.CACHE_WRITE: 31_400,
-            TokenKind.CACHE_READ: 0,
-            TokenKind.OUTPUT: 820,
+            "input": 6,
+            "cache_write": 31_400,
+            "cache_read": 0,
+            "output": 820,
         }
 
     def test_a_count_passes_what_an_int_holds(
         self, session: DbSession, turn: Turn
     ) -> None:
-        count = TokenCount(
-            turn_id=turn.id, token_kind_code=TokenKind.CACHE_READ, tokens=2**40
-        )
+        count = TokenCount(turn_id=turn.id, token_kind_code="cache_read", tokens=2**40)
         session.add(count)
         session.flush()
         session.expire(count)
@@ -550,7 +549,7 @@ class TestTokenCount:
         self, session: DbSession, turn: Turn
     ) -> None:
         session.add_all(
-            TokenCount(turn_id=turn.id, token_kind_code=TokenKind.OUTPUT, tokens=tokens)
+            TokenCount(turn_id=turn.id, token_kind_code="output", tokens=tokens)
             for tokens in (820, 821)
         )
 
@@ -559,16 +558,22 @@ class TestTokenCount:
         )
 
     def test_a_count_counts_a_turn(self, session: DbSession) -> None:
-        session.add(TokenCount(turn_id=404, token_kind_code=TokenKind.INPUT, tokens=6))
+        session.add(TokenCount(turn_id=404, token_kind_code="input", tokens=6))
 
         assert violated_constraint(session) == "token_counts_turn_id_fkey"
 
     def test_a_count_is_never_negative(self, session: DbSession, turn: Turn) -> None:
-        session.add(
-            TokenCount(turn_id=turn.id, token_kind_code=TokenKind.INPUT, tokens=-1)
-        )
+        session.add(TokenCount(turn_id=turn.id, token_kind_code="input", tokens=-1))
 
         assert violated_constraint(session) == "ck_token_counts_tokens"
+
+    @pytest.mark.parametrize("kind", ["cache_write_5m", "cache_write_1h"])
+    def test_a_turn_is_counted_in_no_kind_within_another(
+        self, session: DbSession, turn: Turn, kind: str
+    ) -> None:
+        session.add(TokenCount(turn_id=turn.id, token_kind_code=kind, tokens=6))
+
+        assert violated_constraint(session) == "ck_token_counts_kind"
 
 
 class TestSessionRecord:

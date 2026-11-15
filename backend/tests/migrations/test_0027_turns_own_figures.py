@@ -19,9 +19,17 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import Environment, Project, TokenCount, Turn
-from app.models.reference import RecordKind, SessionState, TokenKind, TurnCause
+from app.models.reference import RecordKind, SessionState, TurnCause
 from app.services.container import ServiceContainer
-from app.services.token_counts import Spent, reported_before, spent
+from app.services.token_counts import (
+    CACHE_READ,
+    CACHE_WRITE,
+    INPUT,
+    OUTPUT,
+    Spent,
+    reported_before,
+    spent,
+)
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import raw_turn
 
@@ -38,14 +46,14 @@ def _result_line(name: str) -> dict[str, Any]:
     return line
 
 
-def _tokens(*counts: int) -> dict[TokenKind, int]:
+def _tokens(*counts: int) -> dict[str, int]:
     return dict(
         zip(
             (
-                TokenKind.INPUT,
-                TokenKind.CACHE_WRITE,
-                TokenKind.CACHE_READ,
-                TokenKind.OUTPUT,
+                INPUT,
+                CACHE_WRITE,
+                CACHE_READ,
+                OUTPUT,
             ),
             counts,
             strict=True,
@@ -65,13 +73,16 @@ OTHER = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 
 
 def _upgrade(db: DbSession) -> None:
-    """Revision 0027's upgrade, on the test's transaction."""
+    """Revision 0027's upgrade, on the test's transaction, with Token Kind
+    the enum type it casts to, which revision 0035's downgrade brings back."""
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
-    revision = ScriptDirectory.from_config(config).get_revision("0027")
-    assert revision is not None
+    scripts = ScriptDirectory.from_config(config)
     with Operations.context(MigrationContext.configure(db.connection())):
-        revision.module.upgrade()
+        for revision, step in (("0035", "downgrade"), ("0027", "upgrade")):
+            script = scripts.get_revision(revision)
+            assert script is not None
+            getattr(script.module, step)()
     db.expire_all()
 
 

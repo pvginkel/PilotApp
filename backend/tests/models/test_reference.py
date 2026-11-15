@@ -1,10 +1,16 @@
-"""The reference entities: the enum types, and the four tables' rows the revisions write."""
+"""The reference entities: the enum types, and the five tables' rows the revisions write."""
 
 import pilot_dsl
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.models import ConfirmationReason, DoneCause, ItemKind, SessionKind
+from app.models import (
+    ConfirmationReason,
+    DoneCause,
+    ItemKind,
+    SessionKind,
+    TokenKind,
+)
 from app.models.reference import ENUM_TYPES, AnswerChannel, BlockKind
 from tests.support.database import violated_constraint
 
@@ -22,8 +28,8 @@ class TestEnumTypes:
 
         assert dict(rows) == {enum.name: list(enum.enums) for enum in ENUM_TYPES}
 
-    def test_the_enums_are_twenty_three(self) -> None:
-        """Twenty-one of DB §2.4, with the four tables its 25 reference
+    def test_the_enums_are_twenty_two(self) -> None:
+        """Twenty of DB §2.4, with the five tables its 25 reference
         entities, and Turn Cause and Hold Kind, Pilot's own of DB §2.11."""
         assert {enum.name for enum in ENUM_TYPES} == {
             "user_kind",
@@ -45,7 +51,6 @@ class TestEnumTypes:
             "effect_kind",
             "task_status",
             "usage_window",
-            "token_kind",
             "progress_state",
             "turn_cause",
             "hold_kind",
@@ -160,3 +165,31 @@ class TestSessionKind:
         )
 
         assert violated_constraint(session) == "ck_session_kinds_surface"
+
+
+class TestTokenKind:
+    def test_the_revisions_write_the_kinds(self, session: Session) -> None:
+        """A cache write's two lifetimes are within `cache_write` (DB 425,
+        426)."""
+        rows = session.execute(
+            select(TokenKind.code, TokenKind.name, TokenKind.within_code)
+        ).all()
+
+        assert set(rows) == {
+            ("input", "Input", None),
+            ("cache_write", "Cache write", None),
+            ("cache_read", "Cache read", None),
+            ("output", "Output", None),
+            ("cache_write_5m", "Cache write, five minutes", "cache_write"),
+            ("cache_write_1h", "Cache write, one hour", "cache_write"),
+        }
+
+    def test_a_kind_is_within_a_token_kind(self, session: Session) -> None:
+        session.add(TokenKind(code="other", name="Other", within_code="cache"))
+
+        assert violated_constraint(session) == "token_kinds_within_code_fkey"
+
+    def test_a_kind_is_not_within_itself(self, session: Session) -> None:
+        session.add(TokenKind(code="other", name="Other", within_code="other"))
+
+        assert violated_constraint(session) == "ck_token_kinds_within"

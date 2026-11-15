@@ -30,13 +30,11 @@ from app.models.reference import (
     HOLD_KIND,
     RECORD_KIND,
     SESSION_STATE,
-    TOKEN_KIND,
     TURN_CAUSE,
     EffectKind,
     HoldKind,
     RecordKind,
     SessionState,
-    TokenKind,
     TurnCause,
 )
 
@@ -202,11 +200,16 @@ class TokenCount(db.Model):  # type: ignore[name-defined]
     __table_args__ = (
         UniqueConstraint("turn_id", "token_kind_code"),
         CheckConstraint("tokens >= 0", name="ck_token_counts_tokens"),
+        # The four kinds a `result` line names, each within no other.
+        CheckConstraint(
+            "token_kind_code IN ('input', 'cache_write', 'cache_read', 'output')",
+            name="ck_token_counts_kind",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     turn_id: Mapped[int] = mapped_column(ForeignKey("turns.id"))
-    token_kind_code: Mapped[TokenKind] = mapped_column(TOKEN_KIND)
+    token_kind_code: Mapped[str] = mapped_column(ForeignKey("token_kinds.code"))
     tokens: Mapped[int] = mapped_column(BigInteger)
 
 
