@@ -64,13 +64,15 @@ a registration after STARTUP raises `InvalidOperationException`.
   `alarm`) on a thread of the
   supervisor's, not the lifecycle coordinator's, so the server serves while they run. One that
   raises is logged, and its job's loops start regardless.
-- **A loop**: `start_loop(job, run, key=None, *, again=False) -> bool` runs `run(handle)` on a
+- **A loop**: `start_loop(job, run, key=None, *, again=False, quiet=False) -> bool` runs `run(handle)` on a
   daemon thread named `job` or `job:key`, one live loop per name. A loop requested before its job's
   reconcile has run waits for it. A request for a name with a live or waiting loop does nothing, a
   loop past its last action whose thread has not yet ended included; with `again`, a request for a
   live loop has it run `run` once more after the current run returns. It returns False for a
   request that did nothing, at and after PREPARE_SHUTDOWN, and for a job that needs the controller
-  when none is configured.
+  when none is configured With `quiet`, the loop's `started`, `runs
+  again` and `ended` lines are logged at DEBUG: a timer's loop that finds nothing to do at most
+  ticks says nothing at INFO (the halt file's re-writes, P-354); a raise is logged as ever.
 - **A run that returns** ends its loop, on purpose. **One that raises** is run again after 1 s, the
   delay doubling to 30 s, and back to 1 s after a run that lasted 30 s or more. Nothing is run again
   once the loop is told to stop.

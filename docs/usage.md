@@ -167,7 +167,9 @@ every environment owed. The timer `halt-file`, on every tick, and the job's reco
 start the loop of every environment owed or whose column is set, so the file is written again
 wherever it is wanted at every tick: a write lost after its mark, by a process that ended in its
 loop's backoff or by a deploy roll's old pod marking after the new pod's STARTUP, lands at the
-next tick of whichever process runs. The tick also finds a work item the gate let through just
+next tick of whichever process runs. A re-write's loop, its start and its end, and its write are
+logged at DEBUG, quiet; the first write to land after a mark, every delete and every refusal stay at
+INFO. The tick also finds a work item the gate let through just
 before a halt or a pause.
 
 **The hard stop.** While a halt whose setting is the hard stop holds, every decision of the watcher

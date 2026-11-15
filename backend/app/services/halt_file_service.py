@@ -25,7 +25,9 @@ a resume (`ProjectService`), a halt's turn (`UsageWatcher`), a work item's
 run's end (`WorkSlots`). The sweep, the loop `halt-file`, starts the loop of
 every environment owed. The timer, on every tick, and the job's reconcile at
 STARTUP start the loop of every environment owed or whose column is set, so
-the file is written again where it is wanted at every tick: a write that
+the file is written again where it is wanted at every tick. A re-write's loop, its start and its
+end, and its write are logged at DEBUG; the first write to land after a mark, every delete and
+every refusal stay at INFO (P-354). A write that
 failed after its mark lands at the next tick of whichever process runs, the
 write of a process that ended in its loop's backoff, or of a deploy roll's
 old pod, marked after the new pod's STARTUP, among them. They also find a
@@ -100,6 +102,10 @@ class HaltFileService:
         """
         self._container = container
         self._supervisor = supervisor
+        # The environments whose file this process has written since their
+        # last mark or delete: a write after it is a re-write, logged below
+        # INFO, and so is the timer's loop that makes it.
+        self._landed: set[str] = set()
         self._halts = usage_halts
         self._settings = {
             UsageWindow.SEVEN_DAY: week_halt,
@@ -166,8 +172,11 @@ class HaltFileService:
         requested = db.scalars(
             select(Environment.id).where(Environment.halt_requested_at.is_not(None))
         )
-        for env_id in sorted({*self.owed(db), *requested}):
-            self._start(env_id)
+        owed = set(self.owed(db))
+        for env_id in sorted({*owed, *requested}):
+            # What lands again is quiet: a file already written by this
+            # process and still wanted, and nothing owed (P-354).
+            self._start(env_id, quiet=env_id in self._landed and env_id not in owed)
 
     def settle(self, env_id: str, handle: LoopHandle) -> None:
         """An environment's loop's run: under its row, while a work item runs
@@ -208,21 +217,36 @@ class HaltFileService:
         requested = row.halt_requested_at is not None
         if wanted and not requested:
             row.halt_requested_at = datetime.now(UTC)
+            self._landed.discard(env_id)
             return _Step.MARKED
         if wanted and not written:
             self._client().write_file(env_id, HALT_FILE, b"")
-            logger.info("Wrote the halt file into environment %s", env_id)
+            # The first write to land after a mark is INFO, a write retried
+            # after a refusal in a settle of its own among them; the timer's
+            # re-writes after it are DEBUG.
+            first = env_id not in self._landed
+            self._landed.add(env_id)
+            logger.log(
+                logging.INFO if first else logging.DEBUG,
+                "Wrote the halt file into environment %s",
+                env_id,
+            )
             return _Step.WRITTEN
         if not wanted and requested:
             self._client().delete_file(env_id, HALT_FILE)
             row.halt_requested_at = None
+            self._landed.discard(env_id)
             logger.info("Deleted the halt file from environment %s", env_id)
             return _Step.DELETED
         return None
 
-    def _start(self, env_id: str) -> None:
+    def _start(self, env_id: str, *, quiet: bool = False) -> None:
         self._supervisor.start_loop(
-            HALT_FILE_JOB, partial(self.settle, env_id), key=env_id, again=True
+            HALT_FILE_JOB,
+            partial(self.settle, env_id),
+            key=env_id,
+            again=True,
+            quiet=quiet,
         )
 
     def _client(self) -> ControllerClient:

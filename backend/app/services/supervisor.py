@@ -117,14 +117,19 @@ class LoopHandle:
         return bool(held)
 
 
+def _level(loop: "_Loop") -> int:
+    return logging.DEBUG if loop.quiet else logging.INFO
+
+
 @dataclass
 class _Job:
     name: str
     needs_controller: bool
     reconcile: Reconcile | None
     reconciled: bool = False
-    # The loops requested before the reconcile ran, by loop name.
-    pending: dict[str, LoopRun] = field(default_factory=dict)
+    # The loops requested before the reconcile ran, by loop name, with
+    # whether each was asked to be quiet.
+    pending: dict[str, tuple[LoopRun, bool]] = field(default_factory=dict)
 
 
 @dataclass
@@ -136,11 +141,19 @@ class _Timer:
 
 class _Loop:
     def __init__(
-        self, job: str, name: str, run: LoopRun, target: Callable[["_Loop"], None]
+        self,
+        job: str,
+        name: str,
+        run: LoopRun,
+        target: Callable[["_Loop"], None],
+        quiet: bool = False,
     ) -> None:
         self.job = job
         self.name = name
         self.run = run
+        # Whether its start, its runs again and its end are logged at DEBUG
+        # in place of INFO.
+        self.quiet = quiet
         self.handle = LoopHandle(name)
         # Set by a request to run again; cleared, under the supervisor's lock,
         # as each run starts.
@@ -231,8 +244,15 @@ class Supervisor:
         key: str | int | None = None,
         *,
         again: bool = False,
+        quiet: bool = False,
     ) -> bool:
         """Run `run` as the loop `job:key` (`job` when there is no key).
+
+        With `quiet`, the loop's start, each run again and its end are logged
+        at DEBUG, in place of INFO, for a loop a timer starts at every tick
+        that mostly finds nothing to do (P-354); what its run logs, and a
+        raise, are the run's and the supervisor's own as ever. A request for
+        a loop already live leaves the live one's setting.
 
         Before the job's reconcile has run the loop waits for it, and starts once
         the reconcile at STARTUP is done: the suite and the CLI never fire
@@ -262,9 +282,9 @@ class Supervisor:
             if live is not None or name in entry.pending:
                 return False
             if entry.reconciled:
-                self._spawn(entry, name, run)
+                self._spawn(entry, name, run, quiet)
             else:
-                entry.pending[name] = run
+                entry.pending[name] = (run, quiet)
             return True
 
     def interrupt_loop(self, job: str, key: str | int | None = None) -> bool:
@@ -280,14 +300,14 @@ class Supervisor:
             loop = self._loops.get(name)
         return loop is not None and loop.handle._close_held()
 
-    def _spawn(self, job: _Job, name: str, run: LoopRun) -> None:
+    def _spawn(self, job: _Job, name: str, run: LoopRun, quiet: bool) -> None:
         # Under self._lock.
-        loop = _Loop(job.name, name, run, self._run_loop)
+        loop = _Loop(job.name, name, run, self._run_loop, quiet)
         self._loops[name] = loop
         loop.thread.start()
 
     def _run_loop(self, loop: _Loop) -> None:
-        logger.info("Loop %s started", loop.name)
+        logger.log(_level(loop), "Loop %s started", loop.name)
         delay = self._backoff_initial
         try:
             while True:
@@ -309,7 +329,7 @@ class Supervisor:
                         if not loop.again or loop.handle.stopping:
                             del self._loops[loop.name]
                             return
-                    logger.info("Loop %s runs again", loop.name)
+                    logger.log(_level(loop), "Loop %s runs again", loop.name)
                     continue
                 if loop.handle.stopping:
                     logger.error(
@@ -332,7 +352,7 @@ class Supervisor:
             with self._lock:
                 if self._loops.get(loop.name) is loop:
                     del self._loops[loop.name]
-            logger.info("Loop %s ended", loop.name)
+            logger.log(_level(loop), "Loop %s ended", loop.name)
 
     def _on_lifecycle_event(self, event: LifecycleEvent) -> None:
         match event:
@@ -381,8 +401,8 @@ class Supervisor:
                     )
             with self._lock:
                 job.reconciled = True
-                for name, run in job.pending.items():
-                    self._spawn(job, name, run)
+                for name, (run, quiet) in job.pending.items():
+                    self._spawn(job, name, run, quiet)
                 job.pending.clear()
 
     def _schedule(self) -> None:

@@ -11,6 +11,7 @@ An environment's run is called on the test's session as its loop calls it;
 the loops' tests run them on a database of their own, as the supervisor
 does."""
 
+import logging
 import re
 import uuid
 from collections.abc import Iterator
@@ -929,6 +930,46 @@ class TestHaltFileServiceLoop:
         assert marked is not None
         assert _file(fake_controller) == b""
         assert _committed_requested(container) == marked
+
+    def test_a_rewrite_at_a_tick_logs_below_info_and_the_first_write_at_info(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> None:
+        """P-354: the first write to land after a mark logs at INFO, and the
+        loop that makes it; the timer's writes after it, the loop's start and
+        end and the write, at DEBUG."""
+        container = committed_app.container
+        project_id, _ = _committed_rows(committed_app, fake_controller)
+        with scoped_session(container) as db:
+            db.get_one(Project, project_id).paused = True
+        service, coordinator = _service(container, supervise, tick=60)
+        ended = f"Loop {HALT_FILE_JOB}:{ENV} ended"
+        wrote = f"Wrote the halt file into environment {ENV}"
+        with listening(SUPERVISOR_LOGGER, HALT_LOGGER) as everything:
+            everything.setLevel(logging.DEBUG)
+            for name in (SUPERVISOR_LOGGER, HALT_LOGGER):
+                logging.getLogger(name).setLevel(logging.DEBUG)
+            coordinator.fire_startup()
+            everything.wait_for(ended)
+            with scoped_session(container) as db:
+                service.run_timer(db)
+            everything.wait_for(ended, 2)
+
+        levels = {
+            message: [
+                record.levelno
+                for record in everything.records
+                if record.getMessage() == message
+            ]
+            for message in (f"Loop {HALT_FILE_JOB}:{ENV} started", ended, wrote)
+        }
+        for message, seen in levels.items():
+            assert len(seen) >= 2, message
+            assert seen[0] == logging.INFO, message
+            assert set(seen[1:]) == {logging.DEBUG}, message
 
     @pytest.mark.parametrize("wanted", [True, False], ids=["write", "delete"])
     def test_a_call_the_controller_keeps_refusing_is_made_again_until_it_lands(

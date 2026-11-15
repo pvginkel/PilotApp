@@ -289,6 +289,32 @@ class TestSupervisorLoops:
         ]
         assert metric_value(JOB_RESTARTS_TOTAL, job="again") == 0
 
+    def test_a_quiet_loop_logs_its_start_runs_again_and_end_below_info(
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
+    ) -> None:
+        """P-354: a loop asked to be quiet logs at DEBUG what a loop logs at
+        INFO; what a loop that raises logs, it logs as ever."""
+        supervisor, coordinator = supervise(app.container)
+        supervisor.register_job("quiet", needs_controller=False)
+        supervisor.register_job("loud", needs_controller=False)
+        coordinator.fire_startup()
+        release = threading.Event()
+        calls = _Calls()
+
+        def quiet(handle: LoopHandle) -> None:
+            calls.add(handle.name)
+            release.wait(WAIT_SECONDS)
+
+        assert supervisor.start_loop("quiet", quiet, again=True, quiet=True)
+        calls.wait_for(1)
+        assert supervisor.start_loop("quiet", quiet, again=True, quiet=True)
+        release.set()
+        assert supervisor.start_loop("loud", lambda handle: None)
+
+        supervisor_log.wait_for(r"Loop loud ended")
+        wait_until(lambda: calls.items == ["quiet", "quiet"], "the quiet loop's rerun")
+        assert supervisor_log.matching(r"Loop quiet .*") == []
+
     def test_a_request_after_a_runs_last_action_is_not_lost(
         self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
