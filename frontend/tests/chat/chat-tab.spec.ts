@@ -549,8 +549,10 @@ test.describe('The Chat tab', () => {
     await expect(chat.cue).toHaveText(/^Thinking · /);
     await cameIntoView(page);
     await expect(chat.cue).toHaveText(thinkingSince(before, after, paused));
-    // A later thinking block counts from the press still.
-    await page.clock.runFor(10_000);
+    // A later thinking block counts from the press still. The wall clock alone moves, the cue's: the
+    // stream's silence watch reads the monotonic clock, and a jump of two heartbeats there opens the
+    // stream again, losing the partials played before the Session's subscription stands again.
+    await page.clock.setSystemTime(paused + 10_000);
     await controller.play(chats.store, session, [text('weigh', 'Weighing them.'), thinkingStart()]);
     await expect(chat.texts).toHaveText(['Weighing them.']);
     await expect(chat.cue).toHaveText(/^Thinking · /);
