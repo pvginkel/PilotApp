@@ -147,6 +147,22 @@ test.describe('The opening', () => {
     expect(said.height).toBeGreaterThan(40 * 15);
     expect(Math.abs(bubble.y + bubble.height - (said.y + said.height) - 10)).toBeLessThan(1);
   });
+
+  test('breaks a long unbroken line within its bubble, the page growing no horizontal scroll', async ({ page, people, projects, timeline }) => {
+    const me = await people.signIn();
+    const path = `example-env:/work/Example/handovers/${'a-long-folder-name/'.repeat(10)}the-handover_2026-11-14.md`;
+    const id = await projects.makeWithSession({ name: makeUnique('Path'), members: [me.handle!], opening: `Start from ${path}` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await timeline.open(id);
+
+    await expect(timeline.openingWords).toContainText(path);
+    const [said, bubble] = await Promise.all(
+      [timeline.openingWords, timeline.opening.locator('.bubble')].map(async (each) => (await each.boundingBox())!),
+    );
+    expect(said.x + said.width).toBeLessThanOrEqual(bubble.x + bubble.width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    expect(await timeline.openingWords.evaluate((box) => box.scrollWidth <= box.clientWidth)).toBe(true);
+  });
 });
 
 test.describe('An open item', () => {

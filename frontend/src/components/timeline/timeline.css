@@ -648,7 +648,7 @@
   }
   .prompt .who { font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .prompt .who b { color: hsl(var(--foreground)); }
-  .prompt .said { margin-top: 2px; white-space: pre-wrap; }
+  .prompt .said { margin-top: 2px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
   @media (max-width: 900px) {
     .feed-inner { padding: 12px 12px; }
