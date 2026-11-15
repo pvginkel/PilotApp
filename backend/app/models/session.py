@@ -163,7 +163,8 @@ class Hold(db.Model):  # type: ignore[name-defined]
     """One period in which Pilot kept a Session from running for one reason
     outside it: written when the gate first keeps the Session and ended once,
     when the gate lets it go or its reason changes (DB §2.5, Hold; 360, 362).
-    Nothing reads one to decide anything."""
+    A Session at rest that is owed its nudge has one while a reason withholds
+    the nudge (`holds.at_rest`). Nothing reads one to decide anything."""
 
     __tablename__ = "holds"
     __table_args__ = (
