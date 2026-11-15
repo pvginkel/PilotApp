@@ -133,7 +133,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Select, literal, or_, select
+from sqlalchemy import Select, exists, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.core_exceptions import ExternalServiceException
@@ -146,6 +146,7 @@ from app.models import (
     ClarificationRun,
     Document,
     Environment,
+    Hold,
     Item,
     Project,
     ProjectTransition,
@@ -176,7 +177,7 @@ from app.services.controller_client import (
 from app.services.controller_outage import ControllerOutage
 from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
-from app.services.holds import turn_hold
+from app.services.holds import turn_hold, turn_rest
 from app.services.pilot_server import PilotServer, unheld_token_hash
 from app.services.quota_wall import confirmed, decided, quota_back
 from app.services.relay_service import (
@@ -912,11 +913,27 @@ class SessionStartService:
         end, which asked for the run, may have moved its reason. So has each
         work item whose nudge is owed,
         the hard stop's or a turn's end's under a halt: a halt's turn may have
-        moved the halt its line names (decision 66)."""
+        moved the halt its line names (decision 66). Then each Session at rest
+        that is owed its nudge, or that has a Hold open, has its Hold turned
+        to what keeps it from the nudge now (`turn_rest`), under its lock."""
         with scoped_session(self._container) as db:
             held = db.scalars(
                 select(AgentSession.id)
                 .where(AgentSession.state_code == SessionState.HELD)
+                .order_by(AgentSession.created_at, AgentSession.id)
+            ).all()
+            resting = db.scalars(
+                select(AgentSession.id)
+                .where(
+                    AgentSession.state_code != SessionState.HELD,
+                    or_(
+                        AgentSession.nudge_owed_at.is_not(None),
+                        exists().where(
+                            Hold.session_id == AgentSession.id,
+                            Hold.ended_at.is_(None),
+                        ),
+                    ),
+                )
                 .order_by(AgentSession.created_at, AgentSession.id)
             ).all()
             for owed in db.scalars(
@@ -931,6 +948,11 @@ class SessionStartService:
                 return
             with scoped_session(self._container) as db:
                 self._release_one(db, session_id)
+        for session_id in resting:
+            if handle.stopping:
+                return
+            with scoped_session(self._container) as db:
+                self._rest_one(db, session_id)
 
     def hard_stop(self) -> None:
         """A usage halt whose setting is the hard stop holds: every running
@@ -943,8 +965,9 @@ class SessionStartService:
     def stop_halted(self, handle: LoopHandle) -> None:
         """The hard stop's loop's run: each work item's Session `running`, in
         `created_at` order, stopped by Pilot as a Stop stops one, its nudge
-        owed (DB 269, 232), each in a transaction of its own, under its lock
-        while it still runs and a hard-stop halt still holds."""
+        owed (DB 269, 232) and its Hold for the halt opened, each in a
+        transaction of its own, under its lock while it still runs and a
+        hard-stop halt still holds."""
         with scoped_session(self._container) as db:
             running = db.scalars(
                 select(AgentSession.id)
@@ -1059,7 +1082,7 @@ class SessionStartService:
             session.state_code == SessionState.IDLE
             and session.nudge_owed_at is not None
         ):
-            self._stop_at_rest(session, person, at)
+            self._stop_at_rest(db, session, person, at)
         else:
             raise InvalidOperationException(
                 operation, _STOP_REFUSALS[session.state_code]
@@ -1081,7 +1104,8 @@ class SessionStartService:
         takes (`stop`). The item is done `cancelled` by `user`, with `reason`
         its Work's `done_note` (`RecordService.close_work`). The Session
         stays `stopped`, its stop as it was written, owed its nudge no more,
-        and holds its environment no more (`EnvironmentService`). The
+        its Hold ended, and holds its environment no more
+        (`EnvironmentService`). The
         documents it registered are read once this commits, or once its
         stopped turn has ended (`TurnEndReadService.run_closed`).
 
@@ -1126,13 +1150,14 @@ class SessionStartService:
                 and before == SessionState.IDLE
                 and session.nudge_owed_at is not None
             ):
-                self._stop_at_rest(session, user, at)
+                self._stop_at_rest(db, session, user, at)
             else:
                 raise InvalidOperationException(operation, _CLOSE_REFUSALS[before])
         self._container.record_service().close_work(
             project, session_id, user, operation, note=reason
         )
         session.nudge_owed_at = None
+        turn_hold(db, session, None, at)
         self._container.turn_end_read_service().run_closed(db, session)
         logger.info(
             "Session %s closed for good by %s, %s", session_id, user.handle, before
@@ -1150,8 +1175,8 @@ class SessionStartService:
         from rest, idle or stopped with its nudge owed, or a job the unlifted
         Store Update stopped, is `stopped` by `person` now, its turn as it
         ended; one failed at the quota wall stays `failed`. None is owed its
-        nudge afterwards, and the lift retries none: it retries Pilot's stops
-        alone (DB 280, 281)."""
+        nudge afterwards, none has a Hold open, and the lift retries none: it
+        retries Pilot's stops alone (DB 280, 281)."""
         records = self._records(db)
         for work_id in sorted(work_ids):
             records.lock_session(work_id)
@@ -1162,10 +1187,11 @@ class SessionStartService:
             if before in STOPPABLE:
                 self._stop(db, session, person, at)
             elif before in (SessionState.IDLE, SessionState.STOPPED):
-                self._stop_at_rest(session, person, at)
+                self._stop_at_rest(db, session, person, at)
             else:
                 self._moved(session, state=True)
             session.nudge_owed_at = None
+            turn_hold(db, session, None, at)
             logger.info(
                 "Session %s taken over by %s, %s", work_id, person.handle, before
             )
@@ -1198,9 +1224,12 @@ class SessionStartService:
         """Every Session of the project running, starting or held, a Chat's
         among them, stopped by `person` at `at` as a Stop stops a work item:
         Finish's and Archive's (F5.1, F128.1), and Reopen's of a finished
-        project's chat (F5.5). It calls no controller in the
-        transaction. The caller holds the project's row; the Sessions are
-        locked before any Item, which a turn's end locks after its Session.
+        project's chat (F5.5). Each of its Sessions at rest that is owed its
+        nudge has its Hold turned to what the project's new standing leaves
+        of it (`turn_rest`): a Finish and an Archive end it at `at`. It calls
+        no controller in the transaction. The caller holds the project's row;
+        the Sessions are locked before any Item, which a turn's end locks
+        after its Session.
         The open chat's Session is locked first, whatever its state: a
         message's send moves it to `running` under that lock, which it takes
         after the project's row shared (`ChatService.send`)."""
@@ -1215,19 +1244,26 @@ class SessionStartService:
             select(AgentSession)
             .where(
                 AgentSession.project_id == project.id,
-                AgentSession.state_code.in_(STOPPABLE),
+                or_(
+                    AgentSession.state_code.in_(STOPPABLE),
+                    AgentSession.nudge_owed_at.is_not(None),
+                ),
             )
             .order_by(AgentSession.id)
             .with_for_update()
             .execution_options(populate_existing=True)
         ):
-            self._stop(db, session, person, at)
+            if session.state_code in STOPPABLE:
+                self._stop(db, session, person, at)
+            else:
+                turn_rest(db, session, self._halts, at)
 
     def resume(self, db: Session, session_id: uuid.UUID) -> AgentSession:
         """A work item's Resume, stopped or failed, in the caller's
         transaction (F67.2): carried on by "continue" (`_carry_on`). The item
         stays one item (F26.7). A nudge owed to it, the hard stop's, is owed
-        no more: the Resume stands in for it (DB 232). A done work item's is
+        no more: the Resume stands in for it (DB 232), and the Hold of its
+        rest ends. A done work item's is
         refused, one closed for good among them, whose Session stays
         `stopped` (DB 347).
 
@@ -1339,6 +1375,16 @@ class SessionStartService:
         self._moved(session, state=True)
         logger.info("Session %s goes on from held", session_id)
 
+    def _rest_one(self, db: Session, session_id: uuid.UUID) -> None:
+        """The Session's Hold turned to what keeps it at rest now, under its
+        lock, while the gate does not hold it: a held start's Hold is the
+        gate's (`_release_one`). One with a Hold open that is owed no nudge
+        has it ended: a process that writes no Hold moved it on."""
+        session = self._records(db).lock_session(session_id)
+        if session.state_code == SessionState.HELD:
+            return
+        turn_rest(db, session, self._halts, datetime.now(UTC))
+
     def _begin(self, db: Session, session: AgentSession) -> None:
         """The start of a `starting` Session begun through the gate, its slot
         taken (`WorkSlots.took`), and its loop run once the transaction
@@ -1394,15 +1440,18 @@ class SessionStartService:
         self._slots.left(session, before)
         logger.info("Session %s stopped by %s, %s", session.id, person.handle, before)
 
-    def _stop_at_rest(self, session: AgentSession, person: User, at: datetime) -> None:
+    def _stop_at_rest(
+        self, db: Session, session: AgentSession, person: User, at: datetime
+    ) -> None:
         """Under the Session's lock: one at rest, idle or stopped, `stopped` by
-        `person` at `at`, its turn as it ended, owed its nudge no more. It held
-        no slot, and its environment went to the shutdown timer at its turn's
-        end or its stop."""
+        `person` at `at`, its turn as it ended, owed its nudge no more, the
+        Hold of its rest ended. It held no slot, and its environment went to
+        the shutdown timer at its turn's end or its stop."""
         session.state_code = SessionState.STOPPED
         session.stopped_at = at
         session.stopped_by_user_id = person.id
         session.nudge_owed_at = None
+        turn_hold(db, session, None, at)
         self._moved(session, state=True)
 
     def _stop_halted(self, db: Session, session_id: uuid.UUID) -> None:
@@ -1412,6 +1461,7 @@ class SessionStartService:
         now = datetime.now(UTC)
         self._stop(db, session, _pilot(db), now)
         session.nudge_owed_at = now
+        turn_rest(db, session, self._halts, now)
         logger.info("Session %s stopped at the usage limit, its nudge owed", session_id)
 
     def _nudgeable(self, db: Session) -> Select[uuid.UUID]:
@@ -1496,7 +1546,9 @@ class SessionStartService:
         through the gate (§13.4): `held` while it is closed, a job's behind
         its project's jobs before it among them, else `starting`, its loop
         sending the Turn once this commits. Its `error`
-        is cleared, its nudge is owed no more, and a write-back the
+        is cleared, its nudge is owed no more, the Hold of its rest ends,
+        a held start's opening as it does where the gate holds the Turn, and
+        a write-back the
         controller refused of a document it carries is owed again
         (`RecordService.retry_write_backs`). With no conversation it is a
         fresh start (`_fresh`). Returns why the gate holds it; None while it
@@ -1522,6 +1574,7 @@ class SessionStartService:
         session.error = None
         session.current_line = None
         session.nudge_owed_at = None
+        turn_hold(db, session, None, now)
         self._container.record_service().retry_write_backs(session.id)
         # The queue counts a job behind the others while it is held.
         session.state_code = SessionState.HELD
@@ -2009,9 +2062,10 @@ class SessionStartService:
     def _settle_missed(self, db: Session, session_id: uuid.UUID) -> None:
         """A Session at the quota wall that a reading decided missed,
         under its project's row and then its own, while it still is: the
-        failed end it is, its nudge owed no more and a pass's questions put
-        to the writer now, unless its project is finished or archived, where
-        nothing starts (the ruling on the wall; DB 254; F5.1, F128.1)."""
+        failed end it is, its nudge owed no more, its Hold ended, and a
+        pass's questions put to the writer now, unless its project is
+        finished or archived, where nothing starts (the ruling on the wall;
+        DB 254; F5.1, F128.1)."""
         unlocked = db.get_one(AgentSession, session_id)
         # Before the Session's lock (the lock order): the clarification run's
         # placement is an Item's birth.
@@ -2022,6 +2076,7 @@ class SessionStartService:
         ):
             return
         session.nudge_owed_at = None
+        turn_hold(db, session, None, datetime.now(UTC))
         if session.kind_code == JOB_KIND and _closed(project) is None:
             self._container.clarification_service().pass_ended(session)
         self._moved(session, state=True)

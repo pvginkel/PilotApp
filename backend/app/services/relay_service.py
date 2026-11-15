@@ -117,6 +117,7 @@ from app.services.current_line import (
     while_starting,
 )
 from app.services.environment_service import EnvironmentService
+from app.services.holds import turn_rest
 from app.services.pilot_server import PilotServer, hold_send
 from app.services.quota_wall import turn_shows_wall
 from app.services.session_record_service import (
@@ -1177,7 +1178,8 @@ class RelayService:
         reply is recorded now, as the turn's final text (DB 232, 255). One
         `failed` whose turn's stream shows the quota wall has its nudge owed,
         a pass asking nothing yet: it is not at its end (the ruling on the
-        wall)."""
+        wall). A Session whose nudge is owed from `at` is held from `at` by
+        what withholds it (`turn_rest`)."""
         work = db.get(Work, session.id) is not None
         if frame.interrupted:
             session.state_code = SessionState.STOPPED
@@ -1187,6 +1189,7 @@ class RelayService:
             session.state_code = SessionState.FAILED
             if turn_shows_wall(db, session.id, turn.id):
                 session.nudge_owed_at = at
+                turn_rest(db, session, self._container.usage_halts(), at)
                 logger.info(
                     "Session %s ended its turn at the quota wall, its nudge owed "
                     "once a reading confirms it",
@@ -1206,6 +1209,7 @@ class RelayService:
                 clarifications = self._container.clarification_service()
                 if session.kind_code == WORK_KIND and self._halted(db, session):
                     session.nudge_owed_at = at
+                    turn_rest(db, session, self._container.usage_halts(), at)
                     clarifications.replied(session, frame.result, at)
                     logger.info(
                         "Session %s ended its turn halted or paused, its nudge owed",

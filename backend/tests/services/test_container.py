@@ -24,6 +24,7 @@ from app.models import (
     AppPage,
     Chat,
     Environment,
+    Hold,
     Item,
     Project,
     ProjectMember,
@@ -39,6 +40,7 @@ from app.models.reference import (
     ChatKind,
     CloseCause,
     FiringCause,
+    HoldKind,
     ProjectState,
     SessionState,
     TurnCause,
@@ -603,7 +605,8 @@ class TestHardStopWiring:
         self, committed_app: Flask, fake_controller: ServedFakeController
     ) -> None:
         """The fleet stream's reading, the watcher's decision, the start
-        service's loop: the work item stopped, its nudge owed (F135.6)."""
+        service's loop: the work item stopped, its nudge owed (F135.6), and
+        held by the week's halt from its stop (DB §2.5, Hold)."""
         container = committed_app.container
         container.app_config.override(
             AppSettings(
@@ -641,6 +644,7 @@ class TestHardStopWiring:
             )
             db.add(run)
             db.flush()
+            container.record_service().place_work(project, run, "Renaming the badge")
             run_id = run.id
         relays = container.relay_service()
         assert isinstance(container.fleet_consumer(), FleetConsumer)
@@ -657,6 +661,10 @@ class TestHardStopWiring:
                 lambda: _stopped_owed(container, run_id),
                 "the work item stopped, its nudge owed",
             )
+            with scoped_session(container) as db:
+                (held,) = db.scalars(select(Hold).where(Hold.session_id == run_id))
+                assert (held.kind_code, held.ended_at) == (HoldKind.WEEK_HALT, None)
+                assert held.started_at == db.get_one(AgentSession, run_id).stopped_at
         finally:
             coordinator.shutdown()
 

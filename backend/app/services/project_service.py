@@ -654,6 +654,9 @@ class ProjectService:
             self.record_service.autopilot_yes(project, person)
         if project.paused != paused:
             self._pause_moved(project)
+        if kind is TransitionKind.BROUGHT_BACK:
+            # Its Sessions owed their nudge may be held again (`at_rest`).
+            after_commit(self.session_start_service.release_held)
         if kind in (TransitionKind.PAUSED, TransitionKind.RESUMED):
             # The pause is not in the store's tree: its timeline is unmoved.
             self.engine_bus.emit(ProjectChanged(project.id))

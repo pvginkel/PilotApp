@@ -3105,6 +3105,23 @@ class TestTransition:
         finally:
             after_commit_module.clear_after_commit_callbacks()
 
+    def test_a_project_brought_back_asks_the_gate_again_once_it_commits(
+        self, container: ServiceContainer
+    ) -> None:
+        """A Session of its that is owed its nudge is held again by what
+        withholds it, its pause here (DB §2.5, Hold)."""
+        made = _make(container, name="Camp", state="open", paused=True, archived=True)
+        starts = container.session_start_service()
+        after_commit_module.clear_after_commit_callbacks()
+        try:
+            container.project_service().transition(
+                ADA, made.id, TransitionKind.BROUGHT_BACK
+            )
+
+            assert starts.release_held in after_commit_module._callbacks.get()
+        finally:
+            after_commit_module.clear_after_commit_callbacks()
+
     @pytest.mark.parametrize(
         ("spec", "kind", "nudged"),
         [

@@ -10225,3 +10225,716 @@ class TestHoldsAtOnce:
         assert _committed(container, work_id).state_code == SessionState.STOPPED
         with scoped_session(container) as db:
             assert _kinds(db, work_id) == [(HoldKind.OUTAGE, False)]
+
+
+def _paused_end(
+    starts: SessionStartService,
+    fake: _Recording,
+    db: DbSession,
+    project: Project,
+    person: User,
+) -> models.Session:
+    """A work item whose turn ended well while its project was paused: open,
+    `idle`, its nudge owed, on its conversation (DB 232)."""
+    run = _running(starts, db, project)
+    _named(fake, run)
+    _transition(db, project, person, TransitionKind.PAUSED)
+    _turn_ends(starts, fake, run, "success")
+    clear_after_commit_callbacks()
+    run = _read(db, run.id)
+    assert run.state_code == SessionState.IDLE
+    assert run.nudge_owed_at is not None
+    return run
+
+
+def _hard_stopped(
+    hard_starts: SessionStartService,
+    fake: _Recording,
+    db: DbSession,
+    project: Project,
+) -> models.Session:
+    """A work item the week's hard stop stopped, its stopped turn ended:
+    `stopped` by Pilot, its nudge owed (DB 269)."""
+    run = _running(hard_starts, db, project)
+    _named(fake, run)
+    _usage(db, week=0.95, five_hour=0.1)
+    _hard_stop(hard_starts)
+    _turn_ends(hard_starts, fake, run, "interrupted")
+    clear_after_commit_callbacks()
+    run = _read(db, run.id)
+    assert run.state_code == SessionState.STOPPED
+    assert run.nudge_owed_at is not None
+    return run
+
+
+class TestRestHoldOpens:
+    """A Session at rest that is owed its nudge is held while a usage halt,
+    its project's pause or a Store Update withholds the nudge (DB §2.5,
+    Hold)."""
+
+    def test_a_turn_ended_under_the_pause_is_held_by_it_from_its_end(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _paused_end(starts, fake, session, project, person)
+
+        (held,) = _holds(session, run.id)
+        assert (held.kind_code, held.ended_at) == (HoldKind.PAUSE, None)
+        assert held.started_at == run.nudge_owed_at == run.turn_ended_at
+
+    def test_a_turn_ended_under_a_cooperative_halt_is_held_by_that_halt(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _halted_end(starts, fake, session, project)
+
+        (held,) = _holds(session, run.id)
+        assert (held.kind_code, held.ended_at) == (HoldKind.WEEK_HALT, None)
+        assert held.started_at == run.nudge_owed_at
+
+    def test_one_the_hard_stop_stopped_is_held_by_the_halt_from_its_stop(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(hard_starts, session, project)
+        _usage(session, week=0.95, five_hour=0.1)
+
+        _hard_stop(hard_starts)
+        clear_after_commit_callbacks()
+
+        run = _read(session, run.id)
+        (held,) = _holds(session, run.id)
+        assert (held.kind_code, held.ended_at) == (HoldKind.WEEK_HALT, None)
+        assert held.started_at == run.stopped_at == run.nudge_owed_at
+
+    def test_a_turn_ended_under_a_halt_and_the_pause_is_held_by_the_halt(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """The first reason in the gate's order."""
+        run = _running(starts, session, project)
+        _named(fake, run)
+        _transition(session, project, person, TransitionKind.PAUSED)
+        _usage(session, week=0.95, five_hour=0.8)
+
+        _turn_ends(starts, fake, run, "success")
+        clear_after_commit_callbacks()
+
+        assert _kinds(session, run.id) == [(HoldKind.WEEK_HALT, True)]
+
+    def test_a_turn_ended_well_with_nothing_holding_has_none(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+        _named(fake, run)
+
+        _turn_ends(starts, fake, run, "success")
+        clear_after_commit_callbacks()
+
+        assert _read(session, run.id).nudge_owed_at is None
+        assert _holds(session, run.id) == []
+
+    def test_the_quota_walls_wait_is_none(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A work item's with no halt holding, and a job's, which no halt
+        holds: each waits for quota alone."""
+        walled = _walled_end(starts, fake, session, project, week=0.5)
+        job = _walled_job(container, session, project, environment, week=0.5)
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _read(session, walled.id).nudge_owed_at is not None
+        assert _holds(session, walled.id) == []
+        assert _holds(session, job.id) == []
+
+    def test_a_wall_met_under_a_halt_is_held_by_the_halt(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        walled = _walled_end(starts, fake, session, project, week=1.0)
+
+        (held,) = _holds(session, walled.id)
+        assert (held.kind_code, held.ended_at) == (HoldKind.WEEK_HALT, None)
+        assert held.started_at == walled.nudge_owed_at
+
+    def test_a_pause_made_over_one_at_the_wall_holds_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """A reason that starts over a Session already at rest: the pause
+        asks for the release, which opens its Hold."""
+        walled = _walled_end(starts, fake, session, project, week=0.5)
+        assert _holds(session, walled.id) == []
+        _transition(session, project, person, TransitionKind.PAUSED)
+        before = datetime.now(UTC)
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        (held,) = _holds(session, walled.id)
+        assert (held.kind_code, held.ended_at) == (HoldKind.PAUSE, None)
+        assert held.started_at >= before
+
+    def test_the_pause_holds_a_job_at_the_wall_but_a_setup(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        setup = _walled_job(container, session, project, environment, week=1.0)
+        fired = _walled_job(
+            container,
+            session,
+            project,
+            environment,
+            week=1.0,
+            trigger=WorkTrigger.WAIT_FIRED,
+        )
+        _transition(session, project, person, TransitionKind.PAUSED)
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _holds(session, setup.id) == []
+        assert _kinds(session, fired.id) == [(HoldKind.PAUSE, True)]
+
+    def test_a_store_update_holds_a_job_at_the_wall_until_its_lift(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A job's alone: the update holds no work item's nudge."""
+        job = _walled_job(container, session, project, environment, week=0.5)
+        walled = _walled_end(starts, fake, session, project, week=0.5)
+        update = hold(session)
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _kinds(session, job.id) == [(HoldKind.STORE_UPDATE, True)]
+        assert _holds(session, walled.id) == []
+
+        lift(session, update)
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _read(session, job.id).nudge_owed_at is not None
+        assert _kinds(session, job.id) == [(HoldKind.STORE_UPDATE, False)]
+
+
+class TestRestHoldTurns:
+    """The Hold of a Session at rest is of the first reason, in the gate's
+    order, that withholds its nudge: the halt before the pause. Each move of
+    those reasons asks for the release, which turns it (DB 362)."""
+
+    def test_a_pause_made_under_the_halt_and_its_lift_turn_nothing(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        (opened,) = _holds(session, halted.id)
+
+        _transition(session, project, person, TransitionKind.PAUSED)
+        _release(starts)
+        assert _kinds(session, halted.id) == [(HoldKind.WEEK_HALT, True)]
+
+        _transition(session, project, person, TransitionKind.RESUMED)
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        (standing,) = _holds(session, halted.id)
+        assert (standing.id, standing.kind_code, standing.ended_at) == (
+            opened.id,
+            HoldKind.WEEK_HALT,
+            None,
+        )
+
+    def test_the_halts_lift_under_the_pause_turns_it_to_the_pause(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        _transition(session, project, person, TransitionKind.PAUSED)
+
+        _usage(session, week=0.5, five_hour=0.1)
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        halt, pause = _holds(session, halted.id)
+        assert (halt.kind_code, pause.kind_code) == (
+            HoldKind.WEEK_HALT,
+            HoldKind.PAUSE,
+        )
+        assert (halt.ended_at, pause.ended_at) == (pause.started_at, None)
+        assert _read(session, halted.id).nudge_owed_at is not None
+
+    def test_a_halt_that_starts_over_a_paused_rest_takes_the_pauses_place(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _paused_end(starts, fake, session, project, person)
+
+        _usage(session, week=0.95, five_hour=0.1)
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        pause, halt = _holds(session, run.id)
+        assert (pause.kind_code, halt.kind_code) == (
+            HoldKind.PAUSE,
+            HoldKind.WEEK_HALT,
+        )
+        assert (pause.ended_at, halt.ended_at) == (halt.started_at, None)
+
+    def test_the_five_hour_halt_takes_the_weeks_place(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+
+        _usage(session, week=0.5, five_hour=0.8)
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _kinds(session, halted.id) == [
+            (HoldKind.WEEK_HALT, False),
+            (HoldKind.FIVE_HOUR_HALT, True),
+        ]
+
+    def test_the_reason_read_again_keeps_its_hold(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        (opened,) = _holds(session, halted.id)
+
+        _release(starts)
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        (standing,) = _holds(session, halted.id)
+        assert (standing.id, standing.started_at, standing.ended_at) == (
+            opened.id,
+            opened.started_at,
+            None,
+        )
+
+
+class TestRestHoldEnds:
+    """The Hold of a Session at rest ends at the first of: its last reason
+    lifting, its nudge going out, anything else after which the nudge is
+    owed no more, and its project's Finish or Archive."""
+
+    def test_the_last_reasons_lift_ends_it_the_nudge_still_owed(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        _usage(session, week=0.5, five_hour=0.1)
+        before = datetime.now(UTC)
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        (ended,) = _holds(session, halted.id)
+        assert ended.kind_code == HoldKind.WEEK_HALT
+        assert ended.ended_at is not None and ended.ended_at >= before
+        run = _read(session, halted.id)
+        assert (run.state_code, run.nudge_owed_at is None) == (
+            SessionState.IDLE,
+            False,
+        )
+
+    def test_the_nudge_that_goes_out_ends_it_at_its_turns_start(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        _usage(session, week=0.5, five_hour=0.1)
+
+        _nudge(starts)
+        clear_after_commit_callbacks()
+
+        assert _read(session, halted.id).state_code == SessionState.STARTING
+        (ended,) = _holds(session, halted.id)
+        assert ended.kind_code == HoldKind.WEEK_HALT
+        assert ended.ended_at == _turns(session, halted.id)[-1].started_at
+
+    def test_a_nudge_the_gate_holds_opens_the_held_starts_as_it_ends(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starts = _services(container, supervise, project_max=1)[0]
+        halted = _halted_end(starts, fake, session, project)
+        _usage(session, week=0.5, five_hour=0.1)
+        _running(starts, session, project)
+
+        _nudge(starts)
+        clear_after_commit_callbacks()
+
+        assert _read(session, halted.id).state_code == SessionState.HELD
+        rest, start = _holds(session, halted.id)
+        assert (rest.kind_code, start.kind_code) == (
+            HoldKind.WEEK_HALT,
+            HoldKind.SLOT,
+        )
+        assert (rest.ended_at, start.ended_at) == (start.started_at, None)
+
+    def test_a_resume_while_the_halt_holds_ends_it_and_opens_the_held_starts(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """The Resume stands in for the nudge (DB 232): the rest's Hold ends
+        though the gate holds the Turn for the same halt, and the Session has
+        one open Hold."""
+        stopped = _hard_stopped(hard_starts, fake, session, project)
+
+        resumed = hard_starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        assert (resumed.state_code, resumed.nudge_owed_at) == (
+            SessionState.HELD,
+            None,
+        )
+        rest, start = _holds(session, stopped.id)
+        assert (rest.kind_code, start.kind_code) == (
+            HoldKind.WEEK_HALT,
+            HoldKind.WEEK_HALT,
+        )
+        assert rest.started_at == stopped.stopped_at
+        assert (rest.ended_at, start.ended_at) == (start.started_at, None)
+        assert start.started_at == _turns(session, stopped.id)[-1].started_at
+
+    def test_a_resume_the_gate_lets_go_ends_it(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        stopped = _hard_stopped(hard_starts, fake, session, project)
+        _usage(session, week=0.5, five_hour=0.1)
+
+        resumed = hard_starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        assert resumed.state_code == SessionState.STARTING
+        (ended,) = _holds(session, stopped.id)
+        assert ended.ended_at == _turns(session, stopped.id)[-1].started_at
+
+    def test_a_stop_ends_it_at_the_stop(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+
+        stopped = starts.stop(session, halted.id, person)
+        clear_after_commit_callbacks()
+
+        (ended,) = _holds(session, halted.id)
+        assert ended.ended_at == stopped.stopped_at is not None
+
+    def test_pilots_close_of_one_idle_ends_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+
+        closed = starts.close(
+            session,
+            halted.id,
+            session.get_one(User, _pilot_id(session)),
+            reason=REASON,
+        )
+        clear_after_commit_callbacks()
+
+        (ended,) = _holds(session, halted.id)
+        assert ended.ended_at == closed.stopped_at is not None
+
+    def test_a_persons_close_of_one_the_hard_stop_stopped_ends_it(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _hard_stopped(hard_starts, fake, session, project)
+        before = datetime.now(UTC)
+
+        closed = hard_starts.close(session, stopped.id, person)
+        clear_after_commit_callbacks()
+
+        assert closed.nudge_owed_at is None
+        (ended,) = _holds(session, stopped.id)
+        assert ended.ended_at is not None and ended.ended_at >= before
+
+    def test_a_stop_and_take_over_ends_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """One idle, stopped as it is taken over, and one failed at the
+        quota wall, which stays `failed`."""
+        walled = _walled_end(starts, fake, session, project, week=0.5)
+        halted = _halted_end(starts, fake, session, project)
+        _transition(session, project, person, TransitionKind.PAUSED)
+        _release(starts)
+        clear_after_commit_callbacks()
+        assert _kinds(session, halted.id) == [(HoldKind.WEEK_HALT, True)]
+        assert _kinds(session, walled.id) == [(HoldKind.WEEK_HALT, True)]
+        before = datetime.now(UTC)
+
+        starts.take_over(session, [halted.id, walled.id], person)
+        clear_after_commit_callbacks()
+
+        taken = _read(session, halted.id)
+        assert (taken.state_code, taken.nudge_owed_at) == (
+            SessionState.STOPPED,
+            None,
+        )
+        (ended,) = _holds(session, halted.id)
+        assert ended.ended_at == taken.stopped_at
+        failed = _read(session, walled.id)
+        assert (failed.state_code, failed.nudge_owed_at) == (
+            SessionState.FAILED,
+            None,
+        )
+        (ended,) = _holds(session, walled.id)
+        assert ended.ended_at is not None and ended.ended_at >= before
+
+    def test_the_walls_settle_of_one_a_reading_decided_missed_ends_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        walled = _walled_end(starts, fake, session, project, week=0.5)
+        _transition(session, project, person, TransitionKind.PAUSED)
+        _release(starts)
+        assert _kinds(session, walled.id) == [(HoldKind.PAUSE, True)]
+        _usage(session, week=0.51, five_hour=0.1)
+        before = datetime.now(UTC)
+
+        _nudge(starts)
+        clear_after_commit_callbacks()
+
+        settled = _read(session, walled.id)
+        assert (settled.state_code, settled.nudge_owed_at) == (
+            SessionState.FAILED,
+            None,
+        )
+        (ended,) = _holds(session, walled.id)
+        assert ended.ended_at is not None and ended.ended_at >= before
+
+    @pytest.mark.parametrize(
+        "standing",
+        [{"state_code": ProjectState.FINISHED}, {"archived": True}],
+        ids=["finished", "archived"],
+    )
+    def test_a_finish_and_an_archive_end_it_and_what_brings_the_project_back_opens_one(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        standing: dict[str, Any],
+    ) -> None:
+        """The nudge goes out no more in a project finished or archived, and
+        may again in one reopened or brought back, while the halt holds."""
+        halted = _halted_end(starts, fake, session, project)
+        at = datetime.now(UTC)
+        for column, value in standing.items():
+            setattr(project, column, value)
+
+        starts.stop_project(session, project, person, at)
+        clear_after_commit_callbacks()
+
+        closed = _read(session, halted.id)
+        assert (closed.state_code, closed.nudge_owed_at is None) == (
+            SessionState.IDLE,
+            False,
+        )
+        (ended,) = _holds(session, halted.id)
+        assert (ended.kind_code, ended.ended_at) == (HoldKind.WEEK_HALT, at)
+
+        project.state_code = ProjectState.OPEN
+        project.archived = False
+        session.flush()
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _kinds(session, halted.id) == [
+            (HoldKind.WEEK_HALT, False),
+            (HoldKind.WEEK_HALT, True),
+        ]
+
+    def test_a_reopen_opens_one_at_the_reopen(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        project.state_code = ProjectState.FINISHED
+        starts.stop_project(session, project, person, datetime.now(UTC))
+        project.state_code = ProjectState.OPEN
+        at = datetime.now(UTC)
+
+        starts.stop_project(session, project, person, at)
+        clear_after_commit_callbacks()
+
+        _, opened = _holds(session, halted.id)
+        assert (opened.kind_code, opened.started_at, opened.ended_at) == (
+            HoldKind.WEEK_HALT,
+            at,
+            None,
+        )
+
+    def test_an_item_done_ends_it_at_the_next_release(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        container.record_service().work_done(halted.id, datetime.now(UTC))
+        session.flush()
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _kinds(session, halted.id) == [(HoldKind.WEEK_HALT, False)]
+
+    def test_the_release_ends_an_open_hold_of_a_session_that_went_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """A Session a process that writes no Hold carried on from rest:
+        running, owed no nudge, its Hold still open."""
+        run = _running(starts, session, project)
+        session.add(
+            Hold(
+                session_id=run.id,
+                kind_code=HoldKind.PAUSE,
+                started_at=datetime.now(UTC) - timedelta(minutes=5),
+            )
+        )
+        session.flush()
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert _kinds(session, run.id) == [(HoldKind.PAUSE, False)]
+
+    def test_the_rests_turn_leaves_a_held_starts_hold_to_the_gate(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        work = _held(starts, session, project)
+        (opened,) = _holds(session, work.id)
+
+        starts._rest_one(session, work.id)
+
+        (standing,) = _holds(session, work.id)
+        assert (standing.id, standing.kind_code, standing.ended_at) == (
+            opened.id,
+            HoldKind.OUTAGE,
+            None,
+        )
