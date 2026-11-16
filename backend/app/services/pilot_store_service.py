@@ -95,8 +95,12 @@ JOB = "job"
 WORK = "work"
 
 PROSE_FIELDS = ("markdown", "urgent", "for", "summary")
+PLACEMENTS = ("repo", "environment")
+"""The two fields a work item is placed by, of which it names exactly one
+(DB 344)."""
+
 WORK_FIELDS = (
-    "repo",
+    *PLACEMENTS,
     "cwd",
     "brief",
     "agent",
@@ -107,7 +111,7 @@ WORK_FIELDS = (
 )
 WAIT_FIELDS = {CARD_WAIT: ("cards", "states"), TIMED_WAIT: ("due_at",)}
 NEEDED = {
-    WORK: ("title", "repo", "cwd", "brief"),
+    WORK: ("title", "cwd", "brief"),
     CARD_WAIT: ("title", "cards", "states"),
     TIMED_WAIT: ("title", "due_at"),
 }
@@ -117,7 +121,8 @@ FORMS_FIELDS = (
     *(field for fields in WAIT_FIELDS.values() for field in fields),
 )
 """The fields of `add_item`'s item that one kind or form takes alone, by their
-names on the wire, and those a work item and a wait need."""
+names on the wire, and those a work item and a wait need, a work item's
+placement apart."""
 
 DRAFT_BLOCK = f"{DRAFT}/"
 """How a block of the draft's id starts, `project.md/<local id>`, the name
@@ -251,8 +256,11 @@ class PilotStoreService:
         where its Markdown gives none of its own, empty without Markdown
         (F29.2, F86.6). A work item is started on add by its repository, as
         every work item's start is, its brief followed by the server's trailer
-        (F66, §5.4), on the brain's placement (F61.1); its Session `held` or
-        `starting`, as the gate leaves it (F141.4); named for the claimed
+        (F66, §5.4), on the brain's placement (F61.1), or in the environment
+        it names in place of one, there from its birth, which Pilot never
+        makes, takes, names or resets, and starts when it is stopped (F86.9;
+        DB 344), its row made on Pilot's first touch of it; its Session `held`
+        or `starting`, as the gate leaves it (F141.4); named for the claimed
         actions its `claims` give, each an open action of a registered
         document of the project or of an item of Pilot's own of it (F21.6; DB
         261, widened by D224), and for the blocks its
@@ -265,9 +273,12 @@ class PilotStoreService:
             RecordNotFoundException: an attachment, the plan's task or a
                 claimed or researched block's item is not of the brain's
                 project, its document has no such block, or an outside
-                source's environment is not the controller's.
+                source's environment or the one a work item names is not the
+                controller's.
             InvalidOperationException: a field the item's kind does not take,
-                or one it needs, missing; a prose text that holds faults, each
+                or one it needs, missing; a work item that names both a
+                repository and an environment, or the store's environment;
+                a prose text that holds faults, each
                 with its line; a wait's list empty or naming one twice, a card
                 no ticket id, or a due time not ahead;
                 material that cannot be copied or over the caps of one call,
@@ -282,6 +293,9 @@ class PilotStoreService:
         refusal = _shape_refusal(item.kind, given)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
+        if item.environment is not None:
+            # Before the project's lock: it asks the controller.
+            self.session_start_service.named_environment(self.db, item.environment)
         carried = self._carried(brain, item.attachments, operation)
         project = self._project(brain)
         session = self.db.get_one(AgentSession, brain.session_id)
@@ -829,22 +843,38 @@ class PilotStoreService:
     def _work(self, project: Project, item: AddItemRequestSchema) -> Item:
         # The shape check let no work item through without these.
         assert item.title is not None
-        assert item.repo is not None
         assert item.cwd is not None
         assert item.brief is not None
         task = None if item.step is None else self._task(project, item.step)
-        work = self.session_start_service.start_work(
-            self.db,
-            project.id,
-            item.repo,
-            title=item.title,
-            brief=self.brief_service.work_item(project, item.brief, task),
-            cwd=item.cwd,
-            plan_task_id=item.step,
-            agent=item.agent,
-            model=item.model,
-            reasoning_effort=item.reasoning_effort,
-        )
+        brief = self.brief_service.work_item(project, item.brief, task)
+        if item.environment is not None:
+            work = self.session_start_service.start_work_in(
+                self.db,
+                project.id,
+                item.environment,
+                title=item.title,
+                brief=brief,
+                cwd=item.cwd,
+                plan_task_id=item.step,
+                agent=item.agent,
+                model=item.model,
+                reasoning_effort=item.reasoning_effort,
+            )
+        else:
+            # The shape check let through a work item with one placement.
+            assert item.repo is not None
+            work = self.session_start_service.start_work(
+                self.db,
+                project.id,
+                item.repo,
+                title=item.title,
+                brief=brief,
+                cwd=item.cwd,
+                plan_task_id=item.step,
+                agent=item.agent,
+                model=item.model,
+                reasoning_effort=item.reasoning_effort,
+            )
         return self.db.get_one(Item, work.id)
 
     def _wait(
@@ -1017,6 +1047,8 @@ def _shape_refusal(kind: str, given: set[str]) -> str | None:
     missing = [field for field in NEEDED.get(kind, ()) if field not in given]
     if missing:
         return f"a {kind} item needs {_fields(missing)}"
+    if kind == WORK and len(given.intersection(PLACEMENTS)) != 1:
+        return f"a {kind} item names exactly one of `repo` and `environment`"
     return None
 
 

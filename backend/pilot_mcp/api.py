@@ -78,6 +78,9 @@ path starts with `/`."""
 
 _REPO = r"^[^/\s]+/[^/\s]+$"
 
+_ENVIRONMENT = r"^[^:\s/]+$"
+"""An environment's id."""
+
 _ATTACHMENT = r"^([0-9A-Fa-f-]{36}|[^:\s/]+:/.*)$"
 """An attachment's id, or a source."""
 
@@ -187,7 +190,15 @@ class NewItem(BaseModel):
         pattern=_REPO,
         description=(
             "A work item's repository, `owner/Name`: Pilot makes its environment"
-            " from it"
+            " from it; a work item names this or `environment`, never both"
+        ),
+    )
+    environment: str | None = Field(
+        default=None,
+        pattern=_ENVIRONMENT,
+        description=(
+            "The id of the environment a work item is placed in, in place of"
+            " `repo`: it runs there, the environment as it stands"
         ),
     )
     cwd: str | None = Field(

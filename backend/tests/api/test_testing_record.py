@@ -3,7 +3,8 @@ UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
 (D027): among them the handbook an open project is born with, an agent's
 saves of the project's draft and handbook, Pilot's Done, a work item placed by
 repository, started in an environment of Pilot's own the stage's own
-controller creates, its worker's registrations and attachments with their
+controller creates, or by name in an environment of that controller's, its
+worker's registrations and attachments with their
 effects and the list of steps it publishes, a pre-ruling pass's questions to a registered document's
 writer, the store's update and its lift, as `update-store` makes and asks
 them, and the brain's waits, a card's transition past the endpoint's token,
@@ -212,6 +213,15 @@ WORK = {
     "title": "Building the camp",
     "brief": "Build the camp.",
     "cwd": "/work/Camp",
+}
+
+NAMED = "example-other-1a2b3c"
+
+WORK_BY_NAME = {
+    "environment": NAMED,
+    "title": "Building the camp",
+    "brief": "Build the camp.",
+    "cwd": "/work/Other",
 }
 
 
@@ -1622,6 +1632,125 @@ class TestCreateWork:
         )
         work = _timeline_item(client, project_id, str(work_id))["work"]
         assert work["environment"] == {"id": run.environment_id, "name": slug}
+
+    def test_it_places_a_work_item_in_an_environment_by_name_and_its_start_runs_there(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        served: None,
+        session: Session,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        # F86.9: nothing made, taken, named or reset; the stopped one started.
+        fake_controller.add_environment(NAMED, name="Other-1", repo="example/Other")
+        project_id = _make(client, name="Camp")
+
+        response = client.post(_work_path(project_id), json=WORK_BY_NAME)
+
+        assert response.status_code == 201, response.get_json()
+        work_id = uuid.UUID(response.get_json()["id"])
+        run = session.get_one(models.Session, work_id)
+        assert (run.state_code, run.environment_id, run.kind_code, run.cwd) == (
+            SessionState.STARTING,
+            NAMED,
+            "work",
+            "/work/Other",
+        )
+        assert session.get_one(Work, work_id).repo is None
+        assert fake_controller.calls == [f"GET /environments/{NAMED}"]
+        clear_after_commit_callbacks()
+
+        container.session_start_service().run(work_id, LoopHandle(f"start:{work_id}"))
+
+        run = session.get_one(models.Session, work_id, populate_existing=True)
+        assert (run.state_code, run.environment_id) == (SessionState.RUNNING, NAMED)
+        named = fake_controller.environment(NAMED)
+        assert (named.name, named.resets, named.status) == ("Other-1", 0, "running")
+        assert "POST /environments" not in fake_controller.calls
+        assert [
+            call
+            for call in fake_controller.calls
+            if call.endswith(("/rename", "/stop", "/reset", "/start"))
+        ] == [f"POST /environments/{NAMED}/start"]
+        work = _timeline_item(client, project_id, str(work_id))["work"]
+        assert work["environment"] == {"id": NAMED, "name": "Other-1"}
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {**WORK, "environment": "example-other-1a2b3c"},
+            {"title": "Building the camp", "brief": "Build it.", "cwd": "/work/Camp"},
+            {**WORK, "repo": None, "environment": ""},
+        ],
+        ids=["two-placements", "no-placement", "an-empty-environment"],
+    )
+    def test_a_body_that_names_not_exactly_one_placement_is_invalid(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+        fake_controller: ServedFakeController,
+        body: dict[str, Any],
+    ) -> None:
+        project_id = _make(client)
+
+        response = client.post(_work_path(project_id), json=body)
+
+        assert response.status_code == 400
+        assert self._work_items(session) == []
+        assert fake_controller.calls == []
+
+    def test_an_environment_the_controller_does_not_have_is_404(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+    ) -> None:
+        project_id = _make(client)
+
+        response = client.post(_work_path(project_id), json=WORK_BY_NAME)
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Environment {NAMED} was not found"
+        assert self._work_items(session) == []
+        assert session.get(Environment, NAMED) is None
+
+    def test_the_stores_environment_is_409(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        fake_controller.add_environment(STORE_ENVIRONMENT_ID, name="PilotProjects")
+        project_id = _make(client)
+
+        response = client.post(
+            _work_path(project_id),
+            json={**WORK_BY_NAME, "environment": STORE_ENVIRONMENT_ID},
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot place a work item in {STORE_ENVIRONMENT_ID} because it is the"
+            " store's environment, where no work item runs"
+        )
+        assert self._work_items(session) == []
+
+    def test_a_controller_that_does_not_answer_the_read_of_the_environment_is_502(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        project_id = _make(client)
+        fake_controller.close()
+
+        response = client.post(_work_path(project_id), json=WORK_BY_NAME)
+
+        assert response.status_code == 502
+        assert self._work_items(session) == []
 
     def test_with_the_controller_unreachable_it_places_the_work_item_held(
         self,

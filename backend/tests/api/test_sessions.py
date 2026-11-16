@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.models import Environment, Item, ProgressStep, Project, Turn, User
+from app.models import Environment, Item, ProgressStep, Project, Turn, User, Work
 from app.models.reference import (
     ProgressState,
     RecordKind,
@@ -33,7 +33,7 @@ from app.services.environment_service import EnvironmentService
 from app.services.pilot_work_service import Worker
 from app.services.relay_service import CONTINUE, RelayService
 from app.services.session_record_service import SessionRecordService
-from app.services.session_start_service import NOT_PILOTS, SessionStartService
+from app.services.session_start_service import SessionStartService
 from app.services.session_stream_service import STREAM_VIEWS
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.services.start_gate import WorkSlots
@@ -1232,27 +1232,31 @@ class TestResumeSession:
             None,
         )
 
-    def test_a_work_item_in_an_environment_pilot_did_not_create_is_409(
+    def test_a_work_item_placed_in_an_environment_by_name_resumes_there(
         self,
         client: FlaskClient,
         container: ServiceContainer,
         session: DbSession,
         person: User,
         project: Project,
+        environment: Environment,
         project_session: models.Session,
     ) -> None:
-        # Placed by id before slice 020, in the store's environment.
+        # F86.9: no repository, in an environment Pilot did not create.
         run = _work_item(
             container, session, project, project_session, SessionState.STOPPED
         )
+        assert session.get_one(Work, run.id).repo is None
+        assert environment.server_created_at is None
         sign_in(client, SUBJECT)
 
         response = client.post(f"/api/sessions/{run.id}/resume")
 
-        assert response.status_code == 409
-        assert response.get_json()["error"] == (
-            f"Cannot resume Build the camp because {NOT_PILOTS}"
-        )
+        assert response.status_code == 200, response.get_json()
+        body = response.get_json()
+        assert (body["state"], body["held_reason"]) == ("starting", None)
+        assert body["current_line"]["text"] == f"Starting {environment.name}…"
+        assert run.environment_id == environment.id
 
     def test_a_work_item_it_cannot_resume_is_409(
         self,

@@ -82,9 +82,12 @@ def add_item(
         403: The bearer's session is not a chat's or a job's, or has no turn
             running
         404: An attachment, the plan's task, a claimed or researched block's
-            item or a source's environment is not the session's project's or
-            the controller's, or that block's document has no such block
-        409: A field the kind does not take or one it needs missing, a text
+            item, a source's environment or the one a work item is placed in
+            is not the session's project's or the controller's, or that
+            block's document has no such block
+        409: A field the kind does not take or one it needs missing, a work
+            item that names both a repository and an environment, neither, or
+            the store's environment, a text
             with faults, a wait's list empty or naming one twice, a card that
             is no ticket id, a due time not ahead, material that cannot be
             copied, a claim that is not an open action of a registered

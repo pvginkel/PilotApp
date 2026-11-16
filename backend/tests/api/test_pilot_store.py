@@ -45,6 +45,7 @@ from app.services.session_record_service import read_records
 from app.services.session_start_service import SessionStartService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
 
@@ -1189,6 +1190,15 @@ WORK = {
 }
 
 
+WORK_BY_NAME = {
+    "kind": "work",
+    "title": "Renaming the badge",
+    "environment": ELSEWHERE,
+    "cwd": "/work/Elsewhere",
+    "brief": "Rename the badge.",
+}
+
+
 @pytest.fixture
 def started(
     container: ServiceContainer, supervise: Supervise
@@ -1254,6 +1264,105 @@ class TestAddItem:
             "effect": "Added · Work · Renaming the badge",
         }
 
+    def test_a_work_item_placed_in_an_environment_by_name_is_201(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        started: SessionStartService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.add_environment(ELSEWHERE, name="Elsewhere-1")
+        _brain(session, project, environment)
+
+        response = client.post(ITEMS, json=WORK_BY_NAME, headers=_bearer())
+
+        assert response.status_code == 201, response.get_json()
+        [item] = session.scalars(select(Item)).all()
+        assert response.get_json() == {
+            "id": str(item.id),
+            "path": None,
+            "state": "starting",
+            "held": None,
+            "effect": "Added · Work · Renaming the badge",
+        }
+        assert session.get_one(Work, item.id).repo is None
+        assert session.get_one(models.Session, item.id).environment_id == ELSEWHERE
+
+    def test_a_work_item_in_an_environment_the_controller_does_not_have_is_404(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        started: SessionStartService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _brain(session, project, environment)
+
+        response = client.post(ITEMS, json=WORK_BY_NAME, headers=_bearer())
+
+        assert response.status_code == 404
+        assert _error(response) == f"Environment {ELSEWHERE} was not found"
+        assert session.scalars(select(Item)).all() == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {**WORK, "environment": ELSEWHERE},
+            {key: value for key, value in WORK.items() if key != "repo"},
+        ],
+        ids=["two-placements", "no-placement"],
+    )
+    def test_a_work_item_that_names_not_exactly_one_placement_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        started: SessionStartService,
+        project: Project,
+        environment: Environment,
+        body: dict[str, Any],
+    ) -> None:
+        _brain(session, project, environment)
+
+        response = client.post(ITEMS, json=body, headers=_bearer())
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot add a work item because a work item names exactly one of"
+            " `repo` and `environment`"
+        )
+        assert session.scalars(select(Item)).all() == []
+
+    def test_a_work_item_placed_in_the_stores_environment_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        started: SessionStartService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.add_environment(STORE_ENVIRONMENT_ID, name="PilotProjects")
+        _brain(session, project, environment)
+
+        response = client.post(
+            ITEMS,
+            json={**WORK_BY_NAME, "environment": STORE_ENVIRONMENT_ID},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot place a work item in {STORE_ENVIRONMENT_ID} because it is the"
+            " store's environment, where no work item runs"
+        )
+        assert session.scalars(select(Item)).all() == []
+
     @pytest.mark.parametrize(
         "body",
         [
@@ -1262,6 +1371,8 @@ class TestAddItem:
             {"kind": "notice", "title": "Camp", "attachments": ["camp.md"]},
             {"kind": "notice", "title": "Camp", "attachments": ["e:/a", "e:/a"]},
             {"kind": "work", "repo": "Example"},
+            {**WORK_BY_NAME, "environment": "example elsewhere"},
+            {**WORK_BY_NAME, "environment": "example/elsewhere"},
             {**WORK, "claims": ["A1"]},
             {**CARD_WAIT, "states": ["Done", ""]},
             {**TIMED_WAIT, "due_at": "2099-10-25T18:30:00"},

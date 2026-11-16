@@ -1437,6 +1437,25 @@ class TestAddItem:
         assert answer.status_code == 404
         assert error_text(result) == _refusal(routes, "add_item")
 
+    async def test_a_work_items_environment_reaches_its_route_in_place_of_a_repository(
+        self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
+    ) -> None:
+        # F86.9. No controller is configured here: the route refuses it.
+        item = {
+            "kind": "work",
+            "title": "Rotating the CI token",
+            "environment": "example-example-1a2b3c",
+            "cwd": "/work/Example",
+            "brief": "Rotate the CI token.",
+        }
+
+        result = await call(mcp_app, "add_item", {"item": item}, path=STORE_PATH)
+
+        [(request, answer)] = routes.calls
+        assert json.loads(request.content) == item
+        assert answer.status_code == 409
+        assert error_text(result) == _refusal(routes, "add_item")
+
     @pytest.mark.parametrize(
         ("item", "sent"),
         [
@@ -1597,6 +1616,8 @@ class TestAddItem:
             {"kind": "card_wait", "title": "Soon", "cards": [""], "states": ["Done"]},
             {"kind": "notice", "title": "Camp", "attachments": ["camp.md"]},
             {"kind": "work", "repo": "Example"},
+            {"kind": "work", "environment": "example example"},
+            {"kind": "work", "environment": "example:/work"},
             {"kind": "work", "title": "Rotating", "claims": ["A1"]},
             {"kind": "work", "title": "Checking", "researches": ["D1"]},
         ],

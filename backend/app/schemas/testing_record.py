@@ -353,13 +353,22 @@ class InventedClarificationSchema(BaseModel):
 
 
 class InventedWorkCreateSchema(BaseModel):
-    """A work item placed by repository and started, as Pilot starts one, in
-    an environment of Pilot's own the stage's controller creates from it."""
+    """A work item placed and started, as Pilot starts one: by repository, in
+    an environment of Pilot's own the stage's controller creates from it, or
+    by name, in the environment of the stage's controller it names, as that
+    stands. It names exactly one of the two."""
 
-    repo: str = Field(
+    repo: str | None = Field(
+        default=None,
         min_length=1,
         description="The repository it is placed by, `owner/Name`",
         examples=["example/Example"],
+    )
+    environment: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The id of the environment it is placed in by name",
+        examples=["example-example-1a2b3c"],
     )
     title: str = Field(
         min_length=1,
@@ -399,6 +408,14 @@ class InventedWorkCreateSchema(BaseModel):
         ),
         examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"]],
     )
+
+    @model_validator(mode="after")
+    def _one_placement(self) -> "InventedWorkCreateSchema":
+        if (self.repo is None) == (self.environment is None):
+            raise ValueError(
+                "a work item names exactly one of `repo` and `environment`"
+            )
+        return self
 
 
 class InventedSaveCreateSchema(BaseModel):

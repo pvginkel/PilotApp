@@ -966,8 +966,9 @@ class TestDataService:
     def work(
         self,
         project_id: uuid.UUID,
-        repo: str,
+        repo: str | None,
         *,
+        environment: str | None,
         title: str,
         brief: str,
         cwd: str,
@@ -975,36 +976,57 @@ class TestDataService:
         claims: Sequence[str],
         researches: Sequence[str],
     ) -> Work:
-        """A work item placed by repository `repo` and its session started,
-        as every work item's start is, named for the claimed actions
-        `claims` and for the blocks `researches` whose facts it checks, by
-        their blocks' ids, as a pass's `add_item` names them (F21.6, F52.3;
-        DB 261, 293).
+        """A work item placed by the repository `repo`, or in the environment
+        `environment` by name, exactly one of them given, and its session
+        started, as every work item's start is (DB 344), named for the
+        claimed actions `claims` and for the blocks `researches` whose facts
+        it checks, by their blocks' ids, as a pass's `add_item` names them
+        (F21.6, F52.3; DB 261, 293). The environment's row is made on Pilot's
+        first touch of it, as `add_item` makes it.
 
         Raises:
             RecordNotFoundException: no project has the id, its plan has no
                 task `step`, a claimed or researched block's item is not of
-                the project, or its document has no such block.
+                the project, its document has no such block, or the
+                controller has no environment `environment`.
             InvalidOperationException: the record refuses a claim or a
-                research; no controller is configured, or the project is
-                finished or archived.
+                research; no controller is configured, the environment is
+                the store's, or the project is finished or archived.
+            ExternalServiceException: the controller did not answer the read
+                of the environment, or failed otherwise.
         """
         project = self.db.get(Project, project_id)
         if project is None:
             raise RecordNotFoundException("Project", str(project_id))
+        if environment is not None:
+            # Before any lock: it asks the controller.
+            self.session_start_service.named_environment(self.db, environment)
         claimed = self.record_service.claimable(project, claims, "add a work item")
         researched = self.record_service.researchable(
             project, researches, "add a work item"
         )
-        work = self.session_start_service.start_work(
-            self.db,
-            project_id,
-            repo,
-            title=title,
-            brief=brief,
-            cwd=cwd,
-            plan_task_id=step,
-        )
+        if environment is not None:
+            work = self.session_start_service.start_work_in(
+                self.db,
+                project_id,
+                environment,
+                title=title,
+                brief=brief,
+                cwd=cwd,
+                plan_task_id=step,
+            )
+        else:
+            # The route's schema let through a work item with one placement.
+            assert repo is not None
+            work = self.session_start_service.start_work(
+                self.db,
+                project_id,
+                repo,
+                title=title,
+                brief=brief,
+                cwd=cwd,
+                plan_task_id=step,
+            )
         self.record_service.give(project, work, claimed)
         self.record_service.research(project, work, researched)
         return work

@@ -74,6 +74,7 @@ from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise, metric_value
 
@@ -2640,6 +2641,22 @@ class TestPilotStoreServiceAddWork:
                 "a work item takes no `due_at`",
                 id="wait-fields",
             ),
+            pytest.param(
+                {"title": "Renaming the badge", "cwd": "/work/Example", "brief": BRIEF},
+                "a work item names exactly one of `repo` and `environment`",
+                id="no-placement",
+            ),
+            pytest.param(
+                {
+                    "title": "Renaming the badge",
+                    "repo": REPO,
+                    "environment": ELSEWHERE,
+                    "cwd": "/work/Example",
+                    "brief": BRIEF,
+                },
+                "a work item names exactly one of `repo` and `environment`",
+                id="two-placements",
+            ),
         ],
     )
     def test_a_work_item_short_of_what_it_needs_or_with_another_kinds_field_is_refused(
@@ -2717,6 +2734,160 @@ class TestPilotStoreServiceAddWork:
         assert refused.value.message == (
             f"Cannot place a work item of {REPO} because its project is finished"
         )
+        assert _effects(session) == []
+
+    def test_a_work_item_placed_in_an_environment_by_name_is_started_there(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        # F86.9: the environment's row is made at the placing.
+        fake_controller.add_environment(ELSEWHERE, name="Elsewhere-1")
+        run = _brain(session, _opened(session, project), environment)
+
+        added = _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Renaming the badge",
+                environment=ELSEWHERE,
+                cwd="/work/Elsewhere",
+                brief=BRIEF,
+                agent="reviewer",
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        work = session.get_one(Work, added.item.id)
+        started = session.get_one(models.Session, added.item.id)
+        assert (added.path, added.state, added.held) == (None, "starting", None)
+        assert (work.session_kind_code, work.repo) == ("work", None)
+        assert (
+            started.state_code,
+            started.environment_id,
+            started.cwd,
+            started.agent,
+        ) == (SessionState.STARTING, ELSEWHERE, "/work/Elsewhere", "reviewer")
+        named = session.get_one(Environment, ELSEWHERE)
+        assert (named.name, named.server_created_at, named.repo) == (
+            "Elsewhere-1",
+            None,
+            None,
+        )
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == started.id))
+        assert turn.message.startswith("Rename the badge.\n\nFrom Pilot:\n")
+        assert added.line.label == "Work · Renaming the badge"
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.item_id) == (EffectKind.ADDED, added.item.id)
+        # It starts the environment, and makes, renames and resets none.
+        assert [
+            call for call in fake_controller.calls if not call.startswith("GET ")
+        ] == []
+
+    def test_one_placed_by_name_in_a_paused_project_is_held_in_its_environment(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.add_environment(ELSEWHERE, name="Elsewhere-1")
+        _opened(session, project).paused = True
+        session.flush()
+        run = _brain(session, project, environment)
+
+        added = _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Renaming the badge",
+                environment=ELSEWHERE,
+                cwd="/work/Elsewhere",
+                brief=BRIEF,
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        started = session.get_one(models.Session, added.item.id)
+        assert (added.state, added.held) == ("held", Held(HeldReason.PAUSED))
+        assert started.environment_id == ELSEWHERE
+
+    @pytest.mark.parametrize("known_to_pilot", [False, True])
+    def test_an_environment_the_controller_does_not_have_is_not_found_and_nothing_added(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+        known_to_pilot: bool,
+    ) -> None:
+        if known_to_pilot:
+            # A conversation's caller the controller had no report on.
+            session.add(Environment(id=ELSEWHERE, name=ELSEWHERE, exempt=False))
+            session.flush()
+        run = _brain(session, _opened(session, project), environment)
+
+        with pytest.raises(RecordNotFoundException) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    environment=ELSEWHERE,
+                    cwd="/work/Elsewhere",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == f"Environment {ELSEWHERE} was not found"
+        assert session.scalars(select(Item)).all() == []
+        assert _effects(session) == []
+
+    def test_the_stores_environment_is_refused_and_nothing_added(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.add_environment(STORE_ENVIRONMENT_ID, name="PilotProjects")
+        run = _brain(session, _opened(session, project), environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    environment=STORE_ENVIRONMENT_ID,
+                    cwd="/work/PilotProjects",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            f"Cannot place a work item in {STORE_ENVIRONMENT_ID} because it is the"
+            " store's environment, where no work item runs"
+        )
+        assert session.scalars(select(Item)).all() == []
         assert _effects(session) == []
 
     def test_a_work_item_is_named_for_the_claimed_actions_it_does(

@@ -34,6 +34,7 @@ from werkzeug.wrappers import Request, Response
 
 from app import models
 from app.app_config import HaltSetting
+from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import EngineBus, EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -100,7 +101,6 @@ from app.services.relay_service import (
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import (
     HARD_STOP_KEY,
-    NOT_PILOTS,
     NUDGE,
     NUDGE_AFTER_A_PAUSE,
     NUDGE_AFTER_A_STOP,
@@ -109,6 +109,7 @@ from app.services.session_start_service import (
     START_FAILED,
     START_JOB,
     STARTING,
+    THE_STORE,
     SessionStartService,
 )
 from app.services.start_gate import Held, WorkSlots, queued
@@ -1702,7 +1703,6 @@ class TestRunTakes:
 
 
 WAIT = "?wait=settled&waitMs=3600000"
-BY_ID = "env-placed-by-id"
 
 
 def _verbs(fake: ServedFakeController, env_id: str) -> list[str]:
@@ -1954,55 +1954,633 @@ class TestRunResets:
         assert _read(session, run.id).environment_id == FREE
 
 
-def _placed_by_id(
+NAMED = "example-other-1a2b3c"
+NAMED_NAME = "Other-1"
+STARTING_NAMED = {"type": STARTING, "text": f"Starting {NAMED_NAME}…"}
+
+
+def _not_pilots(
+    fake: ServedFakeController, state: EnvironmentStatus = "stopped"
+) -> None:
+    """An environment of the fleet Pilot did not create, `state`: Pilot has
+    no row of it."""
+    fake.add_environment(NAMED, name=NAMED_NAME, repo="example/Other", status=state)
+
+
+def _place_in(
     starts: SessionStartService,
     db: DbSession,
-    fake: ServedFakeController,
     project: Project,
-    state: SessionState,
+    env_id: str = NAMED,
 ) -> models.Session:
-    """A work item placed by id before slice 020, in an environment Pilot did
-    not create, its Session `state`."""
-    fake.add_environment(BY_ID, name="Placed", repo=REPO)
-    db.add(Environment(id=BY_ID, name="Placed", exempt=False, last_state="stopped"))
-    db.flush()
-    run = _read(db, _start_work(starts, db, project).id)
-    run.environment_id = BY_ID
-    run.state_code = state
-    if state in (SessionState.STOPPED, SessionState.FAILED):
-        (brief,) = _turns(db, run.id)
-        brief.ended_at = run.turn_ended_at = datetime.now(UTC)
-    db.flush()
-    return run
+    """A work item placed in the environment by name, as `add_item` places
+    one: the environment's row made, then the placing."""
+    starts.named_environment(db, env_id)
+    work = starts.start_work_in(
+        db, project.id, env_id, title="Renaming the badge", brief=BRIEF, cwd=CWD
+    )
+    clear_after_commit_callbacks()
+    return _read(db, work.id)
 
 
-class TestRunPlacedById:
-    """A work item placed by id before slice 020 is never started in an
-    environment Pilot did not create (F143.1; review A2; V10)."""
+class TestNamedEnvironment:
+    """The environment a work item is placed in by name is the controller's,
+    its row made at the placing (F86.9; DB 344, Environment)."""
 
-    @pytest.mark.parametrize("state", [SessionState.STARTING, SessionState.HELD])
-    def test_its_start_fails_with_nothing_called(
+    def test_the_first_touch_makes_its_row_from_the_controllers_report(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+    ) -> None:
+        _not_pilots(fake, "running")
+
+        starts.named_environment(session, NAMED)
+
+        row = _row(session, NAMED)
+        assert (row.name, row.last_state, row.exempt) == (NAMED_NAME, "running", False)
+        # Never one of Pilot's own, and under no claim.
+        assert (row.server_created_at, row.repo) == (None, None)
+        assert _claim(row) == (None, None, None)
+
+    def test_a_row_pilot_has_is_left_as_it_is_and_the_controller_still_asked(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+    ) -> None:
+        free = _free(session, fake, name="camp")
+        fake.calls.clear()
+
+        starts.named_environment(session, FREE)
+
+        assert fake.calls == [f"GET /environments/{FREE}"]
+        row = _row(session, FREE)
+        assert (row.name, row.repo, row.delete_due_at) == (
+            "camp",
+            REPO,
+            free.delete_due_at,
+        )
+
+    @pytest.mark.parametrize("known_to_pilot", [False, True])
+    def test_one_the_controller_does_not_have_is_not_found(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        known_to_pilot: bool,
+    ) -> None:
+        if known_to_pilot:
+            # A conversation's caller, named by its id: the controller had no
+            # report on it at the opening.
+            session.add(Environment(id=NAMED, name=NAMED, exempt=False))
+            session.flush()
+
+        with pytest.raises(RecordNotFoundException, match=NAMED):
+            starts.named_environment(session, NAMED)
+
+    def test_no_controller_refuses_it(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+    ) -> None:
+        _not_pilots(fake)
+        starts = _services(container, supervise, controller_configured=False)[0]
+
+        with pytest.raises(
+            InvalidOperationException, match="no controller is configured"
+        ):
+            starts.named_environment(session, NAMED)
+
+        assert fake.calls == []
+
+    def test_a_controller_that_fails_otherwise_is_raised_as_it_is(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+    ) -> None:
+        fake.close()
+
+        with pytest.raises(ExternalServiceException) as refused:
+            starts.named_environment(session, NAMED)
+
+        assert not isinstance(refused.value, RecordNotFoundException)
+        assert session.get(Environment, NAMED) is None
+
+
+class TestStartWorkIn:
+    """A work item placed in an environment by name (F86.9; DB 344): no
+    repository, its Session there from its birth, through the gate as any."""
+
+    def test_its_session_is_in_the_environment_from_its_birth_and_its_work_keeps_no_repository(
         self,
         starts: SessionStartService,
         fake: _Recording,
         session: DbSession,
         project: Project,
-        state: SessionState,
     ) -> None:
-        run = _placed_by_id(starts, session, fake, project, state)
-        if state is SessionState.HELD:
-            _release(starts)
-            clear_after_commit_callbacks()
+        _not_pilots(fake)
+        starts.named_environment(session, NAMED)
+        fake.calls.clear()
+
+        work = starts.start_work_in(
+            session,
+            project.id,
+            NAMED,
+            title="Renaming the badge",
+            brief=BRIEF,
+            cwd=CWD,
+            agent="reviewer",
+            model="opus",
+            reasoning_effort="high",
+        )
+
+        item = session.get_one(Item, work.id)
+        run = _read(session, work.id)
+        assert (item.kind_code, item.title, item.seq) == (
+            "work",
+            "Renaming the badge",
+            1,
+        )
+        assert (work.session_kind_code, work.repo, work.autopilot) == (
+            "work",
+            None,
+            project.autopilot,
+        )
+        assert (run.state_code, run.environment_id, run.kind_code, run.cwd) == (
+            SessionState.STARTING,
+            NAMED,
+            "work",
+            CWD,
+        )
+        assert (run.agent, run.model, run.reasoning_effort) == (
+            "reviewer",
+            "opus",
+            "high",
+        )
+        assert (run.controller_session, run.conversation_id) == (None, None)
+        (brief,) = _turns(session, run.id)
+        assert (brief.seq, brief.message, brief.ended_at) == (1, BRIEF, None)
+        # It enters the phase that starts the environment: none prepares it.
+        assert _server(session, run.id) == [(None, STARTING_NAMED)]
+        assert "_LoopStart" in _callbacks()
+        clear_after_commit_callbacks()
+        # No controller call in the placing.
+        assert fake.calls == []
+
+    def test_it_works_on_the_plans_task_and_one_not_in_the_plan_is_not_found(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _not_pilots(fake)
+        starts.named_environment(session, NAMED)
+
+        with pytest.raises(RecordNotFoundException, match="Plan task"):
+            starts.start_work_in(
+                session,
+                project.id,
+                NAMED,
+                title="Renaming the badge",
+                brief=BRIEF,
+                cwd=CWD,
+                plan_task_id="nope",
+            )
+
+    def test_in_a_paused_project_it_is_held_in_its_environment_with_nothing_run(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _not_pilots(fake)
+        project.paused = True
+        session.flush()
+
+        run = _place_in(starts, session, project)
+
+        assert (run.state_code, run.environment_id) == (SessionState.HELD, NAMED)
+        held = starts.held(session, project, run)
+        assert held is not None and held.reason == "paused"
+        assert _server(session, run.id) == []
+        assert _verbs(fake, NAMED) == []
+
+    def test_it_counts_for_the_slot_as_any_work_item(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starts = _services(container, supervise, work_max=1)[0]
+        _not_pilots(fake)
+        first = _place_in(starts, session, project)
+
+        second = _start(starts, session, project)
+
+        assert first.state_code == SessionState.STARTING
+        assert second.state_code == SessionState.HELD
+        held = starts.held(session, project, second)
+        assert held is not None and (held.reason, held.running) == ("slot", 1)
+
+    def test_two_placed_in_one_environment_are_both_placed(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _not_pilots(fake)
+
+        first = _place_in(starts, session, project)
+        second = _place_in(starts, session, project)
+
+        assert first.id != second.id
+        assert [(run.state_code, run.environment_id) for run in (first, second)] == [
+            (SessionState.STARTING, NAMED),
+            (SessionState.STARTING, NAMED),
+        ]
+
+    def test_the_stores_environment_is_refused(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        fake.add_environment(STORE_ENVIRONMENT_ID, name="PilotProjects", exempt=True)
+        starts.named_environment(session, STORE_ENVIRONMENT_ID)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            starts.start_work_in(
+                session,
+                project.id,
+                STORE_ENVIRONMENT_ID,
+                title="Renaming the badge",
+                brief=BRIEF,
+                cwd=CWD,
+            )
+
+        assert str(refused.value) == (
+            f"Cannot place a work item in {STORE_ENVIRONMENT_ID} because {THE_STORE}"
+        )
+        assert session.scalars(select(Item)).all() == []
+        assert session.scalars(select(models.Session)).all() == []
+
+    @pytest.mark.parametrize(
+        ("standing", "refusal"),
+        [
+            ({"state_code": ProjectState.FINISHED}, "its project is finished"),
+            ({"archived": True}, "its project is archived"),
+        ],
+    )
+    def test_a_finished_or_archived_project_refuses_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        standing: dict[str, Any],
+        refusal: str,
+    ) -> None:
+        _not_pilots(fake)
+        starts.named_environment(session, NAMED)
+        for column, value in standing.items():
+            setattr(project, column, value)
+        session.flush()
+
+        with pytest.raises(
+            InvalidOperationException,
+            match=f"Cannot place a work item in {NAMED} because {refusal}",
+        ):
+            starts.start_work_in(
+                session,
+                project.id,
+                NAMED,
+                title="Renaming the badge",
+                brief=BRIEF,
+                cwd=CWD,
+            )
+
+        assert session.scalars(select(Item)).all() == []
+
+    def test_no_controller_refuses_it(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starts = _services(container, supervise, controller_configured=False)[0]
+
+        with pytest.raises(
+            InvalidOperationException, match="no controller is configured"
+        ):
+            starts.start_work_in(
+                session,
+                project.id,
+                NAMED,
+                title="Renaming the badge",
+                brief=BRIEF,
+                cwd=CWD,
+            )
+
+    def test_an_unknown_project_is_not_found(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+    ) -> None:
+        with pytest.raises(RecordNotFoundException, match="Project"):
+            starts.start_work_in(
+                session,
+                uuid.uuid4(),
+                NAMED,
+                title="Renaming the badge",
+                brief=BRIEF,
+                cwd=CWD,
+            )
+
+
+class TestRunPlacedByName:
+    """The start of a work item placed in an environment by name (F86.9; DB
+    344): it starts the environment when it is stopped, under the claim, and
+    makes, takes, names and resets none, in one Pilot did not create as in
+    one of Pilot's own."""
+
+    def test_a_stopped_environment_pilot_did_not_create_is_started_under_the_claim(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _not_pilots(fake)
+        run = _place_in(starts, session, project)
 
         _run(starts, run)
 
-        run = _assert_failed(session, run.id, NOT_PILOTS)
-        assert _server(session, run.id) == [
-            (None, {"type": START_FAILED, "reason": NOT_PILOTS}),
-        ]
-        assert _calls_on(fake, BY_ID) == []
+        run = _read(session, run.id)
+        assert (run.state_code, run.environment_id) == (SessionState.RUNNING, NAMED)
+        assert _verbs(fake, NAMED) == ["start"]
         assert fake.created == []
-        assert run.environment_id == BY_ID
+        assert CREATE_ENVIRONMENT not in fake.calls
+        assert (fake.environment(NAMED).name, fake.environment(NAMED).resets) == (
+            NAMED_NAME,
+            0,
+        )
+        row = _row(session, NAMED)
+        assert (row.name, row.server_created_at) == (NAMED_NAME, None)
+        # F88.1: Pilot started it, so the shutdown timer has it.
+        assert row.server_started_at is not None
+        assert row.started_pod_at == fake.environment(NAMED).pod_started_at is not None
+        assert _server(session, run.id) == [(None, STARTING_NAMED), (None, CREATING)]
+        (headless,) = fake.sessions(NAMED)
+        assert run.controller_session == headless.name
+        assert fake.create_bodies == [{"cwd": CWD}]
+        assert _sends(fake, NAMED, headless.name) == 1
+
+    def test_a_running_one_is_left_as_it_runs_under_no_claim(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _not_pilots(fake, "running")
+        pod = fake.environment(NAMED).pod_started_at
+        run = _place_in(starts, session, project)
+
+        _run(starts, run)
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert _verbs(fake, NAMED) == ["start"]
+        assert fake.environment(NAMED).pod_started_at == pod
+        assert _claim(_row(session, NAMED)) == (None, None, None)
+
+    def test_one_of_pilots_own_holding_an_earlier_work_items_tree_is_started_as_it_stands(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        # P-293: free, so a start by its repository would take and reset it.
+        _free(session, fake)
+        run = _place_in(starts, session, project, FREE)
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.environment_id) == (SessionState.RUNNING, FREE)
+        assert _verbs(fake, FREE) == ["start"]
+        assert (fake.environment(FREE).name, fake.environment(FREE).resets) == (None, 0)
+        assert fake.created == []
+        assert _row(session, FREE).name == FREE
+        assert _server(session, run.id) == [
+            (None, {"type": STARTING, "text": f"Starting {FREE}…"}),
+            (None, CREATING),
+        ]
+
+    def test_no_start_by_its_repository_takes_it_while_the_work_is_there(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _free(session, fake)
+        named = _place_in(starts, session, project, FREE)
+        _run(starts, named)
+
+        by_repository = _start(starts, session, project)
+        _run(starts, by_repository)
+
+        (created,) = fake.created
+        assert _env(session, by_repository.id) == created != FREE
+        assert _verbs(fake, FREE) == ["start"]
+        assert fake.environment(FREE).resets == 0
+
+    def test_the_delete_timer_leaves_it_while_the_work_is_there(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starts, environments, _ = _services(container, supervise)
+        _free(session, fake, freed_at=datetime.now(UTC) - timedelta(days=8))
+        _place_in(starts, session, project, FREE)
+
+        environments.run_delete_timer(session)
+
+        assert fake.environment(FREE).status == "stopped"
+        row = _row(session, FREE)
+        assert (row.last_state, row.delete_due_at) == ("stopped", None)
+
+    def test_one_held_at_the_gate_starts_there_once_it_opens(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _not_pilots(fake)
+        project.paused = True
+        session.flush()
+        run = _place_in(starts, session, project)
+        project.paused = False
+        session.flush()
+
+        _release(starts)
+        clear_after_commit_callbacks()
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.environment_id) == (SessionState.STARTING, NAMED)
+        _run(starts, run)
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert _verbs(fake, NAMED) == ["start"]
+        assert _server(session, run.id) == [(None, STARTING_NAMED), (None, CREATING)]
+
+    def test_one_the_controller_no_longer_has_fails_its_start(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _not_pilots(fake)
+        run = _place_in(starts, session, project)
+        fake.remove_environment(NAMED)
+
+        _run(starts, run)
+
+        run = _assert_failed(session, run.id)
+        assert run.environment_id == NAMED
+        assert fake.created == []
+
+    @pytest.mark.parametrize("pilots_own", [False, True])
+    def test_its_resume_with_no_conversation_starts_afresh_there_untaken_and_unreset(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        pilots_own: bool,
+    ) -> None:
+        env_id = FREE if pilots_own else NAMED
+        if pilots_own:
+            _free(session, fake)
+        else:
+            _not_pilots(fake)
+        fake.refuse_sends = True
+        failed = _place_in(starts, session, project, env_id)
+        _run(starts, failed)
+        fake.refuse_sends = False
+        failed = _read(session, failed.id)
+        assert failed.state_code == SessionState.FAILED
+        assert failed.conversation_id is None
+        earlier = failed.controller_session
+        assert earlier is not None
+        claim = _claim(_row(session, env_id))
+        assert claim[0] is not None
+
+        run = starts.resume(session, failed.id)
+        clear_after_commit_callbacks()
+
+        # In a headless session of its own, in the environment as it stands:
+        # its claim is the one its first start took.
+        assert (run.state_code, run.environment_id, run.controller_session) == (
+            SessionState.STARTING,
+            env_id,
+            None,
+        )
+        assert _claim(_row(session, env_id))[:2] == claim[:2]
+        _run(starts, run)
+        run = _read(session, run.id)
+        assert (run.state_code, run.environment_id) == (SessionState.RUNNING, env_id)
+        assert run.controller_session not in (None, earlier)
+        assert _verbs(fake, env_id) == ["start", "start"]
+        assert fake.environment(env_id).resets == 0
+        assert fake.created == []
+        assert [turn.message for turn in _turns(session, run.id)] == [BRIEF, BRIEF]
+        assert _server(session, run.id)[-2:] == [
+            (
+                None,
+                {"type": STARTING, "text": f"Starting {_row(session, env_id).name}…"},
+            ),
+            (None, CREATING),
+        ]
+
+    def test_a_stopped_one_resumes_its_conversation_there(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        _not_pilots(fake)
+        run = _place_in(starts, session, project)
+        _run(starts, run)
+        clear_after_commit_callbacks()
+        run = _read(session, run.id)
+        _named(fake, run)
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+        _turn_ends(starts, fake, run, "interrupted")
+        name = run.controller_session
+
+        resumed = starts.resume(session, run.id)
+        clear_after_commit_callbacks()
+        _run(starts, resumed)
+
+        resumed = _read(session, run.id)
+        assert (resumed.state_code, resumed.environment_id) == (
+            SessionState.RUNNING,
+            NAMED,
+        )
+        assert resumed.controller_session == name
+        assert [turn.message for turn in _turns(session, run.id)] == [BRIEF, CONTINUE]
+        assert _verbs(fake, NAMED) == ["start"]
+
+    def test_one_stopped_while_held_claims_nothing_of_its_environment(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        # One of Pilot's own with no claim: a start by its repository that
+        # ends before its reset claims it for the timer, which this never
+        # does (DB 344).
+        starts, environments, _ = _services(
+            container, supervise, stop_after=timedelta(0)
+        )
+        _free(session, fake)
+        project.paused = True
+        session.flush()
+        run = _place_in(starts, session, project, FREE)
+        fake.calls.clear()
+
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+        environments.run_shutdown_timer(session)
+
+        assert _read(session, run.id).state_code == SessionState.STOPPED
+        assert _claim(_row(session, FREE)) == (None, None, None)
+        assert _calls_on(fake, FREE) == []
 
 
 class TestRunFails:
@@ -4397,24 +4975,6 @@ class TestResume:
         assert fake.environment(env_id).status == "stopped"
         assert fake.environment(env_id).resets == 0
         assert _claim(_row(session, env_id)) == (None, None, None)
-
-    @pytest.mark.parametrize("state", [SessionState.STOPPED, SessionState.FAILED])
-    def test_one_placed_by_id_before_slice_020_is_refused(
-        self,
-        starts: SessionStartService,
-        fake: _Recording,
-        session: DbSession,
-        project: Project,
-        state: SessionState,
-    ) -> None:
-        # Review A2: in an environment Pilot did not create.
-        run = _placed_by_id(starts, session, fake, project, state)
-
-        with pytest.raises(InvalidOperationException, match=NOT_PILOTS):
-            starts.resume(session, run.id)
-
-        assert len(_turns(session, run.id)) == 1
-        assert _calls_on(fake, BY_ID) == []
 
     def test_a_failed_turn_resumes_its_error_cleared(
         self,

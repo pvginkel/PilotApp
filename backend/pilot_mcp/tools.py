@@ -376,11 +376,16 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         its file under the project's folder, born with `title` in its front
         matter and `step`, `urgent`, `for` and `summary` beside it, and its
         `path` answered for you to fill; a short one may come whole as
-        `markdown`, minted with it. A work item is started on add in an
-        environment Pilot makes from `repo`, on your placement, its first turn
-        your `brief` followed by Pilot's own lines; `state` answers whether it
-        is `starting` or `held` at the gate, and `held` why — say so to the
-        person. A work item that does actions you claimed, of workers'
+        `markdown`, minted with it. A work item is started on add, on your
+        placement, its first turn your `brief` followed by Pilot's own lines:
+        by `repo`, in an environment Pilot makes from it, or by `environment`,
+        an environment's id, in that environment as it stands. One placed by
+        `environment` names no `repo`: Pilot never makes, takes, renames or
+        resets its environment, starts it when it is stopped, and stops it
+        again once nothing runs there only where it started it. `state`
+        answers whether it is `starting` or `held` at the gate, and `held` why
+        — say so to the person. A work item that does actions you claimed, of
+        workers'
         documents or of items you added, names them in `claims`: each stays
         open and yours until its `done`, its line naming this work item, the
         latest that names it, and an item you added is done, with no undo,
@@ -392,7 +397,9 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         `due_at`, and is fixed from then on: Pilot fires it and never closes
         it; you close it with your own `mark` `done` and its `note`, and to
         change it you close it and add another. A field the kind does not
-        take or one it needs missing, a text with no title or with faults, a
+        take or one it needs missing, a work item that names both `repo` and
+        `environment` or neither, the store's environment or one the
+        controller does not have, a text with no title or with faults, a
         wait's list empty or naming one twice, a card that is no ticket id, a
         due time not ahead, an attachment or a plan task not of your project,
         material that cannot be copied, a claim that is not an open action of

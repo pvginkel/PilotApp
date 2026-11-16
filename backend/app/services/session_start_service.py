@@ -13,7 +13,10 @@ Pilot's own made from the repository, the take committed before any controller
 call and the environment then renamed after the Project and reset, or creates
 one, whose row commits before its bring-up is waited on; then it creates the
 headless session, Pilot's MCP server handed to it with a token minted for it
-(`PilotServer`), and sends the brief, whose `202` starts the relay. The token's
+(`PilotServer`), and sends the brief, whose `202` starts the relay.
+`start_work_in` places one in an environment by name instead, its Session
+there from its birth (DB 344): its loop starts that environment and goes on
+from the headless create. The token's
 hash is the Session's from the commit that makes the create's controller
 session its own, before any Turn goes to that session. Each phase the
 start enters is a `server` record in no Turn (DB assertion 220), and each such
@@ -90,8 +93,9 @@ when that one is gone or its environment is not running (§9.6), never reset. A
 Resume with no conversation to continue is a fresh start (review B1): in a
 headless session of its own, in its environment reset, or in one taken or
 created when it has none or that one is gone or deleting. A work item placed
-before slice 020, in an environment Pilot did not create, is never started
-there (F143.1; review A2).
+in an environment by name runs there from its birth (F86.9; DB 344): its
+start, a fresh Resume's included, takes, makes, names and resets no
+environment, and starts the one named when it is stopped.
 
 A nudge (F135.3, F141.3; DB 232) carries a work item on as a Resume does,
 its Turn the nudge's words: owed to one the hard stop stopped, and to one
@@ -241,7 +245,8 @@ START_FAILED = "start-failed"
 
 CREATING = "Creating the session…"
 
-NOT_PILOTS = "its environment is not Pilot's"
+THE_STORE = "it is the store's environment, where no work item runs"
+"""Why a work item is not placed in the store by name (DB 344)."""
 
 PILOTS_OWN = "it is Pilot's own work"
 """Why a person's Stop and Resume do not take a job (F26.3)."""
@@ -369,10 +374,8 @@ class _Pending:
     unreset: bool
     """The environment is Pilot's own with no claim, for a start on a new
     conversation: a take's or a fresh Resume's, its rename, its stop and its
-    reset still to make (review B3)."""
-    foreign: bool
-    """The Session is a work item's in an environment Pilot did not create:
-    placed before slice 020, it is never started there."""
+    reset still to make (review B3). Never one the work item was placed in
+    by name (DB 344)."""
     brain: bool
     """The Session is a chat's or a job's: it runs in the store."""
     controller_session: str | None
@@ -509,9 +512,122 @@ class SessionStartService:
             RecordNotFoundException: No Project has the id, or its plan has
                 no task `plan_task_id`
         """
-        operation = f"place a work item of {repo}"
+        return self._place(
+            db,
+            project_id,
+            f"place a work item of {repo}",
+            repo=repo,
+            environment_id=None,
+            title=title,
+            brief=brief,
+            cwd=cwd,
+            plan_task_id=plan_task_id,
+            agent=agent,
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
+
+    def named_environment(self, db: Session, environment_id: str) -> None:
+        """The environment a work item is to be placed in by name
+        (`start_work_in`), asked of the controller before the placing takes a
+        lock: its row is made from the controller's report on Pilot's first
+        touch of it, in the caller's transaction, and one that exists is left
+        as it is (DB Environment). The controller is asked whether Pilot has
+        the row or not: a Conversation's caller has one the controller may
+        not know (`CallerEnvironmentService.row`), and the work must start
+        there.
+
+        Raises:
+            InvalidOperationException: No controller is configured
+            RecordNotFoundException: The controller has no such environment
+            ControllerUnreachable: The controller did not answer
+            ExternalServiceException: The controller failed otherwise
+        """
+        if not self._controller_configured:
+            raise InvalidOperationException(
+                f"place a work item in {environment_id}", "no controller is configured"
+            )
+        try:
+            self._environments.ensure_reported(db, environment_id)
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.NOT_FOUND:
+                raise
+            raise RecordNotFoundException("Environment", environment_id) from problem
+
+    def start_work_in(
+        self,
+        db: Session,
+        project_id: uuid.UUID,
+        environment_id: str,
+        *,
+        title: str,
+        brief: str,
+        cwd: str,
+        plan_task_id: str | None = None,
+        agent: str | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Work:
+        """Place a work item titled `title` on the project's timeline in the
+        environment `environment_id`, by name, and write its `work` Session's
+        start, in the caller's transaction, as `start_work` writes one placed
+        by repository, but for its placement (DB 344; F86.9): its Work keeps
+        no `repo`, and its Session is in the environment from its birth, held
+        or not. Its start takes, makes, names and resets no environment, its
+        Resume on a new conversation included: it starts the one named when
+        it is stopped, under the server's claim (F88.1), and runs there
+        beside whatever else runs there. The environment's row is the
+        caller's to make first (`named_environment`). No controller call is
+        made.
+
+        Returns:
+            The Work
+
+        Raises:
+            InvalidOperationException: No controller is configured, the
+                environment is the store, or the project is finished or
+                archived
+            RecordNotFoundException: No Project has the id, or its plan has
+                no task `plan_task_id`
+        """
+        return self._place(
+            db,
+            project_id,
+            f"place a work item in {environment_id}",
+            repo=None,
+            environment_id=environment_id,
+            title=title,
+            brief=brief,
+            cwd=cwd,
+            plan_task_id=plan_task_id,
+            agent=agent,
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
+
+    def _place(
+        self,
+        db: Session,
+        project_id: uuid.UUID,
+        operation: str,
+        *,
+        repo: str | None,
+        environment_id: str | None,
+        title: str,
+        brief: str,
+        cwd: str,
+        plan_task_id: str | None,
+        agent: str | None,
+        model: str | None,
+        reasoning_effort: str | None,
+    ) -> Work:
+        """A work item placed by exactly one of the repository `repo` and
+        the environment `environment_id`, its Session written through the
+        gate (`start_work`, `start_work_in`)."""
         if not self._controller_configured:
             raise InvalidOperationException(operation, "no controller is configured")
+        if environment_id == self._store:
+            raise InvalidOperationException(operation, THE_STORE)
         project = _standing(db, project_id, births=True)
         refusal = _closed(project)
         if refusal is not None:
@@ -520,6 +636,7 @@ class SessionStartService:
         now = datetime.now(UTC)
         session = AgentSession(
             project_id=project_id,
+            environment_id=environment_id,
             kind_code=WORK_KIND,
             cwd=cwd,
             agent=agent,
@@ -814,18 +931,14 @@ class SessionStartService:
         renamed after its Project (`_named`) and reset; one whose environment
         has a bring-up of Pilot's still to settle, a create's, a reset's or a
         start's, has it awaited, never a second scheduled; any other has its
-        environment started. A Session in an environment Pilot did not create
-        fails with nothing called.
+        environment started, a work item's placed there by name among them,
+        whose environment is never taken, named or reset (DB 344).
         """
         with scoped_session(self._container) as db:
             pending = _pending(db, session_id)
         if pending is None:
             return
         turn_id = pending.turn_id
-        if pending.foreign:
-            with scoped_session(self._container) as db:
-                self._fail(db, session_id, turn_id, NOT_PILOTS, recorded=False)
-            return
         if pending.resuming and pending.controller_session is not None:
             try:
                 lost = self._lost_reason(
@@ -1307,9 +1420,9 @@ class SessionStartService:
             RecordNotFoundException: No Session has the id
             InvalidOperationException: No controller is configured; the
                 Session is no work item's, is a job's, Pilot's own (F26.3), is
-                neither stopped nor failed, runs in an environment Pilot did
-                not create, or has its stopped turn still in flight; its item
-                is done; or the project is finished or archived
+                neither stopped nor failed, or has its stopped turn still in
+                flight; its item is done; or the project is finished or
+                archived
         """
         operation = f"resume {_work_named(db, session_id)}"
         if not self._controller_configured:
@@ -1330,8 +1443,6 @@ class SessionStartService:
             raise InvalidOperationException(
                 operation, _RESUME_REFUSALS[session.state_code]
             )
-        if _foreign(session, _environment(db, session)):
-            raise InvalidOperationException(operation, NOT_PILOTS)
         refusal = _closed(project)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
@@ -1423,14 +1534,13 @@ class SessionStartService:
         Session has its controller session already, and its shutdown timer
         cleared. One with no Environment yet, or with one whose reset is
         still to make, enters its phase at the create, at the rename or as it
-        takes the store; one in an environment Pilot did not create none, its
-        loop failing it."""
+        takes the store."""
         environment = _environment(db, session)
-        if environment is not None and not _foreign(session, environment):
+        if environment is not None:
             if session.controller_session is None and not _unreset(
-                session, environment
+                db, session, environment
             ):
-                self._phase(db, session.id, _bringing_up(session, environment))
+                self._phase(db, session.id, _bringing_up(db, session, environment))
             self._environments.clear_shutdown_timer(db, environment.id)
         self._slots.took(session)
         after_commit(_LoopStart(self, session.id))
@@ -1633,11 +1743,13 @@ class SessionStartService:
         B1): in a headless session of its own, never one an earlier start
         left there, in its environment taken back, its reset still to make
         (`EnvironmentService.retake`); one gone or deleting it lets go, and
-        its start takes a free one or creates one."""
+        its start takes a free one or creates one. A work item placed in its
+        environment by name keeps it as it is, neither taken back nor let go
+        (DB 344)."""
         session.controller_session = None
-        if session.environment_id is not None and not self._environments.retake(
-            db, session.environment_id
-        ):
+        if session.environment_id is None or _placed_by_name(db, session):
+            return
+        if not self._environments.retake(db, session.environment_id):
             logger.info(
                 "Session %s lets environment %s go: it is leaving",
                 session.id,
@@ -1651,10 +1763,11 @@ class SessionStartService:
         whose reset was still to make, its claim cleared for it, is claimed
         first (`EnvironmentService.reclaim`), so that a start cut before its
         reset leaves no environment of Pilot's running outside the timer
-        (refinement D1)."""
+        (refinement D1); a work item placed there by name had no claim
+        cleared for it, and claims none (DB 344)."""
         if session.environment_id is None:
             return
-        if session.conversation_id is None:
+        if session.conversation_id is None and not _placed_by_name(db, session):
             self._environments.reclaim(db, session.environment_id)
         self._environments.arm_shutdown_timer(db, session.environment_id)
 
@@ -1864,7 +1977,7 @@ class SessionStartService:
             self._phase(
                 db,
                 session_id,
-                _bringing_up(session, db.get_one(Environment, self._store)),
+                _bringing_up(db, session, db.get_one(Environment, self._store)),
             )
         self._environments.start(self._store)
         return True
@@ -2316,8 +2429,7 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         bringing_up=environment is not None
         and environment.server_started_at is not None
         and environment.started_pod_at is None,
-        unreset=environment is not None and _unreset(session, environment),
-        foreign=_foreign(session, environment),
+        unreset=environment is not None and _unreset(db, session, environment),
         brain=session.kind_code != WORK_KIND,
         controller_session=session.controller_session,
         token_hash=session.token_hash,
@@ -2344,33 +2456,39 @@ def _environment(db: Session, session: AgentSession) -> Environment | None:
     return db.get_one(Environment, session.environment_id, populate_existing=True)
 
 
-def _unreset(session: AgentSession, environment: Environment) -> bool:
+def _placed_by_name(db: Session, session: AgentSession) -> bool:
+    """Whether the Session is a work item's placed in its Environment by
+    name: its Work keeps no repository (DB 344). A `work` Session with no
+    Work, the testing routes' project session, has none either."""
+    return (
+        session.kind_code == WORK_KIND
+        and db.scalar(select(Work.repo).where(Work.id == session.id)) is None
+    )
+
+
+def _unreset(db: Session, session: AgentSession, environment: Environment) -> bool:
     """Whether the Session's environment is still to be named, stopped and
     reset: Pilot's own with no claim, the take's or the fresh Resume's
-    cleared, for a start on a new conversation (review B3)."""
+    cleared, for a start on a new conversation (review B3); never one the
+    work item was placed in by name (DB 344)."""
     return (
         environment.server_created_at is not None
         and environment.server_started_at is None
         and session.conversation_id is None
+        and not _placed_by_name(db, session)
     )
 
 
-def _foreign(session: AgentSession, environment: Environment | None) -> bool:
-    """Whether the Session is a work item's in an environment Pilot did not
-    create: placed by id before slice 020, it is never started there
-    (F143.1; review A2)."""
-    return (
-        environment is not None
-        and environment.server_created_at is None
-        and session.kind_code == WORK_KIND
-    )
-
-
-def _bringing_up(session: AgentSession, environment: Environment) -> str:
+def _bringing_up(db: Session, session: AgentSession, environment: Environment) -> str:
     """The phase that brings the Session's environment up (decision 38):
     "Preparing" one of Pilot's own for a start on a new conversation, which
-    created or reset it, else "Starting" it."""
-    if environment.server_created_at is not None and session.conversation_id is None:
+    created or reset it, else "Starting" it, as one a work item was placed
+    in by name is (DB 344)."""
+    if (
+        environment.server_created_at is not None
+        and session.conversation_id is None
+        and not _placed_by_name(db, session)
+    ):
         return f"Preparing {environment.name}…"
     return f"Starting {environment.name}…"
 

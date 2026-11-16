@@ -151,8 +151,18 @@ class EnvironmentService:
             ControllerProblem: `not-found` if the controller has no such
                 environment
         """
-        if db.get(Environment, env_id) is not None:
-            return
+        if db.get(Environment, env_id) is None:
+            self.ensure_reported(db, env_id)
+
+    def ensure_reported(self, db: Session, env_id: str) -> None:
+        """Make the environment's row as `ensure_environment` makes it, the
+        controller asked whether Pilot has the row or not; a row that exists
+        is left as it is.
+
+        Raises:
+            ControllerProblem: `not-found` if the controller has no such
+                environment
+        """
         report = self._client().get_environment(env_id)
         db.execute(
             insert(Environment)

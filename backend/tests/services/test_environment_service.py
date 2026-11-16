@@ -223,6 +223,57 @@ class TestEnsureEnvironment:
 REPO = "example/Example"
 
 
+class TestEnsureReported:
+    """The row of an environment a work item is placed in by name: the
+    controller is asked whether Pilot has the row or not (DB 344)."""
+
+    def test_the_first_touch_makes_the_row_from_the_controllers_report(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, name="Alpha", status="running")
+
+        environments.ensure_reported(session, ENV)
+
+        row = _row(session)
+        assert row is not None
+        assert (row.name, row.last_state, row.exempt) == ("Alpha", "running", False)
+        assert (row.server_created_at, row.server_started_at) == (None, None)
+
+    def test_a_row_pilot_has_is_left_as_it_is_the_controller_asked(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _environment(session, started=False)
+        fake_controller.add_environment(ENV, name="Renamed", status="stopped")
+
+        environments.ensure_reported(session, ENV)
+
+        row = _row(session)
+        assert row is not None and (row.name, row.last_state) == ("Env-A", "running")
+        assert fake_controller.calls == [f"GET /environments/{ENV}"]
+
+    @pytest.mark.parametrize("known_to_pilot", [False, True])
+    def test_one_the_controller_does_not_have_is_its_not_found(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        known_to_pilot: bool,
+    ) -> None:
+        if known_to_pilot:
+            _environment(session, started=False)
+
+        with pytest.raises(ControllerProblem) as refused:
+            environments.ensure_reported(session, ENV)
+
+        assert refused.value.problem_type is ControllerProblemType.NOT_FOUND
+
+
 class TestCreate:
     """An environment of Pilot's own (§13.5; F143.1)."""
 

@@ -309,8 +309,21 @@ class AddItemRequestSchema(BaseModel):
     repo: str | None = Field(
         default=None,
         pattern=r"^[^/\s]+/[^/\s]+$",
-        description="The repository a work item runs in, `owner/Name`",
+        description=(
+            "The repository a work item is placed by, `owner/Name`: it runs in an"
+            " environment Pilot makes from it. A work item names this or"
+            " `environment`, never both"
+        ),
         examples=["pvginkel/Example"],
+    )
+    environment: str | None = Field(
+        default=None,
+        pattern=r"^[^:\s/]+$",
+        description=(
+            "The id of the environment a work item is placed in by name, in place"
+            " of `repo`: it runs there, the environment as it stands"
+        ),
+        examples=["pvginkel-example-1a2b3c"],
     )
     cwd: str | None = Field(
         default=None,

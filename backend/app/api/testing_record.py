@@ -7,7 +7,8 @@ and handbook, the files it attaches, a draft's on no item, Pilot's Done, and
 the end of its turn; a read of what a member was shown, which the
 notification's reconcile writes off the request; and a work item placed by
 repository, started in an
-environment of Pilot's own the stage's own controller creates, named for the
+environment of Pilot's own the stage's own controller creates, or placed by
+name in an environment of that controller's, named for the
 claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
 its effect, the list of steps it publishes and the debrief it gives; a pre-ruling pass's questions to a registered document's writer,
@@ -307,6 +308,7 @@ def read_sightings(
         HTTP_400=ApiErrorResponseSchema,
         HTTP_404=ApiErrorResponseSchema,
         HTTP_409=ApiErrorResponseSchema,
+        HTTP_502=ApiErrorResponseSchema,
     ),
 )
 @inject
@@ -314,29 +316,37 @@ def create_work(
     project_id: uuid.UUID,
     test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
 ) -> Any:
-    """Place a work item on the project's timeline by repository, and start
-    its session as every work item's starts: once the request commits, its
-    start creates an environment of Pilot's own from the repository on the
-    stage's own controller. It is named for the claimed actions `claims`
-    gives and for the blocks `researches` gives, whose facts it checks, as a
-    pass's `add_item` names them (F21.6, F52.3).
+    """Place a work item on the project's timeline, by repository or in an
+    environment by name, and start its session as every work item's starts:
+    once the request commits, the start of one placed by repository creates
+    an environment of Pilot's own from it on the stage's own controller, and
+    the start of one placed by name starts the environment named when it is
+    stopped, and makes, takes, names and resets none (F86.9). It is named for
+    the claimed actions `claims` gives and for the blocks `researches` gives,
+    whose facts it checks, as a pass's `add_item` names them (F21.6, F52.3).
 
     Returns:
         201: The work item's id, its Work's and its Session's
-        400: The body is invalid, or the stage is prd
+        400: The body is invalid, naming both a repository and an environment
+            or neither among them, or the stage is prd
         404: No project has the id, its plan has no task of the step, a
-            claimed or researched block's item is not of the project, or its
-            document has no such block
+            claimed or researched block's item is not of the project, its
+            document has no such block, or the controller has no environment
+            of the id it is placed in
         409: A claim that is not an open action of a registered document of
             the project or of an item of Pilot's own of it, a research of a
             block that is answered or not in an open registered document of
-            it, no controller is configured, or the project is finished or
-            archived: the reason
+            it, no controller is configured, the environment it is placed in
+            is the store's, or the project is finished or archived: the
+            reason
+        502: The controller did not answer the read of the environment it is
+            placed in, or failed otherwise
     """
     data = InventedWorkCreateSchema.model_validate(request.get_json())
     work = test_data_service.work(
         project_id,
         data.repo,
+        environment=data.environment,
         title=data.title,
         brief=data.brief,
         cwd=data.cwd,
