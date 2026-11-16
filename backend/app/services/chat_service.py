@@ -112,8 +112,8 @@ _IN_FLIGHT = "a turn of its chat is in flight"
 
 HANDBOOK_CHANGED_TOTAL = Counter(
     "pilot_chat_handbook_changed_total",
-    "Chat turns sent with the server's notice that the project's handbook changed"
-    " since the chat's previous turn, by project",
+    "Chat and conversation turns sent with the server's notice that the project's"
+    " handbook changed since the chat's or the conversation's previous turn, by project",
     ["project"],
 )
 
