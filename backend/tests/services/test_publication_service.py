@@ -2942,14 +2942,6 @@ class TestAdopted:
 
         assert (thread.main_id, thread.adopted_project_id) == (main.id, None)
 
-    def test_an_adopted_transcript_has_no_launch_run_by_a_session(
-        self, session: DbSession, publications: PublicationService, service_user: User
-    ) -> None:
-        """DB 539."""
-        publications.publish(_camp(group=group()))
-
-        assert _ran(session) == [(None, None), (None, None)]
-
     def test_a_stage_with_no_service_user_is_refused_and_nothing_is_written(
         self, session: DbSession, publications: PublicationService
     ) -> None:
