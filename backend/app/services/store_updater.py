@@ -6,9 +6,10 @@ from the row's columns. Each phase is a transaction of its own that locks the
 row and writes its column once, in order, while it is unwritten and no lift
 is asked (`lift_requested_at`):
 
-1. `stopped_at`: every job's and Chat's Session `running` or `starting`
-   stopped by Pilot (`SessionStartService.stop_for_update`), one by one, a
-   held one left held and a Chat left open; then a wait, bounded by
+1. `stopped_at`: every job's, Chat's and Conversation's Session `running` or
+   `starting` stopped by Pilot (`SessionStartService.stop_for_update`), one by
+   one, a held one left held and a Chat and a Conversation left open; then a
+   wait, bounded by
    `turn_wait_seconds`, for the turns those stops interrupted to end. Past
    it, the store's stop ends what is left as a stop made elsewhere. One gone
    `running` or `starting` since is stopped before the column is written.
@@ -71,7 +72,7 @@ from app.services.environment_service import EnvironmentService
 from app.services.handing import hand_over, sides
 from app.services.job_service import TURN_ENDING
 from app.services.session_start_service import SessionStartService
-from app.services.start_gate import CHAT_KIND, JOB_KIND
+from app.services.start_gate import STORE_KINDS
 from app.services.store_update_service import stopped_by, unlifted
 from app.services.supervisor import LoopHandle, Supervisor
 from app.utils.after_commit import after_commit
@@ -417,10 +418,11 @@ def _retriable(update: StoreUpdate) -> Select[uuid.UUID]:
 
 
 def _turns_ending(since: datetime) -> Exists:
-    """Whether a job's or a Chat's Session stopped since `since` has its turn
-    still in flight, which its relay ends at the interrupt's result."""
+    """Whether a job's, a Chat's or a Conversation's Session stopped since
+    `since` has its turn still in flight, which its relay ends at the
+    interrupt's result."""
     return exists().where(
-        AgentSession.kind_code.in_((JOB_KIND, CHAT_KIND)),
+        AgentSession.kind_code.in_(STORE_KINDS),
         AgentSession.state_code == SessionState.STOPPED,
         AgentSession.stopped_at >= since,
         AgentSession.turns > 0,

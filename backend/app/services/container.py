@@ -859,6 +859,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         brief_service=brief_service,
         session_record_service=session_record_service,
         caller_environment_service=caller_environment_service,
+        chat_close_service=chat_close_service,
         brain_model=app_config.provided.brain_model,
         brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
     )

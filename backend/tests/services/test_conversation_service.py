@@ -1,14 +1,17 @@
 """A calling session's conversation with a project's brain: opened in the
 store, briefed, from the environment and the session that called, as the
 service user; its caller's Environment row; its later messages, one in
-flight at a time; several open at once, beside the project's chat (F150.10,
-F150.12; design 3 §5.3; DB decision 77, assertions 330 to 337)."""
+flight at a time; several open at once, beside the project's chat; its
+caller's interrupt and end; the store's update, the pause and its project's
+Finish, Reopen and Archive (F150.10, F150.12; design 3 §5.3; DB decision 77,
+assertions 330 to 337)."""
 
 import json
 import threading
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from flask import Flask
@@ -37,6 +40,7 @@ from app.models.reference import (
     TransitionKind,
     UserKind,
 )
+from app.schemas.timeline import HeldReason
 from app.services.caller_environment_service import CallerEnvironmentService
 from app.services.chat_close_service import ChatCloseService
 from app.services.chat_service import HANDBOOK_CHANGED_TOTAL, STORE_NOTIFICATION
@@ -49,7 +53,7 @@ from app.services.pilot_server import PilotServer
 from app.services.relay_service import RelayService
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import SessionStartService
-from app.services.start_gate import WorkSlots
+from app.services.start_gate import Held, WorkSlots
 from app.services.supervisor import LoopHandle
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils import after_commit as after_commit_module
@@ -58,6 +62,7 @@ from tests.support.chats import open_chat
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.locks import in_thread, lock_waits
+from tests.support.store_updates import hold, lift
 from tests.support.supervisor import WAIT_SECONDS, Supervise, metric_value, wait_until
 
 MCP_URL = "https://pilot-mcp.example.com/mcp"
@@ -192,6 +197,7 @@ def _conversations(
             controller_client=container.controller_client,
             controller_configured=True,
         ),
+        chat_close_service=container.chat_close_service(),
         brain_model="opus",
         brain_reasoning_effort="xhigh",
     )
@@ -327,6 +333,32 @@ def _transition(
 ) -> None:
     container.project_service().transition_as(person, project.id, kind)
     clear_after_commit_callbacks()
+
+
+def _row(db: DbSession, run_id: uuid.UUID) -> Conversation:
+    return db.get_one(Conversation, run_id, populate_existing=True)
+
+
+def _last(db: DbSession, run_id: uuid.UUID) -> Any:
+    """The payload of the Session's last record."""
+    (last,) = read_records(db, run_id, limit=1, newest_first=True)
+    return last.record.payload
+
+
+def _stopped_turn_ends(
+    services: tuple[SessionStartService, RelayService],
+    db: DbSession,
+    fake: _Sent,
+    run_id: uuid.UUID,
+) -> models.Session:
+    """The stopped conversation's turn in flight ended by the controller's
+    interrupt, relayed to its `result` as its loop relays it."""
+    run = _read(db, run_id)
+    assert run.controller_session is not None
+    fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "interrupted")
+    services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
+    clear_after_commit_callbacks()
+    return _read(db, run_id)
 
 
 class TestOpen:
@@ -1151,12 +1183,538 @@ class TestInAPausedProject:
 
         assert "\nThe project is paused since " in turn.message
 
+    def test_its_start_and_its_next_message_go_on_under_the_pause(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        service_user: User,
+    ) -> None:
+        """DB 335: never held by the pause."""
+        opened.paused = True
+        session.add(
+            ProjectTransition(
+                project_id=opened.id,
+                kind_code=TransitionKind.PAUSED,
+                at=datetime.now(UTC),
+                by_user_id=person.id,
+            )
+        )
+        session.flush()
+
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        other = _open(conversations, opened, service_user, "Another")
+
+        assert _read(session, other.session_id).state_code == SessionState.STARTING
+        assert "_LoopStart" in _callbacks()
+        turn = conversations.send(run.id, service_user, "Two")
+        assert turn.error is None
+        assert fake.sent == ["Two"]
+
+
+class TestUnderTheStoresUpdate:
+    """While a Store Update is unlifted no message is taken, the opening's
+    included, and a start that passed that read is held at the gate, as a
+    chat's (F144.2; DB 282, 335)."""
+
+    def test_no_conversation_opens(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        hold(session)
+
+        with pytest.raises(
+            InvalidOperationException,
+            match="Cannot open a conversation with Pilot in Soup club because Pilot"
+            " is updating",
+        ):
+            _open(conversations, opened, service_user)
+
+        assert _rows(session, opened) == []
+        assert _turns(session) == 0
+        assert session.get(Environment, CALLER) is None
+
+    def test_no_message_is_taken(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        update = hold(session)
+
+        with pytest.raises(
+            InvalidOperationException,
+            match="Cannot send a message to Pilot in Soup club because Pilot is"
+            " updating",
+        ):
+            conversations.send(run.id, service_user, "Two")
+
+        assert fake.sent == []
+        assert _turns(session) == 1
+        lift(session, update)
+        assert conversations.send(run.id, service_user, "Two").seq == 2
+
+    def test_one_stopped_before_its_brief_went_out_starts_no_more_until_the_lift(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        first = _open(conversations, opened, service_user, "One")
+        clear_after_commit_callbacks()
+        update = hold(session)
+        services[0].stop_for_update(session, first.session_id)
+        clear_after_commit_callbacks()
+        assert _read(session, first.session_id).state_code == SessionState.STOPPED
+
+        with pytest.raises(InvalidOperationException, match="Pilot is updating"):
+            conversations.send(first.session_id, service_user, "Two")
+
+        assert _turns(session) == 1
+        assert _row(session, first.session_id).closed_at is None
+        lift(session, update)
+        again = conversations.send(first.session_id, service_user, "Two")
+        assert (again.session_id, again.seq) == (first.session_id, 2)
+        assert again.message.startswith(KIND)
+
+    def test_a_start_the_update_caught_is_held_and_goes_on_at_the_lift(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        """An opening whose read of the update came before its commit meets
+        it at the gate."""
+        first = _open(conversations, opened, service_user, "One")
+        clear_after_commit_callbacks()
+        run = _read(session, first.session_id)
+        update = hold(session)
+
+        services[0].start_brain(session, opened, run, "open a conversation")
+
+        assert run.state_code == SessionState.HELD
+        assert services[0].held(session, opened, run) == Held(HeldReason.STORE_UPDATE)
+        clear_after_commit_callbacks()
+        lift(session, update)
+        services[0].release(LoopHandle("start:held"))
+        assert _read(session, run.id).state_code == SessionState.STARTING
+
+
+class TestInterrupt:
+    """Its caller's interrupt: the turn in flight stopped, the conversation
+    kept for the next message (F150.10)."""
+
+    def test_a_running_turn_is_stopped_by_the_caller_interrupted_once_it_commits(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        conversations.send(run.id, service_user, "Two")
+        clear_after_commit_callbacks()
+        before = datetime.now(UTC)
+
+        conversation = conversations.interrupt(run.id, service_user)
+
+        assert (conversation.id, conversation.closed_at) == (run.id, None)
+        run = _read(session, run.id)
+        assert (run.state_code, run.stopped_by_user_id, run.current_line) == (
+            SessionState.STOPPED,
+            service_user.id,
+            None,
+        )
+        assert run.stopped_at is not None and run.stopped_at >= before
+        # The turn stays in flight for its relay; the interrupt follows the commit.
+        assert run.turn_ended_at is None
+        assert "_InterruptStart" in _callbacks()
+        assert ProjectChanged(opened.id) in _emitted()
+
+    def test_after_its_interrupted_turn_the_next_message_goes_to_its_thread(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        conversations.send(run.id, service_user, "Two")
+        conversations.interrupt(run.id, service_user)
+        clear_after_commit_callbacks()
+
+        with pytest.raises(
+            InvalidOperationException, match="a turn of its conversation is in flight"
+        ):
+            conversations.send(run.id, service_user, "Too soon")
+
+        run = _stopped_turn_ends(services, session, fake, run.id)
+        assert (run.state_code, run.turn_ended_at is not None) == (
+            SessionState.STOPPED,
+            True,
+        )
+        fake.sent.clear()
+
+        turn = conversations.send(run.id, service_user, "Three")
+
+        assert (turn.session_id, turn.seq, turn.message) == (run.id, 3, "Three")
+        assert fake.sent == ["Three"]
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+
+    @pytest.mark.parametrize("state", [SessionState.HELD, SessionState.STARTING])
+    def test_a_start_held_or_under_way_ends_its_turn_unsent_and_the_next_message_briefs_it(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+        state: SessionState,
+    ) -> None:
+        first = _open(conversations, opened, service_user, "One")
+        _read(session, first.session_id).state_code = state
+        session.flush()
+        clear_after_commit_callbacks()
+
+        conversations.interrupt(first.session_id, service_user)
+
+        run = _read(session, first.session_id)
+        assert run.state_code == SessionState.STOPPED
+        turn = session.get_one(Turn, first.id, populate_existing=True)
+        assert turn.ended_at == run.stopped_at == run.turn_ended_at
+        assert "_InterruptStart" not in _callbacks()
+        clear_after_commit_callbacks()
+
+        again = conversations.send(first.session_id, service_user, "Two")
+
+        assert (again.session_id, again.seq, again.words) == (run.id, 2, "Two")
+        assert again.message.startswith(KIND)
+        assert _read(session, run.id).state_code == SessionState.STARTING
+
+    def test_with_no_turn_in_flight_it_changes_nothing(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        """As KubeCoder's interrupt of an idle session; a closed
+        conversation's included."""
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        fake.calls.clear()
+
+        conversations.interrupt(run.id, service_user)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.stopped_at) == (SessionState.IDLE, None)
+        conversations.end(run.id, service_user)
+        clear_after_commit_callbacks()
+        records = len(_records(session, run.id))
+
+        conversation = conversations.interrupt(run.id, service_user)
+
+        assert conversation.close_cause_code is CloseCause.ENDED
+        assert _read(session, run.id).state_code == SessionState.IDLE
+        assert len(_records(session, run.id)) == records
+        assert _callbacks() == set()
+        assert fake.calls == []
+
+    def test_no_conversation_has_the_id(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        chat = open_chat(session, opened)
+
+        for unknown in (uuid.uuid4(), chat.id):
+            with pytest.raises(RecordNotFoundException):
+                conversations.interrupt(unknown, service_user)
+            with pytest.raises(RecordNotFoundException):
+                conversations.end(unknown, service_user)
+        assert session.get_one(Chat, chat.id).closed_at is None
+
+
+class TestEnd:
+    """Its caller's end: closed `ended`, a turn in flight stopped first (DB
+    334)."""
+
+    def test_an_idle_conversation_closes_ended_its_record_last_and_no_controller_called(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        fake.calls.clear()
+        before = datetime.now(UTC)
+
+        conversation = conversations.end(run.id, service_user)
+
+        assert conversation.id == run.id
+        assert conversation.close_cause_code is CloseCause.ENDED
+        assert conversation.closed_at is not None and conversation.closed_at >= before
+        assert _last(session, run.id) == {"type": "closed", "cause": "ended"}
+        assert ProjectChanged(opened.id) in _emitted()
+        run = _read(session, run.id)
+        assert (run.state_code, run.stopped_at) == (SessionState.IDLE, None)
+        assert run.controller_session is not None
+        assert fake.calls == []
+
+    def test_a_turn_in_flight_is_stopped_first_the_close_written_after_its_end(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        conversations.send(run.id, service_user, "Two")
+        clear_after_commit_callbacks()
+
+        conversations.end(run.id, service_user)
+
+        assert _row(session, run.id).close_cause_code is CloseCause.ENDED
+        run = _read(session, run.id)
+        assert (run.state_code, run.stopped_by_user_id, run.turn_ended_at) == (
+            SessionState.STOPPED,
+            service_user.id,
+            None,
+        )
+        assert "_InterruptStart" in _callbacks()
+        assert _last(session, run.id) != {"type": "closed", "cause": "ended"}
+        clear_after_commit_callbacks()
+
+        _stopped_turn_ends(services, session, fake, run.id)
+
+        assert _last(session, run.id) == {"type": "closed", "cause": "ended"}
+
+    def test_a_start_under_way_ends_its_turn_unsent_then_closes(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        first = _open(conversations, opened, service_user, "One")
+        clear_after_commit_callbacks()
+
+        conversations.end(first.session_id, service_user)
+
+        run = _read(session, first.session_id)
+        assert run.state_code == SessionState.STOPPED
+        assert run.turn_ended_at is not None
+        payloads = [
+            stored.record.payload
+            for stored in _records(session, run.id)
+            if stored.record.kind_code == RecordKind.SERVER
+        ]
+        assert payloads[-2:] == [
+            {"type": "stopped-unsent"},
+            {"type": "closed", "cause": "ended"},
+        ]
+
+    def test_an_ended_conversation_takes_no_turn(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        conversations.end(run.id, service_user)
+        clear_after_commit_callbacks()
+
+        with pytest.raises(
+            InvalidOperationException, match="its conversation is closed"
+        ):
+            conversations.send(run.id, service_user, "Two")
+
+        assert fake.sent == []
+        assert _turns(session) == 1
+
+    def test_one_closed_already_stays_as_it_closed(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        closed_at = datetime(2026, 10, 26, 9, 30, tzinfo=UTC)
+        conversation = _row(session, run.id)
+        conversation.closed_at = closed_at
+        conversation.close_cause_code = CloseCause.TIMEOUT
+        session.flush()
+        records = len(_records(session, run.id))
+
+        ended = conversations.end(run.id, service_user)
+
+        assert (ended.closed_at, ended.close_cause_code) == (
+            closed_at,
+            CloseCause.TIMEOUT,
+        )
+        assert len(_records(session, run.id)) == records
+        assert _emitted() == []
+
+    def test_the_other_conversations_and_the_chat_stay_open(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        chat = open_chat(session, opened)
+        first = _open(conversations, opened, service_user, "One")
+        second = _open(conversations, opened, service_user, "Another")
+        clear_after_commit_callbacks()
+
+        conversations.end(first.session_id, service_user)
+
+        assert _row(session, second.session_id).closed_at is None
+        assert _read(session, second.session_id).state_code == SessionState.STARTING
+        assert session.get_one(Chat, chat.id).closed_at is None
+
+
+class TestTransitions:
+    """Finish, Reopen and Archive close every open conversation of the
+    project, its sessions stopped first (DB 334)."""
+
+    @pytest.mark.parametrize(
+        ("kind", "cause"),
+        [
+            (TransitionKind.FINISHED, CloseCause.FINISHED),
+            (TransitionKind.REOPENED, CloseCause.REOPENED),
+            (TransitionKind.ARCHIVED, CloseCause.ARCHIVED),
+        ],
+    )
+    def test_each_closes_every_open_conversation_a_running_one_stopped_first(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        service_user: User,
+        kind: TransitionKind,
+        cause: CloseCause,
+    ) -> None:
+        if kind is TransitionKind.REOPENED:
+            _transition(container, opened, person, TransitionKind.FINISHED)
+        ended = _open(conversations, opened, service_user, "Earlier")
+        clear_after_commit_callbacks()
+        conversations.end(ended.session_id, service_user)
+        idle = _idle(services, conversations, session, fake, opened, service_user)
+        running = _idle(services, conversations, session, fake, opened, service_user)
+        conversations.send(running.id, service_user, "Two")
+        clear_after_commit_callbacks()
+
+        container.project_service().transition_as(person, opened.id, kind)
+
+        closed = {row.id: row for row in _rows(session, opened)}
+        assert closed[ended.session_id].close_cause_code is CloseCause.ENDED
+        assert closed[idle.id].close_cause_code is cause
+        assert closed[running.id].close_cause_code is cause
+        assert closed[idle.id].closed_at == closed[running.id].closed_at
+        assert _read(session, idle.id).state_code == SessionState.IDLE
+        assert _last(session, idle.id) == {"type": "closed", "cause": cause.value}
+        stopped = _read(session, running.id)
+        assert (stopped.state_code, stopped.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert stopped.stopped_at == closed[running.id].closed_at
+        # Its close's record waits for its stopped turn's end.
+        assert _last(session, running.id) != {"type": "closed", "cause": cause.value}
+        assert "_InterruptStart" in _callbacks()
+        clear_after_commit_callbacks()
+        _stopped_turn_ends(services, session, fake, running.id)
+        assert _last(session, running.id) == {"type": "closed", "cause": cause.value}
+
+    def test_another_projects_conversation_stays_open(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        conversations: ConversationService,
+        opened: Project,
+        person: User,
+        service_user: User,
+    ) -> None:
+        other = Project(
+            created_by_user_id=person.id,
+            state_code=ProjectState.OPEN,
+            slug="camp",
+            name="Camp",
+        )
+        session.add(other)
+        session.flush()
+        mine = _open(conversations, opened, service_user, "One")
+        theirs = _open(conversations, other, service_user, "Another")
+        clear_after_commit_callbacks()
+
+        _transition(container, opened, person, TransitionKind.FINISHED)
+
+        assert _row(session, mine.session_id).close_cause_code is CloseCause.FINISHED
+        assert _row(session, theirs.session_id).closed_at is None
+        assert _read(session, theirs.session_id).state_code == SessionState.STARTING
+
+    def test_after_finish_a_conversation_opens_and_after_archive_none_is_left_open(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        conversations: ConversationService,
+        opened: Project,
+        person: User,
+        service_user: User,
+    ) -> None:
+        container.project_service().finish_and_archive(person, person, opened.id)
+        clear_after_commit_callbacks()
+
+        with pytest.raises(InvalidOperationException, match="its project is archived"):
+            _open(conversations, opened, service_user)
+
+        assert _rows(session, opened) == []
+
 
 def _committed_idle(
-    container: ServiceContainer, fake: _Sent
-) -> tuple[uuid.UUID, uuid.UUID]:
-    """A service user and an open project's idle conversation on a headless
-    session in the store, committed; the user's id and the conversation's."""
+    container: ServiceContainer,
+    fake: _Sent,
+    state: ProjectState = ProjectState.OPEN,
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
+    """A person, a service user and the idle conversation of a project in
+    `state` on a headless session in the store, committed; the service
+    user's id, the conversation's, the person's and the project's."""
     name = (
         client_of(container, fake)
         .create_headless_session(
@@ -1182,7 +1740,7 @@ def _committed_idle(
         db.flush()
         project = Project(
             created_by_user_id=person.id,
-            state_code=ProjectState.OPEN,
+            state_code=state,
             slug="soup-club",
             name="Soup club",
         )
@@ -1230,7 +1788,7 @@ def _committed_idle(
                 ended_at=now,
             )
         )
-        return caller.id, run.id
+        return caller.id, run.id, person.id, project.id
 
 
 class TestTwoMessages:
@@ -1245,7 +1803,7 @@ class TestTwoMessages:
             fake.add_environment(
                 STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
             )
-            caller_id, conversation_id = _committed_idle(container, fake)
+            caller_id, conversation_id, _, _ = _committed_idle(container, fake)
             services = _starts(container, supervise)
             written, proceed = threading.Event(), threading.Event()
 
@@ -1277,5 +1835,186 @@ class TestTwoMessages:
                     "One",
                     "Two",
                 ]
+        finally:
+            fake.close()
+
+
+class _SendHeld(_Sent):
+    """The fake, holding each send until `release` is set."""
+
+    def __init__(self, keepalive_seconds: float) -> None:
+        super().__init__(keepalive_seconds)
+        self.sending, self.release = threading.Event(), threading.Event()
+
+    def _send(self, request: Request, env_id: str, name: str) -> Response:
+        self.sending.set()
+        assert self.release.wait(WAIT_SECONDS)
+        return super()._send(request, env_id, name)
+
+
+class TestATransitionMeetingAMessage:
+    """A message to an idle conversation and a transition that stops the
+    project's sessions never leave a turn running in a closed conversation:
+    the transition's stop locks every open conversation's Session, whatever
+    its state, before it reads which to stop."""
+
+    @pytest.mark.parametrize(
+        ("kind", "state", "cause"),
+        [
+            (TransitionKind.FINISHED, ProjectState.OPEN, CloseCause.FINISHED),
+            (TransitionKind.REOPENED, ProjectState.FINISHED, CloseCause.REOPENED),
+            (TransitionKind.ARCHIVED, ProjectState.OPEN, CloseCause.ARCHIVED),
+        ],
+    )
+    def test_it_stops_the_turn_a_send_in_flight_started(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        kind: TransitionKind,
+        state: ProjectState,
+        cause: CloseCause,
+    ) -> None:
+        """The transition's stop waits on the conversation's Session, which
+        the send holds across the controller's call, and stops the turn it
+        started."""
+        container = committed_app.container
+        fake = _SendHeld(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            caller_id, conversation_id, person_id, project_id = _committed_idle(
+                container, fake, state
+            )
+            services = _starts(container, supervise)
+
+            def send() -> int:
+                with scoped_session(container) as db:
+                    return (
+                        _conversations(container, *services)
+                        .send(conversation_id, db.get_one(User, caller_id), "Two")
+                        .seq
+                    )
+
+            def transition() -> None:
+                with scoped_session(container) as db:
+                    container.project_service().transition_as(
+                        db.get_one(User, person_id), project_id, kind
+                    )
+
+            sending = in_thread(send)
+            assert fake.sending.wait(WAIT_SECONDS)
+            transitioning = in_thread(transition)
+            wait_until(lambda: lock_waits(container) == 1, "the transition waiting")
+            fake.release.set()
+
+            assert sending.result() == 2
+            transitioning.result()
+            assert fake.sent == ["Two"]
+            with scoped_session(container) as db:
+                run = _read(db, conversation_id)
+                assert run.state_code == SessionState.STOPPED
+                assert run.stopped_by_user_id == person_id
+                assert _row(db, conversation_id).close_cause_code is cause
+        finally:
+            fake.close()
+
+    def test_a_message_meeting_finish_is_refused(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        """The send waits on the conversation's Session, which Finish's stop
+        holds; once Finish commits it finds the conversation closed and
+        sends nothing."""
+        container = committed_app.container
+        fake = _Sent(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            caller_id, conversation_id, person_id, project_id = _committed_idle(
+                container, fake
+            )
+            services = _starts(container, supervise)
+            finished, finish_ends = threading.Event(), threading.Event()
+
+            def finish() -> None:
+                with scoped_session(container) as db:
+                    container.project_service().transition_as(
+                        db.get_one(User, person_id),
+                        project_id,
+                        TransitionKind.FINISHED,
+                    )
+                    finished.set()
+                    assert finish_ends.wait(WAIT_SECONDS)
+
+            def send() -> None:
+                with scoped_session(container) as db:
+                    _conversations(container, *services).send(
+                        conversation_id, db.get_one(User, caller_id), "Two"
+                    )
+
+            finishing = in_thread(finish)
+            assert finished.wait(WAIT_SECONDS)
+            sending = in_thread(send)
+            wait_until(lambda: lock_waits(container) == 1, "the send waiting")
+            finish_ends.set()
+            finishing.result()
+
+            with pytest.raises(
+                InvalidOperationException, match="its conversation is closed"
+            ):
+                sending.result()
+            assert fake.sent == []
+            with scoped_session(container) as db:
+                assert _read(db, conversation_id).state_code == SessionState.IDLE
+                assert _row(db, conversation_id).close_cause_code is (
+                    CloseCause.FINISHED
+                )
+                assert db.scalars(select(Turn.words)).all() == ["One"]
+        finally:
+            fake.close()
+
+    def test_an_end_meeting_a_message_waits_for_its_send_and_stops_its_turn(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        """The caller's end waits on the conversation's Session, which the
+        send holds across the controller's call, and stops the turn it
+        started before it closes."""
+        container = committed_app.container
+        fake = _SendHeld(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            caller_id, conversation_id, _, _ = _committed_idle(container, fake)
+            services = _starts(container, supervise)
+
+            def send() -> int:
+                with scoped_session(container) as db:
+                    return (
+                        _conversations(container, *services)
+                        .send(conversation_id, db.get_one(User, caller_id), "Two")
+                        .seq
+                    )
+
+            def end() -> None:
+                with scoped_session(container) as db:
+                    _conversations(container, *services).end(
+                        conversation_id, db.get_one(User, caller_id)
+                    )
+
+            sending = in_thread(send)
+            assert fake.sending.wait(WAIT_SECONDS)
+            ending = in_thread(end)
+            wait_until(lambda: lock_waits(container) == 1, "the end waiting")
+            fake.release.set()
+
+            assert sending.result() == 2
+            ending.result()
+            with scoped_session(container) as db:
+                run = _read(db, conversation_id)
+                assert run.state_code == SessionState.STOPPED
+                assert run.stopped_by_user_id == caller_id
+                assert _row(db, conversation_id).close_cause_code is CloseCause.ENDED
         finally:
             fake.close()

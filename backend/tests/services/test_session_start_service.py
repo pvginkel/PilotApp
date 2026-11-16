@@ -41,6 +41,7 @@ from app.models import (
     Block,
     ClaimAssignment,
     ClarificationRun,
+    Conversation,
     Document,
     Environment,
     Hold,
@@ -9097,9 +9098,10 @@ class TestUnderTheStoresUpdate:
 
 
 class TestStopForUpdate:
-    """The store's update's stops: every job's and Chat's Session running or
-    starting, by Pilot, as a Stop stops one, a held one left held and a Chat
-    left open (design 5 D4; F144.3; DB 279, 280)."""
+    """The store's update's stops: every job's, Chat's and Conversation's
+    Session running or starting, by Pilot, as a Stop stops one, a held one
+    left held and a Chat and a Conversation left open (design 5 D4; F144.3;
+    DB 279, 280)."""
 
     def test_it_names_the_running_and_starting_jobs_and_chats_in_created_at_order(
         self,
@@ -9157,6 +9159,45 @@ class TestStopForUpdate:
         # The interrupt runs once the stop commits; the chat stays open.
         assert "_InterruptStart" in _callbacks()
         assert session.get_one(models.Chat, run.id).closed_at is None
+        clear_after_commit_callbacks()
+
+    @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.STARTING])
+    def test_a_conversation_running_or_starting_is_named_and_stopped_by_pilot_and_stays_open(
+        self,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        state: SessionState,
+    ) -> None:
+        """DB 335."""
+        run = _chat(session, project, environment, state)
+        run.kind_code = "conversation"
+        session.flush()
+        session.add(
+            Conversation(
+                id=run.id,
+                project_id=project.id,
+                session_kind_code="conversation",
+                caller_environment_id=environment.id,
+            )
+        )
+        held = _chat(session, project, environment, SessionState.HELD)
+        held.kind_code = "conversation"
+        session.flush()
+
+        assert starts.stoppable_for_update(session) == [run.id]
+        starts.stop_for_update(session, run.id)
+        starts.stop_for_update(session, held.id)
+
+        stopped = _read(session, run.id)
+        assert (stopped.state_code, stopped.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            _pilot_id(session),
+        )
+        assert ("_InterruptStart" in _callbacks()) == (state is SessionState.RUNNING)
+        assert session.get_one(Conversation, run.id).closed_at is None
+        assert _read(session, held.id).state_code == SessionState.HELD
         clear_after_commit_callbacks()
 
     def test_a_starting_job_ends_its_turn_unsent(

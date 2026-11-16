@@ -21,6 +21,11 @@ conversation than the chat's is another session's, which the tick never ends
 and Archive call no controller: a chat they close keeps its controller
 session, idle or interrupted, and nothing sends to it again. The definition chat never closes
 by timeout (F130.2).
+
+A Conversation closes as a project chat does (F150.12; DB 334): every open
+one of the project at Finish, Reopen and Archive, each on the timer, and by
+its caller's end, `ended` (`end`), which calls no controller either. Its
+close's record and its turn's end are a chat's.
 """
 
 import logging
@@ -28,11 +33,11 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import exists, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.engine.views import ViewService
-from app.models import Chat, Project, Turn
+from app.models import Chat, Conversation, Project, Turn
 from app.models import Session as AgentSession
 from app.models.reference import ChatKind, CloseCause, RecordKind, SessionState
 from app.services.controller_client import (
@@ -42,6 +47,7 @@ from app.services.controller_client import (
 )
 from app.services.session_record_service import SessionRecordService, read_records
 from app.services.session_stream_service import SessionStreamService
+from app.services.start_gate import CHAT_KIND, CONVERSATION_KIND
 from app.services.supervisor import Supervisor
 from app.services.work_status import work_moved
 
@@ -65,8 +71,9 @@ environment gone, or not running, which no headless session outlives."""
 
 
 class ChatCloseService:
-    """Closes the project chats: at Create project, Finish, Reopen and
-    Archive, and on the timer."""
+    """Closes the project chats, at Create project, Finish, Reopen and
+    Archive, and on the timer; and the conversations, at Finish, Reopen and
+    Archive, on the timer, and at their caller's end."""
 
     def __init__(
         self,
@@ -82,7 +89,7 @@ class ChatCloseService:
             supervisor: Runs the timer on its tick
             session_streams: Woken by the close's record
             close_after_seconds: How long after its last turn ended an open
-                project chat with no turn in flight is closed
+                project chat or conversation with no turn in flight is closed
         """
         self._container = container
         self._streams = session_streams
@@ -118,59 +125,103 @@ class ChatCloseService:
             return
         self._close(db, self._records(db), chat, cause, at)
 
+    def close_conversations(
+        self, db: Session, project: Project, cause: CloseCause, at: datetime
+    ) -> None:
+        """Every open Conversation of the project closed with `cause` at
+        `at`, Finish's, Reopen's or Archive's (DB 334), in the caller's
+        transaction, which holds the project's row, so that none opens
+        meanwhile, and has stopped the project's sessions, theirs among them
+        (`SessionStartService.stop_project`). Each is closed under its
+        Session's lock, taken in the order that stop took them."""
+        records = self._records(db)
+        for conversation_id in db.scalars(
+            select(Conversation.id)
+            .where(
+                Conversation.project_id == project.id,
+                Conversation.closed_at.is_(None),
+            )
+            .order_by(Conversation.id)
+        ).all():
+            records.lock_session(conversation_id)
+            conversation = db.get_one(
+                Conversation, conversation_id, populate_existing=True
+            )
+            if conversation.closed_at is None:
+                self._close(db, records, conversation, cause, at)
+
+    def end(self, db: Session, conversation: Conversation, at: datetime) -> None:
+        """The open Conversation closed by its caller at `at`, `ended` (DB
+        334), in the caller's transaction, which holds its Session's lock
+        and has stopped a Turn of it in flight. No controller is called: its
+        controller session stays, idle or interrupted, and nothing sends to
+        it again."""
+        self._close(db, self._records(db), conversation, CloseCause.ENDED, at)
+
     def turn_ended(self, db: Session, session: AgentSession) -> None:
-        """A Turn of the Session ended, under its lock: a chat closed while
-        the Turn was in flight has the close's record written now that none
-        is, so the close stands last; once."""
-        chat = db.get(Chat, session.id, populate_existing=True)
+        """A Turn of the Session ended, under its lock: a chat or a
+        conversation closed while the Turn was in flight has the close's
+        record written now that none is, so the close stands last; once."""
+        closed = _talk(db, session)
         if (
-            chat is None
-            or chat.close_cause_code is None
+            closed is None
+            or closed.close_cause_code is None
             or _in_flight(db, session.id)
             or _close_recorded(db, session.id)
         ):
             return
         self._records(db).append(
-            session.id, RecordKind.SERVER, payload=_closed(chat.close_cause_code)
+            session.id, RecordKind.SERVER, payload=_closed(closed.close_cause_code)
         )
 
     def run_close_timer(self, db: Session) -> None:
         """The close timer's tick, and its reconcile (F130; design 2 §13):
-        every open project chat whose Session's last Turn ended
-        `chat_close_timeout` ago or more, with no Turn in flight, closed
-        `timeout`, its controller session ended. Each chat's close is a
-        transaction of its own, under its Session's lock: one another
-        transaction holds, a message's send among them, is skipped."""
+        every open project chat and every open conversation whose Session's
+        last Turn ended `chat_close_timeout` ago or more, with no Turn in
+        flight, closed `timeout`, its controller session ended. Each one's
+        close is a transaction of its own, under its Session's lock: one
+        another transaction holds, a message's send among them, is
+        skipped."""
         cutoff = datetime.now(UTC) - self._close_after
         due = db.scalars(
-            select(Chat.id)
-            .join(AgentSession, AgentSession.id == Chat.id)
+            select(AgentSession.id)
+            .outerjoin(Chat, Chat.id == AgentSession.id)
+            .outerjoin(Conversation, Conversation.id == AgentSession.id)
             .where(
-                Chat.closed_at.is_(None),
-                Chat.kind_code == ChatKind.PROJECT,
+                or_(
+                    and_(Chat.closed_at.is_(None), Chat.kind_code == ChatKind.PROJECT),
+                    and_(
+                        Conversation.id.is_not(None),
+                        Conversation.closed_at.is_(None),
+                    ),
+                ),
                 AgentSession.turn_ended_at <= cutoff,
             )
-            .order_by(AgentSession.turn_ended_at, Chat.id)
+            .order_by(AgentSession.turn_ended_at, AgentSession.id)
         ).all()
-        for chat_id in due:
-            self._close_if_due(db, chat_id, cutoff)
+        for session_id in due:
+            self._close_if_due(db, session_id, cutoff)
             db.commit()
 
-    def _close_if_due(self, db: Session, chat_id: uuid.UUID, cutoff: datetime) -> None:
+    def _close_if_due(
+        self, db: Session, session_id: uuid.UUID, cutoff: datetime
+    ) -> None:
         session = db.scalars(
             select(AgentSession)
-            .where(AgentSession.id == chat_id)
+            .where(AgentSession.id == session_id)
             .with_for_update(skip_locked=True)
             .execution_options(populate_existing=True)
         ).one_or_none()
         if session is None:
             return
-        chat = db.get_one(Chat, chat_id, populate_existing=True)
+        chat = _talk(db, session)
+        # The tick's select names a chat's or a conversation's Session alone.
+        assert chat is not None
         if (
             chat.closed_at is not None
             or session.turn_ended_at is None
             or session.turn_ended_at > cutoff
-            or _in_flight(db, chat_id)
+            or _in_flight(db, session_id)
         ):
             return
         if session.controller_session is not None:
@@ -211,20 +262,20 @@ class ChatCloseService:
         self,
         db: Session,
         records: SessionRecordService,
-        chat: Chat,
+        chat: Chat | Conversation,
         cause: CloseCause,
         at: datetime,
     ) -> None:
-        """Under the chat's Session's lock: closed with `cause` at `at`, and
-        the close's record written unless a Turn is in flight; the close told
-        to the browsers and to `chat.md`."""
+        """Under the chat's or the conversation's Session's lock: closed with
+        `cause` at `at`, and the close's record written unless a Turn is in
+        flight; the close told to the browsers and to `chat.md`."""
         chat.closed_at = at
         chat.close_cause_code = cause
         db.flush()
         if not _in_flight(db, chat.id):
             records.append(chat.id, RecordKind.SERVER, payload=_closed(cause))
         self._views(db).chats_moved(db.get_one(Project, chat.project_id))
-        logger.info("Chat %s closed: %s", chat.id, cause)
+        logger.info("%s %s closed: %s", type(chat).__name__, chat.id, cause)
 
     def _records(self, db: Session) -> SessionRecordService:
         return SessionRecordService(db, self._streams, self._views(db))
@@ -241,6 +292,16 @@ class ChatCloseService:
 
 def _closed(cause: CloseCause) -> dict[str, str]:
     return {"type": CLOSED, "cause": cause}
+
+
+def _talk(db: Session, session: AgentSession) -> Chat | Conversation | None:
+    """The Chat or the Conversation the Session is, read afresh; None for a
+    work item's and a job's."""
+    if session.kind_code == CHAT_KIND:
+        return db.get(Chat, session.id, populate_existing=True)
+    if session.kind_code == CONVERSATION_KIND:
+        return db.get(Conversation, session.id, populate_existing=True)
+    return None
 
 
 def _in_flight(db: Session, session_id: uuid.UUID) -> bool:

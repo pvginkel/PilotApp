@@ -80,9 +80,11 @@ class TestHeldReason:
             (False, "job", False, None, False, True, None),
             (False, "chat", False, None, False, True, None),
             # A Conversation takes no slot and waits behind no job (DB 335),
-            # and is held for the outage as a Chat is.
+            # and is held for the outage as a Chat is, never for the pause.
             (False, "conversation", False, 3, True, True, None),
             (False, "conversation", True, None, False, False, Held(UNREACHABLE)),
+            (True, "conversation", False, None, False, False, None),
+            (True, "conversation", True, None, False, False, Held(UNREACHABLE)),
         ],
     )
     def test_the_gate_holds_for_the_pause_the_outage_the_slot_the_queue_and_the_conversation(
@@ -123,6 +125,8 @@ class TestHeldReason:
             (FIVE_HOUR, "job", False, False, None, None),
             (WEEK, "chat", False, False, None, None),
             (FIVE_HOUR, "chat", False, False, None, None),
+            (WEEK, "conversation", False, False, None, None),
+            (FIVE_HOUR, "conversation", True, False, None, None),
             (WEEK, "job", True, False, None, Held(HeldReason.PAUSED)),
             (WEEK, "chat", True, True, None, Held(UNREACHABLE)),
         ],
@@ -205,6 +209,18 @@ class TestHeldReason:
             ("chat", None, False, False, True, None, False, Held(STORE_UPDATE)),
             # A Chat's never held for the pause, nor a job's for a halt.
             ("chat", None, True, False, False, None, False, Held(STORE_UPDATE)),
+            # A Conversation's is held as a Chat's is (DB 335).
+            (
+                "conversation",
+                None,
+                False,
+                False,
+                False,
+                None,
+                False,
+                Held(STORE_UPDATE),
+            ),
+            ("conversation", WEEK, True, False, True, 3, True, Held(STORE_UPDATE)),
             ("job", WEEK, False, False, False, None, False, Held(STORE_UPDATE)),
             # The setup goes through the pause, not through the update.
             ("job", None, True, True, False, None, False, Held(STORE_UPDATE)),

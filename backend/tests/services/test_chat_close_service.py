@@ -1,6 +1,7 @@
 """A project chat's close: at Finish and Reopen, the close's record kept last
 when a turn of the chat still runs, and on the close timer's tick (F130,
-F130.1, F130.2, F5.5; DB decision 57; design 2 §13; V05, V28)."""
+F130.1, F130.2, F5.5; DB decision 57; design 2 §13; V05, V28); and a
+conversation's, as a chat's (F150.12; DB 334)."""
 
 import threading
 import uuid
@@ -17,7 +18,7 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.views import ViewService, utc_time
-from app.models import Chat, Environment, Project, Turn, User
+from app.models import Chat, Conversation, Environment, Project, Turn, User
 from app.models.reference import (
     ChatKind,
     CloseCause,
@@ -110,10 +111,53 @@ def _chat(
     """A chat of the project in the store whose latest Turn ended at `ended`;
     with `in_flight`, an earlier one still in flight, as a send that failed
     after a turn the controller has leaves it."""
+    run = _run(db, project, ended, "chat", state, controller_session, in_flight)
+    db.add(
+        Chat(id=run.id, project_id=project.id, session_kind_code="chat", kind_code=kind)
+    )
+    db.flush()
+    return run
+
+
+def _conversation(
+    db: DbSession,
+    project: Project,
+    ended: datetime,
+    *,
+    state: SessionState = SessionState.IDLE,
+    controller_session: str | None = None,
+    in_flight: bool = False,
+) -> models.Session:
+    """A conversation of the project, opened from the store's environment,
+    its Session and its Turns as `_chat` makes a chat's."""
+    run = _run(db, project, ended, "conversation", state, controller_session, in_flight)
+    db.add(
+        Conversation(
+            id=run.id,
+            project_id=project.id,
+            session_kind_code="conversation",
+            caller_environment_id=STORE_ENVIRONMENT_ID,
+        )
+    )
+    db.flush()
+    return run
+
+
+def _run(
+    db: DbSession,
+    project: Project,
+    ended: datetime,
+    kind_code: str,
+    state: SessionState,
+    controller_session: str | None,
+    in_flight: bool,
+) -> models.Session:
+    """A Session of `kind_code` in the store and its Turns, the latest ended
+    at `ended`."""
     run = models.Session(
         project_id=project.id,
         environment_id=STORE_ENVIRONMENT_ID,
-        kind_code="chat",
+        kind_code=kind_code,
         cwd="/work/PilotProjects",
         conversation_id=None if controller_session is None else CONVERSATION,
         controller_session=controller_session,
@@ -122,9 +166,6 @@ def _chat(
     )
     db.add(run)
     db.flush()
-    db.add(
-        Chat(id=run.id, project_id=project.id, session_kind_code="chat", kind_code=kind)
-    )
     started = ended - timedelta(minutes=1)
     db.add(
         Turn(
@@ -157,6 +198,10 @@ def _chat(
 
 def _chat_row(db: DbSession, run: models.Session) -> Chat:
     return db.get_one(Chat, run.id, populate_existing=True)
+
+
+def _conversation_row(db: DbSession, run: models.Session) -> Conversation:
+    return db.get_one(Conversation, run.id, populate_existing=True)
 
 
 def _servers(db: DbSession, run_id: uuid.UUID) -> list[tuple[int | None, Any]]:
@@ -272,6 +317,107 @@ class TestCloseOpen:
         assert _servers(session, run.id) == []
 
 
+class TestCloseConversations:
+    """Finish's, Reopen's and Archive's close of the project's open
+    conversations (DB 334)."""
+
+    def test_every_open_one_closes_with_the_cause_its_record_last(
+        self, session: DbSession, closes: ChatCloseService, opened: Project
+    ) -> None:
+        first = _conversation(session, opened, _ago(timedelta(minutes=2)))
+        second = _conversation(session, opened, _ago(timedelta(minutes=1)))
+        chat = _chat(session, opened, _ago(timedelta(minutes=2)))
+        at = datetime.now(UTC)
+
+        closes.close_conversations(session, opened, CloseCause.ARCHIVED, at)
+
+        for run in (first, second):
+            closed = _conversation_row(session, run)
+            assert (closed.closed_at, closed.close_cause_code) == (
+                at,
+                CloseCause.ARCHIVED,
+            )
+            assert _last(session, run.id) == {"type": CLOSED, "cause": "archived"}
+            assert run.state_code is SessionState.IDLE
+        assert _chat_row(session, chat).closed_at is None
+
+    def test_one_with_a_turn_in_flight_leaves_its_record_to_the_turns_end(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        closes: ChatCloseService,
+        opened: Project,
+    ) -> None:
+        run = _conversation(
+            session,
+            opened,
+            _ago(timedelta(minutes=2)),
+            state=SessionState.STOPPED,
+            in_flight=True,
+        )
+        closes.close_conversations(
+            session, opened, CloseCause.FINISHED, datetime.now(UTC)
+        )
+        assert _servers(session, run.id) == []
+        _end_turn(container, session, run)
+
+        closes.turn_ended(session, run)
+        closes.turn_ended(session, run)
+
+        assert _servers(session, run.id) == [
+            (None, {"type": CLOSED, "cause": "finished"})
+        ]
+        assert _last(session, run.id) == {"type": CLOSED, "cause": "finished"}
+
+    def test_one_closed_already_and_another_projects_are_left(
+        self,
+        session: DbSession,
+        closes: ChatCloseService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        earlier = _ago(timedelta(hours=20))
+        ended = _conversation(session, opened, _ago(timedelta(days=1)))
+        row = _conversation_row(session, ended)
+        row.closed_at, row.close_cause_code = earlier, CloseCause.ENDED
+        other = Project(
+            created_by_user_id=person.id,
+            state_code=ProjectState.OPEN,
+            slug="camp",
+            name="Camp",
+        )
+        session.add(other)
+        session.flush()
+        theirs = _conversation(session, other, _ago(timedelta(minutes=2)))
+
+        closes.close_conversations(
+            session, opened, CloseCause.FINISHED, datetime.now(UTC)
+        )
+
+        row = _conversation_row(session, ended)
+        assert (row.closed_at, row.close_cause_code) == (earlier, CloseCause.ENDED)
+        assert _servers(session, ended.id) == []
+        assert _conversation_row(session, theirs).closed_at is None
+
+    def test_the_close_is_told_to_the_browsers(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        closes: ChatCloseService,
+        engine_events: list[EngineEvent],
+        opened: Project,
+    ) -> None:
+        _conversation(session, opened, _ago(timedelta(minutes=2)))
+        clear_after_commit_callbacks()
+
+        with scoped_session(container) as db:
+            closes.close_conversations(
+                db, opened, CloseCause.FINISHED, datetime.now(UTC)
+            )
+
+        assert ProjectChanged(opened.id) in engine_events
+
+
 class TestTurnEnded:
     def test_the_end_of_a_closed_chats_last_turn_writes_the_close_after_it_once(
         self,
@@ -363,6 +509,83 @@ class TestCloseTimer:
         # The move to `ended` writes the Session's end, the close's instant.
         assert run.ended_at == chat.closed_at
         assert store.sessions(STORE_ENVIRONMENT_ID) == []
+
+    def test_an_idle_conversation_past_the_timeout_closes_as_a_chat_does(
+        self,
+        session: DbSession,
+        closes: ChatCloseService,
+        store: ServedFakeController,
+        controller_client: ControllerClient,
+        opened: Project,
+    ) -> None:
+        """F150.12; DB 334."""
+        name = _headless(controller_client)
+        run = _conversation(
+            session,
+            opened,
+            _ago(CLOSE_AFTER + timedelta(seconds=5)),
+            controller_session=name,
+        )
+        before = datetime.now(UTC)
+
+        closes.run_close_timer(session)
+
+        closed = _conversation_row(session, run)
+        assert closed.close_cause_code is CloseCause.TIMEOUT
+        assert closed.closed_at is not None
+        assert before <= closed.closed_at <= datetime.now(UTC)
+        assert _last(session, run.id) == {"type": CLOSED, "cause": "timeout"}
+        assert (run.state_code, run.current_line, run.controller_session) == (
+            SessionState.ENDED,
+            None,
+            name,
+        )
+        assert store.sessions(STORE_ENVIRONMENT_ID) == []
+
+    @pytest.mark.parametrize("in_flight", [False, True])
+    def test_a_conversation_short_of_the_timeout_or_with_a_turn_in_flight_stays_open(
+        self,
+        session: DbSession,
+        closes: ChatCloseService,
+        store: ServedFakeController,
+        controller_client: ControllerClient,
+        opened: Project,
+        in_flight: bool,
+    ) -> None:
+        name = _headless(controller_client)
+        run = _conversation(
+            session,
+            opened,
+            _ago(CLOSE_AFTER * 2 if in_flight else CLOSE_AFTER - timedelta(minutes=1)),
+            state=SessionState.RUNNING if in_flight else SessionState.IDLE,
+            controller_session=name,
+            in_flight=in_flight,
+        )
+
+        closes.run_close_timer(session)
+
+        assert _conversation_row(session, run).closed_at is None
+        assert _servers(session, run.id) == []
+        assert [s.name for s in store.sessions(STORE_ENVIRONMENT_ID)] == [name]
+
+    def test_a_closed_conversation_is_left_as_it_closed(
+        self,
+        session: DbSession,
+        closes: ChatCloseService,
+        store: ServedFakeController,
+        opened: Project,
+    ) -> None:
+        run = _conversation(session, opened, _ago(CLOSE_AFTER * 2))
+        earlier = _ago(CLOSE_AFTER)
+        row = _conversation_row(session, run)
+        row.closed_at, row.close_cause_code = earlier, CloseCause.ENDED
+        session.flush()
+
+        closes.run_close_timer(session)
+
+        row = _conversation_row(session, run)
+        assert (row.closed_at, row.close_cause_code) == (earlier, CloseCause.ENDED)
+        assert _servers(session, run.id) == []
 
     def test_a_name_another_conversation_holds_is_left_to_it(
         self,

@@ -225,13 +225,15 @@ _CLOSES = {
     TransitionKind.REOPENED: CloseCause.REOPENED,
     TransitionKind.ARCHIVED: CloseCause.ARCHIVED,
 }
-"""The transitions that close the project's open chat, with their causes: a
-chat's box is fixed at its create (DB decision 57), and no chat is open while
-its project is archived (DB decision 60)."""
+"""The transitions that close the project's open chat and its open
+conversations, with their causes: a chat's box is fixed at its create (DB
+decision 57), a conversation's as a chat's (DB 334), and neither is open
+while its project is archived (DB decision 60)."""
 
 _STOPS = (TransitionKind.FINISHED, TransitionKind.ARCHIVED, TransitionKind.REOPENED)
 """The transitions that stop the project's running, starting and held
-Sessions: in a finished project its read-only chat alone runs (F5.5)."""
+Sessions: in a finished project its read-only chat and conversations alone
+run (F5.5; DB 334)."""
 
 _QUESTION_CLOSES = {TransitionKind.ARCHIVED: ARCHIVE, TransitionKind.REOPENED: KEEP}
 """The transitions that close the project's open archive question, with the
@@ -650,6 +652,9 @@ class ProjectService:
             self.session_start_service.stop_project(self.db, project, person, at)
         if kind in _CLOSES:
             self.chat_close_service.close_open(self.db, project, _CLOSES[kind], at)
+            self.chat_close_service.close_conversations(
+                self.db, project, _CLOSES[kind], at
+            )
         if kind is TransitionKind.FINISHED:
             if project.autopilot:
                 self._write(project, person, at, TransitionKind.AUTOPILOT_OFF)

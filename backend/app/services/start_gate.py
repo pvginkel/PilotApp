@@ -2,10 +2,12 @@
 D3; F141.5, F143.4, F59.2, F135, F144.2; DB 229, 243, 266, 282).
 
 A work item's start is held while a usage halt holds, the week's or the
-five-hour's (`UsageHalts`), a job's and a Chat's never. A start is held while
-its project is paused, a Chat's never (F141.4), nor
+five-hour's (`UsageHalts`), a job's, a Chat's and a Conversation's never. A
+start is held while its project is paused, a Chat's and a Conversation's
+never (F141.4; DB 335), nor
 the setup's, a Retry's included, which runs under the pause Create project
-writes (D083); a job's and a Chat's, never a work item's, while a Store
+writes (D083); a job's, a Chat's and a Conversation's, never a work item's,
+while a Store
 Update is unlifted (`store_update_service.unlifted`), the hold on the
 store's work; while the
 controller is unreachable; a work item's alone while
@@ -47,12 +49,19 @@ CONVERSATION_KIND = "conversation"
 """The Session Kind of a Conversation, a session outside Pilot's with Pilot
 (DB decision 77): no slot's and no queue's (DB 335)."""
 
+UNPAUSED = (CHAT_KIND, CONVERSATION_KIND)
+"""The Session Kinds a project's pause never holds (DB 229)."""
+
 WORK_KIND = "work"
 """The Session Kind the slot counts: a work item's, never a Chat's or a
 job's (DB 243)."""
 
 JOB_KIND = "job"
 """The Session Kind of Pilot's own background jobs (F59)."""
+
+STORE_KINDS = (JOB_KIND, CHAT_KIND, CONVERSATION_KIND)
+"""The Session Kinds the store's update stops, and holds the starts of (DB
+229, 279)."""
 
 COUNTED = (SessionState.RUNNING, SessionState.STARTING)
 """The states a work item holds a slot in."""
@@ -103,7 +112,7 @@ def held_reason(
     (`conversing`) or not; None while the gate is open."""
     if kind_code == WORK_KIND and halted is not None:
         return Held(HALTED[halted])
-    if paused and kind_code != CHAT_KIND and not setup:
+    if paused and kind_code not in UNPAUSED and not setup:
         return Held(HeldReason.PAUSED)
     if updating and kind_code != WORK_KIND:
         return Held(HeldReason.STORE_UPDATE)

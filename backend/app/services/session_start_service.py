@@ -78,8 +78,8 @@ interrupted after the commit, and a start held or under way ends, nothing of it
 sent afterwards. Finish and Archive stop every Session of the project so (F5.1,
 F128.1), and Reopen a finished project's chat (F5.5); a usage halt's hard stop
 every running work item, by Pilot, its nudge owed (F135.6; DB 269); and the
-store's update every job and Chat running or starting, by Pilot (F144.3; DB
-279, 280). A person stops a job only by Stop and take over on a document that
+store's update every job, Chat and Conversation running or starting, by Pilot
+(F144.3; DB 279, 280). A person stops a job only by Stop and take over on a document that
 is Pilot's (F28.9, F26.3), which also stops, by them, what the server would
 go on with from rest: a nudge owed, the lift's retry. Its Resume
 writes a server-own Turn, "continue", or the ended Turn's
@@ -144,6 +144,7 @@ from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Chat,
     ClarificationRun,
+    Conversation,
     Document,
     Environment,
     Hold,
@@ -196,8 +197,8 @@ from app.services.session_record_service import (
 from app.services.session_scope import ScopedCreate, scoped_create
 from app.services.session_stream_service import SessionStreamService
 from app.services.start_gate import (
-    CHAT_KIND,
     JOB_KIND,
+    STORE_KINDS,
     WORK_KIND,
     Held,
     WorkSlots,
@@ -262,8 +263,8 @@ STOPPABLE = (SessionState.RUNNING, SessionState.STARTING, SessionState.HELD)
 held at the gate."""
 
 UPDATE_STOPS = (SessionState.RUNNING, SessionState.STARTING)
-"""The states the store's update stops a job's or a Chat's Session in: a turn
-in flight or a start under way. A held one has not started, and goes on at
+"""The states the store's update stops a job's, a Chat's or a Conversation's
+Session in: a turn in flight or a start under way. A held one has not started, and goes on at
 the lift (DB 279)."""
 
 _STOP_REFUSALS = {
@@ -572,8 +573,8 @@ class SessionStartService:
         """A brain Session's start through the gate (§13.4), in the caller's
         transaction, which holds the project's row: `held` while the gate is
         closed for it, else `starting`, its start run once this commits. A
-        Chat's, its Turn to send written by the caller, is never held for the
-        pause and takes no slot. A job's, placed with no Turn, waits its turn
+        Chat's or a Conversation's, its Turn to send written by the caller,
+        is never held for the pause and takes no slot. A job's, placed with no Turn, waits its turn
         behind its project's jobs before it, held for the pause but the
         setup's (`setups`); going at once, it is briefed at its trigger's
         instant, its Session's `created_at` (`_brief`). No controller call is
@@ -985,13 +986,14 @@ class SessionStartService:
                 self._stop_halted(db, session_id)
 
     def stoppable_for_update(self, db: Session) -> list[uuid.UUID]:
-        """The Sessions the store's update stops (DB 279): every job's and
-        Chat's `running` or `starting`, in `created_at` order."""
+        """The Sessions the store's update stops (DB 279): every job's,
+        Chat's and Conversation's `running` or `starting`, in `created_at`
+        order."""
         return list(
             db.scalars(
                 select(AgentSession.id)
                 .where(
-                    AgentSession.kind_code.in_((JOB_KIND, CHAT_KIND)),
+                    AgentSession.kind_code.in_(STORE_KINDS),
                     AgentSession.state_code.in_(UPDATE_STOPS),
                 )
                 .order_by(AgentSession.created_at, AgentSession.id)
@@ -999,11 +1001,12 @@ class SessionStartService:
         )
 
     def stop_for_update(self, db: Session, session_id: uuid.UUID) -> None:
-        """The store's update's stop of a job's or a Chat's Session, by Pilot,
-        in the caller's transaction, as `_stop` writes a Stop, under its lock
-        while it is still `running` or `starting` (DB 279, 280): a turn in
-        flight is interrupted once this commits, and a Chat stays open with
-        its conversation. A work item's is never stopped so."""
+        """The store's update's stop of a job's, a Chat's or a Conversation's
+        Session, by Pilot, in the caller's transaction, as `_stop` writes a
+        Stop, under its lock while it is still `running` or `starting` (DB
+        279, 280): a turn in flight is interrupted once this commits, and a
+        Chat and a Conversation stay open, each with its thread. A work
+        item's is never stopped so."""
         session = self._records(db).lock_session(session_id)
         if session.kind_code == WORK_KIND or session.state_code not in UPDATE_STOPS:
             return
@@ -1211,7 +1214,8 @@ class SessionStartService:
     ) -> AgentSession:
         """`person`'s Stop of Pilot's answer in a chat, whoever sent its
         message, in the caller's transaction (F44): its Session `stopped`
-        where it is, as `_stop` writes a work item's Stop.
+        where it is, as `_stop` writes a work item's Stop. A Conversation's
+        turn is stopped so by its caller (`ConversationService`).
 
         Returns:
             The Session, `stopped`
@@ -1232,24 +1236,38 @@ class SessionStartService:
         self, db: Session, project: Project, person: User, at: datetime
     ) -> None:
         """Every Session of the project running, starting or held, a Chat's
-        among them, stopped by `person` at `at` as a Stop stops a work item:
-        Finish's and Archive's (F5.1, F128.1), and Reopen's of a finished
-        project's chat (F5.5). Each of its Sessions at rest that is owed its
-        nudge has its Hold turned to what the project's new standing leaves
-        of it (`turn_rest`): a Finish and an Archive end it at `at`. It calls
-        no controller in the transaction. The caller holds the project's row;
+        and a Conversation's among them, stopped by `person` at `at` as a
+        Stop stops a work item: Finish's and Archive's (F5.1, F128.1), and
+        Reopen's of a finished project's chat and conversations (F5.5; DB
+        334). Each of its Sessions at rest that is owed its nudge has its
+        Hold turned to what the project's new standing leaves of it
+        (`turn_rest`): a Finish and an Archive end it at `at`. It calls no
+        controller in the transaction. The caller holds the project's row;
         the Sessions are locked before any Item, which a turn's end locks
         after its Session.
-        The open chat's Session is locked first, whatever its state: a
-        message's send moves it to `running` under that lock, which it takes
-        after the project's row shared (`ChatService.send`)."""
+        The open chat's Session and every open conversation's are locked
+        first, whatever their state: a message's send moves one to `running`
+        under that lock, which it takes after the project's row shared
+        (`ChatService.send`, `ConversationService.send`), so the send either
+        commits before the stop reads the states or waits for the
+        transition's commit."""
+        records = self._records(db)
         chat_id = db.scalar(
             select(Chat.id).where(
                 Chat.project_id == project.id, Chat.closed_at.is_(None)
             )
         )
         if chat_id is not None:
-            self._records(db).lock_session(chat_id)
+            records.lock_session(chat_id)
+        for conversation_id in db.scalars(
+            select(Conversation.id)
+            .where(
+                Conversation.project_id == project.id,
+                Conversation.closed_at.is_(None),
+            )
+            .order_by(Conversation.id)
+        ).all():
+            records.lock_session(conversation_id)
         for session in db.scalars(
             select(AgentSession)
             .where(
@@ -2121,8 +2139,8 @@ class SessionStartService:
         `project` now, a job's `queued` behind another of its project or not,
         a work item's or a job's `session` when it is written already, a
         setup's let through the pause (`setups`); None while it is open. A
-        job's and a Chat's read the store's update (`unlifted`), which holds
-        from its row's commit. A work item's reads the usage halts
+        job's, a Chat's and a Conversation's read the store's update
+        (`unlifted`), which holds from its row's commit. A work item's reads the usage halts
         (`UsageHalts.halted`), and counts
         the slot under the slot's lock (`WorkSlots.lock`), held to the
         transaction's end, so the next start's count sees the Session this

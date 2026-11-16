@@ -30,6 +30,18 @@ with the next message, briefed, in the same conversation, as a chat does.
 
 Every Turn's author is the service user (DB 336). A closed conversation and
 an archived project's take no Turn (DB 334).
+
+Under a Store Update unlifted no message is taken, the opening's included,
+and no Turn written, as a chat's (F144.2; DB 282, 335).
+
+Its caller's interrupt stops the Turn in flight as a person's Stop stops a
+chat's (`SessionStartService.stop_chat`), by the service user, and keeps the
+conversation open: the next message goes to its thread, or starts it afresh,
+briefed, when the stop ended its start unsent. Its caller's end closes it,
+`ended`, a Turn in flight stopped first (`ChatCloseService.end`). Neither
+refuses for what it finds: an interrupt with no Turn in flight and the end of
+a closed conversation change nothing, as KubeCoder's interrupt of an idle
+session and its end of one gone.
 """
 
 import uuid
@@ -44,6 +56,7 @@ from app.models import Session as AgentSession
 from app.models.reference import ProjectState, RecordKind, SessionState
 from app.services.brief_service import BriefService
 from app.services.caller_environment_service import CallerEnvironmentService
+from app.services.chat_close_service import ChatCloseService
 from app.services.chat_service import (
     HANDBOOK_CHANGED_TOTAL,
     STORE_NOTIFICATION,
@@ -56,15 +69,18 @@ from app.services.project_service import project_name
 from app.services.relay_service import RelayService, Words
 from app.services.session_record_service import SessionRecordService
 from app.services.session_scope import STORE_REPO
-from app.services.session_start_service import SessionStartService
+from app.services.session_start_service import STOPPABLE, SessionStartService
 from app.services.start_gate import CONVERSATION_KIND
+from app.services.store_update_service import unlifted
 
 _IN_FLIGHT = "a turn of its conversation is in flight"
 
+_UPDATING = "Pilot is updating"
+
 
 class ConversationService:
-    """Opens a calling session's conversation with a project's brain, and
-    takes its later messages."""
+    """Opens a calling session's conversation with a project's brain, takes
+    its later messages, and its caller's interrupt and end."""
 
     def __init__(
         self,
@@ -74,6 +90,7 @@ class ConversationService:
         brief_service: BriefService,
         session_record_service: SessionRecordService,
         caller_environment_service: CallerEnvironmentService,
+        chat_close_service: ChatCloseService,
         brain_model: str,
         brain_reasoning_effort: str,
     ) -> None:
@@ -85,6 +102,7 @@ class ConversationService:
         self.brief_service = brief_service
         self.records = session_record_service
         self.caller_environments = caller_environment_service
+        self.chat_close_service = chat_close_service
         self.brain_model = brain_model
         self.brain_reasoning_effort = brain_reasoning_effort
 
@@ -114,13 +132,16 @@ class ConversationService:
         Raises:
             RecordNotFoundException: No project has the id
             InvalidOperationException: The project is a draft or archived;
-                no controller or no store environment is configured
+                Pilot is updating its store; no controller or no store
+                environment is configured
         """
         project = self.db.get(Project, project_id, populate_existing=True)
         if project is None:
             raise RecordNotFoundException("Project", str(project_id))
         operation = f"open a conversation with Pilot in {project_name(project)}"
         _refuse_opening(project, operation)
+        if unlifted(self.db) is not None:
+            raise InvalidOperationException(operation, _UPDATING)
         report = self.caller_environments.reported(environment_id)
         project = lock_standing(self.db, project_id)
         _refuse_opening(project, operation)
@@ -161,15 +182,15 @@ class ConversationService:
         Raises:
             RecordNotFoundException: No Conversation has the id
             InvalidOperationException: The conversation is closed, or its
-                project archived; a Turn of it is in flight, its start held
-                or under way included; no controller or no store environment
-                is configured
+                project archived; Pilot is updating its store; a Turn of it
+                is in flight, its start held or under way included; no
+                controller or no store environment is configured
         """
-        conversation = self.db.get(Conversation, conversation_id)
-        if conversation is None:
-            raise RecordNotFoundException("Conversation", str(conversation_id))
+        conversation = self._conversation(conversation_id)
         project = self.db.get_one(Project, conversation.project_id)
         operation = f"send a message to Pilot in {project_name(project)}"
+        if unlifted(self.db) is not None:
+            raise InvalidOperationException(operation, _UPDATING)
         session = self.db.get_one(AgentSession, conversation_id, populate_existing=True)
         if unbriefed(session):
             return self._start_again(conversation_id, caller, words, operation)
@@ -186,6 +207,66 @@ class ConversationService:
         if changed and turn.error is None:
             HANDBOOK_CHANGED_TOTAL.labels(project=str(project.id)).inc()
         return turn
+
+    def interrupt(self, conversation_id: uuid.UUID, caller: User) -> Conversation:
+        """The interrupt of the service user `caller`, in the caller's
+        transaction: the Conversation's Turn in flight stopped by them, as a
+        person's Stop stops a chat's, once this commits; a start held or
+        under way ends its Turn unsent. The conversation stays open for the
+        next message. With no Turn to stop it changes nothing, a closed
+        conversation's included.
+
+        Returns:
+            The Conversation
+
+        Raises:
+            RecordNotFoundException: No Conversation has the id
+        """
+        conversation = self._conversation(conversation_id)
+        self._stop(conversation, caller)
+        return conversation
+
+    def end(self, conversation_id: uuid.UUID, caller: User) -> Conversation:
+        """The end of the Conversation by the service user `caller`, in the
+        caller's transaction: closed `ended`, a Turn of it in flight stopped
+        first, by them. One closed already stays as it closed.
+
+        Returns:
+            The Conversation, closed
+
+        Raises:
+            RecordNotFoundException: No Conversation has the id
+        """
+        conversation = self._conversation(conversation_id)
+        self._stop(conversation, caller)
+        if conversation.closed_at is None:
+            self.chat_close_service.end(self.db, conversation, datetime.now(UTC))
+        return conversation
+
+    def _conversation(self, conversation_id: uuid.UUID) -> Conversation:
+        """The Conversation.
+
+        Raises:
+            RecordNotFoundException: No Conversation has the id
+        """
+        conversation = self.db.get(Conversation, conversation_id)
+        if conversation is None:
+            raise RecordNotFoundException("Conversation", str(conversation_id))
+        return conversation
+
+    def _stop(self, conversation: Conversation, caller: User) -> None:
+        """The Conversation's Session locked to the transaction's end, after
+        its project's row, held shared (the start's lock order), the
+        Conversation read under it, and its Turn in flight, if any, stopped
+        by `caller`."""
+        self.records.lock_project(conversation.id)
+        session = self.records.lock_session(conversation.id)
+        self.db.refresh(conversation)
+        if session.state_code in STOPPABLE:
+            project = self.db.get_one(Project, conversation.project_id)
+            self.session_start_service.stop_chat(
+                self.db, session.id, caller, f"stop Pilot in {project_name(project)}"
+            )
 
     def _start_again(
         self, conversation_id: uuid.UUID, caller: User, words: str, operation: str

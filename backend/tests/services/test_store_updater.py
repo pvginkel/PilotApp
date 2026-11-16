@@ -23,7 +23,17 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
-from app.models import Chat, Environment, Item, Project, StoreUpdate, Turn, User, Work
+from app.models import (
+    Chat,
+    Conversation,
+    Environment,
+    Item,
+    Project,
+    StoreUpdate,
+    Turn,
+    User,
+    Work,
+)
 from app.models.reference import (
     ChatKind,
     ProjectState,
@@ -189,9 +199,10 @@ def _brain(
     controller_session: str | None = None,
     briefed: bool = True,
 ) -> models.Session:
-    """A Chat's Session or a job's, in the store, in `state`: a Chat open,
-    a job placed as the project's setup, its brief written as its first Turn
-    when `briefed`."""
+    """A Chat's Session, a Conversation's or a job's, in the store, in
+    `state`: a Chat open, a Conversation open, opened from the store, whose
+    row the caller has made, a job placed as the project's setup, its brief
+    written as its first Turn when `briefed`."""
     run = models.Session(
         project_id=project.id,
         environment_id=None if controller_session is None else STORE_ENVIRONMENT_ID,
@@ -210,6 +221,15 @@ def _brain(
                 project_id=project.id,
                 session_kind_code="chat",
                 kind_code=ChatKind.PROJECT,
+            )
+        )
+    elif kind == "conversation":
+        db.add(
+            Conversation(
+                id=run.id,
+                project_id=project.id,
+                session_kind_code="conversation",
+                caller_environment_id=STORE_ENVIRONMENT_ID,
             )
         )
     else:
@@ -366,6 +386,34 @@ class TestRun:
         assert fake.environment(STORE_ENVIRONMENT_ID).resets == 1
         assert fake.environment(STORE_ENVIRONMENT_ID).status == "running"
         assert fake.environment(OTHER_ENV).resets == 0
+
+    def test_it_stops_a_running_conversation_by_pilot_and_waits_for_its_turn(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        fake: ServedFakeController,
+        session: DbSession,
+        camp: Project,
+    ) -> None:
+        """DB 279, 335: stopped as a Chat is, and left open."""
+        _store_row(session)
+        talk = _brain(container, session, camp, "conversation", SessionState.RUNNING)
+        update = hold(session)
+        handle = RoundsHandle(STORE_UPDATE_JOB, lambda waits: None)
+
+        _run(updater, handle)
+
+        update = _update(session, update.id)
+        stopped = _session(session, talk.id)
+        assert (stopped.state_code, stopped.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            _pilot_id(session),
+        )
+        assert update.stopped_at is not None and update.reset_at is not None
+        # Its turn is its relay's to end; none runs here, so the wait ran.
+        assert stopped.turn_ended_at is None
+        assert handle.waits > 0
+        assert session.get_one(Conversation, talk.id).closed_at is None
 
     def test_a_store_never_used_has_its_row_made_from_the_controllers_report(
         self,
