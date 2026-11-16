@@ -16,7 +16,9 @@ import { Time } from '@/components/shared/time';
 import { ItemHead } from '@/components/timeline/item-head';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import { useShownProject } from '@/hooks/use-project-address';
+import { useToday } from '@/hooks/use-today';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
+import { clockFormat } from '@/lib/utils/time-format';
 
 type Carried = NonNullable<TimelineItem['debriefs']>[number];
 
@@ -45,6 +47,7 @@ export function DebriefNotice({ item, children }: DebriefNoticeProps) {
 function CarriedDebrief({ carried }: { carried: Carried }) {
   const { address } = useShownProject();
   const replace = useTabReplace();
+  const today = useToday();
   const params = { address, sessionId: carried.id };
   return (
     <section className="carried" data-testid="timeline.debrief" data-item-id={carried.id}>
@@ -55,7 +58,7 @@ function CarriedDebrief({ carried }: { carried: Carried }) {
         {/* The dot goes with the time, so that no row of a wrapping head ends on it. */}
         <span className="dotted">
           <span className="sep">·</span>
-          <Time at={carried.ended_at} format="clock" testId="timeline.debrief.ended" />
+          <Time at={carried.ended_at} format={clockFormat(carried.ended_at, today)} testId="timeline.debrief.ended" />
         </span>
       </div>
       <div data-testid="timeline.debrief.text">

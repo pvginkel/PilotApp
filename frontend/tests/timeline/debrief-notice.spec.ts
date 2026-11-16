@@ -132,6 +132,34 @@ test.describe('The debrief’s notice', () => {
     expect(read!.y).toBeGreaterThan(last!.y + last!.height);
   });
 
+  test('gives the time a work item it carries ended with its date once that is an earlier day, as a wait’s Since does', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+  }) => {
+    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller });
+    const ended = await Promise.all([planning, run].map(async (work) => (await projects.item(project, work)).done!.at));
+
+    // The page opened on the day after the run's turn ended.
+    await page.clock.install({ time: new Date(Date.parse(ended[1]) + 24 * 60 * 60_000) });
+    await timeline.open(project);
+    const item = timeline.item(notice);
+
+    for (const [work, at] of [
+      [planning, ended[0]],
+      [run, ended[1]],
+    ] as const) {
+      const dated = await page.evaluate(
+        (at) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(at)),
+        at,
+      );
+      await expect(item.carried(work).ended).toHaveAttribute('datetime', at);
+      await expect(item.carried(work).ended).toHaveText(dated);
+    }
+  });
+
   test('a debrief that names no subject gets a notice of its own, titled with its work item’s title', async ({ people, projects, controller, timeline }) => {
     const me = await people.signIn();
     const project = await projects.make({ name: makeUnique('Unnamed'), members: [me.handle!] });
