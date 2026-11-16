@@ -945,8 +945,18 @@ class TestRegisterDebrief:
                 "completes": False,
             },
             {"debrief": "Fine.", "entries": [_entry()], "completes": None},
-            {"debrief": "Fine.", "entries": [_entry()], "completes": "false"},
-            {"debrief": "Fine.", "entries": [_entry()], "completes": 0},
+            {
+                "debrief": "Fine.",
+                "entries": [_entry()],
+                "subject": SUBJECT,
+                "completes": "false",
+            },
+            {
+                "debrief": "Fine.",
+                "entries": [_entry()],
+                "subject": SUBJECT,
+                "completes": 0,
+            },
         ],
         ids=[
             "no-debrief",

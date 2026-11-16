@@ -646,7 +646,12 @@ class TestRegisterDebrief:
             {"debrief": "Fine.", "entries": [_entry()], "subject": "  "},
             {"debrief": "Fine.", "entries": [_entry()], "subject": "s" * 121},
             {"debrief": "Fine.", "entries": [_entry()], "completes": False},
-            {"debrief": "Fine.", "entries": [_entry()], "completes": "no"},
+            {
+                "debrief": "Fine.",
+                "entries": [_entry()],
+                "subject": _SUBJECT,
+                "completes": "no",
+            },
         ],
         ids=[
             "empty-debrief",
