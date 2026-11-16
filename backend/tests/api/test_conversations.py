@@ -763,6 +763,31 @@ class TestSendConversationMessage:
         )
         assert _read(session, run_id).state_code == SessionState.RUNNING
 
+    def test_a_message_the_controller_fails_is_201_with_the_turns_error(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        fake: ServedFakeController,
+        services: Services,
+        opened: Project,
+        fleet: User,
+    ) -> None:
+        run_id = _idle(client, session, fake, services)
+        fake.unreachable(STORE_ENVIRONMENT_ID)
+
+        response = client.post(
+            _messages(run_id), json={"words": "And the bread?"}, headers=HEADERS
+        )
+
+        assert response.status_code == 201, response.get_json()
+        turn = session.scalars(select(Turn).where(Turn.seq == 2)).one()
+        assert turn.error is not None and "502 worker-unreachable" in turn.error
+        assert response.get_json() == {
+            "conversation": str(run_id),
+            "seq": 2,
+            "error": turn.error,
+        }
+
     def test_a_message_while_a_turn_is_in_flight_is_409_and_nothing_is_queued(
         self,
         client: FlaskClient,
