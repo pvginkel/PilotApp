@@ -6,8 +6,8 @@ revision (DB decisions 79 and 81; §2.6, §2.7, §2.9 Repository, §2.11 and §7
 the assertions of §4.31 and §4.33). A Call's tokens are a column per Token
 Kind on its own row.
 
-Revision ID: 0036
-Revises: 0035
+Revision ID: 0039
+Revises: 0038
 Create Date: 2026-11-15
 
 """
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0036"
-down_revision: str | None = "0035"
+revision: str = "0039"
+down_revision: str | None = "0038"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

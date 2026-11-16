@@ -5,8 +5,8 @@ part of, and so becomes a table; `cache_write_5m` and `cache_write_1h` are
 within `cache_write` (DB decision 79.5, §7.2, assertions 425, 426 and 547). A
 Turn's Token Counts keep their rows and their four kinds.
 
-Revision ID: 0035
-Revises: 0034
+Revision ID: 0038
+Revises: 0037
 Create Date: 2026-11-15
 
 """
@@ -18,8 +18,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0035"
-down_revision: str | None = "0034"
+revision: str = "0038"
+down_revision: str | None = "0037"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

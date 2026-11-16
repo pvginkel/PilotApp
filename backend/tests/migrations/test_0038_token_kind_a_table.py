@@ -1,4 +1,4 @@
-"""Revision 0035: Token Kind from an enum type to a table and back, a Turn's
+"""Revision 0038: Token Kind from an enum type to a table and back, a Turn's
 Token Counts keeping their rows (DB decision 79.5, §7.2)."""
 
 from datetime import UTC, datetime
@@ -22,11 +22,11 @@ COUNTS = {"input": 6, "cache_write": 31_400, "cache_read": 0, "output": 820}
 
 
 def _run(db: DbSession, step: str) -> None:
-    """Revision 0035's `step`, its upgrade or its downgrade, on the test's
+    """Revision 0038's `step`, its upgrade or its downgrade, on the test's
     transaction."""
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
-    revision = ScriptDirectory.from_config(config).get_revision("0035")
+    revision = ScriptDirectory.from_config(config).get_revision("0038")
     assert revision is not None
     with Operations.context(MigrationContext.configure(db.connection())):
         getattr(revision.module, step)()

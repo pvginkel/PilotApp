@@ -6,8 +6,8 @@ decision 79 point 7; assertions 385, 386 and 537). `ix_sessions_conversation_id`
 is read by every publication, which looks for the Sessions of its
 conversation (DB 538).
 
-Revision ID: 0038
-Revises: 0037
+Revision ID: 0041
+Revises: 0040
 Create Date: 2026-11-16
 
 """
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0038"
-down_revision: str | None = "0037"
+revision: str = "0041"
+down_revision: str | None = "0040"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

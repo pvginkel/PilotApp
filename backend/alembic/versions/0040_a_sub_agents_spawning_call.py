@@ -5,8 +5,8 @@ names its spawning Tool Call by, held from the thread's own publication, so
 that the thread is joined to that Tool Call whichever of the two is published
 first (DB decision 79.16; assertions 380 and 534).
 
-Revision ID: 0037
-Revises: 0036
+Revision ID: 0040
+Revises: 0039
 Create Date: 2026-11-16
 
 """
@@ -17,8 +17,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0037"
-down_revision: str | None = "0036"
+revision: str = "0040"
+down_revision: str | None = "0039"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

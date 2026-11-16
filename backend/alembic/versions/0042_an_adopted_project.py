@@ -8,8 +8,8 @@ and unique (582), and an adopted Project, never opened, has no slug (177).
 `transcripts.adopted_project_id` is the adopted Project of the group a main
 thread's labels name (DB §2.6; 539).
 
-Revision ID: 0039
-Revises: 0038
+Revision ID: 0042
+Revises: 0041
 Create Date: 2026-11-16
 
 """
@@ -21,8 +21,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0039"
-down_revision: str | None = "0038"
+revision: str = "0042"
+down_revision: str | None = "0041"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

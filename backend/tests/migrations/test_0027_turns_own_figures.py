@@ -74,12 +74,12 @@ OTHER = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 
 def _upgrade(db: DbSession) -> None:
     """Revision 0027's upgrade, on the test's transaction, with Token Kind
-    the enum type it casts to, which revision 0035's downgrade brings back."""
+    the enum type it casts to, which revision 0038's downgrade brings back."""
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
     scripts = ScriptDirectory.from_config(config)
     with Operations.context(MigrationContext.configure(db.connection())):
-        for revision, step in (("0035", "downgrade"), ("0027", "upgrade")):
+        for revision, step in (("0038", "downgrade"), ("0027", "upgrade")):
             script = scripts.get_revision(revision)
             assert script is not None
             getattr(script.module, step)()

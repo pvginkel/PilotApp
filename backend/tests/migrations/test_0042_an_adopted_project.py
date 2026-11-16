@@ -1,4 +1,4 @@
-"""Revision 0039's downgrade: Project State and Transition Kind without
+"""Revision 0042's downgrade: Project State and Transition Kind without
 `adopted`, a draft's check and the state's default standing on the types it
 leaves."""
 
@@ -20,12 +20,12 @@ _BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 def _downgrade(db: Session) -> None:
-    """Revision 0039's downgrade, on the test's transaction. Its upgrade
+    """Revision 0042's downgrade, on the test's transaction. Its upgrade
     adds the enums' values in a transaction of its own, which no test's
     transaction holds."""
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
-    revision = ScriptDirectory.from_config(config).get_revision("0039")
+    revision = ScriptDirectory.from_config(config).get_revision("0042")
     assert revision is not None
     with Operations.context(MigrationContext.configure(db.connection())):
         revision.module.downgrade()
