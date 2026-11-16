@@ -15,6 +15,9 @@ brought back after Archive, which closed its definition chat, starts a fresh
 one with its next message. A chat whose start failed, or was
 stopped before its brief went out, starts afresh, briefed, in the same chat: a
 project has one chat open at a time, and no Close Cause is a failure or a stop.
+A call's draft none of whose Turns reached Pilot is briefed with the call
+again, its brief before the person's message
+(`BriefService.definition_chat`).
 While its start is under way or held, a message is refused, as one is while a
 turn runs, which the controller refuses.
 

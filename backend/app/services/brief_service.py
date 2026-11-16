@@ -12,6 +12,7 @@ but `create` reads itself (D058). A worker's carries the handbook verbatim,
 the worker having no tree (F129.5).
 """
 
+import re
 import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
@@ -112,9 +113,10 @@ type Group = Sequence[str | None]
 @dataclass(frozen=True)
 class Call:
     """What a call of `start_project` says of itself (F150.9), which its
-    draft's brief alone holds (DB decision 77): the name of the environment
-    it came from and the handle of the person it starts the project for,
-    each none where the call gave none."""
+    draft's brief alone holds (DB decision 77), the first and one that
+    carries the call's brief again (`BriefService.definition_chat`): the name
+    of the environment it came from and the handle of the person it starts
+    the project for, each none where the call gave none."""
 
     environment: str | None
     for_handle: str | None
@@ -174,17 +176,36 @@ class BriefService:
 
         From the plus, who started it is the person who did. By a call
         (F150.9), `person` its service user and `words` its brief, it is
-        `call`: the environment it came from and the person it is for. A
-        later definition chat of a call's draft has a person's message and no
-        `call`, and says that a call started the draft."""
+        `call`: the environment it came from and the person it is for.
+
+        A later definition chat of a call's draft has a person's message and
+        no `call`. While no Turn of the draft has reached Pilot
+        (`_unheard`), it names the call as the first brief did, and the
+        call's brief goes before the person's message as the call's own.
+        Once one has, it says that a call started the draft, and carries the
+        person's message alone."""
         creator = self.db.get_one(User, project.created_by_user_id)
+        messages: list[Group] = []
         if creator.kind_code is UserKind.SERVICE:
-            started = _by_a_call(call)
+            unheard = None if call is not None else self._unheard(project, creator)
+            if unheard is None:
+                started = _by_a_call(call)
+            else:
+                started = _started_by_a_call(unheard.message)
+                messages.append(["The message:", unheard.words])
         else:
             started = (
                 f"The person who started it: {creator.handle}"
                 f" ({self._standing(project, creator)})."
             )
+        messages.append(
+            [
+                "The message:"
+                if person.id == creator.id
+                else self.message_from(project, person),
+                words,
+            ]
+        )
         draft = self.db.scalar(
             select(Document.published_text).where(
                 Document.project_id == project.id,
@@ -206,13 +227,34 @@ class BriefService:
                 f" {started}",
                 f"Attachments so far: {_files(attached or 0)}.",
             ],
-            [
-                "The message:"
-                if person.id == creator.id
-                else self.message_from(project, person),
-                words,
-            ],
+            *messages,
         )
+
+    def _unheard(self, project: Project, creator: User) -> Turn | None:
+        """The Turn that carried the brief of the call that started the draft
+        `project`, the service user `creator`'s, while no Turn of the draft
+        has reached Pilot: no Session of its chats has a conversation, which
+        the first line a turn prints gives it (`RelayService`), so a start
+        that failed and one stopped before its brief went out left none.
+        None once one has."""
+        chats = select(Chat.id).where(Chat.project_id == project.id)
+        heard = self.db.scalar(
+            select(func.count())
+            .select_from(AgentSession)
+            .where(
+                AgentSession.id.in_(chats),
+                AgentSession.conversation_id.is_not(None),
+            )
+        )
+        if heard:
+            return None
+        # A call's draft is made with the Turn of its brief, the one Turn its
+        # service user writes in it (F150.9; DB 339).
+        return self.db.scalars(
+            select(Turn).where(
+                Turn.session_id.in_(chats), Turn.author_user_id == creator.id
+            )
+        ).one()
 
     def job(
         self, project: Project, work: Work, triggered: datetime, at: datetime
@@ -1038,16 +1080,36 @@ def _frame(
     return "\n\n".join(blocks)
 
 
+BY_A_CALL = "Started by a call"
+
+_DRAFT_BY_A_CALL = re.compile(
+    rf"^The draft: project\.md(?:, empty)?\. ({BY_A_CALL}.*)$", re.MULTILINE
+)
+"""The draft's line of a definition chat's brief by a call, the sentence
+naming the call its group."""
+
+
 def _by_a_call(call: Call | None) -> str:
     """Who started a call's draft, in place of the person who started one
     from the plus (§5.3): the call, from its environment and for its person,
     each as far as `call` names it."""
-    said = "Started by a call"
+    said = BY_A_CALL
     if call is not None and call.environment is not None:
         said += f" from {call.environment}"
     if call is not None and call.for_handle is not None:
         said += f", for {call.for_handle}"
     return f"{said}."
+
+
+def _started_by_a_call(brief: str) -> str:
+    """The sentence naming the call in `brief`, the first brief of a call's
+    draft (`_by_a_call`), its environment and its person as that brief named
+    them, which its words alone hold (DB decision 77). The frame's line
+    comes before the call's words, so the first match is the frame's."""
+    named = _DRAFT_BY_A_CALL.search(brief)
+    # The call's Turn is the definition chat's brief by a call.
+    assert named is not None
+    return named[1]
 
 
 def is_follow_up(turn: Turn) -> bool:

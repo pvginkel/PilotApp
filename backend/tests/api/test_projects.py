@@ -2516,6 +2516,36 @@ class TestCreateProjectByCall:
         (chat,) = chats.get_json()["chats"]
         assert chat["kind"] == "definition"
 
+    def test_a_members_message_after_its_chats_start_failed_is_briefed_with_the_call(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        """P-286: no Turn of the draft reached Pilot, so the chat the
+        member's message starts again is briefed with the call, its
+        environment and `for`, and its brief before their words."""
+        draft = _call(client, {"words": BRIEF, "for": "ada"}).get_json()["id"]
+        run = session.scalars(select(models.Session)).one()
+        run.state_code, run.error = SessionState.FAILED, "the create was refused"
+        session.flush()
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{draft}/chat/messages", json={"words": "Go on."}
+        )
+
+        assert response.status_code == 201, response.get_json()
+        assert response.get_json()["seq"] == 2
+        turn = session.scalars(select(Turn).where(Turn.seq == 2)).one()
+        assert turn.words == "Go on."
+        assert turn.message.endswith(
+            f"The draft: project.md, empty. Started by a call from {CALLER},"
+            " for ada.\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            f"{BRIEF}\n\n"
+            "The message, from ada (member):\n"
+            "Go on."
+        )
+
     def test_its_members_are_the_person_for_names_and_everyone_whose_switch_is_on(
         self, client: FlaskClient, session: Session, container: ServiceContainer
     ) -> None:

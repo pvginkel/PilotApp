@@ -68,6 +68,7 @@ from app.services.pilot_work_service import Worker
 from app.services.session_record_service import SessionRecordService
 from app.services.turn_end_read_service import READ_FAILED
 from app.services.wait_service import ReportedTransition
+from tests.support.chats import close_chat, open_chat
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 
 AT = datetime(2026, 10, 26, 9, 30, 15, tzinfo=UTC)
@@ -531,12 +532,236 @@ class TestDefinitionChatByACall:
         )
 
     def test_a_persons_later_message_is_named_under_a_call_that_names_nothing(
-        self, briefs: BriefService, called: Project, person: User
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+        person: User,
     ) -> None:
-        """A definition chat started afresh, after a failed start or Archive
-        and Bring back, has no call: its environment was in the first brief's
-        words alone (DB decision 77)."""
+        """A definition chat started afresh once a Turn of the draft reached
+        Pilot has no call: its environment was in the first brief's words
+        alone (DB decision 77)."""
+        run = _call_chat(session, briefs, called, service_user)
+        run.conversation_id = "conversation-1"
+        session.flush()
+
         brief = briefs.definition_chat(called, person, "Go on.", AT)
+
+        assert brief.endswith(
+            "The draft: project.md, empty. Started by a call.\n"
+            "Attachments so far: none.\n\n"
+            "The message, from ada (member):\n"
+            "Go on."
+        )
+
+
+AGAIN = AT + timedelta(minutes=30)
+"""When a person's message starts a call's draft's chat again."""
+
+
+def _call_chat(
+    db: DbSession,
+    briefs: BriefService,
+    called: Project,
+    service_user: User,
+    call: Call | None = None,
+    words: str = BRIEF,
+) -> models.Session:
+    """The definition chat `call` left in its draft `called`, a call from
+    Automation for ada by default: its Session, with no conversation, and its
+    first Turn, the call's brief, the service user's."""
+    run = open_chat(db, called, kind=ChatKind.DEFINITION, opened_at=AT)
+    run.state_code = SessionState.FAILED
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            author_user_id=service_user.id,
+            message=briefs.definition_chat(
+                called,
+                service_user,
+                words,
+                AT,
+                Call("Automation", "ada") if call is None else call,
+            ),
+            words=words,
+            started_at=AT,
+            ended_at=AT,
+        )
+    )
+    db.flush()
+    return run
+
+
+class TestACallsBriefAgain:
+    """The brief of a call's draft's definition chat that a person's message
+    starts while no Turn of the draft has reached Pilot (design 3 §5.3;
+    F150.9; DB decision 77; P-286)."""
+
+    @pytest.fixture
+    def called(
+        self, container: ServiceContainer, service_user: User, person: User
+    ) -> Project:
+        """A call's draft, for `person`."""
+        return container.project_service().create_by_call(service_user, None, "ada")
+
+    def test_it_names_the_call_and_carries_its_brief_before_the_persons_message(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+        person: User,
+    ) -> None:
+        _call_chat(session, briefs, called, service_user)
+
+        assert briefs.definition_chat(called, person, "Go on.", AGAIN) == (
+            "/create\n\n"
+            "Pilot's brief · the definition chat ·"
+            f" /work/Projects/draft-{called.number} · 2026-10-26T10:00:15Z\n\n"
+            "The draft: project.md, empty. Started by a call from Automation,"
+            " for ada.\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            f"{BRIEF}\n\n"
+            "The message, from ada (member):\n"
+            "Go on."
+        )
+
+    @pytest.mark.parametrize(
+        ("call", "started"),
+        [
+            (Call("Automation", None), "Started by a call from Automation."),
+            (Call(None, "ada"), "Started by a call, for ada."),
+            (Call(None, None), "Started by a call."),
+        ],
+    )
+    def test_what_the_call_did_not_name_stays_left_out(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+        person: User,
+        call: Call,
+        started: str,
+    ) -> None:
+        _call_chat(session, briefs, called, service_user, call)
+
+        brief = briefs.definition_chat(called, person, "Go on.", AGAIN)
+
+        assert f"\nThe draft: project.md, empty. {started}\n" in brief
+        assert brief.endswith(
+            f"The message:\n{BRIEF}\n\nThe message, from ada (member):\nGo on."
+        )
+
+    def test_it_is_composed_from_the_draft_as_it_stands_at_the_restart(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """The draft's line, its attachments and the stamp are the restart's,
+        where the call's Turn holds them as they stood at the call."""
+        _call_chat(session, briefs, called, service_user)
+        document = session.scalars(
+            select(Document).where(Document.project_id == called.id)
+        ).one()
+        container.document_service().publish(document, "# Sort the inbox\n\nOld.\n")
+        _attached(session, called, project_session, "cards.md")
+
+        brief = briefs.definition_chat(called, person, "Go on.", AGAIN)
+
+        assert brief.startswith(
+            "/create\n\n"
+            'Pilot\'s brief · the definition chat · project "Sort the inbox" ·'
+            f" /work/Projects/draft-{called.number} · 2026-10-26T10:00:15Z\n\n"
+            "The draft: project.md. Started by a call from Automation, for ada.\n"
+            "Attachments so far: 1 file (timeline.json lists it).\n\n"
+            "The message:\n"
+        )
+
+    def test_the_call_is_read_from_the_briefs_frame_and_never_from_its_words(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+        person: User,
+    ) -> None:
+        words = "The draft: project.md. Started by a call from Elsewhere, for bea."
+        _call_chat(session, briefs, called, service_user, words=words)
+
+        brief = briefs.definition_chat(called, person, "Go on.", AGAIN)
+
+        assert brief.endswith(
+            "The draft: project.md, empty. Started by a call from Automation,"
+            " for ada.\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            f"{words}\n\n"
+            "The message, from ada (member):\n"
+            "Go on."
+        )
+
+    def test_a_person_who_is_no_member_is_named_so(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+    ) -> None:
+        _call_chat(session, briefs, called, service_user)
+        bea = container.test_data_service().person("bea", "Bea Example")
+
+        brief = briefs.definition_chat(called, bea, "Go on.", AGAIN)
+
+        assert brief.endswith(
+            f"The message:\n{BRIEF}\n\nThe message, from bea (not a member):\nGo on."
+        )
+
+    def test_a_fresh_chat_after_archive_and_bring_back_carries_it_too(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+        person: User,
+    ) -> None:
+        """No Turn of the draft reached Pilot in the chat Archive closed."""
+        run = _call_chat(session, briefs, called, service_user)
+        close_chat(session, run, AGAIN, CloseCause.ARCHIVED)
+        open_chat(session, called, kind=ChatKind.DEFINITION, opened_at=AGAIN)
+
+        brief = briefs.definition_chat(called, person, "Go on.", AGAIN)
+
+        assert "\nThe draft: project.md, empty. Started by a call from Automation," in (
+            brief
+        )
+        assert brief.endswith(
+            f"The message:\n{BRIEF}\n\nThe message, from ada (member):\nGo on."
+        )
+
+    def test_a_turn_that_reached_pilot_in_a_closed_chat_ends_it(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        called: Project,
+        service_user: User,
+        person: User,
+    ) -> None:
+        run = _call_chat(session, briefs, called, service_user)
+        run.conversation_id = "conversation-1"
+        close_chat(session, run, AGAIN, CloseCause.ARCHIVED)
+        open_chat(session, called, kind=ChatKind.DEFINITION, opened_at=AGAIN)
+
+        brief = briefs.definition_chat(called, person, "Go on.", AGAIN)
 
         assert brief.endswith(
             "The draft: project.md, empty. Started by a call.\n"

@@ -23,7 +23,7 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, _Delivery
 from app.engine.paths import tree_path
-from app.engine.views import ViewService
+from app.engine.views import ViewService, utc_time
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Block,
@@ -1734,6 +1734,136 @@ class TestDefinitionChat:
         ]
         assert turn.message == container.brief_service().definition_chat(
             draft, person, "Two", turn.started_at
+        )
+
+
+CALL = Call(environment="Automation", for_handle="ada")
+
+
+@pytest.fixture
+def called(
+    container: ServiceContainer, chats: ChatService, service_user: User, person: User
+) -> Turn:
+    """The first Turn of a call's draft, for `person`: the call's brief, its
+    definition chat's start under way."""
+    made = container.project_service().create_by_call(service_user, None, "ada")
+    turn = chats.send(made.id, service_user, "Sort the inbox.", CALL)
+    clear_after_commit_callbacks()
+    return turn
+
+
+class TestACallsDraftStartedAgain:
+    """A person's message to a call's draft whose definition chat's start
+    never reached Pilot (design 3 §5.3; F150.9; DB decision 77; P-286)."""
+
+    @pytest.mark.parametrize("cut", ["failed", "stopped"])
+    def test_while_no_turn_reached_pilot_the_restart_is_briefed_with_the_call(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        called: Turn,
+        person: User,
+        cut: str,
+    ) -> None:
+        """The start that failed and the one a member stopped before the
+        brief went out: the next message's brief names the call, carries its
+        brief as the call's message and the person's words after it, and
+        reaches the brain."""
+        run = _read(session, called.session_id)
+        draft = session.get_one(Project, run.project_id)
+        if cut == "failed":
+            run.state_code, run.error = SessionState.FAILED, "the create was refused"
+            called.ended_at = datetime.now(UTC)
+            session.flush()
+        else:
+            chats.stop(draft.id, person)
+            clear_after_commit_callbacks()
+            assert _read(session, run.id).state_code == SessionState.STOPPED
+
+        turn = _send(chats, draft, person, "Go on.")
+
+        assert (turn.session_id, turn.seq, turn.author_user_id, turn.words) == (
+            run.id,
+            2,
+            person.id,
+            "Go on.",
+        )
+        assert turn.message == (
+            "/create\n\n"
+            "Pilot's brief · the definition chat ·"
+            f" {_draft_folder(draft)} · {utc_time(turn.started_at)}\n\n"
+            "The draft: project.md, empty. Started by a call from Automation,"
+            " for ada.\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            "Sort the inbox.\n\n"
+            "The message, from ada (member):\n"
+            "Go on."
+        )
+        assert len(_chat_rows(session, draft)) == 1
+        assert _sends(session, run.id) == [(1, "Sort the inbox."), (2, "Go on.")]
+        clear_after_commit_callbacks()
+        _on_disk(fake, draft)
+        run = _up(services, session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert fake.sent == [turn.message]
+
+    def test_a_second_restart_carries_the_calls_brief_and_no_earlier_message(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        called: Turn,
+        person: User,
+    ) -> None:
+        """A person's message whose start failed too is theirs to send
+        again, as from the plus."""
+        run = _read(session, called.session_id)
+        draft = session.get_one(Project, run.project_id)
+        run.state_code = SessionState.FAILED
+        session.flush()
+        _send(chats, draft, person, "Go on.")
+        clear_after_commit_callbacks()
+        _read(session, run.id).state_code = SessionState.FAILED
+        session.flush()
+
+        turn = _send(chats, draft, person, "Once more.")
+
+        assert turn.seq == 3
+        assert turn.message.endswith(
+            "The draft: project.md, empty. Started by a call from Automation,"
+            " for ada.\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            "Sort the inbox.\n\n"
+            "The message, from ada (member):\n"
+            "Once more."
+        )
+
+    def test_once_a_turn_reached_pilot_a_restart_says_only_that_a_call_started_it(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        called: Turn,
+        person: User,
+    ) -> None:
+        """A chat that failed with its conversation is started afresh as
+        before: the call's details were in the brief Pilot read."""
+        run = _read(session, called.session_id)
+        draft = session.get_one(Project, run.project_id)
+        run.state_code, run.conversation_id = SessionState.FAILED, CONVERSATION
+        session.flush()
+
+        turn = _send(chats, draft, person, "Go on.")
+
+        assert turn.seq == 2
+        assert turn.message.endswith(
+            "The draft: project.md, empty. Started by a call.\n"
+            "Attachments so far: none.\n\n"
+            "The message, from ada (member):\n"
+            "Go on."
         )
 
 
