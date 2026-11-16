@@ -1160,6 +1160,7 @@ class TestSequence:
         # A sidecar that kept its shadow is the store's before its reset.
         _reconciled(committed_app, shadow={"camp/plan.json": "a" * 64})
         assert _committed(container, update_id).reconciled_at is None
+        assert told == [None]
 
         _reconciled(committed_app)
 
@@ -1174,7 +1175,11 @@ class TestSequence:
             lambda: _state(container, held_id).state_code == SessionState.RUNNING,
             "the held chat started",
         )
-        wait_until(lambda: told == [None, None], "the conditions told of the lift")
+        # The lift tells at its commit, and so does a tick that read the
+        # update on either side of that commit: once more where it read none
+        # before the lift's own tell, twice where it read the update and told
+        # after it.
+        wait_until(lambda: len(told) > 1, "the conditions told of the lift")
         with scoped_session(container) as db:
             assert db.get_one(Chat, chat_id).closed_at is None
             retry_id = db.get_one(Work, job_id).retried_by_id
