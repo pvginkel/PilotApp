@@ -103,6 +103,7 @@ MAX_ENTRY_ROLE = 64
 MAX_ENTRY_WORDS = 4_000
 MAX_ENTRY_WHY = 120
 MAX_ENTRY_NUMBER = 2**31 - 1
+MAX_DEBRIEF_SUBJECT = 120
 """The limits of a work item's debrief, as its route takes them
 (`app/schemas/pilot_work.py`)."""
 
@@ -725,6 +726,7 @@ ItemKind = Literal[
     "work",
     "card_wait",
     "timed_wait",
+    "debrief_notice",
 ]
 """An item's kinds, as `reference.json` lists them."""
 
@@ -953,12 +955,19 @@ class PilotWorkApi(_Routes):
         return Progress.model_validate(answer)
 
     async def register_debrief(
-        self, authorization: str, debrief: str, entries: list[DebriefEntry]
+        self,
+        authorization: str,
+        debrief: str,
+        entries: list[DebriefEntry],
+        subject: str | None,
+        completes: bool,
     ) -> RegisteredDebrief:
         """No tool-use id is sent: the call records no effect to name it."""
         body = {
             "debrief": debrief,
             "entries": [entry.model_dump(exclude_none=True) for entry in entries],
+            "subject": subject,
+            "completes": completes,
         }
         answer = await self._post("debrief", authorization, None, body)
         return RegisteredDebrief.model_validate(answer)

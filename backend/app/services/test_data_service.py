@@ -943,11 +943,15 @@ class TestDataService:
         item_id: uuid.UUID,
         debrief: str,
         entries: Sequence[DebriefEntryRequestSchema],
+        *,
+        subject: str | None = None,
+        completes: bool = True,
     ) -> list[DebriefEntry]:
         """The work item's debrief, `debrief` and its `entries` in their
-        order, stored once as its worker's `register_debrief` stores it
-        (F85.5; DB 323 to 325), while the session's turn is in flight; its
-        line shows it once the turn ends (DB 329).
+        order, with the `subject` it names and whether it `completes` it,
+        stored once as its worker's `register_debrief` stores it (F85.5; DB
+        323 to 325, 608), while the session's turn is in flight; its line
+        shows it once the turn ends (DB 329).
 
         Returns:
             The entries stored, in order.
@@ -961,7 +965,9 @@ class TestDataService:
                 `PilotWorkService.register_debrief` refuses it.
         """
         worker = self._worker(item_id, f"register the debrief of work item {item_id}")
-        return self.pilot_work_service.register_debrief(worker, debrief, entries)
+        return self.pilot_work_service.register_debrief(
+            worker, debrief, entries, subject=subject, completes=completes
+        )
 
     def work(
         self,

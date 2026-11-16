@@ -209,9 +209,10 @@ def set_progress_step(
 def register_debrief(
     pilot_work_service: PilotWorkService = Provide[ServiceContainer.pilot_work_service],
 ) -> Any:
-    """`register_debrief(debrief, entries)` (F85.5; DB 323 to 329): the
-    session's own work item's debrief and its entries, in the call's order,
-    stored once; no effect.
+    """`register_debrief(debrief, entries, subject, completes)` (F85.5; DB
+    323 to 329, 608): the session's own work item's debrief and its entries,
+    in the call's order, with the subject it names and whether it completes
+    it, stored once; no effect.
 
     Returns:
         201: The debrief stored: the number of its entries
@@ -219,13 +220,20 @@ def register_debrief(
             entries, each a section of 1 to 120 characters, a round of 1 or
             more, a role of 1 to 64, a duration of 0 seconds or more, at most
             one of words of 1 to 4,000 and passed, and an optional why of 1 to
-            120: each fault
+            120, with an optional subject of 1 to 120 characters and completes
+            false only beside a subject: each fault
         401: No bearer, or one no session has
         403: The bearer's session is not a work item's, or has no turn running
         409: The work item has its debrief already, nothing changed
     """
     body = RegisterDebriefRequestSchema.model_validate(request.get_json())
-    entries = pilot_work_service.register_debrief(g.worker, body.debrief, body.entries)
+    entries = pilot_work_service.register_debrief(
+        g.worker,
+        body.debrief,
+        body.entries,
+        subject=body.subject,
+        completes=body.completes,
+    )
     answer = RegisteredDebriefSchema(entries=len(entries))
     return answer.model_dump(mode="json"), 201
 

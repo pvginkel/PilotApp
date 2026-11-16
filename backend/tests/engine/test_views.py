@@ -170,6 +170,11 @@ class TestViewService:
                 },
                 {"code": "card_wait", "name": "Card wait", "form": "wait"},
                 {"code": "confirmation", "name": "Confirmation", "form": "prose"},
+                {
+                    "code": "debrief_notice",
+                    "name": "Debrief notice",
+                    "form": "debrief_notice",
+                },
                 {"code": "decision", "name": "Decision", "form": "prose"},
                 {"code": "document", "name": "Document", "form": "prose"},
                 {"code": "notice", "name": "Notice", "form": "prose"},

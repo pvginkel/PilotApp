@@ -3769,7 +3769,8 @@
               "archive_question",
               "work",
               "card_wait",
-              "timed_wait"
+              "timed_wait",
+              "debrief_notice"
             ],
             "title": "Kind",
             "type": "string"
@@ -5916,7 +5917,8 @@
                   "archive_question",
                   "work",
                   "card_wait",
-                  "timed_wait"
+                  "timed_wait",
+                  "debrief_notice"
                 ],
                 "type": "string"
               },
@@ -6015,7 +6017,8 @@
               "archive_question",
               "work",
               "card_wait",
-              "timed_wait"
+              "timed_wait",
+              "debrief_notice"
             ],
             "title": "Kind",
             "type": "string"
@@ -9361,6 +9364,15 @@
         "additionalProperties": false,
         "description": "The work item's debrief, to store once.",
         "properties": {
+          "completes": {
+            "default": true,
+            "description": "Whether the debrief completes its subject's account; false where a later debrief of the same subject completes it, which takes a subject",
+            "examples": [
+              false
+            ],
+            "title": "Completes",
+            "type": "boolean"
+          },
           "debrief": {
             "description": "The session's own account of how the run went",
             "examples": [
@@ -9380,6 +9392,24 @@
             "minItems": 1,
             "title": "Entries",
             "type": "array"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What the debrief is an account of, as the workflow names it, compared whole within the project: one subject's debriefs come together in one notice, titled with it; none where not given",
+            "examples": [
+              "Slice 058 · The search page"
+            ],
+            "title": "Subject"
           }
         },
         "required": [
@@ -12583,7 +12613,8 @@
               "archive_question",
               "work",
               "card_wait",
-              "timed_wait"
+              "timed_wait",
+              "debrief_notice"
             ],
             "title": "Kind",
             "type": "string"
@@ -17407,7 +17438,8 @@
                     "archive_question",
                     "work",
                     "card_wait",
-                    "timed_wait"
+                    "timed_wait",
+                    "debrief_notice"
                   ],
                   "type": "string"
                 },
@@ -20619,7 +20651,7 @@
     },
     "/api/testing/items/{item_id}/debrief": {
       "post": {
-        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120, or the stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or the work item has its         debrief already, nothing changed: the reason",
+        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120, with an optional subject of 1 to 120 characters and completes         false only beside a subject, or the stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or the work item has its         debrief already, nothing changed: the reason",
         "operationId": "post__api_testing_items_{item_id}_debrief",
         "parameters": [
           {
@@ -20700,7 +20732,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Store the work item's debrief, the stage session's own words and its entries in the call's order, once, as its worker's `register_debrief` does (F85.5; DB 323 to 325), while the session's turn is in flight; its done line carries the Debrief once the turn ends (DB 329).",
+        "summary": "Store the work item's debrief, the stage session's own words and its entries in the call's order, with the subject it names and whether it completes it, once, as its worker's `register_debrief` does (F85.5; DB 323 to 325, 608), while the session's turn is in flight; its done line carries the Debrief once the turn ends (DB 329).",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -24486,7 +24518,7 @@
     },
     "/tools/pilot-work/debrief": {
       "post": {
-        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120: each fault     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: The work item has its debrief already, nothing changed",
+        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120, with an optional subject of 1 to 120 characters and completes         false only beside a subject: each fault     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: The work item has its debrief already, nothing changed",
         "operationId": "post__tools_pilot-work_debrief",
         "parameters": [],
         "requestBody": {
@@ -24551,7 +24583,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "`register_debrief(debrief, entries)` (F85.5; DB 323 to 329): the session's own work item's debrief and its entries, in the call's order, stored once; no effect.",
+        "summary": "`register_debrief(debrief, entries, subject, completes)` (F85.5; DB 323 to 329, 608): the session's own work item's debrief and its entries, in the call's order, with the subject it names and whether it completes it, stored once; no effect.",
         "tags": []
       }
     },

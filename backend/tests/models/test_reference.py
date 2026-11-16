@@ -88,9 +88,10 @@ class TestItemKind:
             ("work", "Work", "work", "terminal"),
             ("card_wait", "Card wait", "wait", "ticket"),
             ("timed_wait", "Timed wait", "wait", "hourglass"),
+            ("debrief_notice", "Debrief notice", "debrief_notice", "notebook"),
         }
 
-    def test_form_is_prose_work_or_wait(self, session: Session) -> None:
+    def test_form_is_prose_work_wait_or_debrief_notice(self, session: Session) -> None:
         session.add(ItemKind(code="other", name="Other", form="other", icon="ask"))
 
         assert violated_constraint(session) == "ck_item_kinds_form"

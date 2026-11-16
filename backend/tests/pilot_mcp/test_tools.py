@@ -527,6 +527,8 @@ _ACCOUNTS = [
 
 _DEBRIEF = {"debrief": "It went well, if slowly.", "entries": _ACCOUNTS}
 
+_SUBJECT = "Slice 058 · The search page"
+
 
 def _entry(**overrides: object) -> dict[str, object]:
     return {
@@ -563,7 +565,10 @@ class TestRegisterDebrief:
         )
         assert request.headers["authorization"] == BEARER["Authorization"]
         assert "tool-use-id" not in request.headers
-        assert json.loads(request.content) == _DEBRIEF
+        assert json.loads(request.content) == _DEBRIEF | {
+            "subject": None,
+            "completes": True,
+        }
         assert answer.status_code == 201
         assert result.structuredContent == answer.json() == {"entries": 3}
         session.expire_all()
@@ -578,6 +583,26 @@ class TestRegisterDebrief:
             (2, "code-reviewer", None, None, _WHY),
             (3, "sweep", None, True, None),
         ]
+
+    async def test_its_subject_and_whether_it_completes_it_reach_the_route(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        session: DbSession,
+    ) -> None:
+        """DB 608: the client posts both, so the route stores what the tool
+        took."""
+        arguments = _DEBRIEF | {"subject": _SUBJECT, "completes": False}
+
+        result = await call(mcp_app, "register_debrief", arguments)
+
+        assert not result.isError
+        [(request, _)] = routes.calls
+        assert json.loads(request.content) == arguments
+        session.expire_all()
+        work = session.get_one(Work, worker.id)
+        assert (work.debrief_subject, work.debrief_completes) == (_SUBJECT, False)
 
     async def test_a_second_call_is_the_routes_refusal_its_reason_whole(
         self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
@@ -616,6 +641,11 @@ class TestRegisterDebrief:
             {"debrief": "Fine.", "entries": [_entry(why="")]},
             {"debrief": "Fine.", "entries": [_entry(why="w" * 121)]},
             {"debrief": "Fine.", "entries": [_entry(verdict="good")]},
+            {"debrief": "Fine.", "entries": [_entry()], "subject": ""},
+            {"debrief": "Fine.", "entries": [_entry()], "subject": "  "},
+            {"debrief": "Fine.", "entries": [_entry()], "subject": "s" * 121},
+            {"debrief": "Fine.", "entries": [_entry()], "completes": False},
+            {"debrief": "Fine.", "entries": [_entry()], "completes": "no"},
         ],
         ids=[
             "empty-debrief",
@@ -638,6 +668,11 @@ class TestRegisterDebrief:
             "empty-why",
             "long-why",
             "extra-field",
+            "empty-subject",
+            "blank-subject",
+            "long-subject",
+            "not-completing-without-subject",
+            "completes-text",
         ],
     )
     async def test_arguments_outside_the_limits_are_refused_without_calling_the_api(
@@ -672,6 +707,20 @@ class TestRegisterDebrief:
         for fault in ("debrief", "entries.1.role", "entries.1.duration", "entries.2"):
             assert f"\n{fault}\n" in text
         assert "an entry gives at most one of words and passed" in text
+        assert routes.calls == []
+
+    async def test_completes_false_without_a_subject_says_why(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        """DB 608: refused with the reason, nothing stored."""
+        result = await call(
+            mcp_app, "register_debrief", _DEBRIEF | {"completes": False}
+        )
+
+        assert error_text(result) == (
+            "Error executing tool register_debrief: a debrief that does not"
+            " complete names its subject"
+        )
         assert routes.calls == []
 
 

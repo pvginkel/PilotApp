@@ -2665,7 +2665,12 @@ class TestCreateDebrief:
         response = client.post(_debrief_path(work_item.id), json=DEBRIEF)
 
         assert (response.status_code, response.get_json()) == (201, {"entries": 3})
-        assert session.get_one(Work, work_item.id).debrief == DEBRIEF["debrief"]
+        work = session.get_one(Work, work_item.id)
+        assert (work.debrief, work.debrief_subject, work.debrief_completes) == (
+            DEBRIEF["debrief"],
+            None,
+            True,
+        )
         assert [
             (
                 entry.position,
@@ -2696,6 +2701,23 @@ class TestCreateDebrief:
             ),
             (3, "Completion check", 1, "sweep", 600, None, False, None),
         ]
+
+    def test_it_stores_its_subject_and_whether_it_completes_it(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        """DB 608, as the worker's call stores them."""
+        response = client.post(
+            _debrief_path(work_item.id),
+            json=DEBRIEF
+            | {"subject": "Slice 058 · The search page", "completes": False},
+        )
+
+        assert response.status_code == 201
+        work = session.get_one(Work, work_item.id)
+        assert (work.debrief_subject, work.debrief_completes) == (
+            "Slice 058 · The search page",
+            False,
+        )
 
     def test_a_second_conflicts_and_changes_nothing(
         self, client: FlaskClient, session: Session, work_item: models.Session
@@ -2763,6 +2785,8 @@ class TestCreateDebrief:
                 "debrief": "Fine.",
                 "entries": [{**DEBRIEF["entries"][0], "step": "P1.code"}],
             },
+            {"debrief": "Fine.", "entries": DEBRIEF["entries"], "subject": " "},
+            {"debrief": "Fine.", "entries": DEBRIEF["entries"], "completes": False},
         ],
         ids=[
             "an empty debrief",
@@ -2771,6 +2795,8 @@ class TestCreateDebrief:
             "a round of 0",
             "words and passed",
             "a field it does not know",
+            "a blank subject",
+            "not completing without a subject",
         ],
     )
     def test_a_body_the_worker_s_call_refuses_is_invalid(

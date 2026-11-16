@@ -27,7 +27,8 @@ from app.extensions import db
 
 
 class Item(db.Model):  # type: ignore[name-defined]
-    """An entry on a Project's timeline: a Prose Item, a Work or a Wait.
+    """An entry on a Project's timeline: a Prose Item, a Work, a Wait or a
+    Debrief Notice, which has no row of its own beyond this one.
 
     A Prose Item's Document has the Item's id. For a Prose Item, `kind_code`,
     `title`, `plan_task_id`, `urgent` and `for_user_id` are caches of its
@@ -45,7 +46,8 @@ class Item(db.Model):  # type: ignore[name-defined]
         UniqueConstraint("project_id", "seq"),
         # What a Work's keys reference, so its Item is of its Project.
         UniqueConstraint("project_id", "id"),
-        # What a Wait's key references, so its Item is of its kind.
+        # What a Wait's key and a Work's key to its Debrief Notice reference,
+        # so that the Item is of the kind each holds.
         UniqueConstraint("id", "kind_code"),
         # The task is of the Item's Project, the key carrying `project_id`
         # once (DB assertion 176).
@@ -54,12 +56,13 @@ class Item(db.Model):  # type: ignore[name-defined]
             ["plan_tasks.project_id", "plan_tasks.task_id"],
         ),
         CheckConstraint("seq >= 1", name="ck_items_seq"),
-        # The opening is a person's words and an archive question Pilot's;
-        # every other Item a Session's (DB assertion 161).
+        # The opening is a person's words, and an archive question and a
+        # Debrief Notice Pilot's; every other Item a Session's (DB assertion
+        # 161).
         CheckConstraint(
             "(created_by_user_id IS NULL) <> (created_by_session_id IS NULL)"
             " AND (created_by_user_id IS NULL"
-            " OR kind_code IN ('opening', 'archive_question'))",
+            " OR kind_code IN ('opening', 'archive_question', 'debrief_notice'))",
             name="ck_items_created_by",
         ),
         CheckConstraint(

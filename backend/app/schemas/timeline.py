@@ -33,6 +33,7 @@ ItemKindCode = Literal[
     "work",
     "card_wait",
     "timed_wait",
+    "debrief_notice",
 ]
 """Item Kind's codes (DB §2.4)."""
 

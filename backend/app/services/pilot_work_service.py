@@ -327,12 +327,16 @@ class PilotWorkService:
         worker: Worker,
         debrief: str,
         entries: Sequence[DebriefEntryRequestSchema],
+        *,
+        subject: str | None = None,
+        completes: bool = True,
     ) -> list[DebriefEntry]:
         """The worker's own work item's debrief, `debrief` and its `entries`
-        in their order, stored as given, once (F85.5; DB 323 to 325). Nothing
-        else of the Work changes: its steps take a call after it as before
-        (DB 324). No Effect is recorded, no line written in the session's
-        records and nothing moved (DB 328, 329).
+        in their order, with the `subject` it names and whether it `completes`
+        it, stored as given, once (F85.5; DB 323 to 325, 608). Nothing else of
+        the Work changes: its steps take a call after it as before (DB 324).
+        No Effect is recorded, no line written in the session's records and
+        nothing moved (DB 328, 329).
 
         Returns:
             The entries stored, in order.
@@ -351,6 +355,8 @@ class PilotWorkService:
                 "it has its debrief already",
             )
         work.debrief = debrief
+        work.debrief_subject = subject
+        work.debrief_completes = completes
         stored = [
             DebriefEntry(
                 work_id=worker.work_item_id,

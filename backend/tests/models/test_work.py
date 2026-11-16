@@ -1,5 +1,5 @@
-"""Work, Progress Step, Debrief Entry and Clarification Run: what a row must
-hold."""
+"""Work, its debrief's subject and notice, Progress Step, Debrief Entry and
+Clarification Run: what a row must hold."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -937,3 +937,177 @@ class TestDebriefEntry:
         session.add(_account(uuid.uuid4(), 1))
 
         assert violated_constraint(session) == "debrief_entries_work_id_fkey"
+
+
+def _notice(session: DbSession, project: Project, seq: int, kind_code: str) -> Item:
+    """An Item of `kind_code` Pilot placed, as it places a Debrief Notice."""
+    pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+    notice = Item(
+        project_id=project.id,
+        seq=seq,
+        kind_code=kind_code,
+        title="Debrief · Slice 058 · The search page",
+        created_by_user_id=pilot.id,
+    )
+    session.add(notice)
+    session.flush()
+    return notice
+
+
+class TestDebriefNotice:
+    """A debrief's subject, whether it completes it, and the Debrief Notice
+    that carries it (DB decision 82, assertions 606 to 610)."""
+
+    @pytest.fixture
+    def run(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> Work:
+        work = session.get_one(
+            Work,
+            _job(
+                session, project, environment, project_session, seq=2, kind_code="work"
+            ),
+        )
+        work.debrief = "It went well, if slowly."
+        return work
+
+    def test_a_debrief_holds_its_subject_and_whether_it_completes_it(
+        self, session: DbSession, run: Work
+    ) -> None:
+        run.debrief_subject = "Slice 058 · The search page"
+        run.debrief_completes = False
+        session.flush()
+        session.expire_all()
+
+        work = session.get_one(Work, run.id)
+
+        assert (work.debrief_subject, work.debrief_completes) == (
+            "Slice 058 · The search page",
+            False,
+        )
+
+    def test_a_debrief_given_before_them_has_neither(
+        self, session: DbSession, run: Work
+    ) -> None:
+        """DB 609: no notice is placed for a debrief given before decision 82,
+        which named neither."""
+        session.flush()
+        session.expire_all()
+
+        work = session.get_one(Work, run.id)
+
+        assert (work.debrief_subject, work.debrief_completes) == (None, None)
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"debrief_subject": "Slice 058 · The search page"},
+            {"debrief_completes": True},
+        ],
+        ids=["subject", "completes"],
+    )
+    def test_a_work_with_no_debrief_has_neither(
+        self, session: DbSession, run: Work, fields: dict[str, object]
+    ) -> None:
+        """DB 608: a Work with no debrief has neither."""
+        run.debrief = None
+        for name, value in fields.items():
+            setattr(run, name, value)
+
+        assert violated_constraint(session) == "ck_work_debrief_fields"
+
+    def test_a_debrief_left_to_a_later_one_names_its_subject(
+        self, session: DbSession, run: Work
+    ) -> None:
+        """DB 608: completes false with no subject is refused."""
+        run.debrief_completes = False
+
+        assert violated_constraint(session) == "ck_work_debrief_fields"
+
+    def test_a_completing_debrief_may_name_no_subject(
+        self, session: DbSession, run: Work
+    ) -> None:
+        """DB 609: its notice carries it alone, titled with its work item's
+        title."""
+        run.debrief_completes = True
+        session.flush()
+
+        assert session.get_one(Work, run.id).debrief_subject is None
+
+    def test_a_work_names_the_debrief_notice_that_carries_it(
+        self, session: DbSession, project: Project, run: Work
+    ) -> None:
+        """DB 607: the notice Pilot placed, its kind carried with it."""
+        notice = _notice(session, project, 3, "debrief_notice")
+        run.debrief_subject = "Slice 058 · The search page"
+        run.debrief_completes = True
+        run.debrief_notice_id = notice.id
+        run.debrief_notice_kind_code = "debrief_notice"
+        session.flush()
+        session.expire_all()
+
+        work = session.get_one(Work, run.id)
+
+        assert (work.debrief_notice_id, work.debrief_notice_kind_code) == (
+            notice.id,
+            "debrief_notice",
+        )
+
+    def test_its_notice_is_a_debrief_notice(
+        self, session: DbSession, project: Project, run: Work
+    ) -> None:
+        notice = _notice(session, project, 3, "archive_question")
+        run.debrief_completes = True
+        run.debrief_notice_id = notice.id
+        run.debrief_notice_kind_code = "archive_question"
+
+        assert violated_constraint(session) == "ck_work_debrief_notice"
+
+    def test_its_notice_is_of_the_kind_it_carries(
+        self, session: DbSession, project: Project, run: Work
+    ) -> None:
+        """The key reaches the Item with its kind: an Item of another kind
+        is not named as a Debrief Notice."""
+        notice = _notice(session, project, 3, "archive_question")
+        run.debrief_completes = True
+        run.debrief_notice_id = notice.id
+        run.debrief_notice_kind_code = "debrief_notice"
+
+        assert violated_constraint(session) == (
+            "work_debrief_notice_id_debrief_notice_kind_code_fkey"
+        )
+
+    @pytest.mark.parametrize(
+        "fields",
+        [{"debrief_notice_kind_code": None}, {"debrief_notice_id": None}],
+        ids=["no-kind", "no-notice"],
+    )
+    def test_the_notice_and_its_kind_are_named_together(
+        self,
+        session: DbSession,
+        project: Project,
+        run: Work,
+        fields: dict[str, object],
+    ) -> None:
+        notice = _notice(session, project, 3, "debrief_notice")
+        run.debrief_completes = True
+        run.debrief_notice_id = notice.id
+        run.debrief_notice_kind_code = "debrief_notice"
+        for name, value in fields.items():
+            setattr(run, name, value)
+
+        assert violated_constraint(session) == "ck_work_debrief_notice"
+
+    def test_a_debrief_given_before_them_is_carried_by_none(
+        self, session: DbSession, project: Project, run: Work
+    ) -> None:
+        """DB 609: nothing is backfilled."""
+        notice = _notice(session, project, 3, "debrief_notice")
+        run.debrief_notice_id = notice.id
+        run.debrief_notice_kind_code = "debrief_notice"
+
+        assert violated_constraint(session) == "ck_work_debrief_notice"

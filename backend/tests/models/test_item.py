@@ -73,7 +73,24 @@ class TestItem:
 
         assert question.created_by_session_id is None
 
-    def test_only_the_opening_and_an_archive_question_are_a_users(
+    def test_a_debrief_notice_is_pilots(
+        self, session: DbSession, project: Project
+    ) -> None:
+        """DB 611: Pilot places it, with no session (DB 161)."""
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+        notice = Item(
+            project_id=project.id,
+            seq=1,
+            kind_code="debrief_notice",
+            title="Debrief · Slice 058 · The search page",
+            created_by_user_id=pilot.id,
+        )
+        session.add(notice)
+        session.flush()
+
+        assert notice.created_by_session_id is None
+
+    def test_only_the_opening_an_archive_question_and_a_debrief_notice_are_a_users(
         self, session: DbSession, project: Project, person: User
     ) -> None:
         session.add(

@@ -33,6 +33,7 @@ from pilot_mcp.api import (
     LIST_LIMIT_MAX,
     MAX_DEBRIEF,
     MAX_DEBRIEF_ENTRIES,
+    MAX_DEBRIEF_SUBJECT,
     MAX_STEP_CODE,
     MAX_STEPS,
     SESSION_HEADER,
@@ -200,6 +201,13 @@ def _says_something(debrief: str) -> str:
     return debrief
 
 
+def _names_something(subject: str | None) -> str | None:
+    """A blank subject is refused here as its route refuses it."""
+    if subject is not None and not subject.strip():
+        raise ValueError("a subject has words")
+    return subject
+
+
 def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
     @mcp.tool()
     async def register_document(
@@ -345,23 +353,56 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
             ),
         ],
         ctx: Call,
+        subject: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=MAX_DEBRIEF_SUBJECT,
+                description=(
+                    "What your debrief is an account of, as your workflow names it,"
+                    " at most 120 characters: the debriefs of one subject come"
+                    " together in one notice, titled with it"
+                ),
+            ),
+            AfterValidator(_names_something),
+        ] = None,
+        completes: Annotated[
+            bool,
+            Field(
+                strict=True,
+                description=(
+                    "Whether your debrief completes its subject's account, true"
+                    " where left out; false where a later debrief of the same"
+                    " subject completes it, which takes a subject"
+                ),
+            ),
+        ] = True,
     ) -> RegisteredDebrief:
         """Hand Pilot your work item's debrief, once, before your turn ends:
         `debrief`, your own account of how the run went, and `entries`, every
         account of the run in order, each with the `section` of the run it
         ran in, its `round` of that part, its `role`, its `duration` in whole
         seconds, at most one of its `words` and `passed`, a pass or a fail,
-        and, on an entry that opens a round past the first, its `why`. Pilot
+        and, on an entry that opens a round past the first, its `why`; with
+        it, `subject`, what the debrief is an account of, and `completes`,
+        false where a later debrief of the same subject completes it. Pilot
         stores them as you give them and shows them behind the work item's
-        Debrief once your turn ends. A second call is refused with the
-        reason, and nothing changes. A call outside the limits — an empty
-        debrief or one over 16,000 characters, no entries or over 500, an
-        empty section, role, words or why, a section or a why over 120
-        characters, a role over 64, words over 4,000, a round under 1, a
-        duration under 0, both words and passed, an unknown field — is
+        Debrief once your turn ends; a subject's debriefs come together in one
+        notice on the project's timeline once the work item whose debrief
+        completes it is done. A second call is refused with the reason, and
+        nothing changes. A call outside the limits — an empty debrief or one
+        over 16,000 characters, no entries or over 500, an empty section,
+        role, words or why, a section or a why over 120 characters, a role
+        over 64, words over 4,000, a round under 1, a duration under 0, both
+        words and passed, an unknown field in an entry, an empty subject or
+        one over 120 characters, `completes` false without a subject — is
         refused with each fault, and nothing is stored. Answers `{entries}`,
         the number of entries stored."""
-        return await api.register_debrief(_authorization(ctx), debrief, entries)
+        if not completes and subject is None:
+            raise ValueError("a debrief that does not complete names its subject")
+        return await api.register_debrief(
+            _authorization(ctx), debrief, entries, subject, completes
+        )
 
 
 def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:

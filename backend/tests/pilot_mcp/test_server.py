@@ -397,6 +397,29 @@ WORK_SURFACE = {
                     "title": "Entries",
                     "type": "array",
                 },
+                "subject": {
+                    "anyOf": [
+                        {"maxLength": 120, "minLength": 1, "type": "string"},
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                    "description": (
+                        "What your debrief is an account of, as your workflow names"
+                        " it, at most 120 characters: the debriefs of one subject"
+                        " come together in one notice, titled with it"
+                    ),
+                    "title": "Subject",
+                },
+                "completes": {
+                    "default": True,
+                    "description": (
+                        "Whether your debrief completes its subject's account, true"
+                        " where left out; false where a later debrief of the same"
+                        " subject completes it, which takes a subject"
+                    ),
+                    "title": "Completes",
+                    "type": "boolean",
+                },
             },
             "required": ["debrief", "entries"],
             "title": "register_debriefArguments",
@@ -420,13 +443,18 @@ WORK_SURFACE = {
         " account of the run in order, each with the `section` of the run it ran in,"
         " its `round` of that part, its `role`, its `duration` in whole seconds, at"
         " most one of its `words` and `passed`, a pass or a fail, and, on an entry"
-        " that opens a round past the first, its `why`. Pilot stores them as you give"
-        " them and shows them behind the work item's Debrief once your turn ends. A"
-        " second call is refused with the reason, and nothing changes. A call outside"
-        " the limits — an empty debrief or one over 16,000 characters, no entries or"
-        " over 500, an empty section, role, words or why, a section or a why over 120"
-        " characters, a role over 64, words over 4,000, a round under 1, a duration"
-        " under 0, both words and passed, an unknown field — is refused with each"
+        " that opens a round past the first, its `why`; with it, `subject`, what the"
+        " debrief is an account of, and `completes`, false where a later debrief of"
+        " the same subject completes it. Pilot stores them as you give them and shows"
+        " them behind the work item's Debrief once your turn ends; a subject's"
+        " debriefs come together in one notice on the project's timeline once the"
+        " work item whose debrief completes it is done. A second call is refused with"
+        " the reason, and nothing changes. A call outside the limits — an empty"
+        " debrief or one over 16,000 characters, no entries or over 500, an empty"
+        " section, role, words or why, a section or a why over 120 characters, a role"
+        " over 64, words over 4,000, a round under 1, a duration under 0, both words"
+        " and passed, an unknown field in an entry, an empty subject or one over 120"
+        " characters, `completes` false without a subject — is refused with each"
         " fault, and nothing is stored. Answers `{entries}`, the number of entries"
         " stored.",
     ),
@@ -1748,6 +1776,7 @@ PROJECTS_SURFACE = {
                                 "work",
                                 "card_wait",
                                 "timed_wait",
+                                "debrief_notice",
                             ],
                             "type": "string",
                         },

@@ -20,6 +20,7 @@ from sqlalchemy import (
     Integer,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -52,6 +53,14 @@ class Work(db.Model):  # type: ignore[name-defined]
     with the Work's Debrief Entries by its Session's call and never changed
     (DB 323, 324); that a Work has entries exactly when it has a debrief is
     the server's.
+
+    `debrief_subject` and `debrief_completes` are given with the debrief and
+    never changed (DB 608); a debrief given before they were taken has
+    neither, so no Debrief Notice carries it (DB 609). `debrief_notice_id`
+    names the notice that carries the debrief, set once at its placement;
+    `debrief_notice_kind_code` is that Item's kind, carried so that the key
+    reaches a Debrief Notice. That the notice is of the Work's Project and
+    carries one subject (DB 610) is the server's.
     """
 
     __tablename__ = "work"
@@ -98,6 +107,37 @@ class Work(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             "session_kind_code = 'work' OR debrief IS NULL", name="ck_work_debrief"
         ),
+        # A subject and a completion only with a debrief, and a debrief that
+        # leaves its subject to a later one names it (DB 608).
+        CheckConstraint(
+            "(debrief IS NOT NULL"
+            " OR (debrief_subject IS NULL AND debrief_completes IS NULL))"
+            " AND (debrief_completes IS NOT FALSE OR debrief_subject IS NOT NULL)",
+            name="ck_work_debrief_fields",
+        ),
+        ForeignKeyConstraint(
+            ["debrief_notice_id", "debrief_notice_kind_code"],
+            ["items.id", "items.kind_code"],
+        ),
+        # The notice is a Debrief Notice, and it carries only a debrief given
+        # with its completion (DB 607, 609).
+        CheckConstraint(
+            "(debrief_notice_id IS NULL) = (debrief_notice_kind_code IS NULL)"
+            " AND (debrief_notice_kind_code IS NULL"
+            " OR (debrief_notice_kind_code = 'debrief_notice'"
+            " AND debrief_completes IS NOT NULL))",
+            name="ck_work_debrief_notice",
+        ),
+        # A completing Work's done reads its subject's uncarried debriefs (DB
+        # §7.6).
+        Index(
+            "ix_work_debrief_uncarried",
+            "project_id",
+            "debrief_subject",
+            postgresql_where=text(
+                "debrief_notice_id IS NULL AND debrief_subject IS NOT NULL"
+            ),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -110,6 +150,10 @@ class Work(db.Model):  # type: ignore[name-defined]
     retried_by_id: Mapped[uuid.UUID | None]
     done_note: Mapped[str | None] = mapped_column(Text)
     debrief: Mapped[str | None] = mapped_column(Text)
+    debrief_subject: Mapped[str | None] = mapped_column(Text)
+    debrief_completes: Mapped[bool | None] = mapped_column(Boolean)
+    debrief_notice_id: Mapped[uuid.UUID | None]
+    debrief_notice_kind_code: Mapped[str | None] = mapped_column(Text)
 
 
 class ClaimAssignment(db.Model):  # type: ignore[name-defined]

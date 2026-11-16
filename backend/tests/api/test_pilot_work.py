@@ -2,7 +2,7 @@
 makes for a worker session's tools, under the session's bearer, outside `/api/`
 (review 2), pinned as the surface they are, a work item's progress among them
 (F85.3, F85.4), a step's why with it (DB 327), and its debrief (F85.5; DB 323
-to 329)."""
+to 329), with its subject and whether it completes it (DB 608)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -733,6 +733,8 @@ class TestSetProgress:
         assert session.scalars(select(ProgressStep)).all() == []
 
 
+SUBJECT = "Slice 058 · The search page"
+
 _DEBRIEF = {
     "debrief": "It went well, if slowly: the second review was worth it.",
     "entries": [
@@ -801,6 +803,13 @@ def _debriefed(session: DbSession, run: models.Session) -> str | None:
     return session.get_one(Work, run.id).debrief
 
 
+def _subject(session: DbSession, run: models.Session) -> tuple[str | None, bool | None]:
+    """The Work's debrief subject and whether its debrief completes it."""
+    session.expire_all()
+    work = session.get_one(Work, run.id)
+    return work.debrief_subject, work.debrief_completes
+
+
 def _entry(**overrides: object) -> dict[str, object]:
     """An entry inside every limit, with `overrides`; one given None goes."""
     entry: dict[str, object] = {
@@ -832,6 +841,36 @@ class TestRegisterDebrief:
         assert response.get_json() == {"entries": 3}
         assert _debriefed(session, run) == _DEBRIEF["debrief"]
         assert _entries(session, run) == _STORED
+        assert _subject(session, run) == (None, True)
+
+    @pytest.mark.parametrize(
+        ("fields", "stored"),
+        [
+            ({"subject": SUBJECT}, (SUBJECT, True)),
+            ({"subject": SUBJECT, "completes": False}, (SUBJECT, False)),
+            ({"subject": SUBJECT, "completes": True}, (SUBJECT, True)),
+            ({"subject": None, "completes": True}, (None, True)),
+        ],
+        ids=["subject", "not-completing", "completing", "none-completing"],
+    )
+    def test_its_subject_and_whether_it_completes_it_are_stored_as_given(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        fields: dict[str, object],
+        stored: tuple[str | None, bool],
+    ) -> None:
+        """DB 608: compared whole, so stored as given; completes true where
+        the call gives none."""
+        run = _session(session, container, project, environment)
+
+        response = client.post(DEBRIEF, json=_DEBRIEF | fields, headers=_bearer())
+
+        assert response.status_code == 201
+        assert _subject(session, run) == stored
 
     def test_a_second_call_is_409_with_the_reason_and_changes_nothing(
         self,
@@ -847,7 +886,12 @@ class TestRegisterDebrief:
 
         response = client.post(
             DEBRIEF,
-            json={"debrief": "Another account.", "entries": [_entry()]},
+            json={
+                "debrief": "Another account.",
+                "entries": [_entry()],
+                "subject": SUBJECT,
+                "completes": False,
+            },
             headers=_bearer(),
         )
 
@@ -858,6 +902,7 @@ class TestRegisterDebrief:
         )
         assert _debriefed(session, run) == _DEBRIEF["debrief"]
         assert _entries(session, run) == _STORED
+        assert _subject(session, run) == (None, True)
 
     @pytest.mark.parametrize(
         "body",
@@ -888,6 +933,20 @@ class TestRegisterDebrief:
             {"debrief": "Fine.", "entries": [_entry(why="w" * 121)]},
             {"debrief": "Fine.", "entries": [_entry(verdict="good")]},
             {"debrief": "Fine.", "entries": [_entry()], "verdict": "good"},
+            {"debrief": "Fine.", "entries": [_entry()], "subject": ""},
+            {"debrief": "Fine.", "entries": [_entry()], "subject": "  "},
+            {"debrief": "Fine.", "entries": [_entry()], "subject": "s" * 121},
+            {"debrief": "Fine.", "entries": [_entry()], "subject": 58},
+            {"debrief": "Fine.", "entries": [_entry()], "completes": False},
+            {
+                "debrief": "Fine.",
+                "entries": [_entry()],
+                "subject": None,
+                "completes": False,
+            },
+            {"debrief": "Fine.", "entries": [_entry()], "completes": None},
+            {"debrief": "Fine.", "entries": [_entry()], "completes": "false"},
+            {"debrief": "Fine.", "entries": [_entry()], "completes": 0},
         ],
         ids=[
             "no-debrief",
@@ -916,6 +975,15 @@ class TestRegisterDebrief:
             "long-why",
             "entry-extra-field",
             "extra-field",
+            "empty-subject",
+            "blank-subject",
+            "long-subject",
+            "subject-number",
+            "not-completing-without-subject",
+            "not-completing-with-none",
+            "completes-none",
+            "completes-text",
+            "completes-number",
         ],
     )
     def test_a_body_outside_the_limits_is_400_and_stores_nothing(
@@ -964,6 +1032,26 @@ class TestRegisterDebrief:
             ["entries", 2],
         ]
 
+    def test_completes_false_without_a_subject_says_why(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 608: refused with the reason."""
+        _session(session, container, project, environment)
+
+        response = client.post(
+            DEBRIEF, json=_DEBRIEF | {"completes": False}, headers=_bearer()
+        )
+
+        assert response.status_code == 400
+        assert [fault["msg"] for fault in response.get_json()] == [
+            "Value error, a debrief that does not complete names its subject"
+        ]
+
     def test_the_limits_themselves_are_taken(
         self,
         client: FlaskClient,
@@ -981,13 +1069,18 @@ class TestRegisterDebrief:
             why="w" * 120,
         )
         least = _entry(duration=0, passed=True)
-        body = {"debrief": "d" * 16_000, "entries": [longest] * 499 + [least]}
+        body = {
+            "debrief": "d" * 16_000,
+            "entries": [longest] * 499 + [least],
+            "subject": "s" * 120,
+        }
 
         response = client.post(DEBRIEF, json=body, headers=_bearer())
 
         assert response.status_code == 201
         assert response.get_json() == {"entries": 500}
         assert len(_entries(session, run)) == 500
+        assert _subject(session, run) == ("s" * 120, True)
 
     def test_no_bearer_is_401(self, client: FlaskClient) -> None:
         response = client.post(DEBRIEF, json=_DEBRIEF)

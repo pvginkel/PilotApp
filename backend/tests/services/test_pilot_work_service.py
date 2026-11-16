@@ -3,8 +3,9 @@
 (F85.2, F36.1), each call's Effects (R18, F41), against the fake controller,
 `set_progress` and `set_progress_step`, the work item's steps (F85.3,
 F85.4, F145.1; DB 285 to 289, a step's why 327), each change moving its
-status alone (F145.4), and `register_debrief`, its debrief, stored once and
-moving nothing (F85.5; DB 322 to 329)."""
+status alone (F145.4), and `register_debrief`, its debrief, stored once with
+its subject and whether it completes it, and moving nothing (F85.5; DB 322 to
+329, 608)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -1693,6 +1694,7 @@ class TestPilotWorkServiceProgressAtOnce:
 
 
 DEBRIEF = "It went well, if slowly: the second review was worth it."
+SUBJECT = "Slice 058 · The search page"
 
 _ACCOUNTS = [
     DebriefEntryRequestSchema(
@@ -1781,6 +1783,15 @@ def _debrief_of(
     return session.get_one(Work, work_id).debrief, _accounts(list(entries))
 
 
+def _subject_of(
+    session: DbSession, work_id: uuid.UUID
+) -> tuple[str | None, bool | None]:
+    """The Work's debrief subject and whether its debrief completes it."""
+    session.expire_all()
+    work = session.get_one(Work, work_id)
+    return work.debrief_subject, work.debrief_completes
+
+
 class TestPilotWorkServiceRegisterDebrief:
     def test_the_debrief_and_its_entries_are_stored_as_given_in_order(
         self,
@@ -1799,6 +1810,23 @@ class TestPilotWorkServiceRegisterDebrief:
 
         assert _accounts(stored) == _GIVEN
         assert _debrief_of(session, run.id) == (DEBRIEF, _GIVEN)
+        assert _subject_of(session, run.id) == (None, True)
+
+    def test_its_subject_and_whether_it_completes_it_are_stored_with_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 608: given with the debrief, as given."""
+        run = _session(session, container, project, environment)
+
+        container.pilot_work_service().register_debrief(
+            _worker(run), DEBRIEF, _ACCOUNTS, subject=SUBJECT, completes=False
+        )
+
+        assert _subject_of(session, run.id) == (SUBJECT, False)
 
     def test_a_second_call_is_refused_and_changes_nothing(
         self,
@@ -1813,13 +1841,16 @@ class TestPilotWorkServiceRegisterDebrief:
         pilot_work.register_debrief(_worker(run), DEBRIEF, _ACCOUNTS)
 
         with pytest.raises(InvalidOperationException) as refused:
-            pilot_work.register_debrief(_worker(run), "Again.", _ACCOUNTS[:1])
+            pilot_work.register_debrief(
+                _worker(run), "Again.", _ACCOUNTS[:1], subject=SUBJECT, completes=False
+            )
 
         assert refused.value.message == (
             f"Cannot register the debrief of work item {run.id} because it has"
             " its debrief already"
         )
         assert _debrief_of(session, run.id) == (DEBRIEF, _GIVEN)
+        assert _subject_of(session, run.id) == (None, True)
 
     def test_the_steps_are_untouched_and_take_a_call_after_it(
         self,

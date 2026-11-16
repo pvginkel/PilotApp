@@ -716,9 +716,10 @@ def create_debrief(
     test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
 ) -> Any:
     """Store the work item's debrief, the stage session's own words and its
-    entries in the call's order, once, as its worker's `register_debrief`
-    does (F85.5; DB 323 to 325), while the session's turn is in flight; its
-    done line carries the Debrief once the turn ends (DB 329).
+    entries in the call's order, with the subject it names and whether it
+    completes it, once, as its worker's `register_debrief` does (F85.5; DB
+    323 to 325, 608), while the session's turn is in flight; its done line
+    carries the Debrief once the turn ends (DB 329).
 
     Returns:
         201: The debrief stored: the number of its entries
@@ -726,14 +727,21 @@ def create_debrief(
             entries, each a section of 1 to 120 characters, a round of 1 or
             more, a role of 1 to 64, a duration of 0 seconds or more, at most
             one of words of 1 to 4,000 and passed, and an optional why of 1 to
-            120, or the stage is prd
+            120, with an optional subject of 1 to 120 characters and completes
+            false only beside a subject, or the stage is prd
         403: Its session has no turn running
         404: No work item has the id
         409: Its session has no environment yet, or the work item has its
             debrief already, nothing changed: the reason
     """
     data = RegisterDebriefRequestSchema.model_validate(request.get_json())
-    entries = test_data_service.register_debrief(item_id, data.debrief, data.entries)
+    entries = test_data_service.register_debrief(
+        item_id,
+        data.debrief,
+        data.entries,
+        subject=data.subject,
+        completes=data.completes,
+    )
     return RegisteredDebriefSchema(entries=len(entries)).model_dump(mode="json"), 201
 
 

@@ -22,7 +22,8 @@ MAX_ENTRY_ROLE = 64
 MAX_ENTRY_WORDS = 4_000
 MAX_ENTRY_WHY = 120
 MAX_ENTRY_NUMBER = 2**31 - 1
-"""The limits of a work item's debrief (DB 325), which the schema of `work`
+MAX_DEBRIEF_SUBJECT = 120
+"""The limits of a work item's debrief (DB 325, 608), which the schema of `work`
 and `debrief_entries` does not hold; `MAX_ENTRY_NUMBER` is the range of the
 columns of a round and a duration."""
 
@@ -243,6 +244,26 @@ class RegisterDebriefRequestSchema(BaseModel):
         max_length=MAX_DEBRIEF_ENTRIES,
         description="The run's accounts, in order",
     )
+    subject: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_DEBRIEF_SUBJECT,
+        description=(
+            "What the debrief is an account of, as the workflow names it, compared"
+            " whole within the project: one subject's debriefs come together in one"
+            " notice, titled with it; none where not given"
+        ),
+        examples=["Slice 058 · The search page"],
+    )
+    completes: bool = Field(
+        default=True,
+        strict=True,
+        description=(
+            "Whether the debrief completes its subject's account; false where a"
+            " later debrief of the same subject completes it, which takes a subject"
+        ),
+        examples=[False],
+    )
 
     @field_validator("debrief")
     @classmethod
@@ -253,6 +274,21 @@ class RegisterDebriefRequestSchema(BaseModel):
         if not debrief.strip():
             raise ValueError("a debrief has words")
         return debrief
+
+    @field_validator("subject")
+    @classmethod
+    def _names_something(cls, subject: str | None) -> str | None:
+        """The store keeps a blank text as none, and a subject is not empty
+        where given (DB 608)."""
+        if subject is not None and not subject.strip():
+            raise ValueError("a subject has words")
+        return subject
+
+    @model_validator(mode="after")
+    def _a_debrief_left_to_a_later_one_names_its_subject(self) -> Self:
+        if not self.completes and self.subject is None:
+            raise ValueError("a debrief that does not complete names its subject")
+        return self
 
 
 class RegisteredDebriefSchema(BaseModel):

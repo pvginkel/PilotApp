@@ -296,7 +296,10 @@ class ItemKind(db.Model):  # type: ignore[name-defined]
 
     __tablename__ = "item_kinds"
     __table_args__ = (
-        CheckConstraint("form IN ('prose', 'work', 'wait')", name="ck_item_kinds_form"),
+        CheckConstraint(
+            "form IN ('prose', 'work', 'wait', 'debrief_notice')",
+            name="ck_item_kinds_form",
+        ),
     )
 
     code: Mapped[str] = mapped_column(Text, primary_key=True)
