@@ -56,12 +56,13 @@ export const isLine = (item: TimelineItem) => item.work === null || !item.work.p
 
 /**
  * Whether an item can be acted on, which "N open above" counts (F11): open, and a prose item but
- * the opening that is not Pilot's, a notice urgent or not, whichever member it is for; or a work
+ * the opening that is not Pilot's, a notice urgent or not, whichever member it is for; a debrief's
+ * notice, until a member's Read (D186); or a work
  * item stopped or failed, until it is retried, and not while its nudge is owed; and any item, a
  * wait or a done line included, whose Pilot's job it shows stopped or failed with its Retry
  * offered (`offersRetry`). Never work that runs, starts or is held, nor a wait whose job
  * offers no Retry. It is what waits on a person (F94.5) less two of its filters, a notice's urgency and
- * the member an item is for.
+ * the member an item is for, and with the debrief's notice, which waits on nobody (F26.14).
  */
 export function isActionable(item: TimelineItem): boolean {
   if (item.job !== null && offersRetry(item.job.work)) return true;
@@ -74,6 +75,8 @@ export function isActionable(item: TimelineItem): boolean {
       return RESUMABLE.includes(item.work!.state) && item.work!.retried === null && !item.work!.nudge_owed;
     case 'wait':
       return false;
+    case 'debrief_notice':
+      return true;
     default: {
       const unhandled: never = item.form;
       return unhandled;

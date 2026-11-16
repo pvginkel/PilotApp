@@ -4,7 +4,8 @@
  * and a notice's Read alone under its text (F23),
  * and Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
- * (F24.2, F25.1); the archive question is its two buttons (F5.6). A one-ask item whose writer Pilot
+ * (F24.2, F25.1); the archive question is its two buttons (F5.6); a debrief's notice is its box, the
+ * debriefs it carries and its Read (debrief-notice.tsx, F26.13). A one-ask item whose writer Pilot
  * asked about its block carries the block's mark in its head (F52.2; writer-asked.tsx).
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
@@ -19,7 +20,8 @@
  * its Open the session log (F13.5, F26.6), and where its stage session gave a debrief it carries
  * the Debrief, shown always, on a phone too, right of the actions under the mouse (F26.6, D158). Pilot's job on an item shows on it, its line's or its
  * head's (job.tsx, F59.1). A wait open is its own (wait.tsx, F27); done, its line has nothing behind
- * it, no Open and no Undo, and the note Pilot closed it with under its title (F27.4). On a phone the line has Undo alone among its actions,
+ * it, no Open and no Undo, and the note Pilot closed it with under its title (F27.4); a debrief's
+ * notice's line has nothing behind it either, its Undo kept (F26.13). On a phone the line has Undo alone among its actions,
  * and a tap on it opens what its title opens, as a view whose head carries Discuss, or, on a line
  * with nothing behind it, a menu of its actions under it, its job and Discuss (F13.9).
  * On the timeline an open item folds by the kind in its head (fold.ts, F12.3): folded, it is its
@@ -45,6 +47,7 @@ import { Attachments, LineAttachments } from '@/components/timeline/attachments'
 import { Block } from '@/components/timeline/block';
 import { CancelledMark } from '@/components/timeline/cancelled-mark';
 import { DebriefButton } from '@/components/timeline/debrief-button';
+import { DebriefNotice } from '@/components/timeline/debrief-notice';
 import { Confirmation } from '@/components/timeline/confirmation';
 import { DocumentCard, InlineDocument } from '@/components/timeline/document';
 import { isCard } from '@/components/timeline/document-state';
@@ -199,6 +202,12 @@ function useFoldFocus(root: RefObject<HTMLElement | null>, itemId: string, folde
 function OpenItem({ item, lineFocus }: { item: TimelineItem; lineFocus: LineFocus }) {
   if (item.kind === 'work') return <WorkItem item={item} lineFocus={lineFocus} />;
   if (item.form === 'wait') return <WaitItem item={item} />;
+  if (item.form === 'debrief_notice')
+    return (
+      <DebriefNotice item={item}>
+        <Read item={item} />
+      </DebriefNotice>
+    );
   if (item.kind === 'confirmation') return <Confirmation item={item} />;
   if (item.kind === 'archive_question') return <ArchiveQuestion item={item} />;
   if (isCard(item)) return <DocumentCard item={item} />;
@@ -232,8 +241,9 @@ function askOf(item: TimelineItem): ReactNode {
 }
 
 /**
- * A notice's one button, its own state: nothing goes back to a session (F23.1); disabled while the
- * project is archived, which the API refuses until Bring back (D012).
+ * A notice's one button, its own state, and a debrief's notice's: nothing goes back to a session
+ * (F23.1, F26.13); disabled while the project is archived, which the API refuses until Bring back
+ * (D012).
  */
 function Read({ item }: { item: TimelineItem }) {
   const { id: projectId } = useShownProject();
@@ -322,18 +332,25 @@ function inChatOf(item: TimelineItem) {
  * them shows always and never moves as they show (F26.6, D158); a job not ended
  * stands at its end beside the time, shown always (F59.1). On a phone the job's mark, Open and
  * Discuss leave it, and a tap on it anywhere but on a control of its own opens what its title
- * opens, or a wait's menu (F13.9).
+ * opens, or the menu of a line with nothing behind it (F13.9).
  */
 function DoneLine({ item }: { item: TimelineItem }) {
   const phone = usePhone();
   const openView = useOpenLine(item);
   if (!phone) return <Line item={item} />;
-  return item.form === 'wait' ? (
-    <MenuLine item={item} job={item.job} line={(onTap) => <Line item={item} onTap={onTap} />} />
-  ) : (
+  return hasBehind(item) ? (
     <Line item={item} onTap={openView} />
+  ) : (
+    <MenuLine item={item} job={item.job} line={(onTap) => <Line item={item} onTap={onTap} />} />
   );
 }
+
+/**
+ * Whether something is behind the item's line: its document, or a work item's session log (F13.3,
+ * F26.6); never behind a wait's (F27.4) nor a debrief's notice's, which is its title and its time
+ * (F26.13, X6).
+ */
+const hasBehind = (item: TimelineItem) => item.form === 'prose' || item.form === 'work';
 
 /** Whether a tap on a line fell on a control of its own, which acts alone. */
 const onControl = (event: MouseEvent) => (event.target as Element).closest('a, button, [role="menu"]') !== null;
@@ -346,8 +363,8 @@ interface MenuLineProps {
 }
 
 /**
- * A phone's line with nothing behind it, a wait's, or one of an item Pilot is working on before its
- * text is read: a tap on it opens the menu of its actions under it, as the mockup's `lineMenu()`
+ * A phone's line with nothing behind it, a wait's or a debrief's notice's, or one of an item Pilot
+ * is working on before its text is read: a tap on it opens the menu of its actions under it, as the mockup's `lineMenu()`
  * offers them, Pilot's job on it where one shows and Discuss, never Undo, and a tap on it again or
  * anywhere else closes the menu (F13.9).
  */
@@ -395,18 +412,18 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
   return (
     <div className="line" onClick={onTap} data-testid="timeline.line">
       <LineLead item={item} />
-      {item.form === 'wait' ? (
-        <span className="title" title={title} data-testid="timeline.line.title">
-          <LinkedText text={title} />
-        </span>
-      ) : (
+      {hasBehind(item) ? (
         <Behind item={item} className="title" title={title} testId="timeline.line.title">
           <LinkedText text={title} nested />
         </Behind>
+      ) : (
+        <span className="title" title={title} data-testid="timeline.line.title">
+          <LinkedText text={title} />
+        </span>
       )}
       <span className="line-acts">
         {!phone && ended && <JobMark job={job} />}
-        {!phone && item.form !== 'wait' && <Open item={item} />}
+        {!phone && hasBehind(item) && <Open item={item} />}
         {item.done?.undo && <Undo itemId={item.id} testId="timeline.line.undo" />}
         {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       </span>

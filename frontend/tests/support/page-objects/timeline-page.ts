@@ -23,7 +23,9 @@ import { projectAddress } from '../projects';
  * its popover and Resume or Retry (F26, F26.8, F67, F145.2, F145.3). A wait open shows its request's
  * button, what it waits on — a card wait's cards and states and since when, a timed wait's due
  * time — and its firings; done, the note Pilot closed it with, and on a phone the menu its line
- * opens (F27, F13.9). Pilot's job on an item stands in its line or its head (F59.1).
+ * opens (F27, F13.9). A debrief's notice open shows the work items it carries, each its head, its
+ * debrief, Full debrief and Session log (F26.13). Pilot's job on an item stands in its line or its
+ * head (F59.1).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -262,6 +264,9 @@ export class TimelinePage {
         /** The note Pilot closed it with, under its done line's title. */
         note: root.getByTestId('timeline.line.wait-note'),
       },
+      /** A debrief's notice open: the work items it carries, in their order, and each by its id (F26.13). */
+      debriefs: root.getByTestId('timeline.debrief'),
+      carried: (workId: string) => carriedParts(root, workId),
       card: {
         root: root.getByTestId('timeline.item.card'),
         summary: root.getByTestId('timeline.item.summary'),
@@ -354,6 +359,22 @@ export function attachmentAddress(projectId: string, itemId: string, attachmentI
 /** An item's address under its project's, or a block's under the item's (F97). */
 export function addressOf(projectId: string, itemId: string, blockId?: string): string {
   return `${projectAddress(projectId)}/items/${itemId}${blockId === undefined ? '' : `/blocks/${blockId}`}`;
+}
+
+/**
+ * A work item a debrief's notice carries, by its id (F26.13): its head's title and the time its turn
+ * ended, its debrief, and Full debrief and Session log under it.
+ */
+function carriedParts(within: Locator, workId: string) {
+  const root = within.locator(`[data-testid="timeline.debrief"][data-item-id="${workId}"]`);
+  return {
+    root,
+    title: root.getByTestId('timeline.debrief.title'),
+    ended: root.getByTestId('timeline.debrief.ended'),
+    text: root.getByTestId('timeline.debrief.text'),
+    full: root.getByTestId('timeline.debrief.full'),
+    sessionLog: root.getByTestId('timeline.debrief.session-log'),
+  };
 }
 
 /** A settled section's line (F31.5), by its block's id: Pilot's mark, the heading's words, the answer, the note. */

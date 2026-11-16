@@ -493,6 +493,17 @@
   .wait-on { color: hsl(var(--foreground)); }
   .wait-firings { margin: 6px 0 0; padding: 0; list-style: none; font-size: var(--text-sm); line-height: 22px; color: hsl(var(--muted-foreground)); }
 
+  /* ---- A debrief's notice open: per work item it carries, its head, its debrief and its two
+     links, set in behind a rule as the full debrief's entries are (debrief-notice.tsx) -------- */
+
+  .carried { margin-top: 12px; padding-left: 12px; border-left: 2px solid hsl(var(--border)); }
+  .carried-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin-bottom: 2px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
+  .carried-head .carried-title { min-width: 0; font-weight: 600; color: hsl(var(--foreground)); overflow-wrap: anywhere; }
+  .carried-head .dotted { display: inline-flex; align-items: baseline; gap: inherit; }
+  .carried-head .sep { opacity: 0.75; }
+  /* Its ghost buttons' icons stand on the prose's edge, their padding and border hung left of it. */
+  .carried-links { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 6px 0 0 -11px; }
+
   /* ---- The done line -------------------------------------------------------------------- */
 
   /* The same shape for every kind, so history reads as a log. Its text, icons and time share a
