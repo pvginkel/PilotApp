@@ -1075,10 +1075,10 @@ class RecordService:
         held exclusively: where its Work's debrief completes, its Debrief
         Notice placed next on the timeline, by Pilot and no session, on the
         work item's task, titled by the debrief's subject, else by the work
-        item's title, never urgent and for no one (DB 609, 611). It carries that debrief and, where it names a
-        subject, the debrief of every done Work of the project with the same
-        subject that does not complete and that no notice carries yet, each
-        Work naming it (DB 610). None in a project finished or archived,
+        item's title, never urgent and for no one (DB 609, 611). It carries
+        that debrief and, where it names a subject, the debrief of every done
+        Work of the project with the same subject that does not complete and
+        that no notice carries yet, each Work naming it (DB 610). None in a project finished or archived,
         whose Finish left nothing open (DB 613), for a debrief that does not
         complete, and for one given before its completion was taken, which
         has none (DB 609)."""
