@@ -4518,6 +4518,40 @@ class TestRecordServiceDebriefNotice:
         for left in (other, open_one, unplaced):
             assert session.get_one(Work, left.id).debrief_notice_id is None
 
+    def test_it_carries_no_debrief_of_another_project(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 610: every Work a notice carries is of its own project; another
+        project's planning of the same subject stays for its own run's."""
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        records = container.record_service()
+        elsewhere = _debriefed_run(
+            session,
+            container,
+            other,
+            environment,
+            "Planning",
+            subject=self.SUBJECT,
+            completes=False,
+        )
+        records.work_done(elsewhere.id, self.AT)
+        run = _debriefed_run(
+            session, container, project, environment, "Running", subject=self.SUBJECT
+        )
+
+        records.work_done(run.id, self.AT)
+
+        ((_, carried),) = _notices(session, project)
+        assert carried == {run.id}
+        assert session.get_one(Work, elsewhere.id).debrief_notice_id is None
+
     @pytest.mark.parametrize(
         "debrief",
         [
