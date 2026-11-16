@@ -10,7 +10,8 @@
  * has a recommendation, and none is held, and clicked with unanswered recommended blocks it lists
  * them in a dialog whose Confirm sends, the record answering them with their recommendation (F32.5).
  * A block whose note of Pilot's suggests another answer has none, its tooltip naming it first
- * (F168.4).
+ * (F168.4). At its top stand Pilot's alert for what its Send starts (F168.6; send-alert.tsx), then
+ * Pilot's note on it as a whole (F168.5).
  *
  * A larger one, and every review (F25.1), leaves a card: its head, its title, its summary (F34),
  * its count chips (F24.2) and the auto pilot chip, counting the confirmations the switch would
@@ -39,7 +40,9 @@ import { blockKey, GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
 import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
+import { DocumentNote } from '@/components/timeline/pilots-note';
 import { isSettled, piecesOf, SectionsContext, underHeading, type Fold } from '@/components/timeline/sections';
+import { SendAlert } from '@/components/timeline/send-alert';
 import { SettledHead, SettledLines } from '@/components/timeline/settled';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
@@ -67,6 +70,8 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
         <LinkedText text={titleOf(item)} />
       </div>
       <div className="inline-doc" data-testid="timeline.item.document">
+        {item.send_alert !== null && <SendAlert alert={item.send_alert} />}
+        {item.pilots_note !== null && <DocumentNote note={item.pilots_note} />}
         <DocumentParts item={item} />
       </div>
       <Attachments item={item} />

@@ -21,6 +21,7 @@
  * `register_debrief` gives it (/api/testing/items/<id>/debrief); a registered document's writer is asked about
  * its blocks as the pre-ruling pass's `ask_writer` asks (/api/testing/items/<id>/writer-questions),
  * Pilot's note put on a block or on an item as the pass's `note` puts it (/api/testing/items/<id>/notes),
+ * its alert on an item as the pass's `alert` puts it (/api/testing/items/<id>/alerts),
  * and the pass's clarification run placed, with the writer's reply or to run
  * (/api/testing/items/<id>/clarification).
  */
@@ -48,6 +49,7 @@ export type DebriefEntry = components['schemas']['RegisterDebriefRequestSchema.c
 type DebriefSubject = Pick<components['schemas']['RegisterDebriefRequestSchema.ce33d8b'], 'subject' | 'completes'>;
 type WriterQuestion = components['schemas']['InventedWriterQuestionsCreateSchema.6d6b324.InventedWriterQuestionSchema'];
 type PilotNote = components['schemas']['InventedNoteCreateSchema.6d6b324'];
+type SendAlert = components['schemas']['InventedAlertCreateSchema.6d6b324'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type ItemDocument = components['schemas']['ItemDocumentSchema.1fdd8ae'];
 type TimelineItem = Timeline['items'][number];
@@ -335,6 +337,16 @@ export class Projects {
    */
   async note(itemId: string, note: PilotNote): Promise<void> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${itemId}/notes`, { data: note });
+    expect(response.status(), await response.text()).toBe(200);
+  }
+
+  /**
+   * Pilot's alert on the open prose item for what its Send starts, `awaits` the ask to answer first,
+   * `<item id>/<local id>`, as the pre-ruling pass's `alert` writes it, in a pass's turn of its own;
+   * one that gives neither takes the standing one off.
+   */
+  async alert(itemId: string, alert: SendAlert): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${itemId}/alerts`, { data: alert });
     expect(response.status(), await response.text()).toBe(200);
   }
 

@@ -186,6 +186,10 @@ export class TimelinePage {
       writerAsked: root.getByTestId('timeline.item.writer-asked'),
       writing: root.getByTestId('timeline.writing'),
       document: root.getByTestId('timeline.item.document'),
+      /** Pilot's note on the document as a whole, at an inline document's top (F168.5): its triangle and its text. */
+      pilotsNote: documentNoteParts(root),
+      /** Pilot's alert for what the document's Send starts, at an inline document's top (F168.6). */
+      alert: alertParts(root),
       blocks: root.getByTestId('timeline.block'),
       /** A document's block by its id. */
       blockAt: (blockId: string) => blockParts(this.page, root.locator(`[data-testid="timeline.block"][data-block-id="${blockId}"]`)),
@@ -377,6 +381,26 @@ function carriedParts(within: Locator, workId: string) {
   };
 }
 
+/** Pilot's note on a document as a whole (F168.5) within `within`: its triangle and its text. */
+export function documentNoteParts(within: Locator) {
+  const root = within.getByTestId('timeline.item.pilots-note');
+  return { root, mark: root.getByTestId('timeline.item.pilots-note.mark'), text: root.getByTestId('timeline.item.pilots-note.text') };
+}
+
+/**
+ * Pilot's alert on a document (F168.6) within `within`: its text, its button to the ask to answer
+ * first, and on a phone its chevron; `data-open` on its root says whether a phone shows it whole.
+ */
+export function alertParts(within: Locator) {
+  const root = within.getByTestId('timeline.item.send-alert');
+  return {
+    root,
+    text: root.locator('.da-text'),
+    go: root.getByTestId('timeline.item.send-alert.go'),
+    toggle: root.getByTestId('timeline.item.send-alert.toggle'),
+  };
+}
+
 /** A settled section's line (F31.5), by its block's id: Pilot's mark, the heading's words, the answer, the note. */
 export function settledParts(within: Locator, blockId: string) {
   const root = within.locator(`[data-testid="timeline.settled.line"][data-section="${blockId}"]`);
@@ -448,6 +472,9 @@ export function blockParts(page: Page, root: Locator) {
       line: root.getByTestId('timeline.block.pilots-note.line'),
       toggle: root.getByTestId('timeline.block.pilots-note.toggle'),
       take: root.getByTestId('timeline.block.pilots-note.take'),
+      /** The work it offers on an action, and the button that starts it (F168.7). */
+      offer: root.getByTestId('timeline.block.pilots-note.offer'),
+      start: root.getByTestId('timeline.block.pilots-note.start'),
     },
     toggle: root.getByTestId('timeline.block.toggle'),
     answered: root.getByTestId('timeline.block.answered'),

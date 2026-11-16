@@ -35,7 +35,8 @@
  * person's stands between its head and its controls, wherever an item's block is drawn but on a
  * confirmation; none on a block Pilot's work holds or Pilot answered, in a document that is Pilot's,
  * in the draft or in a project's own document (F168.1; pilots-note.tsx), its button taking what
- * it suggests while the block takes an answer (F168.2; take-note.ts).
+ * it suggests while the block takes an answer (F168.2; take-note.ts), and on an open action the
+ * button that starts the work it offers until that is taken (F168.7).
  */
 
 import { useContext, useState } from 'react';
@@ -54,7 +55,7 @@ import { HeldBody, HeldLine, type Hold } from '@/components/timeline/held';
 import { blockKindOf, isOneAsk } from '@/components/timeline/kinds';
 import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
-import { PilotsNote, type PilotsNoteData } from '@/components/timeline/pilots-note';
+import { PilotsNote, type OfferPlace, type PilotsNoteData } from '@/components/timeline/pilots-note';
 import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { SectionsContext } from '@/components/timeline/sections';
@@ -120,6 +121,7 @@ export function Block({ item, block, solo = false, section = [{ type: 'block', b
       flash={flash}
       held={held}
       note={item.kind === 'confirmation' || pilots ? null : block.pilots_note}
+      offerAt={{ item: item.id, block: block.id }}
     />
   );
 }
@@ -145,6 +147,7 @@ export function DocumentBlock({ document, block }: { document: string; block: Bl
       flash={null}
       held={null}
       note={null}
+      offerAt={null}
     />
   );
 }
@@ -179,6 +182,7 @@ export function DraftBlock({ projectId, block, blocks, title, flash }: DraftBloc
       flash={flash}
       held={null}
       note={null}
+      offerAt={null}
     />
   );
 }
@@ -224,9 +228,11 @@ interface BlockPanelProps {
   held: Held | null;
   /** Pilot's note on it, where it shows (F168.1); none otherwise. */
   note: PilotsNoteData | null;
+  /** Where its note's offer is taken: its item's block; none where no item holds it. */
+  offerAt: OfferPlace | null;
 }
 
-function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, settled, disabled, quote, asked, flash, held, note }: BlockPanelProps) {
+function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, settled, disabled, quote, asked, flash, held, note, offerAt }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
   const kept = useChoice(field);
   const choice = choosing ? kept : null;
@@ -243,6 +249,8 @@ function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, 
   // A done question opens to nothing more than its answer.
   const opens = closable && answering !== null && !(settled && block.kind === 'question');
   const take = note === null || answering === null || disabled || !live ? null : takeOf({ field, block, note, answer: answering.answer, choice });
+  // The API takes an offer on an open action alone, once (DB 629).
+  const offer = note === null || note.offer === null || note.offer_taken || answered || disabled || !live ? null : offerAt;
 
   const controls = () => {
     if (block.confirmation) {
@@ -354,7 +362,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, 
           quote={quote}
         />
       )}
-      {note !== null && <PilotsNote note={note} answered={answered} take={take} />}
+      {note !== null && <PilotsNote note={note} answered={answered} take={take} offer={offer} />}
       <div className="block-controls">
         {deferred && <Deferral block={block} />}
         {!(closed && deferred) && controls()}

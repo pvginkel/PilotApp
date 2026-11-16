@@ -138,6 +138,8 @@ test.describe('A reply’s step lines', () => {
       ['cancel', 'mcp__pilot__cancel_ask', { item: 'invented', for: 'ada' }, 'Calling off an ask', 'Called off an ask'],
       ['writer', 'mcp__pilot__ask_writer', { item: 'invented' }, 'Asking the writer', 'Asked the writer'],
       ['register', 'mcp__pilot__register_document', { path: '/work/invented.md' }, 'Registering a document', 'Registered a document'],
+      ['note', 'mcp__pilot__note', { item: 'invented', block: 'invented/D1', text: 'Invented.' }, 'Writing a note', 'Wrote a note'],
+      ['alert', 'mcp__pilot__alert', { item: 'invented', text: 'Invented.', awaits: 'other/Q1' }, 'Raising an alert', 'Raised an alert'],
       // A call of Pilot's with no words of its own reads by its tool's name.
       ['unworded', 'mcp__pilot__invented_tool', {}, 'Using invented_tool', 'Used invented_tool'],
       ['steps', 'mcp__pilot__set_progress', { steps: [] }, 'Publishing its steps', 'Published its steps'],

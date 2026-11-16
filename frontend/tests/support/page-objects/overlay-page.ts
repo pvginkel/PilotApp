@@ -1,13 +1,13 @@
 import type { Locator, Page } from '@playwright/test';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
-import { blockParts, settledHeadParts, settledParts } from './timeline-page';
+import { alertParts, blockParts, documentNoteParts, settledHeadParts, settledParts } from './timeline-page';
 import { projectAddress } from '../projects';
 
 /**
  * A document opened (F28): off a phone in its tab in its project's timeline's place, on a phone a
  * view, opened at the document's own address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
- * *Done* and *Edited <time>*, and its buttons: Pilot's job on the item, its Undo and Discuss; its body with the summary, the prose and the blocks, the sections
+ * *Done* and *Edited <time>*, and its buttons: Pilot's job on the item, its Undo and Discuss, and its last line Pilot's alert; its body with the summary, Pilot's note on the document, the prose and the blocks, the sections
  * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
  * foot; off a phone the session log's popover's cross, and no tab, view or popover draws a maximize or a backdrop; over the text, the box of Pilot's questions to a
  * registered document's writer and the reply (F52.2), which its own address opens it at. A document that is Pilot's has the strip under its head,
@@ -57,6 +57,10 @@ export class OverlayPage {
   readonly undo: Locator;
   readonly body: Locator;
   readonly summary: Locator;
+  /** Pilot's note on the document as a whole, under the summary (F168.5). */
+  readonly pilotsNote: ReturnType<typeof documentNoteParts>;
+  /** Pilot's alert for what the document's Send starts, the head's last line (F168.6). */
+  readonly alert: ReturnType<typeof alertParts>;
   readonly document: Locator;
   readonly blocks: Locator;
   readonly settled: Locator;
@@ -131,6 +135,8 @@ export class OverlayPage {
     this.undo = this.head.getByTestId('overlay.undo');
     this.body = this.root.getByTestId('overlay.body');
     this.summary = this.root.getByTestId('overlay.summary');
+    this.pilotsNote = documentNoteParts(this.body);
+    this.alert = alertParts(this.head);
     this.document = this.root.getByTestId('overlay.document');
     this.blocks = this.root.getByTestId('timeline.block');
     this.settled = this.root.getByTestId('timeline.settled');

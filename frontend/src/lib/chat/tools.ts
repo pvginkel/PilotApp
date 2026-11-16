@@ -53,6 +53,8 @@ const STORE_VERBS: Record<string, [string, string]> = {
   finish: ['Finished the project', 'Finishing the project'],
   register_document: ['Registered a document', 'Registering a document'],
   ask_writer: ['Asked the writer', 'Asking the writer'],
+  note: ['Wrote a note', 'Writing a note'],
+  alert: ['Raised an alert', 'Raising an alert'],
 };
 
 /** A worker's calls that publish its work item's steps. */

@@ -15,7 +15,7 @@
  * 295). A block a work item researches is its held line too, "Researching" (F52.3). Pilot's note on
  * the action shows nowhere while the work holds it, nor in its document opened as Pilot's, and
  * inside it once it is the person's again, its triangle saying so of a note written since (F168.1,
- * F168.8).
+ * F168.8); nor does Pilot's alert on the document while it is Pilot's (F168.6).
  */
 
 import type { Locator } from '@playwright/test';
@@ -288,7 +288,7 @@ test.describe('A claimed action', () => {
     expect(await colourOf(item.segment('A1'))).toBe(await colourOf(item.segment('D1')));
   });
 
-  test('Pilot’s note on it shows nowhere while the work doing it holds it, its document opened as Pilot’s showing none, and Send answers names a block Pilot’s note differs on ahead of it; once that work is stopped the note stands inside the action, the person’s again, live, and a note written since says so in its triangle', async ({
+  test('Pilot’s note on it shows nowhere while the work doing it holds it, its document opened as Pilot’s showing none, nor Pilot’s alert, and Send answers names a block Pilot’s note differs on ahead of it; once that work is stopped the note stands inside the action and the alert in the head, the person’s again, live, and a note written since says so in its triangle', async ({
     people,
     projects,
     controller,
@@ -300,6 +300,8 @@ test.describe('A claimed action', () => {
     const { project, document } = await registered({ people, projects, controller, chats }, cutOver(TOKEN, true));
     await projects.note(document, { block: 'A1', text: 'The token is also in the nightly job.' });
     await projects.note(document, { block: 'D1', suggested_answer: 'Monday' });
+    const runner = await projects.place(project, { kind: 'question', title: 'Which runner?', text: '```question id=Q1\n```\n' });
+    await projects.alert(document, { text: 'Answer which runner first: the cut-over moves the jobs to it.', awaits: `${runner}/Q1` });
     await projects.transition(project, 'paused');
     const rotating = await projects.startWork(project, {
       title: ROTATING,
@@ -329,9 +331,11 @@ test.describe('A claimed action', () => {
     await expect(overlay.blockAt('A1').claimWork).toHaveText(ROTATING);
     await expect(overlay.blockAt('D1').answered).toBeVisible();
     await expect(overlay.body.getByTestId('timeline.block.pilots-note')).toHaveCount(0);
+    await expect(overlay.alert.root).toHaveCount(0);
 
     await projects.stop(rotating);
     await expect(overlay.strip.root).toHaveCount(0);
+    await expect(overlay.alert.go).toHaveText('Which runner?');
     const opened = overlay.blockAt('A1');
     await expect(opened.undone).toBeVisible();
     await expect(opened.pilotsNote.text).toHaveText('The token is also in the nightly job.');

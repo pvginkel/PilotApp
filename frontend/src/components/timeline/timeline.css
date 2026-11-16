@@ -490,6 +490,30 @@
   .pilot-note.one { align-items: center; padding: 4px 10px; color: hsl(var(--muted-foreground)); cursor: pointer; }
   .pilot-note.one > .pn-mark { margin-top: 0; }
   .pilot-note.one .one-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Pilot's note on a document as a whole (F168.5): the same box, under the summary, or at an
+     inline document's top. */
+  .pilot-note.doc { margin: 0 0 18px; padding: 10px 14px; }
+  .inline-doc > .pilot-note.doc { margin: 12px 0 0; }
+  .inline-doc > :is(.pilot-note.doc, .doc-alert) + .prose { margin-top: 12px; }
+
+  /* Pilot's alert for what a document's Send starts (F168.6; send-alert.tsx): the halt's popover's
+     gold line with its button, rounded, the document's width; the head's last line, or an inline
+     document's top. On a phone, one line cut with an ellipsis, a chevron at its end, until a tap
+     opens it. */
+  .gold-line.doc-alert { padding: 10px 14px; border: 1px solid hsl(var(--gold-edge)); border-radius: var(--radius); }
+  .doc-alert .gold-body { flex: 1; }
+  .doc-alert .da-text > :last-child { margin-bottom: 0; }
+  /* A long title wraps inside its button. */
+  .doc-alert .gold-btn { max-width: 100%; height: auto; min-height: 26px; padding: 2px 10px; white-space: normal; text-align: left; }
+  .doc-alert :focus-visible { outline-color: hsl(var(--gold-foreground)); }
+  .doc-alert > .toggle { --h: 20px; flex: none; color: inherit; }
+  .doc-alert > .toggle .icon { width: 12px; height: 12px; margin-top: 0; stroke-width: 2.2; }
+  .inline-doc > .doc-alert { margin: 12px 0 0; }
+  @media (max-width: 900px) {
+    .gold-line.doc-alert { padding: 8px 12px; cursor: pointer; }
+    .doc-alert:not(.open) .da-text > :first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .doc-alert:not(.open) :is(.da-text > :not(:first-child), .gold-actions) { display: none; }
+  }
 
   /* The card a larger document or a review leaves: what is in it, how far the answers are. */
   .doc-card .counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }

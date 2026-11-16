@@ -7,7 +7,10 @@
  * Keep in its block's place (F5.6), then Pilot's dots while it writes
  * (F28.3), and over the text, where Pilot asked a registered document's writer about its blocks,
  * the box of the questions and the writer's reply (F52.2), which an asked block's mark goes to, as
- * the box's address opens the document at it. Its head's buttons are Pilot's job on the item, its
+ * the box's address opens the document at it; Pilot's note on the document as a whole stands under
+ * the lead (F168.5), and Pilot's alert for what its Send starts is its head's last line, under the
+ * segment bar, on a document that is the person's (F168.6). Its head's buttons are Pilot's job on
+ * the item, its
  * Undo while it lasts, the copy of its text as written, front matter, prose and blocks, as the read
  * is drawn from it, and Discuss (F28.10): the job opens its session log, off a phone the popover
  * over the tab, which closing shows again, on a phone a view pushed over the document's. *Edited* and the dots tell of the text as it
@@ -47,6 +50,8 @@ import { Undo } from '@/components/timeline/item';
 import { Edited } from '@/components/timeline/item-head';
 import { JobOn } from '@/components/timeline/job';
 import { LockedContext } from '@/components/timeline/locked';
+import { DocumentNote } from '@/components/timeline/pilots-note';
+import { SendAlert } from '@/components/timeline/send-alert';
 import { ToClarificationContext } from '@/components/timeline/to-clarification';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useItemDocument, type ItemDocument } from '@/hooks/use-document';
@@ -102,6 +107,8 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
       at={block === null ? null : { item: documentId, block }}
       titles={headed && <Titles item={headed} project={project} />}
       acts={headed && <Acts item={headed} />}
+      // Each document opens with its alert closed.
+      alert={item?.send_alert && item.pilots_work === null && <SendAlert key={item.id} alert={item.send_alert} />}
       strip={headed?.pilots_work && <PilotStrip itemId={headed.id} pilots={headed.pilots_work} read={item !== undefined} />}
       foot={headed && footOf(headed, handle, close)}
       onClose={close}
@@ -186,6 +193,7 @@ function Body({ item, box }: { item: ItemDocument; box: ReturnType<typeof useCla
             <LinkedText text={item.summary} />
           </div>
         )}
+        {item.pilots_note !== null && <DocumentNote note={item.pilots_note} />}
         <Attachments item={item} inDocument />
         <Clarifications item={item} boxRef={box.box} flashing={box.flashing} onFlashed={box.onFlashed} />
         <div className={cn('sheet-doc', locked && 'locked')} data-testid="overlay.document">

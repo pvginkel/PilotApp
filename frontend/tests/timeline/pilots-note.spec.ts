@@ -11,9 +11,14 @@
  * another answer on takes no default: *Send answers* waits on it, its tooltip naming it (F168.4);
  * a note that agrees, or one on a block with no recommendation, changes nothing there. None shows
  * on a block Pilot answered, or on a confirmation. A claimed action's note, held and handed back,
- * is `tests/work/claimed.spec.ts`'s.
+ * is `tests/work/claimed.spec.ts`'s. On an open action a note may offer work, its primary button
+ * starting Pilot's work, the job's mark under the mouse: pressed, Pilot's job stands on the document,
+ * the note folds to its line saying the work started, and the action stays the person's, with its
+ * Done (F168.7, F59.3). A note on the document as a whole stands at an inline document's top, and
+ * opened under its summary (F168.5).
  */
 
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 
@@ -30,6 +35,12 @@ const DIFFERS = 'Pilot’s note on Which tent? suggests another answer than reco
 const FERRY = 'The ferry runs on Sundays.';
 const CARD = 'Booked with the club’s card.';
 const BELL = 'A borrowed bell tent';
+const FUEL = 'Find the cheapest station on the way';
+/** The job an offer's taking places (backend/app/services/job_service.py). */
+const OFFERED = 'Starting the work offered on A1';
+const SITE = 'The campsite has moved its gate to the east road since the writer last went.';
+
+const classesOf = (within: Locator) => within.locator('> *').evaluateAll((parts) => parts.map((part) => part.className));
 
 test.describe('Pilot’s note on a block', () => {
   test('stands inside a block of a document that is the person’s, between its head and its controls: its triangle saying it is Pilot’s, its text, the answer it suggests and the note beside it; the head, the segment and the option’s Recommended as they were', async ({
@@ -401,5 +412,99 @@ test.describe('Taking Pilot’s note', () => {
     await timeline.open(project);
     await expect(timeline.item(fuel).block.pilotsNote.note).toHaveText(CARD);
     await expect(timeline.item(fuel).block.pilotsNote.take).toHaveCount(0);
+  });
+});
+
+test.describe('Pilot’s offer on an action', () => {
+  test('shows the work Pilot would do, a primary button that starts it, the job’s mark under the mouse; pressed once, Pilot’s job stands on the document, the note folds to its line saying the work started, and the action stays the person’s, unheld, with its Done', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Offered'), members: [me.handle!] });
+    const trip = await projects.place(project, { kind: 'document', title: 'The trip', text: TRIP });
+    await projects.note(trip, { block: 'A1', text: 'The club’s van is booked that weekend.', offer: FUEL });
+    await timeline.open(project);
+
+    const item = timeline.item(trip);
+    const van = item.blockAt('A1');
+    await expect(van.pilotsNote.text).toHaveText('The club’s van is booked that weekend.');
+    await expect(van.pilotsNote.root).toContainText('Work Pilot would do');
+    await expect(van.pilotsNote.offer).toHaveText(FUEL);
+    await expect(van.pilotsNote.take).toHaveCount(0);
+    await expect(van.pilotsNote.start).toHaveText('Start a work item');
+    await expect(van.pilotsNote.start).toHaveClass(/\bbtn-primary\b/);
+    await expect(van.pilotsNote.start).toHaveAttribute('title', 'Pilot puts a work item for this on the timeline; the action stays yours, with its Done');
+    await expect(van.pilotsNote.start.locator('> .starts-work > .job-glyph')).toHaveCount(1);
+    await expect(item.job.root).toHaveCount(0);
+
+    await van.pilotsNote.start.click();
+    await expect(van.pilotsNote.root).toHaveAttribute('data-line', 'true');
+    await expect(van.pilotsNote.line).toHaveText(`Started as a work item: ${FUEL}`);
+    await expect(item.job.root).toContainText(OFFERED);
+    await expect(van.held.line).toHaveCount(0);
+    await expect(van.answered).toHaveCount(0);
+    await expect(van.done).toBeEnabled();
+    expect((await projects.document(trip)).body!.flatMap((part) => (part.type === 'block' ? [part.block] : []))[2]).toMatchObject({
+      answer: null,
+      done: null,
+      held: null,
+      pilots_note: { offer_taken: true },
+    });
+    // Opened, it says the work started and offers nothing more to press.
+    await van.pilotsNote.toggle.click();
+    await expect(van.pilotsNote.root).toContainText('Started as a work item');
+    await expect(van.pilotsNote.offer).toHaveText(FUEL);
+    await expect(van.pilotsNote.start).toHaveCount(0);
+    await van.pilotsNote.toggle.click();
+
+    // The Done is the person's still.
+    await van.done.click();
+    await expect(van.answered).toBeVisible();
+    await expect(van.pilotsNote.line).toHaveText(`Started as a work item: ${FUEL}`);
+  });
+
+  test('on an action done before it was taken is one line naming the work, with no button that starts it', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Offered'), members: [me.handle!] });
+    const trip = await projects.place(project, { kind: 'document', title: 'The trip', text: TRIP });
+    await projects.note(trip, { block: 'A1', offer: FUEL });
+    await projects.markDone(trip, 'A1');
+    await timeline.open(project);
+
+    const van = timeline.item(trip).blockAt('A1');
+    await expect(van.pilotsNote.line).toHaveText(`Work Pilot would do: ${FUEL}`);
+    await van.pilotsNote.toggle.click();
+    await expect(van.pilotsNote.offer).toHaveText(FUEL);
+    await expect(van.pilotsNote.start).toHaveCount(0);
+  });
+});
+
+test.describe('Pilot’s note on the document as a whole', () => {
+  test('stands at an inline document’s top, and opened under its summary, before its text: the block’s box, its triangle saying it is Pilot’s note on the document', async ({
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Noted'), members: [me.handle!] });
+    const trip = await projects.place(project, { kind: 'document', title: 'The trip', text: `---\nsummary: Three choices for the weekend.\n---\n${TRIP}` });
+    await projects.note(trip, { text: SITE });
+    await timeline.open(project);
+
+    const item = timeline.item(trip);
+    expect((await classesOf(item.document))[0]).toBe('pilot-note doc');
+    await expect(item.pilotsNote.text).toHaveText(SITE);
+    await expect(item.pilotsNote.mark).toHaveAttribute('title', 'Pilot’s own note on this document, not the writer’s');
+    await expect(item.pilotsNote.mark).toHaveAttribute('data-late', 'false');
+    await expect(item.pilotsNote.root.getByRole('button')).toHaveCount(0);
+    await expect(item.blockAt('D1').pilotsNote.root).toHaveCount(0);
+
+    await overlay.open(project, trip);
+    expect((await classesOf(overlay.body.locator('.column'))).slice(0, 3)).toEqual(['lead', 'pilot-note doc', 'sheet-doc']);
+    await expect(overlay.pilotsNote.text).toHaveText(SITE);
+    await expect(overlay.pilotsNote.mark).toHaveAttribute('title', 'Pilot’s own note on this document, not the writer’s');
   });
 });

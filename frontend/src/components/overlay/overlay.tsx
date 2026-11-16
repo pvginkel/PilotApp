@@ -17,7 +17,8 @@
  * its block in its body, which flashes (F33), and opened at a block it goes there once its body
  * draws it; either opens the block's collapsed section (F31.5). Its head carries Discuss, quoting
  * what it shows (F39.1), after Pilot's job on it and its Undo where it has them (F28.10), its
- * buttons level with its title's first line; a strip under its head,
+ * buttons level with its title's first line, and its last line, where what it shows has one, an
+ * alert across its width; a strip under its head,
  * where what it shows has one, says what Pilot does on it (F28.9). On a phone it is a view pushed
  * over the tabs (F98.4): the whole screen over the head and the tabs, with no animation, no
  * backdrop, no maximize and no cross, an arrow back at the left of its head where the head's arrow
@@ -54,6 +55,8 @@ interface OverlayProps {
   tall?: boolean;
   /** Its head's buttons, once what it shows is read: Pilot's job on it, its Undo, Discuss. */
   acts?: ReactNode;
+  /** Its head's last line, across its width: Pilot's alert on a document. */
+  alert?: ReactNode;
   /** Under its head: what Pilot does on a document that is Pilot's. */
   strip?: ReactNode;
   foot: ReactNode;
@@ -73,6 +76,7 @@ export function Overlay({
   back = null,
   tall = false,
   acts = null,
+  alert = null,
   strip = null,
   foot,
   onClose,
@@ -230,6 +234,7 @@ export function Overlay({
                   <X className="icon" aria-hidden="true" />
                 </button>
               )}
+              {alert}
             </div>
             {strip}
             <div key={showing} className="scroll-frame">
