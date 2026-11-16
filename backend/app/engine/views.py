@@ -27,7 +27,9 @@ from app.models import (
     CardTransition,
     Chat,
     ConfirmationReason,
+    Conversation,
     Document,
+    Environment,
     Item,
     ItemAttachment,
     ItemKind,
@@ -47,7 +49,10 @@ from app.services.session_record_service import (
     last_record,
     read_records,
 )
-from app.services.start_gate import CHAT_KIND
+from app.services.start_gate import CHAT_KIND, CONVERSATION_KIND
+
+_TRANSCRIPT_KINDS = (CHAT_KIND, CONVERSATION_KIND)
+"""The Session Kinds whose records `chat.md` shows."""
 
 READONLY = (
     "a projection of the record; an edit is reverted"
@@ -58,6 +63,12 @@ it as an HTML comment."""
 
 _RECORD_PAGE = 500
 """The records one read of a chat's takes, in order."""
+
+CHAT_HEADING = "Chat"
+
+CONVERSATION_HEADING = "Conversation with a session in"
+"""How a Conversation's heading in `chat.md` opens, its caller after it
+(`caller_named`)."""
 
 
 @dataclass(frozen=True)
@@ -76,6 +87,17 @@ class ListedChat:
     chat: Chat
     opened_at: datetime
     state: SessionState
+
+
+@dataclass(frozen=True)
+class _Transcript:
+    """A chat or a conversation in `chat.md`: its Session, what its heading
+    names it, and when it opened and closed."""
+
+    session_id: uuid.UUID
+    named: str
+    opened_at: datetime
+    closed_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -238,21 +260,25 @@ class ViewService:
         self.engine_bus.emit(ProjectChanged(project.id))
 
     def chat(self, project: Project) -> Rendering:
-        """The project's chats as `chat.md` gives them (design 3 §10): in
-        their order (`project_chats`), each under its opening stamp and
-        ending with its close's, or "Open"; in each, a person's messages
-        from the `send` records, their words verbatim, and Pilot's text,
-        the main thread's `assistant` text blocks alone, with each effect's
-        line where its call ran, every record read through the one read
-        function; a closed chat's kept (`_closed_conversation`)."""
+        """The project's chats and its conversations as `chat.md` gives them
+        (design 3 §10; F150.12): in their order (`_transcripts`), each under
+        a heading that names it, a conversation's with its caller, and its
+        opening stamp, and ending with its close's, or "Open"; in each, the
+        messages from the `send` records, each under its author's handle, a
+        conversation's the service user's, their words verbatim, and Pilot's
+        text, the main thread's `assistant` text blocks alone, with each
+        effect's line where its call ran, every record read through the one
+        read function; a closed one's kept (`_closed_conversation`)."""
         paragraphs = [f"<!-- {READONLY} -->"]
-        for listed in project_chats(self.db, project.id):
-            paragraphs.append(f"## Chat · opened {utc_time(listed.opened_at)}")
-            closed = listed.chat.closed_at
+        for listed in self._transcripts(project.id):
+            paragraphs.append(
+                f"## {listed.named} · opened {utc_time(listed.opened_at)}"
+            )
+            closed = listed.closed_at
             paragraphs.extend(
-                self._conversation(listed.chat.id)
+                self._conversation(listed.session_id)
                 if closed is None
-                else self._closed_conversation(listed.chat.id)
+                else self._closed_conversation(listed.session_id)
             )
             paragraphs.append(
                 "Open" if closed is None else f"Closed {utc_time(closed)}"
@@ -263,9 +289,9 @@ class ViewService:
     def recorded(self, session: AgentSession, kind: RecordKind, payload: Any) -> None:
         """A record of `kind` carrying `payload` was written for `session`:
         tell the bus once the transaction commits that its project's
-        `chat.md` has a new hash, when the Session is a chat's and the file
-        shows the record."""
-        if session.kind_code == CHAT_KIND and shows_in_chat(kind, payload):
+        `chat.md` has a new hash, when the Session is a chat's or a
+        conversation's and the file shows the record."""
+        if session.kind_code in _TRANSCRIPT_KINDS and shows_in_chat(kind, payload):
             self.chat_moved(self.db.get_one(Project, session.project_id))
 
     def chat_moved(self, project: Project) -> None:
@@ -276,15 +302,55 @@ class ViewService:
         )
 
     def chats_moved(self, project: Project) -> None:
-        """A chat of the project opened or closed: tell the bus `chat.md` has
-        a new hash and that what the project's screens show moved, once the
-        transaction commits (F80.2's chat)."""
+        """A chat of the project opened, or a chat or a conversation of it
+        closed: tell the bus `chat.md` has a new hash and that what the
+        project's screens show moved, once the transaction commits (F80.2's
+        chat)."""
         self.chat_moved(project)
         self.engine_bus.emit(ProjectChanged(project.id))
 
+    def _transcripts(self, project_id: uuid.UUID) -> list[_Transcript]:
+        """The project's chats and conversations in `chat.md`'s order: the
+        definition chat first, where one exists, then every other chat and
+        every conversation in the order they opened."""
+        listed = [
+            (
+                chat.chat.kind_code is not ChatKind.DEFINITION,
+                _Transcript(
+                    chat.chat.id, CHAT_HEADING, chat.opened_at, chat.chat.closed_at
+                ),
+            )
+            for chat in project_chats(self.db, project_id)
+        ]
+        listed.extend(
+            (
+                True,
+                _Transcript(
+                    conversation.id,
+                    f"{CONVERSATION_HEADING}"
+                    f" {caller_named(environment, conversation.caller_session)}",
+                    opened_at,
+                    conversation.closed_at,
+                ),
+            )
+            for conversation, opened_at, environment in self.db.execute(
+                select(Conversation, AgentSession.created_at, Environment)
+                .join(AgentSession, AgentSession.id == Conversation.id)
+                .join(Environment, Environment.id == Conversation.caller_environment_id)
+                .where(Conversation.project_id == project_id)
+            )
+        )
+        return [
+            transcript
+            for _, transcript in sorted(
+                listed,
+                key=lambda entry: (entry[0], entry[1].opened_at, entry[1].session_id),
+            )
+        ]
+
     def _closed_conversation(self, chat_id: uuid.UUID) -> Sequence[str]:
-        """A closed chat's paragraphs, kept with the id of its last record,
-        read before them.
+        """A closed chat's or conversation's paragraphs, kept with the id of
+        its last record, read before them.
 
         A Session's records are written one per transaction under its row's
         lock, so committed in the order of their ids, and never changed; and
@@ -300,8 +366,9 @@ class ViewService:
         return kept
 
     def _conversation(self, session_id: uuid.UUID) -> list[str]:
-        """The chat's paragraphs in their order, each run of Pilot's and each
-        person's message under its author's handle and its first stamp. An
+        """The chat's or the conversation's paragraphs in their order, each
+        run of Pilot's and each message under its author's handle and its
+        first stamp. An
         effect stands after the `assistant` record that made its call, else
         in its own record's place."""
         said: list[_Said] = []
@@ -315,7 +382,7 @@ class ViewService:
             )
         for stored in self._every(session_id, RecordKind.SEND):
             record = stored.record
-            # A `send`'s Turn has its person and their words (`ck_turns_words`).
+            # A `send`'s Turn has its author and their words (`ck_turns_words`).
             assert stored.author is not None and stored.words is not None
             said.append(
                 _Said(
@@ -395,6 +462,16 @@ def project_chats(db: Session, project_id: uuid.UUID) -> list[ListedChat]:
             )
         )
     ]
+
+
+def caller_named(environment: Environment, caller_session: str | None) -> str:
+    """A Conversation's caller as its brief and `chat.md` name it: the
+    Environment it was opened from, by its name and its id, and the session
+    that opened it, left out where the call named none."""
+    named = environment.id
+    if caller_session is not None:
+        named += f", session {caller_session}"
+    return f"{environment.name} ({named})"
 
 
 def pilot_text(payload: Any) -> list[str]:

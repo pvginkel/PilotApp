@@ -70,7 +70,12 @@ from app.services.pilot_work_service import Worker
 from app.services.session_record_service import SessionRecordService
 from app.services.turn_end_read_service import READ_FAILED
 from app.services.wait_service import ReportedTransition
-from tests.support.chats import close_chat, open_chat
+from tests.support.chats import (
+    close_chat,
+    close_conversation,
+    open_chat,
+    open_conversation,
+)
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 
 AT = datetime(2026, 10, 26, 9, 30, 15, tzinfo=UTC)
@@ -188,6 +193,48 @@ class TestProjectChat:
             "The message, from ada (not a member):\n"
             "What next?"
         )
+
+    def test_a_project_that_has_had_only_conversations_names_no_earlier_chat(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        caller: Environment,
+    ) -> None:
+        """`chat.md` holds the conversation, and the line is for what the
+        people's chats left there (F150.12)."""
+        run = open_conversation(session, opened, caller, caller_session="triage")
+        close_conversation(
+            session, run, datetime(2026, 10, 25, 17, 10, tzinfo=UTC), CloseCause.ENDED
+        )
+
+        assert briefs.project_chat(opened, person, "What next?", AT) == (
+            f"{HEAD}\n\n"
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md).\n\n"
+            "The message, from ada (not a member):\n"
+            "What next?"
+        )
+
+    def test_the_latest_closed_is_a_chats_whatever_conversation_closed_after_it(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        caller: Environment,
+    ) -> None:
+        _closed_chat(session, opened, datetime(2026, 10, 25, 17, 10, tzinfo=UTC))
+        run = open_conversation(session, opened, caller)
+        close_conversation(
+            session, run, datetime(2026, 10, 25, 19, tzinfo=UTC), CloseCause.TIMEOUT
+        )
+
+        assert (
+            "Earlier chats of this project are in chat.md; the latest closed"
+            " 2026-10-25T17:10:00Z.\n\n"
+        ) in briefs.project_chat(opened, person, "What next?", AT)
 
     def test_every_line_that_holds_is_in_the_frames_order(
         self,

@@ -1,7 +1,8 @@
-"""A project's chats written as the server writes them, for the tests that read
-them: the Chat and its Session, then its records through the one writer, a
-person's message as its Turn and `send`, Pilot's lines as the relay records
-them, and an effect as a tool's call places it."""
+"""A project's chats and conversations written as the server writes them, for
+the tests that read them: the Chat or the Conversation and its Session, then
+its records through the one writer, a person's or a caller's message as its
+Turn and `send`, Pilot's lines as the relay records them, and an effect as a
+tool's call places it."""
 
 import uuid
 from datetime import UTC, datetime
@@ -10,7 +11,7 @@ from typing import Any
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
-from app.models import Chat, SessionRecord, Turn, User
+from app.models import Chat, Conversation, Environment, SessionRecord, Turn, User
 from app.models.reference import (
     ChatKind,
     CloseCause,
@@ -56,9 +57,54 @@ def close_chat(
     db.flush()
 
 
+def open_conversation(
+    db: DbSession,
+    project: models.Project,
+    caller: Environment,
+    *,
+    caller_session: str | None = None,
+    opened_at: datetime | None = None,
+    state: SessionState = SessionState.IDLE,
+) -> models.Session:
+    """A conversation of `project` opened from `caller` by the session
+    `caller_session`, its Session in the store, in `state`, opened at
+    `opened_at`, the database's now by default."""
+    run = models.Session(
+        project_id=project.id,
+        kind_code="conversation",
+        cwd="/work/PilotProjects",
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=state,
+    )
+    if opened_at is not None:
+        run.created_at = opened_at
+    db.add(run)
+    db.flush()
+    db.add(
+        Conversation(
+            id=run.id,
+            project_id=project.id,
+            session_kind_code="conversation",
+            caller_environment_id=caller.id,
+            caller_session=caller_session,
+        )
+    )
+    db.flush()
+    return run
+
+
+def close_conversation(
+    db: DbSession, run: models.Session, at: datetime, cause: CloseCause
+) -> None:
+    conversation = db.get_one(Conversation, run.id)
+    conversation.closed_at, conversation.close_cause_code = at, cause
+    db.flush()
+
+
 class ChatWriter:
-    """Writes one chat's records, each through the one writer, as the server
-    writes them: a Turn in flight from each message on."""
+    """Writes one chat's or one conversation's records, each through the one
+    writer, as the server writes them: a Turn in flight from each message
+    on."""
 
     def __init__(
         self, db: DbSession, records: SessionRecordService, run: models.Session
@@ -70,8 +116,8 @@ class ChatWriter:
         self._offset = 0
 
     def message(self, person: User, words: str) -> SessionRecord:
-        """`person`'s message: a Turn of theirs, the brief before the words on
-        the first, and its `send`."""
+        """`person`'s message, a conversation's its service user's: a Turn of
+        theirs, the brief before the words on the first, and its `send`."""
         self.turn = self._turn(person, words)
         return self.records.append(self.run.id, RecordKind.SEND, turn_id=self.turn.id)
 

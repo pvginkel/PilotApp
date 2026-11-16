@@ -16,9 +16,11 @@ from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.closed_chats import ClosedChats
 from app.engine.views import (
+    CONVERSATION_HEADING,
     READONLY,
     Rendering,
     ViewService,
+    caller_named,
     project_chats,
     utc_time,
 )
@@ -47,7 +49,13 @@ from app.models.reference import (
 )
 from app.services.container import ServiceContainer
 from app.utils.after_commit import clear_after_commit_callbacks
-from tests.support.chats import ChatWriter, close_chat, open_chat
+from tests.support.chats import (
+    ChatWriter,
+    close_chat,
+    close_conversation,
+    open_chat,
+    open_conversation,
+)
 
 _CONTENT = b"# Palette\n\nThe two colours compared.\n"
 
@@ -1073,3 +1081,222 @@ class TestChatView:
             TreeHashMoved(f"draft-{project.number}/chat.md", views.chat(project).hash),
             ProjectChanged(project.id),
         ]
+
+
+@pytest.fixture
+def caller(session: DbSession) -> Environment:
+    """The environment a conversation is opened from."""
+    row = Environment(id="example-recipebox-1a2b3c", name="RecipeBox-2", exempt=False)
+    session.add(row)
+    session.flush()
+    return row
+
+
+_HEADING = (
+    "## Conversation with a session in RecipeBox-2"
+    " (example-recipebox-1a2b3c, session ui-sweep-triage)"
+)
+
+
+class TestConversationsInChatView:
+    """A conversation's transcript in `chat.md`, beside the chats' (F150.12)."""
+
+    def test_a_conversation_stands_under_a_heading_naming_its_caller(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        service_user: User,
+        caller: Environment,
+    ) -> None:
+        run = open_conversation(
+            session,
+            project,
+            caller,
+            caller_session="ui-sweep-triage",
+            opened_at=_at(9),
+        )
+        conversation = _writer(session, container, run)
+        asked = conversation.message(service_user, "How is the stock going?\n")
+        conversation.call("toolu_1")
+        conversation.effect("toolu_1", "Added", "Action · Taste the stock")
+        said = conversation.text("Simmering.")
+        # The server's follow-up, sent after the caller's turn ended: no `send`.
+        conversation.server_turn("Your save of `soup-club/plan.json` is held.")
+        conversation.text("Saved now.")
+        again = conversation.message(service_user, "And the bread?")
+
+        text = _rendering(container.view_service().chat(project))
+
+        assert (
+            text
+            == "\n\n".join(
+                [
+                    _COMMENT,
+                    f"{_HEADING} · opened 2026-10-12T09:00:00Z",
+                    f"**fleet** · {utc_time(asked.at)}",
+                    "How is the stock going?",
+                    f"**agent** · {utc_time(asked.at)}",
+                    "Added · Action · Taste the stock",
+                    "Simmering.",
+                    "Saved now.",
+                    f"**fleet** · {utc_time(again.at)}",
+                    "And the bread?",
+                    "Open",
+                ]
+            )
+            + "\n"
+        )
+        assert said.at >= asked.at
+
+    def test_its_heading_names_the_caller_as_its_brief_does(
+        self, caller: Environment
+    ) -> None:
+        assert CONVERSATION_HEADING == "Conversation with a session in"
+        assert (
+            f"## {CONVERSATION_HEADING} {caller_named(caller, 'ui-sweep-triage')}"
+            == (_HEADING)
+        )
+
+    def test_one_whose_call_named_no_session_is_headed_by_its_environment_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        caller: Environment,
+    ) -> None:
+        open_conversation(session, project, caller, opened_at=_at(9))
+
+        text = _rendering(container.view_service().chat(project))
+
+        assert text == (
+            f"{_COMMENT}\n\n"
+            "## Conversation with a session in RecipeBox-2 (example-recipebox-1a2b3c)"
+            " · opened 2026-10-12T09:00:00Z\n\n"
+            "Open\n"
+        )
+
+    def test_the_chats_and_the_conversations_are_in_the_order_they_opened(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        caller: Environment,
+    ) -> None:
+        """The definition chat first, as among the chats alone; each closed
+        one ends with its close's stamp."""
+        first = open_conversation(
+            session, project, caller, caller_session="one", opened_at=_at(9)
+        )
+        close_conversation(session, first, _at(9, 30), CloseCause.ENDED)
+        chat = open_chat(session, project, opened_at=_at(10))
+        close_chat(session, chat, _at(10, 30), CloseCause.TIMEOUT)
+        open_conversation(
+            session, project, caller, caller_session="two", opened_at=_at(11)
+        )
+        definition = open_chat(
+            session, project, kind=ChatKind.DEFINITION, opened_at=_at(12)
+        )
+        close_chat(session, definition, _at(12, 5), CloseCause.CREATED)
+        open_chat(session, project, opened_at=_at(13))
+        open_conversation(session, project, caller, opened_at=_at(14))
+        named = (
+            "## Conversation with a session in RecipeBox-2 (example-recipebox-1a2b3c"
+        )
+
+        text = _rendering(container.view_service().chat(project))
+
+        assert [
+            paragraph
+            for paragraph in text.rstrip("\n").split("\n\n")
+            if paragraph.startswith(("## ", "Closed", "Open"))
+        ] == [
+            "## Chat · opened 2026-10-12T12:00:00Z",
+            "Closed 2026-10-12T12:05:00Z",
+            f"{named}, session one) · opened 2026-10-12T09:00:00Z",
+            "Closed 2026-10-12T09:30:00Z",
+            "## Chat · opened 2026-10-12T10:00:00Z",
+            "Closed 2026-10-12T10:30:00Z",
+            f"{named}, session two) · opened 2026-10-12T11:00:00Z",
+            "Open",
+            "## Chat · opened 2026-10-12T13:00:00Z",
+            "Open",
+            f"{named}) · opened 2026-10-12T14:00:00Z",
+            "Open",
+        ]
+        # The chats a person reads are the chats alone.
+        assert len(project_chats(session, project.id)) == 3
+
+    def test_a_closed_conversation_is_read_once_until_it_takes_a_record(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        service_user: User,
+        caller: Environment,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A stopped turn of an ended conversation ends after its close."""
+        run = open_conversation(session, project, caller, opened_at=_at(9))
+        conversation = _writer(session, container, run)
+        conversation.message(service_user, "Earlier.")
+        close_conversation(session, run, _at(9, 30), CloseCause.ENDED)
+        views = _views(session, container)
+        read = _reads(monkeypatch)
+
+        first = views.chat(project)
+        again = views.chat(project)
+
+        assert again == first
+        assert "Earlier." in first.text
+        assert read == [run.id]
+
+        conversation.text("One more line.")
+
+        assert "One more line." in views.chat(project).text
+
+    def test_another_projects_conversations_are_not_in_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        service_user: User,
+        caller: Environment,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        run = open_conversation(session, other, caller)
+        _writer(session, container, run).message(service_user, "Hi.")
+
+        assert _rendering(container.view_service().chat(project)) == f"{_COMMENT}\n"
+
+    def test_a_record_of_it_the_file_shows_moves_its_hash_after_the_commit(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        service_user: User,
+        caller: Environment,
+    ) -> None:
+        run = open_conversation(session, project, caller)
+        conversation = _writer(session, container, run)
+        path = f"draft-{project.number}/chat.md"
+        views = container.view_service()
+
+        with scoped_session(container):
+            conversation.message(service_user, "How is the stock going?")
+            assert engine_events == []
+        sent = views.chat(project).hash
+        with scoped_session(container):
+            conversation.text("Simmering.")
+        with scoped_session(container):
+            conversation.line({"type": "system", "subtype": "init"})
+
+        assert engine_events == [
+            TreeHashMoved(path, sent),
+            TreeHashMoved(path, views.chat(project).hash),
+        ]
+        assert sent != views.chat(project).hash

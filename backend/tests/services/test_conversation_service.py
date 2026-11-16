@@ -21,7 +21,8 @@ from werkzeug.wrappers import Request, Response
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged, _Delivery
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, _Delivery
+from app.engine.views import utc_time
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Chat,
@@ -552,6 +553,75 @@ class TestOpen:
         assert "sandboxWritableDirs" not in body
         assert "mcpConfig" not in body
         assert body["env"] == [f"PILOT_PROJECT={FOLDER}", f"PILOT_SESSION={run.id}"]
+
+
+class TestItsTranscript:
+    """The conversation in `chat.md`, beside the chats' (F150.12)."""
+
+    def test_its_opening_puts_it_in_chat_md_and_tells_the_store(
+        self,
+        container: ServiceContainer,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        turn = _open(conversations, opened, service_user)
+
+        chat = container.view_service().chat(opened)
+        assert chat.text.split("\n\n")[1:] == [
+            "## Conversation with a session in RecipeBox-2"
+            " (example-recipebox-1a2b3c, session ui-sweep-triage)"
+            f" · opened {utc_time(_read(conversations.db, turn.session_id).created_at)}",
+            f"**fleet** · {utc_time(turn.started_at)}",
+            WORDS,
+            "Open\n",
+        ]
+        assert TreeHashMoved("soup-club/chat.md", chat.hash) in _emitted()
+
+    def test_its_turns_stand_in_it_as_the_caller_and_pilot_said_them(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        services: tuple[SessionStartService, RelayService],
+        conversations: ConversationService,
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+    ) -> None:
+        chat = open_chat(session, opened)
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        conversations.send(run.id, service_user, "Two")
+        before = container.view_service().chat(opened).text
+
+        conversations.end(run.id, service_user)
+
+        said = [
+            paragraph
+            for paragraph in before.split("\n\n")
+            if not paragraph.startswith("**")
+        ]
+        assert said == [
+            said[0],
+            f"## Chat · opened {utc_time(chat.created_at)}",
+            "Open",
+            "## Conversation with a session in RecipeBox-2"
+            " (example-recipebox-1a2b3c, session ui-sweep-triage)"
+            f" · opened {utc_time(run.created_at)}",
+            "One",
+            "Simmering.",
+            "Two",
+            "Open\n",
+        ]
+        assert [
+            paragraph.split(" · ")[0]
+            for paragraph in before.split("\n\n")
+            if paragraph.startswith("**")
+        ] == ["**fleet**", "**agent**", "**fleet**"]
+        closed = _row(session, run.id).closed_at
+        assert closed is not None
+        after = container.view_service().chat(opened)
+        assert after.text.endswith(f"\n\nTwo\n\nClosed {utc_time(closed)}\n")
+        assert TreeHashMoved("soup-club/chat.md", after.hash) in _emitted()
 
 
 class TestTheCallersEnvironment:

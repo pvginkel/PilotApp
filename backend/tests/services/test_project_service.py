@@ -94,6 +94,7 @@ from app.services.timeline_service import Badge
 from app.services.working_on import Reading
 from app.utils import after_commit as after_commit_module
 from tests.support.adoption import FIRST_MENUS
+from tests.support.chats import open_conversation
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
 from tests.support.working_on import Camp
@@ -666,6 +667,37 @@ class TestTabs:
             draft.id: None,
             finished.id: None,
         }
+
+    def test_a_running_conversation_counts_as_a_running_chat_does(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """A paused project is pausing while one runs, and no project is
+        running for it (DB 228; F150.12)."""
+        pausing = _make(container, name="Pausing", paused=True)
+        open_conversation(session, pausing, environment, state=SessionState.RUNNING)
+        paused = _make(container, name="Paused", paused=True)
+        open_conversation(session, paused, environment, state=SessionState.IDLE)
+        talking = _make(container, name="Talking")
+        open_conversation(session, talking, environment, state=SessionState.RUNNING)
+        chatting = _make(container, name="Chatting")
+        _chat(container, session, chatting, environment, SessionState.RUNNING)
+        service = container.project_service()
+
+        tabs = service.tabs(ADA, archived=False)
+
+        statuses = {
+            pausing.id: ProjectStatus.PAUSING,
+            paused.id: ProjectStatus.PAUSED,
+            talking.id: ProjectStatus.IDLE,
+            chatting.id: ProjectStatus.IDLE,
+        }
+        assert {tab.project.id: tab.status for tab in tabs} == statuses
+        assert {
+            project_id: service.head(ADA, project_id).status for project_id in statuses
+        } == statuses
 
     def test_the_status_waits_on_a_member_whoever_reads_it(
         self,

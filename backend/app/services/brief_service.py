@@ -27,7 +27,7 @@ from app.engine.documents import OPENING, REVIEW
 from app.engine.paths import draft_folder
 from app.engine.plan import PlanService
 from app.engine.record import ANSWERED
-from app.engine.views import utc_time
+from app.engine.views import caller_named, utc_time
 from app.models import (
     Attachment,
     Block,
@@ -1121,13 +1121,9 @@ its skill and its frame from (§5.3)."""
 
 
 def conversation_kind(environment: Environment, caller_session: str | None) -> str:
-    """The kind of a Conversation's brief (§5.3): the Environment it was
-    opened from, by its name and its id, and the session that opened it, left
-    out where the call named none."""
-    named = environment.id
-    if caller_session is not None:
-        named += f", session {caller_session}"
-    return f"{CONVERSATION_KIND_LINE} {environment.name} ({named})"
+    """The kind of a Conversation's brief (§5.3): its caller, as `chat.md`
+    names it too."""
+    return f"{CONVERSATION_KIND_LINE} {caller_named(environment, caller_session)}"
 
 
 BY_A_CALL = "Started by a call"

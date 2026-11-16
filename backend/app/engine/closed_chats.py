@@ -1,6 +1,7 @@
-"""A closed chat's paragraphs in `chat.md`, kept per chat with the id of the
-last record they were read from, so that a chat's paragraphs are read again
-only once a record is added to it (`ViewService.chat`)."""
+"""A closed chat's paragraphs in `chat.md`, and a closed conversation's as a
+chat's, kept per chat with the id of the last record they were read from, so
+that a chat's paragraphs are read again only once a record is added to it
+(`ViewService.chat`)."""
 
 import threading
 import uuid

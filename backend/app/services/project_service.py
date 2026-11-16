@@ -144,7 +144,8 @@ class Activity:
     """What of a project runs and waits, as its status reads it (DB 228)."""
 
     running: bool
-    """A Session of the project is `running`, a Chat's included."""
+    """A Session of the project is `running`, a Chat's and a Conversation's
+    included."""
     work_running: bool
     """A Work of the project is `running`: a work item or a job."""
     waiting: bool
