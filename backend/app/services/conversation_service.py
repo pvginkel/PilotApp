@@ -42,6 +42,10 @@ briefed, when the stop ended its start unsent. Its caller's end closes it,
 refuses for what it finds: an interrupt with no Turn in flight and the end of
 a closed conversation change nothing, as KubeCoder's interrupt of an idle
 session and its end of one gone.
+
+A person's Stop of Pilot's answer in a conversation of their project (`stop`;
+F150.12, F44) is a chat's Stop, by that person, whoever opened the
+conversation, and is refused as a chat's where Pilot is not answering in it.
 """
 
 import uuid
@@ -242,6 +246,31 @@ class ConversationService:
         if conversation.closed_at is None:
             self.chat_close_service.end(self.db, conversation, datetime.now(UTC))
         return conversation
+
+    def stop(
+        self, project_id: uuid.UUID, conversation_id: uuid.UUID, person: User
+    ) -> None:
+        """`person`'s Stop of Pilot's answer in the project's Conversation,
+        in the caller's transaction (F44), as a chat's Stop
+        (`SessionStartService.stop_chat`): a turn in flight is interrupted
+        once this commits, the conversation kept open for its caller's next
+        message; a start held or under way ends its Turn unsent, and the
+        caller's next message starts it afresh, briefed.
+
+        Raises:
+            RecordNotFoundException: No Conversation of the project has the
+                id
+            InvalidOperationException: Pilot is not answering in it
+        """
+        conversation = self._conversation(conversation_id)
+        if conversation.project_id != project_id:
+            raise RecordNotFoundException("Conversation", str(conversation_id))
+        # The project's row before the Session's, the start's lock order.
+        self.records.lock_project(conversation.id)
+        project = self.db.get_one(Project, project_id)
+        self.session_start_service.stop_chat(
+            self.db, conversation.id, person, f"stop Pilot in {project_name(project)}"
+        )
 
     def _conversation(self, conversation_id: uuid.UUID) -> Conversation:
         """The Conversation.

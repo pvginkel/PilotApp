@@ -13,6 +13,11 @@ every Turn the server sent after it, the follow-up of a save still held
 (F79) among them, during which the caller's next message is refused. It is
 `running` while a Turn is in flight, as a message's refusal reads that
 (`in_flight`), and is read as it stands, with no wait.
+
+A project's people read every Conversation of the project (`of_project`,
+`one_of_project`; F150.12), whoever opened it: each with the Environment it
+was opened from, by its name, and whether Pilot is answering in it, its
+Session in a state a person's Stop ends (F44).
 """
 
 import uuid
@@ -26,12 +31,12 @@ from sqlalchemy.orm import Session
 
 from app.engine.views import pilot_text
 from app.exceptions import RecordNotFoundException
-from app.models import Conversation, Turn, User
+from app.models import Conversation, Environment, Project, Turn, User
 from app.models import Session as AgentSession
-from app.models.reference import RecordKind
+from app.models.reference import RecordKind, SessionState
 from app.services.conversation_service import in_flight
 from app.services.session_record_service import each_record, read_records
-from app.services.session_start_service import START_FAILED
+from app.services.session_start_service import START_FAILED, STOPPABLE
 
 MESSAGE_SEPARATOR = "\n\n---\n\n"
 """What stands between the sections of a reply's text, as between a turn's
@@ -49,6 +54,25 @@ class ListedConversation:
     opened_at: datetime
     turns: int
     in_flight: bool
+
+
+@dataclass(frozen=True)
+class ProjectConversation:
+    """A Conversation as its project's people read it: the Environment it
+    was opened from, when it opened, its Session's creation, and its
+    Session's state."""
+
+    conversation: Conversation
+    environment: Environment
+    opened_at: datetime
+    state: SessionState
+
+    @property
+    def answering(self) -> bool:
+        """Whether Pilot is answering in it: its Session in a state a
+        person's Stop ends (F44), its start held at the gate or under way,
+        or a turn of it running."""
+        return self.state in STOPPABLE
 
 
 @dataclass(frozen=True)
@@ -143,6 +167,40 @@ class ConversationReadService:
             )
         ]
 
+    def of_project(self, project_id: uuid.UUID) -> list[ProjectConversation]:
+        """The project's Conversations, open and closed, whoever opened
+        them, in the order they opened.
+
+        Raises:
+            RecordNotFoundException: No project has the id
+        """
+        if self.db.get(Project, project_id) is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        return [
+            ProjectConversation(*row)
+            for row in self.db.execute(
+                _of_project(project_id).order_by(
+                    AgentSession.created_at, Conversation.id
+                )
+            )
+        ]
+
+    def one_of_project(
+        self, project_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> ProjectConversation:
+        """The Conversation, one of the project's.
+
+        Raises:
+            RecordNotFoundException: No Conversation of the project has the
+                id
+        """
+        row = self.db.execute(
+            _of_project(project_id).where(Conversation.id == conversation_id)
+        ).one_or_none()
+        if row is None:
+            raise RecordNotFoundException("Conversation", str(conversation_id))
+        return ProjectConversation(*row)
+
     def _row(
         self, conversation_id: uuid.UUID, caller: User, environment_id: str | None
     ) -> tuple[Conversation, AgentSession]:
@@ -234,6 +292,22 @@ def _opened_by(caller: User, environment_id: str) -> Select[Conversation, AgentS
             Turn.author_user_id == caller.id,
             Conversation.caller_environment_id == environment_id,
         )
+        .execution_options(populate_existing=True)
+    )
+
+
+def _of_project(
+    project_id: uuid.UUID,
+) -> Select[Conversation, Environment, datetime, SessionState]:
+    """The project's Conversations, each with its caller's Environment, its
+    Session's creation and its Session's state, read afresh."""
+    return (
+        select(
+            Conversation, Environment, AgentSession.created_at, AgentSession.state_code
+        )
+        .join(AgentSession, AgentSession.id == Conversation.id)
+        .join(Environment, Environment.id == Conversation.caller_environment_id)
+        .where(Conversation.project_id == project_id)
         .execution_options(populate_existing=True)
     )
 

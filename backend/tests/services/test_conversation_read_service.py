@@ -1,7 +1,8 @@
 """A caller's conversations as it reads them: the one a call names, answered
 to its opener alone, the list its environment opened, and Pilot's reply to
 its latest message as it stands (F150.10, F150.11; DB Conversation,
-assertion 337; V01, V04)."""
+assertion 337; V01, V04); and a project's conversations as its people read
+them, whoever opened them (F150.12; V09)."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -23,11 +24,17 @@ from app.services.container import ServiceContainer
 from app.services.conversation_read_service import (
     ConversationReadService,
     ListedConversation,
+    ProjectConversation,
     Reply,
 )
 from app.services.relay_service import SEND_FAILED, STOPPED_UNSENT
 from app.services.session_start_service import START_FAILED
-from tests.support.chats import ChatWriter, close_conversation, open_conversation
+from tests.support.chats import (
+    ChatWriter,
+    close_conversation,
+    open_chat,
+    open_conversation,
+)
 
 OPENED = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
 
@@ -402,6 +409,160 @@ def talk(
     writer = ChatWriter(session, container.session_record_service(), run)
     writer.message(service_user, STOCK)
     return writer
+
+
+class TestOfProject:
+    def test_it_lists_the_projects_open_and_closed_whoever_opened_them_in_order(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        opened: Project,
+        bikes: Project,
+        recipebox: Environment,
+        automation: Environment,
+        service_user: User,
+        other_service_user: User,
+    ) -> None:
+        second = open_conversation(
+            session,
+            opened,
+            automation,
+            opened_at=OPENED + timedelta(hours=1),
+            state=SessionState.RUNNING,
+            opener=other_service_user,
+        )
+        first = open_conversation(
+            session,
+            opened,
+            recipebox,
+            caller_session="monday",
+            opened_at=OPENED,
+            opener=service_user,
+        )
+        close_conversation(
+            session, first, OPENED + timedelta(minutes=5), CloseCause.ENDED
+        )
+        open_conversation(session, bikes, recipebox, opener=service_user)
+
+        listed = reads.of_project(opened.id)
+
+        assert listed == [
+            ProjectConversation(
+                conversation=session.get_one(Conversation, first.id),
+                environment=recipebox,
+                opened_at=OPENED,
+                state=SessionState.IDLE,
+            ),
+            ProjectConversation(
+                conversation=session.get_one(Conversation, second.id),
+                environment=automation,
+                opened_at=OPENED + timedelta(hours=1),
+                state=SessionState.RUNNING,
+            ),
+        ]
+        assert [
+            (
+                entry.conversation.caller_session,
+                entry.conversation.close_cause_code,
+                entry.answering,
+            )
+            for entry in listed
+        ] == [("monday", CloseCause.ENDED, False), (None, None, True)]
+
+    def test_a_project_that_has_had_none_lists_none_whatever_chat_it_has(
+        self, session: DbSession, reads: ConversationReadService, opened: Project
+    ) -> None:
+        open_chat(session, opened)
+
+        assert reads.of_project(opened.id) == []
+
+    def test_no_project_has_the_id(self, reads: ConversationReadService) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(
+            RecordNotFoundException, match=f"Project {unknown} was not found"
+        ):
+            reads.of_project(unknown)
+
+    @pytest.mark.parametrize(
+        ("state", "answering"),
+        [
+            (SessionState.HELD, True),
+            (SessionState.STARTING, True),
+            (SessionState.RUNNING, True),
+            (SessionState.IDLE, False),
+            (SessionState.STOPPED, False),
+            (SessionState.FAILED, False),
+            (SessionState.ENDED, False),
+        ],
+    )
+    def test_pilot_answers_in_it_while_a_stop_would_end_its_session(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        opened: Project,
+        recipebox: Environment,
+        state: SessionState,
+        answering: bool,
+    ) -> None:
+        open_conversation(session, opened, recipebox, state=state)
+
+        (entry,) = reads.of_project(opened.id)
+
+        assert entry.answering is answering
+
+
+class TestOneOfProject:
+    def test_it_reads_the_projects_conversation_as_it_stands(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        opened: Project,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        run = open_conversation(
+            session,
+            opened,
+            recipebox,
+            caller_session="ui-sweep-triage",
+            opened_at=OPENED,
+            state=SessionState.STARTING,
+            opener=service_user,
+        )
+
+        entry = reads.one_of_project(opened.id, run.id)
+
+        assert entry == ProjectConversation(
+            conversation=session.get_one(Conversation, run.id),
+            environment=recipebox,
+            opened_at=OPENED,
+            state=SessionState.STARTING,
+        )
+
+    def test_another_projects_is_answered_as_an_id_that_never_was(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        opened: Project,
+        bikes: Project,
+        recipebox: Environment,
+    ) -> None:
+        run = open_conversation(session, bikes, recipebox)
+
+        for unknown in (run.id, uuid.uuid4()):
+            with pytest.raises(
+                RecordNotFoundException, match=f"Conversation {unknown} was not found"
+            ):
+                reads.one_of_project(opened.id, unknown)
+
+    def test_a_chat_is_no_conversation(
+        self, session: DbSession, reads: ConversationReadService, opened: Project
+    ) -> None:
+        chat = open_chat(session, opened)
+
+        with pytest.raises(RecordNotFoundException):
+            reads.one_of_project(opened.id, chat.id)
 
 
 class TestReply:

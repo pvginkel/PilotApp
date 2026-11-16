@@ -864,7 +864,8 @@ class ServiceContainer(containers.DeclarativeContainer):
         brain_model=app_config.provided.brain_model,
         brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
     )
-    # A caller's conversations as it reads them, its own alone (F150.11)
+    # A caller's conversations as it reads them, its own alone (F150.11), and
+    # a project's as its people read them (F150.12)
     conversation_read_service = providers.Factory(
         ConversationReadService, db=db_session
     )

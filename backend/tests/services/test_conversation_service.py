@@ -1527,6 +1527,144 @@ class TestInterrupt:
         assert session.get_one(Chat, chat.id).closed_at is None
 
 
+class TestStop:
+    """A person's Stop of Pilot's answer in a conversation of their project,
+    as a chat's Stop (F150.12, F44)."""
+
+    def test_a_running_turn_is_stopped_by_the_person_and_the_conversation_kept(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+        person: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        conversations.send(run.id, service_user, "Two")
+        clear_after_commit_callbacks()
+
+        conversations.stop(opened.id, run.id, person)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert run.turn_ended_at is None
+        assert "_InterruptStart" in _callbacks()
+        assert ProjectChanged(opened.id) in _emitted()
+        assert _row(session, run.id).closed_at is None
+
+    def test_after_the_stopped_turn_its_callers_next_message_goes_to_its_thread(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        service_user: User,
+        person: User,
+    ) -> None:
+        run = _idle(services, conversations, session, fake, opened, service_user)
+        conversations.send(run.id, service_user, "Two")
+        conversations.stop(opened.id, run.id, person)
+        clear_after_commit_callbacks()
+        _stopped_turn_ends(services, session, fake, run.id)
+        fake.sent.clear()
+
+        turn = conversations.send(run.id, service_user, "Three")
+
+        assert (turn.session_id, turn.seq, turn.message) == (run.id, 3, "Three")
+        assert fake.sent == ["Three"]
+
+    @pytest.mark.parametrize("state", [SessionState.HELD, SessionState.STARTING])
+    def test_a_start_held_or_under_way_ends_its_turn_unsent(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+        person: User,
+        state: SessionState,
+    ) -> None:
+        first = _open(conversations, opened, service_user, "One")
+        _read(session, first.session_id).state_code = state
+        session.flush()
+        clear_after_commit_callbacks()
+
+        conversations.stop(opened.id, first.session_id, person)
+
+        run = _read(session, first.session_id)
+        assert (run.state_code, run.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        turn = session.get_one(Turn, first.id, populate_existing=True)
+        assert turn.ended_at == run.stopped_at == run.turn_ended_at
+        assert "_InterruptStart" not in _callbacks()
+
+    @pytest.mark.parametrize(
+        ("state", "why"),
+        [
+            (SessionState.IDLE, "it is not answering"),
+            (SessionState.STOPPED, "it was stopped already"),
+            (SessionState.FAILED, "its chat failed to start"),
+            (SessionState.ENDED, "its chat's session has ended"),
+        ],
+    )
+    def test_a_conversation_pilot_is_not_answering_in_is_refused(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+        person: User,
+        state: SessionState,
+        why: str,
+    ) -> None:
+        first = _open(conversations, opened, service_user, "One")
+        _read(session, first.session_id).state_code = state
+        session.flush()
+        clear_after_commit_callbacks()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            conversations.stop(opened.id, first.session_id, person)
+
+        assert str(refused.value) == f"Cannot stop Pilot in Soup club because {why}"
+        assert _read(session, first.session_id).stopped_by_user_id is None
+
+    def test_another_projects_conversation_is_answered_as_an_id_that_never_was(
+        self,
+        session: DbSession,
+        conversations: ConversationService,
+        opened: Project,
+        service_user: User,
+        person: User,
+    ) -> None:
+        first = _open(conversations, opened, service_user, "One")
+        other = Project(
+            created_by_user_id=person.id,
+            state_code=ProjectState.OPEN,
+            slug="bike-log",
+            name="Bike log",
+        )
+        session.add(other)
+        session.flush()
+
+        for project_id, unknown in (
+            (other.id, first.session_id),
+            (opened.id, uuid.uuid4()),
+        ):
+            with pytest.raises(
+                RecordNotFoundException, match=f"Conversation {unknown} was not found"
+            ):
+                conversations.stop(project_id, unknown, person)
+
+        assert _read(session, first.session_id).state_code == SessionState.STARTING
+
+
 class TestEnd:
     """Its caller's end: closed `ended`, a turn in flight stopped first (DB
     334)."""

@@ -6387,6 +6387,250 @@
         "title": "ProjectAddressSchema",
         "type": "object"
       },
+      "ProjectConversationListSchema.de6f08c": {
+        "description": "A project's conversations.",
+        "properties": {
+          "conversations": {
+            "description": "The project's conversations, open and closed, whoever opened them, in the order they opened, the latest last",
+            "items": {
+              "$ref": "#/components/schemas/ProjectConversationListSchema.de6f08c.ProjectConversationSchema"
+            },
+            "title": "Conversations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "conversations"
+        ],
+        "title": "ProjectConversationListSchema",
+        "type": "object"
+      },
+      "ProjectConversationListSchema.de6f08c.CloseCause": {
+        "description": "A kind of way a Chat or a Conversation closed: `created` a Chat's\nalone, `ended`, its caller's end, a Conversation's alone (DB decision\n77).",
+        "enum": [
+          "timeout",
+          "created",
+          "finished",
+          "reopened",
+          "archived",
+          "ended"
+        ],
+        "title": "CloseCause",
+        "type": "string"
+      },
+      "ProjectConversationListSchema.de6f08c.EnvironmentNameSchema": {
+        "description": "An environment of the record, by its id and the name text calls it by.",
+        "properties": {
+          "id": {
+            "description": "The KubeCoder environment id",
+            "examples": [
+              "example-env-1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The environment's name",
+            "examples": [
+              "Example-1"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "EnvironmentNameSchema",
+        "type": "object"
+      },
+      "ProjectConversationListSchema.de6f08c.ProjectConversationSchema": {
+        "description": "One of a project's conversations.",
+        "properties": {
+          "answering": {
+            "description": "Whether Pilot is answering in the conversation: its start held at the gate or under way, or a turn of it running, which the conversation's Stop stops; false once that ends, however it ends, and for a closed conversation. A move of it raises `project_changed`",
+            "title": "Answering",
+            "type": "boolean"
+          },
+          "close_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectConversationListSchema.de6f08c.CloseCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the conversation closed: `ended` by its caller, `timeout` after its last turn, `finished` at Finish, `reopened` at Reopen, `archived` at Archive, and never `created`; null while it is open"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the conversation closed; null while it is open",
+            "title": "Closed At"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/ProjectConversationListSchema.de6f08c.EnvironmentNameSchema",
+            "description": "The environment whose session opened it"
+          },
+          "id": {
+            "description": "The conversation's id, its session's, whose records the session's records route reads",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "opened_at": {
+            "description": "When the conversation opened",
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the session that opened it; null where it named none",
+            "title": "Session"
+          }
+        },
+        "required": [
+          "id",
+          "environment",
+          "session",
+          "opened_at",
+          "closed_at",
+          "close_cause",
+          "answering"
+        ],
+        "title": "ProjectConversationSchema",
+        "type": "object"
+      },
+      "ProjectConversationSchema.de6f08c": {
+        "description": "One of a project's conversations.",
+        "properties": {
+          "answering": {
+            "description": "Whether Pilot is answering in the conversation: its start held at the gate or under way, or a turn of it running, which the conversation's Stop stops; false once that ends, however it ends, and for a closed conversation. A move of it raises `project_changed`",
+            "title": "Answering",
+            "type": "boolean"
+          },
+          "close_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectConversationSchema.de6f08c.CloseCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the conversation closed: `ended` by its caller, `timeout` after its last turn, `finished` at Finish, `reopened` at Reopen, `archived` at Archive, and never `created`; null while it is open"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the conversation closed; null while it is open",
+            "title": "Closed At"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/ProjectConversationSchema.de6f08c.EnvironmentNameSchema",
+            "description": "The environment whose session opened it"
+          },
+          "id": {
+            "description": "The conversation's id, its session's, whose records the session's records route reads",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "opened_at": {
+            "description": "When the conversation opened",
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the session that opened it; null where it named none",
+            "title": "Session"
+          }
+        },
+        "required": [
+          "id",
+          "environment",
+          "session",
+          "opened_at",
+          "closed_at",
+          "close_cause",
+          "answering"
+        ],
+        "title": "ProjectConversationSchema",
+        "type": "object"
+      },
+      "ProjectConversationSchema.de6f08c.CloseCause": {
+        "description": "A kind of way a Chat or a Conversation closed: `created` a Chat's\nalone, `ended`, its caller's end, a Conversation's alone (DB decision\n77).",
+        "enum": [
+          "timeout",
+          "created",
+          "finished",
+          "reopened",
+          "archived",
+          "ended"
+        ],
+        "title": "CloseCause",
+        "type": "string"
+      },
+      "ProjectConversationSchema.de6f08c.EnvironmentNameSchema": {
+        "description": "An environment of the record, by its id and the name text calls it by.",
+        "properties": {
+          "id": {
+            "description": "The KubeCoder environment id",
+            "examples": [
+              "example-env-1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The environment's name",
+            "examples": [
+              "Example-1"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "EnvironmentNameSchema",
+        "type": "object"
+      },
       "ProjectCreateRequestSchema.e86ccd6": {
         "description": "A new project's first message: a person's, from the plus (F46.1), or\nthe brief of a call made as a service user, with what a call alone names\n(F150.9).",
         "properties": {
@@ -17749,6 +17993,182 @@
           }
         ],
         "summary": "Read the project's chats, the definition chat first where one exists, then the project's chats in the order they opened, each open or closed with its cause; and the caller's place in them, whether a reply of Pilot's came after they last saw the chat to its end. A chat's records are its session's.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/conversations": {
+      "get": {
+        "description": "Returns:     200: The project's conversations     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id",
+        "operationId": "get__api_projects_{project_id}_conversations",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConversationListSchema.de6f08c"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the project's conversations, whoever opened them, in the order they opened, each open or closed with its cause, and whether Pilot is answering in it.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/conversations/{conversation_id}/stop": {
+      "post": {
+        "description": "Returns:     200: The conversation, Pilot no longer answering in it     401: No one is signed in     403: The caller lacks the editor role     404: No conversation of the project has the id     409: The caller has not chosen a handle, or Pilot is not answering         in the conversation",
+        "operationId": "post__api_projects_{project_id}_conversations_{conversation_id}_stop",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectConversationSchema.de6f08c"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Stop Pilot's answer in the project's conversation where it is, as the signed-in person, whoever opened it (F44): a turn in flight is interrupted, the conversation kept open for its caller's next message, and a start held or under way ends, nothing of it sent afterwards. The interrupt runs once the request commits; a controller that does not answer lets the turn run out.",
         "tags": [],
         "x-required-role": "editor"
       }
