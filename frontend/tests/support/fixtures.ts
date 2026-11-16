@@ -12,6 +12,8 @@
  * the side panel beside it, `chat` its Chat tab,
  * `phoneTabs` a phone's tabs at the bottom and the page over them,
  * `chats` puts a project's chats in the store's fake environment and sends their messages,
+ * `conversations` a calling session's conversations with Pilot there, and `conversationsTab` is
+ * the Conversations tab that shows them,
  * `browserPush` gives the spec's browser its notifications permission and a push subscription from
  * the worker's fake push service, `device` the page as its device: the pushes its service worker
  * shows, the notifications standing there and the page's visibility,
@@ -28,6 +30,7 @@ import { expect } from '@playwright/test';
 
 import { BrowserPush } from './browser-push';
 import { Chats } from './chats';
+import { Conversations } from './conversations';
 import { Outage } from './connection';
 import { Conditions, Controller } from './controller';
 import { Device } from './device';
@@ -35,6 +38,7 @@ import { infrastructureFixtures } from './fixtures-infrastructure';
 import { HaltSettings } from './halt-settings';
 import { Links } from './links';
 import { ChatPage } from './page-objects/chat-page';
+import { ConversationsPage } from './page-objects/conversations-page';
 import { DocTabsPage } from './page-objects/doc-tabs-page';
 import { HandleStepPage } from './page-objects/handle-step-page';
 import { DebriefPage } from './page-objects/debrief-page';
@@ -74,6 +78,8 @@ interface DomainFixtures {
   chat: ChatPage;
   definitionChat: ChatPage;
   chats: Chats;
+  conversationsTab: ConversationsPage;
+  conversations: Conversations;
   browserPush: BrowserPush;
   device: Device;
   storeUpdate: StoreUpdate;
@@ -186,6 +192,14 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
     const chats = new Chats(page, backendUrl, controller, playwright);
     await use(chats);
     await chats.dispose();
+  },
+  conversationsTab: async ({ page }, use) => {
+    await use(new ConversationsPage(page));
+  },
+  conversations: async ({ page, backendUrl, chats, playwright }, use) => {
+    const conversations = new Conversations(page, backendUrl, chats, playwright);
+    await use(conversations);
+    await conversations.dispose();
   },
   browserPush: async ({ page, backendUrl }, use) => {
     await use(new BrowserPush(page, backendUrl));

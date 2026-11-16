@@ -28,7 +28,7 @@ import { HomeButton } from '@/components/shell/home-head';
 import { useStartProject } from '@/hooks/use-chats';
 import { discussIn } from '@/hooks/use-discuss';
 import { usePhone } from '@/hooks/use-phone';
-import { usePhoneTab } from '@/hooks/use-phone-tab';
+import { phoneTabs, usePhoneTab } from '@/hooks/use-phone-tab';
 import { knowAt } from '@/hooks/use-project-address';
 import { usePerson } from '@/hooks/use-self';
 import { NEW_PROJECT, standInFor, standInRefused, standInTaken, useStandIns } from '@/hooks/use-stand-ins';
@@ -71,7 +71,7 @@ function PhoneNewProject() {
           <NewChat covered={tab !== 'timeline'} />
           {(tab === 'draft' || tab === 'documents') && <NewPhonePanel tab={tab} />}
         </div>
-        <PhoneTabs draft tab={tab} count={0} unread={false} onTab={show} />
+        <PhoneTabs tabs={phoneTabs(true, false)} draft tab={tab} count={0} unread={false} onTab={show} />
       </div>
     </div>
   );

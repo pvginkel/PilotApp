@@ -16,10 +16,11 @@ export const GROUPS = ['others', 'finished'] as const;
 export type Group = (typeof GROUPS)[number];
 
 /**
- * The side panel's tabs: an open project's Chat and Documents (F38.1), a draft's Draft and
- * Documents (F46.3). The first is the one a panel opens on until the person picks another.
+ * The side panel's tabs: an open project's Chat and Documents (F38.1), with Conversations between
+ * them once a session has talked to Pilot about it (F150.12), a draft's Draft and Documents
+ * (F46.3). The first is the one a panel opens on until the person picks another.
  */
-export const PANEL_TABS = ['chat', 'draft', 'documents'] as const;
+export const PANEL_TABS = ['chat', 'draft', 'conversations', 'documents'] as const;
 export type PanelTab = (typeof PANEL_TABS)[number];
 
 /** A project's side panel as the person last left it: its tab. */

@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 /** A tab by its key: a draft's Chat is `timeline`, the definition chat standing in the timeline's place. */
-type PhoneTabKey = 'timeline' | 'chat' | 'plan' | 'documents' | 'draft';
+type PhoneTabKey = 'timeline' | 'chat' | 'conversations' | 'plan' | 'documents' | 'draft';
 
 /**
  * A project's screen on a phone (F98.3): the tabs at the bottom, each by its key, the Chat tab's

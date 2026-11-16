@@ -26,11 +26,18 @@ import { ShownProjectContext } from '@/hooks/use-project-address';
 import { pathWithin } from '@/lib/project-paths';
 
 /** `timeline` is a draft's Chat, the definition chat in the timeline's place. */
-export type PhoneTab = 'timeline' | 'chat' | 'plan' | 'documents' | 'draft';
+export type PhoneTab = 'timeline' | 'chat' | 'conversations' | 'plan' | 'documents' | 'draft';
 
-/** An open project's tabs and a draft's, in their order. */
-export const PROJECT_TABS: readonly PhoneTab[] = ['timeline', 'chat', 'plan', 'documents'];
-export const DRAFT_TABS: readonly PhoneTab[] = ['timeline', 'draft', 'documents'];
+const PROJECT_TABS: readonly PhoneTab[] = ['timeline', 'chat', 'plan', 'documents'];
+const CONVERSED_TABS: readonly PhoneTab[] = ['timeline', 'chat', 'conversations', 'plan', 'documents'];
+const DRAFT_TABS: readonly PhoneTab[] = ['timeline', 'draft', 'documents'];
+
+/**
+ * A project's tabs in their order: a draft's if `draft`, else an open project's, Conversations
+ * after Chat among them if `conversations` (F150.12).
+ */
+export const phoneTabs = (draft: boolean, conversations: boolean): readonly PhoneTab[] =>
+  draft ? DRAFT_TABS : conversations ? CONVERSED_TABS : PROJECT_TABS;
 
 declare module '@tanstack/react-router' {
   interface HistoryState {
@@ -102,9 +109,11 @@ function shownAt(location: ParsedLocation, overlaid: boolean, below: Shown | nul
 
 /**
  * The tab of the shown project's screen and the views over it, a draft's if `draft`, a view showing
- * if `overlaid`; a new project's screen, outside the project's route, shows no view.
+ * if `overlaid`; a new project's screen, outside the project's route, shows no view. `conversed`
+ * says whether the project has had a conversation, undefined until that is read: its Conversations
+ * tab is one of its tabs unless it has had none.
  */
-export function usePhoneTab(draft: boolean, overlaid: boolean): PhoneScreen {
+export function usePhoneTab(draft: boolean, overlaid: boolean, conversed?: boolean): PhoneScreen {
   const project = useContext(ShownProjectContext);
   const router = useRouter();
   const location = useLocation();
@@ -122,7 +131,7 @@ export function usePhoneTab(draft: boolean, overlaid: boolean): PhoneScreen {
   const { shown } = current;
   const { kept, views } = shown;
   // A tab the project has not, a draft's Draft past Create, shows the Timeline.
-  const tab = kept !== undefined && (draft ? DRAFT_TABS : PROJECT_TABS).includes(kept) ? kept : 'timeline';
+  const tab = kept !== undefined && phoneTabs(draft, conversed !== false).includes(kept) ? kept : 'timeline';
 
   // The tab to show once Back has taken the views off.
   const afterViews = useRef<PhoneTab | null>(null);

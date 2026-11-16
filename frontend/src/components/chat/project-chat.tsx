@@ -32,11 +32,11 @@ import { useFlashes } from '@/components/timeline/flash';
 import { useChatReach } from '@/hooks/use-chat-reach';
 import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
 import { useChatPlace, type ChatPlace } from '@/hooks/use-in-chat';
+import { useKeptLine } from '@/hooks/use-kept-line';
 import { usePerson } from '@/hooks/use-self';
 import { useStandIns } from '@/hooks/use-stand-ins';
 import { useStickyBottom } from '@/hooks/use-sticky-bottom';
 import type { components } from '@/lib/api/generated/types';
-import { BAR_PRESS } from '@/lib/scroll-bar';
 import { cn } from '@/lib/utils';
 import { ChatEmptyState, type ChatHome } from './chat-empty-state';
 import { ChatSection, messageKey } from './chat-section';
@@ -45,9 +45,6 @@ import { chatPeople } from './people';
 import { StandIns } from './person-message';
 
 type Member = components['schemas']['ProjectHeadSchema.e86ccd6.MemberSchema'];
-
-/** The reader's own input, a press on the drawn bar among it, which lets go of the line *load more* keeps in place. */
-const READER = ['wheel', 'touchstart', 'pointerdown', 'keydown', BAR_PRESS] as const;
 
 interface ProjectChatProps {
   projectId: string;
@@ -81,38 +78,11 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
   if (from !== null && holding >= 0 && holding < from) setFrom(holding);
   // While the chat before loads above, the line at the top of the view keeps its place, until the
   // reader scrolls: a chat's records land after the click, and its growth moves what is below.
-  const anchor = useRef<{ element: Element; top: number } | null>(null);
-
-  useEffect(() => {
-    const box = container.current!;
-    const observer = new ResizeObserver(() => {
-      const held = anchor.current;
-      if (held === null) return;
-      if (!held.element.isConnected) {
-        anchor.current = null;
-        return;
-      }
-      const moved = held.element.getBoundingClientRect().top - box.getBoundingClientRect().top - held.top;
-      if (Math.abs(moved) >= 1) box.scrollTop += moved;
-    });
-    observer.observe(wrapper.current!);
-    const release = () => {
-      anchor.current = null;
-    };
-    for (const event of READER) box.addEventListener(event, release, { passive: true });
-    return () => {
-      observer.disconnect();
-      for (const event of READER) box.removeEventListener(event, release);
-    };
-  }, []);
+  const { keep, keepTop } = useKeptLine(container, wrapper, stuck);
 
   useEffect(() => {
     if (place !== null) unstick();
   }, [place, unstick]);
-  // Pinned to the end again, the end rules.
-  useEffect(() => {
-    if (stuck) anchor.current = null;
-  }, [stuck]);
 
   const gone = useRef<ChatPlace | null>(null);
   const found = useCallback(
@@ -123,29 +93,26 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
       const offset = () => message.getBoundingClientRect().top - box.getBoundingClientRect().top;
       unstick();
       box.scrollTop += offset() - Math.max(0, (box.clientHeight - message.offsetHeight) / 2);
-      anchor.current = { element: message, top: offset() };
+      keep(message);
       flash(messageKey(place.chat, seq));
       reached(place);
     },
-    [place, unstick, flash, reached],
+    [place, unstick, keep, flash, reached],
   );
 
   const shown = chats !== null && from !== null ? chats.slice(from) : [];
   const before = chats !== null && from !== null && from > 0 ? chats[from - 1] : undefined;
 
   const loadMore = () => {
-    const box = container.current!;
-    const top = box.getBoundingClientRect().top;
-    const first = [...wrapper.current!.children].find((child) => child.tagName !== 'BUTTON' && child.getBoundingClientRect().bottom > top);
-    anchor.current = first === undefined ? null : { element: first, top: first.getBoundingClientRect().top - top };
+    keepTop();
     unstick();
     setFrom(from! - 1);
   };
 
   const toEnd = useCallback(() => {
-    anchor.current = null;
+    keep(null);
     stick();
-  }, [stick]);
+  }, [keep, stick]);
 
   return (
     <ChatColumn

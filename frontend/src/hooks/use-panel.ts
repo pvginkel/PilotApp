@@ -3,13 +3,16 @@
  * draft's definition chat, or the tab showing in their place; nothing lies over it, and nothing
  * closes it (F98.1, F98.2). Each project's shows the tab the person last left it on, kept in the
  * browser and nothing of it on the server (F1.6, F133); until they pick one, its first: an open
- * project's Chat, a draft's Draft (F46.3), each standing for the other across Create project. Its
+ * project's Chat, a draft's Draft (F46.3), each standing for the other across Create project; its
+ * Conversations shows only on a project that has had a conversation (F150.12), Chat in its place
+ * on one that has had none. Its
  * Documents tab lists the project document, the attachments, a batch of several together, and the
  * timeline's documents and reviews, newest first (F37), from the project's timeline and its project
  * document, read as one; a draft's lists what Pilot attached so far, hung on nothing (F36.6).
  */
 
 import { useGetProjectsDraftByProjectId, useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
+import { useHadConversations } from '@/hooks/use-conversations';
 import { PANEL_TABS, rememberPanel, useBrowserState, type PanelTab } from '@/lib/browser-state';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 import type { Attachment, TimelineItem } from '@/hooks/use-timeline';
@@ -17,17 +20,29 @@ import type { Attachment, TimelineItem } from '@/hooks/use-timeline';
 interface PanelState {
   /** The tab showing. */
   tab: PanelTab;
+  /** Whether Conversations is one of its tabs: once the project has had one, and while it is the tab showing, its list still being read. */
+  conversations: boolean;
   show: (tab: PanelTab) => void;
 }
 
-/** A draft's first tab is Draft where an open project's is Chat; Documents is either's. */
-const tabOf = (tab: PanelTab, draft: boolean): PanelTab => (tab === 'documents' ? tab : draft ? 'draft' : 'chat');
+/**
+ * A draft's first tab is Draft where an open project's is Chat; Documents is either's, and
+ * Conversations a project's that has had one, `had`, or whose list is still being read.
+ */
+function tabOf(tab: PanelTab, draft: boolean, had: boolean | undefined): PanelTab {
+  if (tab === 'documents') return tab;
+  if (draft) return 'draft';
+  return tab === 'conversations' && had !== false ? tab : 'chat';
+}
 
 /** The project's panel, a draft's if `draft`. */
 export function usePanel(projectId: string, draft: boolean): PanelState {
   const { panels } = useBrowserState();
+  const had = useHadConversations(projectId, draft);
+  const tab = tabOf(panels[projectId]?.tab ?? PANEL_TABS[0], draft, had);
   return {
-    tab: tabOf(panels[projectId]?.tab ?? PANEL_TABS[0], draft),
+    tab,
+    conversations: had === true || tab === 'conversations',
     show: (tab) => rememberPanel(projectId, { tab }),
   };
 }

@@ -1,13 +1,14 @@
 /**
  * The chat's dividers, the timeline mockup's, a line each side of the words: where a chat closed,
- * "Chat closed · <time>" (F130.1), its cause not shown, and the definition chat's closed at Create
- * project the line alone, with no label; and a day's first message, the day (F38.2).
+ * "Chat closed · <time>" (F130.1), its cause not shown, a conversation's "Conversation closed ·
+ * <time>" (F150.12), and the definition chat's closed at Create project the line alone, with no
+ * label; and a day's first message, the day (F38.2).
  */
 
 import { Time } from '@/components/shared/time';
 import type { CloseCause } from '@/lib/chat/records';
 
-export function SessionSeparator({ at, cause }: { at: string; cause: CloseCause }) {
+export function SessionSeparator({ at, cause, what }: { at: string; cause: CloseCause; what: 'Chat' | 'Conversation' }) {
   if (cause === 'created') return <hr className="my-2 border-border" data-testid="chat.closed" data-cause={cause} />;
   return (
     <div
@@ -16,7 +17,7 @@ export function SessionSeparator({ at, cause }: { at: string; cause: CloseCause 
       data-cause={cause}
     >
       <span>
-        Chat closed · <Time at={at} format="clock" />
+        {what} closed · <Time at={at} format="clock" />
       </span>
     </div>
   );

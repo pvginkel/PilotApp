@@ -70,6 +70,21 @@
   .panel-body { overflow-y: auto; }
   /* The Chat tab scrolls its transcript alone (project-chat.tsx), the composer over its foot. */
   .panel-body.chat { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  /* A conversation's head (project-conversations.tsx), across the tab: at the top of the view
+     while its conversation scrolls under it. The transcript's side padding is 14px. */
+  .conversation-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 46px;
+    margin: 0 -14px;
+    padding: 5px 14px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--background));
+  }
   /* *In the chat* flashes the message it goes to, in the Chat tab and in a draft's definition chat,
      as the timeline flashes what it goes to (F42.3). */
   .project-chat .flash { animation: fresh 1.6s ease-out; }
@@ -179,6 +194,9 @@
     line-height: 1.2;
     cursor: pointer;
   }
+  /* Five tabs, Conversations among them: each takes its name's width and a share of what is left,
+     so that the long name stands within its tab. */
+  .phone-tabs[data-many] .ttab { flex: 1 1 auto; }
   .ttab .pill { position: relative; display: grid; place-items: center; width: 56px; height: 28px; border-radius: 999px; }
   .ttab .pill .icon { width: 20px; height: 20px; }
   .ttab:hover .pill { background: hsl(var(--accent)); }

@@ -1,6 +1,7 @@
 /**
  * The side panel (F38.1), its shell: the tab strip, Chat first with the unread dot (F43), then
- * Documents with its count (F37.3); a draft's, Draft in Chat's place (F46.3). Off a phone, wide or
+ * Conversations, once a session outside Pilot has talked to Pilot about the project (F150.12),
+ * with no dot, then Documents with its count (F37.3); a draft's, Draft in Chat's place (F46.3). Off a phone, wide or
  * narrow, it stands beside the timeline, always open, with no cross, its head as tall as the
  * project's head and its tab's text on the project name's baseline, in whatever font (F98.1,
  * F98.2). On a phone its tab stands alone between the project's head and the tabs at the bottom,
@@ -10,6 +11,7 @@
 
 import { useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { ProjectChat } from '@/components/chat/project-chat';
+import { ProjectConversations } from '@/components/chat/project-conversations';
 import { DocumentsTab, NewDocumentsTab } from '@/components/panel/documents-tab';
 import { DraftEmpty, DraftTab } from '@/components/panel/draft-tab';
 import { ScrollBar } from '@/components/shared/scroll-bar';
@@ -28,12 +30,14 @@ interface PanelProps {
   /** The project's members, as its head reads them. */
   members: readonly Member[];
   tab: PanelTab;
+  /** Whether Conversations is one of its tabs (use-panel.ts). */
+  conversations: boolean;
   /** The project's head, once drawn, which the panel's head lines up with. */
   head: HTMLElement | null;
   onTab: (tab: PanelTab) => void;
 }
 
-export function Panel({ projectId, draft, members, tab, head, onTab }: PanelProps) {
+export function Panel({ projectId, draft, members, tab, conversations, head, onTab }: PanelProps) {
   const documents = usePanelDocuments(projectId);
   const panelHead = useAlignedHead(head);
   return (
@@ -52,6 +56,18 @@ export function Panel({ projectId, draft, members, tab, head, onTab }: PanelProp
           </button>
         ) : (
           <ChatTab projectId={projectId} on={tab === 'chat'} onTab={onTab} />
+        )}
+        {conversations && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'conversations'}
+            className={cn('ptab', tab === 'conversations' && 'on')}
+            onClick={() => onTab('conversations')}
+            data-testid="panel.tab.conversations"
+          >
+            Conversations
+          </button>
         )}
         <button
           type="button"
@@ -148,6 +164,13 @@ function PanelBody({ projectId, draft, members, tab, documents, covered }: Phone
       </div>
     );
   }
+  if (tab === 'conversations') {
+    return (
+      <div className="panel-body chat" role="tabpanel" data-testid="panel.body">
+        <ProjectConversations projectId={projectId} covered={covered} />
+      </div>
+    );
+  }
   return (
     <ScrollingBody>
       {tab === 'draft' ? <DraftTab projectId={projectId} /> : <DocumentsTab projectId={projectId} draft={draft} documents={documents} />}
@@ -155,7 +178,7 @@ function PanelBody({ projectId, draft, members, tab, documents, covered }: Phone
   );
 }
 
-/** A tab's body that scrolls, under its drawn bar; the Chat tab's transcript scrolls alone. */
+/** A tab's body that scrolls, under its drawn bar; the Chat tab's transcript and the Conversations tab's scroll alone. */
 function ScrollingBody({ children }: { children: ReactNode }) {
   const body = useRef<HTMLDivElement>(null);
   return (

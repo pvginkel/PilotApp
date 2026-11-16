@@ -9,6 +9,8 @@
  * with no fade.
  * Asked to go to one of its records, it finds the message of the turn holding it once its stream has
  * read that far: the latest message at or before it (F42.3).
+ * A conversation of a calling session's reads so too (F150.12; project-conversations.tsx): its
+ * caller's messages, Pilot's replies, and the line where it closed, "Conversation closed".
  */
 
 import { Fragment, useLayoutEffect, useMemo, useRef } from 'react';
@@ -26,7 +28,10 @@ import { PilotReply } from './pilot-reply';
 import { DateDivider, SessionSeparator } from './session-separator';
 
 interface ChatSectionProps {
-  chat: Chat;
+  /** The chat, or a conversation, by its session, whether Pilot answers in it and its close. */
+  chat: Pick<Chat, 'id' | 'answering' | 'closed_at'>;
+  /** What the line where it closed calls it; a chat by default. */
+  what?: 'Chat' | 'Conversation';
   people: ChatPeople;
   /** The number of a record of the chat to go to: `onFound` is given the message of its turn, and that message's number. */
   goTo?: number;
@@ -43,7 +48,7 @@ const NO_STAND_INS: readonly StandIn[] = [];
 /** The key a message of a chat flashes by. */
 export const messageKey = (chatId: string, seq: number) => `${chatId}:${seq}`;
 
-export function ChatSection({ chat, people, goTo, onFound, flashing, onFlashed, standIns = NO_STAND_INS }: ChatSectionProps) {
+export function ChatSection({ chat, what = 'Chat', people, goTo, onFound, flashing, onFlashed, standIns = NO_STAND_INS }: ChatSectionProps) {
   const { isConnected } = useSseContext();
   const stream = useChatStream(useSessionTransport(), chat.id);
   useUiStateInstrumentation('chat.section', {
@@ -90,7 +95,7 @@ export function ChatSection({ chat, people, goTo, onFound, flashing, onFlashed, 
   return (
     <>
       {items.map((item) => {
-        if (item.kind === 'closed') return <SessionSeparator key={item.key} at={item.at} cause={item.cause} />;
+        if (item.kind === 'closed') return <SessionSeparator key={item.key} at={item.at} cause={item.cause} what={what} />;
         const { turn } = item;
         const { person } = turn;
         const at = person?.at ?? turn.startedAt;

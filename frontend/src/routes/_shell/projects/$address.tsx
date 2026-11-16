@@ -264,7 +264,15 @@ function DeskProject({ projectId, project: data, tab, goneTo, log, children }: D
               {data !== undefined && (
                 <>
                   <PanelDivider project={page} draft={draft} />
-                  <Panel projectId={projectId} draft={draft} members={data.members} tab={panel.tab} head={head} onTab={panel.show} />
+                  <Panel
+                    projectId={projectId}
+                    draft={draft}
+                    members={data.members}
+                    tab={panel.tab}
+                    conversations={panel.conversations}
+                    head={head}
+                    onTab={panel.show}
+                  />
                 </>
               )}
             </div>

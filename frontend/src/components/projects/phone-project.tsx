@@ -1,10 +1,12 @@
 /**
  * A project's screen on a phone (F98.3), over the home (F98.6): its head in one line
  * (`phone-head.tsx`), its arrow showing the home again from any tab, the tab showing,
- * and the tabs at the bottom — Timeline, Chat, Plan and Documents; a draft's Chat, the definition
+ * and the tabs at the bottom — Timeline, Chat, Plan and Documents, with Conversations after Chat
+ * once a session outside Pilot has talked to Pilot about the project (F150.12); a draft's Chat, the definition
  * chat in the timeline's place, Create project at its end (D119), Draft and Documents. Each tab is
  * its icon over its name, the one showing in the primary's tint, its icon on a pill; Chat carries
- * the unread dot (F43) and Documents its count (F37.3) on the icon's corner. Chat, Documents and
+ * the unread dot (F43) and Documents its count (F37.3) on the icon's corner; Conversations carries
+ * neither. Chat, Conversations, Documents and
  * Draft are the side panel's tabs without its head (F38.1), the phone's Documents listing the
  * handbook under the project document; Plan the plan popover's content as a page (F3.7), which the
  * head's donut shows too. The Timeline, or a draft's Chat, keeps its place under the other tabs.
@@ -18,7 +20,7 @@
 
 import type { ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Files, FileText, List, ListChecks, MessagesSquare, type LucideIcon } from 'lucide-react';
+import { BotMessageSquare, Files, FileText, List, ListChecks, MessagesSquare, type LucideIcon } from 'lucide-react';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { PhonePanel } from '@/components/panel/panel';
 import { CreateProject } from '@/components/projects/create-project';
@@ -26,11 +28,12 @@ import { PhoneHead } from '@/components/projects/phone-head';
 import { PlanPage } from '@/components/projects/plan-popover';
 import { Timeline } from '@/components/timeline/timeline';
 import { useChatDot } from '@/hooks/use-chats';
+import { useHadConversations } from '@/hooks/use-conversations';
 import { discussIn, DiscussContext } from '@/hooks/use-discuss';
 import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePanelDocuments } from '@/hooks/use-panel';
-import { DRAFT_TABS, PhoneViewContext, PROJECT_TABS, usePhoneTab, type PhoneTab } from '@/hooks/use-phone-tab';
+import { phoneTabs, PhoneViewContext, usePhoneTab, type PhoneTab } from '@/hooks/use-phone-tab';
 import { useShownProject } from '@/hooks/use-project-address';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import type { QuoteRef } from '@/lib/chat/quotes';
@@ -48,7 +51,8 @@ interface PhoneProjectProps {
 
 export function PhoneProject({ projectId, project, overlaid, children }: PhoneProjectProps) {
   const draft = project?.state === 'draft';
-  const { tab, show, home, views, back, scroll, keep } = usePhoneTab(draft, overlaid);
+  const conversed = useHadConversations(projectId, draft);
+  const { tab, show, home, views, back, scroll, keep } = usePhoneTab(draft, overlaid, conversed);
   const { address } = useShownProject();
   const documents = usePanelDocuments(projectId);
   const unread = useChatDot(projectId);
@@ -91,12 +95,19 @@ export function PhoneProject({ projectId, project, overlaid, children }: PhonePr
                   ) : (
                     <Timeline projectId={projectId} address={null} inert={overlaid || away} />
                   )}
-                  {(tab === 'chat' || tab === 'documents' || tab === 'draft') && (
+                  {(tab === 'chat' || tab === 'conversations' || tab === 'documents' || tab === 'draft') && (
                     <PhonePanel projectId={projectId} draft={draft} members={project.members} tab={tab} documents={documents} covered={overlaid} />
                   )}
                   {tab === 'plan' && <PlanPage tasks={project.tasks} />}
                 </div>
-                <PhoneTabs draft={draft} tab={tab} count={documents.count} unread={unread} onTab={show} />
+                <PhoneTabs
+                  tabs={phoneTabs(draft, conversed === true || tab === 'conversations')}
+                  draft={draft}
+                  tab={tab}
+                  count={documents.count}
+                  unread={unread}
+                  onTab={show}
+                />
               </div>
             )}
             <PhoneViewContext.Provider value={{ back, under: views.at(-2) ?? null, scroll, keep }}>{children}</PhoneViewContext.Provider>
@@ -110,12 +121,16 @@ export function PhoneProject({ projectId, project, overlaid, children }: PhonePr
 const TABS: Record<PhoneTab, { name: string; icon: LucideIcon }> = {
   timeline: { name: 'Timeline', icon: List },
   chat: { name: 'Chat', icon: MessagesSquare },
+  conversations: { name: 'Conversations', icon: BotMessageSquare },
   plan: { name: 'Plan', icon: ListChecks },
   documents: { name: 'Documents', icon: Files },
   draft: { name: 'Draft', icon: FileText },
 };
 
 interface PhoneTabsProps {
+  /** The tabs, in their order. */
+  tabs: readonly PhoneTab[];
+  /** They are a draft's: its first is its Chat. */
   draft: boolean;
   tab: PhoneTab;
   /** The Documents tab's count. */
@@ -125,11 +140,15 @@ interface PhoneTabsProps {
   onTab: (tab: PhoneTab) => void;
 }
 
-/** The tabs at the bottom; a new project's too (`new-project.tsx`), a draft's. */
-export function PhoneTabs({ draft, tab, count, unread, onTab }: PhoneTabsProps) {
+/**
+ * The tabs at the bottom; a new project's too (`new-project.tsx`), a draft's. Up to four share the
+ * row alike; five, Conversations among them, each take their name's width and a share of the rest
+ * (panel.css).
+ */
+export function PhoneTabs({ tabs, draft, tab, count, unread, onTab }: PhoneTabsProps) {
   return (
-    <nav className="phone-tabs" role="tablist" aria-label="The project" data-testid="project.tabs">
-      {(draft ? DRAFT_TABS : PROJECT_TABS).map((key) => {
+    <nav className="phone-tabs" role="tablist" aria-label="The project" data-many={tabs.length > 4 || undefined} data-testid="project.tabs">
+      {tabs.map((key) => {
         const { name, icon: Icon } = key === 'timeline' && draft ? TABS.chat : TABS[key];
         const dot = key === 'chat' && unread;
         return (
