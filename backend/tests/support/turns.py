@@ -60,6 +60,7 @@ def turn_at(
         message="Scale the recipe.",
         started_at=started_at,
         ended_at=ended_at,
+        cause_code=TurnCause.BRIEF,
     )
     db.add(turn)
     db.flush()

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import TokenCount, Turn
+from app.models.reference import TurnCause
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -77,6 +78,7 @@ def turn_id(session: DbSession, project_session: models.Session) -> int:
         seq=1,
         message="Fix the client for v4.",
         started_at=datetime(2026, 11, 1, 9, 30, tzinfo=UTC),
+        cause_code=TurnCause.BRIEF,
     )
     session.add(turn)
     session.flush()

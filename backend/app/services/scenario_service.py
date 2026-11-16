@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from app.exceptions import RecordNotFoundException, ValidationException
 from app.models import Environment, Project, Transcript, Turn
 from app.models import Session as AgentSession
-from app.models.reference import SessionState
+from app.models.reference import SessionState, TurnCause
 from app.schemas.publication import PublicationSchema
 from app.services.launch_placement import conversation_turn
 from app.services.publication_service import PublicationService
@@ -122,7 +122,7 @@ class ScenarioService:
                 state_code=SessionState.ENDED,
                 turns=1,
             )
-            sent = Turn(seq=1, message=turn.message)
+            sent = Turn(seq=1, message=turn.message, cause_code=TurnCause.BRIEF)
             self.db.add(session)
         else:
             sent = self.db.scalars(
