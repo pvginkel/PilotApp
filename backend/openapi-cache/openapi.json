@@ -7318,7 +7318,7 @@
       },
       "PublicationSchema.e156e3e": {
         "additionalProperties": false,
-        "description": "One Transcript as its file stands, read whole.",
+        "description": "One Transcript as its file stands: read whole or, with `appended`,\nfrom a boundary on.",
         "properties": {
           "agent_id": {
             "anyOf": [
@@ -7347,8 +7347,20 @@
             "description": "A sub-agent's type, as its record names it",
             "title": "Agent Type"
           },
+          "appended": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedAppendedSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "On a publication of a file that grew and nothing else: what it builds on, and its boundary. None on a whole one"
+          },
           "calls": {
-            "description": "Its Calls, in the file's order: the first has position 1",
+            "description": "Its Calls, in the file's order: the first has position 1, and on an appended call the boundary's",
             "items": {
               "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedCallSchema"
             },
@@ -7360,7 +7372,7 @@
             "description": "The collector's version that read the file"
           },
           "compactions": {
-            "description": "Its Compactions, in the file's order",
+            "description": "Its Compactions, in the file's order, from the boundary's on",
             "items": {
               "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedCompactionSchema"
             },
@@ -7408,7 +7420,7 @@
             "type": "integer"
           },
           "launches": {
-            "description": "A main thread's Launches, in the file's order",
+            "description": "A main thread's Launches, in the file's order; on an appended call those that wrote a line of what it carries, the first with its Prompts from the boundary's on",
             "items": {
               "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedLaunchSchema"
             },
@@ -7463,6 +7475,100 @@
           "working_directory"
         ],
         "title": "PublicationSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedAppendedSchema": {
+        "additionalProperties": false,
+        "description": "What makes a publication an appended one (DB decision 81 point 1).",
+        "properties": {
+          "boundary": {
+            "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedBoundarySchema",
+            "description": "Where the call's `launches`, `compactions` and `calls` start: from there on the call carries all the file holds"
+          },
+          "builds_on": {
+            "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedBaseSchema",
+            "description": "What Pilot must hold of the Transcript, or the call is refused and the transcript published whole"
+          }
+        },
+        "required": [
+          "builds_on",
+          "boundary"
+        ],
+        "title": "PublishedAppendedSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedBaseSchema": {
+        "additionalProperties": false,
+        "description": "What an appended publication builds on: the Transcript's file as the\npublication before it read it.",
+        "properties": {
+          "collector": {
+            "description": "The collector's version that read it then",
+            "minLength": 1,
+            "title": "Collector",
+            "type": "string"
+          },
+          "file_modified_at": {
+            "description": "The file's time then",
+            "format": "date-time",
+            "title": "File Modified At",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "The file's size in bytes then",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "File Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_size",
+          "file_modified_at",
+          "collector"
+        ],
+        "title": "PublishedBaseSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedBoundarySchema": {
+        "additionalProperties": false,
+        "description": "Where what an appended publication carries starts in the file. Each is\nthe place of the first one the call carries or, where it carries none,\nthe place the file's next would take.",
+        "properties": {
+          "call": {
+            "description": "The `position` of the first Call it carries",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Call",
+            "type": "integer"
+          },
+          "compaction": {
+            "description": "The place of its first Compaction among the Transcript's Compactions",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Compaction",
+            "type": "integer"
+          },
+          "launch": {
+            "description": "The place of its first Launch among the Transcript's Launches",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Launch",
+            "type": "integer"
+          },
+          "prompt": {
+            "description": "The place of its first Launch's first Prompt among the Transcript's Prompts",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Prompt",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "call",
+          "launch",
+          "prompt",
+          "compaction"
+        ],
+        "title": "PublishedBoundarySchema",
         "type": "object"
       },
       "PublicationSchema.e156e3e.PublishedCallSchema": {
@@ -13620,7 +13726,7 @@
     },
     "/api/collector/publications": {
       "post": {
-        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks. The body is the transcript as its file stands.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds the transcript as the call says. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. No call of this collector's is taken   until its bearer is the server's. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. No call is taken until the collector speaks a   version in the range. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, what in the call   contradicts itself or the record's rules for a transcript. The same   call is refused again; the collector's other transcripts are not. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks. The body is the transcript as its file stands, read whole, or, with `appended`, what a file that grew holds from a boundary on.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds the transcript as the call says. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. No call of this collector's is taken   until its bearer is the server's. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. No call is taken until the collector speaks a   version in the range. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, what in the call   contradicts itself or the record's rules for a transcript. The same   call is refused again; the collector's other transcripts are not. - 409, with the `code` `PUBLICATION_NOT_APPENDABLE`: an appended call   does not continue what Pilot holds of the transcript, the reasons in   `error`: Pilot does not hold it at the size and time and under the   collector's version the call builds on, holds no row at a place before   the boundary's, or holds from there on, or before, what the call does   not carry so. The collector publishes the transcript whole. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
         "operationId": "post__api_collector_publications",
         "parameters": [],
         "requestBody": {
@@ -13656,6 +13762,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "413": {
             "content": {

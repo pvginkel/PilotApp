@@ -120,3 +120,15 @@ class PublicationInvalidException(ValidationException):
             f"Cannot take the publication of transcript {transcript} because "
             + "; ".join(faults)
         )
+
+
+class PublicationNotAppendableException(InvalidOperationException):
+    """Raised when an appended publication does not continue what Pilot
+    holds of its Transcript; `causes` names each reason, and nothing of the
+    call is written. Its code tells the collector to publish the transcript
+    whole."""
+
+    def __init__(self, transcript: str, causes: list[str]) -> None:
+        self.causes = causes
+        super().__init__(f"append to transcript {transcript}", "; ".join(causes))
+        self.error_code = "PUBLICATION_NOT_APPENDABLE"

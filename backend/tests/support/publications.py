@@ -1,6 +1,7 @@
 """Publications of an invented transcript, as a collector sends one: each
-helper gives a part of the call, and `whole` the call, validated;
-`collector_headers` the headers it is sent under."""
+helper gives a part of the call, and `whole` the call, validated, `appended`
+one of the file once it grew; `collector_headers` the headers it is sent
+under."""
 
 from datetime import timedelta
 from typing import Any
@@ -120,6 +121,44 @@ def whole(**overrides: Any) -> PublicationSchema:
         "working_directory": "/work/RecipeBox",
     }
     return PublicationSchema.model_validate(values | overrides)
+
+
+def builds_on(**overrides: Any) -> dict[str, Any]:
+    """What an appended call builds on: the file as `whole` gives it."""
+    values: dict[str, Any] = {
+        "file_size": 48_112,
+        "file_modified_at": (STARTED + timedelta(minutes=12)).isoformat(),
+        "collector": "1.0.0",
+    }
+    return values | overrides
+
+
+def appended(
+    *,
+    call: int = 1,
+    launch: int = 1,
+    prompt: int = 1,
+    compaction: int = 1,
+    **overrides: Any,
+) -> PublicationSchema:
+    """An appended publication of `whole`'s file, grown since: built on the
+    file as `whole` gives it, with the boundary at those places; the
+    overrides give it what it carries from there on, and `builds_on` what
+    else it builds on."""
+    values: dict[str, Any] = {
+        "file_size": 61_000,
+        "file_modified_at": (STARTED + timedelta(minutes=30)).isoformat(),
+        "appended": {
+            "builds_on": overrides.pop("builds_on", builds_on()),
+            "boundary": {
+                "call": call,
+                "launch": launch,
+                "prompt": prompt,
+                "compaction": compaction,
+            },
+        },
+    }
+    return whole(**values | overrides)
 
 
 def sub_agent(**overrides: Any) -> PublicationSchema:

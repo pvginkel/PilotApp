@@ -1,13 +1,15 @@
-"""A whole publication of a transcript, written into the record: its
-Launches with their versions, its Prompts with their Hook Runs, its
-Compactions and its Calls with their tokens, Tool Calls, Events and Context
-Parts (F152.3, F152.4; DB decisions 79 and 81, the assertions of §4.31 and
-§4.33).
+"""A publication of a transcript, whole or appended, written into the
+record: its Launches with their versions, its Prompts with their Hook Runs,
+its Compactions and its Calls with their tokens, Tool Calls, Events and
+Context Parts (F152.3, F152.4, F152.15; DB decisions 79 and 81, the
+assertions of §4.31 and §4.33).
 
 The rule that protects the most: a publication writes only the rows that
 differ, and a row keeps its identity wherever the call names the same fact
-again (`TestRepublished`). What the call no longer names goes, and only
-that (`TestRewritten`; F152.17, decision 81 point 4)."""
+again (`TestRepublished`). What a whole call no longer names goes, and only
+that (`TestRewritten`; F152.17, decision 81 point 4). An appended call
+writes from its boundary on alone (`TestAppended`), and one that does not
+continue what Pilot holds is refused whole (`TestNotAppendable`)."""
 
 import logging
 from datetime import UTC, datetime, timedelta
@@ -23,6 +25,7 @@ from app.exceptions import (
     AuthenticationException,
     CollectorProtocolUnsupportedException,
     PublicationInvalidException,
+    PublicationNotAppendableException,
 )
 from app.models import (
     Call,
@@ -62,6 +65,8 @@ from tests.support.locks import in_thread, lock_waits
 from tests.support.publications import (
     COLLECTOR_TOKEN,
     SPAWNING,
+    appended,
+    builds_on,
     call,
     collector_headers,
     compaction,
@@ -224,6 +229,21 @@ def _camp(**overrides: Any) -> PublicationSchema:
         "calls": _calls(),
     }
     return whole(**values | overrides)
+
+
+def _grown(**overrides: Any) -> PublicationSchema:
+    """The main thread's appended publication once its file grew: from its
+    fourth Call on, the last Pilot holds, with a fifth after it, under the
+    Launch that resumed it and none of that Launch's Prompts."""
+    values: dict[str, Any] = {
+        "call": 4,
+        "launch": 2,
+        "prompt": 4,
+        "compaction": 2,
+        "launches": [_second_launch(prompts=[])],
+        "calls": [_calls()[3], call(5, prompt=3, predecessor="msg_0004")],
+    }
+    return appended(**values | overrides)
 
 
 def _count(db: DbSession, entity: type) -> int:
@@ -1934,6 +1954,658 @@ class TestRewritten:
         assert {entity: _count(session, entity) for entity in codes} == codes
 
 
+class TestAppended:
+    """A transcript that grew, published appended (F152.15; DB decision 81
+    point 1): from its boundary on Pilot holds what the call carries, and
+    what lies before it is not written."""
+
+    def test_a_call_made_since_is_the_row_written(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        first = publications.publish(_camp())
+        ids = _ids(session)
+
+        with writes(session) as wrote:
+            thread = publications.publish(_grown())
+
+        assert thread.id == first.id
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(inserted=1),
+        }
+        after = _ids(session)
+        assert after == ids | {"calls": [*ids["calls"], after["calls"][4]]}
+        assert session.execute(
+            select(
+                Call.message_id, Call.position, Call.predecessor_id, Call.prompt_id
+            ).where(Call.id == after["calls"][4])
+        ).one() == ("msg_0005", 5, ids["calls"][3], ids["prompts"][2])
+
+    def test_a_call_names_one_before_the_boundary_as_its_predecessor(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+
+        with writes(session) as wrote:
+            publications.publish(
+                _grown(call=5, calls=[call(5, prompt=1, predecessor="msg_0002")])
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(inserted=1),
+        }
+        assert session.execute(
+            select(Call.position, Call.predecessor_id, Call.prompt_id).where(
+                Call.message_id == "msg_0005"
+            )
+        ).one() == (5, ids["calls"][1], ids["prompts"][0])
+
+    def test_a_held_call_from_the_boundary_on_takes_what_the_call_says(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        fourth = _calls()[3] | {
+            "thinking_tokens": 120,
+            "tool_calls": [tool_call(5, interrupted=True)],
+            "events": [
+                event(kind="interrupt", is_error=False, at=_at(11), detail=None),
+                event(kind="api_retry", is_error=False, at=_at(12), detail=None),
+            ],
+            "context_parts": [context_part(kind="memory", characters=310)],
+        }
+
+        with writes(session) as wrote:
+            publications.publish(_grown(calls=[fourth]))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(updated=1),
+            "tool_calls": Written(updated=1),
+            "events": Written(inserted=1),
+            "context_parts": Written(inserted=1),
+            "context_part_kinds": Written(inserted=1),
+        }
+        after = _ids(session)
+        assert after["calls"] == ids["calls"]
+        assert after["tool_calls"] == ids["tool_calls"]
+        assert after["events"][:3] == ids["events"]
+        assert session.execute(
+            select(Call.position, Call.thinking_tokens, ToolCall.returned_at)
+            .join(ToolCall, ToolCall.call_id == Call.id)
+            .where(Call.message_id == "msg_0004")
+        ).one() == (4, 120, STARTED + timedelta(minutes=5, seconds=4))
+
+    def test_what_hung_on_a_carried_call_and_it_no_longer_names_goes(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        fourth = _calls()[3] | {"tool_calls": [], "events": []}
+
+        with writes(session) as wrote:
+            publications.publish(_grown(calls=[fourth]))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "tool_calls": Written(deleted=1),
+            "events": Written(deleted=1),
+        }
+        assert _ids(session) == ids | {
+            "tool_calls": ids["tool_calls"][:5],
+            "events": ids["events"][:2],
+        }
+
+    def test_what_a_call_before_the_boundary_did_is_left_as_pilot_holds_it(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The second Call's Tool Calls, Events and Context Parts are no part
+        of a call whose boundary lies after it."""
+        publications.publish(_camp())
+        held = session.execute(
+            select(ToolCall.tool_use_id, ToolCall.call_id).order_by(ToolCall.id)
+        ).all()
+        marked = session.execute(
+            select(Event.kind_code, Event.call_id).order_by(Event.id)
+        ).all()
+
+        publications.publish(
+            _grown(
+                calls=[
+                    _calls()[3],
+                    call(
+                        5,
+                        prompt=3,
+                        predecessor="msg_0004",
+                        tool_calls=[tool_call(6)],
+                        events=[event()],
+                    ),
+                ]
+            )
+        )
+
+        assert (
+            session.execute(
+                select(ToolCall.tool_use_id, ToolCall.call_id).order_by(ToolCall.id)
+            ).all()[:6]
+            == held
+        )
+        assert (
+            session.execute(
+                select(Event.kind_code, Event.call_id).order_by(Event.id)
+            ).all()[:3]
+            == marked
+        )
+
+    def test_a_prompt_received_since_hangs_on_the_launch_the_file_grew_under(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        since = prompt(received_at=_at(15), characters=64, hook_runs=[hook_run()])
+
+        with writes(session) as wrote:
+            publications.publish(
+                _grown(
+                    launches=[_second_launch(prompts=[since])],
+                    calls=[_calls()[3], call(5, prompt=4, predecessor="msg_0004")],
+                )
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "prompts": Written(inserted=1),
+            "hook_runs": Written(inserted=1),
+            "calls": Written(inserted=1),
+        }
+        after = _ids(session)
+        assert after["prompts"][:3] == ids["prompts"]
+        assert session.execute(
+            select(Prompt.launch_id, Prompt.characters, Call.message_id)
+            .join(Call, Call.prompt_id == Prompt.id)
+            .where(Prompt.id == after["prompts"][3])
+        ).all() == [(ids["launches"][1], 64, "msg_0005")]
+        assert (
+            session.scalars(
+                select(HookRun.prompt_id).where(HookRun.id == after["hook_runs"][2])
+            ).one()
+            == after["prompts"][3]
+        )
+
+    def test_a_held_prompt_named_again_takes_the_hook_runs_at_its_runs_end(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+        third = prompt(received_at=_at(10), characters=31, hook_runs=[hook_run()])
+
+        with writes(session) as wrote:
+            publications.publish(
+                _grown(prompt=3, launches=[_second_launch(prompts=[third])])
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "hook_runs": Written(inserted=1),
+            "calls": Written(inserted=1),
+        }
+        after = _ids(session)
+        assert after["prompts"] == ids["prompts"]
+        assert (
+            session.scalars(
+                select(HookRun.prompt_id).where(HookRun.id == after["hook_runs"][2])
+            ).one()
+            == ids["prompts"][2]
+        )
+
+    def test_a_boundary_within_a_launch_leaves_its_earlier_prompts(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The first Launch's second Prompt on: its first, with its two Hook
+        Runs, is no part of the call."""
+        publications.publish(_camp())
+        ids = _ids(session)
+        second = prompt(
+            received_at=_at(4),
+            source="task_notification",
+            characters=90,
+            hook_runs=[hook_run(command="tidy_pantry.sh")],
+        )
+
+        with writes(session) as wrote:
+            publications.publish(
+                _grown(
+                    launch=1,
+                    prompt=2,
+                    launches=[_first_launch(prompts=[second]), _second_launch()],
+                )
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "prompts": Written(updated=1),
+            "hook_runs": Written(inserted=1),
+            "calls": Written(inserted=1),
+        }
+        after = _ids(session)
+        assert after["prompts"] == ids["prompts"]
+        assert after["hook_runs"][:2] == ids["hook_runs"]
+        assert session.execute(
+            select(HookRun.prompt_id, HookRun.command).order_by(HookRun.id)
+        ).all() == [
+            (ids["prompts"][0], "signal_activity.sh"),
+            (ids["prompts"][0], "hold_open.sh"),
+            (ids["prompts"][1], "tidy_pantry.sh"),
+        ]
+        assert session.scalars(select(Prompt.characters).order_by(Prompt.id)).all() == [
+            212,
+            90,
+            31,
+        ]
+
+    def test_a_compaction_made_since_is_written_after_the_held_one(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+
+        with writes(session) as wrote:
+            publications.publish(
+                _grown(
+                    compactions=[compaction(at=_at(13), tokens_before=150_000)],
+                    calls=[
+                        _calls()[3],
+                        call(5, prompt=3, predecessor="msg_0004", compaction=2),
+                    ],
+                )
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "compactions": Written(inserted=1),
+            "calls": Written(inserted=1),
+        }
+        after = _ids(session)
+        assert after["compactions"][:1] == ids["compactions"]
+        assert session.execute(
+            select(Call.message_id, Compaction.tokens_before)
+            .join(Compaction, Compaction.id == Call.compaction_id)
+            .order_by(Call.position)
+        ).all() == [("msg_0003", 160_000), ("msg_0005", 150_000)]
+
+    def test_a_held_compaction_named_again_takes_what_the_call_says(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+
+        with writes(session) as wrote:
+            publications.publish(
+                _grown(
+                    compaction=1,
+                    compactions=[compaction(tokens_after=22_400, duration_ms=5_200)],
+                )
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "compactions": Written(updated=1),
+            "calls": Written(inserted=1),
+        }
+        assert session.execute(
+            select(Compaction.id, Compaction.tokens_after)
+        ).all() == [(ids["compactions"][0], 22_400)]
+
+    def test_a_launch_begun_since_is_written_and_the_held_one_takes_its_end(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The Launch the file grew under keeps its identity, and the one
+        before it, which the call does not carry, is not written."""
+        publications.publish(_camp())
+        ids = _ids(session)
+        third = launch(
+            started_at=_at(20),
+            components=[CLAUDE_CODE, {"component": "plugin:dev", "version": "0.10.56"}],
+            prompts=[prompt(received_at=_at(20))],
+        )
+
+        with writes(session) as wrote:
+            publications.publish(
+                _grown(
+                    launches=[_second_launch(prompts=[], ended_at=_at(14)), third],
+                    calls=[_calls()[3], call(5, prompt=4, predecessor="msg_0004")],
+                )
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "launches": Written(inserted=1, updated=1),
+            "component_versions": Written(inserted=1),
+            "launch_components": Written(inserted=2),
+            "prompts": Written(inserted=1),
+            "calls": Written(inserted=1),
+        }
+        after = _ids(session)
+        assert after["launches"][:2] == ids["launches"]
+        assert session.execute(
+            select(Launch.started_at, Launch.ended_at).order_by(Launch.id)
+        ).all() == [
+            (STARTED, STARTED + timedelta(minutes=9)),
+            (STARTED + timedelta(minutes=10), STARTED + timedelta(minutes=14)),
+            (STARTED + timedelta(minutes=20), None),
+        ]
+        assert session.execute(
+            select(ComponentVersion.component_code, ComponentVersion.version)
+            .join(
+                LaunchComponent,
+                LaunchComponent.component_version_id == ComponentVersion.id,
+            )
+            .where(LaunchComponent.launch_id == after["launches"][2])
+            .order_by(ComponentVersion.component_code)
+        ).all() == [("claude-code", "2.1.317"), ("plugin:dev", "0.10.56")]
+        assert session.execute(
+            select(Prompt.launch_id, Call.message_id)
+            .join(Call, Call.prompt_id == Prompt.id)
+            .where(Prompt.id == after["prompts"][3])
+        ).all() == [(after["launches"][2], "msg_0005")]
+
+    def test_the_file_is_held_at_its_new_size_and_replayed_as_far_as_it_was(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """DB 605: `replayed_size` is the file's size at its last whole
+        publication, through every appended one since."""
+        publications.publish(_camp())
+
+        def held() -> Any:
+            return session.execute(
+                select(
+                    Transcript.file_size,
+                    Transcript.replayed_size,
+                    Transcript.file_modified_at,
+                    ComponentVersion.version,
+                ).join(
+                    ComponentVersion, ComponentVersion.id == Transcript.read_under_id
+                )
+            ).one()
+
+        publications.publish(_grown())
+        assert held() == (61_000, 48_112, STARTED + timedelta(minutes=30), "1.0.0")
+
+        sixth = call(6, prompt=3, predecessor="msg_0005")
+        publications.publish(
+            _grown(
+                call=5,
+                file_size=70_000,
+                file_modified_at=_at(40),
+                builds_on=builds_on(file_size=61_000, file_modified_at=_at(30)),
+                calls=[call(5, prompt=3, predecessor="msg_0004"), sixth],
+            )
+        )
+        assert held() == (70_000, 48_112, STARTED + timedelta(minutes=40), "1.0.0")
+
+        publications.publish(
+            _camp(
+                file_size=70_000,
+                file_modified_at=_at(40),
+                calls=[*_calls(), call(5, prompt=3, predecessor="msg_0004"), sixth],
+            )
+        )
+        assert held() == (70_000, 70_000, STARTED + timedelta(minutes=40), "1.0.0")
+        assert session.scalars(select(Call.position).order_by(Call.position)).all() == [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+        ]
+
+    def test_a_sub_agents_thread_is_appended_to(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        main = publications.publish(_camp())
+        thread = publications.publish(sub_agent(calls=[call(1)]))
+
+        with writes(session) as wrote:
+            publications.publish(
+                appended(
+                    agent_id=SUB_AGENT,
+                    agent_type="Explore",
+                    description=RECIPES,
+                    spawned_by=SPAWNING,
+                    calls=[call(1), call(2, predecessor="msg_0001")],
+                )
+            )
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(inserted=1),
+        }
+        assert session.execute(
+            select(
+                Transcript.main_id, Transcript.spawned_by_id, Transcript.file_size
+            ).where(Transcript.id == thread.id)
+        ).one() == (main.id, _tool_call_id(session), 61_000)
+        assert session.scalars(
+            select(Call.message_id)
+            .where(Call.transcript_id == thread.id)
+            .order_by(Call.position)
+        ).all() == ["msg_0001", "msg_0002"]
+
+    def test_a_spawning_call_an_appended_call_brings_is_joined(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        thread = publications.publish(
+            sub_agent(agent_id=DEEPER, spawned_by="toolu_0040")
+        )
+        assert _spawned_by(session, thread) is None
+        fifth = call(
+            5,
+            prompt=3,
+            predecessor="msg_0004",
+            tool_calls=[tool_call(40, tool="Agent")],
+        )
+
+        publications.publish(_grown(calls=[_calls()[3], fifth]))
+
+        assert _spawned_by(session, thread) == _tool_call_id(session, "toolu_0040")
+
+    def test_a_reference_code_an_appended_call_first_names_is_written(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        fifth = call(5, prompt=3, predecessor="msg_0004", stop_reason="refusal")
+
+        with writes(session) as wrote:
+            publications.publish(_grown(calls=[_calls()[3], fifth]))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "stop_reasons": Written(inserted=1),
+            "calls": Written(inserted=1),
+        }
+
+
+class TestNotAppendable:
+    """An appended call that does not continue what Pilot holds of its
+    Transcript is refused, and writes nothing: the collector publishes the
+    transcript whole (F152.15)."""
+
+    @pytest.mark.parametrize(
+        ("publication", "cause"),
+        [
+            (
+                _grown(builds_on=builds_on(file_size=48_000)),
+                "Pilot holds it at another size, time or collector's version than"
+                " the call builds on",
+            ),
+            (
+                _grown(builds_on=builds_on(file_modified_at=_at(11))),
+                "Pilot holds it at another size, time or collector's version than"
+                " the call builds on",
+            ),
+            (
+                _grown(builds_on=builds_on(collector="1.1.0")),
+                "Pilot holds it at another size, time or collector's version than"
+                " the call builds on",
+            ),
+            (
+                _grown(call=6, calls=[call(6, prompt=3)]),
+                "the boundary's `call` is 6, and Pilot holds 4 calls",
+            ),
+            (
+                _grown(launch=4, launches=[launch(started_at=_at(20))]),
+                "the boundary's `launch` is 4, and Pilot holds 2 launches",
+            ),
+            (
+                _grown(prompt=5),
+                "the boundary's `prompt` is 5, which is neither a prompt Pilot"
+                " holds under the boundary's launch nor the next under it",
+            ),
+            (
+                _grown(prompt=2, calls=[call(4)]),
+                "the boundary's `prompt` is 2, which is neither a prompt Pilot"
+                " holds under the boundary's launch nor the next under it",
+            ),
+            (
+                _grown(compaction=3),
+                "the boundary's `compaction` is 3, and Pilot holds 1 compactions",
+            ),
+            (
+                _grown(launch=1, prompt=1, launches=[_first_launch()], calls=[call(4)]),
+                "the call carries 1 launches from its boundary on, and Pilot holds 2",
+            ),
+            (
+                _grown(
+                    launch=1,
+                    prompt=1,
+                    launches=[_first_launch(prompts=[prompt()]), _second_launch()],
+                    calls=[call(4)],
+                ),
+                "launch 1: the call carries fewer prompts than Pilot holds under it",
+            ),
+            (
+                _grown(prompt=3, calls=[call(4)]),
+                "launch 2: the call carries fewer prompts than Pilot holds under it",
+            ),
+            (
+                _grown(compaction=1),
+                "the call carries 0 compactions from its boundary on, and Pilot"
+                " holds 1",
+            ),
+            (
+                _grown(call=3, calls=[call(4, prompt=3)]),
+                "the call lacks 1 of the calls Pilot holds from its boundary on",
+            ),
+            (
+                _grown(call=5, calls=[call(2, prompt=3)]),
+                "call `msg_0002`: Pilot holds it before the boundary",
+            ),
+            (
+                _grown(call=5, calls=[call(5, prompt=3, predecessor="msg_0009")]),
+                "call `msg_0005`: `predecessor` `msg_0009` is no call Pilot holds"
+                " before the boundary",
+            ),
+            (
+                _grown(
+                    calls=[
+                        _calls()[3],
+                        call(5, predecessor="msg_0004", tool_calls=[tool_call(1)]),
+                    ]
+                ),
+                "tool call `toolu_0001`: Pilot holds it under a call before the"
+                " boundary",
+            ),
+        ],
+    )
+    def test_a_call_that_does_not_continue_what_pilot_holds_is_refused(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        publication: PublicationSchema,
+        cause: str,
+    ) -> None:
+        publications.publish(_camp())
+        ids = _ids(session)
+
+        with (
+            writes(session) as wrote,
+            pytest.raises(PublicationNotAppendableException) as refused,
+        ):
+            publications.publish(publication)
+
+        assert refused.value.causes == [cause]
+        assert wrote == {}
+        assert _ids(session) == ids
+
+    def test_a_transcript_pilot_does_not_hold_is_not_appended_to(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        with (
+            writes(session) as wrote,
+            pytest.raises(PublicationNotAppendableException) as refused,
+        ):
+            publications.publish(appended(calls=[call(1)]))
+
+        assert refused.value.causes == ["Pilot does not hold it"]
+        assert wrote == {}
+
+    def test_a_sub_agents_thread_pilot_does_not_hold_is_not_appended_to(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """Its main thread, held at what the call builds on, is another
+        Transcript."""
+        publications.publish(_camp())
+
+        with (
+            writes(session) as wrote,
+            pytest.raises(PublicationNotAppendableException) as refused,
+        ):
+            publications.publish(appended(agent_id=SUB_AGENT, calls=[call(1)]))
+
+        assert refused.value.causes == ["Pilot does not hold it"]
+        assert wrote == {}
+
+    def test_every_cause_is_named_at_once_under_a_code_of_its_own(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        with pytest.raises(PublicationNotAppendableException) as refused:
+            publications.publish(
+                _grown(call=6, compaction=3, calls=[call(2, prompt=3)])
+            )
+
+        assert refused.value.causes == [
+            "the boundary's `compaction` is 3, and Pilot holds 1 compactions",
+            "the boundary's `call` is 6, and Pilot holds 4 calls",
+            "call `msg_0002`: Pilot holds it before the boundary",
+        ]
+        assert refused.value.message == (
+            f"Cannot append to transcript {CAMP} because "
+            + "; ".join(refused.value.causes)
+        )
+        assert refused.value.error_code == "PUBLICATION_NOT_APPENDABLE"
+
+    def test_the_transcript_published_whole_after_a_refusal_is_taken(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        grown = [*_calls(), call(5, prompt=3, predecessor="msg_0004")]
+        with pytest.raises(PublicationNotAppendableException):
+            publications.publish(_grown(builds_on=builds_on(file_size=48_000)))
+
+        publications.publish(_camp(calls=grown, file_size=61_000))
+
+        assert session.execute(
+            select(Transcript.file_size, Transcript.replayed_size)
+        ).one() == (61_000, 61_000)
+        assert _count(session, Call) == 5
+
+
 class TestTurns:
     """Publications of one conversation take turns, each seeing what the one
     before it committed."""
@@ -2118,15 +2790,15 @@ class TestRefused:
             (whole(calls=[call(1), call(1)]), "call `msg_0001`: named twice"),
             (
                 whole(launches=[launch(prompts=[prompt()])], calls=[call(1, prompt=2)]),
-                "call `msg_0001`: `prompt` 2 is past the call's 1 prompts",
+                "call `msg_0001`: `prompt` 2 is past the transcript's 1 prompts",
             ),
             (
                 sub_agent(calls=[call(1, prompt=1)]),
-                "call `msg_0001`: `prompt` 1 is past the call's 0 prompts",
+                "call `msg_0001`: `prompt` 1 is past the transcript's 0 prompts",
             ),
             (
                 whole(compactions=[compaction()], calls=[call(1, compaction=2)]),
-                "call `msg_0001`: `compaction` 2 is past the call's 1 compactions",
+                "call `msg_0001`: `compaction` 2 is past the transcript's 1 compactions",
             ),
             (
                 whole(calls=[call(1, predecessor="msg_0002"), call(2)]),
@@ -2182,6 +2854,28 @@ class TestRefused:
                 whole(calls=[call(1, events=[event(), event(is_error=False)])]),
                 "call `msg_0001`: event 2: the kind `api_error` is given as an"
                 " error and as none",
+            ),
+            (
+                appended(file_size=48_112),
+                "an appended call's file is no larger than the one it builds on",
+            ),
+            (
+                appended(calls=[call(1, predecessor="msg_0002"), call(2)]),
+                "call `msg_0001`: `predecessor` `msg_0002` is no earlier call",
+            ),
+            (
+                appended(call=3, prompt=4, calls=[call(3, prompt=5)]),
+                "call `msg_0003`: `prompt` 5 is past the transcript's 3 prompts",
+            ),
+            (
+                appended(
+                    call=3,
+                    compaction=2,
+                    compactions=[compaction()],
+                    calls=[call(3, compaction=4)],
+                ),
+                "call `msg_0003`: `compaction` 4 is past the transcript's 2"
+                " compactions",
             ),
         ],
     )

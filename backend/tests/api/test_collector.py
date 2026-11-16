@@ -23,6 +23,8 @@ from app.services.publication_service import (
 from tests.support.database import writes
 from tests.support.publications import (
     COLLECTOR_TOKEN,
+    appended,
+    builds_on,
     call,
     collector_headers,
     launch,
@@ -259,6 +261,77 @@ class TestPublish:
         assert f"Transcript {CAMP} no longer has 3 of the calls Pilot held" in (
             caplog.text
         )
+
+    def test_an_appended_publication_is_204_and_pilot_holds_what_it_carries(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        assert _post(client, _body(_camp())).status_code == 204
+        held = _held(session)
+        grown = appended(
+            call=2,
+            launch=2,
+            prompt=2,
+            calls=[call(2, predecessor="msg_0001"), call(3, predecessor="msg_0002")],
+        )
+
+        with writes(session) as wrote:
+            response = _post(client, _body(grown))
+
+        assert response.status_code == 204
+        assert response.data == b""
+        assert set(wrote) == {"transcripts", "calls"}
+        assert wrote["calls"].inserted == 1
+        after = _held(session)
+        assert after["calls"][:2] == held["calls"]
+        assert after | {"calls": held["calls"]} == held
+        [thread] = session.scalars(select(Transcript)).all()
+        session.refresh(thread)
+        assert (thread.file_size, thread.replayed_size) == (61_000, 48_112)
+        assert session.scalars(
+            select(Call.message_id).order_by(Call.position)
+        ).all() == ["msg_0001", "msg_0002", "msg_0003"]
+
+    def test_an_appended_call_that_does_not_continue_what_pilot_holds_is_409(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        """The code tells the collector to publish the transcript whole, which
+        Pilot then takes."""
+        assert _post(client, _body(_camp())).status_code == 204
+        held = _held(session)
+        grown = [call(2, predecessor="msg_0001"), call(3, predecessor="msg_0002")]
+        stale = appended(
+            call=2,
+            launch=2,
+            prompt=2,
+            builds_on=builds_on(file_size=40_000),
+            calls=grown,
+        )
+
+        with writes(session) as wrote:
+            response = _post(client, _body(stale))
+
+        assert response.status_code == 409
+        assert response.json["code"] == "PUBLICATION_NOT_APPENDABLE"
+        assert response.json["error"] == (
+            f"Cannot append to transcript {CAMP} because Pilot holds it at another"
+            " size, time or collector's version than the call builds on"
+        )
+        assert wrote == {}
+        assert _held(session) == held
+
+        whole_again = _body(_camp(calls=3)) | {"file_size": 61_000}
+        assert _post(client, whole_again).status_code == 204
+        assert len(_held(session)["calls"]) == 3
+
+    def test_an_appended_call_for_a_transcript_pilot_does_not_hold_is_409(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        with writes(session) as wrote:
+            response = _post(client, _body(appended(calls=[call(1)])))
+
+        assert response.status_code == 409
+        assert response.json["code"] == "PUBLICATION_NOT_APPENDABLE"
+        assert wrote == {}
 
     def test_a_body_that_is_not_a_publication_is_400_with_every_field_named(
         self, session: DbSession, client: FlaskClient

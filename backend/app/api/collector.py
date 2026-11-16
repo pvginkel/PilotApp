@@ -59,6 +59,7 @@ def answer_the_protocol_range(
         HTTP_204=None,
         HTTP_400=ApiErrorResponseSchema,
         HTTP_401=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
         HTTP_413=ApiErrorResponseSchema,
         HTTP_426=CollectorProtocolRangeSchema,
     ),
@@ -74,7 +75,8 @@ def publish(
 
     Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`;
     `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.
-    The body is the transcript as its file stands.
+    The body is the transcript as its file stands, read whole, or, with
+    `appended`, what a file that grew holds from a boundary on.
 
     Each answer is the call's outcome, and all but the first leave the record
     as it was:
@@ -90,6 +92,12 @@ def publish(
       that are not the call's shape, or, in `error`, what in the call
       contradicts itself or the record's rules for a transcript. The same
       call is refused again; the collector's other transcripts are not.
+    - 409, with the `code` `PUBLICATION_NOT_APPENDABLE`: an appended call
+      does not continue what Pilot holds of the transcript, the reasons in
+      `error`: Pilot does not hold it at the size and time and under the
+      collector's version the call builds on, holds no row at a place before
+      the boundary's, or holds from there on, or before, what the call does
+      not carry so. The collector publishes the transcript whole.
     - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused
       again.
     """

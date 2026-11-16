@@ -7,6 +7,11 @@ named by its code, a row Pilot holds by what the file names it by: a Call by
 its `message_id`, a Tool Call by its `tool_use_id`, a Prompt and a Compaction
 by their place in the file. It carries nothing of the transcript's text (DB
 decision 79.41).
+
+A call is whole, the file as it stands, or appended, for a file that grew
+(F152.15): one with `appended`, which names what the call builds on and the
+boundary its Launches, Compactions and Calls start at. A place and a
+`position` count through the file in both, from 1.
 """
 
 from typing import Annotated, Literal
@@ -269,8 +274,57 @@ class PublishedCallSchema(_Published):
     )
 
 
+class PublishedBaseSchema(_Published):
+    """What an appended publication builds on: the Transcript's file as the
+    publication before it read it."""
+
+    file_size: Size = Field(description="The file's size in bytes then")
+    file_modified_at: AwareDatetime = Field(description="The file's time then")
+    collector: Name = Field(description="The collector's version that read it then")
+
+
+class PublishedBoundarySchema(_Published):
+    """Where what an appended publication carries starts in the file. Each is
+    the place of the first one the call carries or, where it carries none,
+    the place the file's next would take."""
+
+    call: Place = Field(description="The `position` of the first Call it carries")
+    launch: Place = Field(
+        description="The place of its first Launch among the Transcript's Launches"
+    )
+    prompt: Place = Field(
+        description=(
+            "The place of its first Launch's first Prompt among the Transcript's"
+            " Prompts"
+        )
+    )
+    compaction: Place = Field(
+        description=(
+            "The place of its first Compaction among the Transcript's Compactions"
+        )
+    )
+
+
+class PublishedAppendedSchema(_Published):
+    """What makes a publication an appended one (DB decision 81 point 1)."""
+
+    builds_on: PublishedBaseSchema = Field(
+        description=(
+            "What Pilot must hold of the Transcript, or the call is refused and"
+            " the transcript published whole"
+        )
+    )
+    boundary: PublishedBoundarySchema = Field(
+        description=(
+            "Where the call's `launches`, `compactions` and `calls` start: from"
+            " there on the call carries all the file holds"
+        )
+    )
+
+
 class PublicationSchema(_Published):
-    """One Transcript as its file stands, read whole."""
+    """One Transcript as its file stands: read whole or, with `appended`,
+    from a boundary on."""
 
     session_id: Name = Field(description="Claude Code's id of the main thread")
     agent_id: Name | None = Field(
@@ -312,14 +366,29 @@ class PublicationSchema(_Published):
             " record names it"
         ),
     )
+    appended: PublishedAppendedSchema | None = Field(
+        default=None,
+        description=(
+            "On a publication of a file that grew and nothing else: what it"
+            " builds on, and its boundary. None on a whole one"
+        ),
+    )
     launches: list[PublishedLaunchSchema] = Field(
         default_factory=list,
-        description="A main thread's Launches, in the file's order",
+        description=(
+            "A main thread's Launches, in the file's order; on an appended call"
+            " those that wrote a line of what it carries, the first with its"
+            " Prompts from the boundary's on"
+        ),
     )
     compactions: list[PublishedCompactionSchema] = Field(
-        default_factory=list, description="Its Compactions, in the file's order"
+        default_factory=list,
+        description="Its Compactions, in the file's order, from the boundary's on",
     )
     calls: list[PublishedCallSchema] = Field(
         default_factory=list,
-        description="Its Calls, in the file's order: the first has position 1",
+        description=(
+            "Its Calls, in the file's order: the first has position 1, and on an"
+            " appended call the boundary's"
+        ),
     )

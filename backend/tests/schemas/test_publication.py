@@ -9,6 +9,8 @@ from pydantic import ValidationError
 
 from app.schemas.publication import PublicationSchema
 from tests.support.publications import (
+    appended,
+    builds_on,
     call,
     compaction,
     context_part,
@@ -157,6 +159,77 @@ class TestPublicationSchema:
         assert _refused(
             calls=[call(1, context_parts=[context_part(text="You are a cook")])]
         ) == [("calls", 0, "context_parts", 0, "text")]
+
+    def test_a_call_without_appended_is_whole(self) -> None:
+        assert whole().appended is None
+
+    def test_an_appended_call_names_what_it_builds_on_and_its_boundary(self) -> None:
+        publication = appended(call=7, launch=2, prompt=5, compaction=3)
+
+        assert publication.appended is not None
+        base = publication.appended.builds_on
+        assert (base.file_size, base.collector) == (48_112, "1.0.0")
+        assert base.file_modified_at == STARTED + timedelta(minutes=12)
+        assert publication.appended.boundary.model_dump() == {
+            "call": 7,
+            "launch": 2,
+            "prompt": 5,
+            "compaction": 3,
+        }
+        assert publication.file_size == 61_000
+
+    @pytest.mark.parametrize("part", ["builds_on", "boundary"])
+    def test_an_appended_call_names_both(self, part: str) -> None:
+        values = appended().model_dump(mode="json", exclude_unset=True)
+        del values["appended"][part]
+
+        with pytest.raises(ValidationError) as refused:
+            PublicationSchema.model_validate(values)
+
+        assert [error["loc"] for error in refused.value.errors()] == [
+            ("appended", part)
+        ]
+
+    @pytest.mark.parametrize("place", ["call", "launch", "prompt", "compaction"])
+    def test_a_boundary_names_each_place_from_1(self, place: str) -> None:
+        values = appended().model_dump(mode="json", exclude_unset=True)
+        boundary = values["appended"]["boundary"]
+
+        with pytest.raises(ValidationError) as refused:
+            PublicationSchema.model_validate(
+                values
+                | {"appended": values["appended"] | {"boundary": boundary | {place: 0}}}
+            )
+        assert [error["loc"] for error in refused.value.errors()] == [
+            ("appended", "boundary", place)
+        ]
+
+        del boundary[place]
+        with pytest.raises(ValidationError) as refused:
+            PublicationSchema.model_validate(values)
+        assert [error["loc"] for error in refused.value.errors()] == [
+            ("appended", "boundary", place)
+        ]
+
+    @pytest.mark.parametrize("fact", ["file_size", "file_modified_at", "collector"])
+    def test_what_an_appended_call_builds_on_is_required(self, fact: str) -> None:
+        base = builds_on()
+        del base[fact]
+
+        with pytest.raises(ValidationError) as refused:
+            appended(builds_on=base)
+
+        assert [error["loc"] for error in refused.value.errors()] == [
+            ("appended", "builds_on", fact)
+        ]
+
+    def test_an_appended_call_takes_no_field_pilot_does_not_know(self) -> None:
+        with pytest.raises(ValidationError) as refused:
+            appended(builds_on=builds_on(checkpoint="opaque"))
+
+        assert [error["loc"] for error in refused.value.errors()] == [
+            ("appended", "builds_on", "checkpoint")
+        ]
 
     def test_a_launch_runs_with_a_version(self) -> None:
         """DB 389."""

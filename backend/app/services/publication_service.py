@@ -14,6 +14,13 @@ What Pilot holds of the Transcript that the call no longer names goes, with
 what hangs on it: Pilot follows the file (DB decision 81 point 4; F152.17).
 The Transcript itself never goes (F119.2).
 
+An appended publication, of a file that grew and nothing else, is the same
+write from its boundary on (DB decision 81 point 1; F152.15): what Pilot
+holds before the boundary's places is neither read as the call's nor
+written. It is taken only where it continues what Pilot holds (`_continued`),
+so it removes no Launch, Prompt, Compaction or Call; any other is refused,
+for the collector to publish the transcript whole.
+
 Publications of one conversation, its main thread's and its sub-agents',
 take turns, so that a sub-agent's thread finds its main thread and its
 spawning Tool Call whichever comes first.
@@ -22,6 +29,7 @@ spawning Tool Call whichever comes first.
 import hmac
 import logging
 import re
+import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, get_args
@@ -48,6 +56,7 @@ from app.exceptions import (
     AuthenticationException,
     CollectorProtocolUnsupportedException,
     PublicationInvalidException,
+    PublicationNotAppendableException,
 )
 from app.models import (
     Call,
@@ -78,6 +87,8 @@ from app.models.call import RECORDED_ELSEWHERE
 from app.schemas.publication import (
     CallTokenKind,
     PublicationSchema,
+    PublishedAppendedSchema,
+    PublishedBoundarySchema,
     PublishedCallSchema,
     PublishedCompactionSchema,
     PublishedLaunchSchema,
@@ -109,6 +120,9 @@ HOOK = "hook"
 
 _TOKEN_KINDS: tuple[CallTokenKind, ...] = get_args(CallTokenKind)
 
+_WHOLE = PublishedBoundarySchema(call=1, launch=1, prompt=1, compaction=1)
+"""Where a whole call starts: at the file's first of each."""
+
 type _Version = tuple[str, str]
 """A Component Version as a call names it: its Component's code and its
 version."""
@@ -128,8 +142,13 @@ def _name(publication: PublicationSchema) -> str:
 
 def _faults(publication: PublicationSchema) -> list[str]:
     """What in the call contradicts the call itself or the record's rules for
-    a Transcript (DB 534, 536, 541, 542, 545, 560, 587), each in a line."""
+    a Transcript (DB 534, 536, 541, 542, 545, 560, 587), each in a line. A
+    predecessor an appended call does not carry is left to `_continued`."""
     found: list[str] = []
+    appended = publication.appended
+    boundary = _WHOLE if appended is None else appended.boundary
+    if appended is not None and publication.file_size <= appended.builds_on.file_size:
+        found.append("an appended call's file is no larger than the one it builds on")
     if publication.agent_id is None:
         found.extend(
             f"a main thread has no `{fact}`"
@@ -160,8 +179,10 @@ def _faults(publication: PublicationSchema) -> list[str]:
                     f" `{used.component}` is given two release times"
                 )
 
-    prompts = sum(len(launch.prompts) for launch in publication.launches)
-    compactions = len(publication.compactions)
+    prompts = boundary.prompt - 1
+    prompts += sum(len(launch.prompts) for launch in publication.launches)
+    compactions = boundary.compaction - 1 + len(publication.compactions)
+    carried = {call.message_id for call in publication.calls}
     earlier: set[str] = set()
     requested: set[str] = set()
     servers: dict[str, str | None] = {}
@@ -172,14 +193,19 @@ def _faults(publication: PublicationSchema) -> list[str]:
             found.append(f"{named}: named twice")
         if call.prompt is not None and call.prompt > prompts:
             found.append(
-                f"{named}: `prompt` {call.prompt} is past the call's {prompts} prompts"
+                f"{named}: `prompt` {call.prompt} is past the transcript's"
+                f" {prompts} prompts"
             )
         if call.compaction is not None and call.compaction > compactions:
             found.append(
-                f"{named}: `compaction` {call.compaction} is past the call's"
+                f"{named}: `compaction` {call.compaction} is past the transcript's"
                 f" {compactions} compactions"
             )
-        if call.predecessor is not None and call.predecessor not in earlier:
+        if (
+            call.predecessor is not None
+            and call.predecessor not in earlier
+            and (appended is None or call.predecessor in carried)
+        ):
             found.append(
                 f"{named}: `predecessor` `{call.predecessor}` is no earlier call"
             )
@@ -252,18 +278,25 @@ class PublicationService:
             )
 
     def publish(self, publication: PublicationSchema) -> Transcript:
-        """Take a whole publication of one Transcript, and return its row.
+        """Take a publication of one Transcript, whole or appended, and
+        return its row.
 
-        Its `replayed_size` is then its `file_size` (DB 605). A Call Pilot
-        held of it that the call no longer names is removed with what hangs
-        on it, and their number logged. An Environment,
-        a Repository, a Component Version and a reference code the call names
-        that Pilot has no row for are written, the code as its own name and
-        with what the call says of its category; one Pilot has met stands as
-        it is.
+        After a whole one its `replayed_size` is its `file_size` (DB 605). A
+        Call Pilot held of it that the call no longer names is removed with
+        what hangs on it, and their number logged. After an appended one
+        Pilot holds what the call carries from its boundary on, what lies
+        before it as it was, and `replayed_size` as it stood.
+
+        An Environment, a Repository, a Component Version and a reference
+        code the call names that Pilot has no row for are written, the code
+        as its own name and with what the call says of its category; one
+        Pilot has met stands as it is.
 
         Raises:
             PublicationInvalidException: the call has faults; nothing is
+                written.
+            PublicationNotAppendableException: an appended call does not
+                continue what Pilot holds of the Transcript; nothing is
                 written.
         """
         found = _faults(publication)
@@ -277,27 +310,37 @@ class PublicationService:
                 )
             )
         )
+        boundary = _WHOLE
+        ids: dict[str, int] = {}
+        if publication.appended is not None:
+            boundary = publication.appended.boundary
+            ids = self._continued(publication, publication.appended)
         self._meet_references(publication)
         versions = self._versions(publication)
         thread = self._thread(
             publication, versions[COLLECTOR, publication.collector.version]
         )
         surplus: _Surplus = {}
-        prompts = self._launches(thread, publication.launches, versions, surplus)
-        compactions = self._compactions(thread, publication.compactions, surplus)
+        prompts = self._launches(
+            thread, publication.launches, versions, surplus, boundary
+        )
+        compactions = self._compactions(
+            thread, publication.compactions, surplus, boundary
+        )
         calls = publication.calls
-        ids = self._calls(thread, calls, prompts, compactions)
-        self._tool_calls(thread, calls, ids)
+        stale = self._calls(thread, calls, prompts, compactions, boundary, ids)
+        self._tool_calls(thread, calls, ids, boundary)
         # Must follow `_tool_calls`, which moves a Tool Call the call names
         # off a Call that goes here, and `_calls`, after which no Call the
         # call names points at a Call, a Prompt or a Compaction that goes.
-        self._lose_calls(publication, ids)
+        self._lose_calls(publication, stale)
         for entity, gone in surplus.items():
             self._remove(entity, [row.id for row in gone])
         self._hung(
             Event,
             thread,
             ids,
+            boundary,
             {
                 call.message_id: [
                     {"kind_code": event.kind, "at": event.at, "detail": event.detail}
@@ -310,6 +353,7 @@ class PublicationService:
             ContextPart,
             thread,
             ids,
+            boundary,
             {
                 call.message_id: [
                     {
@@ -324,6 +368,215 @@ class PublicationService:
         )
         self._join(publication.session_id)
         return thread
+
+    def _continued(
+        self, publication: PublicationSchema, appended: PublishedAppendedSchema
+    ) -> dict[str, int]:
+        """Check that an appended call continues what Pilot holds of its
+        Transcript, and return the id of each Call before its boundary that
+        one of its Calls names as its predecessor, by `message_id`.
+
+        It does where Pilot holds the Transcript as the call builds on it,
+        at that size and time and read under that collector's version; where
+        Pilot holds a row at every place before the boundary's; and where
+        the call carries every Launch, Prompt, Compaction and Call Pilot
+        holds from there on, and no Call or Tool Call Pilot holds before.
+        The write that follows then removes none of those and touches
+        nothing before the boundary.
+
+        Raises:
+            PublicationNotAppendableException: it does not; nothing is
+                written.
+        """
+        name = _name(publication)
+        base = appended.builds_on
+        held = self.db.execute(
+            select(
+                Transcript.id,
+                Transcript.file_size,
+                Transcript.file_modified_at,
+                ComponentVersion.version,
+            )
+            .join(ComponentVersion, ComponentVersion.id == Transcript.read_under_id)
+            .where(
+                Transcript.session_id == publication.session_id,
+                Transcript.agent_id.is_not_distinct_from(publication.agent_id),
+            )
+        ).one_or_none()
+        if held is None:
+            raise PublicationNotAppendableException(name, ["Pilot does not hold it"])
+        if (held.file_size, held.file_modified_at, held.version) != (
+            base.file_size,
+            base.file_modified_at,
+            base.collector,
+        ):
+            raise PublicationNotAppendableException(
+                name,
+                [
+                    "Pilot holds it at another size, time or collector's version"
+                    " than the call builds on"
+                ],
+            )
+
+        boundary = appended.boundary
+        causes = self._launch_gaps(held.id, publication.launches, boundary)
+        causes += self._compaction_gaps(held.id, publication.compactions, boundary)
+        earlier = self._call_gaps(held.id, publication.calls, boundary, causes)
+        if causes:
+            raise PublicationNotAppendableException(name, causes)
+        return earlier
+
+    def _launch_gaps(
+        self,
+        thread_id: uuid.UUID,
+        launches: list[PublishedLaunchSchema],
+        boundary: PublishedBoundarySchema,
+    ) -> list[str]:
+        """Why an appended call's Launches and their Prompts do not continue
+        the Transcript's as Pilot holds them, each in a line."""
+        held = self.db.scalars(
+            select(Launch.id)
+            .where(Launch.transcript_id == thread_id)
+            .order_by(Launch.id)
+        ).all()
+        received: dict[int, int] = dict(
+            self.db.execute(
+                select(Prompt.launch_id, func.count())
+                .where(Prompt.transcript_id == thread_id)
+                .group_by(Prompt.launch_id)
+            ).all()
+        )
+        before = held[: boundary.launch - 1]
+        since = held[boundary.launch - 1 :]
+        if len(before) < boundary.launch - 1:
+            return [
+                f"the boundary's `launch` is {boundary.launch}, and Pilot holds"
+                f" {len(held)} launches"
+            ]
+        if len(launches) < len(since):
+            return [
+                f"the call carries {len(launches)} launches from its boundary on,"
+                f" and Pilot holds {len(since)}"
+            ]
+        # The Prompts the boundary's Launch keeps: those before the
+        # boundary's that lie under no Launch before it.
+        kept = boundary.prompt - 1 - sum(received.get(row, 0) for row in before)
+        if not 0 <= kept <= (received.get(since[0], 0) if since else 0):
+            return [
+                f"the boundary's `prompt` is {boundary.prompt}, which is neither"
+                " a prompt Pilot holds under the boundary's launch nor the next"
+                " under it"
+            ]
+        return [
+            f"launch {boundary.launch + place}: the call carries fewer prompts"
+            " than Pilot holds under it"
+            for place, launch_id in enumerate(since)
+            if len(launches[place].prompts) + (0 if place else kept)
+            < received.get(launch_id, 0)
+        ]
+
+    def _compaction_gaps(
+        self,
+        thread_id: uuid.UUID,
+        compactions: list[PublishedCompactionSchema],
+        boundary: PublishedBoundarySchema,
+    ) -> list[str]:
+        """Why an appended call's Compactions do not continue the
+        Transcript's as Pilot holds them, each in a line."""
+        held = self.db.scalars(
+            select(func.count())
+            .select_from(Compaction)
+            .where(Compaction.transcript_id == thread_id)
+        ).one()
+        since = held - (boundary.compaction - 1)
+        if since < 0:
+            return [
+                f"the boundary's `compaction` is {boundary.compaction}, and Pilot"
+                f" holds {held} compactions"
+            ]
+        if len(compactions) < since:
+            return [
+                f"the call carries {len(compactions)} compactions from its"
+                f" boundary on, and Pilot holds {since}"
+            ]
+        return []
+
+    def _call_gaps(
+        self,
+        thread_id: uuid.UUID,
+        calls: list[PublishedCallSchema],
+        boundary: PublishedBoundarySchema,
+        causes: list[str],
+    ) -> dict[str, int]:
+        """Add to `causes` why an appended call's Calls and their Tool Calls
+        do not continue the Transcript's as Pilot holds them, each in a line;
+        the id of each Call before the boundary that one of them names as
+        its predecessor, by `message_id`."""
+        carried = {call.message_id for call in calls}
+        outside = {
+            call.predecessor for call in calls if call.predecessor is not None
+        } - carried
+        held = self.db.execute(
+            select(Call.message_id, Call.id, Call.position).where(
+                Call.transcript_id == thread_id,
+                (Call.position >= boundary.call)
+                | Call.message_id.in_(sorted(carried | outside)),
+            )
+        ).all()
+        before = self.db.scalars(
+            select(func.count())
+            .select_from(Call)
+            .where(Call.transcript_id == thread_id, Call.position < boundary.call)
+        ).one()
+        if before < boundary.call - 1:
+            causes.append(
+                f"the boundary's `call` is {boundary.call}, and Pilot holds"
+                f" {before} calls"
+            )
+        lacking = sum(
+            row.position >= boundary.call and row.message_id not in carried
+            for row in held
+        )
+        if lacking:
+            causes.append(
+                f"the call lacks {lacking} of the calls Pilot holds from its"
+                " boundary on"
+            )
+        earlier: dict[str, int] = {
+            row.message_id: row.id for row in held if row.position < boundary.call
+        }
+        for call in calls:
+            if call.message_id in earlier:
+                causes.append(
+                    f"call `{call.message_id}`: Pilot holds it before the boundary"
+                )
+            if call.predecessor in outside and call.predecessor not in earlier:
+                causes.append(
+                    f"call `{call.message_id}`: `predecessor` `{call.predecessor}`"
+                    " is no call Pilot holds before the boundary"
+                )
+
+        requested = [
+            tool_call.tool_use_id for call in calls for tool_call in call.tool_calls
+        ]
+        if requested:
+            causes.extend(
+                f"tool call `{tool_use_id}`: Pilot holds it under a call before"
+                " the boundary"
+                for tool_use_id in self.db.scalars(
+                    select(ToolCall.tool_use_id)
+                    .join(Call, Call.id == ToolCall.call_id)
+                    .where(
+                        ToolCall.transcript_id == thread_id,
+                        Call.position < boundary.call,
+                        ToolCall.tool_use_id.in_(requested),
+                    )
+                    .order_by(ToolCall.id)
+                )
+            )
+        return {
+            message_id: earlier[message_id] for message_id in outside & earlier.keys()
+        }
 
     def _meet_references(self, publication: PublicationSchema) -> None:
         """A row for each reference code the call names that Pilot has not
@@ -468,9 +721,10 @@ class PublicationService:
             )
 
     def _thread(self, publication: PublicationSchema, read_under_id: int) -> Transcript:
-        """The Transcript's row as the call has it. A sub-agent's thread is
-        under its main thread where Pilot holds that one, and a main thread
-        first held takes the sub-agents' threads that came before it."""
+        """The Transcript's row as the call has it, its `replayed_size` its
+        file's size after a whole call alone (DB 605). A sub-agent's thread
+        is under its main thread where Pilot holds that one, and a main
+        thread first held takes the sub-agents' threads that came before it."""
         facts: dict[str, Any] = {
             "working_directory": publication.working_directory,
             "repository_id": None,
@@ -481,9 +735,10 @@ class PublicationService:
             "file_size": publication.file_size,
             "file_modified_at": publication.file_modified_at,
             "collected_at": datetime.now(UTC),
-            "replayed_size": publication.file_size,
             "read_under_id": read_under_id,
         }
+        if publication.appended is None:
+            facts["replayed_size"] = publication.file_size
         if publication.repository is not None:
             facts["repository_id"] = self._repository(publication.repository)
         if publication.environment is not None:
@@ -530,17 +785,19 @@ class PublicationService:
         launches: list[PublishedLaunchSchema],
         versions: dict[_Version, int],
         surplus: _Surplus,
+        boundary: PublishedBoundarySchema,
     ) -> list[Prompt]:
-        """The Transcript's Launches as the call has them, each with its
-        versions, its Prompts and their Hook Runs; the Prompts' rows in the
-        file's order. A held Launch, Prompt or Hook Run past the call's last
-        is left to `surplus`."""
+        """The Transcript's Launches from the boundary's on as the call has
+        them, each with its versions, its Prompts and their Hook Runs, the
+        first with its Prompts from the boundary's on; the rows of all the
+        Transcript's Prompts in the file's order. A held Launch, Prompt or
+        Hook Run past the call's last is left to `surplus`."""
+        started = self.db.scalars(
+            select(Launch).where(Launch.transcript_id == thread.id).order_by(Launch.id)
+        ).all()
+        before = started[: boundary.launch - 1]
         rows = self._placed(
-            self.db.scalars(
-                select(Launch)
-                .where(Launch.transcript_id == thread.id)
-                .order_by(Launch.id)
-            ).all(),
+            started[boundary.launch - 1 :],
             [
                 {"started_at": launch.started_at, "ended_at": launch.ended_at}
                 for launch in launches
@@ -554,9 +811,7 @@ class PublicationService:
         used_by: dict[int, dict[str, LaunchComponent]] = {}
         for component in self.db.scalars(
             select(LaunchComponent).where(
-                LaunchComponent.launch_id.in_(
-                    select(Launch.id).where(Launch.transcript_id == thread.id)
-                )
+                LaunchComponent.launch_id.in_([row.id for row in rows])
             )
         ):
             used_by.setdefault(component.launch_id, {})[component.component_code] = (
@@ -585,10 +840,18 @@ class PublicationService:
             select(Prompt).where(Prompt.transcript_id == thread.id).order_by(Prompt.id),
             "launch_id",
         )
-        prompts: list[Prompt] = []
+        prompts = [prompt for row in before for prompt in received.get(row.id, [])]
+        # The Prompts the boundary's Launch keeps: those before the
+        # boundary's that lie under no Launch before it.
+        kept = boundary.prompt - 1 - len(prompts)
+        carried: list[Prompt] = []
         for row, launch in zip(rows, launches, strict=True):
-            prompts += self._placed(
-                received.get(row.id, []),
+            under = received.get(row.id, [])
+            if row is rows[0]:
+                prompts += under[:kept]
+                under = under[kept:]
+            carried += self._placed(
+                under,
                 [
                     {
                         "received_at": prompt.received_at,
@@ -606,13 +869,12 @@ class PublicationService:
 
         ran = self._grouped(
             select(HookRun)
-            .join(Prompt, Prompt.id == HookRun.prompt_id)
-            .where(Prompt.transcript_id == thread.id)
+            .where(HookRun.prompt_id.in_([row.id for row in carried]))
             .order_by(HookRun.id),
             "prompt_id",
         )
         published = [prompt for launch in launches for prompt in launch.prompts]
-        for prompt_row, prompt in zip(prompts, published, strict=True):
+        for prompt_row, prompt in zip(carried, published, strict=True):
             self._placed(
                 ran.get(prompt_row.id, []),
                 [run.model_dump() for run in prompt.hook_runs],
@@ -621,22 +883,25 @@ class PublicationService:
                 prompt_id=prompt_row.id,
             )
         self.db.flush()
-        return prompts
+        return prompts + carried
 
     def _compactions(
         self,
         thread: Transcript,
         compactions: list[PublishedCompactionSchema],
         surplus: _Surplus,
+        boundary: PublishedBoundarySchema,
     ) -> list[Compaction]:
-        """The Transcript's Compactions as the call has them, in the file's
-        order. A held one past the call's last is left to `surplus`."""
+        """The Transcript's Compactions from the boundary's on as the call
+        has them; the rows of all its Compactions in the file's order. A held
+        one past the call's last is left to `surplus`."""
+        held = self.db.scalars(
+            select(Compaction)
+            .where(Compaction.transcript_id == thread.id)
+            .order_by(Compaction.id)
+        ).all()
         rows = self._placed(
-            self.db.scalars(
-                select(Compaction)
-                .where(Compaction.transcript_id == thread.id)
-                .order_by(Compaction.id)
-            ).all(),
+            held[boundary.compaction - 1 :],
             [
                 {
                     "at": compaction.at,
@@ -652,7 +917,7 @@ class PublicationService:
             transcript_id=thread.id,
         )
         self.db.flush()
-        return rows
+        return [*held[: boundary.compaction - 1], *rows]
 
     def _calls(
         self,
@@ -660,20 +925,31 @@ class PublicationService:
         calls: list[PublishedCallSchema],
         prompts: list[Prompt],
         compactions: list[Compaction],
-    ) -> dict[str, int]:
-        """The Transcript's Calls as the call has them, their `position` their
-        place in it; the id of each Call Pilot holds of it, by its
-        `message_id`, one the call no longer names included. A Call Pilot has
-        not met takes an id before it is written, so that one written beside
-        it names it as its predecessor."""
+        boundary: PublishedBoundarySchema,
+        ids: dict[str, int],
+    ) -> list[int]:
+        """The Transcript's Calls from the boundary on as the call has them,
+        their `position` their place in the file. `ids`, which comes with
+        the Calls before the boundary that they name, gains the id of each
+        Call the call names, by its `message_id`; returned are the ids of
+        the Calls Pilot held from the boundary on that it no longer names. A
+        Call Pilot has not met takes an id before it is written, so that one
+        written beside it names it as its predecessor."""
         held = {
             row.message_id: row
             for row in self.db.scalars(
-                select(Call).where(Call.transcript_id == thread.id)
+                select(Call).where(
+                    Call.transcript_id == thread.id, Call.position >= boundary.call
+                )
             )
         }
+        named = {call.message_id for call in calls}
         unmet = [call.message_id for call in calls if call.message_id not in held]
-        ids = {message_id: row.id for message_id, row in held.items()}
+        ids.update(
+            (message_id, row.id)
+            for message_id, row in held.items()
+            if message_id in named
+        )
         if unmet:
             ids.update(
                 zip(
@@ -688,7 +964,7 @@ class PublicationService:
             )
 
         met: list[tuple[Call, dict[str, Any]]] = []
-        for position, call in enumerate(calls, start=1):
+        for position, call in enumerate(calls, start=boundary.call):
             facts: dict[str, Any] = {
                 "position": position,
                 "prompt_id": prompts[call.prompt - 1].id if call.prompt else None,
@@ -727,15 +1003,11 @@ class PublicationService:
         for row, facts in met:
             _set(row, facts)
         self.db.flush()
-        return ids
+        return [row.id for message_id, row in held.items() if message_id not in named]
 
-    def _lose_calls(self, publication: PublicationSchema, ids: dict[str, int]) -> None:
-        """Remove the Calls of `ids` that the call no longer names, with what
-        hangs on them, and log their number (DB decision 81 point 4)."""
-        named = {call.message_id for call in publication.calls}
-        lost = [
-            call_id for message_id, call_id in ids.items() if message_id not in named
-        ]
+    def _lose_calls(self, publication: PublicationSchema, lost: list[int]) -> None:
+        """Remove the Calls the call no longer names, with what hangs on
+        them, and log their number (DB decision 81 point 4)."""
         if lost:
             self._remove(Call, lost)
             logger.warning(
@@ -745,14 +1017,24 @@ class PublicationService:
             )
 
     def _tool_calls(
-        self, thread: Transcript, calls: list[PublishedCallSchema], ids: dict[str, int]
+        self,
+        thread: Transcript,
+        calls: list[PublishedCallSchema],
+        ids: dict[str, int],
+        boundary: PublishedBoundarySchema,
     ) -> None:
         """The Tool Calls the call names, each under the Call that requested
-        it; a held one it no longer names is removed."""
+        it; one held under a Call from the boundary on that it no longer
+        names is removed."""
         held = {
             row.tool_use_id: row
             for row in self.db.scalars(
-                select(ToolCall).where(ToolCall.transcript_id == thread.id)
+                select(ToolCall)
+                .join(Call, Call.id == ToolCall.call_id)
+                .where(
+                    ToolCall.transcript_id == thread.id,
+                    Call.position >= boundary.call,
+                )
             )
         }
         for call in calls:
@@ -795,6 +1077,7 @@ class PublicationService:
         entity: type[Any],
         thread: Transcript,
         ids: dict[str, int],
+        boundary: PublishedBoundarySchema,
         facts: dict[str, list[dict[str, Any]]],
     ) -> None:
         """The rows of `entity`, an Event's or a Context Part's, under each
@@ -803,7 +1086,7 @@ class PublicationService:
         held: dict[int, list[Any]] = self._grouped(
             select(entity)
             .join(Call, Call.id == entity.call_id)
-            .where(Call.transcript_id == thread.id)
+            .where(Call.transcript_id == thread.id, Call.position >= boundary.call)
             .order_by(entity.id),
             "call_id",
         )
