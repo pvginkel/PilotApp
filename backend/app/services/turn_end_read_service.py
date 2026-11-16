@@ -39,6 +39,7 @@ Session that owes one, from the rows.
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -59,6 +60,7 @@ from app.services.controller_client import (
     ControllerProblemType,
     ControllerUnreachable,
 )
+from app.services.handing import hand_over, sides
 from app.services.refusal_waits import (
     REFUSAL_RETRY_SECONDS,
     REFUSAL_WAIT_SECONDS,
@@ -276,7 +278,11 @@ class TurnEndReadService:
     ) -> None:
         """What the read gave, written under the Project's row, the Session's
         and the Document's, unless the document no longer awaits its read;
-        with the run's last, the job after its turn placed."""
+        with the run's last, the job after its turn placed. The Blocks that
+        are Pilot's are read before the write and compared after it
+        (`hand_over`): a run's earlier-read documents, Pilot's while this one
+        awaited its read, are the person's after the last where no job
+        follows it."""
         documents = self._container.document_service()
         document = db.get_one(Document, owed.document_id)
         project, item = documents.owner(document)
@@ -304,6 +310,7 @@ class TurnEndReadService:
                 session_id,
             )
             return
+        handing = sides(db, project.id)
         if isinstance(content, _Refused):
             reason = content.reason
         else:
@@ -316,6 +323,7 @@ class TurnEndReadService:
                     session_id,
                 )
                 self._settled(db, project, session_id)
+                hand_over(db, handing, datetime.now(UTC))
                 return
             reason = f"its text holds faults: {listed(version.faults)}"
         documents.fail_read(document)
@@ -333,6 +341,7 @@ class TurnEndReadService:
             "Read document %s of session %s: failed, %s", owed.path, session_id, reason
         )
         self._settled(db, project, session_id)
+        hand_over(db, handing, datetime.now(UTC))
 
     def _settled(self, db: Session, project: Project, session_id: uuid.UUID) -> None:
         """Under the project's row, a document of the Session's run read: once

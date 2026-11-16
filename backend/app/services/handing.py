@@ -19,15 +19,13 @@ The moves to a person: the end of a work item's turn or a job's, a pass's or
 the job's after a run's turn among them, done, failed or interrupted; a start
 that failed; a Stop, a Close, a Stop and take over; the stops of an Archive;
 the lift of a Store Update that leaves a job it stopped to a person's Retry;
-the quota wall's settle; and a Cancel. The moves back to Pilot: a Resume, a
-Retry, a work item added with its claims and researches, and a clarification
-run placed.
+the quota wall's settle; a Cancel; and the turn-end read, whose last read,
+where no job follows it after a Close for good or an Archive, leaves the
+person the Blocks of the run's documents read before it, Pilot's while
+another document of the run awaited its read. The moves back to Pilot: a
+Resume, a Retry, a work item added with its claims and researches, and a
+clarification run placed.
 
-The turn-end read is not compared. A read makes its own document's Blocks,
-but it can move those of a document its run registered and that was read
-before it: they are Pilot's while another document of the run awaits its
-read, and become a person's at the last read where no job follows it, after
-a Close for good or an Archive since. Those Blocks keep no `handed_at`.
 Nothing reads `handed_at` to decide anything.
 """
 

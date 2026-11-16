@@ -92,18 +92,17 @@ interrupted, a pass's among them; a start that failed; a Stop, a
 Close, a Stop and take over and the Cancel (below); the quota wall's settle
 ([`usage.md`](usage.md)); an environment stopped under a turn ([`sessions.md`](sessions.md)); a
 project's transition that stops its Sessions, compared once after its closes, so that an Archive
-hands the blocks its stops leave and a Finish, which closes their items, hands none; and the
-store's update's lift that leaves a job to a person's Retry ([`store-update.md`](store-update.md)).
-And those back to Pilot: a Resume, a Retry, a work item added with its `claims` or `researches`,
+hands the blocks its stops leave and a Finish, which closes their items, hands none; the
+store's update's lift that leaves a job to a person's Retry ([`store-update.md`](store-update.md));
+and the turn-end read (below), which makes its own document's blocks and can move those of a
+document of its run read before it, Pilot's while another document of the run awaits its read and
+the person's after the last read where no job follows it, after a Close for good or an Archive
+since. And those back to Pilot: a Resume, a Retry, a work item added with its `claims` or `researches`,
 and a clarification run placed. The instant is the move's own where it has one, a Stop's
 `stopped_at`, a turn's end, a transition's, the lift's `lifted_at`, and the comparison's otherwise.
 A chat's turn end is not compared.
 
-Nor is the turn-end read (below). A read makes its own document's blocks, but it can move those of
-a document of its run read before it, which are Pilot's while another document of the run awaits
-its read: at the last read where no job follows it, after a Close for good or an Archive since,
-they become the person's with no `handed_at`. A block that became the person's before the column
-has none either.
+A block that became the person's before the column has no `handed_at`.
 
 ## The read at the run's end
 

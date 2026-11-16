@@ -27,6 +27,7 @@ from app.database import scoped_session
 from app.engine.documents import awaits_read
 from app.engine.views import ViewService
 from app.models import (
+    Block,
     Document,
     DocumentVersion,
     Environment,
@@ -753,6 +754,32 @@ class TestTurnEndReadServiceRunClosed:
         document = _document(session, item)
         assert document.published_text is None and document.read_failed_at is not None
         assert _jobs_after(session, run) == []
+
+    def test_the_last_read_hands_the_earlier_documents_asks_at_that_read(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        project: Project,
+        person: User,
+        run: models.Session,
+    ) -> None:
+        """Read first, a document's question is Pilot's while another of the
+        run awaits its read; the last read, which no job follows, leaves it
+        the person's, handed at that read."""
+        first = _register(container, project, run)
+        _register(container, project, run, OTHER)
+        _close(session, container, project, run, person)
+        before = datetime.now(UTC)
+
+        _read(reads, run.id)
+
+        (block,) = session.scalars(
+            select(Block)
+            .where(Block.document_id == first.id)
+            .execution_options(populate_existing=True)
+        )
+        assert block.handed_at is not None and block.handed_at >= before
 
 
 def _pending() -> set[str]:
