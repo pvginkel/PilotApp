@@ -68,6 +68,7 @@ from app.models.reference import SessionState
 from app.services.advisory_turn import advisory_turn
 from app.services.controller_client import ControllerUnreachable
 from app.services.environment_service import EnvironmentService
+from app.services.handing import hand_over, sides
 from app.services.job_service import TURN_ENDING
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import CHAT_KIND, JOB_KIND
@@ -310,9 +311,13 @@ class StoreUpdater:
             left = db.scalars(
                 _retriable(update).with_only_columns(AgentSession.project_id)
             ).all()
+            handing = [sides(db, project_id) for project_id in sorted(set(left))]
             update.lifted_at = datetime.now(UTC)
             # A job left to a person's Retry is in flight no more from this
-            # commit on, and its pass's documents are the person's (DB 296).
+            # commit on, and its pass's documents are the person's (DB 296),
+            # handed at the lift.
+            for before in handing:
+                hand_over(db, before, update.lifted_at)
             bus = self._container.engine_bus()
             for project_id in left:
                 bus.emit(ProjectChanged(project_id))

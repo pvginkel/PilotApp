@@ -36,6 +36,7 @@ from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerUnreachable, HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService, EnvironmentStartFailed
+from app.services.handing import sides
 from app.services.job_service import retry_refusal
 from app.services.pilot_server import PilotServer
 from app.services.relay_service import RelayService
@@ -63,6 +64,7 @@ from tests.support.supervisor import (
     metric_value,
     wait_until,
 )
+from tests.support.working_on import Camp
 
 STORE_REPO = "/work/PilotProjects"
 OTHER_ENV = "example-env-2"
@@ -619,6 +621,13 @@ def _retried(db: DbSession) -> set[uuid.UUID]:
     return set(db.scalars(select(Work.id).where(Work.retried_by_id.is_not(None))))
 
 
+_PITCH = """# Where do we pitch?
+
+```question id=Q1
+```
+"""
+
+
 class TestLift:
     """Before `lifted_at`, each job the update stopped is retried once
     through a person's Retry (design 5 D7; DB 281)."""
@@ -743,6 +752,36 @@ class TestLift:
         _run(updater)
 
         assert ProjectChanged(camp.id) in engine_events
+
+    def test_a_pass_its_retry_refuses_hands_its_documents_blocks_at_the_lift(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        person: User,
+    ) -> None:
+        update = _at_lift(session)
+        record = Camp(container, session)
+        writer = record.worker()
+        pitch = record.registered(writer, _PITCH)
+        record.ended(writer)
+        left = record.job_after(writer, SessionState.STOPPED)
+        left.stopped_at = left.turn_started_at = left.turn_ended_at = datetime.now(UTC)
+        left.stopped_by_user_id = record.pilot().id
+        left.turns = 1
+        record.project.archived = True
+        session.flush()
+        asked = record.block(pitch, "Q1")
+        assert asked.id in sides(session, record.project.id).pilots
+
+        _run(updater)
+
+        assert _retry_of(session, left) is None
+        lifted_at = _update(session, update.id).lifted_at
+        assert lifted_at is not None
+        session.refresh(asked)
+        assert asked.id not in sides(session, record.project.id).pilots
+        assert asked.handed_at == lifted_at
 
     def test_a_stopped_turn_still_ending_holds_the_lift_to_a_later_run(
         self,

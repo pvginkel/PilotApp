@@ -57,6 +57,7 @@ from app.schemas.projects import ProjectStatus
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import ChatCloseService
 from app.services.halt_file_service import HaltFileService
+from app.services.handing import hand_over, sides
 from app.services.job_service import JobService
 from app.services.people_service import PeopleService
 from app.services.session_start_service import STOPPABLE, SessionStartService
@@ -621,7 +622,9 @@ class ProjectService:
     ) -> None:
         """`person`'s transition of `kind` under the project's row, at `at`,
         now where none is given; a Finish puts the archive question unless
-        `asks_archive` is off (`finish_and_archive`)."""
+        `asks_archive` is off (`finish_and_archive`). A Block that the stops
+        of a Finish, an Archive or a Reopen leave to a person is handed at
+        `at` (`hand_over`); one of an Item the Finish closes is not."""
         if kind is TransitionKind.OPENED:
             self._create(project, person)
             return
@@ -637,8 +640,10 @@ class ProjectService:
                 project, person, _QUESTION_CLOSES[kind]
             )
         self._write(project, person, at, kind)
+        handing = None
         # Before the closes, which lock the Items after their Sessions.
         if kind in _STOPS:
+            handing = sides(self.db, project.id)
             self.session_start_service.stop_project(self.db, project, person, at)
         if kind in _CLOSES:
             self.chat_close_service.close_open(self.db, project, _CLOSES[kind], at)
@@ -650,6 +655,8 @@ class ProjectService:
             self.record_service.close_unanswered(project, person, at)
             if asks_archive:
                 self.document_service.bear_archive_question(project)
+        if handing is not None:
+            hand_over(self.db, handing, at)
         if kind is TransitionKind.AUTOPILOT_ON and autopilot_yes:
             self.record_service.autopilot_yes(project, person)
         if project.paused != paused:

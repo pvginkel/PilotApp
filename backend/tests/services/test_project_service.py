@@ -72,6 +72,7 @@ from app.services.auth_service import AuthContext
 from app.services.chat_close_service import CLOSED
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
+from app.services.handing import sides
 from app.services.job_service import SETUP_TITLE
 from app.services.project_service import (
     ARCHIVED_REFUSAL,
@@ -93,6 +94,7 @@ from app.services.working_on import Reading
 from app.utils import after_commit as after_commit_module
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
+from tests.support.working_on import Camp
 
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
@@ -2083,6 +2085,26 @@ class TestCreateProjectRefused:
         assert container.project_service().head(ADA, draft.id).create_refusal is None
 
 
+_PITCH = """# Where do we pitch?
+
+```question id=Q1
+```
+"""
+
+_CUT_OVER = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-11-02T09:00:00Z
+```
+
+```action id=A2
+```
+"""
+"""An action the pass claimed beside one that waits on the person."""
+
+
 @pytest.mark.usefixtures("person")
 class TestTransition:
     @pytest.mark.parametrize(
@@ -2613,6 +2635,70 @@ class TestTransition:
             (run.state_code, run.stopped_at, run.stopped_by_user_id) for run in stopping
         ] == [(SessionState.STOPPED, at, person.id)] * 4
         assert idle.state_code is SessionState.IDLE
+
+    def test_archive_hands_the_blocks_of_the_pass_it_stops_at_the_archive(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        camp = Camp(container, session)
+        writer = camp.worker()
+        pitch = camp.registered(writer, _PITCH)
+        camp.ended(writer)
+        job = camp.job_after(writer)
+        asked = camp.block(pitch, "Q1")
+        assert asked.id in sides(session, camp.project.id).pilots
+
+        container.project_service().transition(
+            ADA, camp.project.id, TransitionKind.ARCHIVED
+        )
+
+        ((_, at, _),) = [
+            transition
+            for transition in _transitions(session, camp.project)
+            if transition[0] is TransitionKind.ARCHIVED
+        ]
+        assert job.state_code is SessionState.STOPPED
+        assert asked.id not in sides(session, camp.project.id).pilots
+        assert asked.handed_at == at
+
+    def test_archive_hands_the_block_the_run_it_stops_held_at_the_archive(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        camp = Camp(container, session)
+        writer = camp.worker()
+        cut_over = camp.registered(writer, _CUT_OVER)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        camp.claim(cut_over, "A1", camp.worker(conversation="conversation-2"))
+        claimed, beside = camp.block(cut_over, "A1"), camp.block(cut_over, "A2")
+        assert sides(session, camp.project.id).pilots == {claimed.id}
+
+        container.project_service().transition(
+            ADA, camp.project.id, TransitionKind.ARCHIVED
+        )
+
+        ((_, at, _),) = [
+            transition
+            for transition in _transitions(session, camp.project)
+            if transition[0] is TransitionKind.ARCHIVED
+        ]
+        assert (claimed.handed_at, beside.handed_at) == (at, None)
+
+    def test_finish_hands_no_block_of_the_items_it_closes(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        camp = Camp(container, session)
+        writer = camp.worker()
+        pitch = camp.registered(writer, _PITCH)
+        camp.ended(writer)
+        camp.job_after(writer)
+        asked = camp.block(pitch, "Q1")
+
+        container.project_service().transition(
+            ADA, camp.project.id, TransitionKind.FINISHED
+        )
+
+        assert pitch.done_cause_code == "finished"
+        assert asked.handed_at is None
 
     def test_finish_closes_the_open_chat_finished_its_close_its_last_record(
         self,
