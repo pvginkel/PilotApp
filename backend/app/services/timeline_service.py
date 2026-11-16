@@ -1318,9 +1318,7 @@ class TimelineService:
                 select(Block.document_id, func.max(Block.handed_at))
                 .where(Block.document_id.in_(document_ids))
                 .group_by(Block.document_id)
-            )
-            .tuples()
-            .all()
+            ).all()
         )
 
     def _edited(self, document_ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime]:
