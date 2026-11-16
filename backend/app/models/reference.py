@@ -125,11 +125,16 @@ class ChatKind(StrEnum):
 
 
 class CloseCause(StrEnum):
+    """A kind of way a Chat or a Conversation closed: `created` a Chat's
+    alone, `ended`, its caller's end, a Conversation's alone (DB decision
+    77)."""
+
     TIMEOUT = "timeout"
     CREATED = "created"
     FINISHED = "finished"
     REOPENED = "reopened"
     ARCHIVED = "archived"
+    ENDED = "ended"
 
 
 class EffectKind(StrEnum):

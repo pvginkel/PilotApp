@@ -187,7 +187,7 @@ class ChatService:
             raise InvalidOperationException(operation, "Pilot is updating")
         quoted = self._quote(project, person, words)
         session = self._open_chat(project.id)
-        if session is not None and not _unbriefed(session):
+        if session is not None and not unbriefed(session):
             locked = self._still_open(project, session.id)
             if locked is not None:
                 return self._send(project, locked, person, quoted)
@@ -233,7 +233,7 @@ class ChatService:
         and first the server's notice when the handbook changed since its
         previous Turn (D052; DB assertion 251), the notice counted once it
         went out."""
-        changed = self._handbook_changed(project, session)
+        changed = handbook_changed(self.db, project, session)
         message = words.text
         if self._previous_author(session) != person.id:
             message = f"{self.brief_service.message_from(project, person)}\n{message}"
@@ -256,7 +256,7 @@ class ChatService:
         when it closed, its start fell through or its project was archived
         meanwhile: the locks let go with the savepoint that took them, since
         a start locks the project's row as a change of its standing does
-        (`_locked`). A transition that stops the project's sessions holds the
+        (`lock_standing`). A transition that stops the project's sessions holds the
         Session's lock to its commit (`SessionStartService.stop_project`), so
         `project` is read under it."""
         savepoint = self.db.begin_nested()
@@ -264,7 +264,7 @@ class ChatService:
         session = self.records.lock_session(session_id)
         chat = self.db.get_one(Chat, session_id, populate_existing=True)
         self.db.get_one(Project, project.id, populate_existing=True)
-        if chat.closed_at is None and not project.archived and not _unbriefed(session):
+        if chat.closed_at is None and not project.archived and not unbriefed(session):
             savepoint.commit()
             return session
         savepoint.rollback()
@@ -291,60 +291,6 @@ class ChatService:
                 return author
         return None
 
-    def _handbook_changed(self, project: Project, session: AgentSession) -> bool:
-        """Whether the project's handbook was published after the chat's
-        previous Turn that reached the brain was sent, by anyone but the chat
-        itself: one whose send failed (F125) never went out, nor the notice it
-        carried, so its retry carries it again. A publication since then is
-        the chat's own when every Version cut of the handbook since is of the
-        chat's Session and its published text is the latest Version's, every
-        Document being born with one; a Version of no Session is a change."""
-        handbook = self.db.execute(
-            select(Document.id, Document.published_at, Document.published_hash).where(
-                Document.project_id == project.id,
-                Document.role_code == DocumentRole.HANDBOOK,
-            )
-        ).one_or_none()
-        if handbook is None or handbook.published_at is None:
-            return False
-        sent = self._previous_sent(session)
-        if sent is None or handbook.published_at <= sent:
-            return False
-        versions = self.db.execute(
-            select(
-                DocumentVersion.session_id,
-                DocumentVersion.hash,
-                DocumentVersion.created_at,
-            )
-            .where(DocumentVersion.document_id == handbook.id)
-            .order_by(DocumentVersion.number.desc())
-        ).all()
-        since = [version for version in versions if version.created_at > sent]
-        return versions[0].hash != handbook.published_hash or any(
-            version.session_id != session.id for version in since
-        )
-
-    def _previous_sent(self, session: AgentSession) -> datetime | None:
-        """When the chat's previous Turn that reached the brain was sent; none
-        while none did. One whose send failed (F125) never went out, nor one a
-        Stop ended before it was sent (F67.1)."""
-        turns = self.db.execute(
-            select(Turn.id, Turn.started_at, Turn.error)
-            .where(Turn.session_id == session.id)
-            .order_by(Turn.seq.desc())
-        ).all()
-        for turn_id, started_at, error in turns:
-            if not read_records(
-                self.db,
-                session.id,
-                turn_id=turn_id,
-                kind=RecordKind.SERVER,
-                payload_type=STOPPED_UNSENT if error is None else SEND_FAILED,
-                limit=1,
-            ):
-                return started_at
-        return None
-
     def _start(
         self,
         project_id: uuid.UUID,
@@ -358,7 +304,7 @@ class ChatService:
         afresh in a headless session of its own, a definition chat's brief
         naming `call`. The open chat's Session is locked after the project's
         row (the start's lock order)."""
-        project = self._locked(project_id)
+        project = lock_standing(self.db, project_id)
         _refuse_message(project, operation)
         session = self._open_chat(project.id)
         if session is None:
@@ -370,7 +316,7 @@ class ChatService:
                     raise InvalidOperationException(operation, "its chat is starting")
                 case SessionState.STOPPED if session.turn_ended_at is None:
                     raise InvalidOperationException(operation, _IN_FLIGHT)
-                case _ if _unbriefed(session):
+                case _ if unbriefed(session):
                     session.controller_session = None
                     session.error = None
                 case _:
@@ -449,16 +395,6 @@ class ChatService:
             .execution_options(populate_existing=True)
         ).one_or_none()
 
-    def _locked(self, project_id: uuid.UUID) -> Project:
-        """The project, its row held as a change of its standing holds it
-        (`ProjectService`), read as the lock found it."""
-        return self.db.scalars(
-            select(Project)
-            .where(Project.id == project_id)
-            .with_for_update(key_share=True)
-            .execution_options(populate_existing=True)
-        ).one()
-
     def _quote(self, project: Project, person: User, words: str) -> Words:
         """`person`'s `words`, quoting the Item or the Block of the project
         their first quote tag names (DB 159), a block of its draft by
@@ -501,10 +437,78 @@ class ChatService:
         return Words(person.id, words, quote_item_id=item_id, quote_block_id=block_id)
 
 
-def _unbriefed(session: AgentSession) -> bool:
-    """A chat's Session a message is not sent to (`_start`): its start held or
-    under way, failed, or stopped with no conversation for a turn to
-    continue."""
+def lock_standing(db: Session, project_id: uuid.UUID) -> Project:
+    """The project, its row held as a change of its standing holds it
+    (`ProjectService`), read as the lock found it."""
+    return db.scalars(
+        select(Project)
+        .where(Project.id == project_id)
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    ).one()
+
+
+def handbook_changed(db: Session, project: Project, session: AgentSession) -> bool:
+    """Whether the project's handbook was published after the previous Turn
+    of `session`, a Chat's or a Conversation's, that reached the brain was
+    sent, by anyone but that Session itself: one whose send failed (F125)
+    never went out, nor the notice it carried, so its retry carries it again.
+    A publication since then is the Session's own when every Version cut of
+    the handbook since is of it and its published text is the latest
+    Version's, every Document being born with one; a Version of no Session is
+    a change."""
+    handbook = db.execute(
+        select(Document.id, Document.published_at, Document.published_hash).where(
+            Document.project_id == project.id,
+            Document.role_code == DocumentRole.HANDBOOK,
+        )
+    ).one_or_none()
+    if handbook is None or handbook.published_at is None:
+        return False
+    sent = _previous_sent(db, session)
+    if sent is None or handbook.published_at <= sent:
+        return False
+    versions = db.execute(
+        select(
+            DocumentVersion.session_id,
+            DocumentVersion.hash,
+            DocumentVersion.created_at,
+        )
+        .where(DocumentVersion.document_id == handbook.id)
+        .order_by(DocumentVersion.number.desc())
+    ).all()
+    since = [version for version in versions if version.created_at > sent]
+    return versions[0].hash != handbook.published_hash or any(
+        version.session_id != session.id for version in since
+    )
+
+
+def _previous_sent(db: Session, session: AgentSession) -> datetime | None:
+    """When the Session's previous Turn that reached the brain was sent; none
+    while none did. One whose send failed (F125) never went out, nor one a
+    Stop ended before it was sent (F67.1)."""
+    turns = db.execute(
+        select(Turn.id, Turn.started_at, Turn.error)
+        .where(Turn.session_id == session.id)
+        .order_by(Turn.seq.desc())
+    ).all()
+    for turn_id, started_at, error in turns:
+        if not read_records(
+            db,
+            session.id,
+            turn_id=turn_id,
+            kind=RecordKind.SERVER,
+            payload_type=STOPPED_UNSENT if error is None else SEND_FAILED,
+            limit=1,
+        ):
+            return started_at
+    return None
+
+
+def unbriefed(session: AgentSession) -> bool:
+    """A Chat's or a Conversation's Session a message is not sent to, which
+    starts afresh instead: its start held or under way, failed, or stopped
+    with no conversation for a turn to continue."""
     match session.state_code:
         case SessionState.HELD | SessionState.STARTING | SessionState.FAILED:
             return True

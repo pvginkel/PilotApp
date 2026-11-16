@@ -926,12 +926,14 @@
         "type": "object"
       },
       "ChatListSchema.f9d9b43.CloseCause": {
+        "description": "A kind of way a Chat or a Conversation closed: `created` a Chat's\nalone, `ended`, its caller's end, a Conversation's alone (DB decision\n77).",
         "enum": [
           "timeout",
           "created",
           "finished",
           "reopened",
-          "archived"
+          "archived",
+          "ended"
         ],
         "title": "CloseCause",
         "type": "string"
@@ -1049,12 +1051,14 @@
         "type": "string"
       },
       "ChatSchema.f9d9b43.CloseCause": {
+        "description": "A kind of way a Chat or a Conversation closed: `created` a Chat's\nalone, `ended`, its caller's end, a Conversation's alone (DB decision\n77).",
         "enum": [
           "timeout",
           "created",
           "finished",
           "reopened",
-          "archived"
+          "archived",
+          "ended"
         ],
         "title": "CloseCause",
         "type": "string"

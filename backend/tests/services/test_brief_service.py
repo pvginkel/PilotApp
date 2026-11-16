@@ -56,10 +56,12 @@ from app.models.reference import (
 )
 from app.schemas.pilot_work import DebriefEntryRequestSchema
 from app.services.brief_service import (
+    CONVERSATION_KIND_LINE,
     FOLLOW_UP_END,
     RESTARTED,
     BriefService,
     Call,
+    conversation_kind,
     is_follow_up,
     is_restarted,
 )
@@ -325,6 +327,157 @@ class TestProjectChat:
         assert briefs.project_chat(opened, person, words, AT).endswith(
             f"(not a member):\n{words}"
         )
+
+
+@pytest.fixture
+def caller(session: DbSession) -> Environment:
+    """The environment a conversation is opened from."""
+    row = Environment(id="example-recipebox-1a2b3c", name="RecipeBox-2", exempt=False)
+    session.add(row)
+    session.flush()
+    return row
+
+
+CONVERSATION_HEAD = (
+    "/chat\n\n"
+    "Pilot's brief · a conversation with a session in RecipeBox-2"
+    " (example-recipebox-1a2b3c, session ui-sweep-triage) ·"
+    ' project "Soup club" · /work/Projects/soup-club · 2026-10-26T09:30:15Z'
+)
+
+
+class TestConversation:
+    """Design 3 §5.3, "A conversation"; F150.12; DB 334, 336."""
+
+    def test_an_open_projects_brief_with_nothing_more_is_the_switch_and_the_message(
+        self, briefs: BriefService, opened: Project, caller: Environment
+    ) -> None:
+        assert briefs.conversation(
+            opened, caller, "ui-sweep-triage", "How is the fix going?", AT
+        ) == (
+            f"{CONVERSATION_HEAD}\n\n"
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md).\n\n"
+            "The message, from the session in RecipeBox-2:\n"
+            "How is the fix going?"
+        )
+
+    def test_a_call_that_named_no_session_names_its_environment_alone(
+        self, briefs: BriefService, opened: Project, caller: Environment
+    ) -> None:
+        brief = briefs.conversation(opened, caller, None, "How is it going?", AT)
+
+        assert brief.splitlines()[2] == (
+            "Pilot's brief · a conversation with a session in RecipeBox-2"
+            ' (example-recipebox-1a2b3c) · project "Soup club" ·'
+            " /work/Projects/soup-club · 2026-10-26T09:30:15Z"
+        )
+
+    def test_an_environment_named_by_its_id_is_named_so(
+        self, session: DbSession, briefs: BriefService, opened: Project
+    ) -> None:
+        """One the controller could not report on."""
+        unknown = Environment(
+            id="example-unknown-9z8y", name="example-unknown-9z8y", exempt=False
+        )
+        session.add(unknown)
+        session.flush()
+
+        brief = briefs.conversation(opened, unknown, "night-run", "Hello", AT)
+
+        assert (
+            "a conversation with a session in example-unknown-9z8y"
+            " (example-unknown-9z8y, session night-run) ·"
+        ) in brief
+        assert brief.endswith(
+            "The message, from the session in example-unknown-9z8y:\nHello"
+        )
+
+    def test_every_line_that_holds_is_in_the_frames_order_and_no_earlier_chat(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        caller: Environment,
+        project_session: models.Session,
+    ) -> None:
+        opened.autopilot = opened.paused = True
+        _transition(
+            session,
+            opened,
+            person,
+            TransitionKind.PAUSED,
+            datetime(2026, 10, 26, 8, tzinfo=UTC),
+        )
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        item = container.document_service().bear_item(
+            opened, "decision", "Soup chores", project_session, DEFERRED
+        )
+        container.record_service().done(item, person)
+        _closed_chat(session, opened, datetime(2026, 10, 25, 17, 10, tzinfo=UTC))
+
+        brief = briefs.conversation(
+            opened, caller, "ui-sweep-triage", "Start triage here.", AT
+        )
+
+        path = f"soup-club/{session.get_one(models.Document, item.id).path}"
+        assert brief == (
+            f"{CONVERSATION_HEAD}\n\n"
+            "Auto pilot: on — the granted column holds for this session"
+            " (rules/grants.md).\n"
+            "The project is paused since 2026-10-26T08:00:00Z: anything you start"
+            " is held until it resumes — say so.\n\n"
+            f"{NOTES}\n"
+            '- fix "Fix the stock" · n1: Ask about salt\n'
+            '- taste "Taste it" · n3: Two spoons\n'
+            "- the plan · n2: Add a sweep task\n"
+            f"{HOMELESS}\n"
+            f"- {item.id}/D1 in {path} (Soup chores), to: fix\n"
+            f"- {item.id}/Q1 in {path} (Soup chores), to: plan\n\n"
+            "The message, from the session in RecipeBox-2:\n"
+            "Start triage here."
+        )
+
+    def test_a_finished_projects_has_the_finish_line_and_no_switch_or_notes(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        caller: Environment,
+    ) -> None:
+        """DB 334: it reads only, as the project's chat does."""
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        _transition(
+            session,
+            opened,
+            person,
+            TransitionKind.FINISHED,
+            datetime(2026, 10, 25, 18, tzinfo=UTC),
+        )
+        opened.state_code = ProjectState.FINISHED
+
+        brief = briefs.conversation(
+            opened, caller, "ui-sweep-triage", "What was settled?", AT
+        )
+
+        assert brief == (
+            f"{CONVERSATION_HEAD}\n\n"
+            f"{FINISH}\n\n"
+            "The message, from the session in RecipeBox-2:\n"
+            "What was settled?"
+        )
+
+    def test_the_kind_line_opens_as_the_stores_map_reads_it(
+        self, caller: Environment
+    ) -> None:
+        assert conversation_kind(caller, "ui-sweep-triage").startswith(
+            f"{CONVERSATION_KIND_LINE} RecipeBox-2 ("
+        )
+        assert CONVERSATION_KIND_LINE == "a conversation with a session in"
 
 
 class TestMessageFrom:

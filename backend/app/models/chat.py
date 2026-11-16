@@ -41,6 +41,8 @@ class Chat(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             "(closed_at IS NULL) = (close_cause_code IS NULL)", name="ck_chats_close"
         ),
+        # Only a Conversation is ended by its caller (DB decision 77).
+        CheckConstraint("close_cause_code <> 'ended'", name="ck_chats_close_cause"),
         # One chat per project at a time, whichever Discuss opens it (U r16).
         Index(
             "uq_chats_open",

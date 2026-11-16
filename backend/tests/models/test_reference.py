@@ -155,6 +155,7 @@ class TestSessionKind:
             ("chat", "Chat", "pilot-store", False),
             ("work", "Work", "pilot-work", True),
             ("job", "Job", "pilot-store", True),
+            ("conversation", "Conversation", "pilot-store", False),
         }
 
     def test_surface_is_pilot_store_or_pilot_work(self, session: Session) -> None:

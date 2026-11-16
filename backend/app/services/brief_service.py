@@ -36,6 +36,7 @@ from app.models import (
     ClaimAssignment,
     ClarificationRun,
     Document,
+    Environment,
     Item,
     ItemAttachment,
     PlanNote,
@@ -157,6 +158,40 @@ class BriefService:
             [_switch(project), self._pause(project)],
             self._notes(project, None),
             [self._earlier_chats(project)],
+            message,
+        )
+
+    def conversation(
+        self,
+        project: Project,
+        environment: Environment,
+        caller_session: str | None,
+        words: str,
+        at: datetime,
+    ) -> str:
+        """The first Turn of a Conversation (§5.3; F150.12; DB 336), sent at
+        `at`: `/chat`, under a kind line of its own naming the Environment
+        its caller called from, by its name and its id, and that caller's
+        session where the call named one; the switch, the pause while the
+        project is paused, every open plan note by summary and the deferrals
+        without a home; then the caller's `words` verbatim, headed as the
+        session's, which it ends with (DB assertion 251). A finished
+        project's has the finish line in place of the switch and no notes, as
+        its chat's (DB 334). It names no earlier chat: a caller reads its own
+        conversations alone."""
+        kind = conversation_kind(environment, caller_session)
+        message = [f"The message, from the session in {environment.name}:", words]
+        if project.state_code is ProjectState.FINISHED:
+            return _frame(
+                CHAT_SKILL, kind, project, at, [self._finish(project)], message
+            )
+        return _frame(
+            CHAT_SKILL,
+            kind,
+            project,
+            at,
+            [_switch(project), self._pause(project)],
+            self._notes(project, None),
             message,
         )
 
@@ -1078,6 +1113,21 @@ def _frame(
         if lines:
             blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+CONVERSATION_KIND_LINE = "a conversation with a session in"
+"""How the kind of a Conversation's brief opens, which the store's map reads
+its skill and its frame from (§5.3)."""
+
+
+def conversation_kind(environment: Environment, caller_session: str | None) -> str:
+    """The kind of a Conversation's brief (§5.3): the Environment it was
+    opened from, by its name and its id, and the session that opened it, left
+    out where the call named none."""
+    named = environment.id
+    if caller_session is not None:
+        named += f", session {caller_session}"
+    return f"{CONVERSATION_KIND_LINE} {environment.name} ({named})"
 
 
 BY_A_CALL = "Started by a call"

@@ -70,7 +70,9 @@ class TestChat:
             None,
         )
 
-    @pytest.mark.parametrize("cause", list(CloseCause))
+    @pytest.mark.parametrize(
+        "cause", [cause for cause in CloseCause if cause is not CloseCause.ENDED]
+    )
     def test_it_closes_with_its_cause(
         self,
         session: DbSession,
@@ -115,7 +117,21 @@ class TestChat:
 
         assert violated_constraint(session) == "ck_chats_close"
 
-    @pytest.mark.parametrize("kind_code", ["work", "job"])
+    def test_no_chat_is_ended_by_a_caller(
+        self, session: DbSession, project: Project, environment: Environment
+    ) -> None:
+        """DB decision 77: `ended` is a Conversation's close alone."""
+        session.add(
+            _chat(
+                _run(session, project, environment),
+                closed_at=CLOSED_AT,
+                close_cause_code=CloseCause.ENDED,
+            )
+        )
+
+        assert violated_constraint(session) == "ck_chats_close_cause"
+
+    @pytest.mark.parametrize("kind_code", ["work", "job", "conversation"])
     def test_a_works_session_is_no_chat(
         self,
         session: DbSession,
@@ -124,7 +140,7 @@ class TestChat:
         kind_code: str,
     ) -> None:
         """DB assertion 149: a `chat` Session is a Chat, a `work` or `job`
-        one a Work."""
+        one a Work, a `conversation` one a Conversation."""
         run = _run(session, project, environment, kind_code=kind_code)
         session.add(_chat(run, session_kind_code=kind_code))
 

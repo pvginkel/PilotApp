@@ -43,6 +43,10 @@ from app.utils.after_commit import after_commit
 
 CHAT_KIND = "chat"
 
+CONVERSATION_KIND = "conversation"
+"""The Session Kind of a Conversation, a session outside Pilot's with Pilot
+(DB decision 77): no slot's and no queue's (DB 335)."""
+
 WORK_KIND = "work"
 """The Session Kind the slot counts: a work item's, never a Chat's or a
 job's (DB 243)."""

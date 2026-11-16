@@ -79,6 +79,10 @@ class TestHeldReason:
             (False, "chat", False, None, True, False, None),
             (False, "job", False, None, False, True, None),
             (False, "chat", False, None, False, True, None),
+            # A Conversation takes no slot and waits behind no job (DB 335),
+            # and is held for the outage as a Chat is.
+            (False, "conversation", False, 3, True, True, None),
+            (False, "conversation", True, None, False, False, Held(UNREACHABLE)),
         ],
     )
     def test_the_gate_holds_for_the_pause_the_outage_the_slot_the_queue_and_the_conversation(

@@ -33,6 +33,7 @@ from app.services.clarification_service import ClarificationService
 from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
+from app.services.conversation_service import ConversationService
 from app.services.draft_service import DraftService
 from app.services.effect_service import EffectService
 from app.services.environment_service import EnvironmentService
@@ -846,6 +847,18 @@ class ServiceContainer(containers.DeclarativeContainer):
         brief_service=brief_service,
         session_record_service=session_record_service,
         view_service=view_service,
+        brain_model=app_config.provided.brain_model,
+        brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
+    )
+    # A calling session's conversation with a project's brain (F150.10)
+    conversation_service = providers.Factory(
+        ConversationService,
+        db=db_session,
+        relay_service=relay_service,
+        session_start_service=session_start_service,
+        brief_service=brief_service,
+        session_record_service=session_record_service,
+        caller_environment_service=caller_environment_service,
         brain_model=app_config.provided.brain_model,
         brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
     )

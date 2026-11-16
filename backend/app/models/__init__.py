@@ -20,6 +20,7 @@ from app.models.call import (
     ToolCall,
 )
 from app.models.chat import Chat, ChatRead
+from app.models.conversation import Conversation
 from app.models.document import Document, DocumentVersion
 from app.models.environment import Environment
 from app.models.item import Item
