@@ -7,7 +7,8 @@ deployed check makes through `/api/testing/` (TEST-6, D027).
 Documents, attachments, the record's writes and the plan go through the
 engine's own operations, so the seed is a record the engine could have
 produced. The rows the engine does not write (people, projects with their
-members and transitions, an environment and the session that added the items)
+members and transitions, an environment, the session that added the items, and
+the sessions and debriefs of two runs, whose done places a debrief's notice)
 are written through the models. Every name and text in it is
 invented: this repository is public.
 """
@@ -321,6 +322,26 @@ TASKS = [
 
 REMOVED_TASK = ("spike", "Try a static site generator", "pending")
 
+DEBRIEF_SUBJECT = "Slice 3 · The recipe card page"
+"""The subject the recipes' planning and run give their debriefs."""
+
+DEBRIEFED_RUNS = [
+    (
+        "Planning the recipe card page",
+        "The plan took two rounds: the reviewer asked for the phone's layout first.",
+        ("Plan", "plan-writer", 600, "The phases follow the card's parts."),
+        False,
+    ),
+    (
+        "Building the recipe card page",
+        "It went well: the card reads in one column, and the review found one slip.",
+        ("P1 · The card", "code-writer", 1260, "The card reads well on a phone."),
+        True,
+    ),
+]
+"""The recipes' planning and run, each its title, its debrief, its one entry's
+section, role, seconds and words, and whether it completes the subject."""
+
 BIKES_DRAFT = """---
 slug: bike-log
 ---
@@ -495,6 +516,10 @@ class TestDataService:
             ],
             environment_id=environment.id,
         )
+        for run_title, debrief, entry, completes in DEBRIEFED_RUNS:
+            self._debriefed_run(
+                recipes, environment, now, run_title, debrief, entry, completes
+            )
 
         self._save_plan(
             recipes,
@@ -1624,6 +1649,51 @@ class TestDataService:
         self.db.add(session)
         self.db.flush()
         return session
+
+    def _debriefed_run(
+        self,
+        project: Project,
+        environment: Environment,
+        now: datetime,
+        title: str,
+        debrief: str,
+        entry: tuple[str, str, int, str],
+        completes: bool,
+    ) -> None:
+        """A worker's run of `project` in `environment` on the task `build`,
+        titled `title`, its debrief `debrief` with its one `entry`, naming
+        `DEBRIEF_SUBJECT` and whether it `completes` it, as its
+        `register_debrief` stores them, and done at its turn's end at `now`,
+        which places the debrief's notice where it completes (DB 609)."""
+        session = AgentSession(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code=WORK_KIND,
+            cwd="/work/RecipeBox",
+            token_hash=hashlib.sha256(title.encode()).hexdigest(),
+            state_code=SessionState.IDLE,
+            started_at=now,
+        )
+        self.db.add(session)
+        self.db.flush()
+        work = self.record_service.place_work(project, session, title, "build")
+        work.debrief = debrief
+        work.debrief_subject = DEBRIEF_SUBJECT
+        work.debrief_completes = completes
+        section, role, duration, words = entry
+        self.db.add(
+            DebriefEntry(
+                work_id=work.id,
+                position=1,
+                section=section,
+                round=1,
+                role=role,
+                duration=duration,
+                words=words,
+            )
+        )
+        self.db.flush()
+        self.record_service.work_done(work.id, now)
 
     def _transitions(
         self, project: Project, by: User, at: datetime, *kinds: TransitionKind

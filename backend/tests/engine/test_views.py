@@ -56,6 +56,7 @@ from tests.support.chats import (
     open_chat,
     open_conversation,
 )
+from tests.support.debriefs import DEBRIEF, placed_notice
 
 _CONTENT = b"# Palette\n\nThe two colours compared.\n"
 
@@ -460,6 +461,36 @@ class TestViewService:
             "by": None,
         }
         assert timeline["items"][0]["path"] is None
+
+    def test_a_debrief_notice_is_its_items_row_with_no_debrief_it_carries(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """DB 611, 328: its kind, title, task and done, as a wait's row has,
+        and nothing of the debriefs it carries, which no chat reads."""
+        container.record_service().place_work(project, project_session, "Renaming")
+        notice = placed_notice(session, container, project, project_session)
+
+        rendering = container.view_service().timeline(project)
+
+        assert _json(rendering)["items"][1] == {
+            "id": str(notice.id),
+            "seq": 2,
+            "kind": "debrief_notice",
+            "title": "Debrief · Renaming",
+            "path": None,
+            "step": None,
+            "urgent": False,
+            "for": None,
+            "summary": None,
+            "created_at": utc_time(notice.created_at),
+            "done": None,
+            "attachments": [],
+        }
+        assert DEBRIEF not in rendering.text
 
     def test_a_wait_carries_what_it_waits_on_its_firings_and_its_note(
         self,

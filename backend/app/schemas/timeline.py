@@ -114,7 +114,7 @@ RequestLabel = Literal["Check now", "Skip wait"]
 wait, *Skip wait* on a timed wait."""
 
 
-ItemForm = Literal["prose", "work", "wait"]
+ItemForm = Literal["prose", "work", "wait", "debrief_notice"]
 """Item Kind's forms: which subtype an item is."""
 
 DoneCauseCode = Literal[
@@ -945,6 +945,33 @@ class WaitSchema(BaseModel):
     )
 
 
+class CarriedDebriefSchema(BaseModel):
+    """A work item whose debrief a debrief's notice carries, as the notice's
+    box shows it (F26.13): read from the work item at each read, never
+    stored on the notice (DB 612)."""
+
+    id: uuid.UUID = Field(
+        description=(
+            "The work item's id, its session's, by which its full debrief and its "
+            "session log open"
+        )
+    )
+    title: str = Field(
+        description="The work item's title",
+        examples=["Planning slice 058 · The search page"],
+    )
+    ended_at: datetime = Field(
+        description=(
+            "When the work item was done, its done line's time, which its Debrief "
+            "shows (F26.9): its turn's end, or its close for good"
+        )
+    )
+    debrief: str = Field(
+        description="The stage session's own debrief, whole, as given",
+        examples=["It went well, if slowly: the second review was worth it."],
+    )
+
+
 class TimelineItemSchema(BaseModel):
     """An entry on the timeline, with what its line and its open form show."""
 
@@ -999,7 +1026,8 @@ class TimelineItemSchema(BaseModel):
     author: UserSchema | None = Field(
         description=(
             "The opening's author (F18.1), and Pilot for an archive question, the "
-            "server's at a finish (F5.6); null for every other item"
+            "server's at a finish (F5.6), and for a debrief's notice, the server's "
+            "at a work item's done (F26.12); null for every other item"
         )
     )
     words: str | None = Field(
@@ -1010,14 +1038,14 @@ class TimelineItemSchema(BaseModel):
             "A prose item's text but the opening's, as drawn: its prose parts and "
             "blocks in order, split at each block's own section's edges, without "
             "the front matter and a first heading that is its title; null for the "
-            "opening, work and waits"
+            "opening, work, waits and a debrief's notice"
         )
     )
     summary: str | None = Field(
         description=(
             "The front matter's `summary`, which a card and the overlay's lead show "
-            "(F34); null where the text gives none, and for the opening, work and "
-            "waits"
+            "(F34); null where the text gives none, and for the opening, work, "
+            "waits and a debrief's notice"
         ),
         examples=["Three tents compared; the dome wins on weight."],
     )
@@ -1076,6 +1104,13 @@ class TimelineItemSchema(BaseModel):
     )
     wait: WaitSchema | None = Field(
         description="A wait's own; null for every other kind"
+    )
+    debriefs: list[CarriedDebriefSchema] | None = Field(
+        description=(
+            "A debrief's notice's work items, whose debriefs it carries, in "
+            "timeline order, each as its work item stands at this read (F26.13); "
+            "null for every other kind"
+        )
     )
     pilots_work: PilotsWorkSchema | None = Field(
         description=(
@@ -1281,8 +1316,8 @@ class IndexedItemSchema(BaseModel):
     path: str | None = Field(
         description=(
             "Its file's path from the root of the store's tree; null for an item "
-            "with no file: a work item, a wait, a registered document before its "
-            "text arrives"
+            "with no file: a work item, a wait, a debrief's notice, a registered "
+            "document before its text arrives"
         ),
         examples=["recipe-box/items/3-the-palette.md"],
     )

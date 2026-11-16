@@ -153,7 +153,8 @@ class ViewService:
         and its attachments, in the files' vocabulary; a wait in `add_item`'s
         shape, with its firings in order and, once marked, its note (TD
         §7.1); a done work item with its note, Pilot's reason for closing it
-        for good, none after any other close (DB 350)."""
+        for good, none after any other close (DB 350); a debrief's notice its
+        Item's row alone, no debrief it carries in it (DB 611, 328)."""
         rows = self.db.execute(
             select(Item, Document.path, Document.summary, Document.published_hash)
             .outerjoin(Document, Document.id == Item.id)

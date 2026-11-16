@@ -82,7 +82,7 @@ from app.services.pilot_work_service import Worker
 from app.services.relay_service import ENVIRONMENT_STOPPED
 from app.services.session_record_service import SessionRecordService
 from app.services.start_gate import WorkSlots
-from app.services.timeline_service import Badge, work_status
+from app.services.timeline_service import Badge, waiting_on_a_member, work_status
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import ReportedTransition
 from app.services.working_on import Reading
@@ -366,12 +366,21 @@ DEBRIEF = "It went well, if slowly.\n\nThe second review was worth it."
 
 
 def _debriefed(
-    session: DbSession, work: Item, *entries: dict[str, Any], debrief: str = DEBRIEF
+    session: DbSession,
+    work: Item,
+    *entries: dict[str, Any],
+    debrief: str = DEBRIEF,
+    subject: str | None = None,
+    completes: bool | None = None,
 ) -> None:
     """The work item's debrief and its `entries`, in their order, as its
-    session's call stores them; an entry's `round` 1 and `duration` 60 unless
-    it gives its own."""
-    session.get_one(Work, work.id).debrief = debrief
+    session's call stores them, with the `subject` it names and whether it
+    `completes` it, neither unless given, as a debrief given before they were
+    taken; an entry's `round` 1 and `duration` 60 unless it gives its own."""
+    given = session.get_one(Work, work.id)
+    given.debrief = debrief
+    given.debrief_subject = subject
+    given.debrief_completes = completes
     session.add_all(
         DebriefEntry(
             work_id=work.id,
@@ -4530,6 +4539,138 @@ class TestItemDocument:
 
 
 @pytest.mark.usefixtures("person")
+class TestDebriefNotice:
+    """A debrief's notice on the timeline (F26.12, F26.13; DB 611, 612)."""
+
+    SUBJECT = "Slice 4 · The tent list"
+    ENTRY = {"section": "Test", "role": "test-agent"}
+
+    def _carried(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> tuple[Item, Item]:
+        """A planning and the run that completes its subject, done in turn, the
+        run's done placing the notice."""
+        records = container.record_service()
+        planning = _work(session, project, environment, SessionState.IDLE)
+        planning.title = "Planning the tent list"
+        _debriefed(
+            session,
+            planning,
+            self.ENTRY,
+            debrief="The plan took two rounds.",
+            subject=self.SUBJECT,
+            completes=False,
+        )
+        records.work_done(planning.id, REPLIED)
+        run = _work(session, project, environment, SessionState.IDLE)
+        _debriefed(session, run, self.ENTRY, subject=self.SUBJECT, completes=True)
+        records.work_done(run.id, REPLIED + timedelta(hours=1))
+        return planning, run
+
+    def test_it_shows_the_work_items_it_carries_in_timeline_order(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """DB 612: each its title, its turn's end and its debrief whole, by
+        its id, which its full debrief and session log open by."""
+        project = _make(container)
+        planning, run = self._carried(container, session, project, environment)
+
+        *before, notice = _items(container, project)
+
+        assert {
+            key: notice[key]
+            for key in (
+                "kind",
+                "form",
+                "title",
+                "urgent",
+                "for_user",
+                "done",
+                "body",
+                "summary",
+                "work",
+                "wait",
+                "close_starts_work",
+                "job",
+            )
+        } == {
+            "kind": "debrief_notice",
+            "form": "debrief_notice",
+            "title": f"Debrief · {self.SUBJECT}",
+            "urgent": False,
+            "for_user": None,
+            "done": None,
+            "body": None,
+            "summary": None,
+            "work": None,
+            "wait": None,
+            "close_starts_work": False,
+            "job": None,
+        }
+        assert notice["author"]["kind"] == "agent"
+        assert notice["debriefs"] == [
+            {
+                "id": str(planning.id),
+                "title": "Planning the tent list",
+                "ended_at": _stamp(REPLIED),
+                "debrief": "The plan took two rounds.",
+            },
+            {
+                "id": str(run.id),
+                "title": "Build the camp",
+                "ended_at": _stamp(REPLIED + timedelta(hours=1)),
+                "debrief": DEBRIEF,
+            },
+        ]
+        assert [(item["form"], item["debriefs"]) for item in before] == [
+            ("prose", None),
+            ("work", None),
+            ("work", None),
+        ]
+
+    def test_it_has_no_document_to_read_on_its_own(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        self._carried(container, session, project, environment)
+        notice = _items(container, project)[-1]["id"]
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.timeline_service().item_document(uuid.UUID(notice))
+
+        assert raised.value.message == f"Document of item {notice} was not found"
+
+    def test_a_carried_work_items_debrief_still_opens_on_its_own(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """F26.6: the work items' Debrief stays."""
+        project = _make(container)
+        planning, run = self._carried(container, session, project, environment)
+
+        assert container.timeline_service().debrief(planning.id).debrief == (
+            "The plan took two rounds."
+        )
+        assert {
+            item["id"]: item["work"]["debriefed"]
+            for item in _items(container, project)
+            if item["form"] == "work"
+        } == {str(planning.id): True, str(run.id): True}
+
+
+@pytest.mark.usefixtures("person")
 class TestDebrief:
     """A done work item's debrief, as its Debrief opens it and the full
     debrief shows it (F26.9, F26.10; DB 326, 329)."""
@@ -4846,6 +4987,39 @@ class TestBadges:
             person,
             [project.id for project in projects],
             Reading(container.db_session()),
+        )
+
+    def test_an_open_debrief_notice_waits_on_no_one(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """F26.14, DB 225: the badge leaves it out, and so do the members'
+        set, which the project's status and the phone's notification read."""
+        project = _make(container)
+        run = _work(session, project, environment, SessionState.IDLE)
+        _debriefed(
+            session, run, {"section": "Test", "role": "test-agent"}, completes=True
+        )
+        container.record_service().work_done(run.id, REPLIED)
+        notice = session.scalars(
+            select(Item).where(
+                Item.project_id == project.id, Item.kind_code == "debrief_notice"
+            )
+        ).one()
+        assert notice.done_at is None
+
+        assert self._badges(container, person, project) == {}
+        assert (
+            session.scalars(
+                select(Item.id).where(
+                    Item.project_id == project.id,
+                    waiting_on_a_member(Reading(session)),
+                )
+            ).all()
+            == []
         )
 
     def test_the_open_prose_items_but_the_opening_wait(

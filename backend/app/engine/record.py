@@ -3,13 +3,13 @@ an action, undo, Done on a document, Read and Reviewed; Finish's close of the
 open items (F5.1); Archive's and Reopen's close of the archive question (DB
 265); the switch's Yes to the confirmations it answers (F4.2);
 a work item's place and its done at its turn's end (DB Work, decision 44);
-the claimed actions a work item is named for at its `add_item`, of a
-registered document or an item of Pilot's own (DB decision 64, widened by
-D224); an item of Pilot's own done at the save that writes its last open
-block's `done` (DB 163); a person's fold of an open item and their
-unfold (DB decision 75); the chat's cancel of an ask Pilot added, on a
-person's word (DB 297); and a stopped work item's close for good, a person's
-or Pilot's (DB decision 78).
+the debrief's notice a work item's done places (DB decision 82); the claimed
+actions a work item is named for at its `add_item`, of a registered document
+or an item of Pilot's own (DB decision 64, widened by D224); an item of
+Pilot's own done at the save that writes its last open block's `done` (DB
+163); a person's fold of an open item and their unfold (DB decision 75);
+the chat's cancel of an ask Pilot added, on a person's word (DB 297); and a
+stopped work item's close for good, a person's or Pilot's (DB decision 78).
 
 Each is a write of the caller's transaction, under the document's row lock
 (TD §8.5), a close and an Undo under its project's row first, and refused
@@ -86,6 +86,13 @@ from app.models.reference import (
 
 NOTICE = "notice"
 WORK = "work"
+
+DEBRIEF_NOTICE = "debrief_notice"
+"""A Debrief Notice's kind, and its form (DB decision 82)."""
+
+DEBRIEF_TITLE = "Debrief · {subject}"
+"""A Debrief Notice's title, by its completing Work's subject, else by that
+Work's title (DB 611)."""
 
 WORKERS_RUN = "work"
 """The Session Kind of a worker's run, as its Work carries it."""
@@ -686,7 +693,8 @@ class RecordService:
         transaction, which holds the project's row exclusively and the work
         item's Session, `stopped`: the item done at once by `user`, its Done
         Cause `cancelled`, which offers no undo, and `note`, Pilot's reason,
-        its Work's `done_note`, none for a person's Close. No document is
+        its Work's `done_note`, none for a person's Close, with the debrief's
+        notice its done places (`_place_debrief_notice`). No document is
         closed, no job is placed and nothing continues its conversation
         (`_release`).
 
@@ -705,6 +713,7 @@ class RecordService:
         item.done_cause_code = CANCELLED
         item.done_by_user_id = user.id
         self.db.get_one(Work, work_id).done_note = note
+        self._place_debrief_notice(project, item)
         self.view_service.timeline_moved(project)
 
     def close_archive_question(
@@ -992,8 +1001,10 @@ class RecordService:
 
     def work_done(self, work_id: uuid.UUID, at: datetime) -> None:
         """The work item done at `at`, its turn's end, by no one, its Done
-        Cause `turn_ended`, which is final (decision 44). An item Finish
-        closed first stays as Finish closed it."""
+        Cause `turn_ended`, which is final (decision 44), with the debrief's
+        notice its done places (`_place_debrief_notice`), after every Item
+        its turn registered. An item Finish closed first stays as Finish
+        closed it."""
         item = self.db.get_one(
             Item, work_id, with_for_update=True, populate_existing=True
         )
@@ -1001,7 +1012,67 @@ class RecordService:
             return
         item.done_at = at
         item.done_cause_code = TURN_ENDED
-        self.view_service.timeline_moved(self.db.get_one(Project, item.project_id))
+        project = self.db.get_one(Project, item.project_id)
+        self._place_debrief_notice(project, item)
+        self.view_service.timeline_moved(project)
+
+    def _place_debrief_notice(self, project: Project, work_item: Item) -> None:
+        """At the done of the work item `work_item`, under its project's row
+        held exclusively: where its Work's debrief completes, its Debrief
+        Notice placed next on the timeline, by Pilot and no session, on the
+        work item's task, titled by the debrief's subject, else by the work
+        item's title, never urgent and for no one (DB 609, 611). It carries that debrief and, where it names a
+        subject, the debrief of every done Work of the project with the same
+        subject that does not complete and that no notice carries yet, each
+        Work naming it (DB 610). None in a project finished or archived,
+        whose Finish left nothing open (DB 613), for a debrief that does not
+        complete, and for one given before its completion was taken, which
+        has none (DB 609)."""
+        if project.archived or project.state_code is ProjectState.FINISHED:
+            return
+        work = self.db.get_one(Work, work_item.id)
+        if not work.debrief_completes:
+            return
+        carried = [work]
+        if work.debrief_subject is not None:
+            carried.extend(
+                self.db.scalars(
+                    select(Work)
+                    .join(Item, Item.id == Work.id)
+                    .where(
+                        Work.project_id == project.id,
+                        Work.debrief_subject == work.debrief_subject,
+                        Work.debrief_notice_id.is_(None),
+                        Work.debrief_completes.is_(False),
+                        Item.done_at.is_not(None),
+                    )
+                )
+            )
+        # A work item has the title it was placed with.
+        assert work_item.title is not None
+        pilot = self.db.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        notice = Item(
+            project_id=project.id,
+            seq=self.document_service.next_seq(project),
+            kind_code=DEBRIEF_NOTICE,
+            title=DEBRIEF_TITLE.format(
+                subject=(
+                    work_item.title
+                    if work.debrief_subject is None
+                    else work.debrief_subject
+                )
+            ),
+            plan_task_id=work_item.plan_task_id,
+            created_by_user_id=pilot.id,
+        )
+        self.db.add(notice)
+        self.db.flush()
+        for each in carried:
+            each.debrief_notice_id = notice.id
+            each.debrief_notice_kind_code = DEBRIEF_NOTICE
+        self.db.flush()
 
     def done_by_its_save(
         self,

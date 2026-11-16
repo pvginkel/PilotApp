@@ -25,6 +25,7 @@ from app.services.tree_read_service import (
     TreeEntry,
     TreeText,
 )
+from tests.support.debriefs import placed_notice
 
 
 def _keep(
@@ -149,6 +150,31 @@ class TestTreeReadServiceItems:
 
         assert [item.seq for item in read.items(badges, True, "decision")] == [2]
         assert read.items(badges, True, "question") == []
+
+    def test_a_debrief_notice_is_listed_by_its_kind(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """DB 611: its row, with no file and none of the debriefs it
+        carries."""
+        container.record_service().place_work(project, project_session, "Renaming")
+        notice = placed_notice(session, container, project, project_session)
+
+        assert container.tree_read_service().items(project, True, "debrief_notice") == [
+            IndexedItem(
+                seq=2,
+                kind="debrief_notice",
+                title="Debrief · Renaming",
+                path=None,
+                created_at=utc_time(notice.created_at),
+                done_cause=None,
+                for_handle=None,
+                urgent=False,
+            )
+        ]
 
     def test_a_path_runs_from_a_drafts_folder_while_it_is_a_draft(
         self,

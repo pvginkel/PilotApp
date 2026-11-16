@@ -65,6 +65,7 @@ from app.services.turn_end_read_service import (
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
+from tests.support.debriefs import give_debrief
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.locks import in_thread, lock_waits
 from tests.support.starts import configured_starts
@@ -596,6 +597,68 @@ class TestTurnEndReadServiceRunEnded:
 
         assert "_ReadStart" not in _pending()
         assert _jobs_after(session, run) == [NEXT_TITLE]
+
+    def test_the_debriefs_notice_is_placed_after_what_it_registered_not_its_reads(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        project: Project,
+        run: models.Session,
+    ) -> None:
+        """F26.15, DB 609: at the turn's end, after the Items it registered,
+        waiting on neither their reads nor the job after the turn, which
+        follows them."""
+        registered = _register(container, project, run)
+        give_debrief(session, run)
+        _end(session, container, run)
+
+        reads.run_ended(session, run)
+
+        notice = _notice(session, project)
+        assert notice.seq == registered.seq + 1
+        assert awaits_read(registered, _document(session, registered))
+        assert _jobs_after(session, run) == []
+
+        _read(reads, run.id)
+
+        assert _job_after(session, run).seq == notice.seq + 1
+
+    def test_a_run_that_registered_none_has_its_notice_before_its_job(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        project: Project,
+        run: models.Session,
+    ) -> None:
+        give_debrief(session, run)
+        _end(session, container, run)
+
+        reads.run_ended(session, run)
+
+        assert _job_after(session, run).seq == _notice(session, project).seq + 1
+
+
+def _notice(db: DbSession, project: Project) -> Item:
+    """The project's one debrief's notice."""
+    return db.scalars(
+        select(Item).where(
+            Item.project_id == project.id, Item.kind_code == "debrief_notice"
+        )
+    ).one()
+
+
+def _job_after(db: DbSession, run: models.Session) -> Item:
+    """The job placed after the run's turn."""
+    return db.scalars(
+        select(Item)
+        .join(Work, Work.id == Item.id)
+        .where(
+            Work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
+            Work.trigger_item_id == run.id,
+        )
+    ).one()
 
 
 def _close(

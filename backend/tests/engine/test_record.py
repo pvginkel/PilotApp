@@ -1,9 +1,10 @@
 """The record's own writes: a person's answer, Done on an action, undo, Done
 on a document, Read and Reviewed (design 1 §6.4, F32.4); a work item's place
 and its done at its turn's end (DB Work, decision 44); the close that continues
-a run whose documents are all closed (decision 44; reviews 1 and 3); and the
+a run whose documents are all closed (decision 44; reviews 1 and 3); the
 close of an item of Pilot's own that places the job after it, which its Undo
-withdraws before its brief (DB decision 45; F14.1; V24, V29)."""
+withdraws before its brief (DB decision 45; F14.1; V24, V29); and the debrief's
+notice a work item's done places (DB decision 82)."""
 
 import json
 import uuid
@@ -4379,6 +4380,278 @@ class TestRecordServiceCloseWork:
 
         (work,) = _continuations(session, project)
         assert session.get_one(models.Session, work.id).conversation_id == "conv-1"
+
+
+def _debriefed_run(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    environment: Environment,
+    title: str,
+    *,
+    subject: str | None = None,
+    completes: bool | None = True,
+    task: str | None = None,
+) -> models.Session:
+    """A worker's run placed as `title` on `task`, its debrief given with
+    `subject` and whether it `completes` it; `completes` None for a debrief
+    given before the two were taken (DB 609)."""
+    run = _work_session(session, project, environment)
+    container.record_service().place_work(project, run, title, task)
+    work = session.get_one(Work, run.id)
+    work.debrief = f"How {title.lower()} went."
+    work.debrief_subject = subject
+    work.debrief_completes = completes
+    session.flush()
+    return run
+
+
+def _notices(session: DbSession, project: Project) -> list[tuple[Item, set[uuid.UUID]]]:
+    """The project's debrief's notices in order, each with the work items it
+    carries."""
+    return [
+        (
+            notice,
+            set(
+                session.scalars(
+                    select(Work.id).where(Work.debrief_notice_id == notice.id)
+                )
+            ),
+        )
+        for notice in session.scalars(
+            select(Item)
+            .where(Item.project_id == project.id, Item.kind_code == "debrief_notice")
+            .order_by(Item.seq)
+        )
+    ]
+
+
+class TestRecordServiceDebriefNotice:
+    """The debrief's notice a work item's done places (DB 609 to 611)."""
+
+    AT = datetime(2026, 11, 16, 9, 30, 0, tzinfo=UTC)
+    SUBJECT = "Slice 4 · The tent list"
+
+    def test_a_completing_debrief_places_its_notice_after_what_its_turn_registered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 609, 611: at its turn's end, once the Items that turn registered
+        are placed; titled by its work item, it naming no subject."""
+        _task(session, project, "build")
+        run = _debriefed_run(
+            session, container, project, environment, "Renaming", task="build"
+        )
+        registered, _ = _registered(session, container, project, run, DECISION)
+
+        container.record_service().work_done(run.id, self.AT)
+
+        ((notice, carried),) = _notices(session, project)
+        assert carried == {run.id}
+        assert notice.seq == registered.seq + 1
+        assert (notice.title, notice.plan_task_id, notice.urgent) == (
+            "Debrief · Renaming",
+            "build",
+            False,
+        )
+        assert (notice.for_user_id, notice.created_by_session_id) == (None, None)
+        assert notice.created_by_user_id == _agent(session).id
+        assert _done(notice) == (None, None, None)
+        assert session.get(Document, notice.id) is None
+        work = session.get_one(Work, run.id)
+        assert (work.debrief_notice_id, work.debrief_notice_kind_code) == (
+            notice.id,
+            "debrief_notice",
+        )
+
+    def test_it_carries_every_earlier_debrief_of_its_subject_that_no_notice_carries(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 609, 610: a slice planned twice carries both plannings; a
+        subject's debrief carried once is carried by no later notice; another
+        subject's, an open one's and one that completes, done in a finished
+        project, stay as they are."""
+        records = container.record_service()
+
+        def done(title: str, **debrief: object) -> models.Session:
+            run = _debriefed_run(
+                session, container, project, environment, title, **debrief
+            )
+            records.work_done(run.id, self.AT)
+            return run
+
+        first = done("Planning", subject=self.SUBJECT, completes=False)
+        second = done("Planning again", subject=self.SUBJECT, completes=False)
+        other = done("Planning the stove", subject="Slice 5", completes=False)
+        open_one = _debriefed_run(
+            session,
+            container,
+            project,
+            environment,
+            "Planning, still",
+            subject=self.SUBJECT,
+            completes=False,
+        )
+        project.slug, project.state_code = "camp", ProjectState.FINISHED
+        unplaced = done("Running, finished", subject=self.SUBJECT)
+        project.state_code = ProjectState.OPEN
+        assert _notices(session, project) == []
+
+        run = done("Running", subject=self.SUBJECT)
+
+        ((notice, carried),) = _notices(session, project)
+        assert notice.title == f"Debrief · {self.SUBJECT}"
+        assert carried == {first.id, second.id, run.id}
+        replanned = done("Planning once more", subject=self.SUBJECT, completes=False)
+        rerun = done("Running again", subject=self.SUBJECT)
+        assert [carried for _, carried in _notices(session, project)] == [
+            {first.id, second.id, run.id},
+            {replanned.id, rerun.id},
+        ]
+        for left in (other, open_one, unplaced):
+            assert session.get_one(Work, left.id).debrief_notice_id is None
+
+    @pytest.mark.parametrize(
+        "debrief",
+        [
+            {"subject": "Slice 4", "completes": False},
+            {"completes": None},
+            None,
+        ],
+        ids=["it does not complete", "given before its completion", "none"],
+    )
+    def test_a_debrief_that_does_not_complete_places_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        debrief: dict[str, object] | None,
+    ) -> None:
+        if debrief is None:
+            run = _work_session(session, project, environment)
+            container.record_service().place_work(project, run, "Renaming")
+        else:
+            run = _debriefed_run(
+                session, container, project, environment, "Renaming", **debrief
+            )
+
+        container.record_service().work_done(run.id, self.AT)
+
+        assert _notices(session, project) == []
+        assert session.get_one(Work, run.id).debrief_notice_id is None
+
+    @pytest.mark.parametrize("closed", ["finished", "archived"])
+    def test_a_project_finished_or_archived_gets_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        closed: str,
+    ) -> None:
+        """DB 613: a Finish leaves nothing open, and an archived project's
+        timeline takes nothing new."""
+        run = _debriefed_run(session, container, project, environment, "Renaming")
+        if closed == "finished":
+            project.slug, project.state_code = "camp", ProjectState.FINISHED
+        else:
+            project.archived = True
+        session.flush()
+
+        container.record_service().work_done(run.id, self.AT)
+
+        assert _notices(session, project) == []
+
+    def test_an_item_finish_closed_first_places_none_at_its_turns_end(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _debriefed_run(session, container, project, environment, "Renaming")
+        records = container.record_service()
+        records.close_unanswered(project, person, FINISH)
+
+        records.work_done(run.id, self.AT)
+
+        assert _notices(session, project) == []
+
+    @pytest.mark.parametrize("by", ["person", "Pilot"])
+    def test_the_close_for_good_places_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+        by: str,
+    ) -> None:
+        """DB 609: a person's Close and Pilot's `stop_work` alike."""
+        planning = _debriefed_run(
+            session,
+            container,
+            project,
+            environment,
+            "Planning",
+            subject=self.SUBJECT,
+            completes=False,
+        )
+        records = container.record_service()
+        records.work_done(planning.id, self.AT)
+        run = _debriefed_run(
+            session, container, project, environment, "Running", subject=self.SUBJECT
+        )
+        run.state_code = SessionState.STOPPED
+
+        records.close_work(
+            project,
+            run.id,
+            person if by == "person" else _agent(session),
+            "close Running",
+            note=None if by == "person" else "Replaced",
+        )
+
+        ((notice, carried),) = _notices(session, project)
+        assert notice.seq == session.get_one(Item, run.id).seq + 1
+        assert carried == {planning.id, run.id}
+
+    def test_its_placement_moves_the_timeline_with_the_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        with scoped_session(container):
+            run = _debriefed_run(session, container, project, environment, "Renaming")
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.record_service().work_done(run.id, self.AT)
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]
+        timeline = json.loads(container.view_service().timeline(project).text)
+        assert [(item["kind"], item["title"]) for item in timeline["items"]] == [
+            ("work", "Renaming"),
+            ("debrief_notice", "Debrief · Renaming"),
+        ]
 
 
 def _brain(db: DbSession, project: Project) -> models.Session:

@@ -67,6 +67,7 @@ from pilot_mcp.server import PROJECTS_PATH, STORE_PATH
 from pilot_mcp.tools import STILL_RUNNING, TOOL_USE_ID_META
 from tests.support.adoption import FIRST_MENUS
 from tests.support.chats import ChatWriter, close_conversation, open_conversation
+from tests.support.debriefs import DEBRIEF, placed_notice
 from tests.support.fake_controller import ServedFakeController
 from tests.support.pilot_mcp import (
     API_URL,
@@ -2359,6 +2360,42 @@ class TestListItems:
         assert str(request.url) == (
             f"{API_URL}/api/projects/items?address={recipes.id}&open=true&kind=notice"
         )
+
+    async def test_a_debrief_notice_is_listed_by_its_kind_with_no_debrief(
+        self,
+        projects_app: Starlette,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """DB 611: the row `timeline.json` carries, none of the debriefs the
+        notice carries in it."""
+        recipes = _make(
+            container, name="Recipe box", open_items=1, environment_id=environment.id
+        )
+        run = running_session(session, container, recipes, environment)
+        notice = placed_notice(session, container, recipes, run)
+        session.commit()
+
+        result = await _ask(
+            projects_app,
+            "list_items",
+            {"project": recipes.slug, "kind": "debrief_notice"},
+        )
+
+        assert result.structuredContent == {
+            "items": [
+                {
+                    "seq": 4,
+                    "kind": "debrief_notice",
+                    "title": "Debrief · Refining the camp",
+                    "created_at": utc_time(notice.created_at),
+                }
+            ],
+            "totalCount": 1,
+            "limitHit": False,
+        }
+        assert DEBRIEF not in json.dumps(result.structuredContent)
 
     @pytest.mark.parametrize(
         ("page", "seqs", "more"),

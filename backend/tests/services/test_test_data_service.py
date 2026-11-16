@@ -158,7 +158,7 @@ class TestTestDataService:
         assert counts == {
             "users": 2,
             "projects": 4,
-            "items": 12,
+            "items": 15,
             "documents": 19,
             "blocks": 14,
             "plan tasks": 10,
@@ -295,8 +295,12 @@ class TestTestDataService:
         self, counts: dict[str, int], session: DbSession
     ) -> None:
         recipes = _project(session, test_data_service.SLUG)
-        items = _items(session, recipes)
-        run = session.scalars(select(models.Session)).one()
+        *items, _, _, _ = _items(session, recipes)
+        run = session.scalars(
+            select(models.Session).where(
+                ~select(Work.id).where(Work.id == models.Session.id).exists()
+            )
+        ).one()
 
         assert [item.kind_code for item in items] == [
             "opening",
@@ -326,6 +330,36 @@ class TestTestDataService:
         assert confirmation.urgent
         assert confirmation.for_user_id == _user(session, "ada").id
         assert confirmation.plan_task_id == "import"
+
+    def test_a_planning_and_a_run_whose_done_placed_their_debriefs_notice(
+        self, counts: dict[str, int], container: ServiceContainer, session: DbSession
+    ) -> None:
+        """DB 609 to 611: the run's debrief completes the planning's subject,
+        so its done places the one notice, which carries both."""
+        recipes = _project(session, test_data_service.SLUG)
+        planning, run, notice = _items(session, recipes)[-3:]
+
+        assert [(item.kind_code, item.title) for item in (planning, run, notice)] == [
+            ("work", "Planning the recipe card page"),
+            ("work", "Building the recipe card page"),
+            ("debrief_notice", "Debrief · Slice 3 · The recipe card page"),
+        ]
+        assert (planning.done_cause_code, run.done_cause_code) == (
+            "turn_ended",
+            "turn_ended",
+        )
+        assert (notice.done_at, notice.plan_task_id) == (None, "build")
+        assert {
+            each.id
+            for each in session.scalars(
+                select(Work).where(Work.debrief_notice_id == notice.id)
+            )
+        } == {planning.id, run.id}
+        timeline = container.timeline_service().timeline(recipes.id)
+        assert [debrief.title for debrief in timeline.items[-1].debriefs or []] == [
+            "Planning the recipe card page",
+            "Building the recipe card page",
+        ]
 
     def test_blocks_unanswered_answered_deferred_and_done(
         self, counts: dict[str, int], session: DbSession
@@ -414,6 +448,8 @@ class TestTestDataService:
             "Put the card scanner on the kitchen desk": ("answered", ada.id),
             "Twenty cards typed up": ("marked", ada.id),
             "Storing recipe photos": ("marked", ada.id),
+            "Planning the recipe card page": ("turn_ended", None),
+            "Building the recipe card page": ("turn_ended", None),
         }
         assert [
             (block.local_id, block.answer, block.via_code)

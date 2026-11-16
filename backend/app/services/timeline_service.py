@@ -23,6 +23,7 @@ from app.engine.claims import standing
 from app.engine.documents import ARCHIVE_QUESTION, OPENING, PROSE, awaits_read
 from app.engine.paths import tree_path
 from app.engine.record import (
+    DEBRIEF_NOTICE,
     MARKED,
     NOTICE,
     SETTLED,
@@ -82,6 +83,7 @@ from app.schemas.timeline import (
     BodyPartSchema,
     CancelSchema,
     CardTransitionSchema,
+    CarriedDebriefSchema,
     ChatPlaceSchema,
     ClaimSchema,
     ClarificationSchema,
@@ -206,7 +208,8 @@ def waiting(reading: Reading) -> ColumnElement[bool]:
     clarification, or with every open block held; a work item stopped or
     failed, a job only until it is retried, and neither while its nudge is
     owed: one a usage halt's hard stop stopped (DB 225, 269), or one whose
-    turn died at the quota wall; never a wait (F27.5)."""
+    turn died at the quota wall; never a wait (F27.5), nor a debrief's notice
+    (F26.14)."""
     form = (
         select(ItemKind.form)
         .where(ItemKind.code == Item.kind_code)
@@ -771,8 +774,8 @@ class TimelineService:
     ) -> list[TimelineItemSchema]:
         """`rows`, items of `project` with their documents and forms, as their
         lines and open forms show them; a prose item's text as drawn is its
-        text in `texts`, where the opening, work, waits and a registered
-        document with no text have none."""
+        text in `texts`, where the opening, work, waits, a debrief's notice
+        and a registered document with no text have none."""
         bodies = {item_id: dsl.body(text) for item_id, text in texts.items()}
         counts = {item_id: dsl.words(text) for item_id, text in texts.items()}
         edited = self._edited(list(texts))
@@ -800,6 +803,9 @@ class TimelineService:
                 return None
             return JobSchema(id=job_id, title=job_titles[job_id], work=works[job_id])
 
+        carried = self._carried(
+            project, [item.id for item, _, form in rows if form == DEBRIEF_NOTICE]
+        )
         waits = [item for item, _, form in rows if form == WAIT]
         fields = (
             {
@@ -927,6 +933,7 @@ class TimelineService:
                     if form == WAIT
                     else None
                 ),
+                debriefs=carried[item.id] if form == DEBRIEF_NOTICE else None,
                 pilots_work=pilots.items.get(item.id),
                 cancel=pilots.cancels.get(item.id),
                 job=job(on.shown.get(item.id)),
@@ -934,6 +941,37 @@ class TimelineService:
             )
             for item, document, form in rows
         ]
+
+    def _carried(
+        self, project: Project, notice_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, list[CarriedDebriefSchema]]:
+        """The work items each of `project`'s debrief's notices `notice_ids`
+        carries, in their order on the timeline, as they stand now (DB
+        612)."""
+        carried: dict[uuid.UUID, list[CarriedDebriefSchema]] = {}
+        if not notice_ids:
+            return carried
+        for notice_id, item_id, title, done_at, debrief in self.db.execute(
+            select(
+                Work.debrief_notice_id, Item.id, Item.title, Item.done_at, Work.debrief
+            )
+            .join(Item, Item.id == Work.id)
+            .where(
+                Work.project_id == project.id,
+                Work.debrief_notice_id.in_(list(notice_ids)),
+            )
+            .order_by(Item.seq)
+        ):
+            # Each row is a carried Work's, done with its debrief (DB 609), of
+            # an Item that has the title it was placed with.
+            assert notice_id is not None and title is not None
+            assert done_at is not None and debrief is not None
+            carried.setdefault(notice_id, []).append(
+                CarriedDebriefSchema(
+                    id=item_id, title=title, ended_at=done_at, debrief=debrief
+                )
+            )
+        return carried
 
     def _titles(self, item_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
         """The titles of the work items `item_ids`, each of which has one."""
