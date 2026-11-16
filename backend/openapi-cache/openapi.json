@@ -6310,7 +6310,7 @@
             "type": "string"
           },
           "mark": {
-            "description": "Done on a document or a wait, Read on a notice, Reviewed on a review",
+            "description": "Done on a document or a wait, Read on a notice or a debrief's notice, Reviewed on a review",
             "enum": [
               "done",
               "read",
@@ -16365,7 +16365,7 @@
     },
     "/api/items/{item_id}/undo": {
       "post": {
-        "description": "Returns:     204: The item is open     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The item is not done, a session has taken its answers, it was         done in a way that offers no undo, or it is no prose item",
+        "description": "Returns:     204: The item is open     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The item is not done, a session has taken its answers, it was         done in a way that offers no undo, or it is neither a prose item         nor a debrief's notice",
         "operationId": "post__api_items_{item_id}_undo",
         "parameters": [
           {

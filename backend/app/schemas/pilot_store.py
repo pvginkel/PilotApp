@@ -163,7 +163,8 @@ class MarkRequestSchema(BaseModel):
     )
     mark: Mark = Field(
         description=(
-            "Done on a document or a wait, Read on a notice, Reviewed on a review"
+            "Done on a document or a wait, Read on a notice or a debrief's notice,"
+            " Reviewed on a review"
         )
     )
     for_: str | None = Field(

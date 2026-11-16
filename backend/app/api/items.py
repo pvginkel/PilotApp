@@ -309,7 +309,8 @@ def undo(
         403: The caller lacks the editor role
         404: No item has the id
         409: The item is not done, a session has taken its answers, it was
-            done in a way that offers no undo, or it is no prose item
+            done in a way that offers no undo, or it is neither a prose item
+            nor a debrief's notice
     """
     item_service.undo(item_id)
     return "", 204

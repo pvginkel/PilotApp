@@ -572,8 +572,8 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             Mark,
             Field(
                 description=(
-                    "`done` on a document or a wait, `read` on a notice,"
-                    " `reviewed` on a review"
+                    "`done` on a document or a wait, `read` on a notice or a"
+                    " debrief's notice, `reviewed` on a review"
                 )
             ),
         ],
@@ -602,13 +602,14 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
     ) -> Recorded:
         """Mark an item on behalf of the person `for` names: `done` on a
         document, its unanswered blocks answered with their recommendations as
-        Done answers them; `read` on a notice; `reviewed` on a review. Without
-        `for`, the mark is your own, and only `done`, on a document you settled
-        whole, every block of it answered, and on a registered document of one
-        block, whatever its kind, once that block is answered or deferred: a
-        claimed action counts once its `done` is written; and on an open wait,
-        with your `note`, which closes it for good. A registered document's
-        Done writes its answers back and resumes its worker once none of its
+        Done answers them; `read` on a notice or a debrief's notice;
+        `reviewed` on a review. Without `for`, the mark is your own, and only
+        `done`, on a document you settled whole, every block of it answered,
+        and on a registered document of one block, whatever its kind, once
+        that block is answered or deferred: a claimed action counts once its
+        `done` is written; and on an open wait, with your `note`, which
+        closes it for good. A registered document's Done writes its answers
+        back and resumes its worker once none of its
         run's documents is open. A `done` or `reviewed` for a person on an
         item you added is yours to carry out in this turn, and has no undo.
         An item not of your project, a `for` that

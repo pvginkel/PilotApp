@@ -38,6 +38,7 @@ from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.sender import SENDER_HEADER
+from tests.support.debriefs import placed_notice
 from tests.support.working_on import Camp
 
 ITEMS = "/api/items"
@@ -1029,6 +1030,37 @@ class TestSentAgain:
         after = client.get(f"/api/projects/{camp.id}").get_json()
         assert (after["state"], after["archived"]) == ("finished", True)
         assert after == before
+
+
+@pytest.mark.usefixtures("person")
+class TestDebriefNoticeRead:
+    """A member's Read of the debrief's notice, and its Undo (DB 613)."""
+
+    def test_read_closes_it_as_theirs_and_undo_reopens_it(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        person: User,
+    ) -> None:
+        container.record_service().place_work(camp, run, "Pitching the tent")
+        notice = placed_notice(session, container, camp, run)
+        _sign_in(client)
+
+        read = client.post(f"{ITEMS}/{notice.id}/read")
+        done = _entry(client, camp, notice)["done"]
+        undone = client.post(f"{ITEMS}/{notice.id}/undo")
+
+        assert (read.status_code, undone.status_code) == (204, 204)
+        assert (done["cause"], done["by"]["handle"], done["undo"]) == (
+            "marked",
+            "ada",
+            True,
+        )
+        assert _entry(client, camp, notice)["done"] is None
+        assert _done(notice) == (None, None)
 
 
 @pytest.mark.usefixtures("person")

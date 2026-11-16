@@ -897,8 +897,8 @@ STORE_SURFACE = {
                 "item": {**_ITEM, "description": "The item's id"},
                 "mark": {
                     "description": (
-                        "`done` on a document or a wait, `read` on a notice,"
-                        " `reviewed` on a review"
+                        "`done` on a document or a wait, `read` on a notice or"
+                        " a debrief's notice, `reviewed` on a review"
                     ),
                     "enum": ["done", "read", "reviewed"],
                     "title": "Mark",
@@ -924,7 +924,8 @@ STORE_SURFACE = {
         _RECORDED,
         "Mark an item on behalf of the person `for` names: `done` on a document,"
         " its unanswered blocks answered with their recommendations as Done"
-        " answers them; `read` on a notice; `reviewed` on a review. Without `for`,"
+        " answers them; `read` on a notice or a debrief's notice; `reviewed` on a"
+        " review. Without `for`,"
         " the mark is your own, and only `done`, on a document you settled whole,"
         " every block of it answered, and on a registered document of one block,"
         " whatever its kind, once that block is answered or deferred: a claimed"

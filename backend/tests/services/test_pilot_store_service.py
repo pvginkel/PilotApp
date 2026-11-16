@@ -73,6 +73,7 @@ from app.services.session_record_service import read_records
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.debriefs import placed_notice
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
@@ -1096,6 +1097,68 @@ class TestPilotStoreServiceMark:
         )
         assert item.done_at is None
 
+    @pytest.mark.usefixtures("placing")
+    def test_read_for_a_member_marks_a_debrief_notice_theirs_with_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 613: on a member's word, as a notice's Read: no job, and no
+        Session consumes it."""
+        run = _brain(session, project, environment)
+        notice = placed_notice(
+            session, container, project, _work(session, container, project)
+        )
+
+        line = _service(container).mark(
+            _admitted(run), notice.id, "read", "ada", TOOL_USE_ID
+        )
+
+        assert (notice.done_cause_code, notice.done_by_user_id) == (
+            "marked",
+            person.id,
+        )
+        assert notice.consumed_session_id is None
+        assert (line.verb, line.label) == ("Marked read", "Debrief · Pitching the tent")
+        assert _jobs_after(session, notice) == []
+        assert container.record_service().offers_undo(notice) is True
+
+    @pytest.mark.parametrize(
+        ("mark", "cause"),
+        [
+            (
+                "read",
+                "Pilot's own mark is Done, on a document it settled whole: Read and"
+                " Reviewed are a person's, named by `for`",
+            ),
+            ("done", "a debrief_notice item is not done by Done"),
+        ],
+    )
+    def test_without_for_a_debrief_notice_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        mark: Any,
+        cause: str,
+    ) -> None:
+        """DB 613: Pilot never closes one on its own word."""
+        run = _brain(session, project, environment)
+        notice = placed_notice(
+            session, container, project, _work(session, container, project)
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).mark(_admitted(run), notice.id, mark, None, None)
+
+        assert refused.value.cause == cause
+        assert notice.done_at is None
+        assert _effects(session) == []
+
     def test_a_mark_its_kind_does_not_take_is_the_records_refusal(
         self,
         session: DbSession,
@@ -1235,6 +1298,30 @@ class TestPilotStoreServiceCancelAsk:
             " on its page, which ends that run"
         )
         assert item.done_at is None
+        assert _effects(session) == []
+
+    def test_a_debrief_notice_is_the_records_refusal_and_writes_no_effect(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 613: the chat's cancel is refused on it, as on every item DB
+        297 does not name."""
+        run = _brain(session, project, environment)
+        notice = placed_notice(
+            session, container, project, _work(session, container, project)
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).cancel_ask(
+                _admitted(run), notice.id, "ada", TOOL_USE_ID
+            )
+
+        assert refused.value.cause == "a debrief_notice item is no ask"
+        assert notice.done_at is None
         assert _effects(session) == []
 
     def test_an_item_of_another_project_and_an_unknown_person_are_not_found(

@@ -352,15 +352,16 @@ class RecordService:
         )
 
     def undo(self, item: Item) -> None:
-        """Undo of a done prose item but an archive question (DB 265) while no
-        session has consumed it, its Done Cause offers it (DB 164, F14.1) and
-        its project is neither finished (D028) nor archived (D012): its done
-        cleared, and on a one-ask item its block's answer with it, an answer
-        of Pilot's it replaced not restored (decision 6); a
-        registered document's write-back of that close with it, so that its
-        next close writes it again (F65.1); and the job its close placed, held
-        before its brief, withdrawn, its work item done `withdrawn`, so that
-        its next close places another.
+        """Undo of a done prose item but an archive question (DB 265), or of a
+        debrief's notice (`_undo_read`; DB 613), while no session has consumed
+        it, its Done Cause offers it (DB 164, F14.1) and its project is
+        neither finished (D028) nor archived (D012): its done cleared, and on
+        a one-ask item its block's answer with it, an answer of Pilot's it
+        replaced not restored (decision 6); a registered document's
+        write-back of that close with it, so that its next close writes it
+        again (F65.1); and the job its close placed, held before its brief,
+        withdrawn, its work item done `withdrawn`, so that its next close
+        places another.
 
         The project's row is held shared before the document's, so that
         Finish and Reopen, which change the project's state under its row
@@ -369,7 +370,8 @@ class RecordService:
         under that lock, and the Undo never both take effect.
         """
         operation = f"undo item {item.id}"
-        if self.references.form(self.db, item.kind_code) != PROSE:
+        form = self.references.form(self.db, item.kind_code)
+        if form not in (PROSE, DEBRIEF_NOTICE):
             raise InvalidOperationException(
                 operation, f"a {item.kind_code} item offers no undo"
             )
@@ -378,6 +380,9 @@ class RecordService:
             .where(Project.id == item.project_id)
             .with_for_update(read=True)
         ).one()
+        if form == DEBRIEF_NOTICE:
+            self._undo_read(item, operation)
+            return
         document = self.db.get_one(Document, item.id)
         project, _ = self._locked(document)
         job = self.jobs().unbriefed(item)
@@ -404,6 +409,22 @@ class RecordService:
         if job is not None:
             self.jobs().withdraw(job, _now())
         self.view_service.timeline_moved(project)
+
+    def _undo_read(self, item: Item, operation: str) -> None:
+        """Undo of a debrief's notice's Read, under its project's row held
+        shared (`undo`): the same notice open again (DB 607). It has no
+        Document, so its own row is held where a document's would be, and no
+        job followed its Read, so none is withdrawn."""
+        item = self.db.get_one(
+            Item, item.id, with_for_update=True, populate_existing=True
+        )
+        refusal = self._undo_refusal(item)
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        item.done_at = None
+        item.done_cause_code = None
+        item.done_by_user_id = None
+        self.view_service.timeline_moved(self.db.get_one(Project, item.project_id))
 
     def fold(self, project: Project, item: Item, folded: bool) -> None:
         """A person's fold of `item`, or, `folded` false, their unfold (F12.3;
@@ -481,7 +502,7 @@ class RecordService:
     def offers_undo(self, item: Item) -> bool:
         """Whether `undo` takes the item now, as it stands."""
         return (
-            self.references.form(self.db, item.kind_code) == PROSE
+            self.references.form(self.db, item.kind_code) in (PROSE, DEBRIEF_NOTICE)
             and self._undo_refusal(item) is None
         )
 
@@ -556,9 +577,42 @@ class RecordService:
         self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP
     ) -> None:
         """Read on a notice, given through `via`: the item's mark, the text
-        untouched. Read through the app on a notice `user`'s own Read closed
-        is taken as done and changes nothing, ahead of every refusal."""
-        self._mark_by_kind(item, user, NOTICE, "Read", via, None)
+        untouched; on a debrief's notice, which has no text, a person's alone
+        (`_read_debrief_notice`). Read through the app on a notice `user`'s
+        own Read closed is taken as done and changes nothing, ahead of every
+        refusal."""
+        if item.kind_code == DEBRIEF_NOTICE:
+            self._read_debrief_notice(item, user, via)
+        else:
+            self._mark_by_kind(item, user, NOTICE, "Read", via, None)
+
+    def _read_debrief_notice(self, item: Item, user: User, via: AnswerChannel) -> None:
+        """A member's Read of a debrief's notice (DB 613): done `marked` by
+        `user`, its Undo as `marked` offers it. Its project's row is held
+        exclusively first, as every close holds it (`_closing`), then its own
+        row, where a document's would be. No Session added it, so no job
+        follows its Read and no Session consumes it."""
+        project = self.db.scalars(
+            select(Project)
+            .where(Project.id == item.project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one()
+        item = self.db.get_one(
+            Item, item.id, with_for_update=True, populate_existing=True
+        )
+        if via is AnswerChannel.APP and _marked_by(item, user, DEBRIEF_NOTICE):
+            return
+        operation = f"mark item {item.id} Read"
+        _not_archived(project, operation)
+        _a_person(
+            user, operation, "Pilot reads a debrief's notice only on a member's word"
+        )
+        _not_done(item, operation)
+        item.done_at = _now()
+        item.done_cause_code = MARKED
+        item.done_by_user_id = user.id
+        self.view_service.timeline_moved(project)
 
     def reviewed(
         self,
@@ -652,10 +706,10 @@ class RecordService:
         run is ended.
 
         Raises:
-            InvalidOperationException: the item is a work item or a wait; the
-                project is archived; `user` is Pilot; the item is a
-                registered document, a notice, or no ask Pilot added; or it
-                is done.
+            InvalidOperationException: the item is a work item, a wait or a
+                debrief's notice; the project is archived; `user` is Pilot;
+                the item is a registered document, a notice, or no ask Pilot
+                added; or it is done.
         """
         if self.references.form(self.db, item.kind_code) != PROSE:
             raise InvalidOperationException(

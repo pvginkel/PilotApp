@@ -64,6 +64,7 @@ from app.services.session_scope import STORE_REPO
 from app.services.timeline_service import waiting_on
 from app.services.working_on import Reading
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.debriefs import placed_notice
 from tests.support.fake_sidecar import FakeSidecar
 from tests.support.locks import in_thread, lock_waits
 from tests.support.starts import configured_starts
@@ -4686,6 +4687,335 @@ class TestRecordServiceDebriefNotice:
             ("work", "Renaming"),
             ("debrief_notice", "Debrief · Renaming"),
         ]
+
+
+def _committed_notice(app: Flask, *, read: bool) -> tuple[uuid.UUID, uuid.UUID]:
+    """A draft project whose worker's run placed its debrief's notice at its
+    turn's end, committed, Read by the person where `read`: the person's id
+    and the notice's."""
+    container = app.container
+    with scoped_session(container) as session:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        session.add(person)
+        session.flush()
+        project = Project(created_by_user_id=person.id)
+        session.add(project)
+        session.add(Environment(id=ENVIRONMENT_ID, name="Example-1", exempt=False))
+        session.flush()
+        run = models.Session(
+            project_id=project.id,
+            environment_id=ENVIRONMENT_ID,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="1" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(project, run, "Renaming")
+        notice = placed_notice(session, container, project, run)
+        if read:
+            container.record_service().read(notice, person)
+        return person.id, notice.id
+
+
+class TestRecordServiceDebriefNoticeRead:
+    """A member's Read of the debrief's notice and its Undo (DB 613): a
+    person's mark, with no Document, no job and no Session consuming it;
+    Finish's close, the chat's cancel and the fold as on any open item."""
+
+    @pytest.fixture
+    def notice(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> Item:
+        container.record_service().place_work(project, project_session, "Renaming")
+        return placed_notice(session, container, project, project_session)
+
+    @pytest.mark.usefixtures("placing")
+    def test_a_members_read_marks_it_theirs_with_undo_and_places_no_job(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        notice: Item,
+        person: User,
+    ) -> None:
+        records = container.record_service()
+
+        records.read(notice, person)
+
+        assert (notice.done_cause_code, notice.done_by_user_id) == (
+            "marked",
+            person.id,
+        )
+        assert notice.done_at is not None
+        assert (notice.consumed_at, notice.consumed_session_id) == (None, None)
+        assert _jobs_after(session, notice) == []
+        assert records.offers_undo(notice) is True
+
+    def test_read_again_by_the_same_member_changes_nothing_and_anothers_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        notice: Item,
+        person: User,
+    ) -> None:
+        records = container.record_service()
+        records.read(notice, person)
+        read = _done(notice)
+        other = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-bo",
+            handle="bo",
+            name="Bo Example",
+            avatar_slot=2,
+        )
+        session.add(other)
+        session.flush()
+
+        records.read(notice, person)
+        with pytest.raises(InvalidOperationException) as refused:
+            records.read(notice, other)
+
+        assert refused.value.message == (
+            f"Cannot mark item {notice.id} Read because the item is done"
+        )
+        assert _done(notice) == read
+
+    def test_undo_reopens_the_same_notice(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        notice: Item,
+        person: User,
+    ) -> None:
+        """DB 607: the notice never moves or goes, and still carries its
+        work item's debrief."""
+        records = container.record_service()
+        records.read(notice, person)
+
+        records.undo(notice)
+
+        assert _done(notice) == (None, None, None)
+        assert _notices(session, project) == [(notice, {project_session.id})]
+        assert records.offers_undo(notice) is False
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(notice)
+        assert refused.value.cause == "the item is not done"
+
+    def test_pilot_reads_none_on_its_own_word(
+        self, session: DbSession, container: ServiceContainer, notice: Item
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().read(notice, _agent(session))
+
+        assert refused.value.cause == (
+            "Pilot reads a debrief's notice only on a member's word"
+        )
+        assert _done(notice) == (None, None, None)
+
+    @pytest.mark.parametrize(
+        ("mark", "cause"),
+        [
+            ("done", "a debrief_notice item is not done by Done"),
+            ("reviewed", "a debrief_notice item is not marked Reviewed"),
+        ],
+    )
+    def test_done_and_reviewed_are_refused(
+        self,
+        container: ServiceContainer,
+        notice: Item,
+        person: User,
+        mark: str,
+        cause: str,
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as refused:
+            getattr(container.record_service(), mark)(notice, person)
+
+        assert refused.value.cause == cause
+        assert _done(notice) == (None, None, None)
+
+    def test_an_archived_projects_takes_no_read(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        notice: Item,
+        person: User,
+    ) -> None:
+        """D012: an archived project takes Bring back alone."""
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().read(notice, person)
+
+        assert refused.value.cause == "its project is archived"
+        assert _done(notice) == (None, None, None)
+
+    def test_an_archived_projects_read_one_offers_no_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        notice: Item,
+        person: User,
+    ) -> None:
+        records = container.record_service()
+        records.read(notice, person)
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(notice)
+
+        assert refused.value.cause == "its project is archived"
+        assert records.offers_undo(notice) is False
+        assert notice.done_cause_code == "marked"
+
+    def test_finishs_close_closes_it_finished_with_no_undo(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        notice: Item,
+        person: User,
+    ) -> None:
+        records = container.record_service()
+
+        records.close_unanswered(project, person, FINISH)
+
+        assert _done(notice) == (FINISH, "finished", person.id)
+        assert records.offers_undo(notice) is False
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(notice)
+        assert refused.value.cause == "an item done as finished offers no undo"
+
+    def test_the_chats_cancel_is_refused(
+        self, container: ServiceContainer, notice: Item, person: User
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().call_off(notice, person)
+
+        assert refused.value.cause == "a debrief_notice item is no ask"
+        assert _done(notice) == (None, None, None)
+
+    def test_it_folds_and_unfolds_its_read_clearing_the_fold(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        notice: Item,
+        person: User,
+    ) -> None:
+        """DB 316 to 318: folded as any open item, and unfolded by its
+        close."""
+        records = container.record_service()
+
+        records.fold(project, notice, True)
+        session.refresh(notice)
+        assert notice.folded is True
+        records.read(notice, person)
+        assert notice.folded is False
+        records.undo(notice)
+        records.fold(project, notice, True)
+        session.refresh(notice)
+        assert notice.folded is True
+        records.fold(project, notice, False)
+        session.refresh(notice)
+
+        assert notice.folded is False
+        assert _done(notice) == (None, None, None)
+
+    @pytest.mark.parametrize("write", ["read", "undo"])
+    def test_its_read_and_its_undo_move_the_timeline_alone(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        notice: Item,
+        person: User,
+        write: str,
+    ) -> None:
+        records = container.record_service()
+        if write == "undo":
+            records.read(notice, person)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            if write == "undo":
+                records.undo(notice)
+            else:
+                records.read(notice, person)
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]
+
+    @pytest.mark.parametrize(
+        ("write", "held"),
+        [
+            ("read", "projects"),
+            ("read", "items"),
+            ("undo", "projects"),
+            ("undo", "items"),
+        ],
+    )
+    def test_a_read_and_an_undo_wait_for_the_projects_row_and_its_own(
+        self, committed_app: Flask, write: str, held: str
+    ) -> None:
+        """The project's row is what Finish, Reopen and Archive hold while
+        they change its state (D012); the notice's own row stands where a
+        document's does in a prose item's close."""
+        person_id, notice_id = _committed_notice(committed_app, read=write == "undo")
+        container = committed_app.container
+        with scoped_session(container) as session:
+            before = _done(session.get_one(Item, notice_id))
+            row_id = (
+                session.get_one(Item, notice_id).project_id
+                if held == "projects"
+                else notice_id
+            )
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql(f"SELECT id FROM {held} WHERE id = :id FOR NO KEY UPDATE"),
+                {"id": row_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                records = container.record_service()
+                notice = session.get_one(Item, notice_id)
+                if write == "undo":
+                    records.undo(notice)
+                else:
+                    records.read(notice, session.get_one(User, person_id))
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert _done(session.get_one(Item, notice_id)) == before
 
 
 def _brain(db: DbSession, project: Project) -> models.Session:
