@@ -38,7 +38,12 @@ from, `5m` or `1h`; unset, the hour of a Claude subscription within its usage
 limits."""
 
 FIVE_MINUTE_JOBS = frozenset(
-    {WorkTrigger.SETUP, WorkTrigger.WORKER_TURN_ENDED, WorkTrigger.ITEM_DONE}
+    {
+        WorkTrigger.SETUP,
+        WorkTrigger.WORKER_TURN_ENDED,
+        WorkTrigger.ITEM_DONE,
+        WorkTrigger.OFFER_TAKEN,
+    }
 )
 """The triggers of the jobs whose sessions run on the 5-minute prompt cache. A
 wait's run, a chat and a work item's run leave Claude Code's own."""

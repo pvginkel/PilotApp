@@ -12,6 +12,7 @@ from app.models.reference import ProjectState, SessionState, Surface, WorkTrigge
 from app.services.container import ServiceContainer
 from app.services.controller_client import HeadlessCreateRequest
 from app.services.session_scope import ScopedCreate, project_folder, scoped_create
+from tests.support.pilot_notes import a_turn, noted
 
 COLUMNS = HeadlessCreateRequest(
     cwd="/work/Example",
@@ -21,6 +22,14 @@ COLUMNS = HeadlessCreateRequest(
     reasoning_effort="high",
 )
 """The create `_session`'s columns make."""
+
+OFFERED = """---
+title: Put the key into OpenBao
+---
+
+```action id=A1
+```
+"""
 
 
 def _session(db: DbSession, project: Project, kind: str) -> models.Session:
@@ -176,6 +185,40 @@ class TestPromptCache:
             f"PILOT_SESSION={run.id}",
             "CLAUDE_CODE_PROMPT_CACHE_TTL=5m",
         ]
+
+    def test_an_offers_job_runs_on_the_five_minute_prompt_cache(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        """The job a taken offer places, as the job after an item's close
+        (F168.7)."""
+        db = container.db_session()
+        project.state_code, project.slug = ProjectState.OPEN, "soup-club"
+        writer = models.Session(
+            project_id=project.id,
+            kind_code="chat",
+            cwd="/work/PilotProjects",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        db.add(writer)
+        db.flush()
+        item = container.document_service().bear_item(
+            project, "action", "Put the key into OpenBao", writer, OFFERED
+        )
+        note = noted(db, item, "A1", a_turn(db, writer), offer="I can store it")
+        run = _session(db, project, "job")
+        container.record_service().place_work(
+            project,
+            run,
+            "A job",
+            trigger=WorkTrigger.OFFER_TAKEN,
+            trigger_note_id=note.id,
+        )
+
+        request = scoped_create(db, run).request
+
+        assert request.env is not None
+        assert request.env[-1] == "CLAUDE_CODE_PROMPT_CACHE_TTL=5m"
 
     @pytest.mark.parametrize("kind", ["chat", "job"])
     def test_a_waits_run_and_a_chat_keep_claude_codes_own(

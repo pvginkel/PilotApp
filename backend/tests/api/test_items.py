@@ -14,6 +14,7 @@ from typing import Any
 
 import pilot_dsl as dsl
 import pytest
+from dependency_injector import providers
 from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,6 +26,7 @@ from app.models import (
     Document,
     Environment,
     Item,
+    PilotNote,
     Project,
     User,
     WaitFiring,
@@ -39,6 +41,9 @@ from app.services.sse_connection_manager import SSEConnection
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.sender import SENDER_HEADER
 from tests.support.debriefs import placed_notice
+from tests.support.pilot_notes import a_turn, noted
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 from tests.support.working_on import Camp
 
 ITEMS = "/api/items"
@@ -832,6 +837,151 @@ class TestMarkActionDone:
         self, oidc_client: FlaskClient
     ) -> None:
         response = oidc_client.post(f"{ITEMS}/{uuid.uuid4()}/blocks/A1/done", json={})
+
+        assert response.status_code == 401
+
+
+OFFER = "I can store the key in OpenBao myself."
+
+
+@pytest.fixture
+def placing(container: ServiceContainer, supervise: Supervise) -> Iterator[None]:
+    """The routes' session start configured, through which the press places
+    Pilot's job."""
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
+    try:
+        yield
+    finally:
+        container.session_start_service.reset_last_overriding()
+
+
+def _offered(
+    session: Session, container: ServiceContainer, camp: Project, run: models.Session
+) -> tuple[Item, PilotNote]:
+    """An action with Pilot's note on it offering work."""
+    item = _bear(container, camp, run, "action", ACTION)
+    return item, noted(session, item, "A1", a_turn(session, run), offer=OFFER)
+
+
+@pytest.mark.usefixtures("person")
+class TestTakeOffer:
+    """The press of the offer of Pilot's note on an action (F168.7; DB 629)."""
+
+    @pytest.mark.usefixtures("placing")
+    def test_the_press_places_pilots_job_and_the_action_stays(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        person: User,
+    ) -> None:
+        item, note = _offered(session, container, camp, run)
+        _sign_in(client)
+
+        response = client.post(
+            f"{ITEMS}/{item.id}/blocks/A1/offer", json={"note_id": note.id}
+        )
+
+        assert response.status_code == 204
+        session.refresh(note)
+        assert note.offer_taken_by_user_id == person.id
+        job = session.scalars(select(Work).where(Work.trigger_note_id == note.id)).one()
+        entry = _entry(client, camp, item)
+        assert entry["job"]["id"] == str(job.id)
+        assert entry["job"]["title"] == "Starting the work offered on A1"
+        (block,) = (part["block"] for part in entry["body"] if part["type"] == "block")
+        assert block["pilots_note"]["offer_taken"] is True
+        assert (_block(session, item, "A1").done, item.done_at) == (None, None)
+
+    def test_a_second_press_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        person: User,
+    ) -> None:
+        item, note = _offered(session, container, camp, run)
+        note.offer_taken_at, note.offer_taken_by_user_id = datetime.now(UTC), person.id
+        session.flush()
+        _sign_in(client)
+
+        response = client.post(
+            f"{ITEMS}/{item.id}/blocks/A1/offer", json={"note_id": note.id}
+        )
+
+        assert response.status_code == 409
+        path = tree_path(camp, session.get_one(Document, item.id).path)
+        assert _error(response) == (
+            f"Cannot take the offer on A1 of {path} because the offer on A1 was"
+            " taken already"
+        )
+
+    def test_a_note_the_block_lacks_is_not_found(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item, note = _offered(session, container, camp, run)
+        _sign_in(client)
+
+        response = client.post(
+            f"{ITEMS}/{item.id}/blocks/A1/offer", json={"note_id": note.id + 1}
+        )
+
+        assert response.status_code == 404
+        assert _error(response) == (
+            f"Pilot Note {item.id}/A1/{note.id + 1} was not found"
+        )
+
+    @pytest.mark.parametrize("body", [{}, {"note_id": "A1"}, {"note_id": 1, "x": 1}])
+    def test_a_body_that_names_no_note_is_invalid(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        body: dict[str, Any],
+    ) -> None:
+        item, _ = _offered(session, container, camp, run)
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{item.id}/blocks/A1/offer", json=body)
+
+        assert response.status_code == 400
+
+    def test_without_editor_it_is_refused(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item, note = _offered(session, container, camp, run)
+        _sign_in(client, roles=())
+
+        response = client.post(
+            f"{ITEMS}/{item.id}/blocks/A1/offer", json={"note_id": note.id}
+        )
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(
+            f"{ITEMS}/{uuid.uuid4()}/blocks/A1/offer", json={"note_id": 1}
+        )
 
         assert response.status_code == 401
 

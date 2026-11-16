@@ -8,8 +8,10 @@ actions a work item is named for at its `add_item`, of a registered document
 or an item of Pilot's own (DB decision 64, widened by D224); an item of
 Pilot's own done at the save that writes its last open block's `done` (DB
 163); a person's fold of an open item and their unfold (DB decision 75);
-the chat's cancel of an ask Pilot added, on a person's word (DB 297); and a
-stopped work item's close for good, a person's or Pilot's (DB decision 78).
+the chat's cancel of an ask Pilot added, on a person's word (DB 297); a
+stopped work item's close for good, a person's or Pilot's (DB decision 78);
+and a member's taking of the offer of Pilot's note, which places Pilot's job
+(DB 629).
 
 Each is a write of the caller's transaction, under the document's row lock
 (TD §8.5), a close and an Undo under its project's row first, and refused
@@ -68,6 +70,7 @@ from app.models import (
     ConfirmationReason,
     Document,
     Item,
+    PilotNote,
     PlanTask,
     Project,
     ResearchAssignment,
@@ -159,10 +162,16 @@ class Continuations(Protocol):
 
 class Jobs(Protocol):
     """Places the job after a person's close of an item of Pilot's own, and
-    withdraws it on the item's Undo before its brief: the job service."""
+    withdraws it on the item's Undo before its brief, and the job a member's
+    press of a Pilot Note's offer places: the job service."""
 
     def item_done(self, project: Project, item: Item) -> Work:
         """The job after the close of `item`, placed in the caller's
+        transaction, which holds the project's row exclusively."""
+        ...
+
+    def offer_taken(self, project: Project, note: PilotNote) -> Work:
+        """The job the taking of `note`'s offer places, in the caller's
         transaction, which holds the project's row exclusively."""
         ...
 
@@ -351,6 +360,74 @@ class RecordService:
             via=AnswerChannel.APP,
             session_id=None,
         )
+
+    def take_offer(
+        self, document: Document, local_id: str, note_id: int, user: User
+    ) -> Work:
+        """`user`'s press of the offer of the Pilot Note `note_id` on action
+        `local_id` (F168.7; DB 629): who took it and when, set once, while
+        the note stands with an offer, the action has no `done` and its item
+        is open; and at that instant the job of Pilot's it places, which names
+        the note (`Jobs.offer_taken`; DB 630). The document's text, the
+        action's answer and Done, and what is held are untouched: the action
+        stays the person's (DB 632). The project's row is held exclusively
+        first, as an item's close holds it, since the press places work.
+
+        Raises:
+            RecordNotFoundException: the document has no such block, or no
+                Pilot Note of the id is on it.
+            InvalidOperationException: the project is archived; the item is
+                done; the note's offer was taken already, or it was replaced
+                or taken off, or offers no work; or the action is done.
+        """
+        project, item = self._closing(document)
+        operation = (
+            f"take the offer on {local_id} of {tree_path(project, document.path)}"
+        )
+        block = self.db.scalars(
+            select(Block)
+            .where(Block.document_id == document.id, Block.local_id == local_id)
+            .execution_options(populate_existing=True)
+        ).one_or_none()
+        note = self.db.get(PilotNote, note_id, populate_existing=True)
+        if block is None or note is None or note.block_id != block.id:
+            raise RecordNotFoundException(
+                "Pilot Note", f"{document.id}/{local_id}/{note_id}"
+            )
+        _not_archived(project, operation)
+        _not_done(item, operation)
+        refusal = self._offer_refusal(note, local_id)
+        if refusal is None and block.done_at is not None:
+            refusal = f"action {local_id} is done"
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        note.offer_taken_at = datetime.now(UTC)
+        note.offer_taken_by_user_id = user.id
+        self.db.flush()
+        self.view_service.timeline_moved(project)
+        return self.jobs().offer_taken(project, note)
+
+    def _offer_refusal(self, note: PilotNote, local_id: str) -> str | None:
+        """Why the offer of `note`, on block `local_id`, takes no press: taken
+        once already, the note no longer standing (DB 625), or no offer in it;
+        None while it takes one."""
+        if note.offer_taken_at is not None:
+            return f"the offer on {local_id} was taken already"
+        if self.db.scalar(
+            select(
+                exists().where(
+                    PilotNote.item_id == note.item_id,
+                    PilotNote.block_id == note.block_id,
+                    PilotNote.id > note.id,
+                )
+            )
+        ):
+            return f"Pilot's note on {local_id} was replaced"
+        if note.withdrawn_at is not None:
+            return f"Pilot's note on {local_id} was taken off"
+        if note.offer is None:
+            return f"Pilot's note on {local_id} offers no work"
+        return None
 
     def undo(self, item: Item) -> None:
         """Undo of a done prose item but an archive question (DB 265), or of a
@@ -879,6 +956,7 @@ class RecordService:
         repo: str | None = None,
         trigger: WorkTrigger | None = None,
         trigger_item_id: uuid.UUID | None = None,
+        trigger_note_id: int | None = None,
     ) -> Work:
         """A work item of `session`, one identity with it (DB Work, decision
         3): its Item of kind `work` at the project's next place on the
@@ -889,7 +967,8 @@ class RecordService:
         started it, a worker's run none (DB 167); a job's Item
         `trigger_item_id` is the one whose event triggered it (decision 5), a
         run's that continues a conversation after Done the one whose close
-        released it (decision 44).
+        released it (decision 44); an offer's job names the Pilot Note
+        `trigger_note_id` whose offer was taken, and no Item (DB 630).
 
         Raises:
             RecordNotFoundException: the project's plan has no task
@@ -916,6 +995,7 @@ class RecordService:
             repo=repo,
             trigger_code=trigger,
             trigger_item_id=trigger_item_id,
+            trigger_note_id=trigger_note_id,
             autopilot=project.autopilot,
         )
         self.db.add(work)

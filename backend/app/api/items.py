@@ -1,6 +1,7 @@
 """What the signed-in person does to a timeline's items (F14, F17, F32.4):
 answer a block, mark an action Done, mark a document Done, a notice Read, a
-review Reviewed, and undo; request a wait's firing (F27.3); and fold an
+review Reviewed, and undo; take the offer of Pilot's note on an action, which
+places Pilot's job (F168.7); request a wait's firing (F27.3); and fold an
 open item and unfold it, for every member (F12.3). Each is the
 record's own write; its refusals answer as the API's errors, a document Pilot
 is working on and a block it holds refusing an answer, Done or paste-back (DB
@@ -20,7 +21,11 @@ from spectree import Response as SpectreeResponse
 
 from app.api.caller import caller
 from app.schemas.common import ApiErrorResponseSchema
-from app.schemas.items import ActionDoneRequestSchema, AnswerRequestSchema
+from app.schemas.items import (
+    ActionDoneRequestSchema,
+    AnswerRequestSchema,
+    TakeOfferRequestSchema,
+)
 from app.schemas.timeline import DebriefSchema, ItemDocumentSchema
 from app.services.container import ServiceContainer
 from app.services.item_service import ItemService
@@ -157,6 +162,45 @@ def mark_action_done(
     """
     body = ActionDoneRequestSchema.model_validate(request.get_json())
     item_service.done_action(caller(), item_id, block_id, body.note)
+    return "", 204
+
+
+@items_bp.route("/<uuid:item_id>/blocks/<block_id>/offer", methods=["POST"])
+@api.validate(
+    json=TakeOfferRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def take_offer(
+    item_id: uuid.UUID,
+    block_id: str,
+    item_service: ItemService = Provide[ServiceContainer.item_service],
+) -> tuple[str, int]:
+    """Take the offer of Pilot's note on the action as the signed-in person,
+    now: who took it and when are recorded once, and Pilot's job that starts
+    the offered work is placed. The action stays theirs, with its Done.
+
+    Returns:
+        204: The offer is taken and Pilot's job placed
+        400: The body names no note
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No item has the id, it has no block of the id, or no note of
+            Pilot's of the id is on it
+        409: The caller has not chosen a handle, the item is done or its
+            project archived, Pilot is working on it or holds the action,
+            the action is done, or the note was replaced or taken off,
+            offers no work, or had its offer taken already
+    """
+    body = TakeOfferRequestSchema.model_validate(request.get_json())
+    item_service.take_offer(caller(), item_id, block_id, body.note_id)
     return "", 204
 
 

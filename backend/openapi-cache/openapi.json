@@ -11218,6 +11218,25 @@
         "title": "SyncProtocolRangeSchema",
         "type": "object"
       },
+      "TakeOfferRequestSchema.bfdf230": {
+        "additionalProperties": false,
+        "description": "A person's taking of the offer of Pilot's note on an action.",
+        "properties": {
+          "note_id": {
+            "description": "The id of Pilot's note whose offer is taken, as the read gave it: a note replaced since is refused",
+            "examples": [
+              12
+            ],
+            "title": "Note Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "note_id"
+        ],
+        "title": "TakeOfferRequestSchema",
+        "type": "object"
+      },
       "TaskActionResponse.70db092": {
         "description": "Response when a task is cancelled or removed.",
         "properties": {
@@ -16448,6 +16467,106 @@
           }
         ],
         "summary": "Mark an action without options Done as the signed-in person, now, with the paste-back as its note.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/blocks/{block_id}/offer": {
+      "post": {
+        "description": "Returns:     204: The offer is taken and Pilot's job placed     400: The body names no note     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, it has no block of the id, or no note of         Pilot's of the id is on it     409: The caller has not chosen a handle, the item is done or its         project archived, Pilot is working on it or holds the action,         the action is done, or the note was replaced or taken off,         offers no work, or had its offer taken already",
+        "operationId": "post__api_items_{item_id}_blocks_{block_id}_offer",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "path",
+            "name": "block_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeOfferRequestSchema.bfdf230"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Take the offer of Pilot's note on the action as the signed-in person, now: who took it and when are recorded once, and Pilot's job that starts the offered work is placed. The action stays theirs, with its Done.",
         "tags": [],
         "x-required-role": "editor"
       }

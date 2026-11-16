@@ -19,12 +19,14 @@ queue or the pause, from the record as it then stands (F59, F141.4). Its work it
 turn ends, a follow-up turn included (`RelayService`), and its project's next
 job goes on then; a person's Stop and Resume do not take it (F26.3).
 
-Four triggers are placed here: the setup, Create project's; a worker's turn
+Five triggers are placed here: the setup, Create project's; a worker's turn
 ended, once the turn-end read settled every document the run registered (D2);
 a person's close of an item of Pilot's own (DB decision 45), whose Undo
-withdraws the job while it is held before its brief; and a wait's pending
+withdraws the job while it is held before its brief; a wait's pending
 firings, the batcher's (`WaitBatcher`; F136.4), which the job takes at its
-brief (DB 196), and whose close withdraws it until then. A job that failed or stopped takes a person's Retry, a fresh
+brief (DB 196), and whose close withdraws it until then; and a member's
+taking of the offer of a Pilot Note (F168.7; DB 629, 630), which nothing
+withdraws. A job that failed or stopped takes a person's Retry, a fresh
 job for the same trigger; the server retries none on its own, but each job the
 store's update stopped, once, at its lift, through the same Retry (D078; DB
 281).
@@ -40,7 +42,7 @@ from sqlalchemy.orm import Session
 from app.engine.bus import EngineBus
 from app.engine.record import WITHDRAWN, RecordService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Document, Item, Project, Work
+from app.models import Block, Document, Item, PilotNote, Project, Work
 from app.models import Session as AgentSession
 from app.models.reference import ProjectState, SessionState, WorkTrigger
 from app.services.handing import hand_over, sides
@@ -64,6 +66,10 @@ and of the job after an item of Pilot's own is closed (DB Item sample)."""
 
 WAIT_TITLE = 'Checking "{wait}"'
 """The title of a wait's run, the wait named by its title."""
+
+OFFER_TITLE = "Starting the work offered on {block}"
+"""The title of the job an offer's taking places, the action named by its
+local id."""
 
 _RETRIABLE = (SessionState.FAILED, SessionState.STOPPED)
 
@@ -185,6 +191,29 @@ class JobService:
             trigger_item_id=wait.id,
         )
 
+    def offer_taken(self, project: Project, note: PilotNote) -> Work:
+        """The job a member's press of the offer of `note` places (F168.7; DB
+        629, 630), in the press's transaction, which holds the project's row
+        exclusively and set the taking: placed at the taking's instant,
+        naming the note and no trigger item, the Item it follows from being
+        the note's. Nothing withdraws it: a taking is never undone.
+
+        Raises:
+            InvalidOperationException: No controller or no store environment
+                is configured
+        """
+        # An offer stands on an action Block alone (DB 626), taken by now.
+        assert note.block_id is not None and note.offer_taken_at is not None
+        block = self.db.get_one(Block, note.block_id)
+        return self._place(
+            project,
+            WorkTrigger.OFFER_TAKEN,
+            OFFER_TITLE.format(block=block.local_id),
+            note.offer_taken_at,
+            f"place the job after the taking of Pilot's offer on {block.local_id}",
+            trigger_note_id=note.id,
+        )
+
     def unbriefed(self, item: Item) -> AgentSession | None:
         """The job a close of `item` placed, or the run of the wait `item`,
         that is still held before its brief, its Session locked and read
@@ -218,7 +247,8 @@ class JobService:
         """A person's Retry of the job `session_id`, failed or stopped, its
         work item open, or the store's update's of a job it stopped, at its
         lift (DB 281), in the caller's transaction: a fresh job for the
-        same trigger and trigger item, titled as it is, placed at the press's
+        same trigger and trigger item, or Pilot Note (DB 630), titled as it
+        is, placed at the press's
         instant at the project's next place, behind every job of the project
         already waiting, and briefed from the record as it stands when it
         starts (`_place`). The job retried is marked retried by it, which
@@ -276,6 +306,7 @@ class JobService:
             datetime.now(UTC),
             operation,
             trigger_item_id=work.trigger_item_id,
+            trigger_note_id=work.trigger_note_id,
             retried=work,
         )
         hand_over(self.db, handing, datetime.now(UTC))
@@ -312,12 +343,14 @@ class JobService:
         operation: str,
         *,
         trigger_item_id: uuid.UUID | None = None,
+        trigger_note_id: int | None = None,
         retried: Work | None = None,
     ) -> Work:
         """A job of `trigger` titled `title`, placed at `at`, taken under the
         project's row: its trigger's instant, which the pause's transitions
         are read against (`BriefService.job`), or a Retry's; its trigger item
-        `trigger_item_id`, the Item whose event triggered it. A Retry's marks
+        `trigger_item_id`, the Item whose event triggered it, or an offer's
+        Pilot Note `trigger_note_id`. A Retry's marks
         the job it retries, `retried`, before it starts, so that its brief
         reads the trigger's instant as that job's chain has it."""
         session = AgentSession(
@@ -333,7 +366,12 @@ class JobService:
         self.db.add(session)
         self.db.flush()
         work = self.record_service.place_work(
-            project, session, title, trigger=trigger, trigger_item_id=trigger_item_id
+            project,
+            session,
+            title,
+            trigger=trigger,
+            trigger_item_id=trigger_item_id,
+            trigger_note_id=trigger_note_id,
         )
         if retried is not None:
             retried.retried_by_id = work.id

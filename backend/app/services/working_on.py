@@ -67,6 +67,7 @@ from app.models import (
     ClarificationRun,
     Document,
     Item,
+    PilotNote,
     Turn,
     Work,
     WriterQuestion,
@@ -785,16 +786,25 @@ def _passes_on() -> tuple[Select[uuid.UUID, uuid.UUID, int], ...]:
 
 @cache
 def _triggered_by() -> Select[uuid.UUID | None, WorkTrigger | None, uuid.UUID, int]:
-    """The jobs not withdrawn that the Items bound as `wanted` triggered:
-    each its trigger item's id, its trigger, its id and its timeline
-    place."""
+    """The jobs not withdrawn that follow from the Items bound as `wanted`:
+    those they triggered, and an offer's, whose Pilot Note is on one of them
+    (DB 630); each the id of the Item it follows from, its trigger, its id
+    and its timeline place."""
     job = _Rows.new()
-    return job.select(
-        job.work.trigger_code.is_not(None),
-        job.work.trigger_item_id.in_(bindparam("wanted", expanding=True)),
-        _not_withdrawn(job),
-    ).with_only_columns(
-        job.work.trigger_item_id, job.work.trigger_code, job.work.id, job.item.seq
+    wanted: BindParameter[Any] = bindparam("wanted", expanding=True)
+    return (
+        job.select(
+            job.work.trigger_code.is_not(None),
+            or_(job.work.trigger_item_id.in_(wanted), PilotNote.item_id.in_(wanted)),
+            _not_withdrawn(job),
+        )
+        .outerjoin(PilotNote, PilotNote.id == job.work.trigger_note_id)
+        .with_only_columns(
+            func.coalesce(job.work.trigger_item_id, PilotNote.item_id),
+            job.work.trigger_code,
+            job.work.id,
+            job.item.seq,
+        )
     )
 
 
@@ -804,8 +814,9 @@ def jobs_on(db: Session, item_ids: Collection[uuid.UUID]) -> JobsOn:
     registered, and the pass after the writer's reply on every document the
     pass before it asked the writer about, as `Reading.pilots` reads them; any
     other job on its trigger item, the worker's run whose turn ended, the
-    item of Pilot's that was closed or the wait that fired; the setup, which
-    has none, on no item. Where several stand on one item, the latest placed
+    item of Pilot's that was closed or the wait that fired, and an offer's
+    on its Pilot Note's item (DB 630); the setup, which has none, on no
+    item. Where several stand on one item, the latest placed
     shows, a Retry over the job it retries; a withdrawn job shows nowhere.
     And for each worker's run among them, the job after its turn, the latest
     of it and its Retries, wherever it shows."""

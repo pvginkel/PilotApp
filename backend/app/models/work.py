@@ -40,6 +40,12 @@ class Work(db.Model):  # type: ignore[name-defined]
     carried so that the keys reach one Project by both paths (DB assertion
     166) and the checks read the Session Kind (DB 149, 167).
 
+    `trigger_note_id` is the Pilot Note whose offer's taking placed the job,
+    set exactly for Work Trigger `offer_taken`, which names no trigger Item:
+    the Item it follows from is the note's Prose Item (DB 630). That the
+    note is on an Item of the Work's Project is the server's: no key reaches
+    the note's Project from this row.
+
     `retried_by_id` is the job a person's Retry of this failed or stopped
     job placed, set once and never changed: a recursive list, a job retried
     at most once and a retry retrying one job.
@@ -84,6 +90,13 @@ class Work(db.Model):  # type: ignore[name-defined]
             name="ck_work_trigger",
         ),
         CheckConstraint("trigger_item_id <> id", name="ck_work_trigger_item"),
+        # An offer's job names its Pilot Note and no trigger Item (DB 630).
+        CheckConstraint(
+            "(trigger_note_id IS NOT NULL)"
+            " = (trigger_code IS NOT DISTINCT FROM 'offer_taken')"
+            " AND (trigger_note_id IS NULL OR trigger_item_id IS NULL)",
+            name="ck_work_trigger_note",
+        ),
         # A job runs in the store, placed in no repository (DB §2.2).
         CheckConstraint(
             "session_kind_code = 'work' OR repo IS NULL", name="ck_work_repo"
@@ -145,6 +158,9 @@ class Work(db.Model):  # type: ignore[name-defined]
     session_kind_code: Mapped[str] = mapped_column(Text)
     trigger_code: Mapped[WorkTrigger | None] = mapped_column(WORK_TRIGGER)
     trigger_item_id: Mapped[uuid.UUID | None]
+    trigger_note_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("pilot_notes.id")
+    )
     repo: Mapped[str | None] = mapped_column(Text)
     autopilot: Mapped[bool] = mapped_column(Boolean)
     retried_by_id: Mapped[uuid.UUID | None]

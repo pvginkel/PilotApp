@@ -89,6 +89,7 @@ class WorkTrigger(StrEnum):
     WORKER_TURN_ENDED = "worker_turn_ended"
     ITEM_DONE = "item_done"
     WAIT_FIRED = "wait_fired"
+    OFFER_TAKEN = "offer_taken"
 
 
 class FiringCause(StrEnum):

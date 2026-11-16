@@ -2,12 +2,13 @@
 block's local id (F30.7): each the record's own write (F32.4), the item and
 the block found by their ids and the writer by the caller; the archive
 question's Archive archives the project with it (DB 265); a person's
-request of a wait, which fires it (F27.3); and their fold of an open item and
-unfold (F12.3). A document that is Pilot's, and a
-held block, take no answer, Done or paste-back from here (DB 295); Stop and
-take over hands such a document to the person (F28.9), and a Cancel on a
-document of the run holding a block, while that run waits on the person, ends
-the run and hands the block back (DB 297 to 299)."""
+request of a wait, which fires it (F27.3); their fold of an open item and
+unfold (F12.3); and their taking of the offer of Pilot's note on an action,
+which places Pilot's job (F168.7; DB 629). A document that is Pilot's, and a
+held block, take no answer, Done, paste-back or taking from here (DB 295);
+Stop and take over hands such a document to the person (F28.9), and a Cancel
+on a document of the run holding a block, while that run waits on the person,
+ends the run and hands the block back (DB 297 to 299)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -138,6 +139,27 @@ class ItemService:
         document = self._document(item, block_id)
         self._not_pilots(item, operation, block_id)
         self.record_service.done_action(document, block_id, person, note=note)
+
+    def take_offer(
+        self, auth: AuthContext, item_id: uuid.UUID, block_id: str, note_id: int
+    ) -> None:
+        """The caller's taking of the offer of Pilot's note `note_id` on the
+        action, which places Pilot's job (F168.7; DB 629, 630); the action
+        stays theirs, with its Done.
+
+        Raises:
+            RecordNotFoundException: no item has the id, it has no such
+                block, or no note of the id is on it.
+            InvalidOperationException: the caller has not chosen a handle,
+                the item is Pilot's or the action held, or the record refuses
+                the taking.
+        """
+        item = self._item(item_id)
+        operation = f"take the offer on block {block_id} of item {item_id}"
+        person = self.people_service.require_person(auth, operation)
+        document = self._document(item, block_id)
+        self._not_pilots(item, operation, block_id)
+        self.record_service.take_offer(document, block_id, note_id, person)
 
     def done(self, auth: AuthContext, item_id: uuid.UUID) -> None:
         """Done on a document, by the caller, with its recommendations

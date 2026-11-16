@@ -14,6 +14,7 @@ from app.models import (
     DebriefEntry,
     Environment,
     Item,
+    PilotNote,
     ProgressStep,
     Project,
     Session,
@@ -21,7 +22,9 @@ from app.models import (
     Work,
 )
 from app.models.reference import ProgressState, SessionState, WorkTrigger
+from app.services.container import ServiceContainer
 from tests.support.database import violated_constraint
+from tests.support.pilot_notes import a_turn, noted
 
 
 def _run(
@@ -349,6 +352,147 @@ class TestWork:
         )
 
         assert violated_constraint(session) == "ck_work_repo"
+
+
+OFFERED = """---
+title: Put the key into OpenBao
+---
+
+```action id=A1
+```
+"""
+
+
+@pytest.fixture
+def offered(
+    session: DbSession, container: ServiceContainer, project_session: Session
+) -> PilotNote:
+    """Pilot's note on an action, offering work."""
+    project = session.get_one(Project, project_session.project_id)
+    item = container.document_service().bear_item(
+        project, "action", "Put the key into OpenBao", project_session, OFFERED
+    )
+    return noted(
+        session,
+        item,
+        "A1",
+        a_turn(session, project_session),
+        offer="I can store the key myself",
+    )
+
+
+class TestTriggerNote:
+    """An offer's job names its Pilot Note and no trigger Item, and only an
+    offer's job names one (DB 630)."""
+
+    def _offers_job(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        creator: Session,
+        **overrides: object,
+    ) -> Work:
+        work_id = uuid.uuid4()
+        values: dict[str, object] = {
+            "session_kind_code": "job",
+            "trigger_code": WorkTrigger.OFFER_TAKEN,
+        }
+        values.update(overrides)
+        work = _work(project, work_id, **values)
+        session.add_all(
+            [
+                _entry(project, creator, work_id, seq=5),
+                _run(project, environment, work_id, kind_code="job"),
+                work,
+            ]
+        )
+        return work
+
+    def test_an_offers_job_names_its_note(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+        offered: PilotNote,
+    ) -> None:
+        work = self._offers_job(
+            session, project, environment, project_session, trigger_note_id=offered.id
+        )
+        session.flush()
+
+        assert (work.trigger_note_id, work.trigger_item_id) == (offered.id, None)
+
+    def test_an_offers_job_without_its_note_is_refused(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        self._offers_job(session, project, environment, project_session)
+
+        assert violated_constraint(session) == "ck_work_trigger_note"
+
+    def test_an_offers_job_names_no_trigger_item(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+        offered: PilotNote,
+    ) -> None:
+        self._offers_job(
+            session,
+            project,
+            environment,
+            project_session,
+            trigger_note_id=offered.id,
+            trigger_item_id=offered.item_id,
+        )
+
+        assert violated_constraint(session) == "ck_work_trigger_note"
+
+    @pytest.mark.parametrize("trigger", [WorkTrigger.ITEM_DONE, WorkTrigger.SETUP])
+    def test_another_jobs_names_no_note(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+        offered: PilotNote,
+        trigger: WorkTrigger,
+    ) -> None:
+        self._offers_job(
+            session,
+            project,
+            environment,
+            project_session,
+            trigger_code=trigger,
+            trigger_note_id=offered.id,
+        )
+
+        assert violated_constraint(session) == "ck_work_trigger_note"
+
+    def test_a_workers_run_names_no_note(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+        offered: PilotNote,
+    ) -> None:
+        work_id = uuid.uuid4()
+        session.add_all(
+            [
+                _entry(project, project_session, work_id, seq=5),
+                _run(project, environment, work_id),
+                _work(project, work_id, trigger_note_id=offered.id),
+            ]
+        )
+
+        assert violated_constraint(session) == "ck_work_trigger_note"
 
 
 def _job(

@@ -39,6 +39,7 @@ from app.models import (
     Environment,
     Item,
     ItemAttachment,
+    PilotNote,
     PlanNote,
     PlanTask,
     Project,
@@ -96,6 +97,10 @@ HOMELESS_HEADING = (
     "Deferrals without a home (a note names none of these blocks — write one,"
     " or answer the block anew in a new item):"
 )
+
+OFFER_TAKEN_KIND = "an offer of yours was taken"
+"""The kind line of the job an offer's taking places (§5.2), which the store's
+map reads its skill's passage from."""
 
 HANDED_BACK = "handed back to the operator: leave it to them"
 """How a claimed or researched block's line in a job's brief ends once the
@@ -312,6 +317,10 @@ class BriefService:
             return self._item_done(project, work.trigger_item_id, triggered, at)
         if work.trigger_code is WorkTrigger.WAIT_FIRED:
             return self._wait_fired(project, work, triggered, at)
+        if work.trigger_code is WorkTrigger.OFFER_TAKEN:
+            # An offer's job names its Pilot Note (DB 630).
+            assert work.trigger_note_id is not None
+            return self._offer_taken(project, work.trigger_note_id, triggered, at)
         assert work.trigger_code is WorkTrigger.SETUP
         return self._setup(project, triggered, at)
 
@@ -601,6 +610,69 @@ class BriefService:
                 project, [] if item.plan_task_id is None else [item.plan_task_id]
             ),
         )
+
+    def _offer_taken(
+        self, project: Project, note_id: int, triggered: datetime, at: datetime
+    ) -> str:
+        """The job a member's press of the offer of the Pilot Note `note_id`
+        placed (F168.7; DB 629, 630): `/plan`, then the note and its taking
+        (`_taken`); then, as the job after an item's close, the open notes of
+        the task the note's item names and the plan's own, the plan's alone
+        where it names none, and the deferrals without a home (F57.4)."""
+        note = self.db.get_one(PilotNote, note_id)
+        item = self.db.get_one(Item, note.item_id)
+        return _frame(
+            PLAN_SKILL,
+            OFFER_TAKEN_KIND,
+            project,
+            at,
+            [_switch(project), self._trigger_paused(project, triggered)],
+            self._taken(note, item),
+            self._notes(
+                project, [] if item.plan_task_id is None else [item.plan_task_id]
+            ),
+        )
+
+    def _taken(self, note: PilotNote, item: Item) -> list[str | None]:
+        """The taken offer's lines: the action's place, its path, item and
+        task, and its own section's words, quoted; then each of the note's
+        fields that it holds, and who took the offer and when."""
+        document = self.db.get_one(Document, item.id)
+        # An offer stands on an action of a published text (DB 626, 627),
+        # and its taking sets both of its facts (DB 629).
+        assert note.block_id is not None and document.published_text is not None
+        assert note.offer is not None and note.offer_taken_at is not None
+        assert note.offer_taken_by_user_id is not None
+        local_id = self.db.get_one(Block, note.block_id).local_id
+        head = (
+            f"The offer, on action {local_id} of {document.path} ({item.id}),"
+            f' {item.kind_code} "{item.title}"'
+        )
+        if item.plan_task_id is not None:
+            head += f", task {item.plan_task_id}"
+        words = "\n\n".join(
+            part.markdown
+            for part in dsl.body(document.published_text)
+            if isinstance(part, dsl.Prose) and part.section == local_id
+        )
+        taker = self.db.get_one(User, note.offer_taken_by_user_id).handle
+        return [
+            f"{head}:",
+            *(f"> {line}" if line else ">" for line in words.splitlines()),
+            None if note.text is None else f'Your note: "{note.text}"',
+            (
+                None
+                if note.suggested_answer is None
+                else f'Your suggested answer: "{note.suggested_answer}"'
+            ),
+            (
+                None
+                if note.suggested_note is None
+                else f'Your suggested note: "{note.suggested_note}"'
+            ),
+            f'Your offer: "{note.offer}"',
+            f"Taken by {taker} at {utc_time(note.offer_taken_at)}.",
+        ]
 
     def _closed(self, item: Item) -> str:
         """The closed item's line: its path, id, kind, title and task, then

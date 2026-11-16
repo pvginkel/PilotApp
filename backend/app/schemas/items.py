@@ -35,3 +35,17 @@ class ActionDoneRequestSchema(BaseModel):
         description="The paste-back, the note under the Done",
         examples=["Key stored under kv/camp"],
     )
+
+
+class TakeOfferRequestSchema(BaseModel):
+    """A person's taking of the offer of Pilot's note on an action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note_id: int = Field(
+        description=(
+            "The id of Pilot's note whose offer is taken, as the read gave"
+            " it: a note replaced since is refused"
+        ),
+        examples=[12],
+    )

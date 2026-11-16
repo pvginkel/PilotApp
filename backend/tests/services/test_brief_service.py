@@ -25,6 +25,7 @@ from app.models import (
     Environment,
     Item,
     ItemAttachment,
+    PilotNote,
     PlanTask,
     Project,
     ProjectMember,
@@ -77,6 +78,7 @@ from tests.support.chats import (
     open_conversation,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.pilot_notes import a_turn, noted
 
 AT = datetime(2026, 10, 26, 9, 30, 15, tzinfo=UTC)
 HEAD = (
@@ -3372,3 +3374,139 @@ class TestWaitFired:
             f"- {transition} · ANS-312: In Progress → Done, by pieter\n"
             f"- {request} · the operator's request (Check now), by ada"
         )
+
+
+OFFERED = """---
+title: Store the stock
+step: fix
+---
+
+```action id=A2
+```
+
+## The cellar
+
+Put the stock in the cellar before Friday.
+
+```action id=A1
+```
+"""
+
+
+class TestOfferTaken:
+    """The job a member's press of the offer of Pilot's note placed: `/plan`,
+    its own kind line, the note with its place and its taking, then the
+    notes of the task its item names and the plan's own (F168.7; DB 629,
+    630)."""
+
+    @pytest.fixture
+    def planned(self, container: ServiceContainer, opened: Project) -> Project:
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        return opened
+
+    def _taken(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        local_id: str,
+        document_text: str = OFFERED,
+        **fields: str,
+    ) -> tuple[Item, PilotNote]:
+        item = container.document_service().bear_item(
+            project, "action", "Store the stock", project_session, document_text
+        )
+        note = noted(
+            session, item, local_id, a_turn(session, project_session), **fields
+        )
+        note.offer_taken_at = datetime(2026, 10, 26, 9, 31, 2, tzinfo=UTC)
+        note.offer_taken_by_user_id = person.id
+        session.flush()
+        return item, note
+
+    def test_its_note_its_place_and_its_taking_in_the_frames_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, note = self._taken(
+            session,
+            container,
+            planned,
+            project_session,
+            person,
+            "A1",
+            text="The cellar is full.",
+            suggested_note="Stored in the shed",
+            offer="I can make room in the cellar.",
+        )
+
+        brief = briefs.job(
+            planned,
+            Work(trigger_code=WorkTrigger.OFFER_TAKEN, trigger_note_id=note.id),
+            AT,
+            LATER,
+        )
+
+        path = session.get_one(Document, item.id).path
+        assert brief == (
+            "/plan\n\n"
+            'Pilot\'s brief · an offer of yours was taken · project "Soup club" ·'
+            " /work/Projects/soup-club · 2026-10-26T11:05:40Z\n\n"
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md).\n\n"
+            f'The offer, on action A1 of {path} ({item.id}), document "Store the stock",'
+            " task fix:\n"
+            "> ## The cellar\n"
+            ">\n"
+            "> Put the stock in the cellar before Friday.\n"
+            'Your note: "The cellar is full."\n'
+            'Your suggested note: "Stored in the shed"\n'
+            'Your offer: "I can make room in the cellar."\n'
+            "Taken by ada at 2026-10-26T09:31:02Z.\n\n"
+            f"{NOTES}\n"
+            '- fix "Fix the stock" · n1: Ask about salt\n'
+            "- the plan · n2: Add a sweep task"
+        )
+
+    def test_an_action_of_no_section_of_its_own_has_its_place_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """The line that does not hold is left out: no words of its own, no
+        note's text, no task in a plan that has none."""
+        item, note = self._taken(
+            session,
+            container,
+            opened,
+            project_session,
+            person,
+            "A2",
+            OFFERED.replace("step: fix\n", ""),
+            offer="I can make room in the cellar.",
+        )
+
+        brief = briefs.job(
+            opened,
+            Work(trigger_code=WorkTrigger.OFFER_TAKEN, trigger_note_id=note.id),
+            AT,
+            LATER,
+        )
+
+        path = session.get_one(Document, item.id).path
+        assert brief.split("\n\n")[3:] == [
+            f'The offer, on action A2 of {path} ({item.id}), document "Store the stock":'
+            '\nYour offer: "I can make room in the cellar."'
+            "\nTaken by ada at 2026-10-26T09:31:02Z."
+        ]

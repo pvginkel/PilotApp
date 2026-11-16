@@ -2,19 +2,37 @@
 block's local id (F30.7): each the record's own write (F32.4), its refusals
 the caller's; and a person's request of a wait (F27.3)."""
 
+import json
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pilot_dsl as dsl
 import pytest
+from dependency_injector import providers
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.engine.paths import tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Document, Item, Project, ProjectTransition, User, WaitFiring
-from app.models.reference import FiringCause, ProjectState, SessionState, TransitionKind
+from app.models import (
+    Document,
+    Item,
+    PilotNote,
+    Project,
+    ProjectTransition,
+    User,
+    WaitFiring,
+    Work,
+)
+from app.models.reference import (
+    FiringCause,
+    ProjectState,
+    SessionState,
+    TransitionKind,
+    WorkTrigger,
+)
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
@@ -31,6 +49,9 @@ from app.services.item_service import (
 )
 from app.services.timeline_service import waiting
 from app.services.working_on import Reading, holds
+from tests.support.pilot_notes import a_turn, noted
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 from tests.support.working_on import Camp
 
 ADA = AuthContext(
@@ -1332,3 +1353,244 @@ class TestItemServiceWhilePilotWorks:
             container.item_service().done(ADA, cut_over.id)
 
         assert refused.value.cause == "Pilot is working on block A1"
+
+
+OFFERED = """---
+title: Put the key into OpenBao
+---
+
+```action id=A1
+```
+
+```action id=A2
+```
+"""
+"""Two actions, the first of which Pilot's note offers work on."""
+
+OFFER = "I can store the key in OpenBao myself."
+
+
+@pytest.fixture
+def placing(container: ServiceContainer, supervise: Supervise) -> Iterator[None]:
+    """The container's start configured, through which the press places
+    Pilot's job."""
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
+    try:
+        yield
+    finally:
+        container.session_start_service.reset_last_overriding()
+
+
+def _offered(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    writer: models.Session,
+    text: str = OFFERED,
+    **fields: str,
+) -> tuple[Item, PilotNote]:
+    """An item of `text` with Pilot's note on its action A1, offering work
+    unless `fields` say otherwise."""
+    item = container.document_service().bear_item(
+        project, "document", "Put the key into OpenBao", writer, text
+    )
+    return item, noted(
+        session, item, "A1", a_turn(session, writer), **({"offer": OFFER} | fields)
+    )
+
+
+def _taken(session: DbSession, note: PilotNote) -> tuple[object, object]:
+    session.refresh(note)
+    return note.offer_taken_at, note.offer_taken_by_user_id
+
+
+@pytest.mark.usefixtures("person")
+class TestItemServiceTakeOffer:
+    """A member's press of the offer of Pilot's note on an action: who took
+    it and when, once, and Pilot's job placed; refused, each with its
+    reason, on a note withdrawn or replaced, on an action done or held, and
+    on an item that is Pilot's or done (F168.7; DB 629, 632)."""
+
+    @pytest.mark.usefixtures("placing")
+    def test_the_press_records_the_taking_and_places_the_job(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        project.state_code, project.slug = ProjectState.OPEN, "camp"
+        item, note = _offered(session, container, project, project_session)
+        before = container.view_service().timeline(project).hash
+
+        container.item_service().take_offer(ADA, item.id, "A1", note.id)
+
+        taken_at, taken_by = _taken(session, note)
+        assert taken_by == person.id
+        job = session.scalars(select(Work).where(Work.trigger_note_id == note.id)).one()
+        assert job.trigger_code is WorkTrigger.OFFER_TAKEN
+        assert session.get_one(models.Session, job.id).created_at == taken_at
+        timeline = container.view_service().timeline(project)
+        assert timeline.hash != before
+        (row,) = (
+            row
+            for row in json.loads(timeline.text)["items"]
+            if row["id"] == str(item.id)
+        )
+        assert [note["offer_taken"] for note in row["notes"]] == [True]
+        assert (_block(session, item, "A1").answer, item.done_at) == (None, None)
+
+    def test_a_caller_without_a_handle_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, note = _offered(session, container, project, project_session)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_offer(NEWCOMER, item.id, "A1", note.id)
+
+        assert refused.value.cause == NO_HANDLE
+        assert _taken(session, note) == (None, None)
+
+    def test_a_note_on_another_block_is_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, note = _offered(session, container, project, project_session)
+
+        with pytest.raises(RecordNotFoundException) as missing:
+            container.item_service().take_offer(ADA, item.id, "A2", note.id)
+
+        assert missing.value.message == (
+            f"Pilot Note {item.id}/A2/{note.id} was not found"
+        )
+
+    @pytest.mark.parametrize(
+        ("case", "cause"),
+        [
+            ("a second press", "the offer on A1 was taken already"),
+            ("taken off", "Pilot's note on A1 was taken off"),
+            ("replaced", "Pilot's note on A1 was replaced"),
+            ("no offer", "Pilot's note on A1 offers no work"),
+        ],
+    )
+    def test_a_note_that_takes_no_press_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        case: str,
+        cause: str,
+    ) -> None:
+        item = container.document_service().bear_item(
+            project, "document", "Put the key into OpenBao", project_session, OFFERED
+        )
+        turn = a_turn(session, project_session)
+        if case == "no offer":
+            note = noted(session, item, "A1", turn, text="The key is in the vault.")
+        else:
+            note = noted(
+                session, item, "A1", turn, withdrawn=case == "taken off", offer=OFFER
+            )
+        if case == "a second press":
+            note.offer_taken_at = datetime.now(UTC)
+            note.offer_taken_by_user_id = person.id
+        if case == "replaced":
+            noted(session, item, "A1", turn, offer=OFFER)
+        session.flush()
+        taken = (note.offer_taken_at, note.offer_taken_by_user_id)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_offer(ADA, item.id, "A1", note.id)
+
+        assert refused.value.cause == cause
+        assert _taken(session, note) == taken
+
+    def test_an_action_done_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, note = _offered(session, container, project, project_session)
+        container.item_service().done_action(ADA, item.id, "A1", None)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_offer(ADA, item.id, "A1", note.id)
+
+        assert refused.value.cause == "action A1 is done"
+        assert _taken(session, note) == (None, None)
+
+    def test_an_item_done_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, note = _offered(session, container, project, project_session, ACTION)
+        container.item_service().done_action(ADA, item.id, "A1", None)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_offer(ADA, item.id, "A1", note.id)
+
+        assert refused.value.cause == "the item is done"
+
+    def test_a_held_action_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, doing = _claimed(camp)
+        note = noted(
+            camp.session, cut_over, "A1", a_turn(camp.session, doing), offer=OFFER
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_offer(ADA, cut_over.id, "A1", note.id)
+
+        assert refused.value.cause == "Pilot is working on block A1"
+        assert _taken(camp.session, note) == (None, None)
+
+    def test_a_document_that_is_pilots_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        registered = camp.registered(run, OFFERED)
+        camp.ended(run)
+        camp.job_after(run)
+        note = noted(
+            camp.session, registered, "A1", a_turn(camp.session, run), offer=OFFER
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_offer(ADA, registered.id, "A1", note.id)
+
+        assert refused.value.cause == PILOTS_ITEM
+        assert _taken(camp.session, note) == (None, None)
+
+    def test_an_archived_projects_item_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, note = _offered(session, container, project, project_session)
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_offer(ADA, item.id, "A1", note.id)
+
+        assert refused.value.cause == "its project is archived"

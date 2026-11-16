@@ -23,8 +23,10 @@ from app.database import scoped_session
 from app.engine.views import ViewService, utc_time
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
+    Block,
     Hold,
     Item,
+    PilotNote,
     Project,
     ProjectTransition,
     Turn,
@@ -54,8 +56,10 @@ from app.services.start_gate import Held
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.services.wait_service import ReportedTransition
+from app.services.working_on import jobs_on
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.pilot_notes import a_turn, noted
 from tests.support.starts import configured_starts
 from tests.support.store_updates import hold, lift
 from tests.support.supervisor import WAIT_SECONDS, Supervise, wait_until
@@ -2190,3 +2194,221 @@ class TestWaitFiredRetry:
         )
         assert held.state_code is SessionState.STOPPED
         assert session.get_one(Item, held.id).done_cause_code == "withdrawn"
+
+
+OFFERED = """---
+title: Put the key into OpenBao
+---
+
+## Store the key
+
+Put the camp key into OpenBao before Friday.
+
+```action id=A1
+```
+"""
+
+
+def _offered(
+    db: DbSession, container: ServiceContainer, project: Project
+) -> tuple[models.Document, PilotNote]:
+    """An action the project's chat added, with Pilot's note on it offering
+    work."""
+    chat = models.Session(
+        project_id=project.id,
+        kind_code="chat",
+        cwd=STORE_REPO,
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.RUNNING,
+    )
+    db.add(chat)
+    db.flush()
+    item = container.document_service().bear_item(
+        project, "action", "Put the key into OpenBao", chat, OFFERED
+    )
+    note = noted(
+        db,
+        item,
+        "A1",
+        a_turn(db, chat),
+        text="The key is in the camp's vault already.",
+        offer="I can store the key in OpenBao myself.",
+    )
+    return db.get_one(models.Document, item.id), note
+
+
+def _taken(
+    container: ServiceContainer, document: models.Document, note: PilotNote, by: User
+) -> models.Session:
+    """`by`'s press of the note's offer; the job it placed."""
+    work = container.record_service().take_offer(document, "A1", note.id, by)
+    return container.db_session().get_one(models.Session, work.id)
+
+
+@pytest.mark.usefixtures("placing")
+class TestOfferTaken:
+    """The job a member's press of the offer of Pilot's note places, at the
+    taking's instant, naming the note and no trigger item; the action stays
+    the person's (F168.7; DB 629, 630, 632)."""
+
+    def test_the_press_places_a_job_naming_the_note(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        opened: Project,
+        person: User,
+    ) -> None:
+        document, note = _offered(session, container, opened)
+        text = document.published_text
+        item = session.get_one(Item, document.id)
+
+        job = _taken(container, document, note, person)
+
+        work = session.get_one(Work, job.id)
+        line = session.get_one(Item, job.id)
+        assert (
+            work.trigger_code,
+            work.trigger_note_id,
+            work.trigger_item_id,
+            work.repo,
+        ) == (WorkTrigger.OFFER_TAKEN, note.id, None, None)
+        assert (line.title, line.seq) == (
+            "Starting the work offered on A1",
+            item.seq + 1,
+        )
+        assert (job.kind_code, job.cwd) == ("job", STORE_REPO)
+        assert (note.offer_taken_by_user_id, note.offer_taken_at) == (
+            person.id,
+            job.created_at,
+        )
+        assert (document.published_text, item.done_at) == (text, None)
+        block = session.scalars(
+            select(Block).where(Block.document_id == document.id)
+        ).one()
+        assert (block.answer, block.done_at) == (None, None)
+
+    def test_going_at_once_it_is_briefed_under_plan(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        opened: Project,
+        person: User,
+    ) -> None:
+        document, note = _offered(session, container, opened)
+
+        job = _taken(container, document, note, person)
+
+        turn = _brief(container, job)
+        assert job.state_code is SessionState.STARTING
+        assert turn.message.startswith(
+            "/plan\n\nPilot's brief · an offer of yours was taken"
+        )
+        assert turn.message == container.brief_service().job(
+            opened, session.get_one(Work, job.id), job.created_at, turn.started_at
+        )
+
+    def test_it_starts_in_the_store_on_the_five_minute_prompt_cache(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        fake.put_file(STORE_ENVIRONMENT_ID, f"{FOLDER}/plan.json", b"{}")
+        document, note = _offered(session, container, opened)
+        job = _taken(container, document, note, person)
+        brief = _brief(container, job).message
+
+        starts.run(job.id, LoopHandle(f"start:{job.id}"))
+
+        job = _read(session, job)
+        assert (job.environment_id, job.state_code) == (
+            STORE_ENVIRONMENT_ID,
+            SessionState.RUNNING,
+        )
+        (body,) = fake.create_bodies
+        assert body["env"][:3] == [
+            f"PILOT_PROJECT={FOLDER}",
+            f"PILOT_SESSION={job.id}",
+            "CLAUDE_CODE_PROMPT_CACHE_TTL=5m",
+        ]
+        assert fake.sent == [brief]
+
+    def test_it_shows_on_the_notes_item_and_its_retry_after_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """No trigger item names it: it follows from its note's item, which
+        shows it whatever its state, a Retry's job then (F59.1; DB 630)."""
+        document, note = _offered(session, container, opened)
+        job = _taken(container, document, note, person)
+        assert jobs_on(session, [document.id]).shown == {document.id: job.id}
+        failed = _ended(session, container, job)
+        assert jobs_on(session, [document.id]).shown == {document.id: failed.id}
+
+        retry = _retry(container, starts, failed)
+
+        assert jobs_on(session, [document.id]).shown == {document.id: retry.id}
+
+
+@pytest.mark.usefixtures("placing")
+class TestOfferTakenRetry:
+    """A Retry of an offer's failed or stopped job: a fresh job naming the
+    same note, which no refusal of its own holds back, a taking being final
+    (DB 278, 630)."""
+
+    @pytest.mark.parametrize("state", [SessionState.FAILED, SessionState.STOPPED])
+    def test_it_names_the_same_note(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+        state: SessionState,
+    ) -> None:
+        document, note = _offered(session, container, opened)
+        ended = _ended(
+            session, container, _taken(container, document, note, person), state
+        )
+
+        retry = _retry(container, starts, ended)
+
+        work = session.get_one(Work, retry.id)
+        assert (
+            work.trigger_code,
+            work.trigger_note_id,
+            work.trigger_item_id,
+        ) == (WorkTrigger.OFFER_TAKEN, note.id, None)
+        assert session.get_one(Item, retry.id).title == (
+            "Starting the work offered on A1"
+        )
+        assert session.get_one(Work, ended.id).retried_by_id == retry.id
+        assert _brief(container, retry).message.startswith(
+            "/plan\n\nPilot's brief · an offer of yours was taken"
+        )
+
+    def test_its_note_taken_off_since_refuses_it_nothing(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """The taking stands on the record whatever the note's place holds
+        since: nothing of the offer's own refuses the Retry."""
+        document, note = _offered(session, container, opened)
+        failed = _ended(session, container, _taken(container, document, note, person))
+        note.withdrawn_at = datetime.now(UTC)
+        session.flush()
+
+        retry = _retry(container, starts, failed)
+
+        assert session.get_one(Work, retry.id).trigger_note_id == note.id
