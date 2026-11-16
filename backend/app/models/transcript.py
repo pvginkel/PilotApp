@@ -147,8 +147,14 @@ class Launch(db.Model):  # type: ignore[name-defined]
     wrote, `ended_at` of the last that carries one, none while it runs (DB
     586).
 
-    That its Transcript is a main thread (DB 536) and that it runs with a
-    Component Version (DB 389) are the publication's to keep.
+    `session_id` and `turn_seq` are Pilot's: the Session that ran it and,
+    of that Session, the Turn that started it, none for a Launch started
+    between two Turns (DB decision 79 point 7). `launch_placement` sets
+    them, once.
+
+    That its Transcript is a main thread (DB 536), that it runs with a
+    Component Version (DB 389) and that its Session's `conversation_id` is
+    its Transcript's `session_id` (DB 538) are the writers' to keep.
     """
 
     __tablename__ = "launches"
@@ -156,12 +162,21 @@ class Launch(db.Model):  # type: ignore[name-defined]
         # What a Prompt's key references, so the Prompt is of its Launch's
         # Transcript.
         UniqueConstraint("transcript_id", "id"),
+        # Its Turn is a Turn of its Session, held once (DB 537).
+        ForeignKeyConstraint(
+            ["session_id", "turn_seq"], ["turns.session_id", "turns.seq"]
+        ),
+        CheckConstraint(
+            "turn_seq IS NULL OR session_id IS NOT NULL", name="ck_launches_turn"
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     transcript_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("transcripts.id"))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id"))
+    turn_seq: Mapped[int | None] = mapped_column(Integer)
 
 
 class LaunchComponent(db.Model):  # type: ignore[name-defined]

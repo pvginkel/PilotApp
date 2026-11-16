@@ -24,6 +24,10 @@ for the collector to publish the transcript whole.
 Publications of one conversation, its main thread's and its sub-agents',
 take turns, so that a sub-agent's thread finds its main thread and its
 spawning Tool Call whichever comes first.
+
+A main thread's Launches that a Turn of Pilot's started are placed under
+their Session and Turn as the write ends (`launch_placement`; DB decision 79
+point 7), and a Launch the call names again keeps what it was placed under.
 """
 
 import hmac
@@ -36,10 +40,8 @@ from typing import Any, get_args
 
 from sqlalchemy import (
     BigInteger,
-    Integer,
     Select,
     any_,
-    cast,
     delete,
     func,
     literal,
@@ -93,7 +95,7 @@ from app.schemas.publication import (
     PublishedCompactionSchema,
     PublishedLaunchSchema,
 )
-from app.services.advisory_turn import turn_key
+from app.services.launch_placement import conversation_turn, place_launches
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +109,6 @@ request or response shape of the collector's routes bumps it, and
 collector."""
 
 _VERSION = re.compile(r"[0-9]+")
-
-PUBLICATION_LOCK = 247
-"""The first key of a conversation's turn (`advisory_turn`); the second is
-drawn from Claude Code's id of its main thread."""
 
 COLLECTOR = "collector"
 """The Component a Transcript is read by."""
@@ -285,7 +283,9 @@ class PublicationService:
         Call Pilot held of it that the call no longer names is removed with
         what hangs on it, and their number logged. After an appended one
         Pilot holds what the call carries from its boundary on, what lies
-        before it as it was, and `replayed_size` as it stood.
+        before it as it was, and `replayed_size` as it stood. After either,
+        each Launch of a main thread that a Turn of Pilot's started stands
+        under its Session and Turn (DB 538).
 
         An Environment, a Repository, a Component Version and a reference
         code the call names that Pilot has no row for are written, the code
@@ -302,14 +302,7 @@ class PublicationService:
         found = _faults(publication)
         if found:
             raise PublicationInvalidException(_name(publication), found)
-        self.db.execute(
-            select(
-                func.pg_advisory_xact_lock(
-                    cast(literal(PUBLICATION_LOCK), Integer),
-                    cast(literal(turn_key(publication.session_id.encode())), Integer),
-                )
-            )
-        )
+        conversation_turn(self.db, publication.session_id)
         boundary = _WHOLE
         ids: dict[str, int] = {}
         if publication.appended is not None:
@@ -367,6 +360,8 @@ class PublicationService:
             },
         )
         self._join(publication.session_id)
+        if publication.agent_id is None:
+            place_launches(self.db, publication.session_id)
         return thread
 
     def _continued(

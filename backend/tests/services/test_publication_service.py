@@ -9,7 +9,8 @@ differ, and a row keeps its identity wherever the call names the same fact
 again (`TestRepublished`). What a whole call no longer names goes, and only
 that (`TestRewritten`; F152.17, decision 81 point 4). An appended call
 writes from its boundary on alone (`TestAppended`), and one that does not
-continue what Pilot holds is refused whole (`TestNotAppendable`)."""
+continue what Pilot holds is refused whole (`TestNotAppendable`). A Launch a
+Turn of Pilot's started stands under its Session and Turn (`TestRan`)."""
 
 import logging
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,7 @@ from flask import Flask
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session as DbSession
 
+from app import models
 from app.database import scoped_session
 from app.exceptions import (
     AuthenticationException,
@@ -51,6 +53,7 @@ from app.models import (
     Tool,
     ToolCall,
     Transcript,
+    Turn,
 )
 from app.schemas.publication import PublicationSchema
 from app.services.container import ServiceContainer
@@ -81,6 +84,7 @@ from tests.support.publications import (
 )
 from tests.support.supervisor import wait_until
 from tests.support.transcripts import CAMP, HAIKU, OPUS, OTHER, STARTED, SUB_AGENT
+from tests.support.turns import end_turns, turn_at
 
 CLAUDE_CODE = {"component": "claude-code", "version": "2.1.317"}
 DEEPER = "c81d5e02f7a9b3d64"
@@ -283,9 +287,48 @@ def _spawned_by(db: DbSession, thread: Transcript) -> int | None:
     ).one()
 
 
+def _at_time(minutes: int) -> datetime:
+    return STARTED + timedelta(minutes=minutes)
+
+
+def _ran(db: DbSession) -> list[tuple[Any, int | None]]:
+    """The Session and the Turn each Launch Pilot holds stands under, in the
+    Launches' order."""
+    return [
+        (row.session_id, row.turn_seq)
+        for row in db.execute(
+            select(Launch.session_id, Launch.turn_seq).order_by(Launch.id)
+        )
+    ]
+
+
+def _projects(db: DbSession, thread: Transcript) -> list[Any]:
+    """The Projects the Transcript is on: those of the Sessions that ran its
+    Launches (DB 540)."""
+    return list(
+        db.scalars(
+            select(models.Session.project_id)
+            .join(Launch, Launch.session_id == models.Session.id)
+            .where(Launch.transcript_id == thread.id)
+            .distinct()
+        )
+    )
+
+
 @pytest.fixture
 def publications(container: ServiceContainer) -> PublicationService:
     return container.publication_service()
+
+
+@pytest.fixture
+def run(session: DbSession, project_session: models.Session) -> models.Session:
+    """A Session of Pilot's on the main thread's conversation: its first
+    Turn sent as the first Launch began and ended as that one did, its
+    second sent as the second Launch began, in flight."""
+    project_session.conversation_id = CAMP
+    turn_at(session, project_session, _at_time(0) - timedelta(seconds=4), _at_time(9))
+    turn_at(session, project_session, _at_time(10) - timedelta(seconds=4))
+    return project_session
 
 
 class TestPublished:
@@ -2604,6 +2647,163 @@ class TestNotAppendable:
             select(Transcript.file_size, Transcript.replayed_size)
         ).one() == (61_000, 61_000)
         assert _count(session, Call) == 5
+
+
+class TestRan:
+    """A Launch a Turn of Pilot's started stands under its Session and that
+    Turn, and its transcript so lands on the Session's project (DB decision
+    79 point 7; assertions 538 and 540; F152.4)."""
+
+    def test_a_launch_a_turn_of_pilots_started_is_under_its_session_and_turn(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        publications.publish(_camp())
+
+        assert _ran(session) == [(run.id, 1), (run.id, 2)]
+
+    def test_its_transcript_lands_on_the_sessions_project(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        thread = publications.publish(_camp())
+
+        assert _projects(session, thread) == [run.project_id]
+
+    def test_one_no_session_of_pilots_ran_lands_on_no_project(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        thread = publications.publish(_camp(session_id=OTHER))
+
+        assert _ran(session) == [(None, None), (None, None)]
+        assert _projects(session, thread) == []
+
+    def test_a_launch_started_between_two_turns_has_the_session_and_no_turn(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        between = _second_launch(
+            started_at=(STARTED + timedelta(minutes=9, seconds=30)).isoformat()
+        )
+
+        publications.publish(_camp(launches=[_first_launch(), between]))
+
+        assert _ran(session) == [(run.id, 1), (run.id, None)]
+
+    def test_a_launch_an_appended_call_brings_is_placed(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        publications.publish(_camp())
+        turn_at(session, run, STARTED + timedelta(minutes=19, seconds=56))
+        third = launch(
+            started_at=_at(20),
+            components=[CLAUDE_CODE],
+            prompts=[prompt(received_at=_at(20))],
+        )
+
+        publications.publish(
+            _grown(
+                launches=[_second_launch(prompts=[], ended_at=_at(14)), third],
+                calls=[_calls()[3], call(5, prompt=4, predecessor="msg_0004")],
+            )
+        )
+
+        assert _ran(session) == [(run.id, 1), (run.id, 2), (run.id, 3)]
+
+    def test_a_placed_launch_named_again_unchanged_is_not_written(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        publications.publish(_camp())
+
+        with writes(session) as wrote:
+            publications.publish(_camp())
+
+        assert wrote == {"transcripts": Written(updated=1)}
+        assert _ran(session) == [(run.id, 1), (run.id, 2)]
+
+    def test_a_placed_launch_keeps_its_session_and_turn_through_a_whole_call(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        """The call names the first Launch again at a start between the two
+        Turns, where a Launch first met would have no Turn."""
+        publications.publish(_camp())
+        restated = _first_launch(
+            started_at=(STARTED + timedelta(minutes=9, seconds=30)).isoformat(),
+            ended_at=None,
+        )
+
+        with writes(session) as wrote:
+            publications.publish(_camp(launches=[restated, _second_launch()]))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "launches": Written(updated=1),
+        }
+        assert _ran(session) == [(run.id, 1), (run.id, 2)]
+
+    def test_a_placed_launch_keeps_its_session_and_turn_through_an_appended_call(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        publications.publish(_camp())
+        end_turns(session, run)
+        turn_at(session, run, _at_time(15))
+
+        with writes(session) as wrote:
+            publications.publish(_grown())
+
+        assert "launches" not in wrote
+        assert _ran(session) == [(run.id, 1), (run.id, 2)]
+
+    def test_a_launch_held_before_its_session_named_the_conversation_is_placed(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        project_session: models.Session,
+    ) -> None:
+        """Whichever publication follows the Session's `conversation_id`
+        places what the earlier ones brought."""
+        turn_at(session, project_session, _at_time(0) - timedelta(seconds=4))
+        publications.publish(_camp())
+        assert _ran(session) == [(None, None), (None, None)]
+        project_session.conversation_id = CAMP
+
+        publications.publish(_camp())
+
+        assert _ran(session) == [(project_session.id, 1), (project_session.id, 1)]
+
+    def test_an_appended_call_places_a_launch_held_before_its_boundary(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        project_session: models.Session,
+    ) -> None:
+        turn_at(session, project_session, _at_time(0) - timedelta(seconds=4))
+        publications.publish(_camp())
+        project_session.conversation_id = CAMP
+
+        publications.publish(_grown())
+
+        assert _ran(session) == [(project_session.id, 1), (project_session.id, 1)]
+
+    def test_a_sub_agents_thread_is_under_the_launch_of_its_main_thread_alone(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        """A sub-agent's thread has no Launch of its own (DB 536): its
+        publication places none."""
+        publications.publish(_camp())
+
+        with writes(session) as wrote:
+            publications.publish(sub_agent())
+
+        assert "launches" not in wrote
+        assert _ran(session) == [(run.id, 1), (run.id, 2)]
+
+    def test_a_launch_the_file_lost_goes_with_its_session_and_turn(
+        self, session: DbSession, publications: PublicationService, run: models.Session
+    ) -> None:
+        publications.publish(_camp())
+
+        publications.publish(_camp(launches=[_first_launch()], calls=_calls()[:3]))
+
+        assert _ran(session) == [(run.id, 1)]
+        assert _count(session, Turn) == 2
 
 
 class TestTurns:

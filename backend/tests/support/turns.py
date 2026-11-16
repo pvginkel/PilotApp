@@ -1,6 +1,7 @@
 """A Session's Turn in flight and its end, as the send and the relay leave
 them, for the tests of a store save: a save is its session's turn's while
-that turn is in flight, and late once it ended (design 1 §7)."""
+that turn is in flight, and late once it ended (design 1 §7); and a Turn
+sent at a given time, for the tests of what a Turn started."""
 
 from datetime import UTC, datetime
 
@@ -42,3 +43,24 @@ def end_turns(db: DbSession, run: models.Session) -> None:
     ):
         turn.ended_at = datetime.now(UTC)
     db.flush()
+
+
+def turn_at(
+    db: DbSession,
+    run: models.Session,
+    started_at: datetime,
+    ended_at: datetime | None = None,
+) -> Turn:
+    """`run`'s next Turn, the server's own, sent at `started_at` and ended
+    at `ended_at`, in flight where that is None."""
+    last = db.scalar(select(func.max(Turn.seq)).where(Turn.session_id == run.id))
+    turn = Turn(
+        session_id=run.id,
+        seq=(last or 0) + 1,
+        message="Scale the recipe.",
+        started_at=started_at,
+        ended_at=ended_at,
+    )
+    db.add(turn)
+    db.flush()
+    return turn

@@ -62,6 +62,12 @@ class Session(db.Model):  # type: ignore[name-defined]
         ),
         # The MCP server's bearer check resolves a token to one Session.
         Index("uq_sessions_token_hash", "token_hash", unique=True),
+        # A publication looks for the Sessions of its conversation (DB 538).
+        Index(
+            "ix_sessions_conversation_id",
+            "conversation_id",
+            postgresql_where=text("conversation_id IS NOT NULL"),
+        ),
         Index(
             "ix_sessions_nudge_owed_at",
             "nudge_owed_at",

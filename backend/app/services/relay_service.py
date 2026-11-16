@@ -12,7 +12,10 @@ whatever name the controller gave it, and takes each frame in order:
   block start or text delta is forwarded to the Session's hub as a partial, and
   every other is dropped, a sub-agent's among them.
 - Every other line, a blank or non-JSON one included, is a `claude` record, in
-  a transaction of its own that rebuilds the Session's current line. A line at
+  a transaction of its own that rebuilds the Session's current line. The
+  first that names the conversation gives a Session without one its
+  `conversation_id`, and places the Launches Pilot holds of that
+  conversation's transcript under it (`launch_placement`). A line at
   or below the last recorded offset of the same controller session, not created
   anew since, is one the record has, and is skipped (§9.4). A `result` line
   `claude` prints writes the Turn's tokens and cost in the same transaction
@@ -119,6 +122,7 @@ from app.services.current_line import (
 from app.services.environment_service import EnvironmentService
 from app.services.handing import Sides, hand_over, sides
 from app.services.holds import turn_rest
+from app.services.launch_placement import conversation_named
 from app.services.pilot_server import PilotServer, hold_send
 from app.services.quota_wall import turn_shows_wall
 from app.services.session_record_service import (
@@ -1054,6 +1058,9 @@ class RelayService:
             conversation = payload.get("session_id")
             if isinstance(conversation, str) and conversation:
                 session.conversation_id = conversation
+                # Places the Launches a publication of its transcript
+                # brought before this line (DB 538).
+                conversation_named(db, conversation)
         return True
 
     def _partial(

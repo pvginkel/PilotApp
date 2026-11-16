@@ -40,6 +40,7 @@ from app.models import (
     DocumentVersion,
     Environment,
     Item,
+    Launch,
     Project,
     TokenCount,
     Turn,
@@ -104,6 +105,7 @@ from app.services.usage_halts import UsageHalts
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
+from tests.support import publications
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
 from tests.support.locks import in_thread, lock_waits
 from tests.support.starts import configured_starts
@@ -1792,6 +1794,34 @@ class TestRelay:
         _relay(relays, idle)
 
         assert idle.conversation_id == json.loads(lines[0])["session_id"]
+
+    def test_the_first_line_places_the_launch_its_transcripts_publication_brought(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        """The publication came before the Session's `conversation_id` (DB
+        538)."""
+        lines = raw_turn("turn_text")
+        turn = _send(relays, session, idle)
+        started = turn.started_at + timedelta(seconds=3)
+        container.publication_service().publish(
+            publications.whole(
+                session_id=json.loads(lines[0])["session_id"],
+                launches=[publications.launch(started_at=started.isoformat())],
+            )
+        )
+        _turn_of(fake_controller, controller_session, lines)
+
+        _relay(relays, idle)
+
+        assert session.execute(select(Launch.session_id, Launch.turn_seq)).all() == [
+            (idle.id, turn.seq)
+        ]
 
     def test_a_conversation_the_session_has_is_kept(
         self,

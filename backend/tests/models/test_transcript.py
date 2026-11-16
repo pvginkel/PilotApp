@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
+from app import models
 from app.models import (
     Compaction,
     CompactionTrigger,
@@ -19,14 +20,17 @@ from app.models import (
     HookRun,
     Launch,
     LaunchComponent,
+    Project,
     Prompt,
     PromptSource,
     Repository,
     Transcript,
 )
+from app.models.reference import SessionState
 from tests.support import transcripts
 from tests.support.database import violated_constraint
 from tests.support.transcripts import CAMP, OTHER, STARTED, SUB_AGENT
+from tests.support.turns import turn_at
 
 
 @pytest.fixture
@@ -345,6 +349,72 @@ class TestLaunch:
         session.add(Launch(transcript_id=uuid.uuid4(), started_at=STARTED))
 
         assert violated_constraint(session) == "launches_transcript_id_fkey"
+
+    def test_one_no_session_of_pilots_ran_has_no_session_and_no_turn(
+        self, session: DbSession, start: Launch
+    ) -> None:
+        session.expire(start)
+
+        assert (start.session_id, start.turn_seq) == (None, None)
+
+    def test_one_a_turn_started_is_under_its_session_and_that_turn(
+        self, session: DbSession, start: Launch, project_session: models.Session
+    ) -> None:
+        """DB 385, 386."""
+        turn_at(session, project_session, STARTED)
+        second = turn_at(session, project_session, STARTED + timedelta(hours=1))
+        start.session_id = project_session.id
+        start.turn_seq = second.seq
+        session.flush()
+        session.expire(start)
+
+        assert (start.session_id, start.turn_seq) == (project_session.id, 2)
+
+    def test_one_started_between_two_turns_has_its_session_and_no_turn(
+        self, session: DbSession, start: Launch, project_session: models.Session
+    ) -> None:
+        start.session_id = project_session.id
+        session.flush()
+        session.expire(start)
+
+        assert (start.session_id, start.turn_seq) == (project_session.id, None)
+
+    def test_one_with_a_turn_has_a_session(
+        self, session: DbSession, start: Launch
+    ) -> None:
+        """DB 537."""
+        start.turn_seq = 1
+
+        assert violated_constraint(session) == "ck_launches_turn"
+
+    def test_its_turn_is_a_turn_of_its_session(
+        self,
+        session: DbSession,
+        start: Launch,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """DB 537."""
+        other = models.Session(
+            project_id=project.id,
+            environment_id=project_session.environment_id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(other)
+        session.flush()
+        turn_at(session, other, STARTED)
+        start.session_id = project_session.id
+        start.turn_seq = 1
+
+        assert violated_constraint(session) == "launches_session_id_turn_seq_fkey"
+
+    def test_its_session_is_a_session(self, session: DbSession, start: Launch) -> None:
+        start.session_id = uuid.uuid4()
+
+        assert violated_constraint(session) == "launches_session_id_fkey"
 
 
 class TestLaunchComponent:
