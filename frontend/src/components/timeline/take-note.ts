@@ -6,7 +6,8 @@
  * before its Send (F32.3), so there the take is its choice, words no option has Other's words, a
  * question's field, with the note its Send carries: a decision's and a question's note field
  * (sent-note.tsx), an action's paste-back. A suggested note alone, on an open action, goes into
- * its paste-back, the Done still the person's. The fields are the keys `<block key>/<part>` the
+ * its paste-back, the Done still the person's. A note that offers work takes none: its offer's
+ * button is its one (F168.7). The fields are the keys `<block key>/<part>` the
  * controls keep their unsent words under.
  */
 
@@ -38,8 +39,9 @@ interface Taking {
 const pressed = (block: Block, answer: string) =>
   block.options.length > 0 ? block.options.some((option) => option.label === answer) : block.kind === 'decision' && answer === AGREE;
 
-/** What taking the note does on the block; none where there is nothing to take. */
+/** What taking the note does on the block; none where there is nothing to take, or where it offers work, whose own button stands there. */
 export function takeOf({ field, block, note, answer, choice }: Taking): Take | null {
+  if (note.offer !== null) return null;
   const suggested = note.suggested_answer;
   const words = note.suggested_note;
   const withNote = words === null ? '' : ', its note with it';

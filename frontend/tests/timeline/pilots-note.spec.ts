@@ -6,8 +6,8 @@
  * the block is answered, one line, what Pilot suggested or the start of its text, which its chevron
  * opens whole and folds again, nothing putting it away (F168.3). Its button takes what it
  * suggests into the block as the person's own: in a document the answer with its note, in a one-ask
- * item the choice and the note its Send carries, on an action a note alone in the paste-back
- * (F168.2). A block Pilot's note suggests
+ * item the choice and the note its Send carries, on an action a note alone in the paste-back; a
+ * note that offers work has no such button (F168.2). A block Pilot's note suggests
  * another answer on takes no default: *Send answers* waits on it, its tooltip naming it (F168.4);
  * a note that agrees, or one on a block with no recommendation, changes nothing there. None shows
  * on a block Pilot answered, or on a confirmation. A claimed action's note, held and handed back,
@@ -363,7 +363,7 @@ test.describe('Taking Pilot’s note', () => {
     expect(await projects.block(project, other)).toMatchObject({ answer: BELL, note: null });
   });
 
-  test('in a one-ask question puts the answer in its field, and in a one-ask action chooses the option, the note in the field its Send carries', async ({
+  test('in a one-ask question puts the answer in its field, and in a one-ask action chooses the option, the note in the field its Send carries; a note that offers work has nothing to take', async ({
     people,
     projects,
     timeline,
@@ -394,5 +394,12 @@ test.describe('Taking Pilot’s note', () => {
     await action.answerSend.click();
     await expect(timeline.item(van).root).toHaveAttribute('data-state', 'done');
     expect(await projects.block(project, van)).toMatchObject({ answer: 'Booked', note: CARD });
+
+    // A note that offers work has its offer's button, never one that takes it.
+    const fuel = await projects.place(project, { kind: 'action', title: 'Fill the van up', text: VAN });
+    await projects.note(fuel, { block: 'A1', suggested_note: CARD, offer: 'Find the cheapest station on the way' });
+    await timeline.open(project);
+    await expect(timeline.item(fuel).block.pilotsNote.note).toHaveText(CARD);
+    await expect(timeline.item(fuel).block.pilotsNote.take).toHaveCount(0);
   });
 });
