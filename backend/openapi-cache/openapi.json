@@ -1471,6 +1471,53 @@
         "title": "ConversationOpenRequestSchema",
         "type": "object"
       },
+      "ConversationResponseSchema.38a7d5c": {
+        "description": "Pilot's reply to a caller's latest message in its conversation, as it\nstands.",
+        "properties": {
+          "state": {
+            "description": "`running` while a turn of the conversation is in flight, as `in_flight` reads it; else `error` where the reply's turn failed, its start included, `interrupted` where it was stopped, and `done` otherwise",
+            "enum": [
+              "running",
+              "done",
+              "error",
+              "interrupted"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every text Pilot wrote since the message, in order, the texts so far while `running`, separated by a line of three dashes between blank lines; an `error`'s reason is its last section; null where there is none",
+            "title": "Text"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number of the Turn the caller's latest message started; null while `state` is `running`",
+            "title": "Turn"
+          }
+        },
+        "required": [
+          "turn",
+          "state",
+          "text"
+        ],
+        "title": "ConversationResponseSchema",
+        "type": "object"
+      },
       "ConversationSchema.38a7d5c": {
         "description": "A conversation as its caller reads it.",
         "properties": {
@@ -14869,6 +14916,94 @@
           }
         ],
         "summary": "Send Pilot the calling session's next message in its conversation, as the service user, the words verbatim: a turn of it, its send made now, or the conversation started afresh with it where its start failed or was stopped unsent. One message is in flight at a time, and nothing is queued.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/conversations/{conversation_id}/response": {
+      "get": {
+        "description": "Returns:     200: The reply as it stands     401: No one is signed in     403: The caller lacks the editor role     404: No conversation has the id, or another caller opened it     409: The caller is no service user",
+        "operationId": "get__api_conversations_{conversation_id}_response",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponseSchema.38a7d5c"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Pilot's reply to the calling session's latest message in its conversation, as it stands: every text Pilot wrote since the message, and whether its turn runs on, ended, failed or was stopped. It answers at once, a turn in flight `running`: a caller that waits for the turn's end asks again. A closed conversation answers its last reply.",
         "tags": [],
         "x-required-role": "editor"
       }

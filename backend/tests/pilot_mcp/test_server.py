@@ -2324,8 +2324,9 @@ PROJECTS_SURFACE = {
         _CONVERSATION,
         "Open a conversation with Pilot about a project Pilot manages, by its id"
         " or its folder, with your first message: Pilot reads `text` verbatim and"
-        " answers it in a turn of its own, which runs on after the call returns."
-        " On a finished project Pilot answers from what it reads and changes"
+        " answers it in a turn of its own, which runs on after the call returns:"
+        " read its reply with `get_response`. On a finished project Pilot answers"
+        " from what it reads and changes"
         " nothing. Answers the conversation as `get_conversation` does, `{id,"
         " project, environment, session, opened_at, closed_at, close_cause, turns,"
         " running}`, its first turn running: hold it by its `id`, which the other"
@@ -2359,12 +2360,94 @@ PROJECTS_SURFACE = {
         "Send your next message in a conversation with Pilot about a project"
         " Pilot manages, by the conversation's id: Pilot reads `text` verbatim, in"
         " a new turn. It answers at once with `{turn}`, the turn's number in the"
-        " conversation, and the turn runs on. One message is in flight at a time"
+        " conversation, and the turn runs on: read its reply with `get_response`."
+        " One message is in flight at a time"
         " and nothing is queued: while a turn of the conversation is in flight, a"
         " stopped one that has not ended yet included, the call is refused and"
         " nothing is sent. Refused the same way: a closed conversation, an"
         " archived project's, and every call while Pilot is updating. A message"
         " that could not be delivered is an error saying why." + _NOT_YOURS,
+    ),
+    "get_response": (
+        {
+            "properties": {
+                "conversation": _CONVERSATION_REF,
+                "wait_ms": {
+                    "default": 900000,
+                    "description": (
+                        "How long to hold for the turn's end, in ms. Defaults to"
+                        " 900000 (15 min), so one call usually returns the whole"
+                        " turn, and is capped at 3600000 (60 min): a larger ask is"
+                        " clamped down to the cap, never refused. 0 answers at"
+                        " once."
+                    ),
+                    "minimum": 0,
+                    "title": "Wait Ms",
+                    "type": "integer",
+                },
+            },
+            "required": ["conversation"],
+            "title": "get_responseArguments",
+            "type": "object",
+        },
+        {
+            "description": (
+                "Pilot's reply to your latest message in a conversation, as it stands."
+            ),
+            "properties": {
+                "turn": {
+                    "anyOf": [{"type": "integer"}, {"type": "null"}],
+                    "description": (
+                        "The number of the turn your message started, as `send`"
+                        " answered it, 1 for the conversation's first; none while"
+                        " `state` is `running`"
+                    ),
+                    "title": "Turn",
+                },
+                "state": {
+                    "description": (
+                        "`running` while the turn is in flight: the wait ran out"
+                        " first, so call again. `done` once it has ended, `error`"
+                        " when it failed, `interrupted` when it was stopped: by"
+                        " `interrupt`, by a person, or by Pilot while it updated"
+                    ),
+                    "enum": ["running", "done", "error", "interrupted"],
+                    "title": "State",
+                    "type": "string",
+                },
+                "text": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                    "description": (
+                        "Every message Pilot wrote in the turn, in order,"
+                        " separated by `\\n\\n---\\n\\n`: the ones so far while"
+                        " `running`. A turn that failed ends it with why, as a"
+                        " section of its own. None when there is none"
+                    ),
+                    "title": "Text",
+                },
+            },
+            "required": ["turn", "state", "text"],
+            "title": "TurnResponse",
+            "type": "object",
+        },
+        "Wait for Pilot's reply to your latest message in a conversation with"
+        " Pilot about a project Pilot manages, by the conversation's id: the one"
+        " way a reply comes back. It holds until the turn in flight ends or"
+        " `wait_ms` runs out, whichever comes first, and answers at once when no"
+        " turn is in flight. Returns `{turn, state, text}`: `state` is `done` when"
+        " the turn ended, `error` when it failed, `interrupted` when it was"
+        " stopped, and `running` when the wait ran out first: call again; `turn`"
+        " is the number `send` answered for your message, 1 for the"
+        " conversation's first, and none on `running`; `text` is every message"
+        " Pilot wrote in the turn, in order, separated by `\\n\\n---\\n\\n`, and"
+        " none when there is none. Several sections mean several messages; only"
+        " `state` says the turn is over. On `running` it holds the messages so"
+        " far, and a later call returns them all again. A turn that failed ends"
+        " `text` with why, as a section of its own. Called again after the turn"
+        " has ended, it answers the same reply, until your next `send`; a closed"
+        " conversation answers its last. While it holds it reports progress twice"
+        " a minute, which keeps a client that ends a silent call from ending it."
+        + _NOT_YOURS,
     ),
     "get_conversation": (
         {**_ONE_CONVERSATION, "title": "get_conversationArguments"},
@@ -2376,7 +2459,7 @@ PROJECTS_SURFACE = {
         " and the session's name that opened it; `closed_at` and `close_cause` are"
         " none while it is open; `turns` counts its turns so far, and `running`"
         " says whether one is in flight, when `send` is refused. It answers no"
-        " message of the conversation." + _NOT_YOURS,
+        " message of the conversation: `get_response` does." + _NOT_YOURS,
     ),
     "list_conversations": (
         {
@@ -2427,7 +2510,8 @@ PROJECTS_SURFACE = {
         " Pilot manages, by the conversation's id: the turn ends where it is, and"
         " the conversation is kept for your next `send`. Answers the conversation"
         " as `get_conversation` does; its `running` stays true until the stopped"
-        " turn has ended, and `send` is refused until then. With no turn in flight"
+        " turn has ended, and `send` is refused until then: `get_response` waits"
+        " for that end, and answers the turn `interrupted`. With no turn in flight"
         " it changes nothing, on a closed conversation too." + _NOT_YOURS,
     ),
     "end_conversation": (

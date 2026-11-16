@@ -8,7 +8,7 @@ Session's records run from 1 without a gap in the order written (DB assertion
 """
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -46,6 +46,9 @@ RECORDS_WRITTEN_TOTAL = Counter(
 
 # A backwards search reads the last record alone first, then pages of this.
 _SEARCH_PAGE = 32
+
+_EACH_PAGE = 500
+"""The records one read of `each_record` takes, in order."""
 
 
 @dataclass(frozen=True)
@@ -133,6 +136,32 @@ def read_records(
     return [
         StoredRecord(row[0], row[1], row[2], row[3]) for row in db.execute(statement)
     ]
+
+
+def each_record(
+    db: Session,
+    session_id: uuid.UUID,
+    kind: RecordKind,
+    payload_type: str | None = None,
+    *,
+    after: int = 0,
+) -> Iterator[StoredRecord]:
+    """Every record of the Session of `kind` after the `seq` `after`, whose
+    payload's `type` is `payload_type` when given, in order, a page at a
+    time."""
+    while True:
+        page = read_records(
+            db,
+            session_id,
+            after=after,
+            kind=kind,
+            payload_type=payload_type,
+            limit=_EACH_PAGE,
+        )
+        yield from page
+        if len(page) < _EACH_PAGE:
+            return
+        after = page[-1].record.seq
 
 
 def last_record(db: Session, session_id: uuid.UUID) -> StoredRecord | None:

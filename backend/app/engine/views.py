@@ -46,8 +46,8 @@ from app.services.effect_service import EFFECT
 from app.services.people_service import AGENT_HANDLE
 from app.services.session_record_service import (
     StoredRecord,
+    each_record,
     last_record,
-    read_records,
 )
 from app.services.start_gate import CHAT_KIND, CONVERSATION_KIND
 
@@ -60,9 +60,6 @@ READONLY = (
 )
 """Each view's top-level `readonly` line (design 1 §8); `chat.md` opens with
 it as an HTML comment."""
-
-_RECORD_PAGE = 500
-"""The records one read of a chat's takes, in order."""
 
 CHAT_HEADING = "Chat"
 
@@ -422,21 +419,8 @@ class ViewService:
         self, session_id: uuid.UUID, kind: RecordKind, payload_type: str | None = None
     ) -> Iterator[StoredRecord]:
         """Every record of the Session of `kind`, whose payload's `type` is
-        `payload_type` when given, in order, a page at a time."""
-        after = 0
-        while True:
-            page = read_records(
-                self.db,
-                session_id,
-                after=after,
-                kind=kind,
-                payload_type=payload_type,
-                limit=_RECORD_PAGE,
-            )
-            yield from page
-            if len(page) < _RECORD_PAGE:
-                return
-            after = page[-1].record.seq
+        `payload_type` when given, in order."""
+        return each_record(self.db, session_id, kind, payload_type)
 
     def _handles(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
         return dict(

@@ -1,6 +1,7 @@
 """A calling session's conversation with Pilot about a project (F150.10,
 F150.11; DB Conversation, assertions 334 to 337): opened with its first
-message, sent its next, read, listed, interrupted and ended.
+message, sent its next, read, listed, interrupted and ended, and Pilot's
+reply to its latest message read as it stands.
 
 The routes are a service user's alone, its second write beside starting a
 project (F150.2): a call to Pilot's projects surface comes as it, and names
@@ -27,6 +28,7 @@ from app.schemas.conversations import (
     ConversationListSchema,
     ConversationMessageRequestSchema,
     ConversationOpenRequestSchema,
+    ConversationResponseSchema,
     ConversationSchema,
     ConversationTurnSchema,
 )
@@ -270,6 +272,48 @@ def send_conversation_message(
     return ConversationTurnSchema(
         conversation=turn.session_id, seq=turn.seq, error=turn.error
     ).model_dump(mode="json"), 201
+
+
+@conversations_bp.route("/<uuid:conversation_id>/response", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ConversationResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    )
+)
+@inject
+def get_conversation_response(
+    conversation_id: uuid.UUID,
+    conversation_read_service: ConversationReadService = Provide[
+        ServiceContainer.conversation_read_service
+    ],
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+) -> Any:
+    """Read Pilot's reply to the calling session's latest message in its
+    conversation, as it stands: every text Pilot wrote since the message,
+    and whether its turn runs on, ended, failed or was stopped. It answers
+    at once, a turn in flight `running`: a caller that waits for the turn's
+    end asks again. A closed conversation answers its last reply.
+
+    Returns:
+        200: The reply as it stands
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No conversation has the id, or another caller opened it
+        409: The caller is no service user
+    """
+    user = people_service.require_service_user(
+        caller(), f"read Pilot's reply in the conversation {conversation_id}"
+    )
+    reply = conversation_read_service.reply(
+        conversation_id, user, _calling_environment()
+    )
+    return ConversationResponseSchema(
+        turn=reply.turn, state=reply.state, text=reply.text
+    ).model_dump(mode="json")
 
 
 @conversations_bp.route("/<uuid:conversation_id>/interrupt", methods=["POST"])

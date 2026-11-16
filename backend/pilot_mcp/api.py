@@ -12,15 +12,23 @@
   a list whole. A conversation's tools call `/api/conversations`
   (`app/api/conversations.py`), which reads whose a conversation is from
   those two headers; a message whose send failed is its tool's error.
+  `get_response` alone holds its call (F150.10): it asks the API where the
+  conversation stands every `POLL_SECONDS`, each ask answered at once, until
+  no turn is in flight or its wait is over, then reads the reply once, and
+  reports progress to its caller every `PROGRESS_SECONDS` meanwhile. No
+  request of it waits in the API.
 
 An answer outside 2xx is a `ToolError` carrying the API's `error`, its reason
 whole, or the answer's status where it is not the API's envelope; an API that
 does not answer is one naming that.
 """
 
+import asyncio
+import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Protocol, Self
 
 import httpx
 from mcp.server.fastmcp.exceptions import ToolError
@@ -42,6 +50,25 @@ TOOL_USE_ID_HEADER = "Tool-Use-Id"
 (`app/services/effect_service.py`)."""
 
 _TIMEOUT = httpx.Timeout(300.0, connect=5.0)
+
+WAIT_MS_DEFAULT = 900_000
+WAIT_MS_MAX = 3_600_000
+"""`get_response`'s wait, in ms, where its call gives none, and the most it
+holds, KubeCoder's `get_session_response`'s own (F150.10)."""
+
+POLL_SECONDS = 2.0
+"""How long a held `get_response` leaves between two asks of where its
+conversation stands."""
+
+PROGRESS_SECONDS = 30.0
+"""The seconds after which a held `get_response` tells its caller it still
+waits, read after each ask: two progress notifications are this, one sleep
+and one ask apart at most. Claude Code ends a tool call that sent no
+response or progress for 300 s."""
+
+_POLL_TIMEOUT = httpx.Timeout(20.0, connect=5.0)
+"""The timeout of one ask of a held `get_response`: no progress is reported
+while an ask is out."""
 
 Mark = Literal["done", "read", "reviewed"]
 
@@ -623,6 +650,57 @@ class SentMessage(BaseModel):
     turn: int = Field(description="The turn's number in the conversation")
 
 
+class TurnResponse(BaseModel):
+    """Pilot's reply to your latest message in a conversation, as it stands."""
+
+    turn: int | None = Field(
+        description=(
+            "The number of the turn your message started, as `send` answered"
+            " it, 1 for the conversation's first; none while `state` is"
+            " `running`"
+        )
+    )
+    state: Literal["running", "done", "error", "interrupted"] = Field(
+        description=(
+            "`running` while the turn is in flight: the wait ran out first, so"
+            " call again. `done` once it has ended, `error` when it failed,"
+            " `interrupted` when it was stopped: by `interrupt`, by a person,"
+            " or by Pilot while it updated"
+        )
+    )
+    text: str | None = Field(
+        description=(
+            "Every message Pilot wrote in the turn, in order, separated by"
+            " `\\n\\n---\\n\\n`: the ones so far while `running`. A turn that"
+            " failed ends it with why, as a section of its own. None when"
+            " there is none"
+        )
+    )
+
+
+class Clock(Protocol):
+    """The time a held call waits by."""
+
+    def now(self) -> float:
+        """Seconds on a clock that never runs back."""
+        ...
+
+    async def sleep(self, seconds: float) -> None: ...
+
+
+class _SystemClock:
+    def now(self) -> float:
+        return time.perf_counter()
+
+    async def sleep(self, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+
+
+StillRunning = Callable[[float, float], Awaitable[None]]
+"""Tells a held call's caller it still waits: the seconds waited so far, and
+the seconds of the whole wait."""
+
+
 ItemKind = Literal[
     "opening",
     "decision",
@@ -987,10 +1065,13 @@ class PilotProjectsApi:
         base_url: str,
         credential: ServiceCredential,
         transport: httpx.AsyncBaseTransport | None = None,
+        clock: Clock | None = None,
     ) -> None:
-        """`transport` answers in place of the network, in the suite."""
+        """`transport` answers in place of the network and `clock` tells the
+        time in place of the system's, in the suite."""
         self._base_url = base_url
         self._credential = credential
+        self._clock = _SystemClock() if clock is None else clock
         self._http = httpx.AsyncClient(
             base_url=base_url, timeout=_TIMEOUT, transport=transport
         )
@@ -1163,6 +1244,44 @@ class PilotProjectsApi:
             await self._send("POST", f"/api/conversations/{conversation}/end", caller)
         )
 
+    async def get_response(
+        self,
+        caller: Caller,
+        conversation: uuid.UUID,
+        wait_seconds: float,
+        still_running: StillRunning,
+    ) -> TurnResponse:
+        """Pilot's reply as it stands once no turn of the conversation is in
+        flight, or once `wait_seconds` have passed, whichever comes first:
+        the conversation asked every `POLL_SECONDS` where it stands, each ask
+        answered at once, and `still_running` told every `PROGRESS_SECONDS`
+        meanwhile. A reply read `running` before the wait is over, a turn
+        started since the ask, is waited on."""
+        path = f"/api/conversations/{conversation}"
+        started = self._clock.now()
+        reported = started
+        while True:
+            over = self._clock.now() - started >= wait_seconds
+            if over or not await self._in_flight(caller, path):
+                reply = TurnResponse.model_validate(
+                    await self._get(f"{path}/response", caller, {})
+                )
+                if over or reply.state != "running":
+                    return reply
+            now = self._clock.now()
+            if now - reported >= PROGRESS_SECONDS:
+                await still_running(now - started, wait_seconds)
+                reported = now
+            left = started + wait_seconds - self._clock.now()
+            await self._clock.sleep(max(0.0, min(POLL_SECONDS, left)))
+
+    async def _in_flight(self, caller: Caller, path: str) -> bool:
+        """Whether a turn of the conversation at `path` is in flight, asked
+        under `_POLL_TIMEOUT`."""
+        standing = await self._send("GET", path, caller, timeout=_POLL_TIMEOUT)
+        in_flight: bool = standing["in_flight"]
+        return in_flight
+
     async def _get(self, path: str, caller: Caller, query: dict[str, str]) -> Any:
         return await self._send("GET", path, caller, query=query)
 
@@ -1174,12 +1293,18 @@ class PilotProjectsApi:
         *,
         query: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
+        timeout: httpx.Timeout = _TIMEOUT,
     ) -> Any:
         headers = {"Authorization": await self._credential.authorization()}
         headers |= caller.headers()
         try:
             response = await self._http.request(
-                method, path, params=query, json=body, headers=headers
+                method,
+                path,
+                params=query,
+                json=body,
+                headers=headers,
+                timeout=timeout,
             )
         except httpx.RequestError as exc:
             raise ToolError(

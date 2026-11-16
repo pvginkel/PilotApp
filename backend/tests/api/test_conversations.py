@@ -1,8 +1,8 @@
 """A calling session's conversation with Pilot through the API (F150.10,
 F150.11, F150.2; DB Conversation, assertions 334 to 337; V01, V04, V18): its
-opening, its next message, its read, its caller's list, its interrupt and its
-end, each the service user's alone and each answering to the environment
-that opened it."""
+opening, its next message, its read, its caller's list, its interrupt, its
+end and the read of Pilot's reply, each the service user's alone and each
+answering to the environment that opened it."""
 
 import json
 import uuid
@@ -64,6 +64,10 @@ def _one(conversation_id: uuid.UUID) -> str:
 
 def _messages(conversation_id: uuid.UUID) -> str:
     return f"{ROOT}/{conversation_id}/messages"
+
+
+def _response(conversation_id: uuid.UUID) -> str:
+    return f"{ROOT}/{conversation_id}/response"
 
 
 def _interrupt(conversation_id: uuid.UUID) -> str:
@@ -185,14 +189,30 @@ def _open(client: FlaskClient, **changes: Any) -> Any:
     return client.post(ROOT, json=body, headers=HEADERS)
 
 
+def _says(text: str) -> str:
+    """A main-thread `assistant` line of the raw stream, one text."""
+    return json.dumps(
+        {
+            "type": "assistant",
+            "parent_tool_use_id": None,
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": text}],
+            },
+        }
+    )
+
+
 def _idle(
     client: FlaskClient,
     db: DbSession,
     fake: ServedFakeController,
     services: Services,
+    *texts: str,
 ) -> uuid.UUID:
-    """A conversation opened through its route, its first turn ended: idle
-    on its headless session in the store."""
+    """A conversation opened through its route, its first turn ended, Pilot
+    having written `texts` in it: idle on its headless session in the
+    store."""
     response = _open(client)
     assert response.status_code == 201, response.get_json()
     clear_after_commit_callbacks()
@@ -205,7 +225,10 @@ def _idle(
     fake.play(
         STORE_ENVIRONMENT_ID,
         run.controller_session,
-        [json.dumps({"type": "system", "subtype": "init", "session_id": "thread-1"})],
+        [
+            json.dumps({"type": "system", "subtype": "init", "session_id": "thread-1"}),
+            *(_says(text) for text in texts),
+        ],
     )
     fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "success", "Done.")
     relays.relay(run_id, LoopHandle(f"relay:{run_id}"))
@@ -889,6 +912,141 @@ class TestSendConversationMessage:
         response = oidc_client.post(
             _messages(uuid.uuid4()), json={"words": "Hi"}, headers=HEADERS
         )
+
+        assert response.status_code == 401
+
+
+class TestGetConversationResponse:
+    """`GET /api/conversations/<id>/response` (F150.10; V01, V02): Pilot's
+    reply as it stands, answered at once."""
+
+    def test_a_turn_in_flight_is_running_and_is_answered_at_once_200(
+        self, client: FlaskClient, services: Services, opened: Project, fleet: User
+    ) -> None:
+        run_id = uuid.UUID(_open(client).get_json()["id"])
+        clear_after_commit_callbacks()
+
+        response = client.get(_response(run_id), headers=HEADERS)
+
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json() == {"turn": None, "state": "running", "text": None}
+
+    def test_an_ended_turn_is_done_with_what_pilot_wrote_200(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        fake: ServedFakeController,
+        services: Services,
+        opened: Project,
+        fleet: User,
+    ) -> None:
+        run_id = _idle(
+            client, session, fake, services, "Reading the plan.", "It simmers."
+        )
+
+        response = client.get(_response(run_id), headers=HEADERS)
+
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json() == {
+            "turn": 1,
+            "state": "done",
+            "text": "Reading the plan.\n\n---\n\nIt simmers.",
+        }
+
+    def test_a_start_interrupted_unsent_is_interrupted_with_no_text_200(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        services: Services,
+        opened: Project,
+        fleet: User,
+    ) -> None:
+        """Its start is stopped before its brief went out: the Turn ends
+        unsent with the interrupt."""
+        run_id = uuid.UUID(_open(client).get_json()["id"])
+        clear_after_commit_callbacks()
+        assert client.post(_interrupt(run_id), headers=HEADERS).status_code == 200
+        clear_after_commit_callbacks()
+
+        response = client.get(_response(run_id), headers=HEADERS)
+
+        assert response.get_json() == {"turn": 1, "state": "interrupted", "text": None}
+
+    def test_a_closed_conversation_answers_its_last_reply_200(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        fake: ServedFakeController,
+        services: Services,
+        opened: Project,
+        fleet: User,
+    ) -> None:
+        run_id = _idle(client, session, fake, services, "It simmers.")
+        assert client.post(_end(run_id), headers=HEADERS).status_code == 200
+        clear_after_commit_callbacks()
+
+        response = client.get(_response(run_id), headers=HEADERS)
+
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json() == {
+            "turn": 1,
+            "state": "done",
+            "text": "It simmers.",
+        }
+
+    @pytest.mark.parametrize(
+        "headers", [OTHERS_HEADERS, {}], ids=["another-environment", "no-environment"]
+    )
+    def test_another_callers_is_answered_as_an_id_that_never_was_404(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        opened: Project,
+        recipebox: Environment,
+        fleet: User,
+        headers: dict[str, str],
+    ) -> None:
+        run = _made(session, opened, recipebox, opener=fleet)
+        never = uuid.uuid4()
+
+        anothers = client.get(_response(run.id), headers=headers)
+        unknown = client.get(_response(never), headers=HEADERS)
+
+        assert (anothers.status_code, unknown.status_code) == (404, 404)
+        assert anothers.get_json()["error"] == f"Conversation {run.id} was not found"
+        assert _refusal(anothers, run.id) == _refusal(unknown, never)
+
+    def test_a_person_reads_none_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        opened: Project,
+        recipebox: Environment,
+        service_user: User,
+        person: User,
+    ) -> None:
+        run = _made(session, opened, recipebox, opener=service_user)
+        _sign_in(client, person.subject)
+
+        response = client.get(_response(run.id), headers=HEADERS)
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot read Pilot's reply in the conversation {run.id} because you do"
+            " not call as a service user"
+        )
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, service_user: User
+    ) -> None:
+        _sign_in(client, service_user.subject, roles=())
+
+        assert client.get(_response(uuid.uuid4()), headers=HEADERS).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.get(_response(uuid.uuid4()), headers=HEADERS)
 
         assert response.status_code == 401
 

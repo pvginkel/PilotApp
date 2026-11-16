@@ -70,7 +70,8 @@ def open_conversation(
     """A conversation of `project` opened from `caller` by the session
     `caller_session`, its Session in the store, in `state`, opened at
     `opened_at`, the database's now by default. With `opener`, the service
-    user who opened it, it has its first Turn, theirs, ended."""
+    user who opened it, it has its first Turn, theirs, ended, and that
+    Turn's `send`."""
     run = models.Session(
         project_id=project.id,
         kind_code="conversation",
@@ -93,15 +94,20 @@ def open_conversation(
     )
     if opener is not None:
         now = datetime.now(UTC)
+        turn = Turn(
+            session_id=run.id,
+            seq=1,
+            author_user_id=opener.id,
+            message="/chat\n\nHello.",
+            words="Hello.",
+            started_at=now,
+            ended_at=now,
+        )
+        db.add(turn)
+        db.flush()
         db.add(
-            Turn(
-                session_id=run.id,
-                seq=1,
-                author_user_id=opener.id,
-                message="/chat\n\nHello.",
-                words="Hello.",
-                started_at=now,
-                ended_at=now,
+            SessionRecord(
+                session_id=run.id, seq=1, turn_id=turn.id, kind_code=RecordKind.SEND
             )
         )
         run.turns = 1
@@ -177,6 +183,36 @@ class ChatWriter:
             controller_session="session-1",
         )
 
+    def result(
+        self, text: str | None = None, *, error: bool = False, stopped: bool = False
+    ) -> SessionRecord:
+        """The worker's `result` frame of the Turn in flight, which ends it
+        as the relay ends a chat's or a conversation's: in error with `text`
+        its Turn's error, `stopped` interrupted and its Session `stopped`,
+        else its Session `idle`."""
+        assert self.turn is not None
+        self._offset += 100
+        record = self.records.append(
+            self.run.id,
+            RecordKind.RESULT,
+            payload={
+                "turn": self.turn.seq,
+                "result": text,
+                "isError": error,
+                "interrupted": stopped,
+            },
+            turn_id=self.turn.id,
+            raw_offset=self._offset,
+            controller_session="session-1",
+        )
+        self.turn.ended_at = datetime.now(UTC)
+        if error:
+            self.turn.error = text
+        self.run.state_code = SessionState.STOPPED if stopped else SessionState.IDLE
+        self.run.turn_ended_at = self.turn.ended_at
+        self.db.flush()
+        return record
+
     def effect(self, tool_use_id: str | None, verb: str, label: str) -> SessionRecord:
         """A tool call's effect line, as its call places it; no Effect row,
         which `chat.md` does not read."""
@@ -206,5 +242,8 @@ class ChatWriter:
             cause_code=TurnCause.FOLLOW_UP if author is None else TurnCause.PERSON,
         )
         self.db.add(turn)
+        self.run.turns = seq
+        self.run.turn_started_at = turn.started_at
+        self.run.turn_ended_at = None
         self.db.flush()
         return turn

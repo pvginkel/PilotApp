@@ -8,6 +8,7 @@ under the service user's token and never the caller's bearer (F150.13)."""
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import Any
 
 import httpx
@@ -55,11 +56,17 @@ from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_record_service import read_records
-from pilot_mcp.api import ENVIRONMENT_HEADER, SESSION_HEADER
+from pilot_mcp.api import (
+    ENVIRONMENT_HEADER,
+    POLL_SECONDS,
+    SESSION_HEADER,
+    WAIT_MS_DEFAULT,
+    WAIT_MS_MAX,
+)
 from pilot_mcp.server import PROJECTS_PATH, STORE_PATH
-from pilot_mcp.tools import TOOL_USE_ID_META
+from pilot_mcp.tools import STILL_RUNNING, TOOL_USE_ID_META
 from tests.support.adoption import FIRST_MENUS
-from tests.support.chats import close_conversation, open_conversation
+from tests.support.chats import ChatWriter, close_conversation, open_conversation
 from tests.support.fake_controller import ServedFakeController
 from tests.support.pilot_mcp import (
     API_URL,
@@ -69,10 +76,12 @@ from tests.support.pilot_mcp import (
     PROJECTS_HEADERS,
     PROJECTS_TOKEN,
     ApiRoutes,
+    SteppedClock,
     TokenEndpoint,
     app_with_projects,
     call,
     error_text,
+    http_client,
     mcp_session,
     running_session,
     service_token,
@@ -3920,3 +3929,352 @@ class TestEndConversation:
             session.get_one(Conversation, run.id, populate_existing=True).closed_at
             is None
         )
+
+
+@pytest.fixture
+def clock() -> SteppedClock:
+    return SteppedClock()
+
+
+@pytest.fixture
+def held_app(
+    gated_routes: ApiRoutes, token_endpoint: TokenEndpoint, clock: SteppedClock
+) -> Starlette:
+    """The app with its projects surface, a held call waiting by `clock`."""
+    return app_with_projects(gated_routes, token_endpoint, clock)
+
+
+@pytest.fixture
+def asked(
+    session: DbSession,
+    container: ServiceContainer,
+    service_user: User,
+    soup: models.Project,
+) -> ChatWriter:
+    """A conversation the service user opened from the caller's environment,
+    its first message's turn in flight. Committed."""
+    caller = Environment(id=CALLER_ENVIRONMENT, name="RecipeBox-2", exempt=False)
+    session.add(caller)
+    session.flush()
+    run = open_conversation(session, soup, caller, state=SessionState.RUNNING)
+    writer = ChatWriter(session, container.session_record_service(), run)
+    writer.message(service_user, STOCK)
+    session.commit()
+    return writer
+
+
+Progress = list[tuple[float, float | None, str | None]]
+
+
+async def _hold(
+    app: Starlette,
+    arguments: dict[str, Any],
+    headers: dict[str, str] = PROJECTS_HEADERS,
+) -> tuple[Any, Progress]:
+    """One `get_response` as a session's entry makes it, with the progress
+    it was sent meanwhile: the seconds waited, of how many, and the words."""
+    progress: Progress = []
+
+    async def told(waited: float, wait: float | None, message: str | None) -> None:
+        progress.append((waited, wait, message))
+
+    async with mcp_session(app, headers, PROJECTS_PATH) as (calls, _):
+        result = await calls.call_tool(
+            "get_response", arguments, progress_callback=told
+        )
+    return result, progress
+
+
+def _paths(routes: ApiRoutes) -> list[str]:
+    return [f"{request.method} {request.url.path}" for request, _ in routes.calls]
+
+
+def _always_running(
+    token_endpoint: TokenEndpoint, clock: SteppedClock, idle_asks: int = 0
+) -> Starlette:
+    """The app with its projects surface, a held call waiting by `clock`,
+    whose API answers a conversation with a turn in flight and its reply
+    `running`, for as long as a suite cannot hold a route's; its first
+    `idle_asks` answers of where the conversation stands say none is."""
+    asks = 0
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        nonlocal asks
+        if request.url.path.endswith("/response"):
+            return httpx.Response(
+                200, json={"turn": None, "state": "running", "text": None}
+            )
+        asks += 1
+        return httpx.Response(200, json={"in_flight": asks > idle_asks})
+
+    return app_with_projects(httpx.MockTransport(answer), token_endpoint, clock)
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestGetResponse:
+    """`get_response` (F150.10; V01, V02): the conversation's long poll, held
+    in the MCP process, which asks the API where the conversation stands in
+    requests each answered at once and reports progress meanwhile."""
+
+    async def test_a_turn_that_has_ended_is_answered_at_once(
+        self,
+        held_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        session: DbSession,
+        clock: SteppedClock,
+        asked: ChatWriter,
+    ) -> None:
+        asked.text("Reading the plan.")
+        asked.text("It simmers.")
+        asked.result("It simmers.")
+        session.commit()
+
+        result, progress = await _hold(held_app, {"conversation": str(asked.run.id)})
+
+        assert not result.isError, result
+        assert result.structuredContent == {
+            "turn": 1,
+            "state": "done",
+            "text": "Reading the plan.\n\n---\n\nIt simmers.",
+        }
+        assert _paths(gated_routes) == [
+            f"GET /api/conversations/{asked.run.id}",
+            f"GET /api/conversations/{asked.run.id}/response",
+        ]
+        [minted] = token_endpoint.minted
+        for request, _ in gated_routes.calls:
+            assert request.headers["authorization"] == f"Bearer {minted}"
+            assert (
+                request.headers[ENVIRONMENT_HEADER],
+                request.headers[SESSION_HEADER],
+            ) == (CALLER_ENVIRONMENT, CALLER_SESSION)
+        assert (clock.slept, progress) == ([], [])
+
+    async def test_it_holds_until_the_turn_ends_and_answers_it(
+        self,
+        held_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        clock: SteppedClock,
+        asked: ChatWriter,
+    ) -> None:
+        def end() -> None:
+            asked.text("It simmers.")
+            asked.result("It simmers.")
+            session.commit()
+
+        clock.at(60, end)
+
+        result, progress = await _hold(held_app, {"conversation": str(asked.run.id)})
+
+        assert result.structuredContent == {
+            "turn": 1,
+            "state": "done",
+            "text": "It simmers.",
+        }
+        assert clock.time == 60
+        assert progress == [(30.0, WAIT_MS_DEFAULT / 1000, STILL_RUNNING)]
+        asks = _paths(gated_routes)
+        assert asks[-1] == f"GET /api/conversations/{asked.run.id}/response"
+        assert set(asks[:-1]) == {f"GET /api/conversations/{asked.run.id}"}
+        assert len(asks) == 60 / POLL_SECONDS + 2
+
+    async def test_a_wait_longer_than_five_minutes_reports_progress_twice_a_minute(
+        self,
+        held_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        clock: SteppedClock,
+        asked: ChatWriter,
+    ) -> None:
+        """Claude Code ends a tool call that sent no response or progress
+        for 300 s, and the surface's entry sets no timeout of its own (V02).
+        No request to the API is held: each ask is answered at once, under a
+        timeout of its own, and the wait is the process's between them."""
+        asked.text("Reading the plan.")
+        session.commit()
+
+        result, progress = await _hold(
+            held_app, {"conversation": str(asked.run.id), "wait_ms": 360_000}
+        )
+
+        assert result.structuredContent == {
+            "turn": None,
+            "state": "running",
+            "text": "Reading the plan.",
+        }
+        assert clock.time == 360
+        waited = [seconds for seconds, _, _ in progress]
+        assert waited == [30.0 * tick for tick in range(1, 12)]
+        gaps = [later - earlier for earlier, later in pairwise([0.0, *waited, 360.0])]
+        assert max(gaps) <= 60
+        assert {(wait, message) for _, wait, message in progress} == {
+            (360.0, STILL_RUNNING)
+        }
+        assert max(clock.slept) <= POLL_SECONDS
+        *asks, read = gated_routes.calls
+        assert len(asks) == 360 / POLL_SECONDS
+        assert {request.extensions["timeout"]["read"] for request, _ in asks} == {20.0}
+        assert _paths(gated_routes)[-1] == (
+            f"GET /api/conversations/{asked.run.id}/response"
+        )
+        assert read[1].status_code == 200
+
+    async def test_a_larger_ask_than_an_hour_is_clamped_to_the_hour(
+        self, token_endpoint: TokenEndpoint, clock: SteppedClock
+    ) -> None:
+        result, progress = await _hold(
+            _always_running(token_endpoint, clock),
+            {"conversation": str(uuid.uuid4()), "wait_ms": 2 * WAIT_MS_MAX},
+        )
+
+        assert not result.isError, result
+        assert result.structuredContent == {
+            "turn": None,
+            "state": "running",
+            "text": None,
+        }
+        assert clock.time == 3600 == WAIT_MS_MAX / 1000
+        assert {wait for _, wait, _ in progress} == {3600.0}
+        assert progress[-1][0] == 3570.0
+
+    async def test_with_no_wait_given_it_holds_fifteen_minutes(
+        self, token_endpoint: TokenEndpoint, clock: SteppedClock
+    ) -> None:
+        result, _ = await _hold(
+            _always_running(token_endpoint, clock), {"conversation": str(uuid.uuid4())}
+        )
+
+        assert result.structuredContent["state"] == "running"
+        assert clock.time == 900 == WAIT_MS_DEFAULT / 1000
+
+    async def test_a_wait_of_nothing_answers_a_running_turn_at_once(
+        self,
+        held_app: Starlette,
+        gated_routes: ApiRoutes,
+        clock: SteppedClock,
+        asked: ChatWriter,
+    ) -> None:
+        result, progress = await _hold(
+            held_app, {"conversation": str(asked.run.id), "wait_ms": 0}
+        )
+
+        assert result.structuredContent == {
+            "turn": None,
+            "state": "running",
+            "text": None,
+        }
+        assert _paths(gated_routes) == [
+            f"GET /api/conversations/{asked.run.id}/response"
+        ]
+        assert (clock.slept, progress) == ([], [])
+
+    async def test_a_turn_started_between_its_ask_and_its_read_is_waited_on(
+        self, token_endpoint: TokenEndpoint, clock: SteppedClock
+    ) -> None:
+        """The conversation is asked and stands idle, and its reply, read
+        next, is `running`: `running` is answered only once the wait is
+        over."""
+        result, _ = await _hold(
+            _always_running(token_endpoint, clock, idle_asks=1),
+            {"conversation": str(uuid.uuid4()), "wait_ms": 10_000},
+        )
+
+        assert result.structuredContent["state"] == "running"
+        assert clock.time == 10
+
+    async def test_a_wait_below_nothing_is_refused_before_any_call(
+        self, held_app: Starlette, gated_routes: ApiRoutes, asked: ChatWriter
+    ) -> None:
+        result, _ = await _hold(
+            held_app, {"conversation": str(asked.run.id), "wait_ms": -1}
+        )
+
+        assert result.isError
+        assert gated_routes.calls == []
+
+    @pytest.mark.parametrize(
+        "headers", [ANOTHERS_HEADERS, NO_ENVIRONMENT], ids=["another", "none"]
+    )
+    async def test_another_environments_is_refused_as_one_no_id_names(
+        self,
+        held_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        clock: SteppedClock,
+        asked: ChatWriter,
+        headers: dict[str, str],
+    ) -> None:
+        never = uuid.uuid4()
+        anothers_app = app_with_projects(gated_routes, token_endpoint, clock)
+
+        anothers, _ = await _hold(
+            anothers_app, {"conversation": str(asked.run.id)}, headers
+        )
+        unknown, _ = await _hold(held_app, {"conversation": str(never)})
+
+        assert error_text(anothers) == _never_was("get_response", asked.run.id)
+        assert error_text(unknown) == _never_was("get_response", never)
+        assert clock.slept == []
+
+    async def test_its_progress_and_its_answer_are_events_of_the_calls_own_stream(
+        self,
+        held_app: Starlette,
+        clock: SteppedClock,
+        asked: ChatWriter,
+    ) -> None:
+        """The call is answered as server-sent events (V02): each progress
+        notification an event of the POST's own response, under the token
+        the call gave, before the answer. Nothing but that stream reaches a
+        caller, the server holding no session between requests."""
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_response",
+                "arguments": {"conversation": str(asked.run.id), "wait_ms": 90_000},
+                "_meta": {"progressToken": "held-1"},
+            },
+        }
+        headers = PROJECTS_HEADERS | {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        }
+
+        async with (
+            http_client(held_app) as http,
+            held_app.router.lifespan_context(held_app),
+        ):
+            response = await http.post(
+                PROJECTS_PATH, content=json.dumps(body).encode(), headers=headers
+            )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        *told, answer = [
+            json.loads(line.removeprefix("data:"))
+            for line in response.text.splitlines()
+            if line.startswith("data:")
+        ]
+        assert [(event["method"], event["params"]) for event in told] == [
+            (
+                "notifications/progress",
+                {
+                    "progressToken": "held-1",
+                    "progress": waited,
+                    "total": 90.0,
+                    "message": STILL_RUNNING,
+                },
+            )
+            for waited in (30.0, 60.0)
+        ]
+        assert answer["id"] == 1
+        assert answer["result"]["structuredContent"] == {
+            "turn": None,
+            "state": "running",
+            "text": None,
+        }
+        assert clock.time == 90

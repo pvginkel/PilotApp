@@ -3,6 +3,7 @@ Streamable-HTTP transport, the app served in process, and its calls to the API
 answered by the test app's own routes, in the test's database session; the
 projects surface with its token endpoint, a fake of Keycloak's."""
 
+import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -28,6 +29,7 @@ from app.services.pilot_server import token_hash
 from pilot_mcp.api import (
     ENVIRONMENT_HEADER,
     SESSION_HEADER,
+    Clock,
     PilotProjectsApi,
     PilotStoreApi,
     PilotWorkApi,
@@ -187,18 +189,49 @@ def credential(endpoint: httpx.AsyncBaseTransport) -> ServiceCredential:
     return ServiceCredential(TOKEN_URL, CLIENT_ID, CLIENT_SECRET, transport=endpoint)
 
 
+class SteppedClock:
+    """A clock a held call waits by that no test waits on: a sleep takes no
+    time and moves `time`, its seconds, on by what was asked. `slept` holds
+    each sleep's seconds, and what `at` was given runs in the sleep that
+    reaches its time."""
+
+    def __init__(self) -> None:
+        self.time = 0.0
+        self.slept: list[float] = []
+        self._due: list[tuple[float, Callable[[], None]]] = []
+
+    def now(self) -> float:
+        return self.time
+
+    def at(self, time: float, act: Callable[[], None]) -> None:
+        """Run `act` in the sleep that reaches `time`."""
+        self._due.append((time, act))
+
+    async def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.time += seconds
+        for due in [due for due in self._due if due[0] <= self.time]:
+            self._due.remove(due)
+            due[1]()
+        await asyncio.sleep(0)
+
+
 def app_with_projects(
-    routes: httpx.AsyncBaseTransport, endpoint: httpx.AsyncBaseTransport
+    routes: httpx.AsyncBaseTransport,
+    endpoint: httpx.AsyncBaseTransport,
+    clock: Clock | None = None,
 ) -> Starlette:
     """The app the pod serves with its projects surface configured: its door's
-    token `PROJECTS_TOKEN`, its credential minted at `endpoint`, and its API
-    `routes`."""
+    token `PROJECTS_TOKEN`, its credential minted at `endpoint`, its API
+    `routes`, and a held call waiting by `clock`, the system's by default."""
     return build_app(
         PilotWorkApi(API_URL, transport=routes),
         PilotStoreApi(API_URL, transport=routes),
         ProjectsSurface(
             token=PROJECTS_TOKEN,
-            api=PilotProjectsApi(API_URL, credential(endpoint), transport=routes),
+            api=PilotProjectsApi(
+                API_URL, credential(endpoint), transport=routes, clock=clock
+            ),
         ),
     )
 

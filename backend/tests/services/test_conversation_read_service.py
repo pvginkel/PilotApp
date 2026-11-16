@@ -1,6 +1,7 @@
 """A caller's conversations as it reads them: the one a call names, answered
-to its opener alone, and the list its environment opened (F150.10, F150.11;
-DB Conversation, assertion 337; V04)."""
+to its opener alone, the list its environment opened, and Pilot's reply to
+its latest message as it stands (F150.10, F150.11; DB Conversation,
+assertion 337; V01, V04)."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -11,13 +12,22 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.exceptions import RecordNotFoundException
 from app.models import Conversation, Environment, Project, Turn, User
-from app.models.reference import CloseCause, ProjectState, SessionState, UserKind
+from app.models.reference import (
+    CloseCause,
+    ProjectState,
+    RecordKind,
+    SessionState,
+    UserKind,
+)
 from app.services.container import ServiceContainer
 from app.services.conversation_read_service import (
     ConversationReadService,
     ListedConversation,
+    Reply,
 )
-from tests.support.chats import close_conversation, open_conversation
+from app.services.relay_service import SEND_FAILED, STOPPED_UNSENT
+from app.services.session_start_service import START_FAILED
+from tests.support.chats import ChatWriter, close_conversation, open_conversation
 
 OPENED = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
 
@@ -373,3 +383,415 @@ class TestOpened:
         self, reads: ConversationReadService, service_user: User
     ) -> None:
         assert reads.opened(service_user, "example-nowhere-000000") == []
+
+
+STOCK = "How is the stock going?"
+
+
+@pytest.fixture
+def talk(
+    session: DbSession,
+    container: ServiceContainer,
+    opened: Project,
+    recipebox: Environment,
+    service_user: User,
+) -> ChatWriter:
+    """A conversation the service user opened from RecipeBox, its first
+    message's Turn in flight."""
+    run = open_conversation(session, opened, recipebox, state=SessionState.RUNNING)
+    writer = ChatWriter(session, container.session_record_service(), run)
+    writer.message(service_user, STOCK)
+    return writer
+
+
+class TestReply:
+    """Pilot's reply to the caller's latest message, as `get_response`
+    answers it (F150.10; V01)."""
+
+    def test_a_turn_in_flight_is_running_with_the_texts_so_far(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.text("Reading the plan.")
+        talk.call("toolu_1", "Read")
+        talk.text("It simmers.")
+
+        reply = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert reply == Reply(
+            None, "running", "Reading the plan.\n\n---\n\nIt simmers."
+        )
+
+    def test_a_turn_in_flight_that_wrote_nothing_yet_has_no_text(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            None, "running", None
+        )
+
+    @pytest.mark.parametrize(
+        "state", [SessionState.HELD, SessionState.STARTING], ids=["held", "starting"]
+    )
+    def test_a_start_held_or_under_way_is_running(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+        state: SessionState,
+    ) -> None:
+        talk.run.state_code = state
+        session.flush()
+
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            None, "running", None
+        )
+
+    def test_an_ended_turn_is_done_with_its_number_and_every_text_in_order(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.text("Reading the plan.", "Two tasks are done.")
+        talk.text("A sub-agent's aside.", parent="toolu_1")
+        talk.text("It simmers.")
+        talk.result("It simmers.")
+
+        reply = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert reply == Reply(
+            1,
+            "done",
+            "Reading the plan.\n\n---\n\nTwo tasks are done.\n\n---\n\nIt simmers.",
+        )
+
+    def test_an_ended_turn_that_wrote_nothing_has_no_text(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.call("toolu_1", "Read")
+        talk.result("")
+
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            1, "done", None
+        )
+
+    def test_it_is_the_latest_messages_alone(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.text("It simmers.")
+        talk.result("It simmers.")
+        talk.message(service_user, "And the bread?")
+        talk.run.state_code = SessionState.RUNNING
+
+        running = reads.reply(talk.run.id, service_user, recipebox.id)
+        talk.text("Proving.")
+        talk.result("Proving.")
+        done = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert running == Reply(None, "running", None)
+        assert done == Reply(2, "done", "Proving.")
+
+    def test_the_servers_turn_after_the_message_is_of_its_reply(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        """The follow-up of a save still held (F79) runs after the caller's
+        turn, and the caller's next message is refused under it."""
+        talk.text("Saving the plan.")
+        talk.result("Saving the plan.")
+        talk.server_turn("Your save of plan.md is still held.")
+        talk.run.state_code = SessionState.RUNNING
+
+        running = reads.reply(talk.run.id, service_user, recipebox.id)
+        talk.text("Saved.")
+        talk.result("Saved.")
+        done = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert running == Reply(None, "running", "Saving the plan.")
+        assert done == Reply(1, "done", "Saving the plan.\n\n---\n\nSaved.")
+
+    def test_a_turn_that_ended_in_error_is_an_error_ending_with_why(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.text("Reading the plan.")
+        talk.result("The model is overloaded", error=True)
+
+        reply = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert reply == Reply(
+            1, "error", "Reading the plan.\n\n---\n\nThe model is overloaded"
+        )
+
+    def test_an_error_pilots_last_text_says_is_not_said_twice(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.text("Reading the plan.")
+        talk.text("The model is overloaded")
+        talk.result("The model is overloaded", error=True)
+
+        reply = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert reply == Reply(
+            1, "error", "Reading the plan.\n\n---\n\nThe model is overloaded"
+        )
+
+    def test_an_error_before_the_servers_turn_after_it_stays_the_replys(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.result("The model is overloaded", error=True)
+        talk.server_turn("Your save of plan.md is still held.")
+        talk.text("Saved.")
+        talk.result("Saved.")
+
+        reply = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert reply == Reply(1, "error", "Saved.\n\n---\n\nThe model is overloaded")
+
+    def test_a_message_the_controller_failed_is_an_error_with_its_reason(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.text("It simmers.")
+        talk.result("It simmers.")
+        talk.message(service_user, "And the bread?")
+        reason = "Cannot send a message because the controller answered 502"
+        assert talk.turn is not None
+        talk.records.append(
+            talk.run.id,
+            RecordKind.SERVER,
+            payload={"type": SEND_FAILED, "reason": reason},
+            turn_id=talk.turn.id,
+        )
+        talk.turn.ended_at, talk.turn.error = datetime.now(UTC), reason
+        talk.run.turn_ended_at = talk.turn.ended_at
+        session.flush()
+
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            2, "error", reason
+        )
+
+    def test_a_start_that_failed_is_an_error_with_its_reason_closed_or_not(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        """A failed start's reason is its Session's and its `start-failed`
+        record's, and no Turn's."""
+        reason = "the store environment did not start"
+        assert talk.turn is not None
+        talk.records.append(
+            talk.run.id,
+            RecordKind.SERVER,
+            payload={"type": START_FAILED, "reason": reason},
+        )
+        talk.turn.ended_at = datetime.now(UTC)
+        talk.run.turn_ended_at = talk.turn.ended_at
+        talk.run.state_code, talk.run.error = SessionState.FAILED, reason
+        session.flush()
+
+        failed = reads.reply(talk.run.id, service_user, recipebox.id)
+        close_conversation(session, talk.run, datetime.now(UTC), CloseCause.ENDED)
+        talk.run.state_code = SessionState.ENDED
+        talk.records.append(
+            talk.run.id, RecordKind.SERVER, payload={"type": "closed", "cause": "ended"}
+        )
+        closed = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert failed == closed == Reply(1, "error", reason)
+
+    def test_a_start_that_failed_before_a_later_message_is_not_that_messages(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.records.append(
+            talk.run.id,
+            RecordKind.SERVER,
+            payload={"type": START_FAILED, "reason": "the controller is away"},
+        )
+        talk.message(service_user, "Are you there?")
+        talk.text("Here.")
+        talk.result("Here.")
+
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            2, "done", "Here."
+        )
+
+    def test_a_stopped_turn_is_running_until_it_has_ended_then_interrupted(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.text("Reading the plan.")
+        talk.run.state_code = SessionState.STOPPED
+        session.flush()
+
+        ending = reads.reply(talk.run.id, service_user, recipebox.id)
+        talk.result(stopped=True)
+        ended = reads.reply(talk.run.id, service_user, recipebox.id)
+
+        assert ending == Reply(None, "running", "Reading the plan.")
+        assert ended == Reply(1, "interrupted", "Reading the plan.")
+
+    def test_a_start_stopped_unsent_is_interrupted_with_no_text(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        assert talk.turn is not None
+        talk.records.append(
+            talk.run.id,
+            RecordKind.SERVER,
+            payload={"type": STOPPED_UNSENT},
+            turn_id=talk.turn.id,
+        )
+        talk.turn.ended_at = datetime.now(UTC)
+        talk.run.turn_ended_at = talk.turn.ended_at
+        talk.run.state_code = SessionState.STOPPED
+        session.flush()
+
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            1, "interrupted", None
+        )
+
+    def test_a_turn_whose_result_an_earlier_one_holds_alone_is_interrupted(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        """The server's turn after the message ended with no result, its
+        environment stopped under it: the caller's own turn's result does
+        not end the reply `done`."""
+        talk.text("Saving the plan.")
+        talk.result("Saving the plan.")
+        talk.server_turn("Your save of plan.md is still held.")
+        assert talk.turn is not None
+        talk.turn.ended_at = datetime.now(UTC)
+        talk.run.turn_ended_at = talk.turn.ended_at
+        talk.run.state_code = SessionState.STOPPED
+        session.flush()
+
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            1, "interrupted", "Saving the plan."
+        )
+
+    def test_a_turn_not_ended_is_running_whatever_its_sessions_row_reads(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        """A message sent between the read of the Session and the read of
+        its Turns: the Session read idle, the Turn in flight."""
+        talk.run.state_code = SessionState.IDLE
+        session.flush()
+
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            None, "running", None
+        )
+
+    def test_a_closed_conversation_answers_its_last_reply(
+        self,
+        session: DbSession,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        service_user: User,
+    ) -> None:
+        talk.text("It simmers.")
+        talk.result("It simmers.")
+        close_conversation(session, talk.run, datetime.now(UTC), CloseCause.TIMEOUT)
+        talk.run.state_code = SessionState.ENDED
+        talk.records.append(
+            talk.run.id,
+            RecordKind.SERVER,
+            payload={"type": "closed", "cause": "timeout"},
+        )
+
+        assert reads.reply(talk.run.id, service_user, recipebox.id) == Reply(
+            1, "done", "It simmers."
+        )
+
+    def test_another_callers_is_answered_as_an_id_that_never_was(
+        self,
+        reads: ConversationReadService,
+        talk: ChatWriter,
+        recipebox: Environment,
+        automation: Environment,
+        service_user: User,
+        other_service_user: User,
+    ) -> None:
+        never = uuid.uuid4()
+        asks = [
+            (talk.run.id, service_user, automation.id),
+            (talk.run.id, service_user, None),
+            (talk.run.id, other_service_user, recipebox.id),
+            (never, service_user, recipebox.id),
+        ]
+
+        refusals = []
+        for conversation_id, caller, environment_id in asks:
+            with pytest.raises(RecordNotFoundException) as refused:
+                reads.reply(conversation_id, caller, environment_id)
+            refusals.append(str(refused.value))
+
+        assert refusals == [
+            f"Conversation {talk.run.id} was not found",
+            f"Conversation {talk.run.id} was not found",
+            f"Conversation {talk.run.id} was not found",
+            f"Conversation {never} was not found",
+        ]

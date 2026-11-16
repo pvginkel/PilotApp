@@ -1,6 +1,7 @@
 """`pilot-work`'s tools (F85, FM §5 step 1), a worker's, `pilot-store`'s
 (F86, TD §4.5), the brain's, and `pilot-projects`' (F150), any session's, each
-one call to its route.
+one call to its route, but `get_response`, which holds its call while it asks
+its routes where the conversation stands (`PilotProjectsApi.get_response`).
 
 A tool's docstring is the description the session reads, and each parameter's
 is in its annotation: they are the surface, not commentary
@@ -36,6 +37,8 @@ from pilot_mcp.api import (
     MAX_STEPS,
     SESSION_HEADER,
     SOURCE,
+    WAIT_MS_DEFAULT,
+    WAIT_MS_MAX,
     Added,
     Asked,
     AttachedFiles,
@@ -64,6 +67,7 @@ from pilot_mcp.api import (
     StartedProject,
     Step,
     StepState,
+    TurnResponse,
 )
 
 Call = Context[ServerSession, object, Request]
@@ -134,6 +138,23 @@ MessageText = Annotated[
         description="Your message, in your own words. Pilot reads it verbatim",
     ),
 ]
+
+WaitMs = Annotated[
+    int,
+    Field(
+        ge=0,
+        description=(
+            "How long to hold for the turn's end, in ms. Defaults to"
+            f" {WAIT_MS_DEFAULT} (15 min), so one call usually returns the whole"
+            f" turn, and is capped at {WAIT_MS_MAX} (60 min): a larger ask is"
+            " clamped down to the cap, never refused. 0 answers at once."
+        ),
+    ),
+]
+"""`get_response`'s `wait_ms` (F150.10)."""
+
+STILL_RUNNING = "Pilot's turn is still running"
+"""The message of a held `get_response`'s progress notification."""
 
 Offset = Annotated[
     int, Field(ge=0, description="Results to skip for pagination. Default: 0.")
@@ -973,7 +994,7 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         """Open a conversation with Pilot about a project Pilot manages, by
         its id or its folder, with your first message: Pilot reads `text`
         verbatim and answers it in a turn of its own, which runs on after the
-        call returns. On a finished project Pilot answers from what it reads
+        call returns: read its reply with `get_response`. On a finished project Pilot answers from what it reads
         and changes nothing. Answers the conversation as `get_conversation`
         does, `{id, project, environment, session, opened_at, closed_at,
         close_cause, turns, running}`, its first turn running: hold it by its
@@ -993,7 +1014,8 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         """Send your next message in a conversation with Pilot about a
         project Pilot manages, by the conversation's id: Pilot reads `text`
         verbatim, in a new turn. It answers at once with `{turn}`, the
-        turn's number in the conversation, and the turn runs on. One message
+        turn's number in the conversation, and the turn runs on: read its
+        reply with `get_response`. One message
         is in flight at a time and nothing is queued: while a turn of the
         conversation is in flight, a stopped one that has not ended yet
         included, the call is refused and nothing is sent. Refused the same
@@ -1002,6 +1024,38 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         error saying why. A conversation no id names is refused, and one
         that another environment opened is refused in the same words."""
         return await api.send(_caller(ctx), conversation, text)
+
+    @mcp.tool()
+    async def get_response(
+        ctx: Call, conversation: ConversationRef, wait_ms: WaitMs = WAIT_MS_DEFAULT
+    ) -> TurnResponse:
+        """Wait for Pilot's reply to your latest message in a conversation
+        with Pilot about a project Pilot manages, by the conversation's id:
+        the one way a reply comes back. It holds until the turn in flight
+        ends or `wait_ms` runs out, whichever comes first, and answers at
+        once when no turn is in flight. Returns `{turn, state, text}`:
+        `state` is `done` when the turn ended, `error` when it failed,
+        `interrupted` when it was stopped, and `running` when the wait ran
+        out first: call again; `turn` is the number `send` answered for your
+        message, 1 for the conversation's first, and none on `running`;
+        `text` is every message Pilot wrote in the turn, in
+        order, separated by `\\n\\n---\\n\\n`, and none when there is none.
+        Several sections mean several messages; only `state` says the turn
+        is over. On `running` it holds the messages so far, and a later call
+        returns them all again. A turn that failed ends `text` with why, as
+        a section of its own. Called again after the turn has ended, it
+        answers the same reply, until your next `send`; a closed
+        conversation answers its last. While it holds it reports progress
+        twice a minute, which keeps a client that ends a silent call from
+        ending it. A conversation no id names is refused, and one
+        that another environment opened is refused in the same words."""
+
+        async def still_running(waited: float, wait: float) -> None:
+            await ctx.report_progress(waited, wait, STILL_RUNNING)
+
+        return await api.get_response(
+            _caller(ctx), conversation, min(wait_ms, WAIT_MS_MAX) / 1000, still_running
+        )
 
     @mcp.tool()
     async def get_conversation(
@@ -1014,7 +1068,8 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         environment's id and the session's name that opened it; `closed_at`
         and `close_cause` are none while it is open; `turns` counts its turns
         so far, and `running` says whether one is in flight, when `send` is
-        refused. It answers no message of the conversation. A conversation no id names is refused, and one
+        refused. It answers no message of the conversation: `get_response`
+        does. A conversation no id names is refused, and one
         that another environment opened is refused in the same words."""
         return await api.get_conversation(_caller(ctx), conversation)
 
@@ -1048,7 +1103,9 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         project Pilot manages, by the conversation's id: the turn ends where
         it is, and the conversation is kept for your next `send`. Answers
         the conversation as `get_conversation` does; its `running` stays true
-        until the stopped turn has ended, and `send` is refused until then.
+        until the stopped turn has ended, and `send` is refused until then:
+        `get_response` waits for that end, and answers the turn
+        `interrupted`.
         With no turn in flight it changes nothing, on a closed conversation
         too. A conversation no id names is refused, and one
         that another environment opened is refused in the same words."""

@@ -3,6 +3,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -101,4 +102,32 @@ class ConversationTurnSchema(BaseModel):
     seq: int = Field(description="The Turn's number in the conversation")
     error: str | None = Field(
         description="Why the message's send failed (F125); null unless it did"
+    )
+
+
+class ConversationResponseSchema(BaseModel):
+    """Pilot's reply to a caller's latest message in its conversation, as it
+    stands."""
+
+    turn: int | None = Field(
+        description=(
+            "The number of the Turn the caller's latest message started; null "
+            "while `state` is `running`"
+        )
+    )
+    state: Literal["running", "done", "error", "interrupted"] = Field(
+        description=(
+            "`running` while a turn of the conversation is in flight, as "
+            "`in_flight` reads it; else `error` where the reply's turn failed, "
+            "its start included, `interrupted` where it was stopped, and `done` "
+            "otherwise"
+        )
+    )
+    text: str | None = Field(
+        description=(
+            "Every text Pilot wrote since the message, in order, the texts so "
+            "far while `running`, separated by a line of three dashes between "
+            "blank lines; an `error`'s reason is its last section; null where "
+            "there is none"
+        )
     )
