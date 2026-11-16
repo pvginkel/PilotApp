@@ -15,8 +15,8 @@ what a conversation shares with a chat, its start in the store, the handbook's n
 follow-up turn and the Stop, is [`chats.md`](chats.md)'s, which also renders it in `chat.md`; the
 start, the send and the relay are [`sessions.md`](sessions.md)'s, and the table is
 [`record.md`](record.md)'s. The store's frame for it is PilotProjects' chat skill, its section
-`## A conversation`, and `rules/placement.md`'s `## An environment by name`, which places the work
-it asks for in the caller's environment.
+`## A conversation`, and `rules/placement.md`'s `## Work born of a conversation`, which places the
+work it asks for by repository, never in the caller's environment.
 
 | Service | Does |
 |---|---|
