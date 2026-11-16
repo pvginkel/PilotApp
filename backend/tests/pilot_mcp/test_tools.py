@@ -24,6 +24,7 @@ from app.models import (
     Attachment,
     Block,
     Chat,
+    Conversation,
     DebriefEntry,
     Document,
     Environment,
@@ -43,6 +44,7 @@ from app.models.reference import (
     AnswerChannel,
     AttachmentSource,
     ChatKind,
+    CloseCause,
     ProjectState,
     SessionState,
     TaskStatus,
@@ -57,6 +59,7 @@ from pilot_mcp.api import ENVIRONMENT_HEADER, SESSION_HEADER
 from pilot_mcp.server import PROJECTS_PATH, STORE_PATH
 from pilot_mcp.tools import TOOL_USE_ID_META
 from tests.support.adoption import FIRST_MENUS
+from tests.support.chats import close_conversation, open_conversation
 from tests.support.fake_controller import ServedFakeController
 from tests.support.pilot_mcp import (
     API_URL,
@@ -3045,6 +3048,8 @@ class TestStartProject:
     ("tool", "arguments"),
     [
         ("list_items", {"project": "recipe-box"}),
+        ("list_conversations", {}),
+        ("get_conversation", {"conversation": str(uuid.UUID(int=7))}),
         ("list_files", {}),
         ("find_files", {"path_pattern": "**"}),
         ("read_file", {"path": "reference.json"}),
@@ -3068,3 +3073,850 @@ async def test_each_read_is_one_call_under_the_minted_token_with_the_callers_hea
         CALLER_ENVIRONMENT,
         CALLER_SESSION,
     )
+
+
+STOCK = "How is the stock going?"
+AUTOMATION = "example-automation-9f8e7d"
+
+ANOTHERS_HEADERS = PROJECTS_HEADERS | {
+    ENVIRONMENT_HEADER: AUTOMATION,
+    SESSION_HEADER: "nightly",
+}
+"""What a session in another environment sends."""
+
+NO_ENVIRONMENT = {"Authorization": PROJECTS_HEADERS["Authorization"]}
+"""What an entry that names no caller sends."""
+
+
+@pytest.fixture
+def soup(container: ServiceContainer, session: DbSession) -> models.Project:
+    """An open project, committed."""
+    project = _make(container, name="Soup club")
+    session.commit()
+    return project
+
+
+def _talk(
+    db: DbSession,
+    project: models.Project,
+    opener: User,
+    environment: str = CALLER_ENVIRONMENT,
+    **spec: Any,
+) -> models.Session:
+    """A conversation `opener` opened from `environment`, its first turn
+    ended. Committed, so that a refused call's rollback keeps it."""
+    caller = db.get(Environment, environment)
+    if caller is None:
+        caller = Environment(id=environment, name=environment, exempt=False)
+        db.add(caller)
+        db.flush()
+    run = open_conversation(db, project, caller, opener=opener, **spec)
+    db.commit()
+    return run
+
+
+async def _ask_as(
+    routes: ApiRoutes,
+    endpoint: TokenEndpoint,
+    headers: dict[str, str],
+    tool: str,
+    arguments: dict[str, Any],
+) -> Any:
+    """One call to `pilot-projects` from the caller `headers` names, through
+    an app of its own on the same API: an app serves one session."""
+    return await call(
+        app_with_projects(routes, endpoint),
+        tool,
+        arguments,
+        headers,
+        path=PROJECTS_PATH,
+    )
+
+
+def _stamp(at: datetime) -> str:
+    """A time as the API writes it."""
+    return at.isoformat().replace("+00:00", "Z")
+
+
+def _standing(db: DbSession, run_id: uuid.UUID, **moved: Any) -> dict[str, Any]:
+    """The conversation as the surface answers it, read from the rows."""
+    run = db.get_one(models.Session, run_id, populate_existing=True)
+    row = db.get_one(Conversation, run_id, populate_existing=True)
+    return {
+        "id": str(run_id),
+        "project": str(row.project_id),
+        "environment": row.caller_environment_id,
+        "session": row.caller_session,
+        "opened_at": _stamp(run.created_at),
+        "closed_at": None if row.closed_at is None else _stamp(row.closed_at),
+        "close_cause": row.close_cause_code,
+        "turns": run.turns,
+        "running": False,
+    } | moved
+
+
+def _never_was(tool: str, conversation_id: uuid.UUID) -> str:
+    """The tool's error for a conversation no id names."""
+    return f"Error executing tool {tool}: Conversation {conversation_id} was not found"
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person", "gated_starts")
+class TestStartConversation:
+    """`start_conversation` (F150.10 to F150.12; V01, V04, V18): the
+    conversation's opening, called as the service user through the sign-in
+    gate, its second write."""
+
+    async def test_the_conversation_is_opened_by_one_post_under_the_minted_token(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        result = await _ask(
+            projects_app, "start_conversation", {"project": soup.slug, "text": STOCK}
+        )
+
+        assert not result.isError, result
+        [(request, answer)] = gated_routes.calls
+        [minted] = token_endpoint.minted
+        assert (request.method, str(request.url)) == (
+            "POST",
+            f"{API_URL}/api/conversations",
+        )
+        assert json.loads(request.content) == {"address": soup.slug, "words": STOCK}
+        assert request.headers["authorization"] == f"Bearer {minted}"
+        assert (
+            request.headers[ENVIRONMENT_HEADER],
+            request.headers[SESSION_HEADER],
+        ) == (CALLER_ENVIRONMENT, CALLER_SESSION)
+        assert answer.status_code == 201
+        row = session.scalars(select(Conversation)).one()
+        assert (row.project_id, row.caller_environment_id, row.caller_session) == (
+            soup.id,
+            CALLER_ENVIRONMENT,
+            CALLER_SESSION,
+        )
+        assert result.structuredContent == _standing(session, row.id, running=True)
+        assert result.structuredContent["turns"] == 1
+        turn = session.scalars(select(Turn)).one()
+        assert (turn.session_id, turn.author_user_id, turn.words) == (
+            row.id,
+            service_user.id,
+            STOCK,
+        )
+        assert session.get_one(Environment, CALLER_ENVIRONMENT).name == (
+            CALLER_ENVIRONMENT
+        )
+        assert session.scalars(select(Chat)).all() == []
+
+    async def test_the_project_is_named_by_its_id_too(
+        self, projects_app: Starlette, session: DbSession, soup: models.Project
+    ) -> None:
+        result = await _ask(
+            projects_app, "start_conversation", {"project": str(soup.id), "text": STOCK}
+        )
+
+        assert not result.isError, result
+        assert result.structuredContent["project"] == str(soup.id)
+
+    async def test_a_later_session_there_finds_it_and_no_other_environment_reaches_it(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        soup: models.Project,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        started = await _ask(
+            projects_app, "start_conversation", {"project": soup.slug, "text": STOCK}
+        )
+        opened = started.structuredContent
+        later = PROJECTS_HEADERS | {SESSION_HEADER: "the-next-morning"}
+
+        found = await _ask_as(
+            gated_routes, token_endpoint, later, "list_conversations", {}
+        )
+        read = await _ask_as(
+            gated_routes,
+            token_endpoint,
+            later,
+            "get_conversation",
+            {"conversation": opened["id"]},
+        )
+        elsewhere = await _ask_as(
+            gated_routes, token_endpoint, ANOTHERS_HEADERS, "list_conversations", {}
+        )
+        refused = await _ask_as(
+            gated_routes,
+            token_endpoint,
+            ANOTHERS_HEADERS,
+            "get_conversation",
+            {"conversation": opened["id"]},
+        )
+
+        assert found.structuredContent == {"conversations": [opened]}
+        assert read.structuredContent == opened
+        assert read.structuredContent["session"] == CALLER_SESSION
+        assert elsewhere.structuredContent == {"conversations": []}
+        assert error_text(refused) == _never_was(
+            "get_conversation", uuid.UUID(opened["id"])
+        )
+
+    async def test_a_draft_takes_none_and_is_the_routes_refusal(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+    ) -> None:
+        draft = _make(container, state="draft")
+        session.commit()
+
+        result = await _ask(
+            projects_app,
+            "start_conversation",
+            {"project": f"draft-{draft.number}", "text": STOCK},
+        )
+
+        assert error_text(result) == (
+            "Error executing tool start_conversation: Cannot open a conversation"
+            " with Pilot in the untitled project because its project is a draft"
+        )
+        assert error_text(result) == _refusal(gated_routes, "start_conversation")
+        assert session.scalars(select(Conversation)).all() == []
+
+    async def test_a_project_nothing_names_is_the_routes_refusal(
+        self, projects_app: Starlette, gated_routes: ApiRoutes
+    ) -> None:
+        result = await _ask(
+            projects_app, "start_conversation", {"project": "no-such", "text": STOCK}
+        )
+
+        assert error_text(result) == (
+            "Error executing tool start_conversation: Project no-such was not found"
+        )
+
+    async def test_an_entry_that_sends_no_environment_opens_none(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        soup: models.Project,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        result = await _ask_as(
+            gated_routes,
+            token_endpoint,
+            NO_ENVIRONMENT,
+            "start_conversation",
+            {"project": soup.slug, "text": STOCK},
+        )
+
+        assert error_text(result) == (
+            "Error executing tool start_conversation: Cannot open a conversation"
+            " with Pilot because the call names no environment, and a conversation"
+            " is its calling environment's"
+        )
+        [(_, answer)] = gated_routes.calls
+        assert answer.status_code == 400
+        assert session.scalars(select(Conversation)).all() == []
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {},
+            {"project": "soup-club"},
+            {"text": STOCK},
+            {"project": "", "text": STOCK},
+            {"project": "soup-club", "text": " \n"},
+        ],
+    )
+    async def test_no_project_or_no_words_is_refused_before_any_call(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        arguments: dict[str, Any],
+    ) -> None:
+        result = await _ask(projects_app, "start_conversation", arguments)
+
+        assert result.isError
+        assert gated_routes.calls == []
+        assert token_endpoint.forms == []
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person", "gated_starts")
+class TestSend:
+    async def test_a_message_while_a_turn_is_in_flight_is_the_routes_refusal(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        soup: models.Project,
+    ) -> None:
+        async with mcp_session(projects_app, PROJECTS_HEADERS, PROJECTS_PATH) as (
+            calls,
+            _,
+        ):
+            started = await calls.call_tool(
+                "start_conversation", {"project": soup.slug, "text": STOCK}
+            )
+            result = await calls.call_tool(
+                "send",
+                {
+                    "conversation": started.structuredContent["id"],
+                    "text": "And the bread?",
+                },
+            )
+
+        assert error_text(result) == (
+            "Error executing tool send: Cannot send a message to Pilot in Soup club"
+            " because a turn of its conversation is in flight"
+        )
+        _, answer = gated_routes.calls[-1]
+        assert answer.status_code == 409
+        assert session.scalars(select(Turn.words)).all() == [STOCK]
+
+    async def test_a_message_is_one_post_to_its_conversation_and_answers_its_turn(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        """Its conversation's start failed, so the message starts it afresh,
+        with no controller's send to fake."""
+        run = _talk(session, soup, service_user, state=SessionState.FAILED)
+
+        result = await _ask(
+            projects_app,
+            "send",
+            {"conversation": str(run.id), "text": "And the bread?"},
+        )
+
+        assert not result.isError, result
+        assert result.structuredContent == {"turn": 2}
+        [(request, answer)] = gated_routes.calls
+        [minted] = token_endpoint.minted
+        assert (request.method, str(request.url)) == (
+            "POST",
+            f"{API_URL}/api/conversations/{run.id}/messages",
+        )
+        assert json.loads(request.content) == {"words": "And the bread?"}
+        assert request.headers["authorization"] == f"Bearer {minted}"
+        assert (
+            request.headers[ENVIRONMENT_HEADER],
+            request.headers[SESSION_HEADER],
+        ) == (CALLER_ENVIRONMENT, CALLER_SESSION)
+        assert answer.status_code == 201
+        turn = session.scalars(select(Turn).where(Turn.seq == 2)).one()
+        assert (turn.session_id, turn.author_user_id, turn.words) == (
+            run.id,
+            service_user.id,
+            "And the bread?",
+        )
+
+    async def test_a_message_whose_send_failed_is_the_tools_error(
+        self, token_endpoint: TokenEndpoint
+    ) -> None:
+        conversation = uuid.uuid4()
+        failed = "Cannot send a message to the session because its environment is gone"
+        app = _canned(
+            {"conversation": str(conversation), "seq": 3, "error": failed},
+            token_endpoint,
+        )
+
+        result = await _ask(
+            app, "send", {"conversation": str(conversation), "text": "Still there?"}
+        )
+
+        assert error_text(result) == f"Error executing tool send: {failed}"
+
+    async def test_a_closed_conversation_takes_none(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        run = _talk(session, soup, service_user)
+        close_conversation(session, run, datetime.now(UTC), CloseCause.ENDED)
+        session.commit()
+
+        result = await _ask(
+            projects_app, "send", {"conversation": str(run.id), "text": "Still there?"}
+        )
+
+        assert error_text(result) == (
+            "Error executing tool send: Cannot send a message to Pilot in Soup club"
+            " because its conversation is closed"
+        )
+
+    @pytest.mark.parametrize(
+        "headers", [ANOTHERS_HEADERS, NO_ENVIRONMENT], ids=["another", "none"]
+    )
+    async def test_another_environments_is_refused_as_one_no_id_names(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+        headers: dict[str, str],
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        run = _talk(session, soup, service_user)
+        never = uuid.uuid4()
+
+        anothers = await _ask_as(
+            gated_routes,
+            token_endpoint,
+            headers,
+            "send",
+            {"conversation": str(run.id), "text": "Mine now."},
+        )
+        unknown = await _ask(
+            projects_app, "send", {"conversation": str(never), "text": "Mine now."}
+        )
+
+        assert error_text(anothers) == _never_was("send", run.id)
+        assert error_text(unknown) == _never_was("send", never)
+        assert session.scalars(select(Turn.words)).all() == ["Hello."]
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {},
+            {"conversation": str(uuid.UUID(int=7))},
+            {"conversation": str(uuid.UUID(int=7)), "text": " "},
+            {"conversation": "soup-club", "text": "Hi"},
+        ],
+    )
+    async def test_no_conversation_or_no_words_is_refused_before_any_call(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        arguments: dict[str, Any],
+    ) -> None:
+        result = await _ask(projects_app, "send", arguments)
+
+        assert result.isError
+        assert gated_routes.calls == []
+        assert token_endpoint.forms == []
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestGetConversation:
+    async def test_it_is_read_through_its_route_as_it_stands(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        run = _talk(
+            session,
+            soup,
+            service_user,
+            caller_session="monday",
+            opened_at=datetime(2026, 10, 12, 9, 0, tzinfo=UTC),
+        )
+        close_conversation(
+            session, run, datetime(2026, 10, 12, 9, 30, tzinfo=UTC), CloseCause.TIMEOUT
+        )
+        session.commit()
+
+        result = await _ask(
+            projects_app, "get_conversation", {"conversation": str(run.id)}
+        )
+
+        assert not result.isError, result
+        assert result.structuredContent == {
+            "id": str(run.id),
+            "project": str(soup.id),
+            "environment": CALLER_ENVIRONMENT,
+            "session": "monday",
+            "opened_at": "2026-10-12T09:00:00Z",
+            "closed_at": "2026-10-12T09:30:00Z",
+            "close_cause": "timeout",
+            "turns": 1,
+            "running": False,
+        }
+        [(request, answer)] = gated_routes.calls
+        assert (request.method, str(request.url)) == (
+            "GET",
+            f"{API_URL}/api/conversations/{run.id}",
+        )
+        assert answer.status_code == 200
+
+    async def test_one_with_a_turn_in_flight_reads_running(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        run = _talk(session, soup, service_user, state=SessionState.RUNNING)
+
+        result = await _ask(
+            projects_app, "get_conversation", {"conversation": str(run.id)}
+        )
+
+        assert result.structuredContent == _standing(session, run.id, running=True)
+
+    @pytest.mark.parametrize(
+        "headers", [ANOTHERS_HEADERS, NO_ENVIRONMENT], ids=["another", "none"]
+    )
+    async def test_another_environments_is_refused_as_one_no_id_names(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+        headers: dict[str, str],
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        run = _talk(session, soup, service_user)
+        never = uuid.uuid4()
+
+        anothers = await _ask_as(
+            gated_routes,
+            token_endpoint,
+            headers,
+            "get_conversation",
+            {"conversation": str(run.id)},
+        )
+        unknown = await _ask(
+            projects_app, "get_conversation", {"conversation": str(never)}
+        )
+
+        assert error_text(anothers) == _never_was("get_conversation", run.id)
+        assert error_text(unknown) == _never_was("get_conversation", never)
+        assert [answer.status_code for _, answer in gated_routes.calls] == [404, 404]
+
+    @pytest.mark.parametrize("arguments", [{}, {"conversation": "soup-club"}])
+    async def test_what_is_no_id_is_refused_before_any_call(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        arguments: dict[str, Any],
+    ) -> None:
+        result = await _ask(projects_app, "get_conversation", arguments)
+
+        assert result.isError
+        assert gated_routes.calls == []
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person")
+class TestListConversations:
+    async def test_the_environments_are_listed_open_and_closed_in_the_order_they_opened(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        bikes = _make(container, name="Bike log")
+        later = _talk(
+            session,
+            bikes,
+            service_user,
+            caller_session="tuesday",
+            opened_at=datetime(2026, 10, 13, 9, 0, tzinfo=UTC),
+        )
+        earlier = _talk(
+            session,
+            soup,
+            service_user,
+            caller_session="monday",
+            opened_at=datetime(2026, 10, 12, 9, 0, tzinfo=UTC),
+        )
+        close_conversation(
+            session,
+            earlier,
+            datetime(2026, 10, 12, 9, 30, tzinfo=UTC),
+            CloseCause.ENDED,
+        )
+        _talk(session, soup, service_user, AUTOMATION)
+
+        result = await _ask(projects_app, "list_conversations", {})
+
+        assert not result.isError, result
+        assert result.structuredContent == {
+            "conversations": [
+                _standing(session, earlier.id),
+                _standing(session, later.id),
+            ]
+        }
+        assert [
+            (row["session"], row["close_cause"])
+            for row in result.structuredContent["conversations"]
+        ] == [("monday", "ended"), ("tuesday", None)]
+        [(request, _)] = gated_routes.calls
+        assert (request.method, str(request.url)) == (
+            "GET",
+            f"{API_URL}/api/conversations",
+        )
+
+    async def test_a_project_lists_its_conversations_alone(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        bikes = _make(container, name="Bike log")
+        _talk(session, soup, service_user)
+        bike = _talk(session, bikes, service_user)
+
+        result = await _ask(projects_app, "list_conversations", {"project": bikes.slug})
+
+        assert [row["id"] for row in result.structuredContent["conversations"]] == [
+            str(bike.id)
+        ]
+        [(request, _)] = gated_routes.calls
+        assert str(request.url) == f"{API_URL}/api/conversations?address={bikes.slug}"
+
+    @pytest.mark.parametrize(
+        "headers", [ANOTHERS_HEADERS, NO_ENVIRONMENT], ids=["another", "none"]
+    )
+    async def test_no_other_environments_is_listed(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+        headers: dict[str, str],
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        _talk(session, soup, service_user)
+
+        result = await _ask_as(
+            gated_routes, token_endpoint, headers, "list_conversations", {}
+        )
+
+        assert result.structuredContent == {"conversations": []}
+
+    async def test_a_project_nothing_names_is_the_routes_refusal(
+        self, projects_app: Starlette, gated_routes: ApiRoutes
+    ) -> None:
+        result = await _ask(projects_app, "list_conversations", {"project": "no-such"})
+
+        assert error_text(result) == (
+            "Error executing tool list_conversations: Project no-such was not found"
+        )
+
+    async def test_an_empty_project_is_refused_before_any_call(
+        self, projects_app: Starlette, gated_routes: ApiRoutes
+    ) -> None:
+        result = await _ask(projects_app, "list_conversations", {"project": ""})
+
+        assert result.isError
+        assert gated_routes.calls == []
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person", "gated_starts")
+class TestInterrupt:
+    async def test_the_turn_in_flight_is_stopped_and_the_conversation_kept(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        soup: models.Project,
+    ) -> None:
+        async with mcp_session(projects_app, PROJECTS_HEADERS, PROJECTS_PATH) as (
+            calls,
+            _,
+        ):
+            started = await calls.call_tool(
+                "start_conversation", {"project": soup.slug, "text": STOCK}
+            )
+            run_id = uuid.UUID(started.structuredContent["id"])
+            result = await calls.call_tool("interrupt", {"conversation": str(run_id)})
+
+        assert not result.isError, result
+        request, answer = gated_routes.calls[-1]
+        assert (request.method, str(request.url), answer.status_code) == (
+            "POST",
+            f"{API_URL}/api/conversations/{run_id}/interrupt",
+            200,
+        )
+        run = session.get_one(models.Session, run_id, populate_existing=True)
+        assert run.state_code == SessionState.STOPPED
+        assert result.structuredContent["id"] == str(run_id)
+        assert (
+            result.structuredContent["closed_at"],
+            result.structuredContent["close_cause"],
+        ) == (None, None)
+
+    async def test_with_no_turn_in_flight_it_changes_nothing(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        run = _talk(session, soup, service_user)
+
+        result = await _ask(projects_app, "interrupt", {"conversation": str(run.id)})
+
+        assert result.structuredContent == _standing(session, run.id)
+        assert session.get_one(models.Session, run.id).state_code == SessionState.IDLE
+
+    @pytest.mark.parametrize(
+        "headers", [ANOTHERS_HEADERS, NO_ENVIRONMENT], ids=["another", "none"]
+    )
+    async def test_another_environments_runs_on_and_is_refused_as_one_no_id_names(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+        headers: dict[str, str],
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        run = _talk(session, soup, service_user, state=SessionState.RUNNING)
+        never = uuid.uuid4()
+
+        anothers = await _ask_as(
+            gated_routes,
+            token_endpoint,
+            headers,
+            "interrupt",
+            {"conversation": str(run.id)},
+        )
+        unknown = await _ask(projects_app, "interrupt", {"conversation": str(never)})
+
+        assert error_text(anothers) == _never_was("interrupt", run.id)
+        assert error_text(unknown) == _never_was("interrupt", never)
+        assert session.get_one(
+            models.Session, run.id, populate_existing=True
+        ).state_code == (SessionState.RUNNING)
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("person", "gated_starts")
+class TestEndConversation:
+    async def test_it_is_closed_ended_by_one_post(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        run = _talk(session, soup, service_user)
+
+        result = await _ask(
+            projects_app, "end_conversation", {"conversation": str(run.id)}
+        )
+
+        assert not result.isError, result
+        [(request, answer)] = gated_routes.calls
+        assert (request.method, str(request.url), answer.status_code) == (
+            "POST",
+            f"{API_URL}/api/conversations/{run.id}/end",
+            200,
+        )
+        row = session.get_one(Conversation, run.id, populate_existing=True)
+        assert row.close_cause_code is CloseCause.ENDED
+        assert result.structuredContent == _standing(session, run.id)
+        assert result.structuredContent["close_cause"] == "ended"
+
+    async def test_an_ended_conversation_takes_no_message(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        run = _talk(session, soup, service_user)
+
+        async with mcp_session(projects_app, PROJECTS_HEADERS, PROJECTS_PATH) as (
+            calls,
+            _,
+        ):
+            await calls.call_tool("end_conversation", {"conversation": str(run.id)})
+            result = await calls.call_tool(
+                "send", {"conversation": str(run.id), "text": "One more thing."}
+            )
+
+        assert error_text(result) == (
+            "Error executing tool send: Cannot send a message to Pilot in Soup club"
+            " because its conversation is closed"
+        )
+
+    async def test_ending_one_closed_already_succeeds_and_changes_nothing(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+    ) -> None:
+        run = _talk(session, soup, service_user)
+        closed_at = datetime(2026, 10, 12, 9, 30, tzinfo=UTC)
+        close_conversation(session, run, closed_at, CloseCause.FINISHED)
+        session.commit()
+
+        result = await _ask(
+            projects_app, "end_conversation", {"conversation": str(run.id)}
+        )
+
+        assert not result.isError, result
+        assert (
+            result.structuredContent["closed_at"],
+            result.structuredContent["close_cause"],
+        ) == ("2026-10-12T09:30:00Z", "finished")
+
+    @pytest.mark.parametrize(
+        "headers", [ANOTHERS_HEADERS, NO_ENVIRONMENT], ids=["another", "none"]
+    )
+    async def test_another_environments_stays_open_and_is_refused_as_one_no_id_names(
+        self,
+        projects_app: Starlette,
+        session: DbSession,
+        service_user: User,
+        soup: models.Project,
+        headers: dict[str, str],
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+    ) -> None:
+        run = _talk(session, soup, service_user)
+        never = uuid.uuid4()
+
+        anothers = await _ask_as(
+            gated_routes,
+            token_endpoint,
+            headers,
+            "end_conversation",
+            {"conversation": str(run.id)},
+        )
+        unknown = await _ask(
+            projects_app, "end_conversation", {"conversation": str(never)}
+        )
+
+        assert error_text(anothers) == _never_was("end_conversation", run.id)
+        assert error_text(unknown) == _never_was("end_conversation", never)
+        assert (
+            session.get_one(Conversation, run.id, populate_existing=True).closed_at
+            is None
+        )

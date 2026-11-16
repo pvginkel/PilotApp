@@ -18,6 +18,11 @@ CALLER_ENVIRONMENT_HEADER = "X-Pilot-Environment"
 projects surface: the id of the environment the call came from, as the
 caller's own header gave it; absent where the caller sent none (F150.1)."""
 
+CALLER_SESSION_HEADER = "X-Pilot-Session"
+"""The header beside it: the name of the caller's session in that
+environment, shown and never checked; absent where the caller sent none
+(F150.1, F150.11)."""
+
 
 class CallerEnvironmentService:
     def __init__(

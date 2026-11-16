@@ -7,8 +7,11 @@
 - `pilot-projects`' calls the API's own routes under `/api/`, under the
   service user's token (`credential.py`) and never the caller's bearer, which
   its door has checked (F150.13), with the caller's environment and session
-  as the call's two headers carried them. Its lists are paged here, as
-  KubeCoder's fleet adapter pages its own: their routes answer a list whole.
+  as the call's two headers carried them. Its lists of items and files are
+  paged here, as KubeCoder's fleet adapter pages its own: their routes answer
+  a list whole. A conversation's tools call `/api/conversations`
+  (`app/api/conversations.py`), which reads whose a conversation is from
+  those two headers; a message whose send failed is its tool's error.
 
 An answer outside 2xx is a `ToolError` carrying the API's `error`, its reason
 whole, or the answer's status where it is not the API's envelope; an API that
@@ -567,6 +570,59 @@ class StartedProject(BaseModel):
     url: str = Field(description="Its page in Pilot's app")
 
 
+ConversationCloseCause = Literal["ended", "timeout", "finished", "reopened", "archived"]
+
+
+class Conversation(BaseModel):
+    """A conversation with Pilot about a project, as it stands."""
+
+    id: uuid.UUID = Field(
+        description="Its id, which the other conversation tools take as `conversation`"
+    )
+    project: uuid.UUID = Field(
+        description="The id of the project it is about, which `get_project` takes"
+    )
+    environment: str = Field(
+        description="The id of the environment whose session opened it"
+    )
+    session: str | None = Field(
+        description="The name of the session that opened it; none where it gave none"
+    )
+    opened_at: str = Field(description="When it was opened, in UTC")
+    closed_at: str | None = Field(
+        description="When it was closed, in UTC; none while it is open"
+    )
+    close_cause: ConversationCloseCause | None = Field(
+        description=(
+            "Why it was closed: `ended` by `end_conversation`, `timeout` by"
+            " Pilot once it stood quiet for some time after its last turn,"
+            " `finished`, `reopened` or `archived` when its project was;"
+            " none while it is open"
+        )
+    )
+    turns: int = Field(description="The count of its turns so far")
+    running: bool = Field(
+        description=(
+            "Whether a turn of it is in flight, a stopped one that has not"
+            " ended yet included: `send` is refused while one is"
+        )
+    )
+
+
+class Conversations(BaseModel):
+    """The conversations with Pilot a caller's environment opened."""
+
+    conversations: list[Conversation] = Field(
+        description="A row per conversation, in the order they were opened"
+    )
+
+
+class SentMessage(BaseModel):
+    """The turn a message started."""
+
+    turn: int = Field(description="The turn's number in the conversation")
+
+
 ItemKind = Literal[
     "opening",
     "decision",
@@ -1057,6 +1113,56 @@ class PilotProjectsApi:
         }
         return FileText.model_validate(await self._get("/api/tree/text", caller, query))
 
+    async def start_conversation(
+        self, caller: Caller, project: str, text: str
+    ) -> Conversation:
+        body = {"address": project, "words": text}
+        opened = await self._send("POST", "/api/conversations", caller, body=body)
+        return _conversation(opened)
+
+    async def send(
+        self, caller: Caller, conversation: uuid.UUID, text: str
+    ) -> SentMessage:
+        """A message whose send failed is the tool's error, the Turn's own."""
+        turn = await self._send(
+            "POST",
+            f"/api/conversations/{conversation}/messages",
+            caller,
+            body={"words": text},
+        )
+        if turn["error"] is not None:
+            raise ToolError(turn["error"])
+        return SentMessage(turn=turn["seq"])
+
+    async def get_conversation(
+        self, caller: Caller, conversation: uuid.UUID
+    ) -> Conversation:
+        return _conversation(
+            await self._get(f"/api/conversations/{conversation}", caller, {})
+        )
+
+    async def list_conversations(
+        self, caller: Caller, project: str | None
+    ) -> Conversations:
+        answer = await self._get("/api/conversations", caller, _given(address=project))
+        return Conversations(
+            conversations=[_conversation(row) for row in answer["conversations"]]
+        )
+
+    async def interrupt(self, caller: Caller, conversation: uuid.UUID) -> Conversation:
+        return _conversation(
+            await self._send(
+                "POST", f"/api/conversations/{conversation}/interrupt", caller
+            )
+        )
+
+    async def end_conversation(
+        self, caller: Caller, conversation: uuid.UUID
+    ) -> Conversation:
+        return _conversation(
+            await self._send("POST", f"/api/conversations/{conversation}/end", caller)
+        )
+
     async def _get(self, path: str, caller: Caller, query: dict[str, str]) -> Any:
         return await self._send("GET", path, caller, query=query)
 
@@ -1083,6 +1189,21 @@ class PilotProjectsApi:
         if response.is_error:
             raise ToolError(_refusal(response))
         return response.json()
+
+
+def _conversation(row: dict[str, Any]) -> Conversation:
+    """A conversation as the API answers it, in the surface's words."""
+    return Conversation(
+        id=row["id"],
+        project=row["project_id"],
+        environment=row["environment"],
+        session=row["session"],
+        opened_at=row["opened_at"],
+        closed_at=row["closed_at"],
+        close_cause=row["close_cause"],
+        turns=row["turns"],
+        running=row["in_flight"],
+    )
 
 
 def _page[T](rows: list[T], offset: int, limit: int) -> tuple[list[T], int, bool]:

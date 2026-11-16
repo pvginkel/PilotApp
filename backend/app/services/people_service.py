@@ -165,6 +165,21 @@ class PeopleService:
             )
         return person
 
+    def require_service_user(self, auth: AuthContext, operation: str) -> User:
+        """The caller's row, for a call a service user alone makes: a
+        conversation with Pilot, its second write (F150.2).
+
+        Raises:
+            InvalidOperationException: the caller is a person, one who has
+                not chosen a handle yet among them.
+        """
+        user = self.find(auth)
+        if user is None or user.kind_code is not UserKind.SERVICE:
+            raise InvalidOperationException(
+                operation, "you do not call as a service user"
+            )
+        return user
+
     def switch_join_calls(self, person: User, on: bool) -> None:
         """Turn `person`'s switch *Join projects started on my behalf*: on,
         they are a member of every project a call starts from now on, and of

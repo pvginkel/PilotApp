@@ -69,9 +69,9 @@ STORE_INSTRUCTIONS = (
 
 PROJECTS_INSTRUCTIONS = (
     "Pilot, the project manager, and its projects. These tools read a project"
-    " Pilot manages, its documents and its items, and start one. Load the skill"
-    " `kubecoder:pilot-usage` before you use them: it maps a project's files and"
-    " says which of them answers which question."
+    " Pilot manages, its documents and its items, start one, and talk to Pilot"
+    " about one. Load the skill `kubecoder:pilot-usage` before you use them: it"
+    " maps a project's files and says which of them answers which question."
 )
 
 WORK_PATH = "/mcp"

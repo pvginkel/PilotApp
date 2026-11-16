@@ -1289,6 +1289,323 @@
         "title": "OverruleKind",
         "type": "string"
       },
+      "ConversationListQuerySchema.38a7d5c": {
+        "description": "Which of the caller's conversations to list.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The address of the one project whose conversations to list, as the opening takes it; every project's without it",
+            "examples": [
+              "recipe-box"
+            ],
+            "title": "Address"
+          }
+        },
+        "title": "ConversationListQuerySchema",
+        "type": "object"
+      },
+      "ConversationListSchema.38a7d5c": {
+        "description": "The conversations a caller's environment opened.",
+        "properties": {
+          "conversations": {
+            "description": "The conversations, open and closed, in the order they opened",
+            "items": {
+              "$ref": "#/components/schemas/ConversationListSchema.38a7d5c.ConversationSchema"
+            },
+            "title": "Conversations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "conversations"
+        ],
+        "title": "ConversationListSchema",
+        "type": "object"
+      },
+      "ConversationListSchema.38a7d5c.CloseCause": {
+        "description": "A kind of way a Chat or a Conversation closed: `created` a Chat's\nalone, `ended`, its caller's end, a Conversation's alone (DB decision\n77).",
+        "enum": [
+          "timeout",
+          "created",
+          "finished",
+          "reopened",
+          "archived",
+          "ended"
+        ],
+        "title": "CloseCause",
+        "type": "string"
+      },
+      "ConversationListSchema.38a7d5c.ConversationSchema": {
+        "description": "A conversation as its caller reads it.",
+        "properties": {
+          "close_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationListSchema.38a7d5c.CloseCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the conversation closed: `ended` by its caller, `timeout` after its last turn, `finished` at Finish, `reopened` at Reopen, `archived` at Archive, and never `created`; null while it is open"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the conversation closed; null while it is open",
+            "title": "Closed At"
+          },
+          "environment": {
+            "description": "The id of the environment whose session opened it",
+            "title": "Environment",
+            "type": "string"
+          },
+          "id": {
+            "description": "The conversation's id, its session's",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "in_flight": {
+            "description": "Whether a turn of it is in flight, when it takes no message: its start held at the gate or under way, a turn running, or a stopped one still ending",
+            "title": "In Flight",
+            "type": "boolean"
+          },
+          "opened_at": {
+            "description": "When the conversation opened",
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project it is about",
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the session that opened it; null where it named none",
+            "title": "Session"
+          },
+          "turns": {
+            "description": "The count of its turns so far",
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "environment",
+          "session",
+          "opened_at",
+          "closed_at",
+          "close_cause",
+          "turns",
+          "in_flight"
+        ],
+        "title": "ConversationSchema",
+        "type": "object"
+      },
+      "ConversationMessageRequestSchema.38a7d5c": {
+        "description": "A caller's next message in its conversation.",
+        "properties": {
+          "words": {
+            "description": "The caller's words, sent verbatim",
+            "title": "Words",
+            "type": "string"
+          }
+        },
+        "required": [
+          "words"
+        ],
+        "title": "ConversationMessageRequestSchema",
+        "type": "object"
+      },
+      "ConversationOpenRequestSchema.38a7d5c": {
+        "description": "A conversation's opening: the project and the caller's first message.",
+        "properties": {
+          "address": {
+            "description": "The project's slug, a draft's `draft-<number>`, which goes on naming its project once Create project has given it its slug, or the project's id; an address that reads as an id is one",
+            "examples": [
+              "recipe-box"
+            ],
+            "minLength": 1,
+            "title": "Address",
+            "type": "string"
+          },
+          "words": {
+            "description": "The caller's first message, sent verbatim",
+            "title": "Words",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "words"
+        ],
+        "title": "ConversationOpenRequestSchema",
+        "type": "object"
+      },
+      "ConversationSchema.38a7d5c": {
+        "description": "A conversation as its caller reads it.",
+        "properties": {
+          "close_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationSchema.38a7d5c.CloseCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the conversation closed: `ended` by its caller, `timeout` after its last turn, `finished` at Finish, `reopened` at Reopen, `archived` at Archive, and never `created`; null while it is open"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the conversation closed; null while it is open",
+            "title": "Closed At"
+          },
+          "environment": {
+            "description": "The id of the environment whose session opened it",
+            "title": "Environment",
+            "type": "string"
+          },
+          "id": {
+            "description": "The conversation's id, its session's",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "in_flight": {
+            "description": "Whether a turn of it is in flight, when it takes no message: its start held at the gate or under way, a turn running, or a stopped one still ending",
+            "title": "In Flight",
+            "type": "boolean"
+          },
+          "opened_at": {
+            "description": "When the conversation opened",
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project it is about",
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the session that opened it; null where it named none",
+            "title": "Session"
+          },
+          "turns": {
+            "description": "The count of its turns so far",
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "environment",
+          "session",
+          "opened_at",
+          "closed_at",
+          "close_cause",
+          "turns",
+          "in_flight"
+        ],
+        "title": "ConversationSchema",
+        "type": "object"
+      },
+      "ConversationSchema.38a7d5c.CloseCause": {
+        "description": "A kind of way a Chat or a Conversation closed: `created` a Chat's\nalone, `ended`, its caller's end, a Conversation's alone (DB decision\n77).",
+        "enum": [
+          "timeout",
+          "created",
+          "finished",
+          "reopened",
+          "archived",
+          "ended"
+        ],
+        "title": "CloseCause",
+        "type": "string"
+      },
+      "ConversationTurnSchema.38a7d5c": {
+        "description": "The message's Turn in the conversation.",
+        "properties": {
+          "conversation": {
+            "description": "The conversation's id",
+            "format": "uuid",
+            "title": "Conversation",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the message's send failed (F125); null unless it did",
+            "title": "Error"
+          },
+          "seq": {
+            "description": "The Turn's number in the conversation",
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "conversation",
+          "seq",
+          "error"
+        ],
+        "title": "ConversationTurnSchema",
+        "type": "object"
+      },
       "DebriefSchema.1fdd8ae": {
         "description": "A done work item's debrief, as its Debrief opens it and the full debrief\nshows it (F26.9, F26.10).",
         "properties": {
@@ -14004,6 +14321,554 @@
           }
         ],
         "summary": "Read the conditions that hold now: the controller unreachable, as this server last met it, and the week's and the five-hour usage halts, as the latest reading decides them.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/conversations": {
+      "get": {
+        "description": "Returns:     200: The conversations, in the order they opened     400: The address is empty     401: No one is signed in     403: The caller lacks the editor role     404: No project is at the address     409: The caller is no service user",
+        "operationId": "get__api_conversations",
+        "parameters": [
+          {
+            "description": "The address of the one project whose conversations to list, as the opening takes it; every project's without it",
+            "in": "query",
+            "name": "address",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The address of the one project whose conversations to list, as the opening takes it; every project's without it",
+              "examples": [
+                "recipe-box"
+              ],
+              "title": "Address"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationListSchema.38a7d5c"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List the conversations the service user opened from the calling environment, open and closed, whatever session there opened each; with `address`, those about that project alone. No other environment's is listed, and a request that names no environment lists none.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "post": {
+        "description": "Returns:     201: The conversation, its first turn in flight     400: The message has no words, no address is given, or the request         names no environment     401: No one is signed in     403: The caller lacks the editor role     404: No project is at the address     409: The caller is no service user; the project is a draft or         archived; Pilot is updating its store; or no controller or store         environment is configured",
+        "operationId": "post__api_conversations",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationOpenRequestSchema.38a7d5c"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSchema.38a7d5c"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Open a conversation with Pilot about the project an address names, with the calling session's first message, as the service user: a session of its own beside the project's chat and its other conversations, its first turn the conversation's brief and the words, which goes out once the session is up, held while the controller is unreachable. It is the calling environment's, the request's `X-Pilot-Environment`, and keeps the session's name, its `X-Pilot-Session`. An environment Pilot has no row of is written one, named as the controller reports it, else by its id.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/conversations/{conversation_id}": {
+      "get": {
+        "description": "Returns:     200: The conversation     401: No one is signed in     403: The caller lacks the editor role     404: No conversation has the id, or another caller opened it     409: The caller is no service user",
+        "operationId": "get__api_conversations_{conversation_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSchema.38a7d5c"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read where a conversation stands: its project, the environment and the session that opened it, open or closed with its cause, its turns and whether one is in flight.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/conversations/{conversation_id}/end": {
+      "post": {
+        "description": "Returns:     200: The conversation, closed     401: No one is signed in     403: The caller lacks the editor role     404: No conversation has the id, or another caller opened it     409: The caller is no service user",
+        "operationId": "post__api_conversations_{conversation_id}_end",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSchema.38a7d5c"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Close the conversation, `ended`, as the service user, a turn of it in flight stopped first. One closed already stays as it closed.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/conversations/{conversation_id}/interrupt": {
+      "post": {
+        "description": "Returns:     200: The conversation, a stopped turn in flight until it has ended     401: No one is signed in     403: The caller lacks the editor role     404: No conversation has the id, or another caller opened it     409: The caller is no service user",
+        "operationId": "post__api_conversations_{conversation_id}_interrupt",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSchema.38a7d5c"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Stop the conversation's turn in flight where it is, as the service user, and keep the conversation for the next message: a running turn is interrupted once the request commits, and a start held or under way ends with nothing of it sent. With no turn in flight it changes nothing.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/conversations/{conversation_id}/messages": {
+      "post": {
+        "description": "A send the controller fails is the turn's `error` (F125).\n\nReturns:     201: The message's turn in the conversation     400: The message has no words     401: No one is signed in     403: The caller lacks the editor role     404: No conversation has the id, or another caller opened it     409: The caller is no service user; the conversation is closed, or         its project archived; Pilot is updating its store; a turn of it         is in flight, its start held or under way included; or no         controller or store environment is configured",
+        "operationId": "post__api_conversations_{conversation_id}_messages",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationMessageRequestSchema.38a7d5c"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationTurnSchema.38a7d5c"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Send Pilot the calling session's next message in its conversation, as the service user, the words verbatim: a turn of it, its send made now, or the conversation started afresh with it where its start failed or was stopped unsent. One message is in flight at a time, and nothing is queued.",
         "tags": [],
         "x-required-role": "editor"
       }

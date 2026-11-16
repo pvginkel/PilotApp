@@ -33,6 +33,7 @@ from app.services.clarification_service import ClarificationService
 from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
+from app.services.conversation_read_service import ConversationReadService
 from app.services.conversation_service import ConversationService
 from app.services.draft_service import DraftService
 from app.services.effect_service import EffectService
@@ -862,6 +863,10 @@ class ServiceContainer(containers.DeclarativeContainer):
         chat_close_service=chat_close_service,
         brain_model=app_config.provided.brain_model,
         brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
+    )
+    # A caller's conversations as it reads them, its own alone (F150.11)
+    conversation_read_service = providers.Factory(
+        ConversationReadService, db=db_session
     )
 
     # The invented record: the dev stack's seed, loaded by `cli

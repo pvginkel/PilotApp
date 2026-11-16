@@ -1,9 +1,12 @@
 """The service user at the API (DB 338): its token is admitted as a person's
 is, by the `editor` role and the subject, and it is the caller and nothing
-more: every write attributed to a person refuses it. The plus's create is
-none of them: called as the service user it is a call's draft (F150.9), which
-`tests/api/test_projects.py`, `TestCreateProjectByCall`, and
-`tests/pilot_mcp/test_tools.py`, `TestStartProject`, pin."""
+more: every write attributed to a person refuses it. Its own two writes are
+none of them (F150.2). The plus's create, called as the service user, is a
+call's draft (F150.9), which `tests/api/test_projects.py`,
+`TestCreateProjectByCall`, and `tests/pilot_mcp/test_tools.py`,
+`TestStartProject`, pin; and a conversation's routes are its alone (F150.10),
+which `tests/api/test_conversations.py` and `tests/pilot_mcp/test_tools.py`,
+`TestStartConversation` on, pin."""
 
 import secrets
 import time

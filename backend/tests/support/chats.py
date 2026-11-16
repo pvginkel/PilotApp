@@ -65,10 +65,12 @@ def open_conversation(
     caller_session: str | None = None,
     opened_at: datetime | None = None,
     state: SessionState = SessionState.IDLE,
+    opener: User | None = None,
 ) -> models.Session:
     """A conversation of `project` opened from `caller` by the session
     `caller_session`, its Session in the store, in `state`, opened at
-    `opened_at`, the database's now by default."""
+    `opened_at`, the database's now by default. With `opener`, the service
+    user who opened it, it has its first Turn, theirs, ended."""
     run = models.Session(
         project_id=project.id,
         kind_code="conversation",
@@ -89,6 +91,20 @@ def open_conversation(
             caller_session=caller_session,
         )
     )
+    if opener is not None:
+        now = datetime.now(UTC)
+        db.add(
+            Turn(
+                session_id=run.id,
+                seq=1,
+                author_user_id=opener.id,
+                message="/chat\n\nHello.",
+                words="Hello.",
+                started_at=now,
+                ended_at=now,
+            )
+        )
+        run.turns = 1
     db.flush()
     return run
 

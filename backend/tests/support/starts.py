@@ -1,6 +1,7 @@
 """The session start on a supervisor of its own, a controller configured unless
-a test says otherwise, for the tests that place work items through a surface
-of Pilot's: its loops never run, and its creates hand no MCP server."""
+a test says otherwise, for the tests that place work items or talk to Pilot
+through a surface of Pilot's: its loops never run, and its creates hand no
+MCP server."""
 
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
@@ -28,6 +29,24 @@ def configured_starts(
     `controller_configured` false: the container's start is a singleton that
     keeps the `controller_url` it was first built under, a test's override
     included."""
+    starts, _ = configured_starts_and_relays(
+        container,
+        supervise,
+        project_max=project_max,
+        controller_configured=controller_configured,
+    )
+    return starts
+
+
+def configured_starts_and_relays(
+    container: ServiceContainer,
+    supervise: Supervise,
+    *,
+    project_max: int = 3,
+    controller_configured: bool = True,
+) -> tuple[SessionStartService, RelayService]:
+    """The start as `configured_starts` builds it, with the relay it sends
+    through, for a test that runs a start and relays its turn by hand."""
     supervisor, _ = supervise(container)
     environments = EnvironmentService(
         container=container,
@@ -56,7 +75,7 @@ def configured_starts(
             close_after_seconds=3300,
         ),
     )
-    return SessionStartService(
+    starts = SessionStartService(
         container=container,
         supervisor=supervisor,
         session_streams=container.session_stream_service(),
@@ -69,3 +88,4 @@ def configured_starts(
         controller_configured=controller_configured,
         store_environment_id=STORE_ENVIRONMENT_ID,
     )
+    return starts, relays

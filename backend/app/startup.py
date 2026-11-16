@@ -56,6 +56,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         from app.api.attachments import attachments_bp
         from app.api.chats import chats_bp
         from app.api.conditions import conditions_bp
+        from app.api.conversations import conversations_bp
         from app.api.items import items_bp
         from app.api.links import links_bp
         from app.api.people import people_bp
@@ -70,6 +71,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         api_bp.register_blueprint(attachments_bp)
         api_bp.register_blueprint(chats_bp)
         api_bp.register_blueprint(conditions_bp)
+        api_bp.register_blueprint(conversations_bp)
         api_bp.register_blueprint(items_bp)
         api_bp.register_blueprint(links_bp)
         api_bp.register_blueprint(people_bp)

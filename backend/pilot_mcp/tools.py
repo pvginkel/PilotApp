@@ -9,7 +9,8 @@ two carries is the API's to resolve; a tool passes it on as it came, with the
 tool-use id Claude Code sends in the call's `_meta`, which the call's effect
 names, where it records one. A call to `pilot-projects` hands on its caller,
 never its bearer (`api.py`), and its words are the outside's (F150.3): Pilot,
-a project, its items and documents.
+a project, its items and documents, and a conversation with Pilot about one,
+whose tools are KubeCoder's session tools one for one (F150.10).
 """
 
 import functools
@@ -40,6 +41,8 @@ from pilot_mcp.api import (
     AttachedFiles,
     AttachedMaterial,
     Caller,
+    Conversation,
+    Conversations,
     DebriefEntry,
     FileListing,
     FileText,
@@ -57,6 +60,7 @@ from pilot_mcp.api import (
     Recorded,
     RegisteredDebrief,
     RegisteredDocument,
+    SentMessage,
     StartedProject,
     Step,
     StepState,
@@ -111,6 +115,25 @@ ProjectRef = Annotated[
 ]
 """A tool's `project` (F150.4)."""
 
+
+ConversationRef = Annotated[
+    uuid.UUID,
+    Field(
+        description=(
+            "The conversation's id, as `start_conversation` and"
+            " `list_conversations` answer it"
+        )
+    ),
+]
+"""A tool's `conversation` (F150.10)."""
+
+MessageText = Annotated[
+    str,
+    Field(
+        pattern=r"\S",
+        description="Your message, in your own words. Pilot reads it verbatim",
+    ),
+]
 
 Offset = Annotated[
     int, Field(ge=0, description="Results to skip for pagination. Default: 0.")
@@ -942,3 +965,104 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         names no person is refused, as is every call while Pilot is updating,
         and nothing is started."""
         return await api.start_project(_caller(ctx), brief, title, for_)
+
+    @mcp.tool()
+    async def start_conversation(
+        ctx: Call, project: ProjectRef, text: MessageText
+    ) -> Conversation:
+        """Open a conversation with Pilot about a project Pilot manages, by
+        its id or its folder, with your first message: Pilot reads `text`
+        verbatim and answers it in a turn of its own, which runs on after the
+        call returns. On a finished project Pilot answers from what it reads
+        and changes nothing. Answers the conversation as `get_conversation`
+        does, `{id, project, environment, session, opened_at, closed_at,
+        close_cause, turns, running}`, its first turn running: hold it by its
+        `id`, which the other conversation tools take as `conversation`. It
+        is your environment's: a later session there finds it with
+        `list_conversations`, and no other environment's session reaches it.
+        Several may be open on one project at once. Refused, with nothing
+        opened: a project no id or folder names, a draft, an archived
+        project, a call whose entry for these tools sends no environment, and
+        every call while Pilot is updating."""
+        return await api.start_conversation(_caller(ctx), project, text)
+
+    @mcp.tool()
+    async def send(
+        ctx: Call, conversation: ConversationRef, text: MessageText
+    ) -> SentMessage:
+        """Send your next message in a conversation with Pilot about a
+        project Pilot manages, by the conversation's id: Pilot reads `text`
+        verbatim, in a new turn. It answers at once with `{turn}`, the
+        turn's number in the conversation, and the turn runs on. One message
+        is in flight at a time and nothing is queued: while a turn of the
+        conversation is in flight, a stopped one that has not ended yet
+        included, the call is refused and nothing is sent. Refused the same
+        way: a closed conversation, an archived project's, and every call
+        while Pilot is updating. A message that could not be delivered is an
+        error saying why. A conversation no id names is refused, and one
+        that another environment opened is refused in the same words."""
+        return await api.send(_caller(ctx), conversation, text)
+
+    @mcp.tool()
+    async def get_conversation(
+        ctx: Call, conversation: ConversationRef
+    ) -> Conversation:
+        """Read where a conversation with Pilot about a project Pilot manages
+        stands, by the conversation's id. Returns `{id, project, environment,
+        session, opened_at, closed_at, close_cause, turns, running}`:
+        `project` is the project's id, `environment` and `session` the
+        environment's id and the session's name that opened it; `closed_at`
+        and `close_cause` are none while it is open; `turns` counts its turns
+        so far, and `running` says whether one is in flight, when `send` is
+        refused. It answers no message of the conversation. A conversation no id names is refused, and one
+        that another environment opened is refused in the same words."""
+        return await api.get_conversation(_caller(ctx), conversation)
+
+    @mcp.tool()
+    async def list_conversations(
+        ctx: Call,
+        project: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description=(
+                    "The one project whose conversations to list, by its id or"
+                    " its folder. Omit for every project's."
+                ),
+            ),
+        ] = None,
+    ) -> Conversations:
+        """List the conversations with Pilot about the projects Pilot manages
+        that your environment opened, open and closed, in the order they were
+        opened: this session's and every earlier session's there, so that a
+        later session finds its predecessor's. With `project`, those about
+        that project alone. Returns `{conversations}`, each as
+        `get_conversation` answers it. No other environment's conversation is
+        listed, and a call whose entry for these tools sends no environment
+        lists none. A `project` no id or folder names is refused."""
+        return await api.list_conversations(_caller(ctx), project)
+
+    @mcp.tool()
+    async def interrupt(ctx: Call, conversation: ConversationRef) -> Conversation:
+        """Stop the turn in flight of a conversation with Pilot about a
+        project Pilot manages, by the conversation's id: the turn ends where
+        it is, and the conversation is kept for your next `send`. Answers
+        the conversation as `get_conversation` does; its `running` stays true
+        until the stopped turn has ended, and `send` is refused until then.
+        With no turn in flight it changes nothing, on a closed conversation
+        too. A conversation no id names is refused, and one
+        that another environment opened is refused in the same words."""
+        return await api.interrupt(_caller(ctx), conversation)
+
+    @mcp.tool()
+    async def end_conversation(
+        ctx: Call, conversation: ConversationRef
+    ) -> Conversation:
+        """Close a conversation with Pilot about a project Pilot manages, by
+        the conversation's id: a turn in flight is stopped first, and the
+        conversation takes no further message. Answers the conversation as
+        `get_conversation` does, its `close_cause` `ended`. Ending one that
+        is closed already succeeds and changes nothing: it stays closed as it
+        was. A conversation no id names is refused, and one
+        that another environment opened is refused in the same words."""
+        return await api.end_conversation(_caller(ctx), conversation)

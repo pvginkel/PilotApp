@@ -197,7 +197,7 @@ class ConversationService:
         self.records.lock_project(conversation_id)
         session = self.records.lock_session(conversation_id)
         self._refuse_message(conversation, operation)
-        if _in_flight(session):
+        if in_flight(session):
             raise InvalidOperationException(operation, _IN_FLIGHT)
         changed = handbook_changed(self.db, project, session)
         message = f"{STORE_NOTIFICATION}\n\n{words}" if changed else words
@@ -279,7 +279,7 @@ class ConversationService:
         project = lock_standing(self.db, conversation.project_id)
         session = self.records.lock_session(conversation_id)
         self._refuse_message(conversation, operation)
-        if _in_flight(session) or not unbriefed(session):
+        if in_flight(session) or not unbriefed(session):
             raise InvalidOperationException(operation, _IN_FLIGHT)
         session.controller_session = None
         session.error = None
@@ -344,10 +344,11 @@ class ConversationService:
             raise InvalidOperationException(operation, "its project is archived")
 
 
-def _in_flight(session: AgentSession) -> bool:
-    """Whether a Turn of the Conversation's Session, its row locked, is in
-    flight: its start held or under way, a turn running, or one stopped and
-    still being relayed to its end."""
+def in_flight(session: AgentSession) -> bool:
+    """Whether a Turn of the Conversation's Session is in flight, as its row
+    reads: its start held or under way, a turn running, or one stopped and
+    still being relayed to its end. A message is refused on it read under
+    the row's lock."""
     match session.state_code:
         case SessionState.HELD | SessionState.STARTING | SessionState.RUNNING:
             return True

@@ -288,6 +288,18 @@ class TestPeopleService:
             "Cannot join the project because you have not chosen your handle yet"
         )
 
+    @pytest.mark.usefixtures("person")
+    @pytest.mark.parametrize("subject", ["subject-ada", "subject-nobody"])
+    def test_require_service_user_refuses_a_person_with_a_handle_or_without(
+        self, people: PeopleService, subject: str
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            people.require_service_user(_auth(subject=subject), "talk to Pilot")
+
+        assert raised.value.message == (
+            "Cannot talk to Pilot because you do not call as a service user"
+        )
+
 
 class TestSelfResponse:
     def test_a_person_is_read_with_both_switches_as_they_stand(
@@ -379,6 +391,11 @@ class TestAServiceUserCalling:
             "Cannot join the project because you call as the service user 'fleet', "
             "which is no person"
         )
+
+    def test_require_service_user_is_its_row(
+        self, people: PeopleService, service_user: User
+    ) -> None:
+        assert people.require_service_user(FLEET, "talk to Pilot") is service_user
 
     def test_the_self_read_gives_it_no_slot_and_neither_switch(
         self, service_user: User

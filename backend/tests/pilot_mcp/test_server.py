@@ -14,7 +14,10 @@ import pytest
 from starlette.applications import Starlette
 
 from app import models
-from app.services.caller_environment_service import CALLER_ENVIRONMENT_HEADER
+from app.services.caller_environment_service import (
+    CALLER_ENVIRONMENT_HEADER,
+    CALLER_SESSION_HEADER,
+)
 from pilot_mcp.api import ENVIRONMENT_HEADER, SESSION_HEADER
 from pilot_mcp.server import PROJECTS_PATH, STORE_PATH, WORK_PATH
 from tests.support.pilot_mcp import (
@@ -1390,8 +1393,121 @@ _STATUS = {
     "title": "Status",
 }
 
+_CONVERSATION_REF = {
+    "description": (
+        "The conversation's id, as `start_conversation` and `list_conversations`"
+        " answer it"
+    ),
+    "format": "uuid",
+    "title": "Conversation",
+    "type": "string",
+}
+
+_MESSAGE_TEXT = {
+    "description": "Your message, in your own words. Pilot reads it verbatim",
+    "pattern": "\\S",
+    "title": "Text",
+    "type": "string",
+}
+
+_ONE_CONVERSATION = {
+    "properties": {"conversation": _CONVERSATION_REF},
+    "required": ["conversation"],
+    "type": "object",
+}
+
+# A conversation as every tool but `send` answers it (F150.10, F150.11).
+_CONVERSATION = {
+    "description": "A conversation with Pilot about a project, as it stands.",
+    "properties": {
+        "id": {
+            **_UUID,
+            "description": (
+                "Its id, which the other conversation tools take as `conversation`"
+            ),
+            "title": "Id",
+        },
+        "project": {
+            **_UUID,
+            "description": (
+                "The id of the project it is about, which `get_project` takes"
+            ),
+            "title": "Project",
+        },
+        "environment": {
+            "description": "The id of the environment whose session opened it",
+            "title": "Environment",
+            "type": "string",
+        },
+        "session": {
+            "anyOf": [{"type": "string"}, {"type": "null"}],
+            "description": (
+                "The name of the session that opened it; none where it gave none"
+            ),
+            "title": "Session",
+        },
+        "opened_at": {
+            "description": "When it was opened, in UTC",
+            "title": "Opened At",
+            "type": "string",
+        },
+        "closed_at": {
+            "anyOf": [{"type": "string"}, {"type": "null"}],
+            "description": "When it was closed, in UTC; none while it is open",
+            "title": "Closed At",
+        },
+        "close_cause": {
+            "anyOf": [
+                {
+                    "enum": ["ended", "timeout", "finished", "reopened", "archived"],
+                    "type": "string",
+                },
+                {"type": "null"},
+            ],
+            "description": (
+                "Why it was closed: `ended` by `end_conversation`, `timeout` by"
+                " Pilot once it stood quiet for some time after its last turn,"
+                " `finished`, `reopened` or `archived` when its project was; none"
+                " while it is open"
+            ),
+            "title": "Close Cause",
+        },
+        "turns": {
+            "description": "The count of its turns so far",
+            "title": "Turns",
+            "type": "integer",
+        },
+        "running": {
+            "description": (
+                "Whether a turn of it is in flight, a stopped one that has not"
+                " ended yet included: `send` is refused while one is"
+            ),
+            "title": "Running",
+            "type": "boolean",
+        },
+    },
+    "required": [
+        "id",
+        "project",
+        "environment",
+        "session",
+        "opened_at",
+        "closed_at",
+        "close_cause",
+        "turns",
+        "running",
+    ],
+    "title": "Conversation",
+    "type": "object",
+}
+
+_NOT_YOURS = (
+    " A conversation no id names is refused, and one that another environment"
+    " opened is refused in the same words."
+)
+
 # Each tool: its parameters, its result and its description, the words as a
-# session anywhere in the fleet reads them (F150.3 to F150.9).
+# session anywhere in the fleet reads them (F150.3 to F150.11).
 PROJECTS_SURFACE = {
     "list_projects": (
         {
@@ -2198,13 +2314,139 @@ PROJECTS_SURFACE = {
         " person is refused, as is every call while Pilot is updating, and"
         " nothing is started.",
     ),
+    "start_conversation": (
+        {
+            "properties": {"project": _PROJECT, "text": _MESSAGE_TEXT},
+            "required": ["project", "text"],
+            "title": "start_conversationArguments",
+            "type": "object",
+        },
+        _CONVERSATION,
+        "Open a conversation with Pilot about a project Pilot manages, by its id"
+        " or its folder, with your first message: Pilot reads `text` verbatim and"
+        " answers it in a turn of its own, which runs on after the call returns."
+        " On a finished project Pilot answers from what it reads and changes"
+        " nothing. Answers the conversation as `get_conversation` does, `{id,"
+        " project, environment, session, opened_at, closed_at, close_cause, turns,"
+        " running}`, its first turn running: hold it by its `id`, which the other"
+        " conversation tools take as `conversation`. It is your environment's: a"
+        " later session there finds it with `list_conversations`, and no other"
+        " environment's session reaches it. Several may be open on one project at"
+        " once. Refused, with nothing opened: a project no id or folder names, a"
+        " draft, an archived project, a call whose entry for these tools sends no"
+        " environment, and every call while Pilot is updating.",
+    ),
+    "send": (
+        {
+            "properties": {"conversation": _CONVERSATION_REF, "text": _MESSAGE_TEXT},
+            "required": ["conversation", "text"],
+            "title": "sendArguments",
+            "type": "object",
+        },
+        {
+            "description": "The turn a message started.",
+            "properties": {
+                "turn": {
+                    "description": "The turn's number in the conversation",
+                    "title": "Turn",
+                    "type": "integer",
+                }
+            },
+            "required": ["turn"],
+            "title": "SentMessage",
+            "type": "object",
+        },
+        "Send your next message in a conversation with Pilot about a project"
+        " Pilot manages, by the conversation's id: Pilot reads `text` verbatim, in"
+        " a new turn. It answers at once with `{turn}`, the turn's number in the"
+        " conversation, and the turn runs on. One message is in flight at a time"
+        " and nothing is queued: while a turn of the conversation is in flight, a"
+        " stopped one that has not ended yet included, the call is refused and"
+        " nothing is sent. Refused the same way: a closed conversation, an"
+        " archived project's, and every call while Pilot is updating. A message"
+        " that could not be delivered is an error saying why." + _NOT_YOURS,
+    ),
+    "get_conversation": (
+        {**_ONE_CONVERSATION, "title": "get_conversationArguments"},
+        _CONVERSATION,
+        "Read where a conversation with Pilot about a project Pilot manages"
+        " stands, by the conversation's id. Returns `{id, project, environment,"
+        " session, opened_at, closed_at, close_cause, turns, running}`: `project`"
+        " is the project's id, `environment` and `session` the environment's id"
+        " and the session's name that opened it; `closed_at` and `close_cause` are"
+        " none while it is open; `turns` counts its turns so far, and `running`"
+        " says whether one is in flight, when `send` is refused. It answers no"
+        " message of the conversation." + _NOT_YOURS,
+    ),
+    "list_conversations": (
+        {
+            "properties": {
+                "project": {
+                    "anyOf": [{"minLength": 1, "type": "string"}, {"type": "null"}],
+                    "default": None,
+                    "description": (
+                        "The one project whose conversations to list, by its id or"
+                        " its folder. Omit for every project's."
+                    ),
+                    "title": "Project",
+                }
+            },
+            "title": "list_conversationsArguments",
+            "type": "object",
+        },
+        {
+            "$defs": {"Conversation": _CONVERSATION},
+            "description": "The conversations with Pilot a caller's environment opened.",
+            "properties": {
+                "conversations": {
+                    "description": (
+                        "A row per conversation, in the order they were opened"
+                    ),
+                    "items": {"$ref": "#/$defs/Conversation"},
+                    "title": "Conversations",
+                    "type": "array",
+                }
+            },
+            "required": ["conversations"],
+            "title": "Conversations",
+            "type": "object",
+        },
+        "List the conversations with Pilot about the projects Pilot manages that"
+        " your environment opened, open and closed, in the order they were opened:"
+        " this session's and every earlier session's there, so that a later"
+        " session finds its predecessor's. With `project`, those about that"
+        " project alone. Returns `{conversations}`, each as `get_conversation`"
+        " answers it. No other environment's conversation is listed, and a call"
+        " whose entry for these tools sends no environment lists none. A `project`"
+        " no id or folder names is refused.",
+    ),
+    "interrupt": (
+        {**_ONE_CONVERSATION, "title": "interruptArguments"},
+        _CONVERSATION,
+        "Stop the turn in flight of a conversation with Pilot about a project"
+        " Pilot manages, by the conversation's id: the turn ends where it is, and"
+        " the conversation is kept for your next `send`. Answers the conversation"
+        " as `get_conversation` does; its `running` stays true until the stopped"
+        " turn has ended, and `send` is refused until then. With no turn in flight"
+        " it changes nothing, on a closed conversation too." + _NOT_YOURS,
+    ),
+    "end_conversation": (
+        {**_ONE_CONVERSATION, "title": "end_conversationArguments"},
+        _CONVERSATION,
+        "Close a conversation with Pilot about a project Pilot manages, by the"
+        " conversation's id: a turn in flight is stopped first, and the"
+        " conversation takes no further message. Answers the conversation as"
+        " `get_conversation` does, its `close_cause` `ended`. Ending one that is"
+        " closed already succeeds and changes nothing: it stays closed as it was."
+        + _NOT_YOURS,
+    ),
 }
 
 PROJECTS_INSTRUCTIONS = (
     "Pilot, the project manager, and its projects. These tools read a project"
-    " Pilot manages, its documents and its items, and start one. Load the skill"
-    " `kubecoder:pilot-usage` before you use them: it maps a project's files and"
-    " says which of them answers which question."
+    " Pilot manages, its documents and its items, start one, and talk to Pilot"
+    " about one. Load the skill `kubecoder:pilot-usage` before you use them: it"
+    " maps a project's files and says which of them answers which question."
 )
 
 _INSIDE_WORDS = re.compile(r"\b(brain|stor(e|es|ed|ing)|record\w*|trees?)\b", re.I)
@@ -2276,7 +2518,8 @@ class TestTheProjectsSurface:
 
         assert opening == (
             "Pilot, the project manager, and its projects. These tools read a"
-            " project Pilot manages, its documents and its items, and start one."
+            " project Pilot manages, its documents and its items, start one, and"
+            " talk to Pilot about one."
         )
         assert skill.startswith("`kubecoder:pilot-usage`")
 
@@ -2304,10 +2547,13 @@ class TestTheProjectsSurface:
             "X-Pilot-Session",
         )
 
-    def test_the_create_route_reads_the_environment_from_the_header_the_process_sends(
+    def test_the_api_reads_the_caller_from_the_two_headers_the_process_sends(
         self,
     ) -> None:
-        assert CALLER_ENVIRONMENT_HEADER == ENVIRONMENT_HEADER
+        assert (CALLER_ENVIRONMENT_HEADER, CALLER_SESSION_HEADER) == (
+            ENVIRONMENT_HEADER,
+            SESSION_HEADER,
+        )
 
 
 _NOT_THE_TOKEN = {
