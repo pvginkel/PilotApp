@@ -472,6 +472,60 @@
         "title": "AlarmsSwitchSchema",
         "type": "object"
       },
+      "AlertRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "Pilot's alert on an open prose item that another open ask comes\nbefore its Send; a call that gives neither takes the standing one off.",
+        "properties": {
+          "awaits": {
+            "anyOf": [
+              {
+                "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+                "examples": [
+                  "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The ask to answer first, `<item id>/<local id>` (TD §4.9), a block of another open item of the project",
+            "title": "Awaits"
+          },
+          "item": {
+            "description": "The prose item's id",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What to answer first and what the Send starts",
+            "examples": [
+              "Answer the dev check's decision first: sending restarts the planning."
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "title": "AlertRequestSchema",
+        "type": "object"
+      },
       "AnswerRequestSchema.4ff8b5e": {
         "additionalProperties": false,
         "description": "A person's answer to a block, given in the chat, to record for them.",
@@ -6344,6 +6398,111 @@
         "title": "MarkRequestSchema",
         "type": "object"
       },
+      "NoteRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "Pilot's note on a block of an open prose item, or on the item as a\nwhole; a call that gives none of the four takes the standing one off.",
+        "properties": {
+          "block": {
+            "anyOf": [
+              {
+                "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+                "examples": [
+                  "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The block's id, `<item id>/<local id>` (TD §4.9), a block of the item; none for a note on the item as a whole",
+            "title": "Block"
+          },
+          "item": {
+            "description": "The prose item's id",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          },
+          "offer": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The work Pilot would do on the person's word, in a line",
+            "examples": [
+              "Grow the registry's volume to 20Gi, deleting nothing"
+            ],
+            "title": "Offer"
+          },
+          "suggested_answer": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The answer Pilot suggests: an option's label, Agree, Yes, No or free words",
+            "examples": [
+              "Keep it to the turn"
+            ],
+            "title": "Suggested Answer"
+          },
+          "suggested_note": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The note Pilot suggests beside that answer, or for an action's Done",
+            "examples": [
+              "One environment between runs, as ruled on 3 November"
+            ],
+            "title": "Suggested Note"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What Pilot knows that bears on the ask, Markdown",
+            "examples": [
+              "On 3 November you ruled one environment between runs."
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "title": "NoteRequestSchema",
+        "type": "object"
+      },
       "ProgressSchema.ce33d8b": {
         "description": "The work item's list of steps as it stands.",
         "properties": {
@@ -10303,6 +10462,29 @@
         ],
         "title": "ProgressState",
         "type": "string"
+      },
+      "StandingSchema.4ff8b5e": {
+        "description": "What the call did to the note or the alert standing in its place.",
+        "properties": {
+          "outcome": {
+            "description": "`written` where none stood, `replaced` where one stood, `withdrawn` where the call took it off",
+            "enum": [
+              "written",
+              "replaced",
+              "withdrawn"
+            ],
+            "examples": [
+              "written"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "StandingSchema",
+        "type": "object"
       },
       "StopRequestSchema.4ff8b5e": {
         "additionalProperties": false,
@@ -23883,6 +24065,87 @@
         "tags": []
       }
     },
+    "/tools/pilot-store/alerts": {
+      "post": {
+        "description": "Returns:     200: What the call did to the alert standing on the item     400: The body is not an item, a text and a block's id     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item or the awaited block's item is not of the session's         project, or that block's document has no such block     409: One of `text` and `awaits` without the other, the item is no         prose item or is done, the awaited block is of the item itself         or of an item that is done, or a withdrawal where no alert         stands: the reason",
+        "operationId": "post__tools_pilot-store_alerts",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`alert(item, text?, awaits?)` (F86.11, F168.6): Pilot's alert on an open prose item that another open ask, the block it awaits, comes before its Send, recorded with the session's turn; a later one replaces the one standing, and a call that gives neither takes it off.",
+        "tags": []
+      }
+    },
     "/tools/pilot-store/answers": {
       "post": {
         "description": "Returns:     200: The call's effect line     400: The body is not a block's id, an answer, a handle, and an         optional note and task     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The block is not of the session's project, or no person has the         handle     409: A block of the draft outside its definition chat, or the record         refuses the answer: the reason",
@@ -24376,6 +24639,87 @@
           }
         },
         "summary": "`mark(item, done | read | reviewed, for?, note?)` (F86.3): Done, Read or Reviewed on an item for the person `for` names, else Pilot's own Done, a wait's with its `note` (F27.4).",
+        "tags": []
+      }
+    },
+    "/tools/pilot-store/notes": {
+      "post": {
+        "description": "Returns:     200: What the call did to the note standing in its place     400: The body is not an item, a block's id and the note's fields     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project, or its document has         no such block     409: The item has no block or is done, the block is of another item,         is answered by Pilot or held by another run, a suggested answer         on an action with no options, an offer on anything but an open         action, anything but `text` on the item as a whole, or a         withdrawal where no note stands: the reason",
+        "operationId": "post__tools_pilot-store_notes",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`note(item, block?, text?, suggested_answer?, suggested_note?, offer?)` (F86.10, F168): Pilot's note on a block of an open prose item, or on the item as a whole, recorded with the session's turn; a later one in the same place replaces the one standing, and a call that gives none of the four takes it off.",
         "tags": []
       }
     },

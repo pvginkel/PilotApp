@@ -253,6 +253,78 @@ class WriterQuestionRequestSchema(BaseModel):
     )
 
 
+class NoteRequestSchema(BaseModel):
+    """Pilot's note on a block of an open prose item, or on the item as a
+    whole; a call that gives none of the four takes the standing one off."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item: uuid.UUID = Field(
+        description="The prose item's id",
+        examples=["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"],
+    )
+    block: BlockId | None = Field(
+        default=None,
+        description=(
+            "The block's id, `<item id>/<local id>` (TD §4.9), a block of the"
+            " item; none for a note on the item as a whole"
+        ),
+    )
+    text: str | None = Field(
+        default=None,
+        min_length=1,
+        description="What Pilot knows that bears on the ask, Markdown",
+        examples=["On 3 November you ruled one environment between runs."],
+    )
+    suggested_answer: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The answer Pilot suggests: an option's label, Agree, Yes, No or free words"
+        ),
+        examples=["Keep it to the turn"],
+    )
+    suggested_note: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The note Pilot suggests beside that answer, or for an action's Done",
+        examples=["One environment between runs, as ruled on 3 November"],
+    )
+    offer: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The work Pilot would do on the person's word, in a line",
+        examples=["Grow the registry's volume to 20Gi, deleting nothing"],
+    )
+
+
+class AlertRequestSchema(BaseModel):
+    """Pilot's alert on an open prose item that another open ask comes
+    before its Send; a call that gives neither takes the standing one off."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item: uuid.UUID = Field(
+        description="The prose item's id",
+        examples=["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"],
+    )
+    text: str | None = Field(
+        default=None,
+        min_length=1,
+        description="What to answer first and what the Send starts",
+        examples=[
+            "Answer the dev check's decision first: sending restarts the planning."
+        ],
+    )
+    awaits: BlockId | None = Field(
+        default=None,
+        description=(
+            "The ask to answer first, `<item id>/<local id>` (TD §4.9), a block"
+            " of another open item of the project"
+        ),
+    )
+
+
 class AddItemRequestSchema(BaseModel):
     """An item to add, in `timeline.json`'s shape (TD §4.5, F86.1): a prose
     item, with its text or to fill, a work item to start, or a wait. Which of
@@ -441,6 +513,23 @@ class RecordedSchema(BaseModel):
     effect: str = Field(
         description="Its effect line, `<verb> · <what>` (F41)",
         examples=["Answered · D1 · Which tent?"],
+    )
+
+
+StandingOutcome = Literal["written", "replaced", "withdrawn"]
+"""What a `note` or an `alert` call did to its place: wrote the first that
+stands there, replaced the one standing, or took it off (DB 625, 631)."""
+
+
+class StandingSchema(BaseModel):
+    """What the call did to the note or the alert standing in its place."""
+
+    outcome: StandingOutcome = Field(
+        description=(
+            "`written` where none stood, `replaced` where one stood, `withdrawn`"
+            " where the call took it off"
+        ),
+        examples=["written"],
     )
 
 

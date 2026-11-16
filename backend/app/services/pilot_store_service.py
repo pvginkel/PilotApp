@@ -4,7 +4,8 @@ its turn runs (the planning ruling) and acting on its project alone. Each tool
 writes as the record's own writes do, Pilot the actor where it acts for itself
 and the person `for` names where it acts on their behalf. Each call that
 changed the record writes its Effect (F41); `ask_writer` writes its Writer
-Question in place of one (DB decision 59).
+Question in place of one (DB decision 59), and `note` and `alert` their Pilot
+Note and Send Alert (DB decision 84).
 
 Every write locks the Project's row first and the Session's for its effect
 after, the order Finish takes, which locks the project's Sessions before their
@@ -22,7 +23,7 @@ from typing import Literal
 
 import pilot_dsl as dsl
 from prometheus_client import Counter
-from sqlalchemy import exists, select
+from sqlalchemy import exists, literal, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import (
@@ -44,13 +45,16 @@ from app.exceptions import (
 from app.models import (
     Attachment,
     Block,
+    BlockOption,
     Chat,
     ClarificationRun,
     Document,
     Item,
     ItemKind,
+    PilotNote,
     PlanTask,
     Project,
+    SendAlert,
     Turn,
     User,
     Wait,
@@ -60,6 +64,7 @@ from app.models import (
 from app.models import Session as AgentSession
 from app.models.reference import (
     AnswerChannel,
+    BlockKind,
     ChatKind,
     DocumentRole,
     EffectKind,
@@ -70,7 +75,12 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
-from app.schemas.pilot_store import AddItemRequestSchema, Mark, source_parts
+from app.schemas.pilot_store import (
+    AddItemRequestSchema,
+    Mark,
+    StandingOutcome,
+    source_parts,
+)
 from app.services.brief_service import BriefService
 from app.services.controller_client import (
     ControllerClient,
@@ -88,6 +98,7 @@ from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
 from app.services.timeline_service import writer_asked
 from app.services.wait_service import CARD_WAIT, TIMED_WAIT, WAITS, WaitService
+from app.services.working_on import Reading, run_of
 
 JOB = "job"
 """The Session Kind of the server's jobs, the pre-ruling pass among them."""
@@ -814,6 +825,286 @@ class PilotStoreService:
             )
         return None
 
+    def note(
+        self,
+        brain: Brain,
+        item_id: uuid.UUID,
+        block_id: str | None,
+        *,
+        text: str | None,
+        suggested_answer: str | None,
+        suggested_note: str | None,
+        offer: str | None,
+    ) -> StandingOutcome:
+        """Pilot's note on the block `block_id`, `<item id>/<local id>`, of
+        the open prose item `item_id`, or without it on the item as a whole,
+        recorded as a Pilot Note of the brain's Turn in flight (F86.10; DB
+        616 to 627): a later one in the same place replaces the one standing
+        there, which stays on the record, and a call that gives none of the
+        four withdraws it. No Effect: the call changes no ask, neither the
+        document's text nor what waits or is held (DB 632). A block a run
+        holds takes a note from the job after the turn of a Work of that run
+        alone, a Retry of it included: the job whose plan notes a claimed
+        action that run left undone, which the run holds until that job
+        ends.
+
+        Raises:
+            AuthorizationException: the brain's turn has ended.
+            RecordNotFoundException: the item is not of the brain's project,
+                or its document has no such block.
+            InvalidOperationException: the item has no block or is done; the
+                block is of another item, is answered by Pilot or held by
+                another run; a suggested answer on a block that takes none,
+                an offer on anything but an open action, anything but `text`
+                on the item as a whole; a withdrawal where no note stands.
+        """
+        place = str(item_id) if block_id is None else block_id
+        operation = f"note {place}"
+        project = self._project(brain)
+        item = self._item(brain, item_id)
+        document = self.db.get(Document, item.id)
+        if document is None or not self.db.scalar(
+            select(exists().where(Block.document_id == item.id))
+        ):
+            raise InvalidOperationException(operation, f"item {item.id} has no block")
+        self.document_service.lock(document)
+        if item.done_at is not None:
+            raise InvalidOperationException(operation, f"item {item.id} is done")
+        block = None if block_id is None else self._noted_block(brain, item, block_id)
+        standing = self._standing_note(item.id, None if block is None else block.id)
+        outcome: StandingOutcome
+        if (text, suggested_answer, suggested_note, offer) == (None, None, None, None):
+            if standing is None:
+                raise InvalidOperationException(
+                    operation, f"no note of Pilot's stands on {place}"
+                )
+            standing.withdrawn_at = datetime.now(UTC)
+            outcome = "withdrawn"
+        else:
+            refusal = self._note_refusal(
+                block,
+                suggested_answer=suggested_answer is not None,
+                suggested_note=suggested_note is not None,
+                offer=offer is not None,
+            )
+            if refusal is not None:
+                raise InvalidOperationException(operation, refusal)
+            self.db.add(
+                PilotNote(
+                    item_id=item.id,
+                    block_id=None if block is None else block.id,
+                    turn_id=self._turn_in_flight(brain),
+                    text=text,
+                    suggested_answer=suggested_answer,
+                    suggested_note=suggested_note,
+                    offer=offer,
+                )
+            )
+            outcome = "written" if standing is None else "replaced"
+        self.db.flush()
+        self.view_service.timeline_moved(project)
+        return outcome
+
+    def _noted_block(self, brain: Brain, item: Item, block_id: str) -> Block:
+        """The block `block_id` of `item` that a note may stand on: neither
+        answered by Pilot nor held by a run other than the brain's own (DB
+        627)."""
+        operation = f"note {block_id}"
+        block_item, local_id = _parts(block_id)
+        if block_item != item.id:
+            raise InvalidOperationException(
+                operation, f"block {block_id} is not of item {item.id}"
+            )
+        block = self.db.scalars(
+            select(Block).where(
+                Block.document_id == item.id, Block.local_id == local_id
+            )
+        ).one_or_none()
+        if block is None:
+            raise RecordNotFoundException("Block", block_id)
+        if _answered_by(block, self._pilot()):
+            raise InvalidOperationException(
+                operation, f"block {local_id} is answered by Pilot"
+            )
+        if self._held_elsewhere(brain, block):
+            raise InvalidOperationException(
+                operation, f"block {local_id} is held by another run of Pilot's"
+            )
+        return block
+
+    def _held_elsewhere(self, brain: Brain, block: Block) -> bool:
+        """Whether a run holds `block` (DB 295) and the brain is not the job
+        after the turn of one of that run's Works, a Retry of it included."""
+        holding = next(
+            (
+                naming
+                for naming in Reading(self.db).namings
+                if naming.block_id == block.id and naming.holding
+            ),
+            None,
+        )
+        if holding is None:
+            return False
+        after = self.db.scalar(
+            select(Work.trigger_item_id).where(
+                Work.id == brain.session_id,
+                Work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
+            )
+        )
+        return after is None or after not in set(
+            self.db.scalars(run_of(literal(holding.work_id)))
+        )
+
+    def _note_refusal(
+        self,
+        block: Block | None,
+        *,
+        suggested_answer: bool,
+        suggested_note: bool,
+        offer: bool,
+    ) -> str | None:
+        """Why a note that gives the fields named true is refused on
+        `block`, none for the item as a whole; None where it is taken (DB
+        626, 627)."""
+        if block is None:
+            if suggested_answer or suggested_note or offer:
+                return "a note on the item as a whole holds `text` alone"
+            return None
+        is_action = block.kind_code is BlockKind.ACTION
+        if (
+            suggested_answer
+            and is_action
+            and not self.db.scalar(
+                select(exists().where(BlockOption.block_id == block.id))
+            )
+        ):
+            return (
+                f"action {block.local_id} has no options: a suggested answer"
+                " is on a block that takes an answer"
+            )
+        if offer and not is_action:
+            return (
+                f"block {block.local_id} is a {block.kind_code}: an offer is on"
+                " an open action alone"
+            )
+        if offer and block.done_at is not None:
+            return (
+                f"action {block.local_id} is done: an offer is on an open action alone"
+            )
+        return None
+
+    def _standing_note(
+        self, item_id: uuid.UUID, block_id: int | None
+    ) -> PilotNote | None:
+        """The Pilot Note standing in a place, the item's block `block_id` or
+        with none the item as a whole: its latest, unless withdrawn (DB
+        625)."""
+        latest = self.db.scalars(
+            select(PilotNote)
+            .where(PilotNote.item_id == item_id, PilotNote.block_id == block_id)
+            .order_by(PilotNote.id.desc())
+            .limit(1)
+        ).one_or_none()
+        return None if latest is None or latest.withdrawn_at is not None else latest
+
+    def alert(
+        self,
+        brain: Brain,
+        item_id: uuid.UUID,
+        *,
+        text: str | None,
+        awaits: str | None,
+    ) -> StandingOutcome:
+        """Pilot's alert on the open prose item `item_id` that the block
+        `awaits`, `<item id>/<local id>`, of another open item of the
+        project, comes before its Send, `text` saying what to answer first
+        and what the Send starts, recorded as a Send Alert of the brain's
+        Turn in flight (F86.11; DB 621 to 623, 631): a later one replaces
+        the one standing, which stays on the record, and a call that gives
+        neither withdraws it. No Effect: it stops no Send and holds nothing
+        (DB 632).
+
+        Raises:
+            AuthorizationException: the brain's turn has ended.
+            RecordNotFoundException: the item or the awaited block's item is
+                not of the brain's project, or that block's document has no
+                such block.
+            InvalidOperationException: one of `text` and `awaits` without the
+                other; the item is no prose item or is done; the awaited
+                block is of the item itself or of an item that is done; a
+                withdrawal where no alert stands.
+        """
+        operation = f"alert on item {item_id}"
+        if (text is None) != (awaits is None):
+            raise InvalidOperationException(
+                operation,
+                "an alert gives its `text` and the block it `awaits` together,"
+                " or neither to take it off",
+            )
+        project = self._project(brain)
+        item = self._item(brain, item_id)
+        document = self.db.get(Document, item.id)
+        if document is None:
+            raise InvalidOperationException(
+                operation, f"item {item.id} is a {item.kind_code} item, no prose item"
+            )
+        self.document_service.lock(document)
+        if item.done_at is not None:
+            raise InvalidOperationException(operation, f"item {item.id} is done")
+        latest = self.db.scalars(
+            select(SendAlert)
+            .where(SendAlert.item_id == item.id)
+            .order_by(SendAlert.id.desc())
+            .limit(1)
+        ).one_or_none()
+        standing = None if latest is None or latest.withdrawn_at is not None else latest
+        outcome: StandingOutcome
+        if text is None or awaits is None:
+            if standing is None:
+                raise InvalidOperationException(
+                    operation, f"no alert of Pilot's stands on item {item.id}"
+                )
+            standing.withdrawn_at = datetime.now(UTC)
+            outcome = "withdrawn"
+        else:
+            self.db.add(
+                SendAlert(
+                    item_id=item.id,
+                    awaits_block_id=self._awaited(brain, item, awaits, operation).id,
+                    turn_id=self._turn_in_flight(brain),
+                    text=text,
+                )
+            )
+            outcome = "written" if standing is None else "replaced"
+        self.db.flush()
+        self.view_service.timeline_moved(project)
+        return outcome
+
+    def _awaited(self, brain: Brain, item: Item, awaits: str, operation: str) -> Block:
+        """The block `awaits` an alert on `item` names: a block of another
+        open item of the brain's project (DB 631)."""
+        awaited_id, local_id = _parts(awaits)
+        awaited = self._item(brain, awaited_id)
+        if awaited.id == item.id:
+            raise InvalidOperationException(
+                operation,
+                f"block {awaits} is of the item itself: an alert awaits an ask of"
+                " another item",
+            )
+        if awaited.done_at is not None:
+            raise InvalidOperationException(
+                operation,
+                f"item {awaited.id} is done: an alert awaits an ask of an open item",
+            )
+        block = self.db.scalars(
+            select(Block).where(
+                Block.document_id == awaited.id, Block.local_id == local_id
+            )
+        ).one_or_none()
+        if block is None:
+            raise RecordNotFoundException("Block", awaits)
+        return block
+
     def _prose(
         self,
         project: Project,
@@ -1050,6 +1341,19 @@ def _shape_refusal(kind: str, given: set[str]) -> str | None:
     if kind == WORK and len(given.intersection(PLACEMENTS)) != 1:
         return f"a {kind} item names exactly one of `repo` and `environment`"
     return None
+
+
+def _answered_by(block: Block, pilot: User) -> bool:
+    """Whether `pilot` answered the Block (DB 627): answered as
+    `pilot_dsl.Block.answered` reads it, a claim only once it is done, its
+    `by` Pilot's."""
+    claimed = (
+        block.kind_code is BlockKind.ACTION
+        and block.answer == dsl.CLAIM
+        and block.done_at is None
+    )
+    answered = block.done_at is not None or (block.answer is not None and not claimed)
+    return answered and block.answered_by_user_id == pilot.id
 
 
 def _fields(names: Sequence[str]) -> str:

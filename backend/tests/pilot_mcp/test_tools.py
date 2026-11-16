@@ -31,9 +31,11 @@ from app.models import (
     Environment,
     Item,
     ItemAttachment,
+    PilotNote,
     PlanTask,
     Project,
     ProjectMember,
+    SendAlert,
     Turn,
     UsageReading,
     User,
@@ -1429,6 +1431,138 @@ class TestAskWriter:
             f"Error executing tool ask_writer: Cannot ask the writer about block"
             f" {item.id}/Q2 because session {brain.id} is a chat session: the"
             " pre-ruling pass, a job's, asks"
+        )
+
+
+@pytest.mark.anyio
+class TestNote:
+    async def test_a_note_is_recorded_and_answers_what_it_did_to_its_place(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+        brain: models.Session,
+    ) -> None:
+        item = _registered_document(session, container, project, environment)
+
+        result = await call(
+            mcp_app,
+            "note",
+            {
+                "item": str(item.id),
+                "block": f"{item.id}/Q2",
+                "text": "The north lake froze last week.",
+                "suggested_answer": "The south lake",
+            },
+            path=STORE_PATH,
+        )
+
+        assert result.structuredContent == {"outcome": "written"}
+        [(request, _)] = routes.calls
+        assert str(request.url) == f"{API_URL}/tools/pilot-store/notes"
+        # What the call was not given is not sent.
+        assert json.loads(request.content) == {
+            "item": str(item.id),
+            "block": f"{item.id}/Q2",
+            "text": "The north lake froze last week.",
+            "suggested_answer": "The south lake",
+        }
+        [note] = session.scalars(select(PilotNote))
+        assert (note.text, note.suggested_answer, note.offer) == (
+            "The north lake froze last week.",
+            "The south lake",
+            None,
+        )
+        assert read_records(session, brain.id, limit=10) == []
+
+    async def test_a_refusal_is_the_routes_reason(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+        brain: models.Session,
+    ) -> None:
+        item = _registered_document(session, container, project, environment)
+
+        result = await call(mcp_app, "note", {"item": str(item.id)}, path=STORE_PATH)
+
+        assert routes.calls[-1][1].status_code == 409
+        assert error_text(result) == (
+            f"Error executing tool note: Cannot note {item.id} because no note of"
+            f" Pilot's stands on {item.id}"
+        )
+
+
+@pytest.mark.anyio
+class TestAlert:
+    async def test_an_alert_is_recorded_and_answers_what_it_did_to_the_items_alert(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+        brain: models.Session,
+    ) -> None:
+        first = _registered_document(session, container, project, environment)
+        item = container.document_service().bear_item(
+            project, "notice", "The build", brain, "# The build\n"
+        )
+        session.commit()
+
+        result = await call(
+            mcp_app,
+            "alert",
+            {
+                "item": str(item.id),
+                "text": "Answer the lake first.",
+                "awaits": f"{first.id}/Q1",
+            },
+            path=STORE_PATH,
+        )
+
+        assert result.structuredContent == {"outcome": "written"}
+        [(request, _)] = routes.calls
+        assert str(request.url) == f"{API_URL}/tools/pilot-store/alerts"
+        assert json.loads(request.content) == {
+            "item": str(item.id),
+            "text": "Answer the lake first.",
+            "awaits": f"{first.id}/Q1",
+        }
+        [alert] = session.scalars(select(SendAlert))
+        assert alert.text == "Answer the lake first."
+
+    async def test_a_refusal_is_the_routes_reason(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+        brain: models.Session,
+    ) -> None:
+        item = _registered_document(session, container, project, environment)
+
+        result = await call(
+            mcp_app,
+            "alert",
+            {"item": str(item.id), "awaits": f"{item.id}/Q1"},
+            path=STORE_PATH,
+        )
+
+        assert routes.calls[-1][1].status_code == 409
+        assert error_text(result) == (
+            f"Error executing tool alert: Cannot alert on item {item.id} because an"
+            " alert gives its `text` and the block it `awaits` together, or neither"
+            " to take it off"
         )
 
 

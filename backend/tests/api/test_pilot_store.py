@@ -23,8 +23,10 @@ from app.models import (
     Effect,
     Environment,
     Item,
+    PilotNote,
     Project,
     ResearchAssignment,
+    SendAlert,
     Turn,
     User,
     Wait,
@@ -57,6 +59,8 @@ CANCELLATIONS = "/tools/pilot-store/cancellations"
 STOPS = "/tools/pilot-store/stops"
 FINISH = "/tools/pilot-store/finish"
 WRITER_QUESTIONS = "/tools/pilot-store/writer-questions"
+NOTES = "/tools/pilot-store/notes"
+ALERTS = "/tools/pilot-store/alerts"
 
 TOKEN = "brain-token"
 
@@ -223,7 +227,7 @@ def _error(response: Any) -> str:
 
 
 class TestPilotStoreRoutes:
-    def test_the_surface_is_eight_routes_outside_the_api(self, app: Flask) -> None:
+    def test_the_surface_is_ten_routes_outside_the_api(self, app: Flask) -> None:
         routes = sorted(
             (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
             for rule in app.url_map.iter_rules()
@@ -231,12 +235,14 @@ class TestPilotStoreRoutes:
         )
 
         assert routes == [
+            (ALERTS, ["POST"]),
             (ANSWERS, ["POST"]),
             (ATTACHMENTS, ["POST"]),
             (CANCELLATIONS, ["POST"]),
             (FINISH, ["POST"]),
             (ITEMS, ["POST"]),
             (MARKS, ["POST"]),
+            (NOTES, ["POST"]),
             (STOPS, ["POST"]),
             (WRITER_QUESTIONS, ["POST"]),
         ]
@@ -1174,6 +1180,241 @@ class TestAskWriter:
         assert again.status_code == 409
         assert _error(again).endswith(
             "because its writer was asked about block Q1 already"
+        )
+
+
+class TestNote:
+    """`POST /tools/pilot-store/notes`: `note(item, block?, text?,
+    suggested_answer?, suggested_note?, offer?)` (F86.10)."""
+
+    def test_a_note_is_200_with_what_it_did_to_its_place(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _decision(container, project, run)
+
+        def note(**fields: str) -> Any:
+            return client.post(
+                NOTES,
+                json={"item": str(item.id), "block": f"{item.id}/D1"} | fields,
+                headers=_bearer(),
+            )
+
+        written = note(text="You ruled one tent.", suggested_answer="Tunnel")
+        replaced = note(suggested_note="One tent")
+        withdrawn = note()
+
+        assert [
+            response.status_code for response in (written, replaced, withdrawn)
+        ] == [
+            200,
+            200,
+            200,
+        ]
+        assert [response.get_json() for response in (written, replaced, withdrawn)] == [
+            {"outcome": "written"},
+            {"outcome": "replaced"},
+            {"outcome": "withdrawn"},
+        ]
+        assert [
+            (
+                note.text,
+                note.suggested_answer,
+                note.suggested_note,
+                note.withdrawn_at is None,
+            )
+            for note in session.scalars(select(PilotNote).order_by(PilotNote.id))
+        ] == [
+            ("You ruled one tent.", "Tunnel", None, True),
+            (None, None, "One tent", False),
+        ]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"block": "{item}/D1", "text": "Why."},
+            {"item": "{item}", "block": "D1", "text": "Why."},
+            {"item": "{item}", "text": ""},
+            {"item": "{item}", "text": "Why.", "urgent": "true"},
+        ],
+        ids=["no-item", "a-local-id", "an-empty-text", "an-unknown-field"],
+    )
+    def test_a_body_that_is_not_a_note_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, str],
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _decision(container, project, run)
+
+        response = client.post(
+            NOTES,
+            json={key: value.format(item=item.id) for key, value in body.items()},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 400
+
+    def test_a_block_the_item_lacks_is_404_and_a_refusal_409_with_its_reason(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _decision(container, project, run)
+        # Committed, so that a refused call's rollback keeps it.
+        session.commit()
+
+        lacking = client.post(
+            NOTES,
+            json={"item": str(item.id), "block": f"{item.id}/D9", "text": "Why."},
+            headers=_bearer(),
+        )
+        refused = client.post(
+            NOTES,
+            json={"item": str(item.id), "block": f"{item.id}/D1", "offer": "Pitch"},
+            headers=_bearer(),
+        )
+
+        assert lacking.status_code == 404
+        assert refused.status_code == 409
+        assert _error(refused) == (
+            f"Cannot note {item.id}/D1 because block D1 is a decision: an offer is"
+            " on an open action alone"
+        )
+
+    def test_a_work_items_session_is_403(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "work")
+        item = _decision(container, project, run)
+
+        response = client.post(
+            NOTES, json={"item": str(item.id), "text": "Why."}, headers=_bearer()
+        )
+
+        assert response.status_code == 403
+
+
+class TestAlert:
+    """`POST /tools/pilot-store/alerts`: `alert(item, text?, awaits?)`
+    (F86.11)."""
+
+    def test_an_alert_is_200_with_what_it_did_to_the_items_alert(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        first = _decision(container, project, run)
+        item = _registered(session, container, project, environment)
+
+        written = client.post(
+            ALERTS,
+            json={
+                "item": str(item.id),
+                "text": "Answer the tent first.",
+                "awaits": f"{first.id}/D1",
+            },
+            headers=_bearer(),
+        )
+        withdrawn = client.post(ALERTS, json={"item": str(item.id)}, headers=_bearer())
+
+        assert (written.status_code, written.get_json()) == (
+            200,
+            {"outcome": "written"},
+        )
+        assert (withdrawn.status_code, withdrawn.get_json()) == (
+            200,
+            {"outcome": "withdrawn"},
+        )
+        [alert] = session.scalars(select(SendAlert))
+        assert (alert.text, alert.withdrawn_at is not None) == (
+            "Answer the tent first.",
+            True,
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"text": "First.", "awaits": "{first}/D1"},
+            {"item": "{item}", "text": "First.", "awaits": "D1"},
+            {"item": "{item}", "text": "", "awaits": "{first}/D1"},
+        ],
+        ids=["no-item", "a-local-id", "an-empty-text"],
+    )
+    def test_a_body_that_is_not_an_alert_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, str],
+    ) -> None:
+        run = _brain(session, project, environment)
+        first = _decision(container, project, run)
+        item = _registered(session, container, project, environment)
+
+        response = client.post(
+            ALERTS,
+            json={
+                key: value.format(item=item.id, first=first.id)
+                for key, value in body.items()
+            },
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 400
+
+    def test_an_awaited_block_its_item_lacks_is_404_and_one_alone_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        first = _decision(container, project, run)
+        item = _registered(session, container, project, environment)
+        # Committed, so that a refused call's rollback keeps it.
+        session.commit()
+
+        lacking = client.post(
+            ALERTS,
+            json={"item": str(item.id), "text": "First.", "awaits": f"{first.id}/D9"},
+            headers=_bearer(),
+        )
+        alone = client.post(
+            ALERTS, json={"item": str(item.id), "text": "First."}, headers=_bearer()
+        )
+
+        assert lacking.status_code == 404
+        assert alone.status_code == 409
+        assert _error(alone).endswith(
+            "because an alert gives its `text` and the block it `awaits` together,"
+            " or neither to take it off"
         )
 
 

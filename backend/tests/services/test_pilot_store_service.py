@@ -1,7 +1,8 @@
 """`pilot-store`, the brain's tools (TD §4.5, F86): the gate that admits a
-chat's or a job's Session while its turn runs, and the seven tools that act on
-its project, each call that changed the record writing its Effect (F41) and
-`ask_writer` its Writer Question (DB decision 59)."""
+chat's or a job's Session while its turn runs, and the tools that act on its
+project, each call that changed the record writing its Effect (F41),
+`ask_writer` its Writer Question (DB decision 59), and `note` and `alert`
+their Pilot Note and Send Alert (DB decision 84)."""
 
 import functools
 import uuid
@@ -35,10 +36,12 @@ from app.models import (
     Environment,
     Item,
     ItemAttachment,
+    PilotNote,
     PlanTask,
     Project,
     ProjectTransition,
     ResearchAssignment,
+    SendAlert,
     Turn,
     User,
     Wait,
@@ -72,12 +75,14 @@ from app.services.pilot_store_service import (
 from app.services.session_record_service import read_records
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
+from app.services.working_on import Reading, holds
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.debriefs import placed_notice
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise, metric_value
+from tests.support.working_on import Camp
 
 TOKEN = "brain-token"
 
@@ -2187,6 +2192,837 @@ class TestPilotStoreServiceAskWriter:
             " this pass asks nothing"
         )
         assert list(session.scalars(select(WriterQuestion))) == []
+
+
+NOTED = """---
+title: Camp
+---
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+recommend: Dome
+```
+
+```action id=A1
+```
+
+```action id=A2
+options:
+  - Restart
+  - Leave it
+```
+
+```question id=Q1
+answer: The lake
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+
+```action id=A3
+answer: Pilot does it
+by: agent
+at: 2026-10-12T09:30:00Z
+done: 2026-10-12T10:00:00Z
+```
+
+```action id=A4
+answer: Pilot does it
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+"""
+"""Asks a note meets: a decision with a recommendation, an action with no
+options, one with options, a question Pilot answered, a claimed action Pilot
+did and one it has not done yet."""
+
+CLAIMED = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-11-02T09:00:00Z
+```
+"""
+"""An action the pass claimed, the document's one block."""
+
+
+def _noted(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    run: models.Session,
+) -> Item:
+    return _bear(container, project, run, "document", "Camp", NOTED)
+
+
+def _notes(db: DbSession) -> list[tuple[Any, ...]]:
+    """Every Pilot Note in the order written: its place, its four, its turn
+    and whether it is withdrawn."""
+    return [
+        (
+            note.item_id,
+            note.block_id,
+            note.text,
+            note.suggested_answer,
+            note.suggested_note,
+            note.offer,
+            note.turn_id,
+            note.withdrawn_at is not None,
+        )
+        for note in db.scalars(select(PilotNote).order_by(PilotNote.id))
+    ]
+
+
+def _turn_id(db: DbSession, run: models.Session) -> int:
+    return db.scalars(select(Turn.id).where(Turn.session_id == run.id)).one()
+
+
+def _with_turn(db: DbSession, run: models.Session) -> models.Session:
+    """`run` with a Turn in flight, as its brief starts it."""
+    db.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message="Go on.",
+            started_at=datetime.now(UTC),
+            cause_code=TurnCause.BRIEF,
+        )
+    )
+    db.flush()
+    return run
+
+
+def _note(
+    container: ServiceContainer,
+    run: models.Session,
+    item: Item,
+    local_id: str | None = None,
+    **fields: str,
+) -> str:
+    """`note` as the brain calls it, the four absent but those given."""
+    return _service(container).note(
+        _admitted(run),
+        item.id,
+        None if local_id is None else f"{item.id}/{local_id}",
+        text=fields.get("text"),
+        suggested_answer=fields.get("suggested_answer"),
+        suggested_note=fields.get("suggested_note"),
+        offer=fields.get("offer"),
+    )
+
+
+class TestPilotStoreServiceNote:
+    def test_a_note_on_a_block_is_recorded_with_its_turn_and_no_effect(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        chat = _brain(session, project, environment, "chat")
+        item = _noted(session, container, project, chat)
+        published = session.get_one(Document, item.id).published_text
+
+        written = _note(
+            container,
+            chat,
+            item,
+            "D1",
+            text="You ruled one tent last week.",
+            suggested_answer="Tunnel",
+            suggested_note="One tent, as ruled",
+        )
+
+        assert written == "written"
+        assert _notes(session) == [
+            (
+                item.id,
+                _block(session, item, "D1").id,
+                "You ruled one tent last week.",
+                "Tunnel",
+                "One tent, as ruled",
+                None,
+                _turn_id(session, chat),
+                False,
+            )
+        ]
+        # Neither the text nor the block's answer moves, and nothing goes on
+        # the session's log (DB 632).
+        assert session.get_one(Document, item.id).published_text == published
+        assert _block(session, item, "D1").answer is None
+        assert _effects(session) == []
+        assert read_records(session, chat.id, limit=10) == []
+
+    def test_a_later_note_replaces_the_one_standing_which_stays_on_the_record(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+
+        first = _note(container, job, item, "D1", suggested_answer="Tunnel")
+        second = _note(container, job, item, "D1", text="The store keeps a month.")
+
+        assert (first, second) == ("written", "replaced")
+        assert [note[2:4] for note in _notes(session)] == [
+            (None, "Tunnel"),
+            ("The store keeps a month.", None),
+        ]
+
+    def test_a_call_that_gives_none_of_the_four_withdraws_the_standing_note(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        _note(container, job, item, "D1", text="Kept.")
+        _note(container, job, item, "D1", text="Standing.")
+
+        assert _note(container, job, item, "D1") == "withdrawn"
+
+        assert [(note[2], note[7]) for note in _notes(session)] == [
+            ("Kept.", False),
+            ("Standing.", True),
+        ]
+        with pytest.raises(InvalidOperationException) as refused:
+            _note(container, job, item, "D1")
+        assert refused.value.message == (
+            f"Cannot note {item.id}/D1 because no note of Pilot's stands on"
+            f" {item.id}/D1"
+        )
+        # None stands, so the next is written, not a replacement.
+        assert _note(container, job, item, "D1", text="Anew.") == "written"
+
+    def test_a_note_on_the_item_as_a_whole_is_a_place_of_its_own(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        _note(container, job, item, "D1", text="On the decision.")
+
+        assert _note(container, job, item, text="The wrap-up closed E3.") == "written"
+        assert _note(container, job, item, "A1", text="On the action.") == "written"
+
+        assert [(note[1], note[2]) for note in _notes(session)] == [
+            (_block(session, item, "D1").id, "On the decision."),
+            (None, "The wrap-up closed E3."),
+            (_block(session, item, "A1").id, "On the action."),
+        ]
+        assert _note(container, job, item) == "withdrawn"
+        assert [note[7] for note in _notes(session)] == [False, True, False]
+
+    @pytest.mark.parametrize("field", ["suggested_answer", "suggested_note", "offer"])
+    def test_a_note_on_the_item_as_a_whole_holds_text_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        field: str,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _note(container, job, item, text="Closed E3.", **{field: "Dome"})
+
+        assert refused.value.message == (
+            f"Cannot note {item.id} because a note on the item as a whole holds"
+            " `text` alone"
+        )
+        assert _notes(session) == []
+
+    def test_suggestions_and_an_offer_go_on_the_blocks_that_take_them(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A suggested answer on a decision and on an action with options, a
+        suggested note alone and an offer on an open action (DB 626)."""
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+
+        _note(container, job, item, "A2", suggested_answer="Leave it")
+        _note(container, job, item, "A1", suggested_note="It never worked here")
+        _note(container, job, item, "A1", offer="Grow the volume to 20Gi")
+
+        assert [note[3:6] for note in _notes(session)] == [
+            ("Leave it", None, None),
+            (None, "It never worked here", None),
+            (None, None, "Grow the volume to 20Gi"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("local_id", "fields", "reason"),
+        [
+            (
+                "A1",
+                {"suggested_answer": "Done"},
+                "action A1 has no options: a suggested answer is on a block that"
+                " takes an answer",
+            ),
+            (
+                "D1",
+                {"offer": "Pitch the dome"},
+                "block D1 is a decision: an offer is on an open action alone",
+            ),
+        ],
+        ids=["an-answer-on-an-action-with-no-options", "an-offer-on-a-decision"],
+    )
+    def test_a_field_the_block_does_not_take_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        local_id: str,
+        fields: dict[str, str],
+        reason: str,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _note(container, job, item, local_id, text="Why.", **fields)
+
+        assert refused.value.message == (
+            f"Cannot note {item.id}/{local_id} because {reason}"
+        )
+        assert _notes(session) == []
+
+    def test_an_offer_on_an_action_a_person_did_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        container.record_service().done_action(
+            session.get_one(Document, item.id), "A1", person, note="Grew it"
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _note(container, job, item, "A1", offer="Grow the volume")
+
+        assert refused.value.message.endswith(
+            "because action A1 is done: an offer is on an open action alone"
+        )
+        # The person's Done is no answer of Pilot's: the action takes a note.
+        assert _note(container, job, item, "A1", text="It filled again.") == "written"
+
+    @pytest.mark.parametrize(
+        "local_id", ["Q1", "A3"], ids=["an-answer", "a-claim-done"]
+    )
+    def test_a_block_pilot_answered_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        local_id: str,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _note(container, job, item, local_id, text="Why.")
+
+        assert refused.value.message == (
+            f"Cannot note {item.id}/{local_id} because block {local_id} is answered"
+            " by Pilot"
+        )
+
+    def test_a_claimed_action_not_yet_done_is_no_answer_of_pilots(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A claim counts as answered only once it is done, as the DSL
+        reads it (DB 627)."""
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+
+        assert _note(container, job, item, "A4", text="Its work left it undone.") == (
+            "written"
+        )
+
+    def test_a_block_a_person_answered_takes_a_note(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        container.record_service().answer(
+            session.get_one(Document, item.id), "D1", person, "Tunnel"
+        )
+
+        assert _note(container, job, item, "D1", text="The tunnel leaks.") == "written"
+
+    def test_an_item_with_no_block_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        notice = _bear(container, project, job, "notice", "The lake is open", NOTICE)
+        work = _work(session, container, project)
+
+        for item in (notice, session.get_one(Item, work.id)):
+            with pytest.raises(InvalidOperationException) as refused:
+                _note(container, job, item, text="Why.")
+            assert refused.value.message == (
+                f"Cannot note {item.id} because item {item.id} has no block"
+            )
+
+    def test_a_done_item_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        container.record_service().close_unanswered(
+            _opened(session, project), person, datetime.now(UTC)
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _note(container, job, item, "D1", text="Why.")
+
+        assert refused.value.message == (
+            f"Cannot note {item.id}/D1 because item {item.id} is done"
+        )
+
+    def test_an_item_of_another_project_and_a_block_its_item_lacks_are_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        theirs = _noted(session, container, _other_project(session, person), job)
+        item = _noted(session, container, project, job)
+
+        with pytest.raises(RecordNotFoundException) as other:
+            _note(container, job, theirs, "D1", text="Why.")
+        with pytest.raises(RecordNotFoundException) as lacking:
+            _note(container, job, item, "D9", text="Why.")
+
+        assert other.value.message == f"Item {theirs.id} was not found"
+        assert lacking.value.message == f"Block {item.id}/D9 was not found"
+
+    def test_a_block_of_another_item_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        other = _noted(session, container, project, job)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).note(
+                _admitted(job),
+                item.id,
+                f"{other.id}/D1",
+                text="Why.",
+                suggested_answer=None,
+                suggested_note=None,
+                offer=None,
+            )
+
+        assert refused.value.message == (
+            f"Cannot note {other.id}/D1 because block {other.id}/D1 is not of item"
+            f" {item.id}"
+        )
+
+    def test_a_session_whose_turn_has_ended_writes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        for turn in session.scalars(select(Turn).where(Turn.session_id == job.id)):
+            turn.ended_at = datetime.now(UTC)
+
+        with pytest.raises(AuthorizationException) as refused:
+            _note(container, job, item, "D1", text="Why.")
+
+        assert refused.value.message == (
+            f"Cannot call pilot-store because session {job.id} has no turn running"
+        )
+
+    def test_the_timeline_moves_once_the_note_commits(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        brain, item_id, project_id = _admitted(job), item.id, project.id
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            _service(container).note(
+                brain,
+                item_id,
+                f"{item_id}/D1",
+                text="Why.",
+                suggested_answer=None,
+                suggested_note=None,
+                offer=None,
+            )
+
+        assert ProjectChanged(project_id) in engine_events
+
+
+class TestPilotStoreServiceNoteOnAHeldBlock:
+    """A block a run holds (DB 295) takes a note from the job after the turn
+    of one of that run's Works alone, a Retry of it included: the job whose
+    plan notes a claimed action its work left undone, which the run holds
+    until that job ends."""
+
+    @pytest.fixture
+    def camp(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> Camp:
+        return Camp(container, session)
+
+    def _held(self, camp: Camp) -> tuple[Item, models.Session]:
+        """A claimed action the work item `doing` holds, its turn ended and
+        the job after it running."""
+        writer = camp.worker()
+        cut_over = camp.registered(writer, CLAIMED)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+        camp.ended(doing)
+        return cut_over, doing
+
+    def test_the_job_after_the_holding_runs_turn_notes_it(self, camp: Camp) -> None:
+        cut_over, doing = self._held(camp)
+        job = _with_turn(camp.session, camp.job_after(doing))
+        assert holds(Reading(camp.session), [cut_over.id]).held.keys() == {
+            camp.block(cut_over, "A1").id
+        }
+
+        written = _note(
+            camp.container,
+            job,
+            cut_over,
+            "A1",
+            text="The rotation needs the vault's admin; its Done is yours.",
+        )
+
+        assert written == "written"
+
+    def test_a_retry_of_that_job_notes_it(self, camp: Camp) -> None:
+        cut_over, doing = self._held(camp)
+        job = camp.job_after(doing, SessionState.FAILED)
+        retry = _with_turn(camp.session, camp.retried(job))
+
+        assert _note(camp.container, retry, cut_over, "A1", text="Undone.") == (
+            "written"
+        )
+
+    def test_a_chat_and_another_runs_job_are_refused(self, camp: Camp) -> None:
+        cut_over, doing = self._held(camp)
+        camp.job_after(doing)
+        chat = _brain(camp.session, camp.project, camp.environment)
+        other = _with_turn(camp.session, camp.job_after(camp.worker(SessionState.IDLE)))
+
+        for brain in (chat, other):
+            with pytest.raises(InvalidOperationException) as refused:
+                _note(camp.container, brain, cut_over, "A1", text="Undone.")
+            assert refused.value.message == (
+                f"Cannot note {cut_over.id}/A1 because block A1 is held by another"
+                " run of Pilot's"
+            )
+        assert _notes(camp.session) == []
+
+    def test_once_the_run_hands_it_back_any_session_notes_it(self, camp: Camp) -> None:
+        cut_over, doing = self._held(camp)
+        camp.ended(camp.job_after(doing))
+        chat = _brain(camp.session, camp.project, camp.environment)
+
+        assert _note(camp.container, chat, cut_over, "A1", text="Undone.") == (
+            "written"
+        )
+
+
+def _alerts(db: DbSession) -> list[tuple[Any, ...]]:
+    """Every Send Alert in the order written: its item, the block it awaits,
+    its text, its turn and whether it is withdrawn."""
+    return [
+        (
+            alert.item_id,
+            alert.awaits_block_id,
+            alert.text,
+            alert.turn_id,
+            alert.withdrawn_at is not None,
+        )
+        for alert in db.scalars(select(SendAlert).order_by(SendAlert.id))
+    ]
+
+
+def _alert(
+    container: ServiceContainer,
+    run: models.Session,
+    item: Item,
+    text: str | None = None,
+    awaits: str | None = None,
+) -> str:
+    return _service(container).alert(_admitted(run), item.id, text=text, awaits=awaits)
+
+
+class TestPilotStoreServiceAlert:
+    def test_an_alert_is_recorded_with_its_turn_awaiting_another_items_block(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        first = _bear(container, project, job, "decision", "Which tent?", DECISION)
+        published = session.get_one(Document, item.id).published_text
+
+        written = _alert(
+            container,
+            job,
+            item,
+            "Answer the tent first: sending starts the build.",
+            f"{first.id}/D1",
+        )
+
+        assert written == "written"
+        assert _alerts(session) == [
+            (
+                item.id,
+                _block(session, first, "D1").id,
+                "Answer the tent first: sending starts the build.",
+                _turn_id(session, job),
+                False,
+            )
+        ]
+        assert session.get_one(Document, item.id).published_text == published
+        assert _effects(session) == []
+
+    def test_a_later_alert_replaces_the_one_standing_and_neither_withdraws_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        chat = _brain(session, project, environment, "chat")
+        item = _noted(session, container, project, chat)
+        first = _bear(container, project, chat, "decision", "Which tent?", DECISION)
+
+        outcomes = [
+            _alert(container, chat, item, "Answer the tent first.", f"{first.id}/D1"),
+            _alert(container, chat, item, "The tent, then send.", f"{first.id}/D1"),
+            _alert(container, chat, item),
+        ]
+
+        assert outcomes == ["written", "replaced", "withdrawn"]
+        assert [(alert[2], alert[4]) for alert in _alerts(session)] == [
+            ("Answer the tent first.", False),
+            ("The tent, then send.", True),
+        ]
+        with pytest.raises(InvalidOperationException) as refused:
+            _alert(container, chat, item)
+        assert refused.value.message == (
+            f"Cannot alert on item {item.id} because no alert of Pilot's stands on"
+            f" item {item.id}"
+        )
+
+    @pytest.mark.parametrize(
+        ("text", "awaits"),
+        [("Answer it first.", None), (None, "{first}/D1")],
+        ids=["a-text-alone", "an-awaited-block-alone"],
+    )
+    def test_a_text_and_an_awaited_block_go_together(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        text: str | None,
+        awaits: str | None,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        first = _bear(container, project, job, "decision", "Which tent?", DECISION)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _alert(
+                container,
+                job,
+                item,
+                text,
+                None if awaits is None else awaits.format(first=first.id),
+            )
+
+        assert refused.value.message == (
+            f"Cannot alert on item {item.id} because an alert gives its `text` and"
+            " the block it `awaits` together, or neither to take it off"
+        )
+
+    def test_an_item_that_is_no_prose_item_or_is_done_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        work = session.get_one(Item, _work(session, container, project).id)
+        item = _noted(session, container, project, job)
+        first = _bear(container, project, job, "decision", "Which tent?", DECISION)
+
+        with pytest.raises(InvalidOperationException) as no_prose:
+            _alert(container, job, work, "Answer it first.", f"{first.id}/D1")
+        container.record_service().close_unanswered(
+            _opened(session, project), person, datetime.now(UTC)
+        )
+        with pytest.raises(InvalidOperationException) as done:
+            _alert(container, job, item, "Answer it first.", f"{first.id}/D1")
+
+        assert no_prose.value.message.endswith(
+            f"because item {work.id} is a work item, no prose item"
+        )
+        assert done.value.message.endswith(f"because item {item.id} is done")
+
+    def test_an_awaited_block_of_the_item_itself_or_of_a_done_item_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        first = _bear(container, project, job, "decision", "Which tent?", DECISION)
+        first.done_at = datetime.now(UTC)
+        first.done_cause_code = "marked"
+        first.done_by_user_id = person.id
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as itself:
+            _alert(container, job, item, "Answer it first.", f"{item.id}/D1")
+        with pytest.raises(InvalidOperationException) as done:
+            _alert(container, job, item, "Answer it first.", f"{first.id}/D1")
+
+        assert itself.value.message.endswith(
+            f"because block {item.id}/D1 is of the item itself: an alert awaits an"
+            " ask of another item"
+        )
+        assert done.value.message.endswith(
+            f"because item {first.id} is done: an alert awaits an ask of an open item"
+        )
+        assert _alerts(session) == []
+
+    def test_an_awaited_block_not_of_the_project_or_not_held_is_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        theirs = _bear(
+            container,
+            _other_project(session, person),
+            job,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        first = _bear(container, project, job, "decision", "Which tent?", DECISION)
+        work = _work(session, container, project)
+
+        with pytest.raises(RecordNotFoundException) as other:
+            _alert(container, job, item, "First.", f"{theirs.id}/D1")
+        with pytest.raises(RecordNotFoundException) as lacking:
+            _alert(container, job, item, "First.", f"{first.id}/D9")
+        with pytest.raises(RecordNotFoundException) as blockless:
+            _alert(container, job, item, "First.", f"{work.id}/D1")
+
+        assert other.value.message == f"Item {theirs.id} was not found"
+        assert lacking.value.message == f"Block {first.id}/D9 was not found"
+        assert blockless.value.message == f"Block {work.id}/D1 was not found"
+
+    def test_the_timeline_moves_once_the_alert_commits(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _brain(session, project, environment, "job")
+        item = _noted(session, container, project, job)
+        first = _bear(container, project, job, "decision", "Which tent?", DECISION)
+        brain, item_id, awaits, project_id = (
+            _admitted(job),
+            item.id,
+            f"{first.id}/D1",
+            project.id,
+        )
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            _service(container).alert(brain, item_id, text="First.", awaits=awaits)
+
+        assert ProjectChanged(project_id) in engine_events
 
 
 ELSEWHERE = "example-elsewhere"

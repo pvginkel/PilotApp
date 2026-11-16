@@ -479,6 +479,35 @@ _BLOCK = {
 
 _ITEM = {"format": "uuid", "title": "Item", "type": "string"}
 
+
+def _optional_text(title: str, description: str) -> dict[str, Any]:
+    """An optional parameter of words, none or one character or more."""
+    return {
+        "anyOf": [{"minLength": 1, "type": "string"}, {"type": "null"}],
+        "default": None,
+        "description": description,
+        "title": title,
+    }
+
+
+_STANDING = {
+    "description": "What the call did to the note or the alert standing in its place.",
+    "properties": {
+        "outcome": {
+            "description": (
+                "`written` where none stood, `replaced` where one stood, `withdrawn`"
+                " where the call took it off"
+            ),
+            "enum": ["written", "replaced", "withdrawn"],
+            "title": "Outcome",
+            "type": "string",
+        }
+    },
+    "required": ["outcome"],
+    "title": "Standing",
+    "type": "object",
+}
+
 _RECORDED = {
     "description": "What the call changed.",
     "properties": {
@@ -1091,6 +1120,107 @@ STORE_SURFACE = {
         " asked about already, a call from the chat, or a call in a pass that"
         " asks nothing is refused with the reason, and nothing is recorded."
         " Answers `{blocks}`, the document's blocks its writer is asked about.",
+    ),
+    "note": (
+        {
+            "properties": {
+                "item": {**_ITEM, "description": "The document's item id"},
+                "block": {
+                    "anyOf": [
+                        {"pattern": _BLOCK["pattern"], "type": "string"},
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                    "description": (
+                        "The block's id, `<item id>/<local id>`, a block of the item;"
+                        " leave it out for a note on the document as a whole"
+                    ),
+                    "title": "Block",
+                },
+                "text": _optional_text(
+                    "Text",
+                    "What you know that bears on the answer and the document does"
+                    " not say, in a few lines of Markdown",
+                ),
+                "suggested_answer": _optional_text(
+                    "Suggested Answer",
+                    "The answer you would give where it is not the one the writer"
+                    " recommends: an option's label, `Agree`, `Yes`, `No` or free"
+                    " words",
+                ),
+                "suggested_note": _optional_text(
+                    "Suggested Note",
+                    "The note you suggest beside that answer, or for an action's Done",
+                ),
+                "offer": _optional_text(
+                    "Offer",
+                    "The work you would do about an open action on the person's"
+                    " word, in a line: the action itself or something beside it",
+                ),
+            },
+            "required": ["item"],
+            "title": "noteArguments",
+            "type": "object",
+        },
+        _STANDING,
+        "Put your note on a block of an open document of your project, an ask a"
+        " person answers, or without `block` on the document as a whole: what you"
+        " know that bears on the answer and the document does not say. Write one"
+        " only by exception: a `suggested_answer`, with its `suggested_note`, where"
+        " you would answer otherwise than the writer recommends; `text` alone where"
+        " you know something that could change the answer; an `offer` where you"
+        " would do work about an open action on the person's word. None to say a"
+        " block is fine or that you agree. The note stands beside the document,"
+        " never in its text, and nothing of it goes back to the writer. A later"
+        " note on the same block, or on the document as a whole, replaces the one"
+        " standing there; a call with none of `text`, `suggested_answer`,"
+        " `suggested_note` and `offer` takes it off. An item not of your project,"
+        " one with no block or that is done, a block not of the item, one you"
+        " answered, one a work item's run holds unless you are the job after that"
+        " run's turn, a suggested answer on an action with no options, an offer on"
+        " anything but an open action, anything but `text` on the document as a"
+        " whole, or a call that takes off a note where none stands is refused with"
+        " the reason, and nothing is written. Answers `{outcome}`: `written`,"
+        " `replaced` or `withdrawn`.",
+    ),
+    "alert": (
+        {
+            "properties": {
+                "item": {**_ITEM, "description": "The document's item id"},
+                "text": _optional_text(
+                    "Text",
+                    "What to answer first and what this document's Send starts, in a"
+                    " line or two",
+                ),
+                "awaits": {
+                    "anyOf": [
+                        {"pattern": _BLOCK["pattern"], "type": "string"},
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                    "description": (
+                        "The ask to answer first, `<item id>/<local id>`, a block of"
+                        " another open item of your project"
+                    ),
+                    "title": "Awaits",
+                },
+            },
+            "required": ["item"],
+            "title": "alertArguments",
+            "type": "object",
+        },
+        _STANDING,
+        "Put an alert on an open document of your project whose Send starts work"
+        " that another open ask must come before: `awaits` names that ask and"
+        " `text` says what to answer first and what the Send starts, the two given"
+        " together. It stops no Send. A later alert on the same document replaces"
+        " the one standing; a call with neither takes it off. An item not of your"
+        " project, a work item, a wait, a debrief's notice or an item that is done,"
+        " an `awaits` of the item itself, of an item not of your project or that is"
+        " done, or that its item does not hold, `text` or `awaits` alone, or a call"
+        " that takes off an alert where none stands is refused with the reason, and"
+        " nothing is written. Answers `{outcome}`: `written`, `replaced` or"
+        " `withdrawn`.",
     ),
 }
 

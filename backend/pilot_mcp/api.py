@@ -357,6 +357,17 @@ class Asked(BaseModel):
     )
 
 
+class Standing(BaseModel):
+    """What the call did to the note or the alert standing in its place."""
+
+    outcome: Literal["written", "replaced", "withdrawn"] = Field(
+        description=(
+            "`written` where none stood, `replaced` where one stood, `withdrawn`"
+            " where the call took it off"
+        )
+    )
+
+
 class Step(BaseModel):
     """A step of your work item's list."""
 
@@ -1077,6 +1088,41 @@ class PilotStoreApi(_Routes):
         body = {"block": block, "question": question}
         answer = await self._post("writer-questions", authorization, tool_use_id, body)
         return Asked.model_validate(answer)
+
+    async def note(
+        self,
+        authorization: str,
+        tool_use_id: str | None,
+        *,
+        item: uuid.UUID,
+        block: str | None,
+        text: str | None,
+        suggested_answer: str | None,
+        suggested_note: str | None,
+        offer: str | None,
+    ) -> Standing:
+        body = {"item": str(item)} | _given(
+            block=block,
+            text=text,
+            suggested_answer=suggested_answer,
+            suggested_note=suggested_note,
+            offer=offer,
+        )
+        answer = await self._post("notes", authorization, tool_use_id, body)
+        return Standing.model_validate(answer)
+
+    async def alert(
+        self,
+        authorization: str,
+        tool_use_id: str | None,
+        *,
+        item: uuid.UUID,
+        text: str | None,
+        awaits: str | None,
+    ) -> Standing:
+        body = {"item": str(item)} | _given(text=text, awaits=awaits)
+        answer = await self._post("alerts", authorization, tool_use_id, body)
+        return Standing.model_validate(answer)
 
 
 class PilotProjectsApi:

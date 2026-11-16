@@ -17,13 +17,16 @@ from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.pilot_store import (
     AddedSchema,
     AddItemRequestSchema,
+    AlertRequestSchema,
     AnswerRequestSchema,
     AttachedSchema,
     AttachRequestSchema,
     CancelAskRequestSchema,
     FinishRequestSchema,
     MarkRequestSchema,
+    NoteRequestSchema,
     RecordedSchema,
+    StandingSchema,
     StopRequestSchema,
     WriterQuestionRequestSchema,
     WriterQuestionsSchema,
@@ -421,6 +424,102 @@ def ask_writer(
     body = WriterQuestionRequestSchema.model_validate(request.get_json())
     blocks = pilot_store_service.ask_writer(g.brain, body.block, body.question)
     return WriterQuestionsSchema(blocks=blocks).model_dump(mode="json"), 201
+
+
+@pilot_store_bp.route("/notes", methods=["POST"])
+@public
+@api.validate(
+    json=NoteRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=StandingSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def note(
+    pilot_store_service: PilotStoreService = Provide[
+        ServiceContainer.pilot_store_service
+    ],
+) -> Any:
+    """`note(item, block?, text?, suggested_answer?, suggested_note?, offer?)`
+    (F86.10, F168): Pilot's note on a block of an open prose item, or on the
+    item as a whole, recorded with the session's turn; a later one in the
+    same place replaces the one standing, and a call that gives none of the
+    four takes it off.
+
+    Returns:
+        200: What the call did to the note standing in its place
+        400: The body is not an item, a block's id and the note's fields
+        401: No bearer, or one no session has
+        403: The bearer's session is not a chat's or a job's, or has no turn
+            running
+        404: The item is not of the session's project, or its document has
+            no such block
+        409: The item has no block or is done, the block is of another item,
+            is answered by Pilot or held by another run, a suggested answer
+            on an action with no options, an offer on anything but an open
+            action, anything but `text` on the item as a whole, or a
+            withdrawal where no note stands: the reason
+    """
+    body = NoteRequestSchema.model_validate(request.get_json())
+    outcome = pilot_store_service.note(
+        g.brain,
+        body.item,
+        body.block,
+        text=body.text,
+        suggested_answer=body.suggested_answer,
+        suggested_note=body.suggested_note,
+        offer=body.offer,
+    )
+    return StandingSchema(outcome=outcome).model_dump(mode="json"), 200
+
+
+@pilot_store_bp.route("/alerts", methods=["POST"])
+@public
+@api.validate(
+    json=AlertRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=StandingSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def alert(
+    pilot_store_service: PilotStoreService = Provide[
+        ServiceContainer.pilot_store_service
+    ],
+) -> Any:
+    """`alert(item, text?, awaits?)` (F86.11, F168.6): Pilot's alert on an
+    open prose item that another open ask, the block it awaits, comes before
+    its Send, recorded with the session's turn; a later one replaces the one
+    standing, and a call that gives neither takes it off.
+
+    Returns:
+        200: What the call did to the alert standing on the item
+        400: The body is not an item, a text and a block's id
+        401: No bearer, or one no session has
+        403: The bearer's session is not a chat's or a job's, or has no turn
+            running
+        404: The item or the awaited block's item is not of the session's
+            project, or that block's document has no such block
+        409: One of `text` and `awaits` without the other, the item is no
+            prose item or is done, the awaited block is of the item itself
+            or of an item that is done, or a withdrawal where no alert
+            stands: the reason
+    """
+    body = AlertRequestSchema.model_validate(request.get_json())
+    outcome = pilot_store_service.alert(
+        g.brain, body.item, text=body.text, awaits=body.awaits
+    )
+    return StandingSchema(outcome=outcome).model_dump(mode="json"), 200
 
 
 def _recorded(line: EffectLine) -> dict[str, Any]:

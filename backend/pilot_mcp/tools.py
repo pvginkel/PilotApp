@@ -65,6 +65,7 @@ from pilot_mcp.api import (
     RegisteredDebrief,
     RegisteredDocument,
     SentMessage,
+    Standing,
     StartedProject,
     Step,
     StepState,
@@ -759,6 +760,132 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         writer is asked about."""
         return await api.ask_writer(
             _authorization(ctx), _tool_use_id(ctx), block=block, question=question
+        )
+
+    @mcp.tool()
+    async def note(
+        item: Annotated[uuid.UUID, Field(description="The document's item id")],
+        ctx: Call,
+        block: Annotated[
+            str | None,
+            Field(
+                pattern=BLOCK_ID,
+                description=(
+                    "The block's id, `<item id>/<local id>`, a block of the item;"
+                    " leave it out for a note on the document as a whole"
+                ),
+            ),
+        ] = None,
+        text: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description=(
+                    "What you know that bears on the answer and the document does"
+                    " not say, in a few lines of Markdown"
+                ),
+            ),
+        ] = None,
+        suggested_answer: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description=(
+                    "The answer you would give where it is not the one the writer"
+                    " recommends: an option's label, `Agree`, `Yes`, `No` or free"
+                    " words"
+                ),
+            ),
+        ] = None,
+        suggested_note: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description=(
+                    "The note you suggest beside that answer, or for an action's Done"
+                ),
+            ),
+        ] = None,
+        offer: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description=(
+                    "The work you would do about an open action on the person's"
+                    " word, in a line: the action itself or something beside it"
+                ),
+            ),
+        ] = None,
+    ) -> Standing:
+        """Put your note on a block of an open document of your project, an
+        ask a person answers, or without `block` on the document as a whole:
+        what you know that bears on the answer and the document does not say.
+        Write one only by exception: a `suggested_answer`, with its
+        `suggested_note`, where you would answer otherwise than the writer
+        recommends; `text` alone where you know something that could change
+        the answer; an `offer` where you would do work about an open action on
+        the person's word. None to say a block is fine or that you agree. The
+        note stands beside the document, never in its text, and nothing of it
+        goes back to the writer. A later note on the same block, or on the
+        document as a whole, replaces the one standing there; a call with none
+        of `text`, `suggested_answer`, `suggested_note` and `offer` takes it
+        off. An item not of your project, one with no block or that is done, a
+        block not of the item, one you answered, one a work item's run holds
+        unless you are the job after that run's turn, a suggested answer on an
+        action with no options, an offer on anything but an open action,
+        anything but `text` on the document as a whole, or a call that takes
+        off a note where none stands is refused with the reason, and nothing
+        is written. Answers `{outcome}`: `written`, `replaced` or
+        `withdrawn`."""
+        return await api.note(
+            _authorization(ctx),
+            _tool_use_id(ctx),
+            item=item,
+            block=block,
+            text=text,
+            suggested_answer=suggested_answer,
+            suggested_note=suggested_note,
+            offer=offer,
+        )
+
+    @mcp.tool()
+    async def alert(
+        item: Annotated[uuid.UUID, Field(description="The document's item id")],
+        ctx: Call,
+        text: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description=(
+                    "What to answer first and what this document's Send starts,"
+                    " in a line or two"
+                ),
+            ),
+        ] = None,
+        awaits: Annotated[
+            str | None,
+            Field(
+                pattern=BLOCK_ID,
+                description=(
+                    "The ask to answer first, `<item id>/<local id>`, a block of"
+                    " another open item of your project"
+                ),
+            ),
+        ] = None,
+    ) -> Standing:
+        """Put an alert on an open document of your project whose Send starts
+        work that another open ask must come before: `awaits` names that ask
+        and `text` says what to answer first and what the Send starts, the two
+        given together. It stops no Send. A later alert on the same document
+        replaces the one standing; a call with neither takes it off. An item
+        not of your project, a work item, a wait, a debrief's notice or an
+        item that is done, an `awaits` of the item itself, of an item not of
+        your project or that is done, or that its item does not hold, `text`
+        or `awaits` alone, or a call that takes off an alert where none stands
+        is refused with the reason, and nothing is written. Answers
+        `{outcome}`: `written`, `replaced` or `withdrawn`."""
+        return await api.alert(
+            _authorization(ctx), _tool_use_id(ctx), item=item, text=text, awaits=awaits
         )
 
 
