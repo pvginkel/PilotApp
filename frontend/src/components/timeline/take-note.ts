@@ -2,7 +2,8 @@
  * Taking Pilot's note (F168.2): one button puts the answer it suggests and its note into the block
  * as the person's own answer (F32.1), theirs to change until the Send. In a document a press on an
  * answer writes the record, so the take is that answer with its note, words no option has as free
- * words; one the block holds already, with that note, takes none. A one-ask item writes nothing
+ * words, a question's field opening on it once saved; one the block holds already, with that note,
+ * takes none. A one-ask item writes nothing
  * before its Send (F32.3), so there the take is its choice, words no option has Other's words, a
  * question's field, with the note its Send carries: a decision's and a question's note field
  * (sent-note.tsx), an action's paste-back. A suggested note alone, on an open action, goes into
@@ -17,6 +18,7 @@ import type { Answer } from '@/hooks/use-answer';
 import type { Choosing } from '@/hooks/use-choice';
 import { isAnswered, type Block } from '@/hooks/use-timeline';
 import { putUnsentText } from '@/hooks/use-unsent-text';
+import { keepUnsent } from '@/lib/browser-state';
 
 export interface Take {
   label: string;
@@ -58,7 +60,12 @@ export function takeOf({ field, block, note, answer, choice }: Taking): Take | n
     return {
       label: 'Take this answer',
       title: `Answer as Pilot suggests${withNote}: yours to change until the document is sent`,
-      take: () => answer(suggested, { note: words ?? undefined }),
+      take: () =>
+        answer(suggested, {
+          note: words ?? undefined,
+          // A question's words kept in its field go once the record holds the answer, as its Send's do.
+          onSaved: block.kind === 'question' ? () => keepUnsent(`${field}/answer`, '') : undefined,
+        }),
     };
   }
   return {

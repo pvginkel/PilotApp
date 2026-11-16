@@ -598,7 +598,8 @@ text, the recommendation and the option's Recommended stay as written.
 - **Taking it** (`takeOf`, `take-note.ts`): while the block takes an answer, a small button after
   what the note suggests puts it into the block as the person's own. In a document, "Take this
   answer" answers with the suggested answer and its note at once, words no option has as free
-  words, theirs to change until *Send answers*; it is gone once the block holds both. In a one-ask
+  words, theirs to change until *Send answers*, a question's field opening on that answer, the words
+  typed in it before cleared once it saves; it is gone once the block holds both. In a one-ask
   item it makes the choice, as a press would: an option, words no option has in Other's field, which
   opens, a question's in its field; the suggested note goes into the field the Send carries, an
   action's paste-back, or the note field of a decision or a question (`sent-note.tsx`, "Your note

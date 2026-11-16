@@ -268,7 +268,7 @@ test.describe('Send answers and Pilot’s note', () => {
 });
 
 test.describe('Taking Pilot’s note', () => {
-  test('in a document answers the block as the person’s own, its note with it, words no option has as free words, until another answer; on an action puts a note alone in the paste-back, the Done still the person’s', async ({
+  test('in a document answers the block as the person’s own, its note with it, words no option has as free words, a question’s field opening on it, until another answer; on an action puts a note alone in the paste-back, the Done still the person’s', async ({
     people,
     projects,
     timeline,
@@ -300,10 +300,15 @@ test.describe('Taking Pilot’s note', () => {
     await expect(tent.option('Dome')).toHaveAttribute('data-chosen', 'true');
     await expect(tent.pilotsNote.take).toBeVisible();
 
+    // Words typed in a question's field before the take give way to the answer the record holds.
     const pitch = item.blockAt('Q1');
+    await pitch.answerField.fill('Somewhere by the water');
     await pitch.pilotsNote.take.click();
     await expect(pitch.answered).toBeVisible();
     expect((await blocks())[1]).toMatchObject({ answer: 'Lake Como', note: FERRY });
+    await expect(pitch.answerField).toHaveValue('Lake Como');
+    await timeline.open(project);
+    await expect(pitch.answerField).toHaveValue('Lake Como');
 
     const van = item.blockAt('A1');
     await expect(van.pilotsNote.take).toHaveText('Take this note');
