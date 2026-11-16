@@ -66,7 +66,11 @@ for one placed in an environment by name ([`sessions.md`](sessions.md)) and for 
 `trigger_item_id`, where it has one ([`work.md`](work.md));
 `work_done(work_id, at)`, at its turn's end, a job's at its last, marks the Item done at `at`, by no
 one, cause `turn_ended`, under the Item's row lock, and leaves one done already, as Finish's close
-leaves it ([`sessions.md`](sessions.md)). Each moves `timeline.json`.
+leaves it ([`sessions.md`](sessions.md)). Its done, and `close_work`'s, places the debrief's notice
+where the Work's debrief completes (`_place_debrief_notice`): an Item of the kind `debrief_notice`,
+created by Pilot, at the next `seq`, carrying that debrief and the debriefs of its subject that do
+not complete and no notice carries, each Work naming it; none in a finished or an archived project
+([`work.md`](work.md#its-debriefs-notice)). Each moves `timeline.json`.
 
 A birth but the opening's refuses a text with a fault of its own (an unclosed fence, a body that is
 no mapping, and the like) and then writes nothing. The opening's is never refused, whatever it
@@ -221,7 +225,9 @@ merge carries the write to the file.
   cause offers undo and its project is neither finished (D028) nor archived (D012); a registered
   document's `written_back_at` and `write_back_refused_at` go with it, so that its next close writes
   it again; and the job its close placed, while it is still held before its brief, is withdrawn
-  (below). An archive question offers none. On cause `answered` it also takes out the answer lines
+  (below). An archive question offers none. A debrief's notice's Read it clears too (`_undo_read`),
+  under the project's row held shared and then the notice's own, with no job to withdraw. On cause
+  `answered` it also takes out the answer lines
   of the block the person answered, which unfreezes the block. It holds the project's row shared
   before the document's, so Finish and Reopen, which change the project's state under its row lock,
   never interleave with it, and locks that job's Session before it reads the item again, so that the
@@ -238,7 +244,11 @@ merge carries the write to the file.
   by its kind, an action of its own closing at its block's `done` instead (step 6 of the
   ingest). Then a `done` version is cut and the item marked done.
 - `read(item, user, *, via=AnswerChannel.APP)` on a notice and `reviewed(item, user, *,
-  via=AnswerChannel.APP)` on a review: the item's mark, cause `marked`, the text untouched.
+  via=AnswerChannel.APP)` on a review: the item's mark, cause `marked`, the text untouched. On a
+  debrief's notice, which has no text, `read` is a person's alone (`_read_debrief_notice`), under
+  the project's row held exclusively and then the notice's own: done `marked` by them, no job after
+  it and no session consuming it, Pilot refused ("Pilot reads a debrief's notice only on a member's
+  word").
 - `cancel(project, document_ids, user, operation)`: a person's Cancel on a run's documents
   ([`round-trip.md`](round-trip.md)). Each open one of `document_ids`, locked in id order, is marked
   done by `user`, cause `cancelled`, which offers no undo; the texts are untouched, no Version is
@@ -249,7 +259,7 @@ merge carries the write to the file.
   of Pilot's own added (`pilots_own`), marked done at once by `user`, cause `cancelled`, which
   offers no undo. Its text and its blocks stand as they are; no Version is cut, no write-back owed,
   no job placed after it and no run ended, so it raises `timeline_moved` alone. It refuses, in this
-  order, a work item or a wait ("a <kind> item is no ask"), an archived project, Pilot as the user
+  order, a work item, a wait or a debrief's notice ("a <kind> item is no ask"), an archived project, Pilot as the user
   ("Pilot calls off no ask on its own word"), a registered document, which its page's Cancel calls
   off, a notice ("a notice asks nothing, and takes its Read"), an item of any other kind or one no
   session of Pilot's own added ("it is no ask Pilot added"), and a done item.
@@ -257,8 +267,8 @@ merge carries the write to the file.
   good, a person's Close or Pilot's `stop_work` with its reason ([`work.md`](work.md)), in the
   caller's transaction, which holds the project's row exclusively and the work item's Session: the
   item done at once by `user`, cause `cancelled`, which offers no undo, and `note`, Pilot's reason,
-  its Work's `done_note`. No document is closed, no job is placed and nothing continues its
-  conversation. It refuses an archived project and a done item, "it is closed for good" for one
+  its Work's `done_note`, and the debrief's notice its done places, as `work_done`'s does. No
+  document is closed, no job is placed and nothing continues its conversation. It refuses an archived project and a done item, "it is closed for good" for one
   closed so (`done_refusal`, which a Resume reads too).
 - `fold(project, item, folded)`: a person's fold of an open item on the timeline, or its unfold
   ([`timeline.md`](timeline.md)), taken on an item the timeline draws as a box of its own: a prose
@@ -327,10 +337,10 @@ write on a done item, but a close sent again (below); a blank answer; `deferred`
 naming neither `plan` nor a task in the plan; an answer to an action without options other than a
 deferral; Done on an action with options or on a block that is no action; Done on an item that is
 not a `document`, Pilot's on a registered document of one block excepted, Read on one that is not
-a notice, Reviewed on one that is not a review; any close of a registered document awaiting its
+a notice or a debrief's notice, Reviewed on one that is not a review; any close of a registered document awaiting its
 read ("its file has not been read yet"); any close of an archived project's item ("its project is
-archived", D012); an answer but Archive or Keep to an archive question; undo of an item that is no
-prose item, is an archive question, is not done, has been consumed, was done by a cause that offers
+archived", D012); an answer but Archive or Keep to an archive question; undo of an item that is
+neither a prose item nor a debrief's notice, is an archive question, is not done, has been consumed, was done by a cause that offers
 none, or is of a finished or an archived project. A block the text does not have is a
 `RecordNotFoundException`, and the opening has none, nor a registered document whose read failed:
 an answer or a Done on either is refused so.
@@ -340,8 +350,8 @@ no event, before any refusal, the archived project's and the done item's include
 item holds that close from the same person already. That is an answer through the app whose block
 the published text holds `by` the person's handle with the same answer, note and `to`
 (`answered_so`); an action's Done whose block holds the person's Done with the same note; and a
-document's Done, a notice's Read or a review's Reviewed through the app on an item of that kind done
-by the person's own mark, cause `marked`. So a request a browser sends twice is not refused the
+document's Done, a notice's or a debrief's notice's Read or a review's Reviewed through the app on an
+item of that kind done by the person's own mark, cause `marked`. So a request a browser sends twice is not refused the
 second time. Another answer or note, the same close by another person, and Pilot's, whose closes
 are the file's, are refused as before; so is one through the chat, whose tool call would show in
 the chat as a close given. `ProjectService.archive_by_its_question` takes Archive sent again on an
@@ -370,8 +380,8 @@ record on a person's behalf ([`mcp.md`](mcp.md)), places none: the chat's own tu
 ruling out (D139), and the item is consumed on the spot by the chat's Session, which the record of
 a close through the chat names, so that it offers no Undo after it, as after a job's brief (D225).
 Neither do a notice's Read, Pilot's own Done, its close at a save (above), Finish's close, a
-registered document's close, an item a worker's session added and the archive question, which no
-session added. A notice's Read through the chat, which carries nothing out, keeps its Undo, as the
+registered document's close, an item a worker's session added, and the archive question and a
+debrief's notice, which no session added. A notice's Read through the chat, which carries nothing out, keeps its Undo, as the
 app's does, and so does Pilot's own Done through `mark` with no `for`. `close_starts_work(db, project, items)` reads these two
 branches for the page, from the rows at each read (`close_starts_work` on a timeline entry,
 [`timeline.md`](timeline.md)): an open item a session of Pilot's own added, but a notice, and a

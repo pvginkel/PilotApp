@@ -29,7 +29,8 @@ item's attachments' shape: what its definition chat attached, which Create proje
 opening, so none past Create ([`documents.md`](documents.md)). `items` are every item, by `seq`,
 each with:
 
-- `id`, `seq`, `kind` (an item kind's code) and `form` (`prose`, `work` or `wait`);
+- `id`, `seq`, `kind` (an item kind's code) and `form` (`prose`, `work`, `wait` or
+  `debrief_notice`);
 - `title`, null for a registered document whose text gives none or that has no text, and
   `file_name`, a registered document's file name from its source path, which its line shows while
   `title` is null;
@@ -51,14 +52,16 @@ each with:
   under the mouse ([`ui.md`](ui.md));
 - `concept`: whether a `parse` Save Error stands on its document's path, its latest save held, so
   that its text is the one last published (F78);
-- the opening's `author` and its `words`, verbatim; null on every other item;
+- `author`, who created it with no session: the opening's author, and Pilot on an archive question
+  and on a debrief's notice; null on every other item;
+- the opening's `words`, verbatim; null on every other item;
 - `body`: every other prose item's text as drawn (`dsl.body`), its parts in order, `{type: prose,
   markdown, section}` and `{type: block, block}`, the front matter and the heading that is the
-  title left out; null for the opening, work and waits, and for a registered document with no text,
-  awaiting its read or after one that failed. A prose part's `section` is the local id of
-  the block whose own section holds it, null outside every section ([`block-dsl.md`](block-dsl.md));
-- `summary`: the front matter's `summary`, null where the text gives none and for the opening, work
-  and waits;
+  title left out; null for the opening, work, waits and a debrief's notice, and for a registered
+  document with no text, awaiting its read or after one that failed. A prose part's `section` is
+  the local id of the block whose own section holds it, null outside every section ([`block-dsl.md`](block-dsl.md));
+- `summary`: the front matter's `summary`, null where the text gives none and for the opening, work,
+  waits and a debrief's notice;
 - `word_count`, the text's own count (`dsl.words`), which no answer, Done or Undo moves, and
   `read_minutes`, that count at 230 words a minute, rounded half up, at least 1; both null where
   `body` is;
@@ -94,6 +97,10 @@ each with:
   refusal}`, the head's button, `label` *Check now* or *Skip wait*, `open` whether the wait takes a
   request now, and `refusal` why not, null while it does; and `note`, the brain's words at its close
   through `mark`, null while open and after Finish's close. A wait waits since its `created_at`;
+- `debriefs`, a debrief's notice's own, null for every other kind
+  ([`work.md`](work.md#its-debriefs-notice)): the work items whose debriefs it carries, in timeline
+  order, each `{id, title, ended_at, debrief}` as the work item stands at the read, `ended_at` the
+  time it was done and `debrief` its stage session's own words, whole;
 - `pilots_work`, what Pilot does on the item while it is Pilot's ([`round-trip.md`](round-trip.md)),
   null while it is the person's or done, and on every other item: `{doing, work, pulse, asked_in}`.
   `doing` is `awaiting_run`, it or another document its run registered awaiting its read;
@@ -157,7 +164,7 @@ the app, answering `204` with no body:
 | `POST blocks/<block_id>/answer` | `{answer, note?}` | a block's answer: an option's label, `Agree` to a proposal, `Yes` or `No` to a confirmation, or free words; the note, an action's paste-back or a No's reason |
 | `POST blocks/<block_id>/done` | `{note?}` | Done on an action without options, the note what was pasted back |
 | `POST done` | | Done on a document, with its recommendations |
-| `POST read` | | Read on a notice |
+| `POST read` | | Read on a notice, and a member's on a debrief's notice ([`work.md`](work.md#its-debriefs-notice)) |
 | `POST reviewed` | | Reviewed on a review |
 | `POST undo` | | Undo of a done item's answer or mark, whoever gave it |
 | `POST request` | | a wait's firing requested by the caller, *Check now* on a card wait, *Skip wait* on a timed wait, which the wait's next run is briefed with ([`waits.md`](waits.md)) |
@@ -170,8 +177,8 @@ while the item is Pilot's or the block is held, with "Pilot is working on …" (
 
 A close the done item holds from the caller already, sent again as a browser resends a request when
 its page comes back, answers `204` and changes nothing (D184): the same answer and note to the same block,
-an action's Done with the same paste-back, a document's Done, a notice's Read or a review's Reviewed
-the caller's own mark closed, and Archive on an archive question the caller answered Archive
+an action's Done with the same paste-back, a document's Done, a notice's or a debrief's notice's Read
+or a review's Reviewed the caller's own mark closed, and Archive on an archive question the caller answered Archive
 ([`engine.md`](engine.md)). Another answer or note, or the same close by another person, is refused
 as any close of a done item, "the item is done".
 
@@ -258,7 +265,8 @@ timeline's place ([`chats.md`](chats.md)).
 - **An open item** (`item.tsx`) is its head, its title (`title`, else `file_name`), its text and
   its attachments; a document and a review draw as [below](#documents-and-reviews). The head
   (`item-head.tsx`) is the kind's icon and label (`kinds.ts`; a confirmation's is "Confirm", a
-  document's "Document · N" with its most common block's icon), the time, the full stamp as its
+  document's "Document · N" with its most common block's icon, a debrief's notice's the Debrief's
+  notebook and "Notice"), the time, the full stamp as its
   tooltip, a confirmation's auto pilot mark (below), Pilot's job on it where one shows
   ([`work.md`](work.md)), a confirmation's reason line, the Urgent chip and "for
   <full name>" while it is for someone, and at its end Discuss,
@@ -278,7 +286,9 @@ timeline's place ([`chats.md`](chats.md)).
   dashed border. An open work item is its session's: its env chip once its start has an
   environment, its one line and its Stop or Resume, Close beside a stopped one's Resume, the setup its Retry once it failed or stopped; every
   other job of Pilot's own draws no item of its own, showing on the item it follows from
-  ([`work.md`](work.md)).
+  ([`work.md`](work.md)). A debrief's notice open is its box (`debrief-notice.tsx`): its head and
+  title, then each work item it carries, its head, its debrief whole, *Full debrief* and *Session
+  log*, and its Read under the whole ([`work.md`](work.md#its-debriefs-notice)).
 - **A folded item** (`fold.ts`, `item.tsx`). The kind in an open box's head is a button, "Fold, for
   everyone" its tooltip, that folds the item in its place for every member (`POST fold`): folded, the
   box is its head, its title and about one line more, the last fading out (`.item.folded`,
@@ -365,8 +375,8 @@ timeline's place ([`chats.md`](chats.md)).
 - **"N open above"**, a chip under the banner, counts the items to act on whose end is scrolled out
   above them (D186; `isActionable`, `hooks/use-timeline.ts`; each item's article carries it as
   `data-actionable`): an open prose item but the opening that Pilot is not working on, a notice
-  urgent or not and an item for whichever member alike, and a work item stopped or failed, until it
-  is retried and not while its nudge is owed. An item of any kind, a done line or a wait included,
+  urgent or not and an item for whichever member alike, a debrief's notice until a member's Read,
+  and a work item stopped or failed, until it is retried and not while its nudge is owed. An item of any kind, a done line or a wait included,
   counts too while the job it shows is failed or stopped with its Retry offered (`offersRetry`),
   as the badge counts it. Work that runs, starts, is held or is idle, and a done line or a wait with
   no Retry on it never count. Its click scrolls the nearest of them to the top. The chip counts
@@ -550,7 +560,7 @@ ask the chat called off for a person ([`mcp.md`](mcp.md)) and a work item closed
 Open, Undo while `done.undo` and Discuss, quoting the item into the chat; a work item's Debrief,
 where its stage session gave a debrief; its attachments' indicator; Pilot's job on it while not
 ended ([`work.md`](work.md)); and the time it was done. The
-title of every line but a wait's is the link to what is behind it, the one Open goes to (`Behind`,
+title of every line but a wait's and a debrief's notice's is the link to what is behind it, the one Open goes to (`Behind`,
 test id `timeline.line.title`, its ticket ids nested), underlined under the mouse off a phone, so
 that the line opens from the keyboard and a screen reader too. Off a phone, on a screen whose
 pointer hovers, the actions show only while the mouse is on the line or the focus in it, and take
@@ -570,7 +580,7 @@ places the continuation that takes their answers ([`round-trip.md`](round-trip.m
 Pilot's own whose close placed the job after it loses it once that job's brief goes out, at once in
 an idle project, and an Undo before then withdraws that job ([`work.md`](work.md)).
 
-- **Open**, on every done line but a wait's, opens the item's document at its address, off a phone
+- **Open**, on every done line but a wait's and a debrief's notice's, opens the item's document at its address, off a phone
   in its tab, as Done fixed it ([`documents.md`](documents.md)).
 - **The attachments' indicator**, where attachments hang on the item, whatever its kind: the clip
   opening the one attachment, as the chips carry it, set apart from Open's document icon beside it
@@ -590,14 +600,16 @@ an idle project, and an Undo before then withdraws that job ([`work.md`](work.md
 - **A wait's line** has nothing behind it: no Open, and never Undo, Pilot's close being consumed on
   the spot ([`waits.md`](waits.md)). Under its title stands the note Pilot closed it with, as linked
   text; a wait Finish closed has none.
+- **A debrief's notice's line** has nothing behind it either: its title, plain, and the time it was
+  read, with no Open, its Undo kept while `done.undo` ([`work.md`](work.md#its-debriefs-notice)).
 - **On a phone** a done line has Undo alone among its actions: no Open, no Discuss and no mark of
   an ended job, the Debrief and its attachments' indicator staying, and a job not ended takes a row
   under its title. A tap on the line, anywhere but on a link, a button or a menu of its own, goes where its
   title goes, the document's address or the session log's, which opens it as a view whose head
   carries Discuss ([`projects.md`](projects.md)); the title is the line's way in from the keyboard
-  and a screen reader. A wait's line, with nothing behind it, opens instead the menu of its actions
-  in a row under it, Pilot's job on it where one shows and then Discuss, which a tap elsewhere, Esc
-  or a tap on the line again closes.
+  and a screen reader. A wait's line or a debrief's notice's, with nothing behind it, opens instead
+  the menu of its actions in a row under it, Pilot's job on it where one shows and then Discuss,
+  which a tap elsewhere, Esc or a tap on the line again closes.
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
 opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". Under that divider
@@ -670,7 +682,8 @@ the documents, `fold.spec.ts` the fold, `decision.spec.ts`'s "A one-ask item’s
 its Send, `busy-press.spec.ts` a busy button and `starts-work.spec.ts` the mark of a button that
 starts work ([`ui.md`](ui.md)), `confirmation.spec.ts` a confirmation's marks,
 `tests/work/claimed.spec.ts` and `tests/chat/cancel-ask.spec.ts` the cancelled mark, `phone-items.spec.ts` the item alone, a done line and every kind's head on a phone, and
-`frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)), `line-actions.spec.ts`
+`frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)), `debrief-notice.spec.ts`
+the debrief's notice, `line-actions.spec.ts`
 a done line's actions under the mouse and its title, `jobs.spec.ts` Pilot's jobs on their items,
 and `waits.spec.ts` the
 waits, open and done, and a wait's menu on a phone, through the `waits` fixture
@@ -701,7 +714,8 @@ buttons and Send (`archiveQuestion`, `archive-question.spec.ts`), the ready box 
 resume, line}`, its Resume's form event `timeline.ready.resume`, pinned in `create-project.spec.ts`),
 a block's Send (`block.answerSend`, `confirm.answerSend` on a confirmation's card), an open item's
 kind and its fold (`timeline.item.kind`, `item.fold`, the box's `data-folded`) and a wait's
-button, what it waits on, its firings, its note and its phone menu (`item(id).wait`); `slowNetwork`
+button, what it waits on, its firings, its note and its phone menu (`item(id).wait`), and the work
+items a debrief's notice carries (`item(id).debriefs`, `item(id).carried(workId)`); `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. Whether an
 item counts for "N open above" is its article's `data-actionable`; `dotsEndingARow(head)` finds the
 dots a wrapped head ends a row on, `lift` (`tests/support/chips.ts`) a chip's words against its

@@ -55,9 +55,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 **The timeline and its documents**
 
 - `items`: an entry on a project's timeline, numbered by `seq` from 1 within the project, of an
-  item kind. The opening is a person's (`created_by_user_id`) and an archive question Pilot's,
-  by no session; every other item was added by a Session (`created_by_session_id`;
-  `ck_items_created_by`). Its done is `done_at` with `done_cause_code`, and
+  item kind. The opening is a person's (`created_by_user_id`), and an archive question and a
+  debrief's notice Pilot's, by no session; every other item was added by a Session
+  (`created_by_session_id`; `ck_items_created_by`). A debrief's notice has no row beyond its Item's
+  ([`work.md`](work.md#its-debriefs-notice)). Its done is `done_at` with `done_cause_code`, and
   `done_by_user_id` when a user did it; `consumed_at` with `consumed_session_id` is a session
   taking its answers: a registered document's, the continuation of the run that registered it, from
   its placement ([`round-trip.md`](round-trip.md)); a wait's, the session whose `mark` closed
@@ -147,7 +148,17 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   done any other way and an open one ([`work.md`](work.md)); and `debrief`, the stage session's own
   account of how its run went, set once with its `debrief_entries` and never changed, which only a
   worker's run has (`ck_work_debrief`), that a Work has entries exactly when it has a debrief being
-  the server's ([`work.md`](work.md#its-debrief)). Its keys
+  the server's ([`work.md`](work.md#its-debrief)); `debrief_subject` and `debrief_completes`, the
+  subject the debrief names and whether it completes it, given with it and never changed, neither
+  without a debrief and a debrief that does not complete naming its subject (`ck_work_debrief_fields`),
+  none on a debrief given before they were taken; and `debrief_notice_id`, the debrief's notice that
+  carries the debrief, set once at the notice's placing, beside `debrief_notice_kind_code`, that
+  Item's kind, so that the key to `items (id, kind_code)` reaches a debrief's notice alone, and only
+  on a debrief with its `debrief_completes` (`ck_work_debrief_notice`); that the notice is of the
+  Work's project and carries one subject is the server's
+  ([`work.md`](work.md#its-debriefs-notice)). `ix_work_debrief_uncarried`, on `(project_id,
+  debrief_subject)` where a subject is named and no notice carries it, serves a completing done's
+  read of its subject's debriefs. Its keys
   reach its Item and its Session through the one project. A `work`-kind Session may stand with no
   `work` row, as the seed's idle session and a testing project's do.
 - `claim_assignments`: a claimed action given to a work item, the `work` and the `block`, both the
@@ -366,7 +377,7 @@ undo and a confirmation reason, each read on its code's first lookup.
 
 | Table | Rows |
 |---|---|
-| `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`, `archive_question`; work: `work`; wait: `card_wait`, `timed_wait` |
+| `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`, `archive_question`; work: `work`; wait: `card_wait`, `timed_wait`; debrief_notice: `debrief_notice` |
 | `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `cancelled` (a run's documents a person's Cancel closed, an ask the chat called off on a person's word, a stopped work item closed for good), `withdrawn` (a job an Undo of its trigger item, or its wait's close, withdrew before its brief, which never ran) |
 | `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval`, `standing-grant` |
 | `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `conversation` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
@@ -443,8 +454,10 @@ is a record the engine could have produced, and its times are those of the run:
 - a draft, `Garden planner`, ada's, its draft holding one unanswered question;
 - the open project `recipe-box`, ticket `RB-12`, ada's and ben's, in the environment
   `example-recipes-1`: an opening; items a work session added, with asks open, answered by a person
-  and by Pilot, deferred to a task and to the plan, and done; an attachment; and a plan whose notes
-  point at blocks, one of its tasks removed;
+  and by Pilot, deferred to a task and to the plan, and done; an attachment; a planning and a run
+  on the task `build`, done, their debriefs naming one subject, "Slice 3 · The recipe card page",
+  and the debrief's notice that carries both; and a plan whose notes point at blocks, one of its
+  tasks removed;
 - the finished project `bike-log`, `Bike repair log`, ben's and ada's, both its steps done, auto
   pilot turned off as it finished, its archive question open under the end;
 - the archived project `photo-album`, `Photo album`, ada's, one step in progress and one not

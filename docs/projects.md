@@ -34,8 +34,8 @@ projects too.
   clarification, or with every open block held ([`round-trip.md`](round-trip.md)); a work item
   whose session stopped or
   failed, a job of Pilot's own only until it is retried, and neither while its nudge is owed
-  ([`usage.md`](usage.md)); never a wait and never an item for another
-  person (before the caller has a handle, every item for someone is another's); `urgent` whether one
+  ([`usage.md`](usage.md)); never a wait nor a debrief's notice
+  ([`work.md`](work.md#its-debriefs-notice)), and never an item for another person (before the caller has a handle, every item for someone is another's); `urgent` whether one
   of them is urgent.
 - **`GET /api/projects/lookup?address=<address>`** answers `{id, address}`, the project an address
   names and the address its pages take now (`ProjectService.at_address`). An address that reads as
@@ -631,9 +631,10 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   on every browser through `work_moved` where the list changed. It answers `200` `{steps}`, the list
   as it stands; a session with no turn running is a `403`, an unknown work item a `404`, a session
   with no environment yet or a repeated code a `409`, and a body outside the limits a `400`.
-- `POST /api/testing/items/<id>/debrief` `{debrief, entries}` gives the work item `<id>`'s debrief as
-  its worker's `register_debrief` does ([`mcp.md`](mcp.md)), while its session's turn is in flight;
-  its done line carries the Debrief once the turn ends ([`work.md`](work.md#its-debrief)). It answers
+- `POST /api/testing/items/<id>/debrief` `{debrief, entries, subject?, completes?}` gives the work
+  item `<id>`'s debrief as its worker's `register_debrief` does ([`mcp.md`](mcp.md)), while its
+  session's turn is in flight; its done line carries the Debrief once the turn ends, and that done
+  places the debrief's notice where the debrief completes ([`work.md`](work.md#its-debrief)). It answers
   `201` `{entries}`, the number stored; a session with no turn running is a `403`, an unknown work
   item a `404`, a session with no environment yet or a debrief given already a `409`, and a body
   outside the limits a `400`.

@@ -20,7 +20,8 @@ YouTrack's posts, the due time and a request, and the run per batch, and an ask 
 on: its line, the read-only strip with Stop and take over, a held block's line, the hand-back and
 the Cancel, and the projects surface: the service user, `pilot-projects` and its tools, and the
 profile's join switch, and the debrief: a repeat round's why under its step, the Debrief on a done
-work item, the debrief and the full debrief, and the pass reading it, and the collection: the
+work item, the debrief and the full debrief, the pass reading it, and the debrief's notice, one per
+slice at its run's end, with its Read, and the collection: the
 transcripts a collector publishes through its door, whole or appended, a launch of Pilot's on its
 Session, the adopted project a group names, and the invented scenario that drives it in the suite,
 and the conversation: a session outside Pilot talking to it through the projects surface, its long
@@ -307,7 +308,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
   environments on demand and Pilot's own, with its fake; the sessions, the gate, its slot and the
   jobs' queue, a Turn's cause, the holds, their records, relay and live stream, Stop, Resume, Close and Retry; a work item's status,
-  its line, its progress, its debrief, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
+  its line, its progress, its debrief and the debrief's notice, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
   worker's tools and the brain's, and its projects surface, any session's, with its door and its

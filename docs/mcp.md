@@ -5,7 +5,7 @@ session's kind. A work item's session gets `pilot-work`: `register_document`, a 
 it wrote, put to a person on the project's timeline; `attach_file`, the material that backs one,
 copied into the record; `set_progress` and `set_progress_step`, the steps its run goes through,
 shown on its tile; and `register_debrief`, its run's debrief, shown behind the done work item's
-Debrief. The brain's sessions, a project's chat, a conversation and the server's jobs, get
+Debrief and in its subject's debrief's notice. The brain's sessions, a project's chat, a conversation and the server's jobs, get
 `pilot-store`, the one door to the record beyond the project's folder: `add_item`, `attach_file`,
 `answer`, `mark`, `cancel_ask`, `stop_work`, `finish` and `ask_writer`. Each tool is one REST call to the backend
 under the session's bearer, which names the session's project, environment and work item, so the
@@ -225,7 +225,7 @@ a script's and the agent's, are served one after the other, each answering the l
 left. No call writes an effect. One that changed the steps' codes, labels, whys, states or order
 moves the work item's status ([`work.md`](work.md)); one that changed none of them sends nothing.
 
-### `register_debrief(debrief, entries)`
+### `register_debrief(debrief, entries, subject?, completes?)`
 
 The session's own work item's debrief ([`work.md`](work.md#its-debrief)), handed over once, before
 its turn ends: `debrief`, the stage session's own account of how the run went, and `entries`, every
@@ -234,20 +234,26 @@ name of the part of the run it ran in, its round of that part, whose account it 
 in whole seconds, at most one of its words and `passed`, a pass or a fail in their place, and, on an
 entry that opens a round past the first, that round's why. Every value is the workflow's: Pilot
 stores it as given and shows it as given, and reads nothing of the workflow's shape from it (D159).
+With them go `subject`, what the debrief is an account of, as the workflow names it, at most 120
+characters, compared whole within the project, shown in the debrief's notice's title and read for
+nothing else, and `completes`, true where left out, false where a later debrief of the same subject
+completes it: one subject's debriefs come together in one notice, placed at the done of the work
+item whose debrief completes it ([`work.md`](work.md#its-debriefs-notice)).
 
-**`POST /tools/pilot-work/debrief`** `{debrief, entries}` answers `201` `{entries}`, the number
+**`POST /tools/pilot-work/debrief`** `{debrief, entries, subject?, completes?}` answers `201` `{entries}`, the number
 stored, the entries numbered from 1 in the call's order (`PilotWorkService.register_debrief`). A
 body outside the limits is a `400` naming each fault, nothing stored: a debrief empty, blank or over
 16,000 characters; no entries or over 500; an empty section, role, words or why; a section or a why
 over 120 characters, a role over 64, words over 4,000; a round under 1 or a duration under 0, or
-either not an integer, or a `passed` that is not a boolean; both words and `passed`; a field the
-call or an entry does not have (`MAX_DEBRIEF` to `MAX_ENTRY_NUMBER` in
+either not an integer, or a `passed` that is not a boolean; both words and `passed`; a subject
+empty, blank or over 120 characters; a `completes` that is not a boolean, or false without a
+subject; a field the call or an entry does not have (`MAX_DEBRIEF` to `MAX_DEBRIEF_SUBJECT` in
 `backend/app/schemas/pilot_work.py`, which `pilot_mcp/api.py` mirrors). A second call is a `409`,
 "it has its debrief already", nothing changed. The call holds the Session's row as the steps' calls
 do and refuses with the gate's `403` unless its turn still runs, so a second call made at once
 waits for the first and is refused. It writes no effect and no line in the session's records, moves
-nothing and sends nothing: the work item shows its debrief once its turn has ended it done
-([`work.md`](work.md)), and the store's tree carries none of it ([`projection.md`](projection.md)).
+nothing and sends nothing: the work item shows its debrief once its turn has ended it done, and
+that done places the debrief's notice where the debrief completes ([`work.md`](work.md)), and the store's tree carries none of it ([`projection.md`](projection.md)).
 The tool sends no tool-use id, since no effect needs it.
 
 ## The brain's routes
@@ -340,10 +346,10 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   answers, its title the draft's, else `project.md`; anywhere else it is a `409`. Its answer takes
   no Undo, the draft having no item.
 - **`mark(item, mark, for?, note?)`**, `POST …/marks`, answers `200` `{effect}`: `done` on a
-  document, with its recommendations, `read` on a notice, `reviewed` on a review, for the person
-  `for` names, given through the chat as `answer` is, so that no job follows it, and a `done` or a
-  `reviewed` on an item of Pilot's own is consumed by the chat's Session, with no Undo after it
-  (D225), where a notice's `read` keeps its Undo; without `for`, Pilot's own Done on a document it settled whole, and on a registered
+  document, with its recommendations, `read` on a notice or a debrief's notice, `reviewed` on a
+  review, for the person `for` names, given through the chat as `answer` is, so that no job follows
+  it, and a `done` or a `reviewed` on an item of Pilot's own is consumed by the chat's Session, with no Undo after it
+  (D225), where a `read` keeps its Undo; without `for`, Pilot's own Done on a document it settled whole, and on a registered
   document of one block, whatever its kind, once that block is answered or deferred, a claimed
   action counting once its `done` is written; `read` and `reviewed` refused. A registered
   document's Done writes its answers back and continues its run once none of the run's documents is
@@ -363,8 +369,8 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   know, and its chat skill gives the cancel to an ask that no longer applies and the `No` to a
   confirmation the person refuses. Refused with the reason, nothing closed: a document a work item's
   run registered, which the Cancel on its page calls off and so ends its run (D210) ("a document a work item's run registered is called off by the Cancel on its page,
-  which ends that run"), a notice ("a notice asks nothing, and takes its Read"), a work item or a
-  wait ("a <kind> item is no ask"), an item no session of Pilot's own added ("it is no ask Pilot
+  which ends that run"), a notice ("a notice asks nothing, and takes its Read"), a work item, a
+  wait or a debrief's notice ("a <kind> item is no ask"), an item no session of Pilot's own added ("it is no ask Pilot
   added"), a done one, an archived project's, an item not of the session's project, and a `for`
   that names no person or names Pilot. "Cancelled · <title>".
 - **`stop_work(item, reason?)`**, `POST …/stops`, answers `200` `{effect}`: the work item's Session
@@ -485,7 +491,7 @@ glob, with no `env`, paths from the root of the projects' files, and no `skipped
 in `find_files`' answer, which count the folders a walk of a disk did not enter. What they read, and
 their refusals, are [`projection.md`](projection.md#read-by-path)'s; `list_items`' `path` runs from
 the same root, `<folder>/items/…`, so that `read_file` takes it as it is, and an item with no file,
-a work item or a wait, has none.
+a work item, a wait or a debrief's notice, has none.
 
 A project's `state` is `draft` until Create project, then `open`, and `finished` once finished, or
 `adopted` for one that stands for a group of work run before Pilot, archived from its birth and
