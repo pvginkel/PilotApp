@@ -39,6 +39,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TransitionKind,
+    TurnCause,
     UserKind,
 )
 from app.schemas.timeline import HeldReason
@@ -1996,6 +1997,7 @@ def _committed_idle(
                 words="One",
                 started_at=now,
                 ended_at=now,
+                cause_code=TurnCause.PERSON,
             )
         )
         return caller.id, run.id, person.id, project.id

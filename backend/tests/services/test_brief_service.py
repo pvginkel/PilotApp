@@ -788,6 +788,7 @@ def _call_chat(
             words=words,
             started_at=AT,
             ended_at=AT,
+            cause_code=TurnCause.PERSON,
         )
     )
     db.flush()

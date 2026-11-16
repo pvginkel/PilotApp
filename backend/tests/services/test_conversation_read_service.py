@@ -18,6 +18,7 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
+    TurnCause,
     UserKind,
 )
 from app.services.container import ServiceContainer
@@ -183,7 +184,15 @@ class TestOwned:
     ) -> None:
         run = open_conversation(session, opened, recipebox, opener=service_user)
         now = datetime.now(UTC)
-        session.add(Turn(session_id=run.id, seq=2, message="Go on.", started_at=now))
+        session.add(
+            Turn(
+                session_id=run.id,
+                seq=2,
+                message="Go on.",
+                started_at=now,
+                cause_code=TurnCause.FOLLOW_UP,
+            )
+        )
         run.turns = 2
         session.flush()
 
