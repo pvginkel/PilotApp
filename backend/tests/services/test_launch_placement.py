@@ -163,9 +163,11 @@ class TestPlaced:
         self, session: DbSession, thread: Transcript, run: models.Session
     ) -> None:
         """A conversation a later Session carries on (DB 183): each Session's
-        Turns count from 1."""
+        Turns count from 1, so the earlier's Turn 2 comes before the later's
+        Turn 1 by time alone."""
         later = _carrying_on(session, run)
         turn_at(session, run, _at(0), _at(9))
+        turn_at(session, run, _at(20), _at(29))
         turn_at(session, later, _at(60))
         first = transcripts.launch(session, thread, started_at=_at(1))
         second = transcripts.launch(session, thread, started_at=_at(61))
