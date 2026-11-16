@@ -91,7 +91,15 @@ from tests.support.publications import (
     whole,
 )
 from tests.support.supervisor import wait_until
-from tests.support.transcripts import CAMP, HAIKU, OPUS, OTHER, STARTED, SUB_AGENT
+from tests.support.transcripts import (
+    CAMP,
+    HAIKU,
+    OPUS,
+    OTHER,
+    SONNET,
+    STARTED,
+    SUB_AGENT,
+)
 from tests.support.turns import end_turns, turn_at
 
 CLAUDE_CODE = {"component": "claude-code", "version": "2.1.317"}
@@ -214,7 +222,7 @@ def _calls() -> list[dict[str, Any]]:
             predecessor="msg_0002",
             compaction=1,
             model=HAIKU,
-            requested_model=OPUS,
+            requested_model=SONNET,
             stop_reason="max_tokens",
             miss_cause="compaction",
             attributed_skill="recipe-scaling",
@@ -588,7 +596,7 @@ class TestPublished:
         assert session.execute(facts.where(Call.position == 3)).one() == (
             None,
             HAIKU,
-            OPUS,
+            SONNET,
             None,
             "max_tokens",
             "compaction",
@@ -733,7 +741,7 @@ class TestPublished:
             (DenialKind, ["hook"]),
             (EventKind, ["api_error", "api_retry", "interrupt"]),
             (MissCause, ["compaction"]),
-            (Model, [HAIKU, OPUS]),
+            (Model, [HAIKU, OPUS, SONNET]),
             (PromptSource, ["person", "task_notification"]),
             (StopReason, ["max_tokens"]),
             (Tool, ["Agent", "Bash", "mcp__pantry__find_items"]),
@@ -765,6 +773,7 @@ class TestPublished:
         ).all() == [
             (HAIKU, HAIKU),
             (OPUS, "Opus 4.5"),
+            (SONNET, SONNET),
         ]
 
     def test_a_tool_is_written_with_the_mcp_server_it_is_of(
@@ -3446,7 +3455,6 @@ class TestRefused:
                 launches=[
                     launch(components=[released]),
                     launch(components=[CLAUDE_CODE]),
-                    launch(components=[released]),
                 ]
             )
         )

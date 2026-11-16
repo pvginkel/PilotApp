@@ -30,6 +30,8 @@ SUB_AGENT = "a4f1c09e2b7d3e586"
 """Claude Code's id of an invented sub-agent."""
 OPUS = "claude-opus-4-5"
 HAIKU = "claude-haiku-4-5-20251001"
+SONNET = "claude-sonnet-4-5"
+"""A model a Call asks for and no Call answers with."""
 
 
 def _added[Row](db: DbSession, row: Row) -> Row:
