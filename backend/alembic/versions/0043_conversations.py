@@ -7,8 +7,8 @@ Session's id and names the Environment its opener called from and that
 caller's session; it closes once, with its cause, `ended` its caller's end
 and never a Chat's, `created` a Chat's alone.
 
-Revision ID: 0035
-Revises: 0034
+Revision ID: 0043
+Revises: 0042
 Create Date: 2026-11-16
 
 """
@@ -20,8 +20,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0035"
-down_revision: str | None = "0034"
+revision: str = "0043"
+down_revision: str | None = "0042"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -88,10 +88,10 @@ def downgrade() -> None:
     op.drop_table("conversations")
     op.drop_constraint("ck_chats_close_cause", "chats", type_="check")
     op.execute("DELETE FROM session_kinds WHERE code = 'conversation'")
-    op.execute("ALTER TYPE close_cause RENAME TO close_cause_0035")
+    op.execute("ALTER TYPE close_cause RENAME TO close_cause_0043")
     postgresql.ENUM(*CLOSE_CAUSE, name="close_cause").create(op.get_bind())
     op.execute(
         "ALTER TABLE chats ALTER COLUMN close_cause_code"
         " TYPE close_cause USING close_cause_code::text::close_cause"
     )
-    op.execute("DROP TYPE close_cause_0035")
+    op.execute("DROP TYPE close_cause_0043")

@@ -1,4 +1,4 @@
-"""Revision 0035's downgrade: no `conversations`, no Session Kind
+"""Revision 0043's downgrade: no `conversations`, no Session Kind
 `conversation`, and Close Cause without `ended`, the chats' closes standing
 on the type it leaves."""
 
@@ -26,12 +26,12 @@ CLOSED_AT = datetime(2026, 11, 14, 11, 20, tzinfo=UTC)
 
 
 def _downgrade(db: Session) -> None:
-    """Revision 0035's downgrade, on the test's transaction. Its upgrade
+    """Revision 0043's downgrade, on the test's transaction. Its upgrade
     adds the enum's value in a transaction of its own, which no test's
     transaction holds."""
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
-    revision = ScriptDirectory.from_config(config).get_revision("0035")
+    revision = ScriptDirectory.from_config(config).get_revision("0043")
     assert revision is not None
     with Operations.context(MigrationContext.configure(db.connection())):
         revision.module.downgrade()
