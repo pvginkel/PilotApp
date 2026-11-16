@@ -7,13 +7,16 @@
  * its recommendation and the option's mark stay as written, and nothing of the note goes in the
  * block's head, on its segment or on the document's card. Once the block is answered the note is
  * one line (F168.3): the triangle, what Pilot suggested or the start of its text, and a chevron
- * that opens it whole, a long note shown whole; nothing puts a note away.
+ * that opens it whole, a long note shown whole; nothing puts a note away. Under what it suggests,
+ * one button takes it, the answer and its note into the block as the person's own (F168.2;
+ * take-note.ts).
  */
 
 import { useState } from 'react';
 import { ChevronDown, ChevronUp, StickyNote, TriangleAlert } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { HeadingWords, Markdown } from '@/components/shared/markdown';
+import type { Take } from '@/components/timeline/take-note';
 import type { Block } from '@/hooks/use-timeline';
 
 export type PilotsNoteData = NonNullable<Block['pilots_note']>;
@@ -35,9 +38,11 @@ interface PilotsNoteProps {
   note: PilotsNoteData;
   /** Its block is answered: the note stands as its line until opened. */
   answered: boolean;
+  /** Its button, which puts what it suggests into the block (F168.2); none where there is nothing to take. */
+  take: Take | null;
 }
 
-export function PilotsNote({ note, answered }: PilotsNoteProps) {
+export function PilotsNote({ note, answered, take }: PilotsNoteProps) {
   const [opened, setOpened] = useState(false);
   if (answered && !opened) return <NoteLine note={note} onOpen={() => setOpened(true)} />;
   const suggests = note.suggested_answer !== null || note.suggested_note !== null;
@@ -64,6 +69,13 @@ export function PilotsNote({ note, answered }: PilotsNoteProps) {
                 <LinkedText text={note.suggested_note} />
               </span>
             )}
+          </div>
+        )}
+        {take !== null && (
+          <div className="pn-acts">
+            <button type="button" className="btn btn-sm" onClick={take.take} title={take.title} data-testid="timeline.block.pilots-note.take">
+              {take.label}
+            </button>
           </div>
         )}
       </div>

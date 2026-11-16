@@ -436,7 +436,8 @@ export function blockParts(page: Page, root: Locator) {
     },
     /**
      * Pilot's note inside the block (F168.1): its triangle, its text, the answer it suggests and the
-     * note beside it; the block answered, its line, which its chevron opens (F168.3).
+     * note beside it, and the button that takes them (F168.2); the block answered, its line, which
+     * its chevron opens (F168.3).
      */
     pilotsNote: {
       root: root.getByTestId('timeline.block.pilots-note'),
@@ -446,6 +447,7 @@ export function blockParts(page: Page, root: Locator) {
       note: root.getByTestId('timeline.block.pilots-note.note'),
       line: root.getByTestId('timeline.block.pilots-note.line'),
       toggle: root.getByTestId('timeline.block.pilots-note.toggle'),
+      take: root.getByTestId('timeline.block.pilots-note.take'),
     },
     toggle: root.getByTestId('timeline.block.toggle'),
     answered: root.getByTestId('timeline.block.answered'),
@@ -458,6 +460,8 @@ export function blockParts(page: Page, root: Locator) {
     said: root.getByTestId('timeline.block.said'),
     answerField: root.getByTestId('timeline.block.field'),
     answerSend: root.getByTestId('timeline.block.send'),
+    /** A one-ask decision's or question's note, which its Send carries, once Pilot's note taken puts one there. */
+    noteField: root.getByTestId('timeline.block.note-field'),
     paste: root.getByTestId('timeline.block.paste'),
     done: root.getByTestId('timeline.block.done'),
     acts: root.getByTestId('timeline.block.act'),

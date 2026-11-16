@@ -4,7 +4,10 @@
  * tooltip says the note is Pilot's, its text, the answer it suggests and the note beside it; the
  * block's head, its segment, the option's Recommended and the document's card as they were. Once
  * the block is answered, one line, what Pilot suggested or the start of its text, which its chevron
- * opens whole and folds again, nothing putting it away (F168.3). A block Pilot's note suggests
+ * opens whole and folds again, nothing putting it away (F168.3). Its button takes what it
+ * suggests into the block as the person's own: in a document the answer with its note, in a one-ask
+ * item the choice and the note its Send carries, on an action a note alone in the paste-back
+ * (F168.2). A block Pilot's note suggests
  * another answer on takes no default: *Send answers* waits on it, its tooltip naming it (F168.4);
  * a note that agrees, or one on a block with no recommendation, changes nothing there. None shows
  * on a block Pilot answered, or on a confirmation. A claimed action's note, held and handed back,
@@ -24,6 +27,9 @@ const WIND = 'The forecast for the weekend gives gusts of 60 km/h on the lake.';
 const STAKES = 'Take the long stakes.';
 const UNTAKEN = 'Pilot’s own note on this ask, not the writer’s';
 const DIFFERS = 'Pilot’s note on Which tent? suggests another answer than recommended: answer it first';
+const FERRY = 'The ferry runs on Sundays.';
+const CARD = 'Booked with the club’s card.';
+const BELL = 'A borrowed bell tent';
 
 test.describe('Pilot’s note on a block', () => {
   test('stands inside a block of a document that is the person’s, between its head and its controls: its triangle saying it is Pilot’s, its text, the answer it suggests and the note beside it; the head, the segment and the option’s Recommended as they were', async ({
@@ -247,5 +253,146 @@ test.describe('Send answers and Pilot’s note', () => {
     await timeline.sendDialog.confirm.click();
     await expect(item.root).toHaveAttribute('data-state', 'done');
     expect((await projects.document(trip)).body!.flatMap((part) => (part.type === 'block' ? [part.block] : []))[0].answer).toBe('Dome');
+  });
+});
+
+test.describe('Taking Pilot’s note', () => {
+  test('in a document answers the block as the person’s own, its note with it, words no option has as free words, until another answer; on an action puts a note alone in the paste-back, the Done still the person’s', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Noted'), members: [me.handle!] });
+    const trip = await projects.place(project, { kind: 'document', title: 'The trip', text: TRIP });
+    await projects.note(trip, { block: 'D1', text: WIND, suggested_answer: 'Tunnel', suggested_note: STAKES });
+    await projects.note(trip, { block: 'Q1', suggested_answer: 'Lake Como', suggested_note: FERRY });
+    await projects.note(trip, { block: 'A1', suggested_note: CARD });
+    await timeline.open(project);
+    const blocks = async () => (await projects.document(trip)).body!.flatMap((part) => (part.type === 'block' ? [part.block] : []));
+
+    const item = timeline.item(trip);
+    const tent = item.blockAt('D1');
+    await expect(tent.pilotsNote.take).toHaveText('Take this answer');
+    await expect(tent.pilotsNote.take).toHaveAttribute('title', /its note with it/);
+    await tent.pilotsNote.take.click();
+    await expect(tent.answered).toBeVisible();
+    await expect(tent.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await expect(tent.note).toHaveText(STAKES);
+    expect((await blocks())[0]).toMatchObject({ answer: 'Tunnel', note: STAKES, by: { kind: 'person' } });
+    // Taken, the note is its line, and opened offers nothing more to take.
+    await expect(tent.pilotsNote.line).toHaveText('Pilot would have answered Tunnel');
+    await tent.pilotsNote.toggle.click();
+    await expect(tent.pilotsNote.take).toHaveCount(0);
+    // Another answer is the person's to give, and the note offers its own again.
+    await tent.option('Dome').click();
+    await expect(tent.option('Dome')).toHaveAttribute('data-chosen', 'true');
+    await expect(tent.pilotsNote.take).toBeVisible();
+
+    const pitch = item.blockAt('Q1');
+    await pitch.pilotsNote.take.click();
+    await expect(pitch.answered).toBeVisible();
+    expect((await blocks())[1]).toMatchObject({ answer: 'Lake Como', note: FERRY });
+
+    const van = item.blockAt('A1');
+    await expect(van.pilotsNote.take).toHaveText('Take this note');
+    await van.pilotsNote.take.click();
+    await expect(van.paste).toHaveValue(CARD);
+    await expect(van.answered).toHaveCount(0);
+    expect((await blocks())[2].done).toBeNull();
+    await van.paste.fill(`${CARD} Pick it up on Friday.`);
+    await van.done.click();
+    await expect(van.answered).toBeVisible();
+    expect((await blocks())[2]).toMatchObject({ note: `${CARD} Pick it up on Friday.` });
+    await expect(van.pilotsNote.root).toHaveAttribute('data-line', 'true');
+
+    // Words no option has are free words, Other's row chosen with them.
+    await projects.note(trip, { block: 'D1', suggested_answer: BELL });
+    await timeline.open(project);
+    await tent.pilotsNote.toggle.click();
+    await tent.pilotsNote.take.click();
+    await expect(tent.other).toHaveAttribute('data-chosen', 'true');
+    await expect(tent.other).toContainText(BELL);
+    // The row shows chosen from the click, while the answer saves.
+    await expect.poll(async () => (await blocks())[0]).toMatchObject({ answer: BELL, note: null });
+  });
+
+  test('in a one-ask decision chooses the answer and puts its note in the field its Send carries, both the person’s to change and kept over a reload; words no option has open Other with them', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Noted'), members: [me.handle!] });
+    const tent = await projects.place(project, { kind: 'decision', title: 'Which tent?', text: TENT });
+    await projects.note(tent, { block: 'D1', text: WIND, suggested_answer: 'Tunnel', suggested_note: STAKES });
+    await timeline.open(project);
+
+    const item = timeline.item(tent);
+    const block = item.block;
+    await expect(block.noteField).toHaveCount(0);
+    await expect(block.pilotsNote.take).toHaveAttribute('title', /before you send it/);
+    await block.pilotsNote.take.click();
+    await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
+    await expect(block.noteField).toHaveValue(STAKES);
+    await expect(block.answerSend).toBeEnabled();
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    expect((await projects.block(project, tent)).answer).toBeNull();
+
+    await block.option('Dome').click();
+    await block.noteField.fill('');
+    await expect(block.noteField).toBeVisible();
+    await block.noteField.fill(`${STAKES} And a mallet.`);
+    await timeline.open(project);
+    await expect(block.option('Dome')).toHaveAttribute('data-chosen', 'true');
+    await expect(block.noteField).toHaveValue(`${STAKES} And a mallet.`);
+    await block.answerSend.click();
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    expect(await projects.block(project, tent)).toMatchObject({ answer: 'Dome', note: `${STAKES} And a mallet.` });
+
+    const other = await projects.place(project, { kind: 'decision', title: 'Which tent, again?', text: TENT });
+    await projects.note(other, { block: 'D1', suggested_answer: BELL });
+    await timeline.open(project);
+    const again = timeline.item(other).block;
+    await again.pilotsNote.take.click();
+    await expect(again.console).toBeVisible();
+    await expect(again.field).toHaveValue(BELL);
+    await expect(again.noteField).toHaveCount(0);
+    await again.answerSend.click();
+    await expect(timeline.item(other).root).toHaveAttribute('data-state', 'done');
+    expect(await projects.block(project, other)).toMatchObject({ answer: BELL, note: null });
+  });
+
+  test('in a one-ask question puts the answer in its field, and in a one-ask action chooses the option, the note in the field its Send carries', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Noted'), members: [me.handle!] });
+    const pitch = await projects.place(project, { kind: 'question', title: 'Where do we pitch?', text: PITCH });
+    await projects.note(pitch, { block: 'Q1', suggested_answer: 'Lake Como', suggested_note: FERRY });
+    const van = await projects.place(project, { kind: 'action', title: 'Book the van', text: '```action id=A1\noptions:\n  - Booked\n  - Not needed\n```\n' });
+    await projects.note(van, { block: 'A1', suggested_answer: 'Booked', suggested_note: CARD });
+    await timeline.open(project);
+
+    const question = timeline.item(pitch).block;
+    await question.pilotsNote.take.click();
+    await expect(question.answerField).toHaveValue('Lake Como');
+    await expect(question.noteField).toHaveValue(FERRY);
+    expect((await projects.block(project, pitch)).answer).toBeNull();
+    await question.answerSend.click();
+    await expect(timeline.item(pitch).root).toHaveAttribute('data-state', 'done');
+    expect(await projects.block(project, pitch)).toMatchObject({ answer: 'Lake Como', note: FERRY });
+
+    const action = timeline.item(van).block;
+    await action.pilotsNote.take.click();
+    await expect(action.act('Booked')).toHaveAttribute('data-chosen', 'true');
+    await expect(action.paste).toHaveValue(CARD);
+    await expect(action.noteField).toHaveCount(0);
+    expect((await projects.block(project, van)).answer).toBeNull();
+    await action.answerSend.click();
+    await expect(timeline.item(van).root).toHaveAttribute('data-state', 'done');
+    expect(await projects.block(project, van)).toMatchObject({ answer: 'Booked', note: CARD });
   });
 });

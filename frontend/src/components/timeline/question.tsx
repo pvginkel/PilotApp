@@ -4,13 +4,15 @@
  * boxed (F20.2): from the click on, and where Pilot gave it, until opened to the field again. While
  * it saves it stands boxed in the field's place, beside the Send, disabled, its icon, Lucide's send,
  * the spinner once the write has waited (F148). In a one-ask item whose close starts Pilot's work,
- * the Send's icon is the job's mark under the mouse (F59.3).
+ * the Send's icon is the job's mark under the mouse (F59.3). Its Send carries the note under the
+ * field once Pilot's note taken in a one-ask item puts one there (F168.2; sent-note.tsx).
  */
 
 import { Send } from 'lucide-react';
 import { BusyIcon } from '@/components/shared/busy-icon';
 import { TextField } from '@/components/shared/text-field';
 import { DEFERRED, Said } from '@/components/timeline/said';
+import { SentNote } from '@/components/timeline/sent-note';
 import type { Answer, Saving } from '@/hooks/use-answer';
 import type { Block } from '@/hooks/use-timeline';
 import { useUnsentText } from '@/hooks/use-unsent-text';
@@ -66,24 +68,36 @@ interface QuestionFieldProps {
 
 function QuestionField({ field, block, initial, closable, disabled, onAnswer, starts }: QuestionFieldProps) {
   const { text, change, sent } = useUnsentText(`${field}/answer`, initial);
+  // The note its Send carries, which Pilot's note taken puts there in a one-ask item (F168.2).
+  const note = useUnsentText(`${field}/note`);
   const words = text.trim() === '' ? block.default : text;
   const send = () => {
-    if (words !== null) onAnswer(words, { onSaved: sent });
+    if (words === null) return;
+    onAnswer(words, {
+      note: note.text,
+      onSaved: () => {
+        sent();
+        note.sent();
+      },
+    });
   };
   return (
-    <div className="field-row">
-      <TextField
-        value={text}
-        onChange={change}
-        onSend={send}
-        label="Your answer"
-        placeholder={block.default === null ? 'Your answer' : `Default: ${block.default}`}
-        disabled={disabled}
-        survivesReload={!closable || text === initial}
-        testId="timeline.block.field"
-      />
-      <SendButton busy={false} disabled={disabled || words === null} starts={starts} onSend={send} />
-    </div>
+    <>
+      <div className="field-row">
+        <TextField
+          value={text}
+          onChange={change}
+          onSend={send}
+          label="Your answer"
+          placeholder={block.default === null ? 'Your answer' : `Default: ${block.default}`}
+          disabled={disabled}
+          survivesReload={!closable || text === initial}
+          testId="timeline.block.field"
+        />
+        <SendButton busy={false} disabled={disabled || words === null} starts={starts} onSend={send} />
+      </div>
+      <SentNote note={note} disabled={disabled} onSend={send} />
+    </>
   );
 }
 

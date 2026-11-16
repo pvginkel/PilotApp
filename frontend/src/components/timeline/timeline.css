@@ -352,6 +352,8 @@
 
   /* An action's paste-back over its buttons: the field's parent, kept in view as it grows. */
   .paste-back { scroll-margin-bottom: 24px; }
+  /* A one-ask decision's or question's note over its Send, or under its field (sent-note.tsx). */
+  .sent-note { margin-top: 8px; scroll-margin-bottom: 24px; }
   .paste-back .item-actions { margin-top: 8px; }
 
   /* A note under its answer, led by a note's icon; its lines after the first align with its words. */
@@ -481,6 +483,8 @@
   .pilot-note .pn-label { color: hsl(var(--muted-foreground)); }
   .pilot-note .pn-answer { font-weight: 600; }
   .pilot-note .pn-suggest .note { flex-basis: 100%; margin-top: 2px; }
+  /* Its button, which takes what it suggests (F168.2), under it. */
+  .pilot-note .pn-acts { display: flex; gap: 8px; margin-top: 8px; }
   .pilot-note > .toggle { --h: 20px; flex: none; }
   .pilot-note > .toggle .icon { width: 12px; height: 12px; stroke-width: 2.2; }
   .pilot-note.one { align-items: center; padding: 4px 10px; color: hsl(var(--muted-foreground)); cursor: pointer; }

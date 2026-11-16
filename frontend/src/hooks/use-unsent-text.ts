@@ -17,6 +17,18 @@ const showing = new Map<string, Set<(text: string) => void>>();
 
 const together = (words: string, since: string) => (since === '' ? words : `${words}\n${since}`);
 
+/** Puts `text` in the field `field`, in every one showing and in the browser, as typing it there would. */
+export function putUnsentText(field: string, text: string): void {
+  showing.get(field)?.forEach((show) => show(text));
+  const left = leaving.get(field);
+  if (left === undefined) {
+    keepUnsent(field, text);
+  } else {
+    left.since = text;
+    keepUnsent(field, together(left.words, text));
+  }
+}
+
 /** `field` keys the text in the browser; `initial` stands while none is kept. */
 export function useUnsentText(field: string, initial = '') {
   const [text, setText] = useState(() => leaving.get(field)?.since ?? unsentText(field) ?? initial);
@@ -30,15 +42,9 @@ export function useUnsentText(field: string, initial = '') {
   }, [field]);
 
   const change = (next: string) => {
+    // Its own field shows it before the effect has put it among those showing.
     setText(next);
-    showing.get(field)?.forEach((show) => show(next));
-    const left = leaving.get(field);
-    if (left === undefined) {
-      keepUnsent(field, next);
-    } else {
-      left.since = next;
-      keepUnsent(field, together(left.words, next));
-    }
+    putUnsentText(field, next);
   };
 
   /**

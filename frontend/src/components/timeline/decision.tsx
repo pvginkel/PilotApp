@@ -11,7 +11,8 @@
  * the row chosen fills as an answer's does and another press moves the choice; Other is a choice
  * too, its console with no Send of its own and its cross giving the choice back, its words kept in
  * its row, unchosen, under another choice; and the block's Send, in a row of its own under the
- * rows, disabled until a row is chosen or Other holds words, sends it. While an answer saves, the
+ * rows, disabled until a row is chosen or Other holds words, sends it, with the note over it once
+ * Pilot's note taken puts one there (F168.2; sent-note.tsx). While an answer saves, the
  * spinner shows once it has waited (F148): a document's row being saved has it at its end, and a
  * one-ask item's Send at its icon.
  */
@@ -21,6 +22,7 @@ import { BusyIcon } from '@/components/shared/busy-icon';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Console, ConsoleBox } from '@/components/timeline/console';
 import { Note } from '@/components/timeline/note';
+import { SentNote } from '@/components/timeline/sent-note';
 import { SendChoice } from '@/components/timeline/send-choice';
 import type { Answer } from '@/hooks/use-answer';
 import type { Choosing } from '@/hooks/use-choice';
@@ -29,7 +31,7 @@ import { useUnsentText } from '@/hooks/use-unsent-text';
 import { cn } from '@/lib/utils';
 
 /** A proposal's answer, and the label of a decision's one row where it proposes nothing. */
-const AGREE = 'Agree';
+export const AGREE = 'Agree';
 
 /** Other's field, as a decision's and an action's console name it. */
 export const OTHER = { label: 'Other, in your own words', placeholder: 'Other: in your own words' };
@@ -85,6 +87,8 @@ export function DecisionOptions({ field, block, chosen, saving, closed, live, se
   const held = own !== null && !rows.some((row) => row.answer === own) ? own : null;
   // Other's words in a one-ask item, where no console of its own holds them.
   const other = useUnsentText(`${field}/other`, held ?? '');
+  // The note a one-ask item's Send carries, which Pilot's note taken puts there (F168.2).
+  const sentNote = useUnsentText(`${field}/note`);
   const typing = choice === null ? opened : choice.typing;
   // A one-ask item's choice shows chosen in the answer's place, from its first press until it is
   // sent, in the open block alone: closed, the block reads the answer the record holds.
@@ -99,9 +103,10 @@ export function DecisionOptions({ field, block, chosen, saving, closed, live, se
     if (!ready) return;
     const sent = () => {
       other.change('');
+      sentNote.sent();
       choice!.sent();
     };
-    onAnswer(typing ? other.text : rows[picked].answer, { onSaved: sent });
+    onAnswer(typing ? other.text : rows[picked].answer, { note: sentNote.text, onSaved: sent });
   };
   // The block's note goes with the block's own answer, not with one being saved or chosen.
   const note = !made && chosen !== null && chosen === block.answer ? block.note : null;
@@ -203,9 +208,12 @@ export function DecisionOptions({ field, block, chosen, saving, closed, live, se
         )}
       </div>
       {choice !== null && (
-        <div className="item-actions">
-          <SendChoice ready={ready} busy={saving} starts={starts} onSend={send} />
-        </div>
+        <>
+          <SentNote note={sentNote} disabled={!live || disabled} onSend={send} />
+          <div className="item-actions">
+            <SendChoice ready={ready} busy={saving} starts={starts} onSend={send} />
+          </div>
+        </>
       )}
     </>
   );
