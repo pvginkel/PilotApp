@@ -13,11 +13,13 @@ class ItemSighting(db.Model):  # type: ignore[name-defined]
     (DB 307 to 310, 313, 315): named or counted in a push to them that went
     out, or waiting while a page of theirs showed the Project.
 
-    Written and deleted by the reconcile alone (`NotificationReconcileService`),
-    which writes the Items of the Project it reconciles only, so that the
-    Item is of its member's Project (DB 315). Deleted once its Item no longer
-    waits on the member, so that an Item coming to wait again alerts again,
-    and at Archive and Leave.
+    Written by the reconcile alone (`NotificationReconcileService`), which
+    writes the Items of the Project it reconciles only, so that the Item is of
+    its member's Project (DB 315). Deleted by the reconcile once its Item no
+    longer waits on the member, so that an Item coming to wait again alerts
+    again, and at Archive and Leave; and by the publish that turns its Item
+    urgent (`DocumentService.publish`), so that the Item alerts again where it
+    waits (DB 633).
     """
 
     __tablename__ = "item_sightings"

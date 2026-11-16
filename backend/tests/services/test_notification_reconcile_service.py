@@ -1,5 +1,5 @@
 """A member's notification of a project (F94, F147; DB 157, 224 to 226, 307
-to 315; DB decision 74; V09 to V12, V14): a push to every browser of theirs,
+to 315, 633; DB decision 74; V09 to V12, V14): a push to every browser of theirs,
 under the project's id, while they are offline, alerting for an item that
 waits on them they have not been shown and silent once one they were shown
 stopped waiting, on the fake push service.
@@ -228,7 +228,6 @@ def _bear(
 ) -> uuid.UUID:
     """A prose item the project's session adds, or with `by_pilot` a job of
     Pilot's own, committed."""
-    header = "".join(f"{key}: {value}\n" for key, value in front_matter.items())
     with scoped_session(container):
         return (
             container.test_data_service()
@@ -236,11 +235,32 @@ def _bear(
                 project_id,
                 kind,
                 title,
-                f"---\ntitle: {title}\n{header}---\n\n{text}",
+                _text(title, text, front_matter),
                 by_pilot=by_pilot,
             )
             .id
         )
+
+
+def _publish(
+    container: ServiceContainer,
+    item_id: uuid.UUID,
+    title: str,
+    text: str,
+    **front_matter: str,
+) -> None:
+    """The item's text published anew, as a save of its writer's is,
+    committed."""
+    with scoped_session(container) as db:
+        documents = container.document_service()
+        document = db.get_one(models.Document, item_id)
+        documents.lock(document)
+        documents.publish(document, _text(title, text, front_matter))
+
+
+def _text(title: str, text: str, front_matter: dict[str, str]) -> str:
+    header = "".join(f"{key}: {value}\n" for key, value in front_matter.items())
+    return f"---\ntitle: {title}\n{header}---\n\n{text}"
 
 
 def _ask(
@@ -645,6 +665,88 @@ class TestNotificationReconcileServiceReconcile:
 
         alert = _push(container, project_id, "Building the camp", worker.session_id)
         assert _pushes(fake_push_service, browsers["ada"]) == [alert, alert]
+
+    def test_an_item_turned_urgent_while_it_waits_alerts_again(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """V12 (DB 633): the tent turned urgent alerts both members again; the
+        boots, for Ben, turned urgent alert him alone; a publish that keeps
+        an item urgent pushes nothing."""
+        project_id = _project(container, ("ada", "ben"))
+        built = _service(container, supervise, web_push_service)
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        boots = _bear(
+            container, project_id, "question", "Your boots?", QUESTION, **{"for": "ben"}
+        )
+        _reconcile(built, project_id)
+
+        _publish(container, tent, "Which tent?", DECISION, urgent="true")
+        _reconcile(built, project_id)
+        _publish(
+            container,
+            boots,
+            "Your boots?",
+            QUESTION,
+            **{"for": "ben", "urgent": "true"},
+        )
+        _reconcile(built, project_id)
+        _publish(
+            container,
+            tent,
+            "Which tent?",
+            DECISION.replace("Tunnel", "Tipi"),
+            urgent="true",
+        )
+        _reconcile(built, project_id)
+
+        assert (
+            _pushes(fake_push_service, browsers["ada"])
+            == [_push(container, project_id, "Which tent?", tent)] * 2
+        )
+        assert (
+            _pushes(fake_push_service, browsers["ben"])
+            == [_push(container, project_id, "Your boots?, 1 more")] * 3
+        )
+        assert _seen(container, project_id) == {tent}
+        assert _seen(container, project_id, "ben") == {tent, boots}
+
+    def test_a_reconcile_in_flight_leaves_what_turning_urgent_dropped(
+        self,
+        container: ServiceContainer,
+        browsers: dict[str, FakeSubscription],
+        fake_push_service: ServedFakePushService,
+        web_push_service: WebPushService,
+        supervise: Supervise,
+    ) -> None:
+        """V12 (DB 633): the tent turns urgent while the push for the site is
+        out, after its compare read the tent shown; its write does not put the
+        tent's sighting back, so the next reconcile alerts for it."""
+        project_id = _project(container)
+        built = _service(container, supervise, web_push_service)
+        tent = _bear(container, project_id, "decision", "Which tent?", DECISION)
+        _reconcile(built, project_id)
+        site = _bear(container, project_id, "decision", "Which site?", DECISION)
+        fake_push_service.on_push = partial(
+            _publish, container, tent, "Which tent?", DECISION, urgent="true"
+        )
+
+        _reconcile(built, project_id)
+
+        assert _seen(container, project_id) == {site}
+
+        _reconcile(built, project_id)
+
+        assert _pushes(fake_push_service, browsers["ada"]) == [
+            _push(container, project_id, "Which tent?", tent),
+            _push(container, project_id, "Which site?, 1 more"),
+            _push(container, project_id, "Which site?, 1 more"),
+        ]
+        assert _seen(container, project_id) == {tent, site}
 
     def test_a_change_of_the_plan_or_of_what_the_text_reads_pushes_nothing(
         self,

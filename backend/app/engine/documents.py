@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
 import pilot_dsl as dsl
-from sqlalchemy import ColumnElement, and_, func, select
+from sqlalchemy import ColumnElement, and_, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, ProjectChanged, TreeHashMoved
@@ -29,6 +29,7 @@ from app.models import (
     DocumentVersion,
     Item,
     ItemKind,
+    ItemSighting,
     Project,
     User,
 )
@@ -209,7 +210,10 @@ class DocumentService:
         an item's, the handbook's or the project document's. Refused for a
         text with a fault: only a parseable text is published (F78). The
         opening's is never parsed. A registered document's first text gives it
-        its file in the tree."""
+        its file in the tree. An item it turns urgent loses its Item
+        Sightings, so that the reconcile alerts for it again wherever it waits
+        (DB 633); the reconcile deletes an Item Sighting of an item that waits
+        on no one at its compare anyway."""
         project, item = self.owner(document)
         parsed = self._read(project, item, document, text)
         tree_hash = (
@@ -218,9 +222,12 @@ class DocumentService:
             else self.tree_service.hash(project, document)
         )
         shown = self._shown(project, item, document)
+        urgent = item is not None and item.urgent
         published = document.published_text
         self._set_published(document, text)
         self._rebuild(project, item, document, parsed)
+        if item is not None and item.urgent and not urgent:
+            self.db.execute(delete(ItemSighting).where(ItemSighting.item_id == item.id))
         moved = self.tree_service.hash(project, document)
         if moved != tree_hash:
             self.engine_bus.emit(

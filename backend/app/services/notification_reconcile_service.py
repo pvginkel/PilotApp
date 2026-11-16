@@ -59,6 +59,12 @@ never waits on the pool for another. Before the push services' calls, what
 the compare and the push's read did is rolled back to a savepoint, the write
 doing again what the compare wrote: across them the transaction holds its
 lock alone, no row or table locked, and no request or commit waits on them.
+
+The publish that turns an item urgent deletes its sightings outside any turn
+(DB 633, `DocumentService.publish`). So the write records the sightings of
+the items the compare found unshown alone: one the compare read that such a
+publish deleted while the push was out stays deleted, and the next reconcile
+alerts for it.
 """
 
 import logging
@@ -115,6 +121,8 @@ class _Due:
     holder_id: int
     """The open membership, whose push it is."""
     notification: StandingNotification
+    seen: frozenset[uuid.UUID]
+    """The items the holder's sightings named as the compare read them."""
     alert: bool
     last_push: datetime | None
     """When the person's last push in the project went out; none before
@@ -298,8 +306,10 @@ class NotificationReconcileService:
                 due.membership_ids,
                 due.holder_id,
                 due.notification.items,
-                shown=took,
+                shown=False,
             )
+            if took:
+                _sight(db, due.holder_id, due.notification.items - due.seen)
         return None
 
     def _compare(
@@ -330,7 +340,7 @@ class NotificationReconcileService:
         if self._pages.shows(db, person_id, project_id):
             _show(db, membership_ids, holder.id, notification.items, shown=True)
             return None
-        seen = set(
+        seen = frozenset(
             db.scalars(
                 select(ItemSighting.item_id).where(ItemSighting.member_id == holder.id)
             )
@@ -349,6 +359,7 @@ class NotificationReconcileService:
             membership_ids=membership_ids,
             holder_id=holder.id,
             notification=notification,
+            seen=seen,
             alert=alert,
             last_push=max(
                 (m.notification_sent_at for m in memberships if m.notification_sent_at),
@@ -400,8 +411,12 @@ def _show(
             ItemSighting.member_id == holder_id, ItemSighting.item_id.not_in(items)
         )
     )
-    if not shown:
-        return
+    if shown:
+        _sight(db, holder_id, items)
+
+
+def _sight(db: Session, holder_id: int, items: frozenset[uuid.UUID]) -> None:
+    """A sighting written on `holder_id` of each of `items` it lacks."""
     seen = set(
         db.scalars(
             select(ItemSighting.item_id).where(ItemSighting.member_id == holder_id)

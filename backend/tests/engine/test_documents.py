@@ -26,8 +26,10 @@ from app.models import (
     DocumentVersion,
     Environment,
     Item,
+    ItemSighting,
     PlanTask,
     Project,
+    ProjectMember,
     SaveError,
     User,
 )
@@ -119,6 +121,9 @@ via: chat
 
 BROKEN = "```decision id=D1\noptions:\n  - Dome\n"
 
+TENT = "# Which tent?\n\n```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n"
+URGENT_TENT = f"---\nurgent: true\n---\n{TENT}"
+
 
 @pytest.fixture
 def build_task(session: DbSession, project: Project) -> PlanTask:
@@ -167,6 +172,13 @@ def _versions(session: DbSession, document: Document) -> list[DocumentVersion]:
 
 def _agent(session: DbSession) -> User:
     return session.scalars(select(User).where(User.handle == "agent")).one()
+
+
+def _sightings(session: DbSession) -> set[tuple[int, object]]:
+    return {
+        (sighting.member_id, sighting.item_id)
+        for sighting in session.scalars(select(ItemSighting))
+    }
 
 
 class TestDocumentServiceBirth:
@@ -1409,6 +1421,60 @@ class TestDocumentServicePublish:
         assert item.urgent is False
         assert item.for_user_id is None
         assert document.summary is None
+
+    def test_an_item_turned_urgent_loses_its_sightings(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """DB 633: the publish that turns an item's `urgent` from false to
+        true deletes every member's Item Sighting of it; one that keeps it
+        urgent or turns it off deletes none, and another item's stand."""
+        ben = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ben",
+            handle="ben",
+            name="Ben Example",
+            avatar_slot=2,
+        )
+        session.add(ben)
+        session.flush()
+        members = [
+            ProjectMember(
+                project_id=project.id, user_id=user.id, joined_at=datetime.now(UTC)
+            )
+            for user in (person, ben)
+        ]
+        session.add_all(members)
+        documents = container.document_service()
+        tent = documents.bear_item(project, "decision", "Tent", project_session, TENT)
+        site = documents.bear_item(project, "decision", "Site", project_session, TENT)
+        session.add_all(
+            ItemSighting(member_id=member.id, item_id=item.id)
+            for member in members
+            for item in (tent, site)
+        )
+        session.flush()
+        document = session.get_one(Document, tent.id)
+
+        documents.publish(document, URGENT_TENT)
+
+        assert tent.urgent is True
+        assert _sightings(session) == {(member.id, site.id) for member in members}
+
+        session.add_all(
+            ItemSighting(member_id=member.id, item_id=tent.id) for member in members
+        )
+        session.flush()
+        sighted = _sightings(session)
+        documents.publish(document, URGENT_TENT.replace("Tunnel", "Tipi"))
+        documents.publish(document, TENT)
+
+        assert tent.urgent is False
+        assert _sightings(session) == sighted
 
     def test_an_items_title_is_its_texts_alone(
         self,
