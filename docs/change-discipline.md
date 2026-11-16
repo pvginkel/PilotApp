@@ -126,4 +126,6 @@ to the test phase ([`slice-test-plan.md`](slice-test-plan.md)), not to the suite
 
 This repo is public; the spec repo is not. No secret or token, and no excerpt of a real project,
 chat, transcript or decision document, goes into a commit here: the mockup replays real projects,
-and its data stays in the spec repo. Test fixtures and examples are invented.
+and its data stays in the spec repo. Test fixtures and examples are invented, and no transcript's
+file is committed: a test's transcript is generated as the suite runs
+([`collection.md`](collection.md#testing-it)).

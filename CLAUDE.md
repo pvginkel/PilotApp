@@ -20,7 +20,9 @@ YouTrack's posts, the due time and a request, and the run per batch, and an ask 
 on: its line, the read-only strip with Stop and take over, a held block's line, the hand-back and
 the Cancel, and the projects surface: the service user, `pilot-projects` and its tools, and the
 profile's join switch, and the debrief: a repeat round's why under its step, the Debrief on a done
-work item, the debrief and the full debrief, and the pass reading it. Every green build of
+work item, the debrief and the full debrief, and the pass reading it, and the collection: the
+transcripts a collector publishes through its door, whole or appended, a launch of Pilot's on its
+Session, the adopted project a group names, and the invented scenario that drives it in the suite. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -38,9 +40,10 @@ phase ticks it ([`docs/slice-doc-plan.md`](docs/slice-doc-plan.md) §6), and an 
   shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, the `Jenkinsfile`, and the
   `Jenkinsfile.architecture` that publishes the hand-authored model in `docs/architecture/`.
 - **`backend/`** — the Flask API (Python, uv), on PostgreSQL; `pilot_mcp/`, Pilot's MCP server,
-  the image's second entry point (`python -m pilot_mcp`); and `packages/pilot-dsl/`, the block DSL,
+  the image's second entry point (`python -m pilot_mcp`); `packages/pilot-dsl/`, the block DSL,
   a package the backend takes by path and PilotProjects pins from git
-  ([`docs/block-dsl.md`](docs/block-dsl.md)).
+  ([`docs/block-dsl.md`](docs/block-dsl.md)); and `packages/pilot-scenario/`, the invented scenario
+  and its builder, taken by path too ([`docs/collection.md`](docs/collection.md)).
 - **`frontend/`** — the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
 - **`sidecar/`** — `pilot-sync`, the store environment's sync sidecar (Go), app-owned.
@@ -294,6 +297,9 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   them.
 - [`docs/sync.md`](docs/sync.md): the sync protocol and `pilot-sync`, the sidecar that keeps the
   store's tree in step with the record, and its write lock, through which each save is a session's.
+- [`docs/collection.md`](docs/collection.md): the transcripts a collector publishes: its door and
+  bearer, a publication whole or appended, a launch of Pilot's on its Session, the adopted project,
+  and the invented scenario with its load.
 - [`docs/jobs.md`](docs/jobs.md), [`docs/controller.md`](docs/controller.md),
   [`docs/sessions.md`](docs/sessions.md), [`docs/work.md`](docs/work.md): the supervisor that runs
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,

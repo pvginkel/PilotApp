@@ -548,7 +548,8 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   one at their first sign-in, `null` for a token with no name;
   `other(handle, name?)` puts another person on the record; `self()` reads the signed-in person;
   `withoutRole({name?, subject?})` swaps the page's session for one without the `editor` role once
-  the page's fetches have landed ([`sign-in.md`](sign-in.md)).
+  the page's fetches have landed ([`sign-in.md`](sign-in.md)); `serviceUser()` makes a service
+  user on the record, which an adopted project is made by ([`collection.md`](collection.md#testing-it)).
 - `shell`: `open(path)` opens an address once the signed-in person is read; `goldBadges`,
   `goldBadge(code)` and `goldPopover` read the badges and the week's halt's popover, `goldBar` and
   `goldLine(code)` the phone's lines, `goldLineWords(line)` a phone's line's words and `goldFlyout`

@@ -32,8 +32,9 @@ chooses theirs at their first sign-in, before the app opens, and is on Pilot's r
   event, status `401` with no valid token and `403` to a token without `editor`, and the stream
   ends, never registered. The check runs only when a stream opens, so a stream already open stays
   open after its token expires.
-- **Three surfaces are not a person's, and sit outside the API blueprint**, where the OIDC gate
+- **Four surfaces are not a person's, and sit outside the API blueprint**, where the OIDC gate
   never sees them: the store's sync routes, behind the store's bearer ([`sync.md`](sync.md)); the
+  collector's publication route, behind the collector's bearer ([`collection.md`](collection.md)); the
   tools' routes, the worker's `/tools/pilot-work/` and the brain's `/tools/pilot-store/`, behind the
   bearer Pilot minted for the session that calls ([`mcp.md`](mcp.md)), which no site reaches; and
   the tracker-events endpoint, `/api/tracker-events/<tracker>`, behind the tracker's own token,
@@ -125,7 +126,10 @@ to the row by its subject alone.
   refuses it as a caller whose handle is chosen.
 - **Its one write** is the plus's create, which makes a call's draft ([`projects.md`](projects.md)).
   Every write in a person's name refuses it (above), and so a service user is never a member;
-  Undo, Resume and Retry name no person and take it as they take anyone. Its handle names no one in
+  Undo, Resume and Retry name no person and take it as they take anyone. Pilot makes every adopted
+  project in its name, its creator and the one transition's, the first service user made where the
+  stage has several, and a group's first publication on a stage with none is refused
+  ([`collection.md`](collection.md#the-adopted-project)). Its handle names no one in
   a file: `for` and `by` with it are parse faults ([`block-dsl.md`](block-dsl.md)). As an author it
   is drawn from its initials, with no colour of the palette.
 

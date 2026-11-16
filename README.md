@@ -84,7 +84,11 @@ conversation while the prompt cache holds and closes the wait through `mark` wit
 Pilot's MCP process for any session of KubeCoder's production fleet, behind one shared token: it
 lists the projects, reads a project's head, its items and its files as Pilot renders them, and
 starts a draft as Pilot's service user, its members the person it is for and everyone whose profile
-switch joins them ([`docs/mcp.md`](docs/mcp.md)).
+switch joins them ([`docs/mcp.md`](docs/mcp.md)); and the record of the fleet's Claude Code
+transcripts, their launches, prompts, calls and tool calls, which a collector publishes through a
+door of its own, whole or appended as a file grows, a launch a Turn of Pilot's started placed under
+its session, and a group of work done before Pilot standing as an adopted project, listed with the
+archived ones ([`docs/collection.md`](docs/collection.md)).
 The brain's own repository holds its map, its
 rules, its four skills, and `pilot.py`, the script it edits a project's folder with, on the block
 DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); its four skills' bodies are written:

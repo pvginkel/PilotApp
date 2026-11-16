@@ -350,7 +350,9 @@ in order:
   stored as its text, and so is one that jsonb refuses: a string holding a `\u0000`, or a lone
   surrogate such as a truncated emoji's `\ud83d`, the line kept whole rather than scrubbed. A line
   at or below the last recorded offset of the same controller session, not created anew since, is
-  one the record has, and is skipped. While the Session's `conversation_id` is null, a recorded line's `session_id` sets it.
+  one the record has, and is skipped. While the Session's `conversation_id` is null, a recorded line's `session_id` sets it,
+  and under the conversation's turn the Launches Pilot holds of that conversation's transcript are
+  placed under the Session ([`collection.md`](collection.md#a-launch-of-pilots)).
   A `result` line of `claude`'s own writes its Turn's tokens and cost in the same transaction
   ([`usage.md`](usage.md)).
 - **The `result` frame ends the Turn**, and nothing else does (D004). In one transaction: the

@@ -26,15 +26,21 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   last shown the conditions that alarm, and only moves forward
   ([`notifications.md`](notifications.md)).
 - `projects`: `number` (an identity, which names a draft's folder), `slug` (none while the project
-  is a draft and set once it is not; lower-case letters, digits and hyphens, never starting with
-  `draft-`), `name`, the state (`draft`, `open`, `finished`), `archived`, `autopilot`, `paused`,
-  and the plan's `ticket` and `repo`.
+  is a draft or adopted and set once it is opened, `ck_projects_unopened_slug`; lower-case letters,
+  digits and hyphens, never starting with `draft-`), `name`, the state (`draft`, `open`,
+  `finished`, `adopted`), `archived`, `autopilot`, `paused`, and the plan's `ticket` and `repo`.
+  An adopted project stands for a group of work run before Pilot: its `adopted_group`, the group's
+  key, set exactly while its state is `adopted` and unique (`ck_projects_adopted_group`), and it is
+  archived (`ck_projects_adopted_archived`), born so by its one transition, `adopted`, its creator
+  and that transition's the stage's service user's, with no member; that creator and that one
+  transition are the adoption's to keep ([`collection.md`](collection.md#the-adopted-project)).
 - `project_members`: a membership from `joined_at` to `left_at`; one open membership per user and
   project, and a rejoin is a new row; nothing makes Pilot a member. `notification_sent_at` is when
   the last push of the project's notification to the member was tried, taken or not, which the two
   seconds between their pushes read ([`notifications.md`](notifications.md)).
 - `project_transitions`: each change of a project's state, archived flag, auto pilot switch or
-  pause, with when and by whom ([`projects.md`](projects.md)).
+  pause, with when and by whom ([`projects.md`](projects.md)); an adopted project's `adopted`, its
+  one, which nothing follows.
 
 **The plan**, which `plan.json` renders and is parsed back into
 
@@ -103,7 +109,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   environment's start makes one from the controller's report when it first touches it; the store's
   sidecar's first sync call makes the store's the same way ([`sync.md`](sync.md)), or by its id
   alone while no controller is configured. The fleet stream keeps its `name`, `last_state`,
-  `last_seen_at` and `exempt` current; `server_started_at` and `started_pod_at` are Pilot's claim,
+  `last_seen_at` and `exempt` current, and a publication that names an environment Pilot has no
+  row for makes one by its id, named by it until the stream reports it
+  ([`collection.md`](collection.md)); `server_started_at` and `started_pod_at` are Pilot's claim,
   that it started the environment and the pod's start that bring-up settled on, and `stop_due_at`
   is when Pilot stops it. An environment Pilot created is its own: `server_created_at` and `repo`,
   the repository it was made from, set together, and `delete_due_at`, when Pilot deletes it while
@@ -180,8 +188,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   write and never changed: `person` exactly on a Turn with an author (`ck_turns_cause`)
   ([`sessions.md`](sessions.md#a-turns-cause)).
 - `token_counts`: the tokens of one Token Kind a Turn used, `tokens`, summed over every model its
-  run called, the turn's own: one per turn and kind, never negative (`ck_token_counts_tokens`),
-  written as the turn's `result` line is recorded ([`usage.md`](usage.md)).
+  run called, the turn's own: one per turn and kind, of the four kinds within none (`input`,
+  `cache_write`, `cache_read`, `output`, `ck_token_counts_kind`), never negative
+  (`ck_token_counts_tokens`), written as the turn's `result` line is recorded
+  ([`usage.md`](usage.md)).
 - `holds`: a period in which Pilot kept one Session from running for one reason outside it: the
   `session`, `kind_code`, its Hold Kind (`week_halt`, `five_hour_halt`, `pause`, `store_update`,
   `outage`, `slot`, `queue`, `conversation`), `started_at`, and `ended_at`, none while it holds and
@@ -211,6 +221,61 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   which no other kind has. A `claude` payload is never a `stream_event` line. A `send` has no
   payload, its words and author being its turn's (`words`, `author_user_id`), and a turn has one at
   most; every other kind has a payload.
+
+**The transcripts** ([`collection.md`](collection.md)), a collector's publications, which no key
+reaches a person or a member from
+
+- `transcripts`: a Claude Code conversation as one file on the fleet's home records it, a main
+  thread or one sub-agent's thread, unique by `session_id`, Claude Code's id of the main thread, and
+  `agent_id`, the sub-agent's, none on a main thread, which counts as a value
+  (`uq_transcripts_session_id_agent_id`). A sub-agent's thread has `main_id`, empty until its main
+  thread is held, its `agent_type` and `description`, `spawned_by_tool_use_id`, the name its record
+  gives its spawning call, and `spawned_by_id`, the Tool Call of that name once a thread of its
+  conversation holds it, emptied when that Tool Call goes; a main thread has none of them
+  (`ck_transcripts_main_thread`). `working_directory`, `repository_id`, and on a main thread alone
+  `environment_id` (`ck_transcripts_environment`) and `adopted_project_id`, the adopted project of
+  the group its last publication named, none where it named none
+  (`ck_transcripts_adopted_project`). `file_size`, `file_modified_at`, `collected_at`, the server's
+  time, and `read_under_id`, the collector's Component Version, are its last publication's;
+  `replayed_size`, `bigint` as `file_size` is, the file's size at its last whole one, at most
+  `file_size` (`ck_transcripts_replayed_size`).
+- `launches`: a start of a Claude Code process on a main thread, `started_at` its first line's time
+  and `ended_at` its last's that carries one, none while it runs; and Pilot's own two,
+  `session_id`, the Session that ran it, and `turn_seq`, that Session's Turn that started it, a Turn
+  of that Session by its key, never without the Session (`ck_launches_turn`), each set once by the
+  placement ([`collection.md`](collection.md#a-launch-of-pilots)). `sessions.conversation_id` is
+  indexed for it (`ix_sessions_conversation_id`).
+- `component_versions`: a released version of one Component, unique by both, with `released_at`;
+  `launch_components`: one Launch's use of one, one version of each Component a Launch
+  (`launch_id`, `component_code` unique).
+- `prompts`: an input a Launch received, `received_at`, `source_code` and `characters`, carrying its
+  Launch's Transcript; `hook_runs`: a hook command's run at the end of a Prompt's run, `command`,
+  `duration_ms`, `failed` and `prevented_end`.
+- `compactions`: a compaction of a Transcript's context, `at`, `trigger_code`, `tokens_before`,
+  and `tokens_after` and `duration_ms` where the version records them.
+- `calls`: a request a Transcript made to the model, with its response: `message_id`, unique in its
+  Transcript; `position`, its place among its Transcript's Calls from 1, unique in it and checked at
+  the commit (`uq_calls_transcript_id_position`), so that a publication moves Calls up or down in
+  its transaction; its `prompt_id`, `predecessor_id` and `compaction_id`, each of its own
+  Transcript; `sent_at`, `completed_at`, `model_code`, and `requested_model_code` only where it
+  differs (`ck_calls_requested_model`); `effort`, `stop_reason_code`, `thinking_tokens`, a part of
+  the output's, `attributed_skill`, `attributed_plugin` and `miss_cause_code`; and its tokens, a
+  column per Token Kind nothing is within, required, 0 where the file gives none:
+  `input_tokens`, `cache_write_5m_tokens`, `cache_write_1h_tokens`, `cache_read_tokens` and
+  `output_tokens`.
+- `tool_calls`: a call of one tool a Call requested, with its result, carrying its Call's
+  Transcript, its `tool_use_id` unique in it: `tool_code`, `first_argument`, `requested_at`,
+  `returned_at`, `failed`, `exit_code` where it was not 0 (`ck_tool_calls_exit_code`),
+  `interrupted`, `denial_kind_code`, `hook` only on a failed call
+  (`ck_tool_calls_denied_by_hook`), `result_characters` and `saved_characters`.
+- `events`: an occurrence on a Call at one moment that no other table records, `kind_code`, `at`
+  and `detail`, never of the ten kinds a Compaction, a Call, a Tool Call or a Hook Run records
+  (`RECORDED_ELSEWHERE`, `ck_events_kind`); `context_parts`: a part of what a Call carried that no
+  earlier Call of its Launch did, `kind_code`, `name` and `characters`.
+- `repositories`: a git repository the fleet works in, by the unique `name` of its checkout.
+
+A Launch's delete takes its versions and Prompts, a Prompt's its Hook Runs, a Call's its Tool
+Calls, Events and Context Parts; nothing follows a Transcript's, which no publication deletes.
 
 **The waits** ([`waits.md`](waits.md))
 
@@ -280,12 +345,12 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 ## The reference values
 
-Twenty-three are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, the
-Turn Cause and the Hold Kind among them, and
-four are tables with rows, because each value carries a fact. The revisions write the rows; a value
-is added by a revision and nowhere else, and the backend starts once its revisions are applied. So a
-process keeps each row it looks up for its life (`References`, [`engine.md`](engine.md)), a kind's
-form, a cause's undo and a confirmation reason, each read on its code's first lookup.
+Most of Pilot's own are PostgreSQL enum types, each a `StrEnum` in
+`backend/app/models/reference.py`, the Turn Cause and the Hold Kind among them; five are tables with
+rows, because each value carries a fact. The revisions write the rows; a value is added by a
+revision and nowhere else, and the backend starts once its revisions are applied. So a process keeps
+each row it looks up for its life (`References`, [`engine.md`](engine.md)), a kind's form, a cause's
+undo and a confirmation reason, each read on its code's first lookup.
 
 | Table | Rows |
 |---|---|
@@ -293,9 +358,16 @@ form, a cause's undo and a confirmation reason, each read on its code's first lo
 | `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `cancelled` (a run's documents a person's Cancel closed, an ask the chat called off on a person's word, a stopped work item closed for good), `withdrawn` (a job an Undo of its trigger item, or its wait's close, withdrew before its brief, which never ran) |
 | `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval`, `standing-grant` |
 | `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
+| `token_kinds` (`name`, `within_code`, the coarser kind it is part of) | within none: `input`, `cache_write`, `cache_read`, `output`; within `cache_write`: `cache_write_5m`, `cache_write_1h` |
 
 A confirmation reason's `description` is the line `reference.json` gives the agent, which picks a
 confirmation's `because` from it.
+
+The collector's ten are tables too, keyed by `code` with a `name`, which no revision writes: a
+publication writes a code's row, its `name` the code, when it first names it
+([`collection.md`](collection.md)): `components`, `models`, `tools` (with `mcp_server`),
+`prompt_sources`, `stop_reasons`, `miss_causes`, `denial_kinds`, `compaction_triggers`,
+`event_kinds` (with `is_error`) and `context_part_kinds`.
 
 ## The caches
 

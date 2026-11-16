@@ -131,8 +131,11 @@ or `paused`) is written with it:
 | `paused` | an open project that is not paused | every start in it but a Chat's held at the gate ([`sessions.md`](sessions.md)); a running turn runs out, with the halt file written where a work item of the project runs, and a work item's turn that ends normally under the pause is not done but owed its nudge ([`usage.md`](usage.md)) |
 | `resumed` | a paused project | once it commits, the gate opens for its held starts, the nudges owed go where nothing else holds them, and the halt file is deleted where nothing holds it any more |
 
-An archived project takes `brought_back` alone. Any other `kind` is a `400`, and so is
-`answer_confirmations` with a kind but `autopilot_on`. A confirmation answered meanwhile is left as
+An archived project takes `brought_back` alone, and an adopted project, which stands for a group
+of work run before Pilot, archived from its birth ([`collection.md`](collection.md#the-adopted-project)),
+takes none: "Cannot bring back <name> because it is adopted, and an adopted project stays as it was
+born". A `kind` the table does not name is a `400`, `adopted` among them, which an adopted project
+is born with and no request makes, and so is `answer_confirmations` with a kind but `autopilot_on`. A confirmation answered meanwhile is left as
 it was answered, and one added after the Yes is not answered.
 A transition that the project's standing does not allow is a `409`, and so is any write by a caller
 who has not chosen a handle or by the service user, which is no person ([`sign-in.md`](sign-in.md)).
@@ -216,8 +219,8 @@ send under way never deadlocks with them.
 **`POST /api/projects/<id>/membership`** joins the project as the caller (`201`), and **`DELETE`**
 on the same path leaves it (`200`), each answering the head. Joining opens a `project_members`
 row, so a rejoin is a new row; leaving closes the open one (`left_at`). Each is refused with `409`
-on an archived project, to a caller without a handle, to a member joining and to someone who is
-not a member leaving. A project may be left with no members. Pilot is never a member: the caller
+on an archived project, an adopted one with its own reason, to a caller without a handle, to a
+member joining and to someone who is not a member leaving. A project may be left with no members. Pilot is never a member: the caller
 is found by the token's subject, and Pilot's row has none. Nor is a service user: it joins and
 leaves nothing, `409`, as any write in a person's name refuses it.
 
@@ -264,7 +267,8 @@ focused and taking words.
 - **A tab** (`project-tab.tsx`) is a link to the project: its name ("New project" for a draft
   without a title) with its status icon after its last word (below), its ticket, on one line, the
   name giving way to it, and its status line, at most two lines, ellipsized, its whole text
-  its tooltip: "Draft"; "Finished" and the day it finished; else every step in progress, in the
+  its tooltip: "Draft"; "Finished" and the day it finished; "Adopted" for an adopted project, which is
+  listed with the archived ones; else every step in progress, in the
   plan's order, " · " between them, or with none in progress the step reading's "Not started", "N of
   M done" or "All steps done" (`projectStatusLine()`, D181). The step reading, `stepReading()` in
   `frontend/src/lib/utils/status-labels.ts`, is the head's step button's and a work item's progress
@@ -495,7 +499,7 @@ project document.
 `project-menu.tsx`, last in the head's second row, on a phone at its line's end. On an unarchived
 project, a draft included: "Join the project" or "Leave the project"; "Finish the project…" on an
 open project, "Reopen the project" on a finished one; and "Archive the project". On an archived
-project, "Bring back" alone.
+project, "Bring back" alone. An adopted project has no menu.
 
 Join and Leave act at once, each with a toast: "You joined <name>." and "You left <name>. It moves
 to Other projects.", on a finished project "You left <name>." alone, since it stays under Finished.
@@ -664,6 +668,9 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   wait by the project's session, deliver a card's change of state past the endpoint's token, run the
   waits' timer's tick, place a wait's run past its quiet window and close a wait as Pilot's `mark`
   does ([`waits.md`](waits.md)).
+- `POST /api/testing/scenarios` `{projects}` loads the invented scenario, its conversations
+  published through the collector's publication service, and answers `201` `{transcripts}`
+  ([`collection.md`](collection.md#testing-it)).
 - `GET /api/testing/projects/<id>/sightings?handle=<handle>` answers `{item_ids}`, the items the
   person's open membership of the project was shown, which the notification's reconcile writes off
   the request that showed them ([`notifications.md`](notifications.md)); no person with the handle,
@@ -677,7 +684,7 @@ project document that changes its text or takes it for the session, and a turn's
 document it lets go. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`, `place`, `save`,
 `saveProjectDocument`, `endTurn`, `doneByPilot`, `attach`, `attachToDraft`, `draft`, `register`,
-`workerAttach`, `askWriter`, `clarify`, `list`, `head`, `transition`, `sightings`, the item writes of
+`workerAttach`, `askWriter`, `clarify`, `list`, `head`, `transition`, `sightings`, `loadScenario`, the item writes of
 [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
 `projectList` and `projectHead` drive the screens, a spec building a project's URLs with
 `projectAddress(id)`, the folder the testing route answered (a draft created since is at its slug,
@@ -692,7 +699,8 @@ reads Create project (`definitionChat.createReady`, `createButton` and `createLi
 `create()` presses it and waits for its success ([`chats.md`](chats.md)); `phoneTabs`
 (`phone-tabs-page.ts`) reads a phone's tabs (`tab(key)`, a draft's Chat keyed `timeline`), the Chat
 tab's dot, the Documents tab's count, the page over them and the Plan tab's page. The status and the
-pause are pinned in `tests/projects/project-status.spec.ts`, the switch's dialog in
+pause are pinned in `tests/projects/project-status.spec.ts`, an adopted project's row and head in
+`adopted-project.spec.ts`, the switch's dialog in
 `autopilot.spec.ts`; the plus in `new-project.spec.ts`, Create project and its pause in
 `create-project.spec.ts`, the addresses in `project-address.spec.ts`, a switch that keeps the
 screen in `tests/shell/screen-switch.spec.ts`, the tight head, the auto pilot switch's refusals

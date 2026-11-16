@@ -472,6 +472,11 @@ their refusals, are [`projection.md`](projection.md#read-by-path)'s; `list_items
 the same root, `<folder>/items/…`, so that `read_file` takes it as it is, and an item with no file,
 a work item or a wait, has none.
 
+A project's `state` is `draft` until Create project, then `open`, and `finished` once finished, or
+`adopted` for one that stands for a group of work run before Pilot, archived from its birth and
+never opened, which `list_projects` lists with `archived` alone and whose folder no file tool reaches
+([`collection.md`](collection.md#the-adopted-project)).
+
 `start_project` takes the brief in the session's own words, verbatim the first message of the
 draft's definition chat, a one-line `title` and a person's handle as `for`, and no auto pilot
 switch: the draft is the plus's create by a call, its creator the service user, and runs nothing

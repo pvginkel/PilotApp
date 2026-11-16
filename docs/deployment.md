@@ -157,7 +157,8 @@ objects into each stage's namespace:
   as `STORE_ENVIRONMENT_ID`, and the store's bearer as `SYNC_TOKEN`, from the Secret `pilot-sync`.
   That reference is optional: a backend started while the Secret is absent runs with `SYNC_TOKEN`
   unset, which refuses every sync call, until its next start, and never fails to start for it.
-  `migrate` sets neither.
+  `migrate` sets neither. No stage sets `COLLECTOR_TOKEN`, so the collector's door refuses every
+  call there ([`collection.md`](collection.md)).
   Production's backend takes YouTrack's webhook token, which its tracker-events endpoint compares
   with each delivery's `X-YouTrack-Token` ([`waits.md`](waits.md)), as `YOUTRACK_WEBHOOK_TOKEN`
   from the Secret `pilot-youtrack-webhook-token`, key `token` ([below](#secrets)). That reference
