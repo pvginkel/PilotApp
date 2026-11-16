@@ -7735,6 +7735,48 @@ class TestLockOrder:
         assert _committed(container, placed_id).state_code == SessionState.STARTING
         assert _seqs(container, [stopped_id, placed_id]) == [1, 2]
 
+    @pytest.mark.parametrize("paused", [False, True])
+    def test_no_take_gets_an_environment_a_placement_by_name_has_yet_to_commit(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        paused: bool,
+    ) -> None:
+        # F86.9: the placed Session's row holds the Environment's against the
+        # take, held at the gate or not, so no start by repository resets it.
+        container = committed_app.container
+        starts, environments, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            _free(db, committed_fake)
+            db.get_one(Project, project_id).paused = paused
+        placed, release = threading.Event(), threading.Event()
+
+        def place() -> uuid.UUID:
+            with scoped_session(container) as db:
+                starts.named_environment(db, FREE)
+                work_id = starts.start_work_in(
+                    db, project_id, FREE, title="Renaming", brief=BRIEF, cwd=CWD
+                ).id
+                clear_after_commit_callbacks()
+                placed.set()
+                assert release.wait(timeout=30)
+                return work_id
+
+        placing = in_thread(place)
+        try:
+            assert placed.wait(timeout=30)
+            with scoped_session(container) as db:
+                assert environments.take(db, REPO) is None
+        finally:
+            release.set()
+        work_id = placing.result()
+
+        with scoped_session(container) as db:
+            assert environments.take(db, REPO) is None
+        assert _committed(container, work_id).environment_id == FREE
+
     def test_two_starts_in_one_project_both_go_through(
         self,
         committed_app: Flask,
