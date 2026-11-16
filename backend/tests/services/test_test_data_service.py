@@ -361,6 +361,22 @@ class TestTestDataService:
             "Building the recipe card page",
         ]
 
+    def test_a_save_on_the_recipes_is_the_session_that_added_their_items(
+        self, counts: dict[str, int], container: ServiceContainer, session: DbSession
+    ) -> None:
+        """The runs' sessions have no start, so the testing routes act through
+        the session started last, the one that added the items."""
+        review = _item(session, "Review the recipe card page")
+
+        container.test_data_service().save(
+            review.id, "---\nstep: build\n---\n\n# Review the recipe card page\n"
+        )
+
+        assert (
+            session.get_one(Document, review.id).writing_session_id
+            == review.created_by_session_id
+        )
+
     def test_blocks_unanswered_answered_deferred_and_done(
         self, counts: dict[str, int], session: DbSession
     ) -> None:

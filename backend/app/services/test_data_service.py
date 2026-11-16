@@ -1664,7 +1664,10 @@ class TestDataService:
         titled `title`, its debrief `debrief` with its one `entry`, naming
         `DEBRIEF_SUBJECT` and whether it `completes` it, as its
         `register_debrief` stores them, and done at its turn's end at `now`,
-        which places the debrief's notice where it completes (DB 609)."""
+        which places the debrief's notice where it completes (DB 609). Its
+        session has no start, so that the session started last, the one the
+        testing routes act through (`_session_of`), stays the one that added
+        the items."""
         session = AgentSession(
             project_id=project.id,
             environment_id=environment.id,
@@ -1672,7 +1675,6 @@ class TestDataService:
             cwd="/work/RecipeBox",
             token_hash=hashlib.sha256(title.encode()).hexdigest(),
             state_code=SessionState.IDLE,
-            started_at=now,
         )
         self.db.add(session)
         self.db.flush()
