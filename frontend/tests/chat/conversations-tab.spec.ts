@@ -9,12 +9,13 @@
  * under it. There is no composer, and the tab carries no unread dot. It shows from the earliest
  * conversation still open, or the latest; "Load previous" loads the one before, above "Conversation
  * closed · <time>". The Chat tab, its composer, its Stop and its unread dot read the project's
- * chats alone. The panel keeps the tab as the one the person picked, in the browser.
+ * chats alone. The panel keeps the tab as the one the person picked, in the browser. Where its
+ * read fails it says "The conversations did not load." (F113).
  */
 
 import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
-import { makeUnique } from '../support/helpers';
+import { expectConsoleError, makeUnique } from '../support/helpers';
 
 const ZONE = 'Europe/Amsterdam';
 test.use({ timezoneId: ZONE });
@@ -248,6 +249,44 @@ test.describe('The Conversations tab', () => {
     await expect(conversationsTab.conversation(third.conversation).names).toHaveText(['Automation']);
     await expect(conversationsTab.conversation(second.conversation).state).toHaveText('Open');
     await controller.finish(chats.store, third.session, 'success', 'Nothing.');
+  });
+
+  test('says “The conversations did not load.” where its read fails, and draws them once a later read lands', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chats,
+    conversations,
+    conversationsTab,
+  }) => {
+    const subject = makeUnique('subject');
+    const me = await people.signIn({ subject });
+    const project = await projects.make({ name: makeUnique('Failed'), members: [me.handle!] });
+    const { caller } = await conversations.caller('RecipeBox-2');
+    const { conversation: id, session } = await caller.start(project, 'Is the stock on?');
+    await controller.play(chats.store, session, [text('stock', 'Simmering.')]);
+    await controller.finish(chats.store, session, 'success', 'Simmering.');
+    await conversations.idle(project, id);
+    await timeline.open(project);
+    await conversationsTab.tab.click();
+    const conversation = conversationsTab.conversation(id);
+    await expect(conversation.texts).toHaveText(['Simmering.']);
+
+    // The browser's session now lacks the editor role, and the API refuses the list's next read.
+    await expectConsoleError(page, /403/);
+    await people.withoutRole({ subject });
+    await timeline.refocus();
+    await expect(conversationsTab.failed).toHaveText('The conversations did not load.');
+    await expect(conversationsTab.conversations).toHaveCount(0);
+    await expect(conversationsTab.tab).toHaveAttribute('aria-selected', 'true');
+
+    await people.firstSignIn({ subject });
+    await timeline.refocus();
+    await expect(conversationsTab.failed).toHaveCount(0);
+    await expect(conversation.texts).toHaveText(['Simmering.']);
+    await expect(conversation.state).toHaveText('Open');
   });
 });
 
