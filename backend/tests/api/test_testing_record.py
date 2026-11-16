@@ -7,7 +7,8 @@ controller creates, its worker's registrations and attachments with their
 effects and the list of steps it publishes, a pre-ruling pass's questions to a registered document's
 writer, the store's update and its lift, as `update-store` makes and asks
 them, and the brain's waits, a card's transition past the endpoint's token,
-the waits' timer's tick, a wait's run and its close."""
+the waits' timer's tick, a wait's run and its close, and the invented
+scenario's load."""
 
 import base64
 import uuid
@@ -40,6 +41,7 @@ from app.models import (
     ProjectMember,
     ResearchAssignment,
     StoreUpdate,
+    Transcript,
     Turn,
     User,
     Wait,
@@ -85,6 +87,7 @@ FLEET = {"handle": "fleet", "name": "KubeCoder fleet", "subject": "subject-fleet
 ENVIRONMENTS = "/api/testing/environments"
 PROJECTS = "/api/testing/projects"
 STORE_UPDATE = "/api/testing/store-update"
+SCENARIOS = "/api/testing/scenarios"
 
 TASKS = [{"id": "build", "title": "Build the camp", "status": "pending"}]
 
@@ -1960,6 +1963,7 @@ ENDPOINTS = [
     (DUE, {}),
     (_wait_run_path(NO_ROW), {}),
     (_wait_close_path(NO_ROW), {"note": "Read"}),
+    (SCENARIOS, {"projects": {"recipe-box": str(NO_ROW)}}),
 ]
 
 
@@ -3906,6 +3910,88 @@ class TestCreateWaitClose:
         response = client.post(_wait_close_path(NO_ROW), json={"note": self.NOTE})
 
         assert response.status_code == 404
+
+
+class TestCreateScenario:
+    def test_the_scenario(
+        self, client: FlaskClient, session: Session, project: Project
+    ) -> None:
+        response = client.post(
+            SCENARIOS, json={"projects": {"recipe-box": str(project.id)}}
+        )
+
+        assert response.status_code == 201
+        halving, counting, gears = response.get_json()["transcripts"]
+        assert [set(thread) for thread in (halving, counting, gears)] == [
+            {"session_id", "agent_id"}
+        ] * 3
+        assert (halving["agent_id"], gears["agent_id"]) == (None, None)
+        assert counting["session_id"] == halving["session_id"]
+        assert counting["agent_id"] is not None
+        assert session.execute(
+            select(Transcript.session_id, Transcript.agent_id).order_by(
+                Transcript.file_modified_at
+            )
+        ).all() == [
+            (counting["session_id"], counting["agent_id"]),
+            (halving["session_id"], None),
+            (gears["session_id"], None),
+        ]
+        run = session.scalars(
+            select(models.Session).where(
+                models.Session.conversation_id == halving["session_id"]
+            )
+        ).one()
+        assert run.project_id == project.id
+
+    def test_a_second_load_replaces_the_first(
+        self, client: FlaskClient, session: Session, project: Project
+    ) -> None:
+        body = {"projects": {"recipe-box": str(project.id)}}
+
+        first = client.post(SCENARIOS, json=body)
+        second = client.post(SCENARIOS, json=body)
+
+        assert second.status_code == 201
+        assert second.get_json() == first.get_json()
+        assert _count(session, Transcript) == 3
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({}, id="no projects"),
+            pytest.param({"projects": {"recipe-box": "camp"}}, id="no id"),
+        ],
+    )
+    def test_a_request_out_of_shape_is_refused(
+        self, client: FlaskClient, session: Session, body: dict[str, Any]
+    ) -> None:
+        assert client.post(SCENARIOS, json=body).status_code == 400
+        assert _count(session, Transcript) == 0
+
+    def test_a_project_the_scenario_has_no_turn_on_is_refused(
+        self, client: FlaskClient, session: Session, project: Project
+    ) -> None:
+        response = client.post(
+            SCENARIOS, json={"projects": {"bike-log": str(project.id)}}
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["error"] == (
+            "Cannot load the scenario because `projects` gives a project for "
+            "`bike-log`, and the scenario's Turns of Pilot's are on `recipe-box`"
+        )
+        assert _count(session, Transcript) == 0
+
+    def test_an_unknown_project_is_not_found(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        response = client.post(
+            SCENARIOS, json={"projects": {"recipe-box": str(NO_ROW)}}
+        )
+
+        assert response.status_code == 404
+        assert _count(session, Transcript) == 0
 
 
 @pytest.mark.usefixtures("person")

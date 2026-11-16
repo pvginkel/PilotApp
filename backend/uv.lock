@@ -963,6 +963,7 @@ dependencies = [
     { name = "mcp" },
     { name = "paste" },
     { name = "pilot-dsl" },
+    { name = "pilot-scenario" },
     { name = "prometheus-flask-exporter" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -1005,6 +1006,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.28,<2" },
     { name = "paste", specifier = ">=3.10.1,<4" },
     { name = "pilot-dsl", editable = "packages/pilot-dsl" },
+    { name = "pilot-scenario", editable = "packages/pilot-scenario" },
     { name = "prometheus-flask-exporter", specifier = ">=0.23.0,<0.24" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1.0,<4" },
     { name = "pydantic", specifier = ">=2.5.0,<3" },
@@ -1045,6 +1047,16 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pyyaml", specifier = ">=6.0.3,<7" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.0,<10" }]
+
+[[package]]
+name = "pilot-scenario"
+version = "0.1.0"
+source = { editable = "packages/pilot-scenario" }
+
+[package.metadata]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.0,<10" }]

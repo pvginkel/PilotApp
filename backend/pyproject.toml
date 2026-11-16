@@ -24,6 +24,7 @@ dependencies = [
     "cryptography>=46.0.4,<47",
     "httpx>=0.28.1,<0.29",
     "pilot-dsl",
+    "pilot-scenario",
     # FastMCP, as in KubeCoder and Fieldnotes: mcp 2 renamed it MCPServer and
     # changed its API.
     "mcp>=1.28,<2",
@@ -32,10 +33,13 @@ dependencies = [
 ]
 
 # The block DSL, a package of its own that PilotProjects takes from git
-# (design 3 §7). Editable: uv reinstalls a path dependency installed whole only
-# when its pyproject.toml changes, never its source.
+# (design 3 §7), and the invented scenario with its builder, which the testing
+# route loads on every stage but prd (F122.2, F122.6). Editable: uv reinstalls
+# a path dependency installed whole only when its pyproject.toml changes, never
+# its source.
 [tool.uv.sources]
 pilot-dsl = { path = "packages/pilot-dsl", editable = true }
+pilot-scenario = { path = "packages/pilot-scenario", editable = true }
 
 [project.scripts]
 cli = "app.cli:main"
@@ -127,7 +131,7 @@ module = "app.models.*"
 disable_error_code = ["attr-defined"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages/pilot-dsl/tests"]
+testpaths = ["tests", "packages/pilot-dsl/tests", "packages/pilot-scenario/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

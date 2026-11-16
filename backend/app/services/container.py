@@ -63,6 +63,7 @@ from app.services.push_subscription_service import PushSubscriptionService
 from app.services.quota_overrule_service import QuotaOverruleService
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import RelayWatchdog
+from app.services.scenario_service import ScenarioService
 from app.services.session_record_service import SessionRecordService
 from app.services.session_start_service import SessionStartService
 from app.services.session_stream_service import SessionStreamService
@@ -575,6 +576,11 @@ class ServiceContainer(containers.DeclarativeContainer):
     # A collector's publication of a transcript (F152.3)
     publication_service = providers.Factory(
         PublicationService, db=db_session, app_settings=app_config
+    )
+
+    # The invented scenario, loaded through /api/testing/ (F122.6)
+    scenario_service = providers.Factory(
+        ScenarioService, db=db_session, publication_service=publication_service
     )
 
     testing_sync_service = providers.Factory(

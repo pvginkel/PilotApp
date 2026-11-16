@@ -7,7 +7,7 @@ WORKDIR /app
 
 # --- Reproduce the environment ---
 COPY pyproject.toml uv.lock /app/
-# The block DSL, a path dependency the sync below installs.
+# The block DSL and the scenario, path dependencies the sync below installs.
 COPY packages /app/packages
 
 # Install project deps into .venv

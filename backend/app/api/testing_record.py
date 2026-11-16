@@ -17,7 +17,8 @@ its effect; the store's update, made or its lift asked, as `update-store`
 does (F144.5); and the brain's waits, a card's transition delivered as the
 tracker-events endpoint takes it, past its token, which the dev stage has
 none of (R8), the waits' timer's tick, a wait's run placed as the batcher
-places it, and its close by Pilot's `mark`.
+places it, and its close by Pilot's `mark`; and the invented scenario, its
+conversations as a collector publishes them (F122.6).
 Nothing in the UI places a work item, which the brain adds (F66).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
@@ -67,10 +68,13 @@ from app.schemas.testing_record import (
     InventedRegistrationCreateSchema,
     InventedSaveCreateSchema,
     InventedSaveSchema,
+    InventedScenarioCreateSchema,
+    InventedScenarioSchema,
     InventedSightingsQuerySchema,
     InventedSightingsSchema,
     InventedStoreUpdateCreateSchema,
     InventedStoreUpdateSchema,
+    InventedTranscriptSchema,
     InventedWaitCloseSchema,
     InventedWaitCreateSchema,
     InventedWorkCreateSchema,
@@ -83,6 +87,7 @@ from app.schemas.testing_record import (
 from app.schemas.tracker_events import TrackerEventReplySchema
 from app.services.container import ServiceContainer
 from app.services.people_service import PeopleService
+from app.services.scenario_service import ScenarioService
 from app.services.store_update_service import StoreUpdateService
 from app.services.test_data_service import TestDataService
 from app.services.tracker_event_service import TrackerEventService
@@ -1123,6 +1128,43 @@ def create_wait_close(
     data = InventedWaitCloseSchema.model_validate(request.get_json())
     test_data_service.close_wait(item_id, data.note)
     return "", 204
+
+
+@testing_record_bp.route("/scenarios", methods=["POST"])
+@api.validate(
+    json=InventedScenarioCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedScenarioSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_scenario(
+    scenario_service: ScenarioService = Provide[ServiceContainer.scenario_service],
+) -> Any:
+    """Load the invented scenario: its conversations, each published whole
+    through the service a collector's publication writes through, its last
+    moment now, and the Session and Turn of Pilot's that ran one of them, on
+    the project given for the scenario's (F122.6). A second load replaces
+    the first: the record holds the scenario once, as it was loaded last.
+
+    Returns:
+        201: The scenario's transcripts
+        400: The projects given are not the scenario's that a Turn of
+            Pilot's is on, or the stage is prd
+        404: No project has an id given
+    """
+    data = InventedScenarioCreateSchema.model_validate(request.get_json())
+    transcripts = scenario_service.load(data.projects)
+    return InventedScenarioSchema(
+        transcripts=[
+            InventedTranscriptSchema(
+                session_id=transcript.session_id, agent_id=transcript.agent_id
+            )
+            for transcript in transcripts
+        ]
+    ).model_dump(), 201
 
 
 def _saved(ingested: Ingested) -> dict[str, Any]:

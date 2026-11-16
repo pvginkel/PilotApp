@@ -2546,6 +2546,76 @@
         "title": "InventedFaultSchema",
         "type": "object"
       },
+      "InventedScenarioCreateSchema.6d6b324": {
+        "description": "The invented scenario to load (F122.6).",
+        "properties": {
+          "projects": {
+            "additionalProperties": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "description": "The project that stands for each of the scenario's projects a Turn of Pilot's is on, by the scenario's name of it",
+            "examples": [
+              {
+                "recipe-box": "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b"
+              }
+            ],
+            "title": "Projects",
+            "type": "object"
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "title": "InventedScenarioCreateSchema",
+        "type": "object"
+      },
+      "InventedScenarioSchema.6d6b324": {
+        "description": "The scenario as the record now holds it.",
+        "properties": {
+          "transcripts": {
+            "description": "Its transcripts as published: each session's main thread, then its sub-agents'",
+            "items": {
+              "$ref": "#/components/schemas/InventedScenarioSchema.6d6b324.InventedTranscriptSchema"
+            },
+            "title": "Transcripts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "transcripts"
+        ],
+        "title": "InventedScenarioSchema",
+        "type": "object"
+      },
+      "InventedScenarioSchema.6d6b324.InventedTranscriptSchema": {
+        "description": "A transcript of the scenario, by Claude Code's ids of it.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude Code's id of the sub-agent, none on a main thread",
+            "title": "Agent Id"
+          },
+          "session_id": {
+            "description": "Claude Code's id of its main thread",
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "agent_id"
+        ],
+        "title": "InventedTranscriptSchema",
+        "type": "object"
+      },
       "InventedSightingsQuerySchema.6d6b324": {
         "description": "Whose sightings in the project are read.",
         "properties": {
@@ -20737,6 +20807,63 @@
           }
         ],
         "summary": "The fake push service's answer to its route at `path`.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/scenarios": {
+      "post": {
+        "description": "Returns:     201: The scenario's transcripts     400: The projects given are not the scenario's that a Turn of         Pilot's is on, or the stage is prd     404: No project has an id given",
+        "operationId": "post__api_testing_scenarios",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedScenarioCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedScenarioSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Load the invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and the Session and Turn of Pilot's that ran one of them, on the project given for the scenario's (F122.6). A second load replaces the first: the record holds the scenario once, as it was loaded last.",
         "tags": [],
         "x-required-role": "editor"
       }

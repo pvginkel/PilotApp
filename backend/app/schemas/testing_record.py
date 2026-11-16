@@ -3,8 +3,8 @@ cannot make: people, a service user, environments, projects, their items,
 their work items,
 an agent's saves of them, the files hung on them, a worker's registrations and
 attachments, the pre-ruling pass's questions to a writer, an answer the brain
-records in the chat, the store's update and its lift, and the brain's waits,
-their firings, their runs and their close."""
+records in the chat, the store's update and its lift, the brain's waits,
+their firings, their runs and their close, and the scenario's load."""
 
 import base64
 import binascii
@@ -589,3 +589,35 @@ class InventedFiredSchema(BaseModel):
     """How many waits a testing route fired."""
 
     fired: int = Field(ge=0, description="How many waits fired", examples=[1])
+
+
+class InventedScenarioCreateSchema(BaseModel):
+    """The invented scenario to load (F122.6)."""
+
+    projects: dict[str, uuid.UUID] = Field(
+        description=(
+            "The project that stands for each of the scenario's projects a Turn "
+            "of Pilot's is on, by the scenario's name of it"
+        ),
+        examples=[{"recipe-box": "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b"}],
+    )
+
+
+class InventedTranscriptSchema(BaseModel):
+    """A transcript of the scenario, by Claude Code's ids of it."""
+
+    session_id: str = Field(description="Claude Code's id of its main thread")
+    agent_id: str | None = Field(
+        description="Claude Code's id of the sub-agent, none on a main thread"
+    )
+
+
+class InventedScenarioSchema(BaseModel):
+    """The scenario as the record now holds it."""
+
+    transcripts: list[InventedTranscriptSchema] = Field(
+        description=(
+            "Its transcripts as published: each session's main thread, then its "
+            "sub-agents'"
+        )
+    )
