@@ -69,8 +69,8 @@ projects too.
   answers `404`.
 
 **The status** (`project_status()` in `project_service.py`) is one for every viewer, derived on
-each read and never stored: `paused`, or `pausing` while a Session of the project, a Chat's too, is
-`running`; else `running` while a work item or a job is `running`; `waiting_on_you` while an open
+each read and never stored: `paused`, or `pausing` while a Session of the project, a Chat's or a
+Conversation's too, is `running`; else `running` while a work item or a job is `running`; `waiting_on_you` while an open
 item waits on a member, the badge's set (for nobody while the project has a member, or for a
 member); `waiting_on_event` while a wait is open; `done` while every step of a plan with steps is
 done; `idle` otherwise. A draft and a finished project have none; an archived open one has its
@@ -122,13 +122,13 @@ or `paused`) is written with it:
 | `kind` | Allowed on | Also |
 |---|---|---|
 | `opened` | a draft whose `create_refusal` is null | Create project (below) |
-| `finished` | an open project | every session of the project running, starting or held stopped, as Stop stops one ([`sessions.md`](sessions.md)), and its open chat closed, `finished` ([`chats.md`](chats.md)); while auto pilot is on, `autopilot_off`, and while it is paused, `resumed`, each at the same instant, by the same person; then every open item but the opening closed unanswered, and the archive question put (below) |
-| `reopened` | a finished project | every session of the project running, starting or held stopped, which in a finished project is its read-only chat's alone, and its open chat closed, `reopened`, so that the next message starts one that writes (D068); an open archive question closed as its Keep; auto pilot stays off and the project is not paused: a finished project's never are |
-| `archived` | a draft, an open or a finished project | every session of the project running, starting or held stopped, and its open chat closed, `archived` ([`chats.md`](chats.md)), so an archived project has no chat open; an open archive question closed as its Archive; auto pilot and the pause are kept, so Bring back returns the project as it was |
+| `finished` | an open project | every session of the project running, starting or held stopped, as Stop stops one ([`sessions.md`](sessions.md)), and its open chat and conversations closed, `finished` ([`chats.md`](chats.md), [`conversations.md`](conversations.md)); while auto pilot is on, `autopilot_off`, and while it is paused, `resumed`, each at the same instant, by the same person; then every open item but the opening closed unanswered, and the archive question put (below) |
+| `reopened` | a finished project | every session of the project running, starting or held stopped, which in a finished project is its read-only chat's and conversations' alone, and its open chat and conversations closed, `reopened`, so that the next message starts one that writes (D068); an open archive question closed as its Keep; auto pilot stays off and the project is not paused: a finished project's never are |
+| `archived` | a draft, an open or a finished project | every session of the project running, starting or held stopped, and its open chat and conversations closed, `archived` ([`chats.md`](chats.md)), so an archived project has no chat or conversation open; an open archive question closed as its Archive; auto pilot and the pause are kept, so Bring back returns the project as it was |
 | `brought_back` | an archived project | nothing started: the next message starts a chat |
 | `autopilot_on` | an open project with auto pilot off | with `answer_confirmations` true, the switch's Yes: each open confirmation it would answer, the head's `autopilot_may_take`, answered `Yes` by the caller, `via: autopilot`, in timeline order, as the caller's own answer is, each doing what that answer does ([`work.md`](work.md), [`round-trip.md`](round-trip.md)) |
 | `autopilot_off` | a project with auto pilot on | |
-| `paused` | an open project that is not paused | every start in it but a Chat's held at the gate ([`sessions.md`](sessions.md)); a running turn runs out, with the halt file written where a work item of the project runs, and a work item's turn that ends normally under the pause is not done but owed its nudge ([`usage.md`](usage.md)) |
+| `paused` | an open project that is not paused | every start in it but a Chat's and a Conversation's held at the gate ([`sessions.md`](sessions.md)); a running turn runs out, with the halt file written where a work item of the project runs, and a work item's turn that ends normally under the pause is not done but owed its nudge ([`usage.md`](usage.md)) |
 | `resumed` | a paused project | once it commits, the gate opens for its held starts, the nudges owed go where nothing else holds them, and the halt file is deleted where nothing holds it any more |
 
 An archived project takes `brought_back` alone, and an adopted project, which stands for a group
@@ -456,12 +456,15 @@ back, Esc and Back take it off. A home row's status icon pauses and resumes as t
 
 At 900px and below, a project's screen is `PhoneProject` (`components/projects/phone-project.tsx`):
 the head in one line (above), the tab showing, and under it the tabs at the bottom: Timeline, Chat,
-Plan and Documents for a project, and for a draft its Chat, the definition chat in the timeline's
+Plan and Documents for a project, Timeline, Chat, Conversations, Plan and Documents for one that has
+had a conversation (D234, [`conversations.md`](conversations.md)), and for a draft its Chat, the definition chat in the timeline's
 place with Create project at its end, then Draft and Documents. Each tab is its icon over its name,
 the one showing in the primary's tint, its icon on a pill. Chat carries the unread dot, its name
 then "Chat, a reply unread" ([`chats.md`](chats.md)), and Documents its count on the icon's corner.
+Up to four tabs share the row alike; of five, each takes its name's width and a share of what is left, so
+that "Conversations" stands within its tab (`phoneTabs(draft, conversations)`, `hooks/use-phone-tab.ts`).
 
-- **Chat, Documents and Draft** are the side panel's tabs, drawn without the panel's head
+- **Chat, Conversations, Documents and Draft** are the side panel's tabs, drawn without the panel's head
   (`PhonePanel`, [`documents.md`](documents.md)).
 - **Plan** is the plan popover's content as a page (`PlanPage`): "The plan · N of M done" ("The
   plan" alone with no steps), the steps in their rows at the base size, a step's notes listed on its
@@ -554,18 +557,20 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   open notices. A finished project with auto pilot on, a paused project that is not open, a member
   named twice, open items without an environment and a plan with a fault are each a `400`; a handle
   that is no person's, `agent` included, and an unknown environment a `404`.
-- `POST /api/testing/projects/<id>/work` `{repo, title, brief, cwd, step?, claims?, researches?}`
-  places a work
-  item by the repository `repo`, `owner/Name`, its session to run in `cwd`, and starts its session
-  through the gate, as every work item's starts ([`sessions.md`](sessions.md)): once the request
-  commits, its start takes or creates an environment of Pilot's own from the repository on the
-  stage's own controller. It answers `201` `{id}`, the item's, its Work's and its Session's. `step`
+- `POST /api/testing/projects/<id>/work` `{repo | environment, title, brief, cwd, step?, claims?,
+  researches?}` places a work item by the repository `repo`, `owner/Name`, or in the environment
+  `environment` by name, exactly one of them, else a `400`, its session to run in `cwd`, and starts
+  its session through the gate, as every work item's starts ([`sessions.md`](sessions.md)): once the
+  request commits, the start of one placed by repository takes or creates an environment of Pilot's
+  own from it on the stage's own controller, and the start of one placed by name starts the
+  environment named where it is stopped, which must be one the stage's controller reports, else a
+  `404`. It answers `201` `{id}`, the item's, its Work's and its Session's. `step`
   is the id of a plan task it serves. `claims` names it for claimed actions by their blocks' ids,
   and `researches` for the blocks it checks a fact for, as a pass's `add_item` does
   ([`mcp.md`](mcp.md)). An unknown project, a step not in the plan, a claim's or a research's item
   not of the project or a block its document lacks is a `404`; a claim or a research the record
-  refuses, no controller configured, or a finished or an archived project, a `409`. A work item is
-  created by its own Session, so once one has started, the routes below that act by the project's
+  refuses, no controller configured, the store's environment, or a finished or an archived project,
+  a `409`. A work item is created by its own Session, so once one has started, the routes below that act by the project's
   session started last act by it.
 - `POST /api/testing/projects/<id>/items` `{kind, title, text, by_pilot?}` adds a prose item as
   Pilot adds one, born through the engine's `bear_item` by the project's session started last, and

@@ -148,7 +148,7 @@ Each window's halt setting says it, the three on one mechanism:
 **The halt file**, `/work/.quota-limit-halt-requested`, written empty (`HaltFileService`), is
 wanted in an environment where a work item's Session is `running` under a usage halt whose setting
 is the cooperative stop, or under its project's pause ([`projects.md`](projects.md)), and nowhere
-else: never for a job's Session or a chat's, so never in the store. Two projects sharing an
+else: never for a job's Session, a chat's or a conversation's, so never in the store. Two projects sharing an
 environment share its file, and so do a halt and a pause: it goes once nothing holds it there.
 `environments.halt_requested_at` says the file may be there: set and committed before the write
 goes out, cleared once the delete is answered, so that a write the controller made but whose answer
@@ -210,7 +210,8 @@ A Session's `nudge_owed_at` is set where its run is to be carried on once there 
 once its project is resumed: a work item the hard stop stopped (`stopped`), one halted or paused at
 its turn's end (`idle`), and a work item or a job whose turn died at the quota wall (`failed`,
 below). A chat's Session is never owed one (D096): a turn that fails there shows so, and the person
-sends again.
+sends again; nor is a conversation's, whose caller reads the reply and sends again
+([`conversations.md`](conversations.md)).
 
 `SessionStartService.send_nudges()` asks for the loop `start:nudges`. Its run first settles each
 wall a reading decided missed (below); then it takes each Session whose nudge is owed and that
@@ -282,7 +283,7 @@ its nudge owed from the turn's end, and a job's Retry stays refused, until a rea
 
 ## Each turn's tokens
 
-Every Turn of every Session, a work item's, a job's and a chat's alike, keeps the tokens its run
+Every Turn of every Session, a work item's, a job's, a chat's and a conversation's alike, keeps the tokens its run
 used and the cost it reports (`token_counts.py`): a `token_counts` row per Token Kind, `input`,
 `cache_write`, `cache_read` and `output`, and the Turn's `cost`, in US dollars as Claude reports it,
 notional on a subscription ([`record.md`](record.md)). They are read from `claude`'s own `result`

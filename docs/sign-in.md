@@ -124,7 +124,9 @@ to the row by its subject alone.
 - **Its reads** answer as a person's. The self read answers its handle and name, `avatar_slot`,
   `alarms` and `join_calls` null, and writes nothing: no sign-in refreshes the row. The handle step
   refuses it as a caller whose handle is chosen.
-- **Its one write** is the plus's create, which makes a call's draft ([`projects.md`](projects.md)).
+- **Its two writes** are the plus's create, which makes a call's draft ([`projects.md`](projects.md)),
+  and a conversation with Pilot, whose routes are a service user's alone and refuse a person, `409`
+  "Cannot … because you do not call as a service user" ([`conversations.md`](conversations.md)).
   Every write in a person's name refuses it (above), and so a service user is never a member;
   Undo, Resume and Retry name no person and take it as they take anyone. Pilot makes every adopted
   project in its name, its creator and the one transition's, the first service user made where the

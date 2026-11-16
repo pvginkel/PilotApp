@@ -5,7 +5,7 @@ session's kind. A work item's session gets `pilot-work`: `register_document`, a 
 it wrote, put to a person on the project's timeline; `attach_file`, the material that backs one,
 copied into the record; `set_progress` and `set_progress_step`, the steps its run goes through,
 shown on its tile; and `register_debrief`, its run's debrief, shown behind the done work item's
-Debrief. The brain's sessions, a project's chat and the server's jobs, get
+Debrief. The brain's sessions, a project's chat, a conversation and the server's jobs, get
 `pilot-store`, the one door to the record beyond the project's folder: `add_item`, `attach_file`,
 `answer`, `mark`, `cancel_ask`, `stop_work`, `finish` and `ask_writer`. Each tool is one REST call to the backend
 under the session's bearer, which names the session's project, environment and work item, so the
@@ -16,7 +16,8 @@ the brain's tools serve is [`chats.md`](chats.md)'s.
 
 Beside the two, the same process serves `pilot-projects`, the projects surface, to any session of
 KubeCoder's production fleet, Pilot's own included: tools that read the projects Pilot manages,
-their items and their files, and `start_project`, which starts a draft. Its callers present one
+their items and their files, `start_project`, which starts a draft, and the tools of a conversation
+with Pilot about one ([`conversations.md`](conversations.md)). Its callers present one
 shared token, and its tools call the API's own routes under `/api/` as Pilot's service user
 ([below](#the-projects-surface)).
 
@@ -33,8 +34,8 @@ write each document under `/work`, register it, attach what backs it and end its
 waiting for the answers (`server.py`'s `WORK_INSTRUCTIONS`); `pilot-store`'s say that its tools act on the one project `$PILOT_PROJECT`
 names, only while the session's turn runs, how an item and a block are named, and that a call the
 record refuses changes nothing (`STORE_INSTRUCTIONS`); `pilot-projects`' say what the surface is,
-Pilot and its projects, that its tools read a project, its documents and its items, and start one,
-and ask the session to load the skill `kubecoder:pilot-usage` before it uses them
+Pilot and its projects, that its tools read a project, its documents and its items, start one, and
+talk to Pilot about one, and ask the session to load the skill `kubecoder:pilot-usage` before it uses them
 (`PROJECTS_INSTRUCTIONS`).
 
 - **The bearer gate** (`server.py`, `BearerRequired`): a request with no `Authorization: Bearer
@@ -84,7 +85,7 @@ starts the backend and Vite alone.
 server to each headless create Pilot makes, a start's and a relay's re-create of a gone controller
 session alike, at the endpoint of the surface the create's scope names (`scoped_create`,
 [`sessions.md`](sessions.md)): `pilot-work`, a work item's, at `MCP_SERVER_URL`, and
-`pilot-store`, a chat's and a job's, at `<MCP_SERVER_URL>/store`, never both:
+`pilot-store`, a chat's, a conversation's and a job's, at `<MCP_SERVER_URL>/store`, never both:
 
 - it mints a token, `secrets.token_urlsafe(32)`, and appends `PILOT_TOKEN=<token>` to the create's
   `env`, then `PILOT_MCP_URL=<the endpoint>`, so that a process the session runs can call a tool
@@ -255,8 +256,8 @@ The tool sends no tool-use id, since no effect needs it.
 where `pilot_work` does: on the app, outside `/api/` and the OIDC gate, reached by the pod's
 loopback alone. Its gate is `PilotStoreService.admit`
 (`backend/app/services/pilot_store_service.py`): `401` as `pilot-work`'s, and `403` for a work
-item's Session ("… is a work session, not a chat's or a job's") and for a chat's or a job's whose
-turn is not running, read as `pilot-work`'s gate reads it, a send under way waited for, so a bearer
+item's Session ("… is a work session, not a chat's or a job's") and for a chat's, a conversation's
+or a job's whose turn is not running, read as `pilot-work`'s gate reads it, a send under way waited for, so a bearer
 acts only while its turn does. A call acts on the bearer's project
 alone: an item, a block or an attachment of another project is a `404` "… was not found". `for`
 names a person by their handle, `404` "Person <handle> was not found" for one no person has, Pilot's
@@ -269,12 +270,13 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   one object in `timeline.json`'s shape ([`projection.md`](projection.md)): `kind` (`decision`,
   `question`, `action`, `notice`, `document`, `review`, `work`, `card_wait` or `timed_wait`),
   `title`, `step` and `attachments`, then a prose item's `markdown`, `urgent`, `for` and `summary`,
-  a work item's `repo` (`owner/Name`), `cwd`, `brief`, `agent`, `model`, `reasoning_effort`,
+  a work item's `repo` (`owner/Name`) or `environment`, an environment's id, `cwd`, `brief`, `agent`, `model`, `reasoning_effort`,
   `claims`, the blocks' ids, `<item id>/<local id>`, of the claimed actions it does, and
   `researches`, the ids of the blocks it checks a fact for, which the pass left open, a card wait's
   `cards` and `states`, or a timed wait's `due_at`, a time with its offset. A field the kind does not
-  take, and a work item without its `title`, `repo`, `cwd` or `brief`, or a wait without its
-  `title` and its own fields, are refused. A wait is recorded as given and fixed from then on: an
+  take, a work item without its `title`, `cwd` or `brief`, one that names both or neither of `repo`
+  and `environment` ("a work item names exactly one of `repo` and `environment`"), and a wait
+  without its `title` and its own fields, are refused. A wait is recorded as given and fixed from then on: an
   empty list ("its `cards` list is empty"), a card that is no ticket id ("`sr-1` is no ticket id,
   `<pattern>`"), a list naming a card twice or a state twice, case-insensitively, and a due time
   not ahead ("its due time, <UTC>, is not ahead") are refused ([`waits.md`](waits.md)). A prose item is born in the record with its
@@ -283,9 +285,14 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   gives none of its own (`with_facts`, [`block-dsl.md`](block-dsl.md)); its text is read first as a
   save of it is, and one with a fault is refused, each fault with its line, nothing minted: one with
   no title either way, and a block whose `by` names a person, whose answer is `answer`'s, after the
-  add. `path` is a prose item's file, absolute. A work item is placed and started on add by its
-  repository, as every work item's start is ([`sessions.md`](sessions.md)), in the `cwd` the brain
-  gives, on its `agent`, `model` and `reasoning_effort`; its first turn is the brain's `brief`, a
+  add. `path` is a prose item's file, absolute. A work item is placed and started on add
+  ([`sessions.md`](sessions.md)): by its `repo`, in an environment of Pilot's own its start makes or
+  takes from it, or by its `environment`, in that environment as it stands, which Pilot never
+  makes, takes, renames or resets, and starts when it is stopped. A placement by `environment` asks
+  the controller for the environment before any lock and writes Pilot's row of it where there is
+  none: one the controller does not have is a `404`, "Environment <id> was not found", and the
+  store's a `409`, "it is the store's environment, where no work item runs". It runs in the `cwd`
+  the brain gives, on its `agent`, `model` and `reasoning_effort`; its first turn is the brain's `brief`, a
   blank line, then the server's lines under `From Pilot:`: ``- This work item serves plan task <id>
   "<title>": write `step: <id>` into the front matter of every document you register.``, `- Auto
   pilot is on: the grants above hold for this session.` or `- Auto pilot is off: the grants above
@@ -410,13 +417,13 @@ one whose Session has no Turn in flight writes none either, its changes standing
 so. A view puts the line on the call whose tool-use id it names, whether the effect's record was
 written before or after the call's `assistant` line, and one whose call no record shows in its
 record's place: a work item's session log ([`work.md`](work.md)), the Chat tab and `chat.md`
-([`chats.md`](chats.md)). A block's latest `answered` effect whose call ran in a chat is where
+([`chats.md`](chats.md)), and the Conversations tab ([`conversations.md`](conversations.md)). A block's latest `answered` effect whose call ran in a chat is where
 *In the chat* goes, the block's `in_chat` ([`timeline.md`](timeline.md)).
 
 ## The projects surface
 
 `pilot-projects` is any session's: its tools read the projects Pilot manages, their items and their
-files, and start a draft, for a session in any environment that holds the surface's token, which
+files, start a draft, and talk to Pilot about one, for a session in any environment that holds the surface's token, which
 every environment of KubeCoder's production fleet does ([`deployment.md`](deployment.md#secrets)).
 Nothing of it is a session's of Pilot's: it takes no session's bearer, and its calls write no
 effect.
@@ -445,7 +452,8 @@ effect.
 - **The caller** (`api.py`, `Caller`): the call's `X-Pilot-Environment` and `X-Pilot-Session`, the
   id of the environment it calls from and its session's name there, an empty one none. Both travel
   on to the API's route under the same names. The plus's create names the environment in a call's
-  brief ([`projects.md`](projects.md)); nothing reads the session.
+  brief ([`projects.md`](projects.md)); a conversation is the environment's, and keeps the
+  session's name ([`conversations.md`](conversations.md)).
 
 A tool's `project` is a project's id or its folder, `draft-<number>` while it is a draft and its
 slug once created; a draft's folder does not survive Create project, so a session holds a draft by
@@ -461,6 +469,13 @@ its id. Each tool is one call (`tools.py`, `register_projects_tools`; `api.py`,
 | `find_files(path_pattern, offset, limit)` | `GET /api/tree/matches?pattern=` | `{pattern, files, totalCount, limitHit}`, the paths in path order |
 | `read_file(path, start_line?, end_line?, tail_lines?)` | `GET /api/tree/text?path=` | `{content, sha256, totalCount, limitHit, lineCut}` |
 | `start_project(brief, title?, for?)` | `POST /api/projects` `{words, title?, for?}` | `{id, folder, url}`, the draft |
+| `start_conversation(project, text)` | `POST /api/conversations` `{address, words}` | the conversation, its first turn running |
+| `send(conversation, text)` | `POST /api/conversations/<id>/messages` `{words}` | `{turn}`, the message's Turn's `seq` |
+| `get_response(conversation, wait_ms?)` | `GET /api/conversations/<id>`, then `GET …/response` | `{turn, state, text}`, held (below) |
+| `get_conversation(conversation)` | `GET /api/conversations/<id>` | the conversation |
+| `list_conversations(project?)` | `GET /api/conversations[?address=]` | `{conversations}`, the calling environment's, in the order they opened |
+| `interrupt(conversation)` | `POST /api/conversations/<id>/interrupt` | the conversation |
+| `end_conversation(conversation)` | `POST /api/conversations/<id>/end` | the conversation, closed |
 
 The routes answer a list whole and the process pages it (`_page`): `offset`, and a `limit` of 100
 by default and 1,000 at most for `list_items` and `list_files`, 50 and 200 for `find_files`, a
@@ -484,6 +499,34 @@ until a person presses Create project ([`projects.md`](projects.md)). A `for` th
 is the API's `404`, and a call while Pilot updates its store the API's `409` ("Pilot is updating");
 neither starts anything.
 
+### A conversation
+
+The conversation's tools are KubeCoder's session tools one for one, on a conversation with Pilot
+about a project ([`conversations.md`](conversations.md)): `start_conversation`, `send`,
+`get_response`, `get_conversation`, `list_conversations`, `interrupt` and `end_conversation`. Each
+but `get_response` is one call. A conversation is answered as `{id, project, environment, session,
+opened_at, closed_at, close_cause, turns, running}`, the API's answer with `project_id` as `project`
+and `in_flight` as `running`, and `close_cause` one of the five a conversation closes with. Where a
+KubeCoder tool answers a handle or `{}`, the opening, the read, the interrupt and the end answer the
+conversation, so that the end of one closed already says how it closed. A send whose Turn has an
+`error`, the controller having failed it, is the `send` tool's error, its reason whole.
+
+**`get_response`** alone holds its call, in the MCP process (`PilotProjectsApi.get_response`,
+`backend/pilot_mcp/api.py`): no route of the API waits, so no thread and no database connection of
+the API is held for it. It holds until no turn of the conversation is in flight or `wait_ms` is
+over, `WAIT_MS_DEFAULT`, 900000 (15 min), where the call gives none, and `WAIT_MS_MAX`, 3600000
+(60 min), at most, a larger ask clamped and a negative one refused; 0 answers at once. Meanwhile it
+asks `GET /api/conversations/<id>` where the conversation stands every `POLL_SECONDS`, 2 s, each
+ask answered at once under a 20 s timeout, and once no turn is in flight, or the wait is over, reads
+the reply once from `GET …/response`; a reply read `running` before the wait is over, a turn
+started between the ask and the read, is waited on. Every `PROGRESS_SECONDS`, 30 s, read after an
+ask, it reports progress on the call's own event stream, the seconds waited of the wait's, "Pilot's
+turn is still running", so that a client that ends a call silent for 300 s, as Claude Code does,
+keeps it; a caller that sends no `progressToken` is sent none. A caller that goes away ends the
+held call with its transport, as the MCP SDK cancels a call in flight there. A held call cut
+otherwise, by a restart of a proxy or of Pilot, is called again, and the reply says where the turn
+stands.
+
 **The words are the outside's.** A session anywhere in the fleet reads the surface, so every tool's
 description names "project(s) Pilot manages" before its first comma, and no word of the surface,
 its instructions, its descriptions, its parameters or its answers, names the brain, the store, the
@@ -505,8 +548,10 @@ The server is pinned in `backend/tests/pilot_mcp/`: a real MCP client drives the
 (`backend/tests/support/pilot_mcp.py`), its API calls answered by the test app's own routes in the
 test's session, and `test_main.py` runs `python -m pilot_mcp` as a process, with the projects
 surface's settings and without them. The projects surface is `TestTheProjectsSurface` and
-`TestTheProjectsDoor` in `test_server.py`, and its tools `TestListProjects` to `TestStartProject`
-in `test_tools.py`, through the OIDC app's gate under a token the fake endpoint, `TokenEndpoint`,
+`TestTheProjectsDoor` in `test_server.py`, each tool's served schema and words `PROJECTS_SURFACE`
+there, and its tools `TestListProjects` to `TestGetResponse` in `test_tools.py`, a held
+`get_response` on the API client's clock, the suite's `SteppedClock`
+(`backend/tests/support/pilot_mcp.py`), whose sleep takes no time, through the OIDC app's gate under a token the fake endpoint, `TokenEndpoint`,
 signs with the suite's key; the credential is `test_credential.py`, the settings `test_config.py`,
 and the tree's routes `tests/api/test_tree.py` and `tests/services/test_tree_read_service.py`. The injection is
 `tests/services/test_pilot_server.py`, with the creates in `test_session_start_service.py` and

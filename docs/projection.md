@@ -23,7 +23,7 @@ moves the folder ([`projects.md`](projects.md)). In a project's folder:
 | `inbox/<seq>-<slug>.md` | a worker's registered document, once its file was read | is ingested |
 | `plan.json` | the plan, rendered from its rows | is parsed back into the rows |
 | `timeline.json` | the timeline, rendered from the rows | stores nothing |
-| `chat.md` | the project's chats, rendered from their records ([`chats.md`](chats.md)) | stores nothing |
+| `chat.md` | the project's chats and its conversations with sessions outside Pilot, rendered from their records ([`chats.md`](chats.md)) | stores nothing |
 | `attachments/<batch>/<filename>` | an attachment's copy, its `filename` holding slashes where it came in a folder | stores nothing |
 
 `reference.json` is read-only too. A save that stores nothing is answered with the file as the

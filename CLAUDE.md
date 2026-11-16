@@ -22,7 +22,9 @@ the Cancel, and the projects surface: the service user, `pilot-projects` and its
 profile's join switch, and the debrief: a repeat round's why under its step, the Debrief on a done
 work item, the debrief and the full debrief, and the pass reading it, and the collection: the
 transcripts a collector publishes through its door, whole or appended, a launch of Pilot's on its
-Session, the adopted project a group names, and the invented scenario that drives it in the suite. Every green build of
+Session, the adopted project a group names, and the invented scenario that drives it in the suite,
+and the conversation: a session outside Pilot talking to it through the projects surface, its long
+poll and its Conversations tab, and a work item placed in a named environment. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -314,6 +316,9 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   the clarification run, its write-back and the run's continuation; a project's chat and a draft's
   definition chat, its start in the store, its brief, its Stop, its close, `chat.md`, and its Chat
   tab, composer, Discuss and *In the chat*.
+- [`docs/conversations.md`](docs/conversations.md): a conversation with Pilot, a session outside
+  Pilot's: whose it is, its routes, its opening, messages and reply, its interrupt, end and close,
+  its brief, and the Conversations tab.
 - [`docs/notifications.md`](docs/notifications.md): the notifications through web push, a browser's
   subscription, its switch, the offer and sign-out, the service worker, the online status and the
   closing on the device, a project's per member for what they have not been shown and the alarms,

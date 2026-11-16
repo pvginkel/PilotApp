@@ -9,7 +9,10 @@ project's next chat. This page is the chat as built: a message and the way it go
 in the store and its brief, what the server puts before a message's words, the server's follow-up
 turn, the Stop of Pilot's answer, the close, the chats as a person reads them, `chat.md`, the chats
 as the brain reads them, and the chat's screens: the side panel's Chat tab or a draft's definition
-chat, its composer, Discuss, the unread dot and *In the chat*. What the brain may do through its
+chat, its composer, Discuss, the unread dot and *In the chat*. A session outside Pilot talks to the
+brain in a conversation of its own, beside the chat, which shares its start, its notice, its
+follow-up turn, its Stop, its close and `chat.md`, and has a tab of its own
+([`conversations.md`](conversations.md)). What the brain may do through its
 tools is [`mcp.md`](mcp.md)'s, the start, the send and the relay that carry a chat's turns are
 [`sessions.md`](sessions.md)'s, the panel's shell is [`documents.md`](documents.md)'s, and the
 tables are [`record.md`](record.md)'s. The skill the brief opens with is PilotProjects'
@@ -18,8 +21,8 @@ tables are [`record.md`](record.md)'s. The skill the brief opens with is PilotPr
 | Service | Does |
 |---|---|
 | `ChatService` (`chat_service.py`) | a person's message: sent to the project's open chat, or the chat started with it; and the Stop of Pilot's answer |
-| `BriefService` (`brief_service.py`) | the chat's brief, the definition chat's and each job's ([`work.md`](work.md)), the follow-up turn, a resumed wait's run's first turn ([`waits.md`](waits.md)), and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
-| `ChatCloseService` (`chat_close_service.py`) | a chat's close: at Create project, Finish, Reopen and Archive, and on the timer `chat-close` |
+| `BriefService` (`brief_service.py`) | the chat's brief, the definition chat's, a conversation's and each job's ([`work.md`](work.md)), the follow-up turn, a resumed wait's run's first turn ([`waits.md`](waits.md)), and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
+| `ChatCloseService` (`chat_close_service.py`) | a chat's close and a conversation's: at Create project, Finish, Reopen and Archive, at a conversation's end, and on the timer `chat-close` |
 | `ChatReadService` (`chat_read_service.py`) | a project's chats in their order, and a person's place in them |
 | `session_scope.py` | what a brain session's create is handed: its box, its surface, its `PILOT_PROJECT` and its `PILOT_SESSION`, and a job's prompt cache ([`sessions.md`](sessions.md)) |
 
@@ -162,8 +165,13 @@ none of which a draft has:
   attachment of the project counted. A draft a call started, its starter the service user
   ([`projects.md`](projects.md)), has `Started by a call from <environment name>, for <handle>.` in
   place of the person who started it, a clause the call did not name left out, its first chat's
-  message the call's brief; a later definition chat of it, which a person's message starts, has
-  `Started by a call.`, the environment being in the first brief's words alone;
+  message the call's brief. A later definition chat of it, which a person's message starts, names
+  the call as the first brief did, that sentence taken whole from the first brief, and carries the
+  call's brief under `The message:` before the person's message, while no chat of the draft has
+  reached Pilot, none of their Sessions having a conversation: its first start failed, or was
+  stopped before its brief went out. An earlier member's message whose start failed too is not
+  carried. Once a chat of the draft has reached Pilot, a later one has `Started by a call.` and the
+  person's message alone, the environment and `for` being in the first brief's words alone;
 - `The message:` and the words verbatim, or `The message, from <handle> (member):` or `(not a
   member):` where someone other than the draft's starter sends the message that starts the chat.
 
@@ -194,7 +202,7 @@ The handbook (handbook.md) changed since your last turn.
 ```
 
 The notice is counted once the send went out, `pilot_chat_handbook_changed_total{project}`, by the
-project's id. A start's Turn carries the brief instead, and the skill reads the handbook then
+project's id, a conversation's with the chat's. A start's Turn carries the brief instead, and the skill reads the handbook then
 anyway. A publication since that Turn is the chat's own, and brings no notice, when every Version
 of the handbook cut since is the chat's Session's and the published text is the latest Version's
 (`ChatService._handbook_changed`); a Version of no Session, a save made with no write lock held
@@ -247,8 +255,8 @@ A chat closes for one of five causes, `Chat.closed_at` and `close_cause_code` wr
 is never sent to again: the next message starts a chat of its own.
 
 - **`timeout`**: the timer `chat-close`, on each round of the scheduler ([`jobs.md`](jobs.md)),
-  closes every open project chat whose Session's last turn ended `CHAT_CLOSE_TIMEOUT` ago or more,
-  with no Turn in flight. Each in a transaction of its own under its Session's lock, skipping one
+  closes every open project chat, and every open conversation, whose Session's last turn ended
+  `CHAT_CLOSE_TIMEOUT` ago or more, with no Turn in flight. Each in a transaction of its own under its Session's lock, skipping one
   another transaction holds, a message's send among them: its controller session, where it has one,
   ended first, a `404` or a `409` counting as ended, and so does its name holding another
   conversation than the chat's, another session's, which the close leaves as it is; and its Session
@@ -269,6 +277,10 @@ is never sent to again: the next message starts a chat of its own.
   project's Sessions, as Finish does, so that an archived project has no chat open. Bring back
   starts none: the next message after it starts a chat under the project's state then.
 
+Finish, Reopen and Archive close every open conversation of the project too, with their cause,
+and a conversation's caller closes it `ended` ([`conversations.md`](conversations.md#the-close)): a
+conversation never closes `created`, and a chat never `ended`.
+
 A chat's box is fixed at its create, so a close at a change of the project's state keeps every
 chat in the state it was opened under. Finish, Reopen and Archive call no controller: the chat
 keeps its controller session, idle or interrupted, and nothing sends to it again.
@@ -288,6 +300,8 @@ whether Pilot is answering in the chat, its Session `held`, `starting` or `runni
 Stop ends: false once that ends, however it ends, and for a closed chat; each move of it raises
 `ProjectChanged`, as every move of a chat's Session's state does ([`work.md`](work.md)). A chat's
 records are its Session's, read and followed as any Session's are ([`sessions.md`](sessions.md)).
+No conversation is among the chats: the Conversations tab reads a list of its own
+([`conversations.md`](conversations.md#the-conversations-tab)).
 
 **`PUT /api/projects/<id>/chat/read`**, no body, says the signed-in person has seen the project's
 chat to its end now, on whichever device: their Chat Read, one per person and project, written at
@@ -302,13 +316,19 @@ project.
 ## `chat.md`
 
 Every syncing project's folder holds `chat.md`, read-only ([`projection.md`](projection.md)): the
-project's chats as the brain reads them, rendered from the records (`ViewService.chat`). Its
-paragraphs stand a blank line apart:
+project's chats and its conversations as the brain reads them, rendered from the records
+(`ViewService.chat`). Its paragraphs stand a blank line apart:
 
 - first `<!-- a projection of the record; an edit is reverted — the timeline is edited through the
-  tools -->`, which a folder with no chat holds alone;
-- per chat, in the list's order, `## Chat · opened <UTC stamp>`;
-- a person's message as `**<handle>** · <stamp>`, then their words verbatim, quote tags as sent;
+  tools -->`, which a folder with no chat and no conversation holds alone;
+- per chat and per conversation, the definition chat first, then every other chat and every
+  conversation in the order they opened: a chat under `## Chat · opened <UTC stamp>`, and a
+  conversation under `## Conversation with a session in <environment name> (<environment id>,
+  session <name>) · opened <UTC stamp>`, its caller named as its brief's kind line names it,
+  `, session <name>` left out where the call named none ([`conversations.md`](conversations.md));
+- a person's message as `**<handle>** · <stamp>`, then their words verbatim, quote tags as sent; a
+  conversation's caller's under the service user's handle, so that the heading, not the handle,
+  says whose they are;
 - Pilot's run as `**agent** · <stamp>`, then each main-thread text block of its `assistant`
   records, and each effect's line, `<verb> · <label>`, where its call ran: after the `assistant`
   record that holds its tool-use id, whichever was written first, else in its own record's place
@@ -316,11 +336,12 @@ paragraphs stand a blank line apart:
 - last, `Closed <stamp>`, the stamp the brief's "the latest closed" gives, or `Open`.
 
 The server's own turns, the brief's frame and the follow-up among them, are not in it: Pilot's
-reply to a follow-up continues its run. A record of a chat's Session that the file shows, a `send`,
+reply to a follow-up continues its run. A record of a chat's or a conversation's Session that the
+file shows, a `send`,
 an effect, Pilot's text or a main-thread tool call, moves it in the record's own transaction
 (`SessionRecordService.append`, through `ViewService.recorded`); a record that shows nothing moves
-nothing, and no work item's record moves it. A render reads an open chat's records, three kinds of
-record, filtered, a page at a time. A closed chat's paragraphs are kept (`ClosedChats`,
+nothing, and no work item's record moves it. A render reads an open chat's or conversation's
+records, three kinds of record, filtered, a page at a time. A closed one's paragraphs are kept (`ClosedChats`,
 `backend/app/engine/closed_chats.py`, a singleton of the container) with the id of its last record,
 read before them, and handed back while that id is still its last: no id is handed out twice, so a
 record the chat takes after its close gives it a last id of its own, and its paragraphs are read
@@ -369,7 +390,8 @@ closed.
   <time>", its cause not shown, or a bare line where Create project closed it. What comes live fades
   in, what loads does not. A turn its records leave open ends once the list says Pilot no longer
   answers. Every viewer streams the chats it shows, so another member's message and Pilot's reply to
-  it come to them as to the sender.
+  it come to them as to the sender. A conversation in the Conversations tab is drawn so too, its closed line
+  "Conversation closed · <time>".
 - **A person's message** (`person-message.tsx`) stands on the right, a bubble with no frame, its
   radius `14px 14px 4px`, the tail at its foot, on `--bubble`, the primary's light blue, a step
   darker than the opening prompt's `--primary-muted` in the light theme and lighter in the dark, so
@@ -474,9 +496,9 @@ not seen.
 
 | Setting | Default | |
 |---|---|---|
-| `BRAIN_MODEL` | `opus` | the model of every brain session, the chat's and every job's |
+| `BRAIN_MODEL` | `opus` | the model of every brain session, the chat's, a conversation's and every job's |
 | `BRAIN_REASONING_EFFORT` | `xhigh` | their reasoning effort |
-| `CHAT_CLOSE_TIMEOUT` | `CACHE_EXPIRATION_TTL`'s, 3300 | the seconds after its last turn ended at which an open project chat with no turn in flight closes, by default the prompt cache's 55 minutes, the TTL within which a wait's run resumes its previous run's conversation ([`waits.md`](waits.md)); above 0 |
+| `CHAT_CLOSE_TIMEOUT` | `CACHE_EXPIRATION_TTL`'s, 3300 | the seconds after its last turn ended at which an open project chat or conversation with no turn in flight closes, by default the prompt cache's 55 minutes, the TTL within which a wait's run resumes its previous run's conversation ([`waits.md`](waits.md)); above 0 |
 
 The brain runs on one model and one effort, for the chat and every job alike, each a setting of the
 deployment (D066): no chat and no task has its own, and the brain has no tool to change its own; it

@@ -50,7 +50,7 @@ stage's store environment, with the hooks that hold a project's write lock aroun
 brain's edits, so that each save is its session's, and tell it what the record made of
 them ([`docs/sync.md`](docs/sync.md)); and the server's jobs on the KubeCoder controller: the
 environments of its own Pilot creates from a work item's repository, resets before each fresh start,
-stops and deletes, and the sessions it runs there through the gate every start passes, recorded and
+stops and deletes, or the one a work item is placed in by name, and the sessions it runs there through the gate every start passes, recorded and
 streamed live ([`docs/sessions.md`](docs/sessions.md)); and Pilot's MCP server, handed to every
 session it creates ([`docs/mcp.md`](docs/mcp.md)), through which a work item's session registers the
 documents it wrote and attaches what backs them: each read onto the timeline once the run ends,
@@ -74,7 +74,7 @@ each as its setting says, holding new work, asking running work to stop through 
 stopping it, the week's halt's overrule from the gold bar, and the nudge that carries a halted,
 paused or walled run on once nothing holds it, with each turn's tokens and cost kept in the
 database ([`docs/usage.md`](docs/usage.md)); and the store's update, one command that holds the
-store's chats and jobs while the server stops them, resets the store onto PilotProjects' `main`,
+store's chats, conversations and jobs while the server stops them, resets the store onto PilotProjects' `main`,
 retries the jobs it stopped and lifts the hold ([`docs/store-update.md`](docs/store-update.md));
 and the brain's waits on the timeline, a card wait fired when YouTrack posts that one of its cards
 entered one of its states, a timed wait at its due time, either by a person's Check now or Skip
@@ -84,7 +84,10 @@ conversation while the prompt cache holds and closes the wait through `mark` wit
 Pilot's MCP process for any session of KubeCoder's production fleet, behind one shared token: it
 lists the projects, reads a project's head, its items and its files as Pilot renders them, and
 starts a draft as Pilot's service user, its members the person it is for and everyone whose profile
-switch joins them ([`docs/mcp.md`](docs/mcp.md)); and the record of the fleet's Claude Code
+switch joins them ([`docs/mcp.md`](docs/mcp.md)), and talks to Pilot about a project: a conversation
+of the calling environment's own, a brain session in the store beside the project's chat, its reply
+waited on in one long poll, which the project's people read in its Conversations tab
+([`docs/conversations.md`](docs/conversations.md)); and the record of the fleet's Claude Code
 transcripts, their launches, prompts, calls and tool calls, which a collector publishes through a
 door of its own, whole or appended as a file grows, a launch a Turn of Pilot's started placed under
 its session, and a group of work done before Pilot standing as an adopted project, listed with the

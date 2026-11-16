@@ -50,7 +50,8 @@ file must hold ([`projection.md`](projection.md)). Every route answers the gate'
 | `POST /api/sync/check` | `{"folder", "wait_seconds"}` | the check, below |
 
 The put is the engine's ingest of the save, its Save Errors under the store's Environment. The
-save is a Session's when `X-Pilot-Session` names a brain session, a chat's or a job's, of the
+save is a Session's when `X-Pilot-Session` names a brain session, a chat's, a conversation's or a
+job's, of the
 syncing project whose folder holds the path: the ingest makes that Session the document's writer
 ([`engine.md`](engine.md)). The sidecar names the session that held the project folder's write
 lock as it read the file (below); a value that is no UUID, no Session, a work item's or another

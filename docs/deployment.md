@@ -242,7 +242,7 @@ version keeps an incompatible one out: a sidecar outside the server's range is a
 controller onto the catalog entry, and production's reaches KubeCoder's production fleet through
 KubeCoder's own promotion, `KubeCoder/Promote-PRD`. PilotProjects' files, the service list and the
 hooks among them, reach a store's checkout through the store's update, which holds the store's
-work, stops the store's jobs and chats, and resets the store. The reset clones the repo again and
+work, stops the store's jobs, chats and conversations, and resets the store. The reset clones the repo again and
 empties the sidecar's data, its shadow with it; a restart does not pull it. The update is the
 backend's command, `kubectl --context prd -n pilot-prd exec deploy/pilot -c backend -- python -m
 app.cli update-store`, `-n pilot-dev` on dev, and the testing route

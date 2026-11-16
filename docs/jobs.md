@@ -28,7 +28,7 @@ the job, never its work.
 | `halt-file` | a timer | sweeps the halt files ([`usage.md`](usage.md)) |
 | `environment-shutdown` | a timer | stops the idle environments Pilot started ([`controller.md`](controller.md)) |
 | `environment-delete` | a timer | clears the name of a free environment of Pilot's own, and deletes one that stays free ([`controller.md`](controller.md)) |
-| `chat-close` | a timer | closes the project chats that have stood quiet past their timeout ([`chats.md`](chats.md)) |
+| `chat-close` | a timer | closes the project chats and the conversations that have stood quiet past their timeout ([`chats.md`](chats.md)) |
 | `relay-watchdog` | a timer | restarts a relay the fleet stream shows stuck or stopped ([`sessions.md`](sessions.md)) |
 | `controller-probe` | a timer | while the controller is unreachable, asks whether it answers ([`controller.md`](controller.md)) |
 | `nudges` | a timer | asks for `start:nudges` while a nudge owed is held by nothing, or a wall decided missed still owes one ([`usage.md`](usage.md)) |

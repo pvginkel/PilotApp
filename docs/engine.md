@@ -17,7 +17,7 @@ commits.
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json`, `timeline.json` and `chat.md` ([`chats.md`](chats.md)) |
 | `References` (`references.py`) | the reference rows the reads look up, a kind's form, a cause's undo and a confirmation reason, kept for the process's life, each read on its code's first lookup ([`record.md`](record.md)) |
-| `ClosedChats` (`closed_chats.py`) | a closed chat's paragraphs in `chat.md`, kept with the id of its last record ([`chats.md`](chats.md)) |
+| `ClosedChats` (`closed_chats.py`) | a closed chat's or conversation's paragraphs in `chat.md`, kept with the id of its last record ([`chats.md`](chats.md)) |
 | `AttachmentStore` (`attachments.py`) | an attachment's bytes, kept, read and deleted ([`documents.md`](documents.md)) |
 | `AttachService` (`attachments.py`) | files a session copied from its environment, hung on an item as one batch, or a draft's on nothing ([`mcp.md`](mcp.md)); at Create project, the draft's copy and the draft's material hung on the opening |
 | `EngineBus` (`bus.py`) | the events, one bus per process |
@@ -62,7 +62,7 @@ document:
 trigger_item_id=None)` writes its Item, kind `work`, created by its own `session` and sharing its
 id, on the plan's task when given (a task not in the plan is a `RecordNotFoundException`), and its
 Work, `autopilot` the project's switch as it stands and `repo` the repository it is placed by, none
-for a job, which has instead the `trigger` that started it and the Item that set it off,
+for one placed in an environment by name ([`sessions.md`](sessions.md)) and for a job, which has instead the `trigger` that started it and the Item that set it off,
 `trigger_item_id`, where it has one ([`work.md`](work.md));
 `work_done(work_id, at)`, at its turn's end, a job's at its last, marks the Item done at `at`, by no
 one, cause `turn_ended`, under the Item's row lock, and leaves one done already, as Finish's close
@@ -362,7 +362,7 @@ Resume of a continuation, clears `write_back_refused_at` on the documents it car
 again with its `WriteBackOwed`.
 
 **The job after an item of Pilot's own.** A person's close of an item a session of Pilot's own
-added, one whose Session Kind's surface is `pilot-store` (a chat's or a job's), places the job after
+added, one whose Session Kind's surface is `pilot-store` (a chat's, a conversation's or a job's), places the job after
 it in the close's transaction, through the port `Jobs` (`JobService.item_done`,
 [`work.md`](work.md)): an answer that marks a one-ask item done, an action's Done that does, Done
 and Reviewed. A close given `via` `chat`, which `pilot-store`'s `answer` and its `mark` with `for`
@@ -411,12 +411,12 @@ already emitted in the transaction is delivered once.
 
 | Event | Emitted |
 |---|---|
-| `TreeHashMoved(path, hash)` | when a path's tree hash moved: a birth, a publish, a save, an attachment hung; `timeline.json` when what it shows moved, a done mark or its undo and a project's transition included; `plan.json` when a save moved its rendering; `chat.md` when a record it shows is written, and at a chat's open and close |
+| `TreeHashMoved(path, hash)` | when a path's tree hash moved: a birth, a publish, a save, an attachment hung; `timeline.json` when what it shows moved, a done mark or its undo and a project's transition included; `plan.json` when a save moved its rendering; `chat.md` when a record it shows is written, and at a chat's or a conversation's open and close |
 | `DocumentModified(project_id, path)` | on every save of a document, held or published; the record's own writes raise none |
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
 | `ManifestChanged()` | when the set of syncing projects or their folders changed: a draft started from the plus, a project created, archived or brought back ([`projects.md`](projects.md)), and the sync's testing endpoint |
-| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes the published text of an item, a record write on a held item included, of the handbook or of the project document; on a save that holds an item or ends its hold; on a save that makes its session a document's writer, on a late save that cuts its session's `turn` version, and for each document a turn's end lets go; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a chat's open and close ([`chats.md`](chats.md)); on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)), and it starts the project's notification reconcile ([`notifications.md`](notifications.md)) |
+| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes the published text of an item, a record write on a held item included, of the handbook or of the project document; on a save that holds an item or ends its hold; on a save that makes its session a document's writer, on a late save that cuts its session's `turn` version, and for each document a turn's end lets go; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a chat's or a conversation's open and close ([`chats.md`](chats.md), [`conversations.md`](conversations.md)); on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)), and it starts the project's notification reconcile ([`notifications.md`](notifications.md)) |
 | `WriteBackOwed(session_id)` | on a close that owes a registered document's text to its file, and on a Resume that owes a refused one again; the write-back service hears it ([`round-trip.md`](round-trip.md)) |
 | `WorkMoved(project_id, work_id)` | when what a work item's line shows of its Session moved: its state, its current line, its start, its error or its steps ([`work.md`](work.md)). `ProjectEventService` sends it with the work item's status |
 

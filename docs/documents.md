@@ -287,8 +287,9 @@ its dots come and go, as they happen.
 ## The side panel
 
 `Panel` (`components/panel/panel.tsx`) stands beside the project's head and timeline, or the tab
-showing: a tab strip, Chat first, with the unread dot ([`chats.md`](chats.md)), then Documents, with
-its count. Off a phone it is always open, at every width, the narrow one included, and has no cross:
+showing: a tab strip, Chat first, with the unread dot ([`chats.md`](chats.md)), then, once the
+project has had a conversation, Conversations ([`conversations.md`](conversations.md), D234), then
+Documents, with its count. Off a phone it is always open, at every width, the narrow one included, and has no cross:
 nothing closes it, and nothing lies over it. Its head stands as tall as the project's head with no
 tab line under it, its tab on the name's baseline. Discuss and *In the chat* show its Chat tab. A
 draft's panel stands beside its definition chat, with Draft in Chat's place, and an ask a quote or an
@@ -299,7 +300,9 @@ definition chat instead ([`chats.md`](chats.md)).
 in the browser (`usePanel`, `browser-state.ts`'s `panels`, [`ui.md`](ui.md)), so switching projects
 brings each back as it was; a project not opened before shows its first: an open project's Chat, a
 draft's Draft. A remembered Chat reads as Draft for a draft and Draft as Chat for an open project,
-so a panel on the Draft tab at Create project shows the Chat tab after it.
+so a panel on the Draft tab at Create project shows the Chat tab after it, and a remembered
+Conversations reads as Draft for a draft and as Chat for a project that has had none, but stays
+while the project's list of them is read (`usePanel`, `useHadConversations`).
 
 **Its width** is dragged at the divider at its left (`PanelDivider`,
 `components/panel/panel-divider.tsx`, a `separator`), in a project and a draft alike, or moved 16px
@@ -311,8 +314,8 @@ for the timeline's column, a draft's chat or the tab showing; a width held in fo
 kept as it was. The divider sets `--panel` on the project's page (`.project`), which the panel's
 width reads.
 
-**A phone**, 900px and below, has no panel beside the timeline: its Chat, Documents and Draft tabs
-are among the tabs at the bottom, each between the head and the tabs, drawn without the panel's head
+**A phone**, 900px and below, has no panel beside the timeline: its Chat, Conversations, Documents
+and Draft tabs are among the tabs at the bottom, each between the head and the tabs, drawn without the panel's head
 (`PhonePanel`), and neither the tab kept per project nor the width is read or written there
 ([`projects.md`](projects.md)).
 

@@ -203,8 +203,8 @@ delivers to it. A work item's status moves on an event of its own, `work_moved`,
 and moves nothing else ([`work.md`](work.md)).
 
 `useProjectEvents` (`frontend/src/hooks/use-project-events.ts`), called by the shell, reads again,
-on the event, the project lists and the named project's head, timeline, handbook, project document
-and chats ([`chats.md`](chats.md)), and every document read of an item of it
+on the event, the project lists and the named project's head, timeline, handbook, project document,
+chats ([`chats.md`](chats.md)) and conversations ([`conversations.md`](conversations.md)), and every document read of an item of it
 ([`documents.md`](documents.md)), events that arrive together once after them; and on every rise of
 the stream's `isConnected`, the first included, every one of those reads, which covers an event sent
 from a process that does not hold the browser's stream. A read the event finds under way, which may

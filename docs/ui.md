@@ -432,7 +432,7 @@ that has one Send (`TextField`).
 `src/lib/browser-state.ts`, one localStorage entry, `pilot`: the theme, the current project (which
 the bare address opens off a phone), the chevrons of *Other projects* and *Finished*, and, off a phone
 ([`documents.md`](documents.md)): each project's side panel's tab, `panels`, `{tab}` by the project's
-id, once the person set it; the panel's two widths, `panelWidths`, `{project, draft}`, every
+id, `chat`, `draft`, `conversations` or `documents`, once the person set it; the panel's two widths, `panelWidths`, `{project, draft}`, every
 project's in pixels and every draft's as a share of the window; and each project's tab line,
 `lines`, `{tabs, seen}` by the project's id, its tabs in the order they opened, each by its path
 within the project, and their keys in the order they showed, while it has a tab open. A phone neither reads nor writes the panel's or the

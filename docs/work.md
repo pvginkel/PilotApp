@@ -6,8 +6,9 @@ and as the screens show it: its status, its live event, its line and its actions
 its progress, and its session log. What the server does to start it through the gate, stop it and resume it is
 [`sessions.md`](sessions.md)'s, and the timeline it stands on [`timeline.md`](timeline.md)'s.
 
-The brain places one with `add_item`, started on add by its repository ([`mcp.md`](mcp.md)), and the
-record's testing route `POST /api/testing/projects/<id>/work` places one so, on every stage but
+The brain places one with `add_item`, started on add by its repository or in an environment it
+names ([`mcp.md`](mcp.md), [`sessions.md`](sessions.md)), and the record's testing route
+`POST /api/testing/projects/<id>/work` places one so, on every stage but
 `prd` ([`projects.md`](projects.md)). The app places one itself as a run's continuation:
 the close that leaves none of the documents a work item's run registered open places the work item
 that continues its conversation, titled as the run, on its plan task while the plan still has it,

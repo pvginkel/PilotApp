@@ -111,7 +111,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   alone while no controller is configured. The fleet stream keeps its `name`, `last_state`,
   `last_seen_at` and `exempt` current, and a publication that names an environment Pilot has no
   row for makes one by its id, named by it until the stream reports it
-  ([`collection.md`](collection.md)); `server_started_at` and `started_pod_at` are Pilot's claim,
+  ([`collection.md`](collection.md)), as does a conversation's opening from an environment the
+  controller does not report, and a placement by name makes one from the controller's report
+  ([`conversations.md`](conversations.md), [`sessions.md`](sessions.md)); `server_started_at` and `started_pod_at` are Pilot's claim,
   that it started the environment and the pod's start that bring-up settled on, and `stop_due_at`
   is when Pilot stops it. An environment Pilot created is its own: `server_created_at` and `repo`,
   the repository it was made from, set together, and `delete_due_at`, when Pilot deletes it while
@@ -129,13 +131,14 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   holds before its first ([`mcp.md`](mcp.md)). `nudge_owed_at`, indexed where it is set, is when
   its nudge came to be owed: a hard stop, a turn's end halted or paused, or a turn's end at the
   quota wall; none once the nudge's Turn goes out ([`usage.md`](usage.md)). `ended_at` is when it
-  became `ended`, which only a project chat's close on its timeout does
+  became `ended`, which only a project chat's or a conversation's close on its timeout does
   ([`chats.md`](chats.md#the-close)).
 - `work`: a work item, the extension table its Item and its Session share their id with
   ([`work.md`](work.md)): `project_id`, `session_kind_code` (`work` or `job`, never a Chat's),
   `trigger_code` (a job's Work Trigger; a worker's run has none) and `trigger_item_id` (an item of
   the same project, never the work item itself; a continuation's, the registered document whose
-  close released it), `repo`, the repository a worker's run is placed by (none for a job),
+  close released it), `repo`, the repository a worker's run is placed by (none for a job, nor for
+  a work item placed in an environment by name, whose Session is there from its birth),
   `autopilot`, the switch's setting at its brief, and `retried_by_id`, the job a person's Retry of
   this failed or stopped one placed: only a job is retried, never by itself, by a job of the same
   project, and a job retries one at most (`ck_work_retried_by`, `uq_work_retried_by_id`); and
@@ -200,9 +203,18 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   ([`sessions.md`](sessions.md#the-holds)).
 - `chats`: a project's chat, sharing its id with its Session, one of kind `chat` of the same project
   (`session_kind_code`, held `chat`): its kind, `definition` or `project`, and its close,
-  `closed_at` and `close_cause_code` (`timeout`, `created`, `finished`, `reopened`, `archived`) set
-  together (`ck_chats_close`). A project has one chat open at a time (`uq_chats_open`)
-  ([`chats.md`](chats.md)).
+  `closed_at` and `close_cause_code` (`timeout`, `created`, `finished`, `reopened`, `archived`, never
+  `ended`, `ck_chats_close_cause`) set together (`ck_chats_close`). A project has one chat open at a
+  time (`uq_chats_open`) ([`chats.md`](chats.md)).
+- `conversations`: a session outside Pilot's conversation with a project's brain, sharing its id
+  with its Session, one of kind `conversation` of the same project (`session_kind_code`, held
+  `conversation`): `caller_environment_id`, the Environment it was opened from, indexed for a
+  caller's list; `caller_session`, the name of the session that opened it there, null where the
+  call named none, an empty one stored as null; and its close, `closed_at` and `close_cause_code`
+  (`ended`, `timeout`, `finished`, `reopened`, `archived`, never `created`,
+  `ck_conversations_close_cause`) set together (`ck_conversations_close`). Who opened it is its
+  first Turn's author, which no column holds, and a project has several open at once
+  ([`conversations.md`](conversations.md)).
 - `chat_reads`: a person's place in a project's chat, one per user and project, `read_at`.
 - `effects`: a change a session's tool call made to the record, of the Turn the call ran in and
   placed by that Turn's `server` record (`record_id`), with `at`: its kind (`added`, `answered`,
@@ -357,7 +369,7 @@ undo and a confirmation reason, each read on its code's first lookup.
 | `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`, `archive_question`; work: `work`; wait: `card_wait`, `timed_wait` |
 | `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `cancelled` (a run's documents a person's Cancel closed, an ask the chat called off on a person's word, a stopped work item closed for good), `withdrawn` (a job an Undo of its trigger item, or its wait's close, withdrew before its brief, which never ran) |
 | `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval`, `standing-grant` |
-| `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
+| `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `conversation` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
 | `token_kinds` (`name`, `within_code`, the coarser kind it is part of) | within none: `input`, `cache_write`, `cache_read`, `output`; within `cache_write`: `cache_write_5m`, `cache_write_1h` |
 
 A confirmation reason's `description` is the line `reference.json` gives the agent, which picks a

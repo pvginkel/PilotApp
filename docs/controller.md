@@ -202,7 +202,12 @@ runs there. The claim ends with its deadline: `_end_claim` clears `server_starte
   ([`projects.md`](projects.md)): its Environment row's name, else the name the controller reports,
   else the id itself, for an environment neither knows, one the controller reports without a name,
   and any while no controller is configured or the controller does not answer. It writes no row, and
-  no call is refused for where it came from.
+  no call is refused for where it came from. A conversation's opening writes one
+  ([`conversations.md`](conversations.md)): `reported(env_id)` asks the controller, before any lock,
+  for an environment Pilot has no row of, and `row(env_id, report)` writes the row from the report,
+  else named by its id, and leaves one that exists as it is; the fleet stream keeps it current. A
+  placement by name writes its environment's row from the controller's report alone, and refuses
+  one the controller does not have ([`sessions.md`](sessions.md)).
 - `start(env_id) -> ControllerEnvironment` brings the environment up and waits until it settles.
   The `start` goes without `wait`, since only then does its answer say whether this call
   scheduled the bring-up: on `202` it commits `server_started_at`, `started_pod_at` none until it
@@ -254,9 +259,11 @@ An environment is Pilot's own while its row has `server_created_at`: the server 
 `repo`, `owner/Name`, for a work item placed by that repository ([`sessions.md`](sessions.md)). Pilot
 knows its own from its rows; the create also makes it a managed environment of Pilot's client at the
 controller, its `managedBy`, by which the controller's list filters. Pilot takes, renames, resets
-and deletes only its own: never an operator's environment of the same repository, the store, or an
-environment a work item was placed in by its id. The one exception is the store's reset at its
-update (`reset`, below).
+and deletes only its own: never an operator's environment of the same repository, or the store, the
+one exception being the store's reset at its update (`reset`, below). An environment a work item
+was placed in by name, Pilot's own or not, its start starts where it is stopped and leaves as it
+stands, and while that work is under way no start takes it and the delete timer leaves it
+([`sessions.md`](sessions.md)).
 
 **Free.** One of Pilot's own is free while it is neither `deleting` nor `gone`, no Session there
 is `running`, `starting` or `held`, nor an open work item's `stopped` or `failed`, nor `idle` an

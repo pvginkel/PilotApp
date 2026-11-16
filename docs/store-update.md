@@ -1,8 +1,8 @@
 # The store's update
 
 The store's update brings the store environment onto PilotProjects' `main` while Pilot runs. One
-command makes an app-wide hold on the store's work. The server then stops the store's running jobs
-and chats, resets the store, waits for its sidecar's first manifest, retries the jobs it stopped
+command makes an app-wide hold on the store's work. The server then stops the store's running jobs,
+chats and conversations, resets the store, waits for its sidecar's first manifest, retries the jobs it stopped
 and lifts the hold. A PilotProjects change reaches a store this way ([`deployment.md`](deployment.md)).
 This page is the update as built: the command, the hold, the sequence, the retry and the testing
 route. The gate it holds starts at is [`sessions.md`](sessions.md)'s, the store's reset
@@ -63,7 +63,7 @@ An update not yet lifted is the hold, and at most one stands (`uq_store_updates_
 locks the table, so of two makes at once the second is refused. The hold stands from the make's
 commit:
 
-- **At the gate**, a job's start and a Chat's are held, `held_reason` `store_update`. The update is
+- **At the gate**, a job's start, a Chat's and a Conversation's are held, `held_reason` `store_update`. The update is
   read after the pause and before the outage. The setup is held too, though the pause lets it
   through. A work item's start, Resume and nudge go on: a worker's run is in an environment of its
   own and never touches the store ([`sessions.md`](sessions.md)). A held job's session log reads "Waiting
@@ -71,15 +71,17 @@ commit:
 - **A job's owed nudge** is not sent until the lift ([`usage.md`](usage.md)).
 - **A message to a project's chat** is refused `409` "Cannot send a message to Pilot in <project>
   because Pilot is updating", and the composer keeps the words ([`chats.md`](chats.md)). A send
-  that began before the make lands with its chat's start held.
+  that began before the make lands with its chat's start held. A conversation's opening and its
+  message are refused so ("Cannot open a conversation with Pilot in <project> because Pilot is
+  updating"), the caller calling again after the lift ([`conversations.md`](conversations.md)).
 - **The gold bar** shows the condition `store_update` from `made_at`, after the outage and before
   the halts: the badge "Pilot is updating since <time>", the line "Pilot is updating its store
   since <time>. No chat answers and no job of Pilot's starts until it is done; work items go on."
   ([`ui.md`](ui.md)). It alarms nobody ([`notifications.md`](notifications.md)).
 
 The make tells no one. The timer asks the gate again and tells the conditions at its tick's commit
-when the unlifted update is not the one this process last told of, so that a held job's or Chat's
-Hold turns to the update ([`sessions.md`](sessions.md#the-holds)), and the lift does both at its
+when the unlifted update is not the one this process last told of, so that a held job's, Chat's or
+Conversation's Hold turns to the update ([`sessions.md`](sessions.md#the-holds)), and the lift does both at its
 commit. So the gold bar shows the update
 within a tick.
 
@@ -89,11 +91,11 @@ The job `store-update` runs the unlifted update's sequence on one loop, from the
 Each phase is a transaction of its own that locks the row. Each writes its column once, in order,
 while the column is unwritten and no lift is asked:
 
-1. **`stopped_at`.** Every job's and Chat's Session `running` or `starting` is stopped by Pilot,
+1. **`stopped_at`.** Every job's, Chat's and Conversation's Session `running` or `starting` is stopped by Pilot,
    one by one, in `created_at` order, as Stop stops one (`SessionStartService.stop_for_update`,
    [`sessions.md`](sessions.md)). A turn in flight is interrupted once its stop commits. A start
-   under way ends its Turn unsent. A Chat stays open with its conversation, and a held Session stays
-   held. The update then waits up to 60 s, reading every 0.5 s, for the turns those stops
+   under way ends its Turn unsent. A Chat and a Conversation stay open with their conversation, and
+   a held Session stays held. The update then waits up to 60 s, reading every 0.5 s, for the turns those stops
    interrupted to end. Past the wait, the store's stop ends what is left, as a stop made elsewhere
    does. A Session gone `running` or `starting` since, one whose gate read came before the make's
    commit, is stopped before the column is written. The log says `The store's update <id>:
