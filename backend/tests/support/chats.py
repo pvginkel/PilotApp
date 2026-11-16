@@ -100,6 +100,7 @@ def open_conversation(
             author_user_id=opener.id,
             message="/chat\n\nHello.",
             words="Hello.",
+            cause_code=TurnCause.PERSON,
             started_at=now,
             ended_at=now,
         )

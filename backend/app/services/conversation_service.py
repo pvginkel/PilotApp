@@ -57,7 +57,12 @@ from sqlalchemy.orm import Session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Conversation, Environment, Project, Turn, User
 from app.models import Session as AgentSession
-from app.models.reference import ProjectState, RecordKind, SessionState
+from app.models.reference import (
+    ProjectState,
+    RecordKind,
+    SessionState,
+    TurnCause,
+)
 from app.services.brief_service import BriefService
 from app.services.caller_environment_service import CallerEnvironmentService
 from app.services.chat_close_service import ChatCloseService
@@ -206,7 +211,11 @@ class ConversationService:
         changed = handbook_changed(self.db, project, session)
         message = f"{STORE_NOTIFICATION}\n\n{words}" if changed else words
         turn = self.relay_service.send(
-            self.db, session.id, message, words=Words(caller.id, words)
+            self.db,
+            session.id,
+            message,
+            TurnCause.PERSON,
+            words=Words(caller.id, words),
         )
         if changed and turn.error is None:
             HANDBOOK_CHANGED_TOTAL.labels(project=str(project.id)).inc()
@@ -342,6 +351,7 @@ class ConversationService:
                 now,
             ),
             words=words,
+            cause_code=TurnCause.PERSON,
             started_at=now,
         )
         self.db.add(turn)
