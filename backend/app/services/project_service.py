@@ -161,8 +161,8 @@ def project_status(
 ) -> ProjectStatus | None:
     """The project's status (DB 228): paused, or pausing while a Session of
     it is `running`; then running, waiting on you, waiting on an event, done
-    while every step of a plan is done, idle; none for a draft and a finished
-    project (227). A plan with no step is not done."""
+    while every step of a plan is done, idle; none for a draft, a finished
+    and an adopted project (227). A plan with no step is not done."""
     if project.state_code is not ProjectState.OPEN:
         return None
     if project.paused:
@@ -200,10 +200,13 @@ _VERBS = {
     TransitionKind.PAUSED: "pause",
     TransitionKind.RESUMED: "resume",
     TransitionKind.OPENED: "create",
+    TransitionKind.ADOPTED: "adopt",
 }
 """What a person does with each kind, as a refusal names it."""
 
 ARCHIVED_REFUSAL = "it is archived, and an archived project takes Bring back alone"
+
+ADOPTED_REFUSAL = "it is adopted, and an adopted project stays as it was born"
 
 WRITING_REFUSAL = "Pilot is writing"
 """Create project's refusal while a Turn of the definition chat is in flight
@@ -704,7 +707,7 @@ class ProjectService:
             )
         at = datetime.now(UTC)
         self._write(project, person, at, TransitionKind.OPENED)
-        # In the flush that opens it: `ck_projects_draft_slug`.
+        # In the flush that opens it: `ck_projects_unopened_slug`.
         project.slug = creation.slug
         self.db.flush()
         self._write(project, self._pilot(), at, TransitionKind.PAUSED)
@@ -809,13 +812,14 @@ class ProjectService:
         Raises:
             RecordNotFoundException: no project has the id.
             InvalidOperationException: the caller has not chosen a handle, is
-                a member, or the project is archived.
+                a member, or the project is archived, an adopted one always
+                (DB 584).
         """
         project = self._locked(project_id)
         operation = f"join {project_name(project)}"
         person = self.people_service.require_person(auth, operation)
         if project.archived:
-            raise InvalidOperationException(operation, ARCHIVED_REFUSAL)
+            raise InvalidOperationException(operation, _archived_refusal(project))
         if self._membership(project, person) is not None:
             raise InvalidOperationException(operation, "you are a member already")
         self.db.add(
@@ -838,7 +842,7 @@ class ProjectService:
         operation = f"leave {project_name(project)}"
         person = self.people_service.require_person(auth, operation)
         if project.archived:
-            raise InvalidOperationException(operation, ARCHIVED_REFUSAL)
+            raise InvalidOperationException(operation, _archived_refusal(project))
         membership = self._membership(project, person)
         if membership is None:
             raise InvalidOperationException(operation, "you are no member")
@@ -1010,10 +1014,16 @@ class ProjectService:
 
 def _refusal(project: Project, kind: TransitionKind) -> str | None:
     """Why the project's standing does not allow a transition of `kind`, or
-    none: a kind follows from the standing it leaves (DB 170), an archived
+    none: a kind follows from the standing it leaves (DB 170), nothing
+    follows an adopted project's birth, Bring back included, and `adopted`
+    follows nothing, an archived
     project takes Bring back alone (D012), and auto pilot is an open project's
     (F2.6, F4.1), as the pause is (F141.2); Create project opens a draft
     alone, what its draft allows aside (`ProjectService._creation`)."""
+    if project.state_code is ProjectState.ADOPTED:
+        return ADOPTED_REFUSAL
+    if kind is TransitionKind.ADOPTED:
+        return "a project is adopted at its birth alone"
     if kind is TransitionKind.BROUGHT_BACK:
         return None if project.archived else "it is not archived"
     if project.archived:
@@ -1042,6 +1052,13 @@ def _refusal(project: Project, kind: TransitionKind) -> str | None:
     if kind is TransitionKind.RESUMED and not project.paused:
         return "it is not paused"
     return None
+
+
+def _archived_refusal(project: Project) -> str:
+    """Why an archived project takes no change of its members."""
+    if project.state_code is ProjectState.ADOPTED:
+        return ADOPTED_REFUSAL
+    return ARCHIVED_REFUSAL
 
 
 def project_name(project: Project) -> str:

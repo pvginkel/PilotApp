@@ -3912,6 +3912,7 @@ class TestCreateWaitClose:
         assert response.status_code == 404
 
 
+@pytest.mark.usefixtures("service_user")
 class TestCreateScenario:
     def test_the_scenario(
         self, client: FlaskClient, session: Session, project: Project
@@ -3923,7 +3924,7 @@ class TestCreateScenario:
         assert response.status_code == 201
         halving, counting, gears = response.get_json()["transcripts"]
         assert [set(thread) for thread in (halving, counting, gears)] == [
-            {"session_id", "agent_id"}
+            {"session_id", "agent_id", "adopted_by"}
         ] * 3
         assert (halving["agent_id"], gears["agent_id"]) == (None, None)
         assert counting["session_id"] == halving["session_id"]
@@ -3943,6 +3944,48 @@ class TestCreateScenario:
             )
         ).one()
         assert run.project_id == project.id
+
+    def test_the_conversation_of_the_scenarios_group_is_adopted_by_its_project(
+        self, client: FlaskClient, session: Session, project: Project
+    ) -> None:
+        """F152.8: what a spec finds the group's project in the Archived list
+        by."""
+        response = client.post(
+            SCENARIOS, json={"projects": {"recipe-box": str(project.id)}}
+        )
+
+        halving, counting, gears = response.get_json()["transcripts"]
+        adopted = session.scalars(
+            select(Project).where(Project.adopted_group == "bike-log-first-rides")
+        ).one()
+        assert gears["adopted_by"] == {
+            "id": str(adopted.id),
+            "name": "Bike log: the first rides",
+        }
+        assert (halving["adopted_by"], counting["adopted_by"]) == (None, None)
+        assert (adopted.state_code, adopted.archived) == (ProjectState.ADOPTED, True)
+
+    def test_a_stage_with_no_service_user_is_a_conflict(
+        self,
+        client: FlaskClient,
+        session: Session,
+        project: Project,
+        service_user: User,
+    ) -> None:
+        service_user.kind_code = UserKind.PERSON
+        service_user.avatar_slot = 3
+        session.flush()
+
+        response = client.post(
+            SCENARIOS, json={"projects": {"recipe-box": str(project.id)}}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "NO_SERVICE_USER"
+        assert response.get_json()["error"] == (
+            "Cannot make the adopted project of the group 'bike-log-first-rides'"
+            " because the stage has no service user to make it"
+        )
 
     def test_a_second_load_replaces_the_first(
         self, client: FlaskClient, session: Session, project: Project

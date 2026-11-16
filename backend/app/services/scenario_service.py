@@ -11,7 +11,9 @@ so that the publication places the Launch the Turn started (DB 538).
 
 The conversations' ids are the scenario's own, so a second load is a whole
 publication of the same transcripts and replaces the first: the record holds
-the scenario once, however often it is loaded.
+the scenario once, however often it is loaded. The conversation the scenario
+names a group for is adopted by the group's adopted Project, which the first
+load makes and a later one finds by the group's key (F152.8).
 """
 
 import hashlib
@@ -52,6 +54,9 @@ class ScenarioService:
             ValidationException: `projects` names another set of the
                 scenario's projects than those a Turn of Pilot's is on.
             RecordNotFoundException: no Project has an id given.
+            NoServiceUserException: the record holds no adopted Project of
+                the group the scenario names, and the stage has no service
+                user to make it.
         """
         now = self.db.scalar(select(func.now()))
         assert now is not None
@@ -78,6 +83,16 @@ class ScenarioService:
             )
             for publication in builder.publications()
         ]
+
+    def adopting(self, transcripts: list[Transcript]) -> dict[uuid.UUID, Project]:
+        """The adopted Projects that adopted `transcripts`, by id."""
+        adopted = {transcript.adopted_project_id for transcript in transcripts}
+        return {
+            project.id: project
+            for project in self.db.scalars(
+                select(Project).where(Project.id.in_(adopted - {None}))
+            )
+        }
 
     def _session(self, project: Project, turn: SentTurn) -> None:
         """The Session that ran the Turn's conversation, of `project`, over

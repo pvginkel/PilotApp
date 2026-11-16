@@ -25,9 +25,11 @@ from app.models import (
     PromptSource,
     Repository,
     Transcript,
+    User,
 )
 from app.models.reference import SessionState
 from tests.support import transcripts
+from tests.support.adoption import adopted_project
 from tests.support.database import violated_constraint
 from tests.support.transcripts import CAMP, OTHER, STARTED, SUB_AGENT
 from tests.support.turns import turn_at
@@ -263,6 +265,35 @@ class TestTranscript:
         )
 
         assert violated_constraint(session) == "ck_transcripts_environment"
+
+    def test_a_main_thread_is_adopted_by_an_adopted_project(
+        self, session: DbSession, collector: ComponentVersion, service_user: User
+    ) -> None:
+        project = adopted_project(session, service_user)
+        thread = _thread(collector, adopted_project_id=project.id)
+        session.add(thread)
+        session.flush()
+        session.refresh(thread)
+
+        assert thread.adopted_project_id == project.id
+
+    def test_only_a_main_thread_is_adopted(
+        self, session: DbSession, collector: ComponentVersion, service_user: User
+    ) -> None:
+        """DB §2.6: the group is a main thread's label."""
+        project = adopted_project(session, service_user)
+        session.add(
+            _thread(collector, agent_id=SUB_AGENT, adopted_project_id=project.id)
+        )
+
+        assert violated_constraint(session) == "ck_transcripts_adopted_project"
+
+    def test_a_transcript_is_adopted_by_a_project_pilot_holds(
+        self, session: DbSession, collector: ComponentVersion
+    ) -> None:
+        session.add(_thread(collector, adopted_project_id=uuid.uuid4()))
+
+        assert violated_constraint(session) == "transcripts_adopted_project_id_fkey"
 
     @pytest.mark.parametrize(
         ("column", "value", "constraint"),

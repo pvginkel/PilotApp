@@ -19,6 +19,7 @@ from app.engine.references import References
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
 from app.exceptions import ConfigurationError
+from app.services.adoption_service import AdoptionService
 from app.services.alarm_service import AlarmService
 from app.services.app_page_service import AppPageService
 from app.services.attachment_service import AttachmentService
@@ -574,8 +575,17 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
 
     # A collector's publication of a transcript (F152.3)
+    adoption_service = providers.Factory(
+        AdoptionService,
+        db=db_session,
+        document_service=document_service,
+        engine_bus=engine_bus,
+    )
     publication_service = providers.Factory(
-        PublicationService, db=db_session, app_settings=app_config
+        PublicationService,
+        db=db_session,
+        app_settings=app_config,
+        adoption_service=adoption_service,
     )
 
     # The invented scenario, loaded through /api/testing/ (F122.6)

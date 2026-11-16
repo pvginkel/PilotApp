@@ -132,3 +132,29 @@ class PublicationNotAppendableException(InvalidOperationException):
         self.causes = causes
         super().__init__(f"append to transcript {transcript}", "; ".join(causes))
         self.error_code = "PUBLICATION_NOT_APPENDABLE"
+
+
+class TranscriptNotAdoptableException(InvalidOperationException):
+    """Raised when a publication names a group for a Transcript a Session of
+    Pilot's ran, which no adopted Project adopts (DB 539); nothing of the
+    call is written."""
+
+    def __init__(self, transcript: str, group: str) -> None:
+        super().__init__(
+            f"adopt transcript {transcript} into the group {group!r}",
+            "a session of Pilot's ran it",
+        )
+        self.error_code = "TRANSCRIPT_NOT_ADOPTABLE"
+
+
+class NoServiceUserException(InvalidOperationException):
+    """Raised when a publication first names a group while the stage holds no
+    service user, an adopted Project's creator (DB 584); nothing of the call
+    is written."""
+
+    def __init__(self, group: str) -> None:
+        super().__init__(
+            f"make the adopted project of the group {group!r}",
+            "the stage has no service user to make it",
+        )
+        self.error_code = "NO_SERVICE_USER"

@@ -28,6 +28,12 @@ spawning Tool Call whichever comes first.
 A main thread's Launches that a Turn of Pilot's started are placed under
 their Session and Turn as the write ends (`launch_placement`; DB decision 79
 point 7), and a Launch the call names again keeps what it was placed under.
+
+A main thread whose call names a group is adopted by the group's adopted
+Project, which the call makes where Pilot has none (`adoption_service`;
+F152.8), and by none where its call names none: the label is the call's. A
+Transcript a Session of Pilot's ran is adopted by no Project (DB 539), so a
+group named for one is refused.
 """
 
 import hmac
@@ -43,6 +49,7 @@ from sqlalchemy import (
     Select,
     any_,
     delete,
+    exists,
     func,
     literal,
     select,
@@ -59,6 +66,7 @@ from app.exceptions import (
     CollectorProtocolUnsupportedException,
     PublicationInvalidException,
     PublicationNotAppendableException,
+    TranscriptNotAdoptableException,
 )
 from app.models import (
     Call,
@@ -85,6 +93,7 @@ from app.models import (
     ToolCall,
     Transcript,
 )
+from app.models import Session as AgentSession
 from app.models.call import RECORDED_ELSEWHERE
 from app.schemas.publication import (
     CallTokenKind,
@@ -95,6 +104,7 @@ from app.schemas.publication import (
     PublishedCompactionSchema,
     PublishedLaunchSchema,
 )
+from app.services.adoption_service import AdoptionService, group_faults
 from app.services.launch_placement import conversation_turn, place_launches
 
 logger = logging.getLogger(__name__)
@@ -158,6 +168,10 @@ def _faults(publication: PublicationSchema) -> list[str]:
             found.append("a sub-agent's thread is hosted by no environment")
         if publication.launches:
             found.append("a sub-agent's thread has no launches")
+        if publication.group is not None:
+            found.append("a sub-agent's thread names no `group`")
+    if publication.group is not None:
+        found.extend(group_faults(publication.group.name, publication.group.summary))
 
     released: dict[_Version, datetime] = {}
     for place, launch in enumerate(publication.launches, start=1):
@@ -242,9 +256,15 @@ class PublicationService:
     """Admits a collector's call, and writes its publication into the record
     on the caller's transaction."""
 
-    def __init__(self, db: Session, app_settings: AppSettings) -> None:
+    def __init__(
+        self,
+        db: Session,
+        app_settings: AppSettings,
+        adoption_service: AdoptionService,
+    ) -> None:
         self.db = db
         self.app_settings = app_settings
+        self.adoption_service = adoption_service
 
     def admit(self, authorization: str | None, protocol: str | None) -> None:
         """Let a collector's call through, its two headers' values given.
@@ -285,7 +305,10 @@ class PublicationService:
         Pilot holds what the call carries from its boundary on, what lies
         before it as it was, and `replayed_size` as it stood. After either,
         each Launch of a main thread that a Turn of Pilot's started stands
-        under its Session and Turn (DB 538).
+        under its Session and Turn (DB 538). After either, a main thread
+        is adopted by the adopted Project of the `group` the call names,
+        made where no Project holds the group and renamed where the group
+        was, and by none where the call names none.
 
         An Environment, a Repository, a Component Version and a reference
         code the call names that Pilot has no row for are written, the code
@@ -298,6 +321,11 @@ class PublicationService:
             PublicationNotAppendableException: an appended call does not
                 continue what Pilot holds of the Transcript; nothing is
                 written.
+            TranscriptNotAdoptableException: the call names a group for a
+                Transcript a Session of Pilot's ran; nothing is written.
+            NoServiceUserException: the call names a group no Project
+                holds, and the stage has no service user to make its
+                Project; nothing is written.
         """
         found = _faults(publication)
         if found:
@@ -308,10 +336,11 @@ class PublicationService:
         if publication.appended is not None:
             boundary = publication.appended.boundary
             ids = self._continued(publication, publication.appended)
+        adopted_by = self._adopted_by(publication)
         self._meet_references(publication)
         versions = self._versions(publication)
         thread = self._thread(
-            publication, versions[COLLECTOR, publication.collector.version]
+            publication, versions[COLLECTOR, publication.collector.version], adopted_by
         )
         surplus: _Surplus = {}
         prompts = self._launches(
@@ -573,6 +602,43 @@ class PublicationService:
             message_id: earlier[message_id] for message_id in outside & earlier.keys()
         }
 
+    def _adopted_by(self, publication: PublicationSchema) -> uuid.UUID | None:
+        """The id of the adopted Project of the group the call names, none
+        where it names none. A Session of Pilot's ran the Transcript where
+        one runs a Launch of it, or names its conversation while no Project
+        has adopted it: one adopted before a Session named it stays adopted,
+        its Launches off that Session (`launch_placement.place_launches`).
+
+        Raises:
+            TranscriptNotAdoptableException: a Session of Pilot's ran the
+                Transcript (DB 539); nothing is written.
+            NoServiceUserException: no Project holds the group, and the
+                stage has no service user; nothing is written.
+        """
+        group = publication.group
+        if group is None:
+            return None
+        conversation = publication.session_id
+        ran = self.db.scalar(
+            select(
+                exists().where(
+                    Launch.transcript_id == Transcript.id,
+                    Transcript.session_id == conversation,
+                    Launch.session_id.is_not(None),
+                )
+                | (
+                    exists().where(AgentSession.conversation_id == conversation)
+                    & ~exists().where(
+                        Transcript.session_id == conversation,
+                        Transcript.adopted_project_id.is_not(None),
+                    )
+                )
+            )
+        )
+        if ran:
+            raise TranscriptNotAdoptableException(_name(publication), group.key)
+        return self.adoption_service.adopt(group.key, group.name, group.summary)
+
     def _meet_references(self, publication: PublicationSchema) -> None:
         """A row for each reference code the call names that Pilot has not
         met. The entities in one order and each one's codes in theirs, so
@@ -715,15 +781,22 @@ class PublicationService:
                 .on_conflict_do_nothing(index_elements=["id"])
             )
 
-    def _thread(self, publication: PublicationSchema, read_under_id: int) -> Transcript:
-        """The Transcript's row as the call has it, its `replayed_size` its
-        file's size after a whole call alone (DB 605). A sub-agent's thread
+    def _thread(
+        self,
+        publication: PublicationSchema,
+        read_under_id: int,
+        adopted_by: uuid.UUID | None,
+    ) -> Transcript:
+        """The Transcript's row as the call has it, adopted by the Project
+        `adopted_by`, its `replayed_size` its file's size after a whole call
+        alone (DB 605). A sub-agent's thread
         is under its main thread where Pilot holds that one, and a main
         thread first held takes the sub-agents' threads that came before it."""
         facts: dict[str, Any] = {
             "working_directory": publication.working_directory,
             "repository_id": None,
             "environment_id": None,
+            "adopted_project_id": adopted_by,
             "spawned_by_tool_use_id": publication.spawned_by,
             "agent_type": publication.agent_type,
             "description": publication.description,

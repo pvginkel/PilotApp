@@ -12,10 +12,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
-from app.exceptions import RecordNotFoundException, ValidationException
+from app.exceptions import (
+    NoServiceUserException,
+    RecordNotFoundException,
+    ValidationException,
+)
 from app.models import (
     Call,
     Compaction,
+    Document,
     Environment,
     Event,
     Launch,
@@ -26,7 +31,7 @@ from app.models import (
     Turn,
     User,
 )
-from app.models.reference import SessionState
+from app.models.reference import ProjectState, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.scenario_service import ScenarioService
 from tests.support.database import Written, writes
@@ -38,6 +43,11 @@ RECIPES = "ben-recipebox-51f0c2"
 @pytest.fixture
 def scenario_service(container: ServiceContainer) -> ScenarioService:
     return container.scenario_service()
+
+
+pytestmark = pytest.mark.usefixtures("service_user")
+"""The stage's service user, which the scenario's group has its adopted
+Project made by."""
 
 
 @pytest.fixture
@@ -119,7 +129,36 @@ class TestLoad:
         )
         assert (run.turn_ended_at, run.ended_at) == (turn.ended_at, turn.ended_at)
 
-    def test_the_session_on_no_project_lands_under_where_it_ran(
+    def test_the_group_the_scenario_names_adopts_the_session_a_person_ran(
+        self, session: DbSession, loaded: list[Transcript], service_user: User
+    ) -> None:
+        """F152.8: the group's adopted Project, made by the load."""
+        halving, counting, gears = loaded
+
+        adopted = session.scalars(
+            select(Project).where(Project.adopted_group.is_not(None))
+        ).one()
+        assert (adopted.state_code, adopted.archived, adopted.adopted_group) == (
+            ProjectState.ADOPTED,
+            True,
+            "bike-log-first-rides",
+        )
+        assert adopted.name == "Bike log: the first rides"
+        assert adopted.created_by_user_id == service_user.id
+        assert session.scalars(
+            select(Document.published_text).where(Document.project_id == adopted.id)
+        ).one() == (
+            "---\n"
+            "title: 'Bike log: the first rides'\n"
+            "---\n"
+            "\n"
+            "The gear tables and ride notes Ada kept by hand, before Pilot kept the"
+            " log.\n"
+        )
+        assert gears.adopted_project_id == adopted.id
+        assert (halving.adopted_project_id, counting.adopted_project_id) == (None, None)
+
+    def test_the_session_a_person_ran_lands_under_where_it_ran(
         self, session: DbSession, loaded: list[Transcript]
     ) -> None:
         gears = loaded[2]
@@ -193,6 +232,41 @@ class TestLoad:
 
         assert [thread.id for thread in again] == [thread.id for thread in loaded]
         assert wrote == {"transcripts": Written(updated=3)}
+
+    def test_a_second_load_finds_the_groups_project_by_its_key(
+        self,
+        session: DbSession,
+        scenario_service: ScenarioService,
+        loaded: list[Transcript],
+        project: Project,
+    ) -> None:
+        adopted = loaded[2].adopted_project_id
+
+        again = scenario_service.load({"recipe-box": project.id})
+
+        assert again[2].adopted_project_id == adopted
+        assert session.scalars(
+            select(Project.id).where(Project.adopted_group.is_not(None))
+        ).all() == [adopted]
+        assert scenario_service.adopting(again) == {
+            adopted: session.get_one(Project, adopted)
+        }
+
+    def test_a_stage_with_no_service_user_refuses_the_load(
+        self,
+        session: DbSession,
+        scenario_service: ScenarioService,
+        project: Project,
+        service_user: User,
+    ) -> None:
+        service_user.kind_code = UserKind.PERSON
+        service_user.avatar_slot = 3
+        session.flush()
+
+        with pytest.raises(NoServiceUserException):
+            scenario_service.load({"recipe-box": project.id})
+
+        assert session.scalars(select(Project.id)).all() == [project.id]
 
     def test_a_second_load_replaces_what_the_record_held_of_the_first(
         self,

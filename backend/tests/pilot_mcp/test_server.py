@@ -1354,9 +1354,11 @@ _NAME = {
 
 _STATE = {
     "description": (
-        "`draft` until Create project, then `open`, and `finished` once finished"
+        "`draft` until Create project, then `open`, and `finished` once finished;"
+        " `adopted` for a project that stands for a group of slices run before"
+        " Pilot, which is archived from its birth and never opened"
     ),
-    "enum": ["draft", "open", "finished"],
+    "enum": ["draft", "open", "finished", "adopted"],
     "title": "State",
     "type": "string",
 }

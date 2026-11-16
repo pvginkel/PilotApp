@@ -12,6 +12,8 @@ A call is whole, the file as it stands, or appended, for a file that grew
 (F152.15): one with `appended`, which names what the call builds on and the
 boundary its Launches, Compactions and Calls start at. A place and a
 `position` count through the file in both, from 1.
+
+Of the workflow's labels a call carries one, a main thread's `group` (F152.8).
 """
 
 from typing import Annotated, Literal
@@ -322,6 +324,26 @@ class PublishedAppendedSchema(_Published):
     )
 
 
+class PublishedGroupSchema(_Published):
+    """The group of slices run before Pilot that a main thread's labels name
+    (F152.8): what Pilot makes the group's adopted project from, and finds it
+    again by."""
+
+    key: Name = Field(
+        description="The labeller's key of the group, which never changes",
+        examples=["recipe-box-first-menus"],
+    )
+    name: Name = Field(
+        description="The group's name as it now stands, one line: its project's name"
+    )
+    summary: str = Field(
+        description=(
+            "The group's summary as it now stands, prose with no ask: with the"
+            " name, all its project's `project.md` holds"
+        )
+    )
+
+
 class PublicationSchema(_Published):
     """One Transcript as its file stands: read whole or, with `appended`,
     from a boundary on."""
@@ -364,6 +386,14 @@ class PublicationSchema(_Published):
         description=(
             "The `tool_use_id` of the call that started a sub-agent, where its"
             " record names it"
+        ),
+    )
+    group: PublishedGroupSchema | None = Field(
+        default=None,
+        description=(
+            "A main thread's label: the group it belongs to, whose adopted"
+            " project then adopts it; none where its labels name none, and the"
+            " transcript is then adopted by no project"
         ),
     )
     appended: PublishedAppendedSchema | None = Field(

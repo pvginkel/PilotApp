@@ -15,6 +15,7 @@ from tests.support.publications import (
     compaction,
     context_part,
     event,
+    group,
     hook_run,
     launch,
     prompt,
@@ -159,6 +160,39 @@ class TestPublicationSchema:
         assert _refused(
             calls=[call(1, context_parts=[context_part(text="You are a cook")])]
         ) == [("calls", 0, "context_parts", 0, "text")]
+
+    def test_a_call_names_no_group_unless_its_labels_do(self) -> None:
+        assert whole().group is None
+
+    def test_a_group_is_its_key_its_name_and_its_summary(self) -> None:
+        named = whole(group=group()).group
+
+        assert named is not None
+        assert (named.key, named.name, named.summary) == (
+            "recipe-box-first-menus",
+            "Recipe box: the first menus",
+            "The menus Ada wrote by hand, before the recipe box.",
+        )
+
+    @pytest.mark.parametrize("fact", ["key", "name", "summary"])
+    def test_a_group_names_all_three(self, fact: str) -> None:
+        named = group()
+        del named[fact]
+
+        assert _refused(group=named) == [("group", fact)]
+
+    @pytest.mark.parametrize("fact", ["key", "name"])
+    def test_a_groups_key_and_name_are_not_empty(self, fact: str) -> None:
+        assert _refused(group=group(**{fact: ""})) == [("group", fact)]
+
+    def test_a_group_with_no_summary_is_taken(self) -> None:
+        named = whole(group=group(summary="")).group
+
+        assert named is not None
+        assert named.summary == ""
+
+    def test_a_group_takes_no_field_pilot_does_not_know(self) -> None:
+        assert _refused(group=group(slices=["012"])) == [("group", "slices")]
 
     def test_a_call_without_appended_is_whole(self) -> None:
         assert whole().appended is None

@@ -48,6 +48,7 @@ from app.schemas.pilot_work import (
     SetProgressRequestSchema,
 )
 from app.schemas.testing_record import (
+    InventedAdoptedProjectSchema,
     InventedAttachmentsCreateSchema,
     InventedAttachmentsSchema,
     InventedChatAnswerCreateSchema,
@@ -87,6 +88,7 @@ from app.schemas.testing_record import (
 from app.schemas.tracker_events import TrackerEventReplySchema
 from app.services.container import ServiceContainer
 from app.services.people_service import PeopleService
+from app.services.project_service import project_name
 from app.services.scenario_service import ScenarioService
 from app.services.store_update_service import StoreUpdateService
 from app.services.test_data_service import TestDataService
@@ -1137,6 +1139,7 @@ def create_wait_close(
         HTTP_201=InventedScenarioSchema,
         HTTP_400=ApiErrorResponseSchema,
         HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
     ),
 )
 @inject
@@ -1146,25 +1149,38 @@ def create_scenario(
     """Load the invented scenario: its conversations, each published whole
     through the service a collector's publication writes through, its last
     moment now, and the Session and Turn of Pilot's that ran one of them, on
-    the project given for the scenario's (F122.6). A second load replaces
-    the first: the record holds the scenario once, as it was loaded last.
+    the project given for the scenario's (F122.6). The conversation the
+    scenario names a group for is adopted by the group's adopted project,
+    made where the record has none (F152.8). A second load replaces the
+    first: the record holds the scenario once, as it was loaded last.
 
     Returns:
-        201: The scenario's transcripts
+        201: The scenario's transcripts, each with the project that adopted it
         400: The projects given are not the scenario's that a Turn of
             Pilot's is on, or the stage is prd
         404: No project has an id given
+        409: The stage has no service user to make the group's adopted project
     """
     data = InventedScenarioCreateSchema.model_validate(request.get_json())
     transcripts = scenario_service.load(data.projects)
+    adopting = scenario_service.adopting(transcripts)
     return InventedScenarioSchema(
         transcripts=[
             InventedTranscriptSchema(
-                session_id=transcript.session_id, agent_id=transcript.agent_id
+                session_id=transcript.session_id,
+                agent_id=transcript.agent_id,
+                adopted_by=(
+                    None
+                    if transcript.adopted_project_id is None
+                    else InventedAdoptedProjectSchema(
+                        id=transcript.adopted_project_id,
+                        name=project_name(adopting[transcript.adopted_project_id]),
+                    )
+                ),
             )
             for transcript in transcripts
         ]
-    ).model_dump(), 201
+    ).model_dump(mode="json"), 201
 
 
 def _saved(ingested: Ingested) -> dict[str, Any]:

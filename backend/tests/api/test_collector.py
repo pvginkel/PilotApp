@@ -13,13 +13,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 from werkzeug.test import TestResponse
 
-from app.models import Call, ToolCall, Transcript
+from app import models
+from app.models import Call, Project, ToolCall, Transcript, User
+from app.models.reference import ProjectState
 from app.schemas.publication import PublicationSchema
 from app.services.container import ServiceContainer
 from app.services.publication_service import (
     COLLECTOR_PROTOCOL_MAX,
     COLLECTOR_PROTOCOL_MIN,
 )
+from tests.support.adoption import FIRST_MENUS
 from tests.support.database import writes
 from tests.support.publications import (
     COLLECTOR_TOKEN,
@@ -27,6 +30,7 @@ from tests.support.publications import (
     builds_on,
     call,
     collector_headers,
+    group,
     launch,
     prompt,
     sub_agent,
@@ -331,6 +335,76 @@ class TestPublish:
 
         assert response.status_code == 409
         assert response.json["code"] == "PUBLICATION_NOT_APPENDABLE"
+        assert wrote == {}
+
+    def test_a_call_naming_a_group_has_its_project_made_and_the_transcript_adopted(
+        self, session: DbSession, client: FlaskClient, service_user: User
+    ) -> None:
+        """F152.8."""
+        response = _post(client, _body(_camp()) | {"group": group()})
+
+        assert response.status_code == 204
+        project = session.scalars(select(Project)).one()
+        assert (project.state_code, project.adopted_group, project.name) == (
+            ProjectState.ADOPTED,
+            FIRST_MENUS,
+            "Recipe box: the first menus",
+        )
+        assert session.scalars(select(Transcript.adopted_project_id)).all() == [
+            project.id
+        ]
+
+    def test_a_group_first_named_on_a_stage_with_no_service_user_is_409(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        with writes(session) as wrote:
+            response = _post(client, _body(_camp()) | {"group": group()})
+
+        assert response.status_code == 409
+        assert response.json["code"] == "NO_SERVICE_USER"
+        assert response.json["error"] == (
+            "Cannot make the adopted project of the group 'recipe-box-first-menus'"
+            " because the stage has no service user to make it"
+        )
+        assert wrote == {}
+
+    def test_a_group_named_for_a_transcript_a_session_of_pilots_ran_is_409(
+        self,
+        session: DbSession,
+        client: FlaskClient,
+        project_session: models.Session,
+        service_user: User,
+    ) -> None:
+        """DB 539. The call without its group is then taken."""
+        project_session.conversation_id = CAMP
+        session.flush()
+
+        with writes(session) as wrote:
+            response = _post(client, _body(_camp()) | {"group": group()})
+
+        assert response.status_code == 409
+        assert response.json["code"] == "TRANSCRIPT_NOT_ADOPTABLE"
+        assert response.json["error"] == (
+            f"Cannot adopt transcript {CAMP} into the group 'recipe-box-first-menus'"
+            " because a session of Pilot's ran it"
+        )
+        assert wrote == {}
+        assert _post(client, _body(_camp())).status_code == 204
+
+    def test_a_group_that_makes_no_project_document_is_400(
+        self, session: DbSession, client: FlaskClient, service_user: User
+    ) -> None:
+        body = _body(_camp()) | {"group": group(name="The first menus ")}
+
+        with writes(session) as wrote:
+            response = _post(client, body)
+
+        assert response.status_code == 400
+        assert response.json["code"] == "VALIDATION_FAILED"
+        assert response.json["error"] == (
+            f"Cannot take the publication of transcript {CAMP} because the group's"
+            " `name` is not one line of words with no space around them"
+        )
         assert wrote == {}
 
     def test_a_body_that_is_not_a_publication_is_400_with_every_field_named(

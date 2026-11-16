@@ -34,6 +34,12 @@ class Project(db.Model):  # type: ignore[name-defined]
     `name` is a cache of the draft's title, rebuilt on every publish of the
     draft. `state_code`, `archived`, `autopilot` and `paused` are caches of the
     Project Transitions, rebuilt with each (DB §7.4).
+
+    An adopted Project stands for a group of slices run before Pilot, whose
+    key is its `adopted_group`: born archived by its one `adopted` Project
+    Transition, a service user's as its creator is, with no Project Member
+    (DB decision 79; 584). That creator and that one transition are the
+    adoption's to keep: no key reaches them.
     """
 
     __tablename__ = "projects"
@@ -41,9 +47,20 @@ class Project(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             "slug ~ '^[a-z0-9-]+$' AND slug NOT LIKE 'draft-%'", name="ck_projects_slug"
         ),
-        # The opened transition sets the slug (DB assertion 177).
+        # The opened transition sets the slug, and an adopted Project is
+        # never opened (DB 177).
         CheckConstraint(
-            "(state_code = 'draft') = (slug IS NULL)", name="ck_projects_draft_slug"
+            "(state_code IN ('draft', 'adopted')) = (slug IS NULL)",
+            name="ck_projects_unopened_slug",
+        ),
+        # DB 582.
+        CheckConstraint(
+            "(state_code = 'adopted') = (adopted_group IS NOT NULL)",
+            name="ck_projects_adopted_group",
+        ),
+        # DB 170.
+        CheckConstraint(
+            "state_code <> 'adopted' OR archived", name="ck_projects_adopted_archived"
         ),
     )
 
@@ -63,6 +80,7 @@ class Project(db.Model):  # type: ignore[name-defined]
     paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     ticket: Mapped[str | None] = mapped_column(Text)
     repo: Mapped[str | None] = mapped_column(Text)
+    adopted_group: Mapped[str | None] = mapped_column(Text, unique=True)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

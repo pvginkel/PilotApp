@@ -98,6 +98,13 @@ def publish(
       collector's version the call builds on, holds no row at a place before
       the boundary's, or holds from there on, or before, what the call does
       not carry so. The collector publishes the transcript whole.
+    - 409, with the `code` `TRANSCRIPT_NOT_ADOPTABLE`: the call names a
+      `group` for a transcript a session of Pilot's ran, which no adopted
+      project adopts. The same call is refused again, and the call without
+      its `group` is taken.
+    - 409, with the `code` `NO_SERVICE_USER`: the call names a `group` no
+      project holds yet, and the stage has no service user to make its
+      adopted project. The same call is taken once the stage has one.
     - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused
       again.
     """

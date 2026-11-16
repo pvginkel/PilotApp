@@ -38,6 +38,7 @@ class ProjectState(StrEnum):
     DRAFT = "draft"
     OPEN = "open"
     FINISHED = "finished"
+    ADOPTED = "adopted"
 
 
 class TransitionKind(StrEnum):
@@ -50,6 +51,7 @@ class TransitionKind(StrEnum):
     AUTOPILOT_OFF = "autopilot_off"
     PAUSED = "paused"
     RESUMED = "resumed"
+    ADOPTED = "adopted"
 
 
 class DocumentRole(StrEnum):

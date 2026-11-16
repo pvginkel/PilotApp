@@ -106,7 +106,12 @@ class InventedProjectCreateSchema(BaseModel):
         description="The draft's title, the project's name; a draft without one when null",
         examples=["Recipe box"],
     )
-    state: ProjectState = Field(default=ProjectState.OPEN)
+    state: Literal[ProjectState.DRAFT, ProjectState.OPEN, ProjectState.FINISHED] = (
+        Field(
+            default=ProjectState.OPEN,
+            description="An adopted project is made by a scenario's load alone",
+        )
+    )
     archived: bool = Field(default=False)
     autopilot: bool = Field(
         default=False, description="Auto pilot on; a finished project has it off"
@@ -603,12 +608,25 @@ class InventedScenarioCreateSchema(BaseModel):
     )
 
 
+class InventedAdoptedProjectSchema(BaseModel):
+    """The adopted project of a group the scenario names."""
+
+    id: uuid.UUID = Field(description="The project's id")
+    name: str = Field(description="The project's name: the group's")
+
+
 class InventedTranscriptSchema(BaseModel):
     """A transcript of the scenario, by Claude Code's ids of it."""
 
     session_id: str = Field(description="Claude Code's id of its main thread")
     agent_id: str | None = Field(
         description="Claude Code's id of the sub-agent, none on a main thread"
+    )
+    adopted_by: InventedAdoptedProjectSchema | None = Field(
+        description=(
+            "The adopted project of the group the scenario names for it, none "
+            "where it names none"
+        )
     )
 
 

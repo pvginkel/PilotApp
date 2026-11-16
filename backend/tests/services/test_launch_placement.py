@@ -5,6 +5,7 @@ The rule that protects the most: a Launch is placed once, under the Session
 whose Turn was sent last before its start, and what it was placed under
 stands whatever Turn follows (`TestPlacedOnce`)."""
 
+import logging
 import uuid
 from datetime import datetime, timedelta
 
@@ -15,17 +16,26 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.models import ComponentVersion, Environment, Launch, Project, Transcript
+from app.models import (
+    ComponentVersion,
+    Environment,
+    Launch,
+    Project,
+    Transcript,
+    User,
+)
 from app.models.reference import SessionState, UserKind
 from app.schemas.publication import PublicationSchema
 from app.services.launch_placement import conversation_named, place_launches
-from app.services.publication_service import PublicationService
 from tests.support import publications, transcripts
+from tests.support.adoption import adopted_project
 from tests.support.database import writes
 from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import wait_until
 from tests.support.transcripts import CAMP, OTHER, STARTED, SUB_AGENT
 from tests.support.turns import turn_at
+
+LOGGER = "app.services.launch_placement"
 
 
 def _at(minutes: int) -> datetime:
@@ -230,6 +240,85 @@ class TestPlaced:
         assert wrote == {}
 
 
+class TestAdopted:
+    """A Transcript an adopted Project has adopted has no Launch run by a
+    Session (DB 539)."""
+
+    def test_an_adopted_transcripts_launches_stay_off_the_session_that_names_it(
+        self,
+        session: DbSession,
+        thread: Transcript,
+        run: models.Session,
+        service_user: User,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        adopted = adopted_project(session, service_user)
+        thread.adopted_project_id = adopted.id
+        turn_at(session, run, _at(0))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        with caplog.at_level(logging.WARNING, logger=LOGGER):
+            conversation_named(session, CAMP)
+
+        assert _placed(session, launch) == (None, None)
+        assert caplog.messages == [
+            f"Transcript {CAMP} is adopted by project {adopted.id}, and a Session of"
+            " Pilot's names it: its launches stay off that Session"
+        ]
+
+    def test_an_adopted_transcript_no_session_names_is_not_logged(
+        self,
+        session: DbSession,
+        thread: Transcript,
+        service_user: User,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        thread.adopted_project_id = adopted_project(session, service_user).id
+        transcripts.launch(session, thread, started_at=_at(1))
+
+        with caplog.at_level(logging.WARNING, logger=LOGGER):
+            place_launches(session, CAMP)
+
+        assert caplog.messages == []
+
+    def test_a_sub_agents_thread_keeps_no_launch_off_its_session(
+        self,
+        session: DbSession,
+        thread: Transcript,
+        collector: ComponentVersion,
+        run: models.Session,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The adopted thread is the conversation's main one alone."""
+        transcripts.transcript(session, collector, agent_id=SUB_AGENT)
+        turn_at(session, run, _at(0))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        with caplog.at_level(logging.WARNING, logger=LOGGER):
+            place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (run.id, 1)
+        assert caplog.messages == []
+
+    def test_a_transcript_no_longer_adopted_is_placed(
+        self,
+        session: DbSession,
+        thread: Transcript,
+        run: models.Session,
+        service_user: User,
+    ) -> None:
+        thread.adopted_project_id = adopted_project(session, service_user).id
+        turn_at(session, run, _at(0))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+        place_launches(session, CAMP)
+
+        thread.adopted_project_id = None
+        session.flush()
+        place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (run.id, 1)
+
+
 class TestPlacedOnce:
     def test_a_placed_launch_is_not_written_again(
         self, session: DbSession, thread: Transcript, run: models.Session
@@ -326,14 +415,10 @@ class TestConversationNamed:
                 db.get_one(models.Session, run_id).conversation_id = CAMP
                 conversation_named(db, CAMP)
 
-        publishing = container.session_maker()()
-        try:
-            PublicationService(publishing, container.app_config()).publish(_camp())
+        with scoped_session(container):
+            container.publication_service().publish(_camp())
             naming = in_thread(named)
             wait_until(lambda: lock_waits(container) == 1, "the naming's turn waiting")
-            publishing.commit()
-        finally:
-            publishing.close()
 
         naming.result()
         with scoped_session(container) as db:

@@ -50,6 +50,7 @@ from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.job_service import SETUP_TITLE
 from app.services.session_scope import STORE_REPO
+from tests.support.adoption import FIRST_MENUS
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
 from tests.support.starts import configured_starts
@@ -107,6 +108,14 @@ def _run(
     session.add(run)
     session.flush()
     return run
+
+
+def _adopted(container: ServiceContainer) -> uuid.UUID:
+    """The adopted Project of an invented group, as a publication that first
+    names the group makes it; a `service_user` is its creator."""
+    return container.adoption_service().adopt(
+        FIRST_MENUS, "The first menus", "The menus Ada wrote by hand."
+    )
 
 
 def _make(container: ServiceContainer, **spec: Any) -> uuid.UUID:
@@ -248,6 +257,28 @@ class TestListProjects:
 
         assert response.status_code == 200
         assert [tab["id"] for tab in response.get_json()["projects"]] == [str(album)]
+
+    def test_an_adopted_project_is_among_the_archived_ones_in_its_own_state(
+        self, client: FlaskClient, container: ServiceContainer, service_user: User
+    ) -> None:
+        """F128.2: listed there, marked as adopted."""
+        _make(container, name="Kept")
+        adopted = _adopted(container)
+        _sign_in(client)
+
+        (tab,) = client.get(PROJECTS, query_string={"archived": "true"}).get_json()[
+            "projects"
+        ]
+
+        assert (tab["id"], tab["name"], tab["state"]) == (
+            str(adopted),
+            "The first menus",
+            "adopted",
+        )
+        assert (tab["status"], tab["finished_at"], tab["member"]) == (None, None, False)
+        assert [
+            listed["name"] for listed in client.get(PROJECTS).get_json()["projects"]
+        ] == ["Kept"]
 
     def test_no_project_is_an_empty_list(self, client: FlaskClient) -> None:
         _sign_in(client)
@@ -662,6 +693,23 @@ class TestGetProjectAtAddress:
         assert response.status_code == 200
         body = response.get_json()
         assert (body["id"], body["address"]) == (str(recipes.id), recipes.slug)
+
+    def test_an_adopted_projects_head_is_read(
+        self, client: FlaskClient, container: ServiceContainer, service_user: User
+    ) -> None:
+        adopted = _adopted(container)
+        _sign_in(client)
+
+        response = client.get(HEAD, query_string={"address": str(adopted)})
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert (body["state"], body["archived"], body["name"]) == (
+            "adopted",
+            True,
+            "The first menus",
+        )
+        assert (body["status"], body["members"], body["member"]) == (None, [], False)
 
     def test_an_archived_projects_head_is_read(
         self, client: FlaskClient, container: ServiceContainer, session: Session
@@ -1818,6 +1866,41 @@ class TestAddTransition:
         body = response.get_json()
         assert (body["state"], body["archived"], body["autopilot"]) == standing
 
+    @pytest.mark.parametrize(
+        "kind", ["brought_back", "archived", "finished", "reopened", "autopilot_on"]
+    )
+    def test_a_transition_of_an_adopted_project_is_a_conflict(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        service_user: User,
+        kind: str,
+    ) -> None:
+        """DB 170."""
+        adopted = _adopted(container)
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{adopted}/transitions", json={"kind": kind})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].endswith(
+            "because it is adopted, and an adopted project stays as it was born"
+        )
+        body = client.get(f"{PROJECTS}/{adopted}").get_json()
+        assert (body["state"], body["archived"]) == ("adopted", True)
+
+    def test_adopted_is_no_transition_a_caller_makes(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "adopted"}
+        )
+
+        assert response.status_code == 400
+
     def test_auto_pilot_on_with_the_yes_answers_the_confirmations_it_takes(
         self,
         client: FlaskClient,
@@ -2645,6 +2728,21 @@ class TestJoinProject:
         _sign_in(client)
 
         assert client.post(f"{PROJECTS}/{recipes}/membership").status_code == 409
+
+    def test_an_adopted_project_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer, service_user: User
+    ) -> None:
+        """DB 584: it has no member."""
+        adopted = _adopted(container)
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{adopted}/membership")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot join The first menus because it is adopted, and an adopted"
+            " project stays as it was born"
+        )
 
     def test_a_caller_without_a_handle_is_a_conflict(
         self, client: FlaskClient, container: ServiceContainer

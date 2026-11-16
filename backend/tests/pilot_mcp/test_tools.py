@@ -56,6 +56,7 @@ from app.services.session_record_service import read_records
 from pilot_mcp.api import ENVIRONMENT_HEADER, SESSION_HEADER
 from pilot_mcp.server import PROJECTS_PATH, STORE_PATH
 from pilot_mcp.tools import TOOL_USE_ID_META
+from tests.support.adoption import FIRST_MENUS
 from tests.support.fake_controller import ServedFakeController
 from tests.support.pilot_mcp import (
     API_URL,
@@ -1733,6 +1734,15 @@ def _make(container: ServiceContainer, **spec: Any) -> models.Project:
     )
 
 
+def _adopted(container: ServiceContainer) -> models.Project:
+    """The adopted Project of an invented group, as a publication that first
+    names the group makes it, by the service user the surface calls as."""
+    project_id = container.adoption_service().adopt(
+        FIRST_MENUS, "The first menus", "The menus Ada wrote by hand."
+    )
+    return container.db_session().get_one(models.Project, project_id)
+
+
 async def _ask(app: Starlette, tool: str, arguments: dict[str, Any]) -> Any:
     """One call to `pilot-projects` as a session's entry makes it."""
     return await call(app, tool, arguments, PROJECTS_HEADERS, path=PROJECTS_PATH)
@@ -1812,6 +1822,30 @@ class TestListProjects:
         ]
         [(request, _)] = gated_routes.calls
         assert str(request.url) == f"{API_URL}/api/projects?archived=true"
+
+    async def test_an_adopted_project_is_listed_with_the_archived_ones_as_adopted(
+        self, projects_app: Starlette, container: ServiceContainer
+    ) -> None:
+        """F128.2: an archived project in the state `adopted`."""
+        _make(container, name="Recipe box")
+        adopted = _adopted(container)
+
+        archived, others = await _ask_each(
+            projects_app, "list_projects", {"archived": True}, {}
+        )
+
+        assert not archived.isError
+        (row,) = archived.structuredContent["projects"]
+        assert (row["id"], row["name"], row["state"], row["status"]) == (
+            str(adopted.id),
+            "The first menus",
+            "adopted",
+            None,
+        )
+        assert row["folder"] == f"draft-{adopted.number}"
+        assert [row["name"] for row in others.structuredContent["projects"]] == [
+            "Recipe box"
+        ]
 
     async def test_the_call_goes_under_the_minted_token_never_the_callers_bearer(
         self,
@@ -2053,6 +2087,23 @@ class TestGetProject:
 
         head = result.structuredContent
         assert (head["id"], head["archived"]) == (str(camp.id), True)
+
+    async def test_an_adopted_projects_head_is_read_as_an_archived_project_adopted(
+        self, projects_app: Starlette, container: ServiceContainer
+    ) -> None:
+        adopted = _adopted(container)
+
+        result = await _ask(projects_app, "get_project", {"project": str(adopted.id)})
+
+        assert not result.isError
+        head = result.structuredContent
+        assert (head["id"], head["state"], head["archived"], head["status"]) == (
+            str(adopted.id),
+            "adopted",
+            True,
+            None,
+        )
+        assert (head["name"], head["members"]) == ("The first menus", [])
 
     async def test_the_service_user_is_no_member(
         self,

@@ -295,6 +295,7 @@ class Builder:
         publication = self._file(session, session.size, _main_moments(session))
         publication |= _given(
             environment=session.environment,
+            group=None if session.group is None else asdict(session.group),
             launches=launches,
             compactions=thread.compactions,
             calls=thread.calls,

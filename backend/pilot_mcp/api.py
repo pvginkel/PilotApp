@@ -457,7 +457,7 @@ class Caller:
         )
 
 
-ProjectState = Literal["draft", "open", "finished"]
+ProjectState = Literal["draft", "open", "finished", "adopted"]
 
 ProjectStatus = Literal[
     "running",
@@ -469,7 +469,11 @@ ProjectStatus = Literal[
     "paused",
 ]
 
-_STATE = "`draft` until Create project, then `open`, and `finished` once finished"
+_STATE = (
+    "`draft` until Create project, then `open`, and `finished` once finished;"
+    " `adopted` for a project that stands for a group of slices run before"
+    " Pilot, which is archived from its birth and never opened"
+)
 
 _STATUS = (
     "`paused`, or `pausing` while a turn of its work still runs; else `running`"

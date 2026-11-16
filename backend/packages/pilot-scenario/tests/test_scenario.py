@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from pilot_scenario import SCENARIO, Scenario
-from pilot_scenario.script import Call, Session, Unit
+from pilot_scenario.script import Call, Group, Session, Unit
 
 WORKFLOW = {"slice", "stage", "phase"}
 """The workflow's kinds of work, which no scenario speaks of."""
@@ -84,6 +84,23 @@ class TestItsVocabulary:
                 {"slice"},
                 id="a sub-agent's name",
             ),
+            pytest.param(
+                replace(
+                    SCENARIO,
+                    sessions=(
+                        replace(
+                            SCENARIO.sessions[1],
+                            group=Group(
+                                key="bike-log-first-rides",
+                                name="The first rides",
+                                summary="Each ride had three phases.",
+                            ),
+                        ),
+                    ),
+                ),
+                {"phases"},
+                id="a group's summary",
+            ),
         ],
     )
     def test_a_word_of_the_workflow_is_found(
@@ -109,7 +126,20 @@ class TestItsWorld:
             else:
                 assert session.person in SCENARIO.people
 
-    def test_it_takes_in_a_turn_of_pilots_a_session_on_no_project_and_a_sub_agent(
+    def test_a_group_is_named_for_a_session_no_turn_of_pilots_ran(self) -> None:
+        """An adopted project adopts no conversation a session of Pilot's
+        ran."""
+        assert [
+            (session.name, None if session.group is None else session.group.key)
+            for session in SCENARIO.sessions
+        ] == [("halving", None), ("gears", "bike-log-first-rides")]
+        assert all(
+            session.turn is None
+            for session in SCENARIO.sessions
+            if session.group is not None
+        )
+
+    def test_it_takes_in_a_turn_of_pilots_a_session_a_person_ran_and_a_sub_agent(
         self,
     ) -> None:
         assert [

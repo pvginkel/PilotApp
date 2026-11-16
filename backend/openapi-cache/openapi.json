@@ -2299,8 +2299,15 @@
             "title": "Repo"
           },
           "state": {
-            "$ref": "#/components/schemas/InventedProjectCreateSchema.6d6b324.ProjectState",
-            "default": "open"
+            "default": "open",
+            "description": "An adopted project is made by a scenario's load alone",
+            "enum": [
+              "draft",
+              "open",
+              "finished"
+            ],
+            "title": "State",
+            "type": "string"
           },
           "tasks": {
             "description": "The plan's steps, in order",
@@ -2401,15 +2408,6 @@
         ],
         "title": "InventedTaskSchema",
         "type": "object"
-      },
-      "InventedProjectCreateSchema.6d6b324.ProjectState": {
-        "enum": [
-          "draft",
-          "open",
-          "finished"
-        ],
-        "title": "ProjectState",
-        "type": "string"
       },
       "InventedProjectCreateSchema.6d6b324.TaskStatus": {
         "enum": [
@@ -2588,9 +2586,42 @@
         "title": "InventedScenarioSchema",
         "type": "object"
       },
+      "InventedScenarioSchema.6d6b324.InventedAdoptedProjectSchema": {
+        "description": "The adopted project of a group the scenario names.",
+        "properties": {
+          "id": {
+            "description": "The project's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The project's name: the group's",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "InventedAdoptedProjectSchema",
+        "type": "object"
+      },
       "InventedScenarioSchema.6d6b324.InventedTranscriptSchema": {
         "description": "A transcript of the scenario, by Claude Code's ids of it.",
         "properties": {
+          "adopted_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InventedScenarioSchema.6d6b324.InventedAdoptedProjectSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The adopted project of the group the scenario names for it, none where it names none"
+          },
           "agent_id": {
             "anyOf": [
               {
@@ -2611,7 +2642,8 @@
         },
         "required": [
           "session_id",
-          "agent_id"
+          "agent_id",
+          "adopted_by"
         ],
         "title": "InventedTranscriptSchema",
         "type": "object"
@@ -7061,7 +7093,8 @@
         "enum": [
           "draft",
           "open",
-          "finished"
+          "finished",
+          "adopted"
         ],
         "title": "ProjectState",
         "type": "string"
@@ -7245,7 +7278,8 @@
         "enum": [
           "draft",
           "open",
-          "finished"
+          "finished",
+          "adopted"
         ],
         "title": "ProjectState",
         "type": "string"
@@ -7488,6 +7522,18 @@
             "minimum": 0,
             "title": "File Size",
             "type": "integer"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedGroupSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A main thread's label: the group it belongs to, whose adopted project then adopts it; none where its labels name none, and the transcript is then adopted by no project"
           },
           "launches": {
             "description": "A main thread's Launches, in the file's order; on an appended call those that wrote a line of what it carries, the first with its Prompts from the boundary's on",
@@ -8067,6 +8113,39 @@
           "at"
         ],
         "title": "PublishedEventSchema",
+        "type": "object"
+      },
+      "PublicationSchema.e156e3e.PublishedGroupSchema": {
+        "additionalProperties": false,
+        "description": "The group of slices run before Pilot that a main thread's labels name\n(F152.8): what Pilot makes the group's adopted project from, and finds it\nagain by.",
+        "properties": {
+          "key": {
+            "description": "The labeller's key of the group, which never changes",
+            "examples": [
+              "recipe-box-first-menus"
+            ],
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "description": "The group's name as it now stands, one line: its project's name",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "summary": {
+            "description": "The group's summary as it now stands, prose with no ask: with the name, all its project's `project.md` holds",
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "summary"
+        ],
+        "title": "PublishedGroupSchema",
         "type": "object"
       },
       "PublicationSchema.e156e3e.PublishedHookRunSchema": {
@@ -13796,7 +13875,7 @@
     },
     "/api/collector/publications": {
       "post": {
-        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks. The body is the transcript as its file stands, read whole, or, with `appended`, what a file that grew holds from a boundary on.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds the transcript as the call says. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. No call of this collector's is taken   until its bearer is the server's. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. No call is taken until the collector speaks a   version in the range. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, what in the call   contradicts itself or the record's rules for a transcript. The same   call is refused again; the collector's other transcripts are not. - 409, with the `code` `PUBLICATION_NOT_APPENDABLE`: an appended call   does not continue what Pilot holds of the transcript, the reasons in   `error`: Pilot does not hold it at the size and time and under the   collector's version the call builds on, holds no row at a place before   the boundary's, or holds from there on, or before, what the call does   not carry so. The collector publishes the transcript whole. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks. The body is the transcript as its file stands, read whole, or, with `appended`, what a file that grew holds from a boundary on.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds the transcript as the call says. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. No call of this collector's is taken   until its bearer is the server's. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. No call is taken until the collector speaks a   version in the range. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, what in the call   contradicts itself or the record's rules for a transcript. The same   call is refused again; the collector's other transcripts are not. - 409, with the `code` `PUBLICATION_NOT_APPENDABLE`: an appended call   does not continue what Pilot holds of the transcript, the reasons in   `error`: Pilot does not hold it at the size and time and under the   collector's version the call builds on, holds no row at a place before   the boundary's, or holds from there on, or before, what the call does   not carry so. The collector publishes the transcript whole. - 409, with the `code` `TRANSCRIPT_NOT_ADOPTABLE`: the call names a   `group` for a transcript a session of Pilot's ran, which no adopted   project adopts. The same call is refused again, and the call without   its `group` is taken. - 409, with the `code` `NO_SERVICE_USER`: the call names a `group` no   project holds yet, and the stage has no service user to make its   adopted project. The same call is taken once the stage has one. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
         "operationId": "post__api_collector_publications",
         "parameters": [],
         "requestBody": {
@@ -20813,7 +20892,7 @@
     },
     "/api/testing/scenarios": {
       "post": {
-        "description": "Returns:     201: The scenario's transcripts     400: The projects given are not the scenario's that a Turn of         Pilot's is on, or the stage is prd     404: No project has an id given",
+        "description": "Returns:     201: The scenario's transcripts, each with the project that adopted it     400: The projects given are not the scenario's that a Turn of         Pilot's is on, or the stage is prd     404: No project has an id given     409: The stage has no service user to make the group's adopted project",
         "operationId": "post__api_testing_scenarios",
         "parameters": [],
         "requestBody": {
@@ -20856,6 +20935,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
           }
         },
         "security": [
@@ -20863,7 +20952,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Load the invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and the Session and Turn of Pilot's that ran one of them, on the project given for the scenario's (F122.6). A second load replaces the first: the record holds the scenario once, as it was loaded last.",
+        "summary": "Load the invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and the Session and Turn of Pilot's that ran one of them, on the project given for the scenario's (F122.6). The conversation the scenario names a group for is adopted by the group's adopted project, made where the record has none (F152.8). A second load replaces the first: the record holds the scenario once, as it was loaded last.",
         "tags": [],
         "x-required-role": "editor"
       }

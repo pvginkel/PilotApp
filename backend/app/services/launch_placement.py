@@ -10,6 +10,12 @@ has the Session and no Turn; one started before every Turn of the
 conversation has neither. A Launch is placed once, and what it was placed
 under stands.
 
+A Transcript an adopted Project has adopted has no Launch run by a Session
+(DB 539): where a Session's `conversation_id` names one, its Launches stay
+unplaced for as long as it is adopted, and the server logs it. The other way
+round, a group named for a Transcript a Session ran, is the publication's to
+refuse.
+
 The two facts a placement reads arrive in either order, a publication's
 Launch and a Session's `conversation_id`, each in a transaction of its own.
 Both writers place under the conversation's turn (`conversation_turn`), the
@@ -20,12 +26,16 @@ A Launch a driver started under a loop session continues another Transcript,
 one no Session's `conversation_id` names, and is not placed here (DB 538).
 """
 
+import logging
+
 from sqlalchemy import Integer, cast, func, literal, select
 from sqlalchemy.orm import Session
 
 from app.models import Launch, Transcript, Turn
 from app.models import Session as AgentSession
 from app.services.advisory_turn import turn_key
+
+logger = logging.getLogger(__name__)
 
 PUBLICATION_LOCK = 247
 """The first key of a conversation's turn (`advisory_turn`); the second is
@@ -56,7 +66,8 @@ def conversation_named(db: Session, conversation: str) -> None:
 def place_launches(db: Session, conversation: str) -> None:
     """Place each Launch of the conversation's main thread that has no
     Session under the Session and the Turn that started it, where Pilot
-    holds them. The caller holds the conversation's turn."""
+    holds them; none while an adopted Project has adopted that thread, which
+    is logged. The caller holds the conversation's turn."""
     turns = db.execute(
         select(Turn.session_id, Turn.seq, Turn.started_at, Turn.ended_at)
         .join(AgentSession, AgentSession.id == Turn.session_id)
@@ -64,6 +75,19 @@ def place_launches(db: Session, conversation: str) -> None:
         .order_by(Turn.started_at, Turn.id)
     ).all()
     if not turns:
+        return
+    adopted_by = db.scalar(
+        select(Transcript.adopted_project_id).where(
+            Transcript.session_id == conversation, Transcript.agent_id.is_(None)
+        )
+    )
+    if adopted_by is not None:
+        logger.warning(
+            "Transcript %s is adopted by project %s, and a Session of Pilot's"
+            " names it: its launches stay off that Session",
+            conversation,
+            adopted_by,
+        )
         return
     unplaced = db.scalars(
         select(Launch)

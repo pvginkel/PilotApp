@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Project, ProjectMember, ProjectTransition, User
 from app.models.reference import ProjectState, TransitionKind
+from tests.support.adoption import FIRST_MENUS, adopted_project
 from tests.support.database import violated_constraint
 
 
@@ -49,14 +50,14 @@ class TestProject:
     def test_a_draft_has_no_slug(self, session: Session, project: Project) -> None:
         project.slug = "fix-the-client"
 
-        assert violated_constraint(session) == "ck_projects_draft_slug"
+        assert violated_constraint(session) == "ck_projects_unopened_slug"
 
     def test_an_opened_project_has_a_slug(
         self, session: Session, project: Project
     ) -> None:
         project.state_code = ProjectState.OPEN
 
-        assert violated_constraint(session) == "ck_projects_draft_slug"
+        assert violated_constraint(session) == "ck_projects_unopened_slug"
 
     def test_an_opened_project_keeps_its_slug(
         self, session: Session, project: Project
@@ -98,6 +99,84 @@ class TestProject:
         )
 
         assert violated_constraint(session) == "projects_slug_key"
+
+
+class TestAnAdoptedProject:
+    def test_it_is_archived_with_its_group_and_no_slug(
+        self, session: Session, service_user: User
+    ) -> None:
+        project = adopted_project(session, service_user)
+        session.refresh(project)
+
+        assert project.state_code == ProjectState.ADOPTED
+        assert (project.archived, project.adopted_group) == (True, FIRST_MENUS)
+        assert project.slug is None
+        assert session.scalars(
+            select(ProjectTransition.kind_code).where(
+                ProjectTransition.project_id == project.id
+            )
+        ).all() == [TransitionKind.ADOPTED]
+
+    def test_it_has_no_slug(self, session: Session, service_user: User) -> None:
+        """DB 177."""
+        project = adopted_project(session, service_user)
+        project.slug = "the-first-menus"
+
+        assert violated_constraint(session) == "ck_projects_unopened_slug"
+
+    def test_it_has_a_group(self, session: Session, service_user: User) -> None:
+        """DB 582."""
+        project = adopted_project(session, service_user)
+        project.adopted_group = None
+
+        assert violated_constraint(session) == "ck_projects_adopted_group"
+
+    @pytest.mark.parametrize(
+        "state", [ProjectState.DRAFT, ProjectState.OPEN, ProjectState.FINISHED]
+    )
+    def test_no_other_project_has_a_group(
+        self, session: Session, person: User, state: ProjectState
+    ) -> None:
+        """DB 582."""
+        session.add(
+            Project(
+                created_by_user_id=person.id,
+                state_code=state,
+                slug=None if state is ProjectState.DRAFT else "fix-the-client",
+                adopted_group=FIRST_MENUS,
+            )
+        )
+
+        assert violated_constraint(session) == "ck_projects_adopted_group"
+
+    def test_it_is_always_archived(self, session: Session, service_user: User) -> None:
+        """DB 170."""
+        project = adopted_project(session, service_user)
+        project.archived = False
+
+        assert violated_constraint(session) == "ck_projects_adopted_archived"
+
+    def test_no_two_hold_one_group(self, session: Session, service_user: User) -> None:
+        """DB 582."""
+        adopted_project(session, service_user)
+        session.add(
+            Project(
+                state_code=ProjectState.ADOPTED,
+                archived=True,
+                adopted_group=FIRST_MENUS,
+                created_by_user_id=service_user.id,
+            )
+        )
+
+        assert violated_constraint(session) == "projects_adopted_group_key"
+
+    def test_two_groups_have_a_project_each(
+        self, session: Session, service_user: User
+    ) -> None:
+        first = adopted_project(session, service_user)
+        second = adopted_project(session, service_user, "bike-log-first-rides")
+
+        assert first.id != second.id
 
 
 class TestProjectMember:

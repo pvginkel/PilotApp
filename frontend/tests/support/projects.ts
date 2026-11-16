@@ -53,6 +53,7 @@ type RecordPage = components['schemas']['SessionRecordPageSchema.01118bb'];
 type Block = components['schemas']['TimelineSchema.1fdd8ae.BlockSchema'];
 type BlockPart = components['schemas']['TimelineSchema.1fdd8ae.BlockPartSchema'];
 type ProjectDocument = components['schemas']['ProjectDocumentSchema.1fdd8ae'];
+type Scenario = components['schemas']['InventedScenarioSchema.6d6b324'];
 
 /** The slug the testing route gives an open project it makes: `project-` and its id's first 12 hex digits. */
 export function slugOf(projectId: string): string {
@@ -391,6 +392,20 @@ export class Projects {
     const response = await this.page.request.get(`${this.backendUrl}/api/projects/${id}`);
     expect(response.status(), await response.text()).toBe(200);
     return (await response.json()) as ProjectHead;
+  }
+
+  /**
+   * The invented scenario loaded (F122.6), `recipeBox` the project that stands for its
+   * `recipe-box`; answers its transcripts in the scenario's order, each with the adopted project
+   * that adopted it. The stage holds a service user (`people.serviceUser()`), which the adopted
+   * project of the scenario's group is made by.
+   */
+  async loadScenario(recipeBox: string): Promise<Scenario['transcripts']> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/scenarios`, {
+      data: { projects: { 'recipe-box': recipeBox } },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return ((await response.json()) as Scenario).transcripts;
   }
 
   /** A transition by the signed-in person. */

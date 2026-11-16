@@ -248,7 +248,7 @@ class TestAMainThread:
             prompt["received_at"] for prompt in gears["launches"][0]["prompts"]
         ] == [_at(300), _at(350), _at(390), _at(960)]
 
-    def test_a_session_on_no_project_names_where_it_ran(self) -> None:
+    def test_a_session_a_person_ran_names_where_it_ran(self) -> None:
         gears = _built()["gears"]
 
         assert (gears["environment"], gears["repository"]) == (
@@ -257,6 +257,20 @@ class TestAMainThread:
         )
         assert gears["working_directory"] == "/work/BikeLog"
         assert "agent_id" not in gears
+
+    def test_a_session_of_a_group_names_it_on_its_main_thread(self) -> None:
+        built = _built()
+
+        assert built["gears"]["group"] == {
+            "key": "bike-log-first-rides",
+            "name": "Bike log: the first rides",
+            "summary": (
+                "The gear tables and ride notes Ada kept by hand, before Pilot kept"
+                " the log."
+            ),
+        }
+        assert "group" not in built["halving"]
+        assert "group" not in built["counting"]
 
     def test_prompts_are_counted_through_the_launches(self) -> None:
         """A thread a process resumed: its second Launch's Prompt is the

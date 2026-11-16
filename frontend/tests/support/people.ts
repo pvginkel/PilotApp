@@ -55,6 +55,18 @@ export class People {
     await this.fetches.landed();
   }
 
+  /**
+   * A service user on the record, as `create-service-user` makes its row: the stage then has one,
+   * which an adopted project is made by.
+   */
+  async serviceUser(): Promise<void> {
+    const handle = makeUnique('fleet', 8);
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/service-users`, {
+      data: { handle, name: 'Example fleet', subject: `subject-${handle}` },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+  }
+
   /** A fresh person who has chosen their handle, as the record holds them. */
   async signIn({ name = 'Test Person', handle = makeUnique('p', 8), subject }: SignIn = {}): Promise<Self> {
     await this.firstSignIn({ name, subject });

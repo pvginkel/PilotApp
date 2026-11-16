@@ -1,5 +1,6 @@
 """Publications of an invented transcript, as a collector sends one: each
-helper gives a part of the call, and `whole` the call, validated, `appended`
+helper gives a part of the call, `group` the group its labels name, and
+`whole` the call, validated, `appended`
 one of the file once it grew; `collector_headers` the headers it is sent
 under."""
 
@@ -8,6 +9,7 @@ from typing import Any
 
 from app.schemas.publication import PublicationSchema
 from app.services.publication_service import COLLECTOR_PROTOCOL_MAX
+from tests.support.adoption import FIRST_MENUS
 from tests.support.transcripts import CAMP, OPUS, STARTED, SUB_AGENT
 
 COLLECTOR_TOKEN = "an-invented-collector-token"
@@ -106,6 +108,16 @@ def call(place: int, **overrides: Any) -> dict[str, Any]:
             "cache_read": 48_112,
             "output": 2_870,
         },
+    }
+    return values | overrides
+
+
+def group(**overrides: Any) -> dict[str, Any]:
+    """The group a main thread's labels name: work done before Pilot."""
+    values: dict[str, Any] = {
+        "key": FIRST_MENUS,
+        "name": "Recipe box: the first menus",
+        "summary": "The menus Ada wrote by hand, before the recipe box.",
     }
     return values | overrides
 

@@ -3,9 +3,10 @@ and `ben`, the projects `recipe-box` and `bike-log`.
 
 Pilot is sent to halve the stew in the recipe box, an errand's first leg. Its
 session reads the recipe, has a sub-agent count the servings, meets an API
-error and a failing command, and carries on past a compaction. Ada, by hand
-and on no project, looks at the bike log's gear table, takes back her second
-question and comes back after the cache has lapsed.
+error and a failing command, and carries on past a compaction. Ada, by hand,
+looks at the bike log's gear table, takes back her second question and comes
+back after the cache has lapsed: one of the first rides' conversations, a
+group of work done before Pilot ran any.
 
 The model names are the public ones. Everything else is invented.
 """
@@ -14,6 +15,7 @@ from pilot_scenario.script import (
     Call,
     Carried,
     Compaction,
+    Group,
     HookRun,
     Launch,
     Occurrence,
@@ -218,6 +220,12 @@ HALVING = Session(
     sub_agents=(COUNTING,),
 )
 
+FIRST_RIDES = Group(
+    key="bike-log-first-rides",
+    name="Bike log: the first rides",
+    summary="The gear tables and ride notes Ada kept by hand, before Pilot kept the log.",
+)
+
 GEARS = Session(
     name="gears",
     directory="/work/BikeLog",
@@ -225,6 +233,7 @@ GEARS = Session(
     repository="BikeLog",
     size=18_260,
     person="ada",
+    group=FIRST_RIDES,
     launches=(
         Launch(
             at=300,

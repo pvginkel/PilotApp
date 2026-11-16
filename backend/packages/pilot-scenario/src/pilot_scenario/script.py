@@ -143,11 +143,22 @@ class Turn:
 
 
 @dataclass(frozen=True)
+class Group:
+    """A group of work done before Pilot ran any: its `key`, which never
+    changes, and its name and summary as they now stand."""
+
+    key: str
+    name: str
+    summary: str
+
+
+@dataclass(frozen=True)
 class Session:
     """A conversation with Claude Code in one directory, its main thread and
     its sub-agents'. One Pilot ran has its `turn`; one a person ran by hand
-    has that `person` and is on no project. `unit` is the unit of work it
-    ran; `size` its main thread's file's, in bytes."""
+    has that `person`, is on no project of Pilot's running, and may belong to
+    a `group`. `unit` is the unit of work it ran; `size` its main thread's
+    file's, in bytes."""
 
     name: str
     directory: str
@@ -158,6 +169,7 @@ class Session:
     turn: Turn | None = None
     person: str | None = None
     unit: str | None = None
+    group: Group | None = None
     sub_agents: tuple[SubAgent, ...] = ()
 
 

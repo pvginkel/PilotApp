@@ -2,7 +2,8 @@
  * The project's menu, at the end of its head (F2.4): Join or Leave, each at once with its toast
  * (F127); Finish or Reopen, and Archive, each asking first in a dialog (F5.1, F6, F128.1), Finish's
  * and Archive's naming the running sessions they stop; on an archived project only Bring back,
- * which asks too (F128.3, D012). What follows a write, the toast or the dialog's closing, comes
+ * which asks too (F128.3, D012). An adopted project, which is never brought back and takes no
+ * member, has no menu (F152.8). What follows a write, the toast or the dialog's closing, comes
  * once the list and the head show the new standing.
  */
 
@@ -134,6 +135,7 @@ export function ProjectMenu({ project }: { project: Project }) {
     });
   };
 
+  if (project.state === 'adopted') return null;
   const asked = asking && question(asking, project);
   return (
     <>

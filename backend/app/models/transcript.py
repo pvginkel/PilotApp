@@ -74,9 +74,13 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     main thread is published. `spawned_by_tool_use_id` is the `tool_use_id`
     its record names its spawning call by, and `spawned_by_id` the Tool Call
     of that name once a thread of its conversation holds it (DB decision
-    79.16). That a thread's main has no `agent_id` (DB 534) and that its
-    spawning call lies under that main (DB 535) are the publication's to
-    keep: no key reaches them.
+    79.16). `adopted_project_id` is a label of a main thread's: the adopted
+    Project of the group its last publication named for it, none where it
+    named none. That a thread's main has no `agent_id` (DB 534), that its
+    spawning call lies under that main (DB 535), and that an adopted
+    Transcript's Project is `adopted` and no Launch of it is run by a Session
+    (DB 539) are the publication's and the placement's to keep: no key
+    reaches them.
     """
 
     __tablename__ = "transcripts"
@@ -112,6 +116,11 @@ class Transcript(db.Model):  # type: ignore[name-defined]
             "replayed_size >= 0 AND replayed_size <= file_size",
             name="ck_transcripts_replayed_size",
         ),
+        # The group is named on a main thread (DB §2.6).
+        CheckConstraint(
+            "agent_id IS NULL OR adopted_project_id IS NULL",
+            name="ck_transcripts_adopted_project",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -134,6 +143,9 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     working_directory: Mapped[str] = mapped_column(Text)
     repository_id: Mapped[int | None] = mapped_column(ForeignKey("repositories.id"))
     environment_id: Mapped[str | None] = mapped_column(ForeignKey("environments.id"))
+    adopted_project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("projects.id")
+    )
     file_size: Mapped[int] = mapped_column(BigInteger)
     file_modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

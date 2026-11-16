@@ -75,6 +75,7 @@ from app.services.controller_outage import ControllerOutage
 from app.services.handing import sides
 from app.services.job_service import SETUP_TITLE
 from app.services.project_service import (
+    ADOPTED_REFUSAL,
     ARCHIVED_REFUSAL,
     NO_SLUG_REFUSAL,
     NOTHING_DRAFTED_REFUSAL,
@@ -92,6 +93,7 @@ from app.services.supervisor import LoopHandle
 from app.services.timeline_service import Badge
 from app.services.working_on import Reading
 from app.utils import after_commit as after_commit_module
+from tests.support.adoption import FIRST_MENUS
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
 from tests.support.working_on import Camp
@@ -119,6 +121,15 @@ def _make(container: ServiceContainer, **spec: Any) -> Project:
     return container.test_data_service().project(
         InventedProjectCreateSchema.model_validate(spec)
     )
+
+
+def _adopted(container: ServiceContainer) -> Project:
+    """The adopted Project of an invented group, as a publication that first
+    names the group makes it; a `service_user` is its creator."""
+    project_id = container.adoption_service().adopt(
+        FIRST_MENUS, "The first menus", "The menus Ada wrote by hand."
+    )
+    return container.db_session().get_one(Project, project_id)
 
 
 def _ben(container: ServiceContainer) -> User:
@@ -469,6 +480,27 @@ class TestTabs:
         assert [tab.project.id for tab in tabs] == [draft.id, done.id]
         assert tabs[1].finished_at is not None
 
+    def test_an_adopted_project_is_listed_with_the_archived_ones(
+        self, container: ServiceContainer, service_user: User
+    ) -> None:
+        """F128.2."""
+        _make(container, name="Kept")
+        adopted = _adopted(container)
+
+        (tab,) = container.project_service().tabs(ADA, archived=True)
+
+        assert (tab.project.id, tab.project.state_code, tab.project.name) == (
+            adopted.id,
+            ProjectState.ADOPTED,
+            "The first menus",
+        )
+        assert (tab.status, tab.member, tab.finished_at) == (None, False, None)
+        assert tab.badge == Badge(0, False)
+        assert [
+            listed.project.name
+            for listed in container.project_service().tabs(ADA, archived=False)
+        ] == ["Kept"]
+
     def test_a_tab_says_whether_the_caller_is_a_member(
         self, container: ServiceContainer, session: DbSession
     ) -> None:
@@ -710,6 +742,19 @@ class TestHead:
             False,
             True,
         )
+
+    def test_an_adopted_projects_head_is_read(
+        self, container: ServiceContainer, person: User, service_user: User
+    ) -> None:
+        adopted = _adopted(container)
+
+        head = container.project_service().head(ADA, adopted.id)
+
+        assert (adopted.state_code, adopted.archived) == (ProjectState.ADOPTED, True)
+        assert (head.status, head.member, head.members) == (None, False, ())
+        assert (head.steps, head.running_work, head.open_items) == ((), (), 0)
+        assert head.create_refusal == ADOPTED_REFUSAL
+        assert head.url.endswith(f"/projects/draft-{adopted.number}")
 
     @pytest.mark.parametrize(
         ("spec", "status"),
@@ -2973,6 +3018,59 @@ class TestTransition:
         assert (_transitions(session, made), _standing(made)) == before
         assert made.paused is spec.get("paused", False)
 
+    @pytest.mark.parametrize("kind", list(TransitionKind))
+    def test_no_transition_is_taken_on_an_adopted_project(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        service_user: User,
+        kind: TransitionKind,
+    ) -> None:
+        """DB 170: nothing follows the one it is born with, Bring back
+        included."""
+        adopted = _adopted(container)
+        before = (_transitions(session, adopted), _standing(adopted))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().transition(ADA, adopted.id, kind)
+
+        assert refused.value.cause == ADOPTED_REFUSAL
+        assert (_transitions(session, adopted), _standing(adopted)) == before
+        assert [kind for kind, _, _ in before[0]] == [TransitionKind.ADOPTED]
+
+    def test_bring_back_of_an_adopted_project_says_why(
+        self, container: ServiceContainer, person: User, service_user: User
+    ) -> None:
+        adopted = _adopted(container)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().transition(
+                ADA, adopted.id, TransitionKind.BROUGHT_BACK
+            )
+
+        assert refused.value.message == (
+            "Cannot bring back The first menus because it is adopted, and an adopted"
+            " project stays as it was born"
+        )
+
+    @pytest.mark.parametrize(
+        "spec", [{"state": "draft"}, {"state": "open"}, {"archived": True}]
+    )
+    def test_no_project_is_adopted_after_its_birth(
+        self, container: ServiceContainer, session: DbSession, spec: dict[str, Any]
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        before = (_transitions(session, made), _standing(made))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().transition(ADA, made.id, TransitionKind.ADOPTED)
+
+        assert refused.value.message == (
+            "Cannot adopt Camp because a project is adopted at its birth alone"
+        )
+        assert (_transitions(session, made), _standing(made)) == before
+
     @pytest.mark.parametrize(
         ("name", "kind", "message"),
         [
@@ -3559,6 +3657,25 @@ class TestJoin:
 
         assert refused.value.cause == ARCHIVED_REFUSAL
         assert _memberships(session, made, person) == []
+
+    def test_an_adopted_project_takes_no_member(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        service_user: User,
+    ) -> None:
+        """DB 584."""
+        adopted = _adopted(container)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().join(ADA, adopted.id)
+
+        assert refused.value.message == (
+            "Cannot join The first menus because it is adopted, and an adopted"
+            " project stays as it was born"
+        )
+        assert _memberships(session, adopted, person) == []
 
     def test_a_caller_without_a_handle_is_refused(
         self, container: ServiceContainer, session: DbSession
