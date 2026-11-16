@@ -14,7 +14,9 @@ to archive, which Pilot's Finish and archive leaves out ([`docs/projects.md`](do
 that asks one thing is answered in place, chosen and then sent, and a document inline or from its
 card, with Undo, an open item folded for every member, an urgent banner, the auto pilot mark, a badge per tab and a URL per item, an item
 Pilot is still working on one line until it is done, read-only under a gold strip with Stop and
-take over, and which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its
+take over, Pilot's note inside an ask it left to a person, with a button that takes what it
+suggests or starts the work it offers, and its alert where another ask must come before a Send, and
+which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its
 work items, each a
 session Pilot runs, live on the timeline with its one current line, the steps its run publishes on
 a donut, a repeat round's why under its step, Stop, Resume and Close, its session log, which shows
@@ -25,7 +27,8 @@ background jobs, each shown on the item it follows from, one at a time per proje
 the brain's, fresh but for a wait's run: the setup, the pre-ruling pass after every worker's turn,
 which reads the stage session's debrief where the run gave one and may ask the worker's writer, or claim an action or research a fact for a work item of
 Pilot's, the blocks held through its run, the plan's next
-step after every item of Pilot's a person closes in the app, the chat carrying out a ruling it
+step after every item of Pilot's a person closes in the app, the work Pilot offered on an action
+started once a member takes the offer, the chat carrying out a ruling it
 records itself, and a wait's run, with Retry on one that failed
 ([`docs/work.md`](docs/work.md)); each
 project's status as one icon on its tab, which pauses it, and the gold bar, a badge in the top bar

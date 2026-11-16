@@ -85,7 +85,9 @@ that are Pilot's before its writes (`sides`) and compares them once it has writt
 a block that was Pilot's and is the person's to answer now is handed at the move's instant, the
 latest move kept; one that is Pilot's after the move has no `handed_at`, so one Pilot answers has
 none; and any other keeps what it has, one the person's from its put none, one answered or of a
-closed item the instant it was handed at. Nothing reads it to decide anything.
+closed item the instant it was handed at. Nothing reads it to decide anything: the timeline's read
+derives from it alone whether Pilot's note on the block, or on its document, came after the ask came
+to the person, `late` ([`timeline.md`](timeline.md#reading-it)).
 
 The moves compared are those to the person: a work item's or a job's turn end, done, failed or
 interrupted, a pass's among them; a start that failed; a Stop, a
@@ -154,12 +156,15 @@ settle, and none places a second; none is placed in a finished or an archived pr
 pre-ruling pass, PilotProjects' `pre-rule` skill, may answer blocks as Pilot, defer them to a plan
 task, claim an action a work item of Pilot's does (below), leave a block open for a work item of
 Pilot's that checks a fact its answer rests on (below), ask the writer about a block it cannot read
-(below), and give a document it settled or deferred whole Pilot's own Done, cause `settled`,
+(below), put what only Pilot knows of a block it leaves to a person in its note on the block, and
+an alert on a document whose Send must wait on another ask (`note` and `alert`,
+[`mcp.md`](mcp.md)), by exception alone, and give a document it settled or deferred whole Pilot's own Done, cause `settled`,
 which closes it as a person's Done does, its write-back and its continuation included: an item of
 kind `document`, or a registered document of one block, which has its block's kind, once that block
 is answered, deferred, or claimed and done ([`engine.md`](engine.md)). Where the run's session gave
 its debrief, the brief carries it whole after the documents (D219, [`work.md`](work.md#its-debrief)),
-and the pass leaves it, or makes a notice, a card or a fieldnote of it; the debrief is no document,
+and the pass leaves it, puts what the operator must know of it in a note on the run's document
+still open, or a notice where none is, or makes a card or a fieldnote of it; the debrief is no document,
 with no block to answer and nothing to mark.
 
 **A claimed action** (D085). An action Pilot may run under the grants, the pass claims: it adds the
@@ -240,12 +245,15 @@ to the first of its open documents on the timeline that is the person's with no 
 the first of its open documents (`working_on.py`'s `_asked_in`): so where another run's work holds
 a block of an earlier one, or Pilot works on it, the strip and the take-over's refusal below name
 one the person can answer. Its Cancel is still refused while any open document of the run is
-Pilot's or has a block held (below). A held block takes no answer, Done or paste-back
-from the app's controls (above), and in a document that is the person's it is its section's line
+Pilot's or has a block held (below). A held block takes no answer, Done, paste-back or offer's
+taking from the app's controls (above), and in a document that is the person's it is its section's line
 ([`timeline.md`](timeline.md)). A claimed action the run no longer holds, its `done` unwritten, is
 the person's again, its claim standing and its head saying that Pilot's work left it undone: where
 the run was done with it, the job after that turn retries it in a new work item or leaves it to the
-person with a notice (PilotProjects' `plan` skill). A researched block the run no longer holds is
+person with Pilot's note on the action saying why, written while the run still holds the block, since
+`note` refuses a held block but from the job after a turn of the run that holds it (D239,
+[`mcp.md`](mcp.md)), so the person reads the note inside the action once that job ends
+(PilotProjects' `plan` skill). A researched block the run no longer holds is
 open as any block. The job's brief ends the line of a block handed back so `handed back to the
 operator: leave it to them`, and the continuation's message names them
 ([below](#the-continuation)).

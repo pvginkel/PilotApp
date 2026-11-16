@@ -209,7 +209,7 @@ the store repo's root, read-only; `sandboxWritableDirs` its project's folder,
 `/work/Projects/<folder>`, the one folder under `/work` it writes; and in its `env`
 `PILOT_PROJECT=<that folder>`, which the brain's `pilot.py` reads, and `PILOT_SESSION=<its Session's
 id>`, which the store's hooks send `pilot-sync` as the write lock's holder ([`sync.md`](sync.md)),
-then, for a job of trigger `setup`, `worker_turn_ended` or `item_done`,
+then, for a job of trigger `setup`, `worker_turn_ended`, `item_done` or `offer_taken`,
 `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` ([`work.md`](work.md)).
 While its Project is finished it is boxed with no folder writable and no surface, so it is handed no
 server, its `PILOT_PROJECT` and `PILOT_SESSION` kept

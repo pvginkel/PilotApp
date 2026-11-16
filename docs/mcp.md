@@ -7,7 +7,7 @@ copied into the record; `set_progress` and `set_progress_step`, the steps its ru
 shown on its tile; and `register_debrief`, its run's debrief, shown behind the done work item's
 Debrief and in its subject's debrief's notice. The brain's sessions, a project's chat, a conversation and the server's jobs, get
 `pilot-store`, the one door to the record beyond the project's folder: `add_item`, `attach_file`,
-`answer`, `mark`, `cancel_ask`, `stop_work`, `finish` and `ask_writer`. Each tool is one REST call to the backend
+`answer`, `mark`, `cancel_ask`, `stop_work`, `finish`, `ask_writer`, `note` and `alert`. Each tool is one REST call to the backend
 under the session's bearer, which names the session's project, environment and work item, so the
 tools take none of them, and each call that changed the record is its effect, a line in the
 session's records where the call ran, but for the steps and the debrief, which write none. What becomes of a registered document, its read at the run's
@@ -406,6 +406,41 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   changes no ask, so it writes no effect: the asked block's head says that Pilot asked its writer
   ([`timeline.md`](timeline.md)), `blocks` the local ids it is asked about in the document's order,
   and each question is counted, `pilot_pass_questions_total{project}`.
+- **`note(item, block?, text?, suggested_answer?, suggested_note?, offer?)`**, `POST …/notes`,
+  answers `200` `{outcome}`, `written`, `replaced` or `withdrawn`: Pilot's note on an ask a person
+  answers, the block `<item id>/<local id>` of the open prose item `item`, or without `block` on the
+  document as a whole, recorded as a Pilot Note of the session's Turn in flight
+  (`backend/app/models/pilot_note.py`): what only Pilot knows that bears on the answer, its
+  `text`, Markdown; the answer it would give, `suggested_answer`, an option's label, `Agree`, `Yes`,
+  `No` or free words, and `suggested_note` beside it, or for an action's Done; and `offer`, work it
+  would do about an open action on the person's word. A note on the document as a whole holds `text`
+  alone. It stands beside the document, never in its text, so the pass still rewrites nothing of the
+  writer's (D053), and nothing of it goes back to the writer: the page draws it inside the block ([`timeline.md`](timeline.md#pilots-note-on-an-ask))
+  and the tree carries it ([`projection.md`](projection.md)). A later note in the same place
+  replaces the one standing there, which stays on the record, unseen; a call with none of the four
+  takes the standing one off, and is refused where none stands ("no note of Pilot's stands on …").
+  A `suggested_answer` that is not, compared exactly, the answer the block's recommendation would
+  record makes the note differ, which takes that recommendation away from the document's Done
+  (`differs`, `backend/app/engine/pilot_notes.py`; [`timeline.md`](timeline.md#documents-and-reviews)). Refused with the reason,
+  nothing written: an item with no document or no block ("item <id> has no block"), a done one, a
+  block not of `item`, a block Pilot answered, a claim counting once its action is done, so that
+  a person's answer leaves the block open to a note ("block A1 is answered by Pilot"), a block a run
+  holds ([`round-trip.md`](round-trip.md#held-through-the-run)), "block A1 is held by another run of
+  Pilot's", but from the job after the turn of a work item of that run, a Retry of it included,
+  which notes a claimed action that run left undone (D239), a `suggested_answer` on an action with no
+  options, an `offer` on any block but an action without its `done`, and anything but `text` on the
+  document as a whole. It changes no ask, waits on no one and holds nothing, so it writes no effect.
+- **`alert(item, text?, awaits?)`**, `POST …/alerts`, answers `200` `{outcome}` as `note` does:
+  Pilot's alert on the open prose item `item` whose Send starts work that another open ask must come
+  before, `awaits` that ask, `<item id>/<local id>`, a block of another open item of the project,
+  and `text` what to answer first and what the Send starts, the two given together or neither,
+  recorded as a Send Alert of the Turn in flight. A later one replaces the one standing, kept on the
+  record; a call with neither takes it off, refused where none stands. It stops no Send, and shows
+  while its item and the item of the ask it awaits are both open
+  ([`timeline.md`](timeline.md#pilots-note-on-an-ask)). Refused with the reason: `text` or `awaits`
+  alone, an item with no document, a work item, a wait or a debrief's notice among them ("… is a
+  work item, no prose item"), a done item, and an `awaits` of the item itself, of a done item, or
+  of an item not of the project (`404`). It writes no effect either.
 
 ## Effects
 
@@ -566,7 +601,7 @@ services that inject; the suite's default settings set no URL, so other creates 
 `TestAScriptsCall` (`tests/pilot_mcp/test_server.py`) pins a script's lone `tools/call` as the
 transport admits it. The routes are `tests/api/test_pilot_work.py`, whose
 `test_the_surface_is_five_routes_outside_the_api` holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
-`tests/api/test_pilot_store.py`, whose `test_the_surface_is_eight_routes_outside_the_api` holds
+`tests/api/test_pilot_store.py`, whose `test_the_surface_is_ten_routes_outside_the_api` holds
 its blueprint's rules, and `tests/services/test_pilot_store_service.py`, each tool's served schema
 `STORE_SURFACE` in `tests/pilot_mcp/test_server.py`, the scope
 `tests/services/test_session_scope.py`, the effects `tests/services/test_effect_service.py`; the
@@ -574,6 +609,7 @@ copies `tests/engine/test_attachments.py`. The fake controller serves the file r
 ([`controller.md`](controller.md)), and the record's testing routes `POST
 /api/testing/items/<id>/registrations`, `…/worker-attachments`, `…/progress` and `…/debrief`
 register a document, attach a file, replace the list of steps and give the debrief as the worker's
-tools do, and `…/writer-questions` asks a document's writer as the pass does
+tools do, `…/writer-questions` asks a document's writer as the pass does, and `…/notes` and
+`…/alerts` write Pilot's note and alert as `note` and `alert` do
 ([`projects.md`](projects.md)). `frontend/tests/infrastructure/nginx.spec.ts` pins that the UI's
 nginx forwards no path under `/tools/`, whatever its extension.

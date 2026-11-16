@@ -138,7 +138,8 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   ([`work.md`](work.md)): `project_id`, `session_kind_code` (`work` or `job`, never a Chat's),
   `trigger_code` (a job's Work Trigger; a worker's run has none) and `trigger_item_id` (an item of
   the same project, never the work item itself; a continuation's, the registered document whose
-  close released it), `repo`, the repository a worker's run is placed by (none for a job, nor for
+  close released it), `trigger_note_id`, the Pilot Note whose offer's taking placed the job, set
+  exactly for trigger `offer_taken`, which then names no trigger item (`ck_work_trigger_note`), `repo`, the repository a worker's run is placed by (none for a job, nor for
   a work item placed in an environment by name, whose Session is there from its birth),
   `autopilot`, the switch's setting at its brief, and `retried_by_id`, the job a person's Retry of
   this failed or stopped one placed: only a job is retried, never by itself, by a job of the same
@@ -236,6 +237,17 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 - `writer_questions`: the pre-ruling pass's question to a registered document's writer about one of
   its blocks: the pass's Turn, the Block, the `question` verbatim and `asked_at`; one per block
   (`uq_writer_questions_block_id`).
+- `pilot_notes`: Pilot's note on an ask a person answers, written through `note`
+  ([`mcp.md`](mcp.md)): its item, its Block, none for the item as a whole, the Turn that wrote it,
+  `text`, `suggested_answer`, `suggested_note` and `offer`, one or more of the four and on the item
+  as a whole `text` alone (`ck_pilot_notes_holds`, `ck_pilot_notes_on_the_item`), `created_at`,
+  `withdrawn_at`, and `offer_taken_at` and `offer_taken_by_user_id`, set together once a member
+  takes its offer, on a note with one (`ck_pilot_notes_offer_taken`). A place's standing note is
+  its latest, the highest `id`, unless withdrawn; a replaced one is kept. That its Block is of its
+  item is the server's check, which no key holds.
+- `send_alerts`: Pilot's alert on a prose item for what its Send starts, written through `alert`:
+  its item, `awaits_block_id`, a Block of another item of the project, the Turn, `text`,
+  `created_at` and `withdrawn_at`; an item's standing alert is its latest unless withdrawn.
 - `session_records`: every session's list, chat and work alike, in one table, numbered by `seq`
   from 1 within its session without a gap, which its writer holds under the session's row lock:
   `kind_code` (`claude`, `result`, `send`, `server`), the `payload`, its turn (`turn_id`, a turn of
@@ -361,9 +373,9 @@ Calls, Events and Context Parts; nothing follows a Transcript's, which no public
   while a page of theirs counts, derived and never stored.
 - `item_sightings`: a member's having been shown an item that waits on them, keyed by the
   membership and the item: named or counted in a push some browser of theirs took, or waiting while
-  a page of theirs showed the project. Written and deleted by the reconcile alone, of the items of
-  the membership's project; deleted once the item no longer waits on the member, and at Archive
-  and Leave. It keeps no time: when a member was first shown an item is stored nowhere, and when an
+  a page of theirs showed the project. Written by the reconcile alone, of the items of the
+  membership's project; deleted by it once the item no longer waits on the member, and at Archive
+  and Leave, and by the publish that turns the item urgent ([`notifications.md`](notifications.md)). It keeps no time: when a member was first shown an item is stored nowhere, and when an
   ask became a person's is its Block's `handed_at` (D231).
 
 ## The reference values

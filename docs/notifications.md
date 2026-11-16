@@ -214,8 +214,14 @@ their turn:
 Whatever is pushed, every compare deletes the sighting of an item that no longer waits on them, so
 that an item that comes to wait again alerts, as one they were never shown does (D157). So the
 silent update for an item that stopped waiting while they were online elsewhere is not sent at
-their going offline: its sighting is gone by then. A push some browser of theirs took shows them
-every item it named or counted, a sighting written for each. An alert that none took writes no
+their going offline: its sighting is gone by then. An item turned urgent while it waits alerts
+again too (D157): a publish that turns a prose item's `urgent` from false to true deletes every
+member's sighting of it (`DocumentService.publish`, `backend/app/engine/documents.py`), so that a
+document Pilot marks urgent with a late note ([`timeline.md`](timeline.md#pilots-note-on-an-ask))
+is not urgent in silence; an item born urgent, and a publish that keeps it urgent, drop none. A push
+some browser of theirs took shows them every item it named or counted, a sighting written for each
+the compare found unshown, so that one a publish turned urgent while the push was out stays
+unsighted and the next reconcile alerts for it. An alert that none took writes no
 sighting, so that the member's next reconcile pushes anew; a silent update that none took has still
 deleted the sightings of what stopped, so their next reconcile pushes nothing. A closed membership's sightings are deleted at every compare, so that a
 rejoin alerts anew. A change of the plan alone, or a retitle of an item, pushes nothing: what waits

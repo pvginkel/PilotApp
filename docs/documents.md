@@ -157,7 +157,11 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
   timeline draws it ([`work.md`](work.md)), the item's Undo while `done.undo` holds, and a copy
   button, "Copy the document’s text", which copies the read's `text` and stands where it is not
   null (`CopyButton`, [`ui.md`](ui.md)), before Discuss. On a phone a job queued, running, failed or stopped takes a row under the head's top line.
-- **The body**: the summary as its lead, the attachments, then Pilot's questions to the writer
+  Its last line, across its width under the segment bar, is Pilot's alert for what the document's
+  Send starts, while the document is the person's, closed on a phone each time the document opens
+  ([`timeline.md`](timeline.md#pilots-note-on-an-ask)); on a phone under the job's row.
+- **The body**: the summary as its lead, Pilot's note on the document as a whole under it
+  ([`timeline.md`](timeline.md#pilots-note-on-an-ask)), the attachments, then Pilot's questions to the writer
   (below), then the text as an inline document draws it, every block answered in place, every
   settled section collapsed and every held block its line, a claimed action reading "Pilot does it"
   and its work item ([`timeline.md`](timeline.md)), an open archive question its Archive, Keep

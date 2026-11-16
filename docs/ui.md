@@ -443,14 +443,17 @@ is on the server. A component reads it with `useBrowserState()` and changes it w
 another tab of the browser keeps for the rest.
 
 The unsent text of every answer's field and of the chat's composer is a second entry,
-`pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other` and `/no`, and a one-ask
+`pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other`, `/no` and `/note`, a one-ask
+decision's or question's note, which its Send carries, and a one-ask
 item's choice before its Send, `<item>/<block>/choice`, `{answer, typing}`, the option chosen and
 whether its field is open, whose words are then the choice ([`timeline.md`](timeline.md)), a draft's ask's under `<project>/project.md/<block>` the same way
 ([`documents.md`](documents.md)), and `chat/<project>` ([`chats.md`](chats.md)).
 `useUnsentText(field, initial)` (`src/hooks/use-unsent-text.ts`) reads it when the field opens, so a
 field opened again, after a reload or in another tab, starts from what was left in it, and writes it
 on every keystroke over what the storage holds; every field showing under one key at once, as a
-block drawn on the timeline and in its tab, shows what is typed in any of them. The choices are read
+block drawn on the timeline and in its tab, shows what is typed in any of them.
+`putUnsentText(field, text)` puts words in a field from outside, in every one showing and in the
+browser, as typing them there would, as taking Pilot's note does ([`timeline.md`](timeline.md#pilots-note-on-an-ask)). The choices are read
 once at the page's load (`useChoice`), so another tab's choice shows after a reload, and a done
 item's is dropped. An emptied field's entry is deleted, and so is a
 sent one's once the record holds it; a refused send keeps it. Words that leave a field on their

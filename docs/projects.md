@@ -644,6 +644,14 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   they are asked, nothing started. It answers `201` `{blocks}`, the blocks its writer is asked
   about; an unknown item or block is a `404`, and an item that is no registered document or is
   done, or a block answered or asked about already, a `409`.
+- `POST /api/testing/items/<id>/notes` `{block?, text?, suggested_answer?, suggested_note?,
+  offer?}` puts Pilot's note on a block of the open prose item `<id>`, by its local id, or without
+  `block` on the item as a whole, as `note` does ([`mcp.md`](mcp.md)), in one turn of a job's
+  session of its project placed for it and ended once it is written, nothing started; a body with
+  none of the four takes the standing note off. `POST /api/testing/items/<id>/alerts` `{text,
+  awaits}` puts Pilot's alert on it the same way, as `alert` does, and a body with neither takes it
+  off. Each answers `200` `{outcome}`; an unknown item or block is a `404`, and what the tool
+  refuses a `409` with its reason.
 - `POST /api/testing/items/<id>/clarification` `{reply?}` places the clarification run of the pass
   that asked about the registered document `<id>` (`writer-questions` first), on the conversation of
   the run that registered it, as a pass's end places it ([`round-trip.md`](round-trip.md)), and
@@ -690,7 +698,7 @@ project document that changes its text or takes it for the session, and a turn's
 document it lets go. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`, `place`, `save`,
 `saveProjectDocument`, `endTurn`, `doneByPilot`, `attach`, `attachToDraft`, `draft`, `register`,
-`workerAttach`, `askWriter`, `clarify`, `list`, `head`, `transition`, `sightings`, `loadScenario`, the item writes of
+`workerAttach`, `askWriter`, `clarify`, `note`, `alert`, `list`, `head`, `transition`, `sightings`, `loadScenario`, the item writes of
 [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
 `projectList` and `projectHead` drive the screens, a spec building a project's URLs with
 `projectAddress(id)`, the folder the testing route answered (a draft created since is at its slug,

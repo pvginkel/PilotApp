@@ -25,7 +25,10 @@ slice at its run's end, with its Read, and the collection: the
 transcripts a collector publishes through its door, whole or appended, a launch of Pilot's on its
 Session, the adopted project a group names, and the invented scenario that drives it in the suite,
 and the conversation: a session outside Pilot talking to it through the projects surface, its long
-poll and its Conversations tab, and a work item placed in a named environment. Every green build of
+poll and its Conversations tab, and a work item placed in a named environment, and Pilot's note on a
+block: what only Pilot knows inside an ask left to a person, its take and its offer that starts
+Pilot's work, its note on a document, its alert for what a Send starts, and an item turned urgent
+alerting again. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -292,7 +295,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   tokens, motion, shared pieces and links in text, the phone's frame, its home and the drawer, a
   dropped connection, the buttons that write or start work and the drawn scrollbar; the projects' API and
   screens, a project's address, the plus and Create project, a project on a phone, its home, tabs and views; the timeline's
-  API, live event and screens, the fold, a one-ask item's Send and the done lines' marks; a document read alone, a draft's asks, the attachments, the tabs, the
+  API, live event and screens, the fold, a one-ask item's Send, Pilot's note on an ask and its alert, and the done lines' marks; a document read alone, a draft's asks, the attachments, the tabs, the
   tab line and the side panel with a draft's Draft tab.
 - [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
   [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's

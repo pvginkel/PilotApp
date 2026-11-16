@@ -367,7 +367,7 @@ at its trigger's instant:
   ([`chats.md`](chats.md)), `held`, with no Turn, its `created_at` the trigger's instant; on the
   5-minute prompt cache, but for a wait's run (below);
 - its Work has the trigger that started it, the Item that set it off as its trigger item where it
-  has one, and no repository;
+  has one, or, for an offer taken, the Pilot Note whose offer it was, and no repository;
 - its Item takes the timeline's next place, where only the setup draws a line of its own (below).
 
 It starts through the gate as a chat does (`start_brain`, [`sessions.md`](sessions.md)): held while
@@ -383,7 +383,7 @@ nor the brain's `stop_work` takes it ([`sessions.md`](sessions.md)); Finish and 
 they stop every session, and the store's update while it runs or starts. One job is placed per
 trigger, never one for several; a wait's run is one trigger, however many firings it takes.
 
-**The prompt cache.** A job of trigger `setup`, `worker_turn_ended` or `item_done` runs on Claude
+**The prompt cache.** A job of trigger `setup`, `worker_turn_ended`, `item_done` or `offer_taken` runs on Claude
 Code's 5-minute prompt cache (D141): its create's `env` carries `CLAUDE_CODE_PROMPT_CACHE_TTL=5m`
 after `PILOT_SESSION`, at its start and at the relay's create of it anew alike, a finished
 project's job's too (`FIVE_MINUTE_JOBS`, `backend/app/services/session_scope.py`). Such a job
@@ -392,7 +392,7 @@ cache's, buys it nothing. A wait's run, which may resume its previous run's conv
 `CACHE_EXPIRATION_TTL` (below), a chat and a work item's run carry no such entry and keep Claude
 Code's own, the hour on a subscription within its usage limits.
 
-**The triggers.** Four place a job:
+**The triggers.** Five place a job:
 
 - **The setup**: Create project places it after the opening, titled "Setting up the project",
   trigger `setup`, and the setup runs under the pause Create writes, so the work items it places
@@ -417,6 +417,11 @@ Code's own, the hour on a subscription within its usage limits.
   which no session added. The chat's close and the save's are consumed on the spot, by the chat's
   Session and by the Session the save is credited to, so that neither offers an Undo after it, as
   after a job's brief (D225, D226).
+- **An offer taken**, trigger `offer_taken`, naming the Pilot Note whose offer a member took and no
+  trigger item, titled `Starting the work offered on <local id>`: a member's press of the offer of
+  Pilot's note on an action ([`timeline.md`](timeline.md#pilots-note-on-an-ask)), placed at the
+  taking's instant in the press's transaction, which holds the project's row. Nothing withdraws it,
+  a taking being never undone.
 - **A wait's firings**, trigger `wait_fired`, its trigger item the wait, titled `Checking "<wait
   title>"`: placed by the batcher once the wait's oldest pending firing is the quiet window old and
   no run of the wait is in flight, taking at its brief every firing still pending
@@ -488,6 +493,13 @@ work item you add is held until a person resumes it.` Then by trigger:
   `(Other)`); a document's `Done by <handle> at <stamp>; its blocks:` and a line per block; a
   review's `Reviewed by <handle> at <stamp>`; then the open notes of the item's plan task and the
   plan's own, and the deferrals without a home.
+- **An offer taken**: `/plan`, kind `an offer of yours was taken`; `The offer, on action <local id>
+  of <path> (<item id>), <kind> "<title>"[, task <id>]:`, the action's own section quoted, `> ` a
+  line, then `Your note: "<text>"`, `Your suggested answer: "…"` and `Your suggested note: "…"` where
+  the note holds them, `Your offer: "…"` and `Taken by <handle> at <stamp>.`; then the open notes of
+  the item's plan task and the plan's own, and the deferrals without a home, as after an item's
+  close. The plan skill starts the offered work as any work item and writes nothing on the block
+  (PilotProjects).
 - **A wait's firings**: `/plan`, kind `a wait fired`; the wait's line, what it waits on, since when
   and its task, then `Firings pending, oldest first:` and a line per firing it took
   (their words in [`waits.md`](waits.md)); then the open notes of the wait's task and the plan's own,
@@ -514,7 +526,7 @@ brief. A resume the controller refuses fails the run at its create ([`waits.md`]
 
 **Retry.** A job `failed` or `stopped`, whoever stopped it, its work item open, offers Retry (D078,
 `POST /api/sessions/<id>/retry`, [`sessions.md`](sessions.md)): a fresh job for the same trigger,
-trigger item and title, at the project's next place, behind every job already waiting, briefed as it
+trigger item or Pilot Note, and title, at the project's next place, behind every job already waiting, briefed as it
 starts from the record as it then stands. Its brief reads its trigger's instant from the first job
 of its chain, so a retried setup still says when the project was created, and an `item_done`
 retry's brief consumes the item only if the job it retries did not. What the failed job wrote is
@@ -534,7 +546,8 @@ and its Retries, `setup` true (`isLine`, `frontend/src/hooks/use-timeline.ts`): 
 keeps its entry in `items`, where its session log finds it, and shows on the item it follows from,
 as that item's `job` ([`timeline.md`](timeline.md)). A pass shows on each document it pre-rules,
 the pass after the writer's reply included; any other job on its trigger item: the worker's run
-whose turn ended, the item of Pilot's whose close placed it, the wait that fired. Where several
+whose turn ended, the item of Pilot's whose close placed it, the wait that fired; and an offer's on
+the item its note stands on. Where several
 stand on one item, the latest placed shows, a Retry over the job it retries; where the latest was
 withdrawn, the one before it, so that a withdrawn job shows nowhere. A worker's run carries besides,
 as `after_turn`, the job after its turn, its latest Retry where it was retried, wherever that job

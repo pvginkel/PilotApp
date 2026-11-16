@@ -118,6 +118,14 @@ The values the agent writes from a closed list:
     `stop_work`, null after any other close; an item's fold on the timeline is not here, nor
     anywhere in the tree;
   - `attachments`: the `id` and `path` of each attachment hung on the item, in their order;
+  - on a prose item alone, Pilot's notes and alert standing on it ([`mcp.md`](mcp.md)): `notes`, the
+    one on the item as a whole first, then its blocks' in the text's order, each `block` (the local
+    id, or null on the item as a whole), `text`, `suggested_answer`, `suggested_note`, `offer`,
+    `offer_taken` and `at`, and `alert`, null where none stands, else `text`, `awaits` (`<item
+    id>/<local id>`) and `at`; what stands is here as the record holds it, a note on a block
+    Pilot has since answered or a run holds, and an alert whose awaited item is done, which the page
+    shows nowhere ([`timeline.md`](timeline.md#pilots-note-on-an-ask)), among them. A note or an alert written or taken off, and an offer
+    taken, re-render the file;
   - on a wait alone, its fields in `add_item`'s shape, a card wait's `cards` and `states` or a timed
     wait's `due_at`, and `firings`, in order, each `seq`, `cause` (`transition`, `due` or
     `requested`), `fired_at`, `transition` (`card`, `from`, `to`, `at`, `by`, null but for a

@@ -129,10 +129,16 @@ each with:
   where several stand on it, a Retry over the job it retries; never a withdrawn job, nor the setup;
 - `after_turn`, a worker's run's: the job after its turn, its latest Retry where it was retried, in
   `job`'s shape, wherever that job shows, which its session log's head carries; null until it is
-  placed, and for every other item.
+  placed, and for every other item;
+- `pilots_note`, Pilot's note on the document as a whole, in a block's `pilots_note` shape (below),
+  its `text` alone, null where none stands and on every item but a prose item;
+- `send_alert`, Pilot's alert for what the item's Send starts ([below](#pilots-note-on-an-ask)),
+  `{text, awaits}`, `awaits` the ask to answer first, `{item, title, block}`, its item, that item's
+  title as its line shows it and the block's local id; null where none stands, once this item or
+  the awaited one is done, and on every item but a prose item.
 
 A block is `{id, kind, confirmation, because, proposal, default, check, options, answer, by, at,
-note, via, done, claim, held, deferral, writer_asked, section}`. `id` is its local id; `because` is a
+note, via, done, claim, held, deferral, writer_asked, pilots_note, section}`. `id` is its local id; `because` is a
 confirmation's reason, `{code, name, description, asks_under_autopilot}`, the grants table's name
 and the line the agent reads, not the card's words, and whether it asks under auto pilot too;
 `options` are `{label, text, recommended}` in order; `via` is `app` for a person's answer whose text
@@ -148,7 +154,14 @@ holds a block while Pilot's work holds it, a claimed action or a block a researc
 ([`round-trip.md`](round-trip.md)), `{doing, work, pulse, asked_in}` as `pilots_work` has them,
 `doing` one of `doing`, `researching` or `waiting_on_answer` and `work` the work item its standing
 claim or research names, and null while it is not held; `writer_asked` is whether Pilot asked the
-registered document's writer about the block; `deferral` is `{to, title}` while `answer`
+registered document's writer about the block; `pilots_note` is Pilot's note standing on it
+([`mcp.md`](mcp.md)), on a block Pilot answered or holds too, null where none stands: `{id, text,
+suggested_answer, suggested_note, offer, offer_taken, differs, late, at}`, `differs` whether its
+suggested answer is not, compared exactly, the answer the block's recommendation would record,
+false where it suggests none and on a block with no recommendation, an action among them, and
+`late` whether it was written after the block last came to a person, its `handed_at`
+([`round-trip.md`](round-trip.md#when-an-ask-became-the-persons)), on the document as a whole after
+the latest of its blocks did, false where none did, derived and never stored; `deferral` is `{to, title}` while `answer`
 is `deferred`, `title` the task's title live from the plan and null for `to: plan`, the project's
 end; `section` is the block's own section, `{heading}`, the heading's text, or null. A person,
 Pilot or a service user, wherever one is named, is `{kind, handle, name, initials, avatar_slot}`,
@@ -156,13 +169,14 @@ Pilot `kind: agent` and a service user `kind: service`, each with no slot.
 
 ## Answering it
 
-Nine routes under `/api/items/<item_id>`, each the record's own write, as the caller, now, through
+Ten routes under `/api/items/<item_id>`, each the record's own write, as the caller, now, through
 the app, answering `204` with no body:
 
 | Route | Body | Does |
 |---|---|---|
 | `POST blocks/<block_id>/answer` | `{answer, note?}` | a block's answer: an option's label, `Agree` to a proposal, `Yes` or `No` to a confirmation, or free words; the note, an action's paste-back or a No's reason |
 | `POST blocks/<block_id>/done` | `{note?}` | Done on an action without options, the note what was pasted back |
+| `POST blocks/<block_id>/offer` | `{note_id}` | the offer of Pilot's note on an action taken, once: who took it and when, and Pilot's job that starts the offered work placed ([`work.md`](work.md)); the action stays the caller's, with its Done |
 | `POST done` | | Done on a document, with its recommendations |
 | `POST read` | | Read on a notice, and a member's on a debrief's notice ([`work.md`](work.md#its-debriefs-notice)) |
 | `POST reviewed` | | Reviewed on a review |
@@ -172,8 +186,12 @@ the app, answering `204` with no body:
 | `POST unfold` | | its fold undone, for every member |
 
 Stop and take over, `POST take-over`, and the Cancel, `POST cancel`, are
-[`round-trip.md`](round-trip.md)'s. An answer, an action's Done and a document's Done are refused
-while the item is Pilot's or the block is held, with "Pilot is working on …" (there).
+[`round-trip.md`](round-trip.md)'s. An answer, an action's Done, a document's Done and an offer's
+taking are refused while the item is Pilot's or the block is held, with "Pilot is working on …"
+(there). The offer names the note the read gave, `pilots_note.id`: one not on that block is a `404`,
+and the taking is a `409` with its reason where the offer was taken already, the note was replaced
+or taken off since, offers no work, or the action is done ("the offer on A1 was taken already",
+"Pilot's note on A1 was replaced", "… was taken off", "… offers no work", "action A1 is done").
 
 A close the done item holds from the caller already, sent again as a browser resends a request when
 its page comes back, answers `204` and changes nothing (D184): the same answer and note to the same block,
@@ -421,8 +439,14 @@ Done: a person's answer or Pilot's, an action's Done among them. A deferral alon
 since it asks nothing of the person, and neither is a recommendation or a claim not yet done; a held
 save, `concept`, has nothing to do with it (`isUnsent`). The document's Done is *Send answers*,
 which fixes the answers and sends them back while the work goes on (`POST done`). It enables once
-every unanswered block has a recommendation and no block is held, its tooltip while one is "Pilot
-is working on a block of it: send once Pilot is done"; with any block unanswered it asks first, in
+every unanswered block has a recommendation and no block is held. A block Pilot's note differs on
+(`differs`, [above](#reading-it)) counts as one with none, here and in the record's Done, which
+refuses it while it is unanswered ("these blocks have neither an answer nor a recommendation: D1
+(Pilot's note on D1 suggests another answer than its recommendation)"); nothing else marks it, and
+the page never compares answers itself (`recommendationOf`, `document-state.ts`). The tooltip names
+such blocks first, "Pilot’s note on <ask> suggests another answer than recommended: answer it
+first", a held block left out of it; else, while a block is held, "Pilot is working on a block of
+it: send once Pilot is done"; a phone shows neither. With any block unanswered it asks first, in
 a dialog,
 "Send with the recommendations?", a line per unanswered block, "<ask> · <answer>", a proposal's
 answer "Agree: <proposal>" and a confirmation's "Yes: <proposal>", whose Confirm sends, the record
@@ -547,6 +571,66 @@ item's head quoting the item. In a done item, as Open shows it, every answered b
 person's answer too, and a decision, an action and a confirmation open on their chevron to their
 controls, all disabled, a confirmation to its proposal, Yes and No. A done question has no chevron,
 since opening it would show no more than its answer.
+
+## Pilot's note on an ask
+
+What only Pilot knows about an ask left to a person stands on the ask, where the person answers it:
+Pilot's note (`block.pilots_note`, `pilots-note.tsx`), written through `note`
+([`mcp.md`](mcp.md)), beside the document and never in its text. It stands inside the block, between
+its head and its controls, at the top of an open one-ask panel, which draws no head, wherever `Block`
+draws the block: the timeline, an inline document, a document's tab, a phone's view and a one-ask
+item. `Block` passes none for a confirmation, in a document that is Pilot's, on a held block and on
+a block Pilot answered, and the handbook's, the project document's and a draft's blocks have none.
+Nothing of it shows in the block's head, on its segment or on the document's card, and the writer's
+text, the recommendation and the option's Recommended stay as written.
+
+- **Opened**, it is a box on the page's colour (`.pilot-note`) under an amber triangle (`.pn-mark`),
+  "Pilot’s own note on this ask, not the writer’s" its tooltip, with ", written since it came to you"
+  where the note is `late`; nothing else marks a note new or read. Under it, each where the note has
+  it: its text as Markdown; "Pilot would answer" and the suggested answer in bold, or "Pilot would
+  add" where it suggests a note alone, the suggested note under it with the note icon; and on an
+  action "Work Pilot would do" and the offer in bold.
+- **Once its block is answered**, or its offer taken, it is one line: the triangle, "Pilot would
+  have answered **<answer>**", "Work Pilot would do: **<offer>**" or, taken, "Started as a work
+  item: **<offer>**", else the first line of its text or of its suggested note, and a chevron. A
+  click on the line, "Open the note", opens it whole, a long note too, and a chevron in it, "Fold
+  the note to its line", folds it back. No control puts a note away.
+- **Taking it** (`takeOf`, `take-note.ts`): while the block takes an answer, a small button after
+  what the note suggests puts it into the block as the person's own. In a document, "Take this
+  answer" answers with the suggested answer and its note at once, words no option has as free
+  words, theirs to change until *Send answers*; it is gone once the block holds both. In a one-ask
+  item it makes the choice, as a press would: an option, words no option has in Other's field, which
+  opens, a question's in its field; the suggested note goes into the field the Send carries, an
+  action's paste-back, or the note field of a decision or a question (`sent-note.tsx`, "Your note
+  with the answer, if any", kept under `<block key>/note`, [`ui.md`](ui.md)), which shows once it
+  holds words. A suggested note alone on an open action is "Take this note", into its paste-back,
+  the Done still the person's. The take moves no focus. A note with an offer has no take.
+- **The offer**, on an action: while the action is open and unanswered, its item open, the project
+  not archived and the block not held, the note's primary button "Start a work item", "Pilot puts a
+  work item for this on the timeline; the action stays yours, with its Done" its title and its icon
+  the job's mark under the mouse ([`ui.md`](ui.md)), takes it once (`useOffer`, `hooks/use-offer.ts`,
+  the form `timeline.offer`), naming the note it shows (`POST blocks/<block_id>/offer`, above). The
+  note then folds to its line, Pilot's job shows on the item ([`work.md`](work.md)), and the action
+  stays the person's, with its Done; nothing of the work shows in the document or is written on the
+  block. A refusal is a toast in the API's words.
+
+**Pilot's note on the document** as a whole (`DocumentNote`), `pilots_note` on the item, is the same
+box, its text alone, its triangle's tooltip "Pilot’s own note on this document, not the writer’s":
+at the top of an inline document, and under the summary in the opened document
+([`documents.md`](documents.md)), in a document that is Pilot's too.
+
+**Pilot's alert** (`SendAlert`, `send-alert.tsx`), the item's `send_alert`, says what the document's
+Send starts where another open ask has to be answered first. It is a rounded gold box, as the halt's
+popover is ([`ui.md`](ui.md)), the document's width: the triangle, its text, and, as the popover's
+button, the awaited item's title, "Go to <local id> of “<title>”, to answer it first" its title,
+which opens that ask (`useOpenQuote`). It stands first in an inline document, above the note on the
+document, and is the opened document's head's last line, under the segment bar, not scrolling, while
+the document is the person's ([`documents.md`](documents.md)). On a phone it is one line, cut with
+an ellipsis, its chevron "Show the whole alert" or "Show the alert’s first line only", a tap
+anywhere on it opening and closing it, closed each time the document opens. It blocks nothing, and
+the read drops it once the item of the ask it names is done. A document of one block is a one-ask
+item on the timeline, which shows neither its alert nor its note on the document there; both show
+once it is opened.
 
 ## Done lines and Undo
 
@@ -714,8 +798,13 @@ buttons and Send (`archiveQuestion`, `archive-question.spec.ts`), the ready box 
 resume, line}`, its Resume's form event `timeline.ready.resume`, pinned in `create-project.spec.ts`),
 a block's Send (`block.answerSend`, `confirm.answerSend` on a confirmation's card), an open item's
 kind and its fold (`timeline.item.kind`, `item.fold`, the box's `data-folded`) and a wait's
-button, what it waits on, its firings, its note and its phone menu (`item(id).wait`), and the work
-items a debrief's notice carries (`item(id).debriefs`, `item(id).carried(workId)`); `slowNetwork`
+button, what it waits on, its firings, its note and its phone menu (`item(id).wait`), the work
+items a debrief's notice carries (`item(id).debriefs`, `item(id).carried(workId)`), Pilot's note in
+a block (`pilotsNote`: `root`, `mark`, `text`, `answer`, `note`, `line`, `toggle`, `take`, `offer`,
+`start`), on an inline document (`item(id).pilotsNote`) and its alert (`item(id).alert`: `go`,
+`toggle`), which `projects.note(itemId, {block?, text?, suggested_answer?, suggested_note?,
+offer?})` and `projects.alert(itemId, {text, awaits})` write as the pass does
+(`tests/timeline/pilots-note.spec.ts`, `send-alert.spec.ts`); `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. Whether an
 item counts for "N open above" is its article's `data-actionable`; `dotsEndingARow(head)` finds the
 dots a wrapped head ends a row on, `lift` (`tests/support/chips.ts`) a chip's words against its

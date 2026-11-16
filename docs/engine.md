@@ -236,7 +236,8 @@ merge carries the write to the file.
 - `done(item, user, *, via=AnswerChannel.APP)`: Done on a document. A person's first answers
   every unanswered block that has a recommendation with it, `via: recommended`, and is refused
   while a block has neither an answer nor a recommendation, a claimed action not yet done among
-  them; its cause is `marked`.
+  them, and a block Pilot's standing note differs on counted as one with none
+  ([`timeline.md`](timeline.md#documents-and-reviews)); its cause is `marked`.
   Pilot's is refused while any block is unanswered, a claim counting only once its action is done
   ([`block-dsl.md`](block-dsl.md)); its cause is `settled`. Pilot's also takes a registered
   document of one block, whose item has its block's kind, once that block is answered, deferred, or
