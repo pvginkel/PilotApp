@@ -588,7 +588,9 @@ class TestItsTranscript:
         opened: Project,
         service_user: User,
     ) -> None:
-        chat = open_chat(session, opened)
+        chat = open_chat(
+            session, opened, opened_at=datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
+        )
         run = _idle(services, conversations, session, fake, opened, service_user)
         conversations.send(run.id, service_user, "Two")
         before = container.view_service().chat(opened).text
