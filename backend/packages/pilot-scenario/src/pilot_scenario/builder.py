@@ -88,19 +88,29 @@ def _session_moments(session: Session) -> Iterator[int]:
         yield from _moments(agent.steps)
 
 
+@dataclass
+class _Ids:
+    """How many messages and tool calls a conversation's threads have
+    named, counted through all of them, as Claude's own ids never repeat
+    across a conversation's threads."""
+
+    messages: int = 0
+    tool_calls: int = 0
+
+
 class _Thread:
     """One thread's Calls and Compactions as its steps are read, in the
     file's order, each named and placed as a collector names and places
-    them."""
+    them; its ids counted on with `ids`, the conversation's."""
 
-    def __init__(self, builder: "Builder") -> None:
+    def __init__(self, builder: "Builder", ids: _Ids) -> None:
         self.calls: list[dict[str, Any]] = []
         self.compactions: list[dict[str, Any]] = []
         self.spawned: dict[str, dict[str, Any]] = {}
         """The tool call that started each sub-agent, by the sub-agent's
         name."""
         self._builder = builder
-        self._tool_calls = 0
+        self.ids = ids
         self._named: dict[str, str] = {}
         self._crossed: int | None = None
 
@@ -119,7 +129,8 @@ class _Thread:
             )
             self._crossed = len(self.compactions)
             return
-        message_id = f"msg_{len(self.calls) + 1:04}"
+        self.ids.messages += 1
+        message_id = f"msg_{self.ids.messages:04}"
         if step.back_to is not None:
             predecessor: str | None = self._named[step.back_to]
         else:
@@ -164,9 +175,9 @@ class _Thread:
 
     def _tool_call(self, call: Call, use: ToolUse) -> dict[str, Any]:
         at = self._builder.time
-        self._tool_calls += 1
+        self.ids.tool_calls += 1
         tool_call = _given(
-            tool_use_id=f"toolu_{self._tool_calls:04}",
+            tool_use_id=f"toolu_{self.ids.tool_calls:04}",
             tool=use.tool,
             mcp_server=use.server,
             first_argument=use.argument,
@@ -256,7 +267,7 @@ class Builder:
         )
 
     def _main(self, session: Session) -> tuple[dict[str, Any], _Thread]:
-        thread = _Thread(self)
+        thread = _Thread(self, _Ids())
         launches: list[dict[str, Any]] = []
         place = 0
         for launch in session.launches:
@@ -307,7 +318,7 @@ class Builder:
     ) -> dict[str, Any]:
         """The sub-agent's thread, named for the tool call of the main
         thread that started it."""
-        thread = _Thread(self)
+        thread = _Thread(self, main.ids)
         for step in agent.steps:
             thread.read(step, None)
         spawning = main.spawned[agent.name]

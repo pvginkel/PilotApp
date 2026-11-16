@@ -370,6 +370,27 @@ class TestASubAgent:
         assert built["counting"]["description"] == spawning["first_argument"]
         assert built["counting"]["agent_type"] == "Explore"
 
+    def test_its_ids_repeat_none_of_its_main_threads(self) -> None:
+        """A conversation's threads name their messages and tool calls
+        through all of them, as Claude's own ids never repeat: a sub-agent
+        holding its main thread's tool_use_id is joined to no call."""
+        built = _built()
+
+        def ids(thread: dict[str, Any]) -> tuple[set[str], set[str]]:
+            return set(_calls(thread, "message_id")), {
+                tool_call["tool_use_id"]
+                for call in thread["calls"]
+                for tool_call in call.get("tool_calls", [])
+            }
+
+        (main_messages, main_tools), (agent_messages, agent_tools) = (
+            ids(built["halving"]),
+            ids(built["counting"]),
+        )
+        assert agent_messages and agent_tools
+        assert not main_messages & agent_messages
+        assert not main_tools & agent_tools
+
     def test_it_is_a_thread_of_its_sessions_conversation(self) -> None:
         built = _built()
 
