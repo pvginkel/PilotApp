@@ -251,6 +251,42 @@ test.describe('The Conversations tab', () => {
     await controller.finish(chats.store, third.session, 'success', 'Nothing.');
   });
 
+  test('shows from the earliest of two open conversations, Pilot still answering in it: both are shown, its Stop in its head, and nothing waits under Load previous', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chats,
+    conversations,
+    conversationsTab,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Two open'), members: [me.handle!] });
+    const { caller } = await conversations.caller('RecipeBox-2');
+    // The earlier one: Pilot still answering in it.
+    const earlier = await caller.start(project, 'Walk me through the fix.');
+    // The later one: answered, and idle.
+    const later = await caller.start(project, 'And the bread?');
+    await controller.play(chats.store, later.session, [text('bread', 'Proving.')]);
+    await controller.finish(chats.store, later.session, 'success', 'Proving.');
+    await conversations.idle(project, later.conversation);
+
+    await timeline.open(project);
+    const live = conversationsTab.live(earlier.conversation);
+    await conversationsTab.tab.click();
+    await live;
+    await expect(conversationsTab.conversations).toHaveCount(2);
+    await expect(conversationsTab.before).toHaveCount(0);
+    const answering = conversationsTab.conversation(earlier.conversation);
+    await expect(answering.messageTexts).toHaveText(['Walk me through the fix.']);
+    await expect(answering.state).toHaveText('Open');
+    await expect(answering.stop).toBeVisible();
+    const idle = conversationsTab.conversation(later.conversation);
+    await expect(idle.texts).toHaveText(['Proving.']);
+    await expect(idle.stop).toHaveCount(0);
+    await controller.finish(chats.store, earlier.session, 'success', 'Done.');
+  });
+
   test('says “The conversations did not load.” where its read fails, and draws them once a later read lands', async ({
     page,
     people,
