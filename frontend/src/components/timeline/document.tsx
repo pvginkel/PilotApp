@@ -9,6 +9,8 @@
  * colour. *Send answers* is the document's Done (F24.3): it enables once every block is answered or
  * has a recommendation, and none is held, and clicked with unanswered recommended blocks it lists
  * them in a dialog whose Confirm sends, the record answering them with their recommendation (F32.5).
+ * A block whose note of Pilot's suggests another answer has none, its tooltip naming it first
+ * (F168.4).
  *
  * A larger one, and every review (F25.1), leaves a card: its head, its title, its summary (F34),
  * its count chips (F24.2) and the auto pilot chip, counting the confirmations the switch would
@@ -32,7 +34,7 @@ import { Markdown } from '@/components/shared/markdown';
 import { Attachments } from '@/components/timeline/attachments';
 import { AutopilotChip } from '@/components/timeline/autopilot-mark';
 import { Block } from '@/components/timeline/block';
-import { askOf, countsOf, isUnsent, readOf, recommendationOf, type Counts } from '@/components/timeline/document-state';
+import { askOf, countsOf, differs, isUnsent, readOf, recommendationOf, type Counts } from '@/components/timeline/document-state';
 import { blockKey, GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
 import { LockedContext } from '@/components/timeline/locked';
@@ -283,8 +285,11 @@ function recommendedWords(block: BlockData, answer: string): string {
   return block.proposal === null ? answer : `${answer}: ${block.proposal}`;
 }
 
-/** Why *Send answers* is disabled, or what it does. */
-function sendTitle(held: boolean, ready: boolean): string {
+/** Why *Send answers* is disabled, or what it does: first the open blocks Pilot's note differs on. */
+function sendTitle(differing: BlockData[], held: boolean, ready: boolean): string {
+  if (differing.length > 0) {
+    return `Pilot’s note on ${differing.map(askOf).join(', ')} suggests another answer than recommended: answer ${differing.length === 1 ? 'it' : 'them'} first`;
+  }
   if (held) return 'Pilot is working on a block of it: send once Pilot is done';
   return ready ? 'Send the answers to Pilot' : 'Answer every block that has no recommendation first';
 }
@@ -302,6 +307,7 @@ export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () 
   const blocks = blocksOf(item);
   const unanswered = blocks.filter((block) => !isAnswered(block));
   const held = blocks.some((block) => block.held !== null);
+  const differing = unanswered.filter((block) => block.held === null && differs(block));
   const ready = !held && unanswered.every((block) => recommendationOf(block) !== null);
   const send = () => (unanswered.length > 0 ? setAsking(true) : mark());
   return (
@@ -311,7 +317,7 @@ export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () 
         className="btn btn-primary"
         onClick={send}
         disabled={!ready || pending || archived}
-        title={sendTitle(held, ready)}
+        title={sendTitle(differing, held, ready)}
         data-testid="timeline.item.send"
       >
         <BusyIcon busy={pending && !asking} starts={item.close_starts_work}>

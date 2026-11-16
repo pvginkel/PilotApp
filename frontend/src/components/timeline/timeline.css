@@ -454,6 +454,39 @@
   .held-body > .block-controls { padding-left: 0; padding-right: 0; }
   .held-body .block-controls :is(.option:not(.chosen), .field) { opacity: 0.55; }
 
+  /* Pilot's note on a block (F168.1): between its head and its controls, a box on the page's colour
+     with an amber triangle at its left, at the top of a one-ask panel that draws no head; under the
+     triangle its text, then the answer it suggests, bold, and its note on a line of its own. Once
+     the block is answered, one line, its words cut with an ellipsis (F168.3). */
+  .pilot-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 4px 14px 6px;
+    padding: 8px 10px;
+    border: 1px solid hsl(var(--border));
+    border-radius: 6px;
+    background: hsl(var(--background));
+    font-size: var(--text-base);
+  }
+  .block.solo > .pilot-note:first-child { margin: 12px 14px 0; }
+  .block.solo > .pilot-note:not(:first-child) { margin-bottom: 0; }
+  .pilot-note > .pn-mark { display: flex; flex: none; margin-top: 3px; color: hsl(var(--warning)); }
+  .pilot-note > .pn-mark .icon { width: 18px; height: 18px; }
+  .pilot-note .pn-body { flex: 1; min-width: 0; }
+  .pilot-note .prose > :first-child { margin-top: 0; }
+  .pilot-note .prose > :last-child { margin-bottom: 0; }
+  .pilot-note .pn-suggest { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin-top: 6px; }
+  .pilot-note .pn-body > .pn-suggest:first-child { margin-top: 0; }
+  .pilot-note .pn-label { color: hsl(var(--muted-foreground)); }
+  .pilot-note .pn-answer { font-weight: 600; }
+  .pilot-note .pn-suggest .note { flex-basis: 100%; margin-top: 2px; }
+  .pilot-note > .toggle { --h: 20px; flex: none; }
+  .pilot-note > .toggle .icon { width: 12px; height: 12px; stroke-width: 2.2; }
+  .pilot-note.one { align-items: center; padding: 4px 10px; color: hsl(var(--muted-foreground)); cursor: pointer; }
+  .pilot-note.one > .pn-mark { margin-top: 0; }
+  .pilot-note.one .one-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   /* The card a larger document or a review leaves: what is in it, how far the answers are. */
   .doc-card .counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
   /* A count's words a pixel higher in their pill than the shared chip's, the pill as high, as the

@@ -399,7 +399,8 @@ export function settledHeadParts(within: Locator, blockId: string) {
  * An open item's block, its head, its answer; a decision's options, a question's field and Send,
  * an action's paste-back, Done and its options as buttons, and Pilot's claim on it, or the mark of
  * Pilot's work that left it undone; Other and its console; a confirmation block's proposal, Yes
- * and No, and No's console; a block Pilot's work holds as its section's line (F31.7). `answerSend`
+ * and No, and No's console; a block Pilot's work holds as its section's line (F31.7); Pilot's note
+ * inside it (F168.1). `answerSend`
  * is the block's own Send, a question's and a one-ask item's (F32.3); `send` and `noSend` are a
  * console's, which a one-ask item's console has none of.
  */
@@ -432,6 +433,19 @@ export function blockParts(page: Page, root: Locator) {
       pulse: root.getByTestId('timeline.block.held.pilots.pulse'),
       toggle: root.getByTestId('timeline.block.held.toggle'),
       body: root.getByTestId('timeline.block.held.body'),
+    },
+    /**
+     * Pilot's note inside the block (F168.1): its triangle, its text, the answer it suggests and the
+     * note beside it; the block answered, its line, which its chevron opens (F168.3).
+     */
+    pilotsNote: {
+      root: root.getByTestId('timeline.block.pilots-note'),
+      mark: root.getByTestId('timeline.block.pilots-note.mark'),
+      text: root.getByTestId('timeline.block.pilots-note.text'),
+      answer: root.getByTestId('timeline.block.pilots-note.answer'),
+      note: root.getByTestId('timeline.block.pilots-note.note'),
+      line: root.getByTestId('timeline.block.pilots-note.line'),
+      toggle: root.getByTestId('timeline.block.pilots-note.toggle'),
     },
     toggle: root.getByTestId('timeline.block.toggle'),
     answered: root.getByTestId('timeline.block.answered'),

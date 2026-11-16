@@ -1,7 +1,8 @@
 /**
  * What a document's screens read from its item: whether it leaves a card (F24.1, F24.2, F25.1),
  * what its card counts (F24.2), whether it reads *Unsent* (D026), whether a registered document's
- * read failed (F85.1), what a block asks and the answer Done records for it unanswered (F32.5).
+ * read failed (F85.1), what a block asks and the answer Done records for it unanswered (F32.5,
+ * F168.4).
  */
 
 import { blockKindOf } from '@/components/timeline/kinds';
@@ -57,12 +58,17 @@ export function readOf(item: TimelineItem): 'failed' | null {
   return !item.awaiting_read && item.body === null && item.file_name !== null ? 'failed' : null;
 }
 
+/** Whether Pilot's note on the block suggests another answer than its recommendation (F168.4). */
+export const differs = (block: Block) => block.pilots_note?.differs === true;
+
 /**
  * The answer Done records for a block left unanswered, by the record's rule: a question's
  * default; Yes to a confirmation and Agree to another proposal; a decision's recommended option. An
- * action has none.
+ * action has none, nor has a block whose note of Pilot's suggests another answer, as the server
+ * reads it (F168.4).
  */
 export function recommendationOf(block: Block): string | null {
+  if (differs(block)) return null;
   switch (block.kind) {
     case 'action':
       return null;

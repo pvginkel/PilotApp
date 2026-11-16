@@ -31,7 +31,10 @@
  * the browser (use-choice.ts), and the block's one Send sends it; a question's Send and an
  * action's Done are that one control already. Where the item's close starts Pilot's work, as the
  * server reads it, that control's icon is the job's mark under the mouse (F59.3); no option row, no
- * Yes or No, and no answer inside a document carries it.
+ * Yes or No, and no answer inside a document carries it. Pilot's note on a block that is the
+ * person's stands between its head and its controls, wherever an item's block is drawn but on a
+ * confirmation; none on a block Pilot's work holds or Pilot answered, in a document that is Pilot's,
+ * in the draft or in a project's own document (F168.1; pilots-note.tsx).
  */
 
 import { useContext, useState } from 'react';
@@ -50,6 +53,7 @@ import { HeldBody, HeldLine, type Hold } from '@/components/timeline/held';
 import { blockKindOf, isOneAsk } from '@/components/timeline/kinds';
 import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
+import { PilotsNote, type PilotsNoteData } from '@/components/timeline/pilots-note';
 import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { SectionsContext } from '@/components/timeline/sections';
@@ -96,6 +100,8 @@ export function Block({ item, block, solo = false, section = [{ type: 'block', b
   };
   // A document that is Pilot's draws every block whole (F28.9).
   const held = block.held === null || locked ? null : { hold: block.held, section, shown, onToggle: toggle };
+  // Pilot's note shows on a block that is the person's, and never on a confirmation (F168.1).
+  const pilots = locked || block.held !== null || (isAnswered(block) && block.by?.kind === 'agent');
   return (
     <BlockPanel
       field={key}
@@ -111,6 +117,7 @@ export function Block({ item, block, solo = false, section = [{ type: 'block', b
       asked={block.writer_asked && !solo ? item.id : null}
       flash={flash}
       held={held}
+      note={item.kind === 'confirmation' || pilots ? null : block.pilots_note}
     />
   );
 }
@@ -135,6 +142,7 @@ export function DocumentBlock({ document, block }: { document: string; block: Bl
       asked={null}
       flash={null}
       held={null}
+      note={null}
     />
   );
 }
@@ -168,6 +176,7 @@ export function DraftBlock({ projectId, block, blocks, title, flash }: DraftBloc
       asked={null}
       flash={flash}
       held={null}
+      note={null}
     />
   );
 }
@@ -211,9 +220,11 @@ interface BlockPanelProps {
   flash: Flash | null;
   /** Its line, where Pilot's work holds it inside a document that is the person's; none otherwise. */
   held: Held | null;
+  /** Pilot's note on it, where it shows (F168.1); none otherwise. */
+  note: PilotsNoteData | null;
 }
 
-function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, settled, disabled, quote, asked, flash, held }: BlockPanelProps) {
+function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, settled, disabled, quote, asked, flash, held, note }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
   const kept = useChoice(field);
   const choice = choosing ? kept : null;
@@ -340,6 +351,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, 
           quote={quote}
         />
       )}
+      {note !== null && <PilotsNote note={note} answered={answered} />}
       <div className="block-controls">
         {deferred && <Deferral block={block} />}
         {!(closed && deferred) && controls()}

@@ -12,7 +12,10 @@
  * work doing it fails or is stopped, the action is the person's again, live, unfolded with its
  * controls, its head saying Pilot's work left it undone, and their Done marks it done as any
  * action's Done, the claim gone; while that work is in flight the server takes no Done on it (DB
- * 295). A block a work item researches is its held line too, "Researching" (F52.3).
+ * 295). A block a work item researches is its held line too, "Researching" (F52.3). Pilot's note on
+ * the action shows nowhere while the work holds it, nor in its document opened as Pilot's, and
+ * inside it once it is the person's again, its triangle saying so of a note written since (F168.1,
+ * F168.8).
  */
 
 import type { Locator } from '@playwright/test';
@@ -283,6 +286,62 @@ test.describe('A claimed action', () => {
     await expect(action.done).toBeEnabled();
     await expect(item.segment('A1')).not.toHaveClass(/\bheld\b/);
     expect(await colourOf(item.segment('A1'))).toBe(await colourOf(item.segment('D1')));
+  });
+
+  test('Pilot’s note on it shows nowhere while the work doing it holds it, its document opened as Pilot’s showing none, and Send answers names a block Pilot’s note differs on ahead of it; once that work is stopped the note stands inside the action, the person’s again, live, and a note written since says so in its triangle', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    timeline,
+    overlay,
+    deploymentSse,
+  }) => {
+    const { project, document } = await registered({ people, projects, controller, chats }, cutOver(TOKEN, true));
+    await projects.note(document, { block: 'A1', text: 'The token is also in the nightly job.' });
+    await projects.note(document, { block: 'D1', suggested_answer: 'Monday' });
+    await projects.transition(project, 'paused');
+    const rotating = await projects.startWork(project, {
+      title: ROTATING,
+      brief: 'Rotate the CI token.',
+      cwd: '/work/Example',
+      claims: [`${document}/A1`],
+    });
+    await expect.poll(async () => (await projects.work(project, rotating)).state).toBe('held');
+    await timeline.open(project);
+
+    const item = timeline.item(document);
+    const action = item.blockAt('A1');
+    await action.held.toggle.click();
+    await expect(action.held.body).toBeVisible();
+    await expect(action.pilotsNote.root).toHaveCount(0);
+    await expect(item.blockAt('D1').pilotsNote.answer).toHaveText('Monday');
+    await expect(item.send).toHaveAttribute('title', 'Pilot’s note on The day suggests another answer than recommended: answer it first');
+    await item.blockAt('D1').option('Monday').click();
+    await expect(item.send).toHaveAttribute('title', 'Pilot is working on a block of it: send once Pilot is done');
+
+    // Every other block answered, the document is Pilot's.
+    await item.blockAt('D2').option('Morning').click();
+    await expect(item.root).toHaveAttribute('data-state', 'pilots');
+    await overlay.open(project, document);
+    await deploymentSse.ensureConnected();
+    await expect(overlay.strip.root).toBeVisible();
+    await expect(overlay.blockAt('A1').claimWork).toHaveText(ROTATING);
+    await expect(overlay.blockAt('D1').answered).toBeVisible();
+    await expect(overlay.body.getByTestId('timeline.block.pilots-note')).toHaveCount(0);
+
+    await projects.stop(rotating);
+    await expect(overlay.strip.root).toHaveCount(0);
+    const opened = overlay.blockAt('A1');
+    await expect(opened.undone).toBeVisible();
+    await expect(opened.pilotsNote.text).toHaveText('The token is also in the nightly job.');
+    await expect(opened.pilotsNote.mark).toHaveAttribute('data-late', 'false');
+    await expect(overlay.blockAt('D1').pilotsNote.line).toHaveText('Pilot would have answered Monday');
+
+    await projects.note(document, { block: 'A1', text: 'The nightly job runs at two.' });
+    await expect(opened.pilotsNote.text).toHaveText('The nightly job runs at two.');
+    await expect(opened.pilotsNote.mark).toHaveAttribute('data-late', 'true');
+    await expect(opened.pilotsNote.mark).toHaveAttribute('title', 'Pilot’s own note on this ask, not the writer’s, written since it came to you');
   });
 
   test('once the turn of the work doing it fails, it unfolds, live, with its controls, its head saying Pilot’s work left it undone, and the person’s Done closes it', async ({

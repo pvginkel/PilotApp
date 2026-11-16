@@ -20,6 +20,7 @@
  * `set_progress` replaces it (/api/testing/items/<id>/progress), and its debrief given as its
  * `register_debrief` gives it (/api/testing/items/<id>/debrief); a registered document's writer is asked about
  * its blocks as the pre-ruling pass's `ask_writer` asks (/api/testing/items/<id>/writer-questions),
+ * Pilot's note put on a block or on an item as the pass's `note` puts it (/api/testing/items/<id>/notes),
  * and the pass's clarification run placed, with the writer's reply or to run
  * (/api/testing/items/<id>/clarification).
  */
@@ -46,6 +47,7 @@ export type DebriefEntry = components['schemas']['RegisterDebriefRequestSchema.c
 /** What a debrief is an account of, and whether it completes it (F85.5). */
 type DebriefSubject = Pick<components['schemas']['RegisterDebriefRequestSchema.ce33d8b'], 'subject' | 'completes'>;
 type WriterQuestion = components['schemas']['InventedWriterQuestionsCreateSchema.6d6b324.InventedWriterQuestionSchema'];
+type PilotNote = components['schemas']['InventedNoteCreateSchema.6d6b324'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type ItemDocument = components['schemas']['ItemDocumentSchema.1fdd8ae'];
 type TimelineItem = Timeline['items'][number];
@@ -324,6 +326,16 @@ export class Projects {
       data: { questions },
     });
     expect(response.status(), await response.text()).toBe(201);
+  }
+
+  /**
+   * Pilot's note on a block of the open prose item, by its local id, or with none on the item as a
+   * whole, as the pre-ruling pass's `note` writes it, in a pass's turn of its own; a note that gives
+   * none of its four parts takes the standing one off.
+   */
+  async note(itemId: string, note: PilotNote): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${itemId}/notes`, { data: note });
+    expect(response.status(), await response.text()).toBe(200);
   }
 
   /**
