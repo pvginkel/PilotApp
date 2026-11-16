@@ -57,8 +57,33 @@ from tests.support.chats import (
     open_conversation,
 )
 from tests.support.debriefs import DEBRIEF, placed_notice
+from tests.support.pilot_notes import a_turn, alerted, noted
 
 _CONTENT = b"# Palette\n\nThe two colours compared.\n"
+
+
+NOTED = """---
+title: Camp plan
+---
+
+```question id=Q1
+default: By the lake
+```
+
+```action id=A1
+```
+"""
+
+SITE = """---
+title: Camp site
+---
+
+```decision id=D1
+options:
+  - Lake
+  - Hill
+```
+"""
 
 
 def _json(rendering: Rendering) -> Any:
@@ -333,6 +358,8 @@ class TestViewService:
                     "attachments": [
                         {"id": str(draft_copy.id), "path": "attachments/1/project.md"}
                     ],
+                    "notes": [],
+                    "alert": None,
                 },
                 {
                     "id": str(decision.id),
@@ -356,6 +383,8 @@ class TestViewService:
                             "path": "attachments/2/survey/colours.md",
                         }
                     ],
+                    "notes": [],
+                    "alert": None,
                 },
             ],
             "attachments": [
@@ -683,6 +712,105 @@ class TestViewService:
                 "firings": [],
             },
         ]
+
+    def test_a_prose_items_row_carries_pilots_notes_and_its_alert(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        camp = documents.bear_item(
+            project, "document", "Camp plan", project_session, NOTED
+        )
+        site = documents.bear_item(
+            project, "decision", "Camp site", project_session, SITE
+        )
+        turn = a_turn(session, project_session)
+        noted(session, camp, "Q1", turn, text="The lake froze.")
+        on_q1 = noted(
+            session,
+            camp,
+            "Q1",
+            turn,
+            suggested_answer="On the hill",
+            suggested_note="The lake froze over",
+        )
+        on_a1 = noted(
+            session,
+            camp,
+            "A1",
+            turn,
+            offer="Book the gear",
+            offer_taken_at=_at(10),
+            offer_taken_by_user_id=person.id,
+        )
+        whole = noted(session, camp, None, turn, text="Read the survey first.")
+        noted(session, site, "D1", turn, text="Gone.", withdrawn=True)
+        alert = alerted(session, camp, site, "D1", turn, "Pick the site first.")
+        for row in (on_q1, on_a1, whole, alert):
+            session.refresh(row)
+
+        items = _json(container.view_service().timeline(project))["items"]
+
+        assert [(item["notes"], item["alert"]) for item in items] == [
+            (
+                [
+                    {
+                        "block": None,
+                        "text": "Read the survey first.",
+                        "suggested_answer": None,
+                        "suggested_note": None,
+                        "offer": None,
+                        "offer_taken": False,
+                        "at": utc_time(whole.created_at),
+                    },
+                    {
+                        "block": "Q1",
+                        "text": None,
+                        "suggested_answer": "On the hill",
+                        "suggested_note": "The lake froze over",
+                        "offer": None,
+                        "offer_taken": False,
+                        "at": utc_time(on_q1.created_at),
+                    },
+                    {
+                        "block": "A1",
+                        "text": None,
+                        "suggested_answer": None,
+                        "suggested_note": None,
+                        "offer": "Book the gear",
+                        "offer_taken": True,
+                        "at": utc_time(on_a1.created_at),
+                    },
+                ],
+                {
+                    "text": "Pick the site first.",
+                    "awaits": f"{site.id}/D1",
+                    "at": utc_time(alert.created_at),
+                },
+            ),
+            ([], None),
+        ]
+
+    def test_a_row_that_is_no_prose_items_carries_no_notes(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        container.record_service().place_work(
+            project, project_session, "Pitch the tent", repo="example/Camp"
+        )
+
+        [entry] = _json(container.view_service().timeline(project))["items"]
+
+        assert entry["kind"] == "work"
+        assert "notes" not in entry
+        assert "alert" not in entry
 
     def test_timeline_moved_tells_the_bus_after_the_commit(
         self,

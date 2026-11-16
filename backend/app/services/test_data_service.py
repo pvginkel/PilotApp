@@ -16,7 +16,8 @@ invented: this repository is public.
 import hashlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -70,6 +71,7 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
+from app.schemas.pilot_store import StandingOutcome
 from app.schemas.pilot_work import (
     DebriefEntryRequestSchema,
     ProgressStepRequestSchema,
@@ -1191,9 +1193,80 @@ class TestDataService:
             InvalidOperationException: the item is no registered document or
                 is done, or a block is answered or was asked about already.
         """
+        item = self._existing(item_id)
+        asked: list[str] = []
+        with self._in_a_pass(item) as brain:
+            for asking in questions:
+                asked = self.pilot_store_service.ask_writer(
+                    brain, f"{item.id}/{asking.block}", asking.question
+                )
+        return asked
+
+    def note(
+        self,
+        item_id: uuid.UUID,
+        block: str | None,
+        *,
+        text: str | None,
+        suggested_answer: str | None,
+        suggested_note: str | None,
+        offer: str | None,
+    ) -> StandingOutcome:
+        """Pilot's note on the block `block`, by its local id, of the open
+        prose item, or with none on the item as a whole, written as the
+        pre-ruling pass's `note` writes it (F86.10), in the one Turn of a
+        job's Session of the item's project placed for the pass, ended once
+        it is written, the Session idle with nothing started. None of the
+        four takes the standing note off.
+
+        Raises:
+            RecordNotFoundException: no item has the id, or its document has no
+                such block.
+            InvalidOperationException: as `note` refuses the call.
+        """
+        item = self._existing(item_id)
+        with self._in_a_pass(item) as brain:
+            return self.pilot_store_service.note(
+                brain,
+                item.id,
+                None if block is None else f"{item.id}/{block}",
+                text=text,
+                suggested_answer=suggested_answer,
+                suggested_note=suggested_note,
+                offer=offer,
+            )
+
+    def alert(
+        self, item_id: uuid.UUID, *, text: str | None, awaits: str | None
+    ) -> StandingOutcome:
+        """Pilot's alert on the open prose item that the block `awaits`,
+        `<item id>/<local id>`, of another open item comes before its Send,
+        written as the pre-ruling pass's `alert` writes it (F86.11), in a
+        pass's Turn as `note` writes one. Neither takes the standing alert
+        off.
+
+        Raises:
+            RecordNotFoundException: no item has the id, or the awaited block
+                is not of the project.
+            InvalidOperationException: as `alert` refuses the call.
+        """
+        item = self._existing(item_id)
+        with self._in_a_pass(item) as brain:
+            return self.pilot_store_service.alert(
+                brain, item.id, text=text, awaits=awaits
+            )
+
+    def _existing(self, item_id: uuid.UUID) -> Item:
         item = self.db.get(Item, item_id)
         if item is None:
             raise RecordNotFoundException("Item", str(item_id))
+        return item
+
+    @contextmanager
+    def _in_a_pass(self, item: Item) -> Iterator[Brain]:
+        """The brain of a job's Session of `item`'s project placed for a
+        pre-ruling pass, the server's, its one Turn running while the block
+        runs and ended after it, the Session idle with nothing started."""
         now = self.db.scalar(select(func.now()))
         assert now is not None
         session = AgentSession(
@@ -1216,17 +1289,11 @@ class TestDataService:
         )
         self.db.add(turn)
         self.db.flush()
-        brain = Brain(session.id, session.project_id, JOB)
-        asked: list[str] = []
-        for asking in questions:
-            asked = self.pilot_store_service.ask_writer(
-                brain, f"{item.id}/{asking.block}", asking.question
-            )
+        yield Brain(session.id, session.project_id, JOB)
         turn.ended_at = now
         session.state_code = SessionState.IDLE
         session.turn_ended_at = now
         self.db.flush()
-        return asked
 
     def clarify(self, item_id: uuid.UUID, reply: str | None) -> AgentSession:
         """The clarification run of the pre-ruling pass that asked about the

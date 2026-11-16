@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.engine.attachments import MAX_CALL_FILES, MAX_CALL_SIZE, copied
-from app.engine.bus import EngineEvent, ProjectChanged
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.claims import standing
+from app.engine.paths import TIMELINE, tree_path
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
@@ -396,6 +397,15 @@ def _opened(db: DbSession, project: Project) -> Project:
 
 def _pilot(db: DbSession) -> User:
     return db.scalars(select(User).where(User.kind_code == UserKind.AGENT)).one()
+
+
+def _moved(events: list[EngineEvent], path: str) -> str:
+    """The hash the last of `events` that moved `path`'s gave it."""
+    return [
+        event.hash
+        for event in events
+        if isinstance(event, TreeHashMoved) and event.path == path
+    ][-1]
 
 
 def _effects(db: DbSession) -> list[Effect]:
@@ -1005,6 +1015,38 @@ class TestPilotStoreServiceMark:
         [effect] = _effects(session)
         assert (effect.kind_code, effect.item_id) == (EffectKind.MARKED, item.id)
         assert _jobs_after(session, item) == []
+
+    def test_done_for_a_person_takes_no_recommendation_pilots_note_differs_on(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", CAMP_PLAN)
+        service = _service(container)
+        service.note(
+            _admitted(run),
+            item.id,
+            f"{item.id}/D1",
+            text=None,
+            suggested_answer="Tunnel",
+            suggested_note=None,
+            offer=None,
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            service.mark(_admitted(run), item.id, "done", "ada", TOOL_USE_ID)
+
+        assert refused.value.cause == (
+            "these blocks have neither an answer nor a recommendation: D1 (Pilot's"
+            " note on D1 suggests another answer than its recommendation)"
+        )
+        assert item.done_at is None
+        assert _block(session, item, "D1").answer is None
+        assert _effects(session) == []
 
     @pytest.mark.parametrize(
         ("kind", "title", "text", "mark", "verb", "undo"),
@@ -2697,6 +2739,8 @@ class TestPilotStoreServiceNote:
         job = _brain(session, project, environment, "job")
         item = _noted(session, container, project, job)
         brain, item_id, project_id = _admitted(job), item.id, project.id
+        timeline = tree_path(project, TIMELINE)
+        before = container.view_service().timeline(project).hash
         with scoped_session(container):
             pass
         engine_events.clear()
@@ -2713,6 +2757,7 @@ class TestPilotStoreServiceNote:
             )
 
         assert ProjectChanged(project_id) in engine_events
+        assert _moved(engine_events, timeline) != before
 
 
 class TestPilotStoreServiceNoteOnAHeldBlock:
@@ -3015,6 +3060,8 @@ class TestPilotStoreServiceAlert:
             f"{first.id}/D1",
             project.id,
         )
+        timeline = tree_path(project, TIMELINE)
+        before = container.view_service().timeline(project).hash
         with scoped_session(container):
             pass
         engine_events.clear()
@@ -3023,6 +3070,7 @@ class TestPilotStoreServiceAlert:
             _service(container).alert(brain, item_id, text="First.", awaits=awaits)
 
         assert ProjectChanged(project_id) in engine_events
+        assert _moved(engine_events, timeline) != before
 
 
 ELSEWHERE = "example-elsewhere"

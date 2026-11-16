@@ -30,6 +30,7 @@ from app.models import (
     Item,
     ItemAttachment,
     ItemKind,
+    PilotNote,
     PlanTask,
     Project,
     ProjectTransition,
@@ -65,13 +66,17 @@ from app.schemas.pilot_work import ProgressStepRequestSchema, ProgressStepSchema
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.schemas.timeline import (
     AttachmentSchema,
+    AwaitedAskSchema,
+    BlockPartSchema,
     DebriefEntrySchema,
     DebriefSchema,
     DebriefSectionSchema,
     DoneCauseCode,
     HeldReason,
     ItemKindCode,
+    PilotNoteSchema,
     RetriedSchema,
+    SendAlertSchema,
     StopCause,
 )
 from app.services.auth_service import AuthContext
@@ -88,6 +93,7 @@ from app.services.wait_service import ReportedTransition
 from app.services.working_on import Reading
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.parses import parses
+from tests.support.pilot_notes import a_turn, alerted, block_of, noted
 from tests.support.statements import sent
 from tests.support.store_updates import hold, lift, stopped_job
 from tests.support.turns import end_turns, turn_in_flight
@@ -766,6 +772,10 @@ class TestTimeline:
         camp.job_after(queue, SessionState.HELD)
         camp.worker(SessionState.HELD)
         camp.wait(queue)
+        turn = a_turn(session, queue)
+        noted(session, asked, "Q1", turn, suggested_answer="On the hill")
+        noted(session, asked, None, turn, text="The lake froze over.")
+        alerted(session, asked, held, "A2", turn, "Do the second chore first.")
 
         def reads() -> list[Any]:
             with sent(session) as each:
@@ -1040,6 +1050,7 @@ class TestTimeline:
                     "held": None,
                     "deferral": None,
                     "writer_asked": False,
+                    "pilots_note": None,
                     "section": None,
                 },
             },
@@ -5348,3 +5359,198 @@ class TestBadges:
             camp.id: Badge(2, False),
             hike.id: Badge(1, True),
         }
+
+
+NOTED = """---
+title: Camp plan
+---
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+recommend: Dome
+```
+
+```question id=Q1
+default: By the lake
+```
+
+```action id=A1
+```
+"""
+
+
+SITE = """---
+title: Where do we camp?
+---
+
+```question id=Q1
+default: By the lake
+```
+
+```question id=Q2
+default: Two nights
+```
+"""
+
+
+def _notes(
+    container: ServiceContainer, project: Project, item: Item
+) -> dict[str | None, PilotNoteSchema | None]:
+    """The notes the item's entry on the timeline carries: on each block by
+    its local id, and on the item as a whole under none."""
+    (entry,) = [
+        entry
+        for entry in container.timeline_service().timeline(project.id).items
+        if entry.id == item.id
+    ]
+    assert entry.body is not None
+    return {
+        None: entry.pilots_note,
+        **{
+            part.block.id: part.block.pilots_note
+            for part in entry.body
+            if isinstance(part, BlockPartSchema)
+        },
+    }
+
+
+def _note_read(
+    note: PilotNote, *, differs: bool = False, late: bool = False
+) -> PilotNoteSchema:
+    return PilotNoteSchema(
+        id=note.id,
+        text=note.text,
+        suggested_answer=note.suggested_answer,
+        suggested_note=note.suggested_note,
+        offer=note.offer,
+        offer_taken=note.offer_taken_at is not None,
+        differs=differs,
+        late=late,
+        at=note.created_at,
+    )
+
+
+@pytest.mark.usefixtures("person")
+class TestPilotsNotes:
+    def test_each_block_carries_its_standing_note_and_whether_it_differs(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", NOTED)
+        turn = a_turn(session, run)
+        on_d1 = noted(
+            session,
+            item,
+            "D1",
+            turn,
+            text="You ruled one tent last week.",
+            suggested_answer="Tunnel",
+            suggested_note="One tent, as ruled",
+        )
+        on_q1 = noted(session, item, "Q1", turn, suggested_answer="By the lake")
+        on_a1 = noted(
+            session,
+            item,
+            "A1",
+            turn,
+            offer="Grow the volume",
+            offer_taken_at=datetime.now(UTC),
+            offer_taken_by_user_id=person.id,
+        )
+        session.refresh(on_d1)
+        session.refresh(on_q1)
+        session.refresh(on_a1)
+
+        assert _notes(container, project, item) == {
+            None: None,
+            "D1": _note_read(on_d1, differs=True),
+            "Q1": _note_read(on_q1),
+            "A1": _note_read(on_a1),
+        }
+        assert _note_read(on_a1).offer_taken is True
+        read = container.timeline_service().item_document(item.id)
+        assert read.body is not None
+        assert [
+            part.block.pilots_note
+            for part in read.body
+            if isinstance(part, BlockPartSchema)
+        ] == [
+            _note_read(on_d1, differs=True),
+            _note_read(on_q1),
+            _note_read(on_a1),
+        ]
+
+    def test_a_note_written_after_its_place_came_to_a_person_is_late(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", NOTED)
+        turn = a_turn(session, run)
+        on_d1 = noted(session, item, "D1", turn, text="The site moved.")
+        on_q1 = noted(session, item, "Q1", turn, text="The lake froze.")
+        whole = noted(session, item, None, turn, text="Read the survey first.")
+        session.refresh(on_d1)
+        session.refresh(on_q1)
+        session.refresh(whole)
+        hour = timedelta(hours=1)
+        block_of(session, item, "D1").handed_at = on_d1.created_at - hour
+        block_of(session, item, "Q1").handed_at = on_q1.created_at + hour
+        session.flush()
+
+        assert _notes(container, project, item) == {
+            None: _note_read(whole),
+            "D1": _note_read(on_d1, late=True),
+            "Q1": _note_read(on_q1),
+            "A1": None,
+        }
+
+        block_of(session, item, "Q1").handed_at = None
+        session.flush()
+
+        assert _notes(container, project, item)[None] == _note_read(whole, late=True)
+
+    def test_an_alert_shows_while_its_item_and_the_awaited_asks_item_are_open(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        camp = _bear(container, project, run, "document", "Camp plan", NOTED)
+        site = _bear(container, project, run, "document", "Where?", SITE)
+        turn = a_turn(session, run)
+        alerted(session, camp, site, "Q1", turn, "Pick the site first.")
+
+        def alerts() -> dict[uuid.UUID, SendAlertSchema | None]:
+            return {
+                entry.id: entry.send_alert
+                for entry in container.timeline_service().timeline(project.id).items
+                if entry.id in (camp.id, site.id)
+            }
+
+        shown = SendAlertSchema(
+            text="Pick the site first.",
+            awaits=AwaitedAskSchema(
+                item=site.id, title="Where do we camp?", block="Q1"
+            ),
+        )
+        assert alerts() == {camp.id: shown, site.id: None}
+        assert container.timeline_service().item_document(camp.id).send_alert == shown
+
+        container.record_service().done(site, person)
+        alerted(session, site, camp, "D1", turn, "Pick the tent first.")
+
+        assert alerts() == {camp.id: None, site.id: None}

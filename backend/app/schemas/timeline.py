@@ -407,6 +407,82 @@ class CancelSchema(BaseModel):
     )
 
 
+class PilotNoteSchema(BaseModel):
+    """Pilot's note standing on a block, or on its item as a whole (F168; DB
+    625): what only Pilot knows about the ask, beside the document and never
+    in its text (DB 632)."""
+
+    id: int = Field(description="The note's id", examples=[12])
+    text: str | None = Field(
+        description="Its few lines, Markdown; null where it gives none",
+        examples=["On 3 November you ruled one environment between runs."],
+    )
+    suggested_answer: str | None = Field(
+        description=(
+            "The answer Pilot suggests: an option's label, `Agree`, `Yes`, `No` "
+            "or free words; null where it suggests none"
+        ),
+        examples=["Keep it to the turn"],
+    )
+    suggested_note: str | None = Field(
+        description=(
+            "The note Pilot suggests beside that answer, or for an action's Done; "
+            "null where it suggests none"
+        )
+    )
+    offer: str | None = Field(
+        description=(
+            "The work Pilot would do about the action on a member's word, in a "
+            "line (F168.7); null where it offers none"
+        )
+    )
+    offer_taken: bool = Field(
+        description="Whether a member took its offer; false where it has none"
+    )
+    differs: bool = Field(
+        description=(
+            "Whether its suggested answer is not the answer the block's "
+            "recommendation would record, compared exactly, which takes that "
+            "recommendation away: Done records none for the block and is refused "
+            "while it is unanswered (F168.4; DB 628). False where it suggests "
+            "none, on a block with no recommendation, and on the item as a whole"
+        )
+    )
+    late: bool = Field(
+        description=(
+            "Whether it was written after its place last came to a person: after "
+            "its block was handed over to one, or, on the item as a whole, after "
+            "the latest of its blocks was; false where none was. Derived, never "
+            "stored"
+        )
+    )
+    at: datetime = Field(description="When it was written")
+
+
+class AwaitedAskSchema(BaseModel):
+    """The ask an alert names to answer first: a block of another open item
+    of the project."""
+
+    item: uuid.UUID = Field(description="The block's item, its document's address")
+    title: str = Field(
+        description="The item's title, as its line shows it: its text's, else its file's name (F35)",
+        examples=["Dev check"],
+    )
+    block: str = Field(description="The block's local id", examples=["D1"])
+
+
+class SendAlertSchema(BaseModel):
+    """Pilot's alert on an open item for what its Send starts, while another
+    open ask has to be answered before it is sent (F168.6; DB 631). It stops
+    no Send."""
+
+    text: str = Field(
+        description="What to answer first and what the Send starts, Markdown",
+        examples=["Answer the dev check's decision before you send this."],
+    )
+    awaits: AwaitedAskSchema = Field(description="The ask to answer first")
+
+
 class BlockSchema(BaseModel):
     """An ask in its item's text, with its definition and its answer (F30, F31)."""
 
@@ -473,6 +549,12 @@ class BlockSchema(BaseModel):
             "Whether Pilot asked the registered document's writer about the block "
             "(F52.2), which its head's mark says, opening the document at the "
             "questions and the reply; false for every other block"
+        )
+    )
+    pilots_note: PilotNoteSchema | None = Field(
+        description=(
+            "Pilot's note standing on the block (F168.1), on a block Pilot "
+            "answered or holds too; null where none stands"
         )
     )
     section: SectionSchema | None = Field(
@@ -1146,6 +1228,20 @@ class TimelineItemSchema(BaseModel):
             "it was retried, which its session log's head carries, wherever "
             "the job shows (F59.1); null until it is placed, and for every "
             "other item"
+        )
+    )
+    pilots_note: PilotNoteSchema | None = Field(
+        description=(
+            "Pilot's note standing on the document as a whole (F168.5): its "
+            "`text` alone; null where none stands, and on every item but a prose "
+            "item"
+        )
+    )
+    send_alert: SendAlertSchema | None = Field(
+        description=(
+            "Pilot's alert standing on the item, while the item and the item of "
+            "the ask it awaits are both open (F168.6; DB 631); null otherwise, "
+            "and on every item but a prose item"
         )
     )
 

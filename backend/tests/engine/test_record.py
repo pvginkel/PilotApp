@@ -67,6 +67,7 @@ from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.debriefs import placed_notice
 from tests.support.fake_sidecar import FakeSidecar
 from tests.support.locks import in_thread, lock_waits
+from tests.support.pilot_notes import a_turn, noted
 from tests.support.starts import configured_starts
 from tests.support.statements import sent
 from tests.support.supervisor import Supervise, wait_until
@@ -1543,6 +1544,156 @@ class TestRecordServiceDone:
         assert document.published_text == UNREADY
         assert _done(item) == (None, None, None)
         assert len(_versions(session, document)) == 1
+
+    def test_a_block_pilots_note_differs_on_has_no_recommendation(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "document",
+            "Camp plan",
+            RECOMMENDED,
+        )
+        turn = a_turn(session, project_session)
+        noted(session, item, "D1", turn, suggested_answer="Tunnel")
+        noted(session, item, "C1", turn, suggested_answer="No")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().done(item, person)
+
+        assert refused.value.cause == (
+            "these blocks have neither an answer nor a recommendation: D1, C1"
+            " (Pilot's note on D1, C1 suggests another answer than its"
+            " recommendation)"
+        )
+        assert document.published_text == RECOMMENDED
+        assert _done(item) == (None, None, None)
+        assert len(_versions(session, document)) == 1
+
+    def test_done_records_the_recommendations_beside_a_differing_blocks_answer(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "document",
+            "Camp plan",
+            RECOMMENDED,
+        )
+        noted(
+            session,
+            item,
+            "D1",
+            a_turn(session, project_session),
+            suggested_answer="Tunnel",
+        )
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+
+        records.done(item, person)
+
+        assert [
+            (block.local_id, block.answer, block.via_code)
+            for block in session.scalars(
+                select(Block)
+                .where(Block.document_id == document.id)
+                .order_by(Block.position)
+            )
+        ] == [
+            ("D1", "Tunnel", AnswerChannel.APP),
+            ("D2", "Agree", AnswerChannel.RECOMMENDED),
+            ("C1", "Yes", AnswerChannel.RECOMMENDED),
+            ("Q1", "The lake", AnswerChannel.RECOMMENDED),
+            ("A1", None, AnswerChannel.APP),
+        ]
+        assert _done(item) == (item.done_at, "marked", person.id)
+
+    def test_a_note_that_agrees_suggests_nothing_or_is_withdrawn_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "document",
+            "Camp plan",
+            RECOMMENDED,
+        )
+        turn = a_turn(session, project_session)
+        noted(session, item, "D1", turn, suggested_answer="Dome")
+        noted(session, item, "D2", turn, text="The fire ban ended on Friday.")
+        noted(session, item, "Q1", turn, suggested_answer="The hill")
+        noted(session, item, "Q1", turn, text="Gone.", withdrawn=True)
+
+        container.record_service().done(item, person)
+
+        assert [
+            (block.local_id, block.via_code)
+            for block in session.scalars(
+                select(Block)
+                .where(Block.document_id == document.id)
+                .order_by(Block.position)
+            )
+        ] == [
+            ("D1", AnswerChannel.RECOMMENDED),
+            ("D2", AnswerChannel.RECOMMENDED),
+            ("C1", AnswerChannel.RECOMMENDED),
+            ("Q1", AnswerChannel.RECOMMENDED),
+            ("A1", AnswerChannel.APP),
+        ]
+
+    def test_a_suggestion_on_a_block_with_no_recommendation_changes_no_refusal(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, _ = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "document",
+            "Camp chores",
+            UNREADY,
+        )
+        noted(
+            session,
+            item,
+            "Q1",
+            a_turn(session, project_session),
+            suggested_answer="Oak",
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().done(item, person)
+
+        assert refused.value.cause == (
+            "these blocks have neither an answer nor a recommendation: Q1, A1"
+        )
 
     def test_pilots_done_settles_a_document_answered_whole(
         self,

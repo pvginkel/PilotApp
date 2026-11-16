@@ -26,7 +26,8 @@ another document of the run awaited its read. The moves back to Pilot: a
 Resume, a Retry, a work item added with its claims and researches, and a
 clarification run placed.
 
-Nothing reads `handed_at` to decide anything.
+Nothing reads `handed_at` to decide anything: the page's read derives from
+it alone whether Pilot's note came after its place came to a person.
 """
 
 import uuid

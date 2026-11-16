@@ -58,6 +58,7 @@ from app.engine.documents import (
     awaits_read,
 )
 from app.engine.paths import tree_path
+from app.engine.pilot_notes import differs, standing_notes
 from app.engine.references import References
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -519,7 +520,8 @@ class RecordService:
         unanswered block that has a recommendation answered with it, `user`'s,
         `via: recommended`; then a `done` Document Version of the published
         text and the item's mark. Refused while a block has neither, a claimed
-        action not yet done among them (DB 154). Pilot's Done is on a document
+        action not yet done among them (DB 154); a block Pilot's standing
+        note differs on has no recommendation (DB 628). Pilot's Done is on a document
         it settled whole, every block answered (decision 42), and on a
         registered document of one block, which takes its block's kind, once
         that block is answered, deferred, or claimed and done. Done through
@@ -548,21 +550,32 @@ class RecordService:
         if pilots:
             cause = SETTLED
             unready = [block for block in blocks if not block.answered]
-            problem = (
+            refusal = (
                 "Pilot marks done only a document it settled whole, and these"
-                " blocks are unanswered"
+                " blocks are unanswered: " + ", ".join(b.local_id for b in unready)
             )
         else:
             cause = MARKED
+            differing = self._differing(item, blocks)
             unready = [
                 block
                 for block in blocks
-                if not block.answered and dsl.recommendation(block) is None
+                if not block.answered
+                and (block.local_id in differing or dsl.recommendation(block) is None)
             ]
-            problem = "these blocks have neither an answer nor a recommendation"
+            noted = [block.local_id for block in unready if block.local_id in differing]
+            refusal = (
+                "these blocks have neither an answer nor a recommendation: "
+                + ", ".join(block.local_id for block in unready)
+                + (
+                    f" (Pilot's note on {', '.join(noted)} suggests another answer"
+                    " than its recommendation)"
+                    if noted
+                    else ""
+                )
+            )
         if unready:
-            ids = ", ".join(block.local_id for block in unready)
-            raise InvalidOperationException(operation, f"{problem}: {ids}")
+            raise InvalidOperationException(operation, refusal)
         at = _now()
         if cause == MARKED:
             text = dsl.write_recommended(_published(document), by=user.handle, at=at)
@@ -572,6 +585,19 @@ class RecordService:
         self._mark(
             project, item, document, cause, user, at, via=via, session_id=session_id
         )
+
+    def _differing(self, item: Item, blocks: Sequence[dsl.Block]) -> set[str]:
+        """The local ids of `blocks`, the published text's of `item`, that
+        Pilot's standing note differs on (DB 628)."""
+        notes = {
+            standing.block: standing.note
+            for standing in standing_notes(self.db, [item.id]).get(item.id, [])
+        }
+        return {
+            block.local_id
+            for block in blocks
+            if (note := notes.get(block.local_id)) is not None and differs(note, block)
+        }
 
     def read(
         self, item: Item, user: User, *, via: AnswerChannel = AnswerChannel.APP

@@ -13,7 +13,7 @@ scenario's load."""
 
 import base64
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,6 +37,7 @@ from app.models import (
     Item,
     ItemAttachment,
     ItemSighting,
+    PilotNote,
     ProgressStep,
     Project,
     ProjectMember,
@@ -157,6 +158,14 @@ def _writer_questions_path(item_id: uuid.UUID | str) -> str:
 
 def _clarification_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/clarification"
+
+
+def _notes_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/notes"
+
+
+def _alerts_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/alerts"
 
 
 def _chat_answers_path(project_id: uuid.UUID | str) -> str:
@@ -2079,6 +2088,8 @@ ENDPOINTS = [
         {"questions": [{"block": "Q1", "question": "Which?"}]},
     ),
     (_clarification_path(NO_ROW), {"reply": "Lake Ilm."}),
+    (_notes_path(NO_ROW), {"text": "Why."}),
+    (_alerts_path(NO_ROW), {"text": "First.", "awaits": f"{NO_ROW}/D1"}),
     (
         _chat_answers_path(NO_ROW),
         {"block": f"{NO_ROW}/D1", "value": "Yes", "for": "ada"},
@@ -2922,6 +2933,145 @@ class TestCreateWriterQuestions:
         self, client: FlaskClient, document: Item, body: dict[str, Any]
     ) -> None:
         response = client.post(_writer_questions_path(document.id), json=body)
+
+        assert response.status_code == 400
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateNotesAndAlerts:
+    @pytest.fixture
+    def documents(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> tuple[Item, Item]:
+        """Two open documents of the project, committed so that a refused
+        call's rollback keeps them."""
+        bear = container.document_service().bear_item
+        camp = bear(project, "document", "Camp plan", project_session, QUESTIONED)
+        site = bear(project, "document", "Camp site", project_session, QUESTIONED)
+        session.commit()
+        return camp, site
+
+    def test_a_note_is_written_in_a_passs_turn_and_read_on_its_block(
+        self,
+        client: FlaskClient,
+        session: Session,
+        project: Project,
+        documents: tuple[Item, Item],
+    ) -> None:
+        camp, _ = documents
+
+        response = client.post(
+            _notes_path(camp.id),
+            json={
+                "block": "Q1",
+                "text": "The north shore flooded.",
+                "suggested_answer": "Lake Ilm",
+                "suggested_note": "Dry ground",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"outcome": "written"}
+        [job] = session.scalars(
+            select(models.Session).where(models.Session.kind_code == "job")
+        )
+        assert (job.project_id, job.state_code) == (project.id, SessionState.IDLE)
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == job.id))
+        assert turn.ended_at is not None
+        [note] = session.scalars(select(PilotNote))
+        assert note.turn_id == turn.id
+        line = _timeline_item(client, str(project.id), str(camp.id))
+        assert {
+            part["block"]["id"]: _within(
+                part["block"]["pilots_note"],
+                {
+                    "text": "The north shore flooded.",
+                    "suggested_answer": "Lake Ilm",
+                    "suggested_note": "Dry ground",
+                    "differs": False,
+                },
+            )
+            for part in line["body"]
+            if part["type"] == "block"
+        } == {"Q1": True, "Q2": False}
+
+    def test_a_note_on_the_item_as_a_whole_and_its_withdrawal(
+        self,
+        client: FlaskClient,
+        project: Project,
+        documents: tuple[Item, Item],
+    ) -> None:
+        camp, _ = documents
+
+        written = client.post(_notes_path(camp.id), json={"text": "Read it first."})
+        shown = _timeline_item(client, str(project.id), str(camp.id))["pilots_note"]
+        withdrawn = client.post(_notes_path(camp.id), json={})
+
+        assert written.get_json() == {"outcome": "written"}
+        assert _within(shown, {"text": "Read it first.", "late": False})
+        assert withdrawn.get_json() == {"outcome": "withdrawn"}
+        assert (
+            _timeline_item(client, str(project.id), str(camp.id))["pilots_note"] is None
+        )
+
+    def test_an_alert_is_written_in_a_passs_turn_and_read_on_its_item(
+        self,
+        client: FlaskClient,
+        project: Project,
+        documents: tuple[Item, Item],
+    ) -> None:
+        camp, site = documents
+
+        response = client.post(
+            _alerts_path(camp.id),
+            json={"text": "Pick the site first.", "awaits": f"{site.id}/Q2"},
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"outcome": "written"}
+        assert _timeline_item(client, str(project.id), str(camp.id))["send_alert"] == {
+            "text": "Pick the site first.",
+            "awaits": {"item": str(site.id), "title": "Camp site", "block": "Q2"},
+        }
+
+    def test_what_the_tools_refuse_conflicts_and_an_unknown_item_is_not_found(
+        self, client: FlaskClient, documents: tuple[Item, Item]
+    ) -> None:
+        camp, _ = documents
+
+        unknown = client.post(_notes_path(uuid.uuid4()), json={"text": "Why."})
+        no_block = client.post(_notes_path(camp.id), json={"block": "Q9", "text": "?"})
+        none_stands = client.post(_notes_path(camp.id), json={"block": "Q1"})
+        half = client.post(_alerts_path(camp.id), json={"text": "First."})
+
+        assert (unknown.status_code, no_block.status_code) == (404, 404)
+        assert (none_stands.status_code, half.status_code) == (409, 409)
+        assert none_stands.get_json()["error"].endswith(
+            f"because no note of Pilot's stands on {camp.id}/Q1"
+        )
+
+    @pytest.mark.parametrize(
+        ("path", "body"),
+        [
+            (_notes_path, {"block": ""}),
+            (_notes_path, {"text": ""}),
+            (_notes_path, {"answer": "Yes"}),
+            (_alerts_path, {"text": "First.", "awaits": "D1"}),
+        ],
+        ids=["an-empty-block", "empty-text", "an-unknown-field", "a-bare-local-id"],
+    )
+    def test_a_body_that_is_not_a_note_or_an_alert_is_invalid(
+        self,
+        client: FlaskClient,
+        documents: tuple[Item, Item],
+        path: Callable[[uuid.UUID], str],
+        body: dict[str, Any],
+    ) -> None:
+        response = client.post(path(documents[0].id), json=body)
 
         assert response.status_code == 400
 

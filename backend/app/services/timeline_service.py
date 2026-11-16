@@ -22,6 +22,13 @@ from sqlalchemy.orm import Session, aliased, defer
 from app.engine.claims import standing
 from app.engine.documents import ARCHIVE_QUESTION, OPENING, PROSE, awaits_read
 from app.engine.paths import tree_path
+from app.engine.pilot_notes import (
+    StandingAlert,
+    StandingNote,
+    differs,
+    standing_alerts,
+    standing_notes,
+)
 from app.engine.record import (
     DEBRIEF_NOTICE,
     MARKED,
@@ -46,6 +53,7 @@ from app.models import (
     Item,
     ItemAttachment,
     ItemKind,
+    PilotNote,
     PlanTask,
     ProgressStep,
     Project,
@@ -78,6 +86,7 @@ from app.schemas.links import EnvironmentNameSchema
 from app.schemas.pilot_work import ProgressStepSchema
 from app.schemas.timeline import (
     AttachmentSchema,
+    AwaitedAskSchema,
     BlockPartSchema,
     BlockSchema,
     BodyPartSchema,
@@ -102,11 +111,13 @@ from app.schemas.timeline import (
     ItemKindCode,
     JobSchema,
     OptionSchema,
+    PilotNoteSchema,
     PilotsWorkSchema,
     ProjectDocumentSchema,
     ProsePartSchema,
     RetriedSchema,
     SectionSchema,
+    SendAlertSchema,
     StepSchema,
     StopCause,
     TakenBackSchema,
@@ -759,6 +770,7 @@ class TimelineService:
             {},
             frozenset(),
             _Pilots({}, {}, frozenset(), {}),
+            {},
         )
         return ProjectDocumentSchema(
             title=dsl.parse(text).title,
@@ -784,6 +796,20 @@ class TimelineService:
         asked = writer_asked(self.db, documents)
         clarified = on_documents(self.db, documents)
         pilots = self._pilots(Reading(self.db), documents, list(bodies))
+        notes = standing_notes(self.db, documents)
+        on_blocks = {
+            (item_id, standing.block): standing
+            for item_id, each in notes.items()
+            for standing in each
+            if standing.block is not None
+        }
+        on_items = {
+            item_id: each[0].note
+            for item_id, each in notes.items()
+            if each[0].block is None
+        }
+        handed = self._handed(list(on_items))
+        alerts = standing_alerts(self.db, documents)
         on = jobs_on(self.db, [item.id for item, _, _ in rows])
         job_ids = set(on.shown.values()) | set(on.after_turn.values())
         works = work_status(
@@ -848,6 +874,7 @@ class TimelineService:
                 for local_id in local_ids
             ),
             pilots,
+            on_blocks,
         )
         paths = [
             tree_path(project, document.path)
@@ -938,6 +965,18 @@ class TimelineService:
                 cancel=pilots.cancels.get(item.id),
                 job=job(on.shown.get(item.id)),
                 after_turn=job(on.after_turn.get(item.id)),
+                pilots_note=(
+                    None
+                    if item.id not in on_items
+                    else _pilots_note(
+                        on_items[item.id], differs=False, handed_at=handed.get(item.id)
+                    )
+                ),
+                send_alert=(
+                    None
+                    if item.id not in alerts or item.done_at is not None
+                    else _send_alert(alerts[item.id])
+                ),
             )
             for item, document, form in rows
         ]
@@ -1016,6 +1055,7 @@ class TimelineService:
         claims: dict[tuple[uuid.UUID, str], WorkLinkSchema],
         asked: frozenset[tuple[uuid.UUID, str]],
         pilots: "_Pilots",
+        notes: dict[tuple[uuid.UUID, str], StandingNote],
     ) -> "_Reader":
         return _Reader(
             users=users,
@@ -1023,6 +1063,7 @@ class TimelineService:
             claims=claims,
             asked=asked,
             pilots=pilots,
+            notes=notes,
             tasks=dict(
                 self.db.execute(
                     select(PlanTask.task_id, PlanTask.title).where(
@@ -1265,6 +1306,23 @@ class TimelineService:
             },
         )
 
+    def _handed(
+        self, document_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, datetime | None]:
+        """When each of the documents `document_ids` last came to a person:
+        the latest `handed_at` among its blocks, none where none has one."""
+        if not document_ids:
+            return {}
+        return dict(
+            self.db.execute(
+                select(Block.document_id, func.max(Block.handed_at))
+                .where(Block.document_id.in_(document_ids))
+                .group_by(Block.document_id)
+            )
+            .tuples()
+            .all()
+        )
+
     def _edited(self, document_ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime]:
         """Each document's *Edited <time>* (F28.7, the planning's ruling): the
         time of its latest `turn` Version where a Version before it holds
@@ -1448,6 +1506,9 @@ class _Reader:
     claims: dict[tuple[uuid.UUID, str], WorkLinkSchema]
     asked: frozenset[tuple[uuid.UUID, str]]
     pilots: _Pilots
+    notes: dict[tuple[uuid.UUID, str], StandingNote]
+    """Pilot's note standing on each block, by its document's id and its
+    local id."""
     tasks: dict[str, str]
     reason: Callable[[str], Reason]
 
@@ -1465,6 +1526,16 @@ class _Reader:
                 type="prose", markdown=part.markdown, section=part.section
             )
         return BlockPartSchema(type="block", block=self._block(document_id, part))
+
+    def _note(self, document_id: uuid.UUID, block: dsl.Block) -> PilotNoteSchema | None:
+        standing = self.notes.get((document_id, block.local_id))
+        if standing is None:
+            return None
+        return _pilots_note(
+            standing.note,
+            differs=differs(standing.note, block),
+            handed_at=standing.handed_at,
+        )
 
     def _block(self, document_id: uuid.UUID, block: dsl.Block) -> BlockSchema:
         because = None if block.because is None else self.reason(block.because)
@@ -1518,12 +1589,44 @@ class _Reader:
                 else None
             ),
             writer_asked=(document_id, block.local_id) in self.asked,
+            pilots_note=self._note(document_id, block),
             section=(
                 None
                 if block.section is None
                 else SectionSchema(heading=block.section.heading)
             ),
         )
+
+
+def _pilots_note(
+    note: PilotNote, *, differs: bool, handed_at: datetime | None
+) -> PilotNoteSchema:
+    """`note` as the page reads it, its place last handed to a person at
+    `handed_at`."""
+    return PilotNoteSchema(
+        id=note.id,
+        text=note.text,
+        suggested_answer=note.suggested_answer,
+        suggested_note=note.suggested_note,
+        offer=note.offer,
+        offer_taken=note.offer_taken_at is not None,
+        differs=differs,
+        late=handed_at is not None and note.created_at > handed_at,
+        at=note.created_at,
+    )
+
+
+def _send_alert(standing: StandingAlert) -> SendAlertSchema | None:
+    """An open item's standing alert as the page reads it: none once the
+    item of the ask it awaits is done (DB 631)."""
+    if not standing.open:
+        return None
+    return SendAlertSchema(
+        text=standing.alert.text,
+        awaits=AwaitedAskSchema(
+            item=standing.item_id, title=standing.title, block=standing.block
+        ),
+    )
 
 
 def _wait(

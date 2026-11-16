@@ -22,6 +22,12 @@ from app.engine.paths import (
     sha256_hex,
     tree_path,
 )
+from app.engine.pilot_notes import (
+    StandingAlert,
+    StandingNote,
+    standing_alerts,
+    standing_notes,
+)
 from app.models import (
     Attachment,
     CardTransition,
@@ -154,13 +160,23 @@ class ViewService:
         shape, with its firings in order and, once marked, its note (TD
         §7.1); a done work item with its note, Pilot's reason for closing it
         for good, none after any other close (DB 350); a debrief's notice its
-        Item's row alone, no debrief it carries in it (DB 611, 328)."""
+        Item's row alone, no debrief it carries in it (DB 611, 328); a prose
+        item with Pilot's notes and alert standing on it (F74.2)."""
         rows = self.db.execute(
-            select(Item, Document.path, Document.summary, Document.published_hash)
+            select(
+                Item,
+                Document.id.is_not(None).label("prose"),
+                Document.path,
+                Document.summary,
+                Document.published_hash,
+            )
             .outerjoin(Document, Document.id == Item.id)
             .where(Item.project_id == project.id)
             .order_by(Item.seq)
         ).all()
+        prose_ids = [item.id for item, prose, _, _, _ in rows if prose]
+        notes = standing_notes(self.db, prose_ids)
+        alerts = standing_alerts(self.db, prose_ids)
         attachments = list(
             self.db.scalars(
                 select(Attachment)
@@ -202,7 +218,7 @@ class ViewService:
         handles = self._handles(
             {
                 user_id
-                for item, _, _, _ in rows
+                for item, _, _, _, _ in rows
                 for user_id in (item.for_user_id, item.done_by_user_id)
                 if user_id is not None
             }
@@ -236,7 +252,12 @@ class ViewService:
                         firings.get(item.id, []),
                         works.get(item.id),
                     )
-                    for item, path, summary, published_hash in rows
+                    | (
+                        _notes(notes.get(item.id, []), alerts.get(item.id))
+                        if prose
+                        else {}
+                    )
+                    for item, prose, path, summary, published_hash in rows
                 ],
                 "attachments": [
                     {
@@ -564,6 +585,33 @@ def _item(
     if wait is not None:
         entry |= _wait(wait, firings, handles)
     return entry
+
+
+def _notes(notes: list[StandingNote], alert: StandingAlert | None) -> dict[str, Any]:
+    """A prose item's standing Pilot Notes, each with its block's local id
+    or none for the item as a whole, and its standing Send Alert with the
+    block it awaits (F74.2)."""
+    return {
+        "notes": [
+            {
+                "block": standing.block,
+                "text": standing.note.text,
+                "suggested_answer": standing.note.suggested_answer,
+                "suggested_note": standing.note.suggested_note,
+                "offer": standing.note.offer,
+                "offer_taken": standing.note.offer_taken_at is not None,
+                "at": utc_time(standing.note.created_at),
+            }
+            for standing in notes
+        ],
+        "alert": None
+        if alert is None
+        else {
+            "text": alert.alert.text,
+            "awaits": f"{alert.item_id}/{alert.block}",
+            "at": utc_time(alert.alert.created_at),
+        },
+    }
 
 
 def _wait(

@@ -331,6 +331,68 @@ class InventedWriterQuestionsSchema(BaseModel):
     )
 
 
+class InventedNoteCreateSchema(BaseModel):
+    """Pilot's note on a block of an open prose item, by its local id, or
+    without one on the item as a whole, as the pre-ruling pass's `note`
+    writes it (F86.10); a body that gives none of the four takes the standing
+    one off."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    block: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The block's local id; none for a note on the item as a whole",
+        examples=["D1"],
+    )
+    text: str | None = Field(
+        default=None,
+        min_length=1,
+        description="What Pilot knows that bears on the ask, Markdown",
+        examples=["On 3 November you ruled one environment between runs."],
+    )
+    suggested_answer: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The answer Pilot suggests: an option's label, Agree, Yes, No or free words"
+        ),
+        examples=["Tunnel"],
+    )
+    suggested_note: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The note Pilot suggests beside that answer, or for an action's Done",
+    )
+    offer: str | None = Field(
+        default=None,
+        min_length=1,
+        description="The work Pilot would do about an open action, in a line",
+    )
+
+
+class InventedAlertCreateSchema(BaseModel):
+    """Pilot's alert on an open prose item that another open ask comes before
+    its Send, as the pre-ruling pass's `alert` writes it (F86.11); a body that
+    gives neither takes the standing one off."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str | None = Field(
+        default=None,
+        min_length=1,
+        description="What to answer first and what the Send starts",
+        examples=["Answer the site's decision first: sending books the gear."],
+    )
+    awaits: BlockId | None = Field(
+        default=None,
+        description=(
+            "The ask to answer first, `<item id>/<local id>`, a block of another"
+            " open item of the project"
+        ),
+    )
+
+
 class InventedClarificationCreateSchema(BaseModel):
     """The clarification run of the pre-ruling pass that asked about a
     registered document's blocks, with the writer's reply or to run."""

@@ -12,7 +12,9 @@ name in an environment of that controller's, named for the
 claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
 its effect, the list of steps it publishes and the debrief it gives; a pre-ruling pass's questions to a registered document's writer,
-and its clarification run, with the writer's reply or to run; a person's
+and its clarification run, with the writer's reply or to run; Pilot's
+notes on a prose item's blocks or on the item as a whole, and its alert for
+what an item's Send starts, each as the pass writes it; a person's
 answer the brain records through the project's open chat, with
 its effect; the store's update, made or its lift asked, as `update-store`
 does (F144.5); and the brain's waits, a card's transition delivered as the
@@ -40,7 +42,7 @@ from app.engine.paths import folder
 from app.exceptions import RouteNotAvailableException
 from app.models.reference import DocumentRole
 from app.schemas.common import ApiErrorResponseSchema
-from app.schemas.pilot_store import RecordedSchema
+from app.schemas.pilot_store import RecordedSchema, StandingSchema
 from app.schemas.pilot_work import (
     ProgressSchema,
     ProgressStepSchema,
@@ -50,6 +52,7 @@ from app.schemas.pilot_work import (
 )
 from app.schemas.testing_record import (
     InventedAdoptedProjectSchema,
+    InventedAlertCreateSchema,
     InventedAttachmentsCreateSchema,
     InventedAttachmentsSchema,
     InventedChatAnswerCreateSchema,
@@ -63,6 +66,7 @@ from app.schemas.testing_record import (
     InventedFiredSchema,
     InventedItemCreateSchema,
     InventedItemSchema,
+    InventedNoteCreateSchema,
     InventedPersonCreateSchema,
     InventedPersonSchema,
     InventedProjectCreateSchema,
@@ -775,6 +779,76 @@ def create_writer_questions(
     data = InventedWriterQuestionsCreateSchema.model_validate(request.get_json())
     blocks = test_data_service.ask_writer(item_id, data.questions)
     return InventedWriterQuestionsSchema(blocks=blocks).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/notes", methods=["POST"])
+@api.validate(
+    json=InventedNoteCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_200=StandingSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_note(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Put Pilot's note on a block of the open prose item, by its local id,
+    or without one on the item as a whole, as the pre-ruling pass's `note`
+    writes it (F86.10): in the one turn of a job's session of its project
+    placed for the pass and ended once it is written, nothing started. A body
+    that gives none of the four takes the standing note off.
+
+    Returns:
+        200: What the call did to the note standing in its place
+        400: The body is invalid, or the stage is prd
+        404: No item has the id, or its document has no such block
+        409: As `note` refuses the call: the reason
+    """
+    data = InventedNoteCreateSchema.model_validate(request.get_json())
+    outcome = test_data_service.note(
+        item_id,
+        data.block,
+        text=data.text,
+        suggested_answer=data.suggested_answer,
+        suggested_note=data.suggested_note,
+        offer=data.offer,
+    )
+    return StandingSchema(outcome=outcome).model_dump(mode="json")
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/alerts", methods=["POST"])
+@api.validate(
+    json=InventedAlertCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_200=StandingSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_alert(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Put Pilot's alert on the open prose item that a block of another open
+    item comes before its Send, as the pre-ruling pass's `alert` writes it
+    (F86.11), in a pass's turn as `notes` writes a note. A body that gives
+    neither takes the standing alert off.
+
+    Returns:
+        200: What the call did to the alert standing on the item
+        400: The body is invalid, or the stage is prd
+        404: No item has the id, or the awaited block is not of its project
+        409: As `alert` refuses the call: the reason
+    """
+    data = InventedAlertCreateSchema.model_validate(request.get_json())
+    outcome = test_data_service.alert(item_id, text=data.text, awaits=data.awaits)
+    return StandingSchema(outcome=outcome).model_dump(mode="json")
 
 
 @testing_record_bp.route("/items/<uuid:item_id>/clarification", methods=["POST"])

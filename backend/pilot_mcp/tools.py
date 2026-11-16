@@ -817,26 +817,28 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             ),
         ] = None,
     ) -> Standing:
-        """Put your note on a block of an open document of your project, an
-        ask a person answers, or without `block` on the document as a whole:
-        what you know that bears on the answer and the document does not say.
-        Write one only by exception: a `suggested_answer`, with its
-        `suggested_note`, where you would answer otherwise than the writer
-        recommends; `text` alone where you know something that could change
-        the answer; an `offer` where you would do work about an open action on
-        the person's word. None to say a block is fine or that you agree. The
-        note stands beside the document, never in its text, and nothing of it
-        goes back to the writer. A later note on the same block, or on the
-        document as a whole, replaces the one standing there; a call with none
-        of `text`, `suggested_answer`, `suggested_note` and `offer` takes it
-        off. An item not of your project, one with no block or that is done, a
-        block not of the item, one you answered, one a work item's run holds
-        unless you are the job after that run's turn, a suggested answer on an
-        action with no options, an offer on anything but an open action,
-        anything but `text` on the document as a whole, or a call that takes
-        off a note where none stands is refused with the reason, and nothing
-        is written. Answers `{outcome}`: `written`, `replaced` or
-        `withdrawn`."""
+        """Put your note on a block of an open document of your project, an ask
+        a person answers, or without `block` on the document as a whole: what
+        you know that bears on the answer and the document does not say. Write
+        one only by exception: a `suggested_answer`, with its `suggested_note`,
+        where you would answer otherwise than the writer recommends; `text`
+        alone where you know something that could change the answer; an `offer`
+        where you would do work about an open action on the person's word. None
+        to say a block is fine or that you agree. The note stands beside the
+        document, never in its text, and nothing of it goes back to the writer.
+        A `suggested_answer` that is not the answer the block's recommendation
+        would record takes that recommendation away: Done records none for the
+        block, and is refused while it is unanswered. A later note on the same
+        block, or on the document as a whole, replaces the one standing there;
+        a call with none of `text`, `suggested_answer`, `suggested_note` and
+        `offer` takes it off. An item not of your project, one with no block or
+        that is done, a block not of the item, one you answered, one a work
+        item's run holds unless you are the job after that run's turn, a
+        suggested answer on an action with no options, an offer on anything but
+        an open action, anything but `text` on the document as a whole, or a
+        call that takes off a note where none stands is refused with the
+        reason, and nothing is written. Answers `{outcome}`: `written`,
+        `replaced` or `withdrawn`."""
         return await api.note(
             _authorization(ctx),
             _tool_use_id(ctx),
@@ -876,14 +878,15 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         """Put an alert on an open document of your project whose Send starts
         work that another open ask must come before: `awaits` names that ask
         and `text` says what to answer first and what the Send starts, the two
-        given together. It stops no Send. A later alert on the same document
-        replaces the one standing; a call with neither takes it off. An item
-        not of your project, a work item, a wait, a debrief's notice or an
-        item that is done, an `awaits` of the item itself, of an item not of
-        your project or that is done, or that its item does not hold, `text`
-        or `awaits` alone, or a call that takes off an alert where none stands
-        is refused with the reason, and nothing is written. Answers
-        `{outcome}`: `written`, `replaced` or `withdrawn`."""
+        given together. It stops no Send, and shows while this item and the
+        item of the ask it awaits are both open. A later alert on the same
+        document replaces the one standing; a call with neither takes it off.
+        An item not of your project, a work item, a wait, a debrief's notice or
+        an item that is done, an `awaits` of the item itself, of an item not of
+        your project or that is done, or that its item does not hold, `text` or
+        `awaits` alone, or a call that takes off an alert where none stands is
+        refused with the reason, and nothing is written. Answers `{outcome}`:
+        `written`, `replaced` or `withdrawn`."""
         return await api.alert(
             _authorization(ctx), _tool_use_id(ctx), item=item, text=text, awaits=awaits
         )

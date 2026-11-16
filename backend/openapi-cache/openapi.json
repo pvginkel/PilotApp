@@ -2103,6 +2103,48 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InventedAlertCreateSchema.6d6b324": {
+        "additionalProperties": false,
+        "description": "Pilot's alert on an open prose item that another open ask comes before\nits Send, as the pre-ruling pass's `alert` writes it (F86.11); a body that\ngives neither takes the standing one off.",
+        "properties": {
+          "awaits": {
+            "anyOf": [
+              {
+                "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+                "examples": [
+                  "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The ask to answer first, `<item id>/<local id>`, a block of another open item of the project",
+            "title": "Awaits"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What to answer first and what the Send starts",
+            "examples": [
+              "Answer the site's decision first: sending books the gear."
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "InventedAlertCreateSchema",
+        "type": "object"
+      },
       "InventedAttachmentsCreateSchema.6d6b324": {
         "description": "Files the project's session attaches to an item in one call, as a\nfolder is: one batch.",
         "properties": {
@@ -2561,6 +2603,93 @@
           "id"
         ],
         "title": "InventedItemSchema",
+        "type": "object"
+      },
+      "InventedNoteCreateSchema.6d6b324": {
+        "additionalProperties": false,
+        "description": "Pilot's note on a block of an open prose item, by its local id, or\nwithout one on the item as a whole, as the pre-ruling pass's `note`\nwrites it (F86.10); a body that gives none of the four takes the standing\none off.",
+        "properties": {
+          "block": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The block's local id; none for a note on the item as a whole",
+            "examples": [
+              "D1"
+            ],
+            "title": "Block"
+          },
+          "offer": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The work Pilot would do about an open action, in a line",
+            "title": "Offer"
+          },
+          "suggested_answer": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The answer Pilot suggests: an option's label, Agree, Yes, No or free words",
+            "examples": [
+              "Tunnel"
+            ],
+            "title": "Suggested Answer"
+          },
+          "suggested_note": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The note Pilot suggests beside that answer, or for an action's Done",
+            "title": "Suggested Note"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What Pilot knows that bears on the ask, Markdown",
+            "examples": [
+              "On 3 November you ruled one environment between runs."
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "InventedNoteCreateSchema",
         "type": "object"
       },
       "InventedPersonCreateSchema.6d6b324": {
@@ -3845,6 +3974,17 @@
             "title": "Kind",
             "type": "string"
           },
+          "pilots_note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.PilotNoteSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's note standing on the document as a whole (F168.5): its `text` alone; null where none stands, and on every item but a prose item"
+          },
           "pilots_work": {
             "anyOf": [
               {
@@ -3876,6 +4016,17 @@
               2
             ],
             "title": "Read Minutes"
+          },
+          "send_alert": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.SendAlertSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's alert standing on the item, while the item and the item of the ask it awaits are both open (F168.6; DB 631); null otherwise, and on every item but a prose item"
           },
           "seq": {
             "description": "Its place in the timeline, from 1",
@@ -4034,6 +4185,8 @@
           "cancel",
           "job",
           "after_turn",
+          "pilots_note",
+          "send_alert",
           "project_id",
           "text"
         ],
@@ -4131,6 +4284,40 @@
           "source"
         ],
         "title": "AttachmentSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.AwaitedAskSchema": {
+        "description": "The ask an alert names to answer first: a block of another open item\nof the project.",
+        "properties": {
+          "block": {
+            "description": "The block's local id",
+            "examples": [
+              "D1"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "item": {
+            "description": "The block's item, its document's address",
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          },
+          "title": {
+            "description": "The item's title, as its line shows it: its text's, else its file's name (F35)",
+            "examples": [
+              "Dev check"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "title",
+          "block"
+        ],
+        "title": "AwaitedAskSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.BlockKind": {
@@ -4332,6 +4519,17 @@
             "title": "Options",
             "type": "array"
           },
+          "pilots_note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.PilotNoteSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's note standing on the block (F168.1), on a block Pilot answered or holds too; null where none stands"
+          },
           "proposal": {
             "anyOf": [
               {
@@ -4392,6 +4590,7 @@
           "held",
           "deferral",
           "writer_asked",
+          "pilots_note",
           "section"
         ],
         "title": "BlockSchema",
@@ -5164,6 +5363,107 @@
         "title": "OptionSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae.PilotNoteSchema": {
+        "description": "Pilot's note standing on a block, or on its item as a whole (F168; DB\n625): what only Pilot knows about the ask, beside the document and never\nin its text (DB 632).",
+        "properties": {
+          "at": {
+            "description": "When it was written",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "differs": {
+            "description": "Whether its suggested answer is not the answer the block's recommendation would record, compared exactly, which takes that recommendation away: Done records none for the block and is refused while it is unanswered (F168.4; DB 628). False where it suggests none, on a block with no recommendation, and on the item as a whole",
+            "title": "Differs",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The note's id",
+            "examples": [
+              12
+            ],
+            "title": "Id",
+            "type": "integer"
+          },
+          "late": {
+            "description": "Whether it was written after its place last came to a person: after its block was handed over to one, or, on the item as a whole, after the latest of its blocks was; false where none was. Derived, never stored",
+            "title": "Late",
+            "type": "boolean"
+          },
+          "offer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work Pilot would do about the action on a member's word, in a line (F168.7); null where it offers none",
+            "title": "Offer"
+          },
+          "offer_taken": {
+            "description": "Whether a member took its offer; false where it has none",
+            "title": "Offer Taken",
+            "type": "boolean"
+          },
+          "suggested_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The answer Pilot suggests: an option's label, `Agree`, `Yes`, `No` or free words; null where it suggests none",
+            "examples": [
+              "Keep it to the turn"
+            ],
+            "title": "Suggested Answer"
+          },
+          "suggested_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The note Pilot suggests beside that answer, or for an action's Done; null where it suggests none",
+            "title": "Suggested Note"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its few lines, Markdown; null where it gives none",
+            "examples": [
+              "On 3 November you ruled one environment between runs."
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "suggested_answer",
+          "suggested_note",
+          "offer",
+          "offer_taken",
+          "differs",
+          "late",
+          "at"
+        ],
+        "title": "PilotNoteSchema",
+        "type": "object"
+      },
       "ItemDocumentSchema.1fdd8ae.PilotsWorkSchema": {
         "description": "What Pilot does on an item that is Pilot's (F13.7; DB 296), which its\nline shows in its kind's place and its strip says once opened (F28.9):\nread at every read, never stored.",
         "properties": {
@@ -5347,6 +5647,29 @@
           "heading"
         ],
         "title": "SectionSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.SendAlertSchema": {
+        "description": "Pilot's alert on an open item for what its Send starts, while another\nopen ask has to be answered before it is sent (F168.6; DB 631). It stops\nno Send.",
+        "properties": {
+          "awaits": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.AwaitedAskSchema",
+            "description": "The ask to answer first"
+          },
+          "text": {
+            "description": "What to answer first and what the Send starts, Markdown",
+            "examples": [
+              "Answer the dev check's decision before you send this."
+            ],
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "awaits"
+        ],
+        "title": "SendAlertSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.SessionState": {
@@ -7162,6 +7485,17 @@
             "title": "Options",
             "type": "array"
           },
+          "pilots_note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.PilotNoteSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's note standing on the block (F168.1), on a block Pilot answered or holds too; null where none stands"
+          },
           "proposal": {
             "anyOf": [
               {
@@ -7222,6 +7556,7 @@
           "held",
           "deferral",
           "writer_asked",
+          "pilots_note",
           "section"
         ],
         "title": "BlockSchema",
@@ -7460,6 +7795,107 @@
           "recommended"
         ],
         "title": "OptionSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.PilotNoteSchema": {
+        "description": "Pilot's note standing on a block, or on its item as a whole (F168; DB\n625): what only Pilot knows about the ask, beside the document and never\nin its text (DB 632).",
+        "properties": {
+          "at": {
+            "description": "When it was written",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "differs": {
+            "description": "Whether its suggested answer is not the answer the block's recommendation would record, compared exactly, which takes that recommendation away: Done records none for the block and is refused while it is unanswered (F168.4; DB 628). False where it suggests none, on a block with no recommendation, and on the item as a whole",
+            "title": "Differs",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The note's id",
+            "examples": [
+              12
+            ],
+            "title": "Id",
+            "type": "integer"
+          },
+          "late": {
+            "description": "Whether it was written after its place last came to a person: after its block was handed over to one, or, on the item as a whole, after the latest of its blocks was; false where none was. Derived, never stored",
+            "title": "Late",
+            "type": "boolean"
+          },
+          "offer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work Pilot would do about the action on a member's word, in a line (F168.7); null where it offers none",
+            "title": "Offer"
+          },
+          "offer_taken": {
+            "description": "Whether a member took its offer; false where it has none",
+            "title": "Offer Taken",
+            "type": "boolean"
+          },
+          "suggested_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The answer Pilot suggests: an option's label, `Agree`, `Yes`, `No` or free words; null where it suggests none",
+            "examples": [
+              "Keep it to the turn"
+            ],
+            "title": "Suggested Answer"
+          },
+          "suggested_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The note Pilot suggests beside that answer, or for an action's Done; null where it suggests none",
+            "title": "Suggested Note"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its few lines, Markdown; null where it gives none",
+            "examples": [
+              "On 3 November you ruled one environment between runs."
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "suggested_answer",
+          "suggested_note",
+          "offer",
+          "offer_taken",
+          "differs",
+          "late",
+          "at"
+        ],
+        "title": "PilotNoteSchema",
         "type": "object"
       },
       "ProjectDocumentSchema.1fdd8ae.ProsePartSchema": {
@@ -11375,6 +11811,40 @@
         "title": "AttachmentSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae.AwaitedAskSchema": {
+        "description": "The ask an alert names to answer first: a block of another open item\nof the project.",
+        "properties": {
+          "block": {
+            "description": "The block's local id",
+            "examples": [
+              "D1"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "item": {
+            "description": "The block's item, its document's address",
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          },
+          "title": {
+            "description": "The item's title, as its line shows it: its text's, else its file's name (F35)",
+            "examples": [
+              "Dev check"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "title",
+          "block"
+        ],
+        "title": "AwaitedAskSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.BlockKind": {
         "enum": [
           "decision",
@@ -11574,6 +12044,17 @@
             "title": "Options",
             "type": "array"
           },
+          "pilots_note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.PilotNoteSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's note standing on the block (F168.1), on a block Pilot answered or holds too; null where none stands"
+          },
           "proposal": {
             "anyOf": [
               {
@@ -11634,6 +12115,7 @@
           "held",
           "deferral",
           "writer_asked",
+          "pilots_note",
           "section"
         ],
         "title": "BlockSchema",
@@ -12406,6 +12888,107 @@
         "title": "OptionSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae.PilotNoteSchema": {
+        "description": "Pilot's note standing on a block, or on its item as a whole (F168; DB\n625): what only Pilot knows about the ask, beside the document and never\nin its text (DB 632).",
+        "properties": {
+          "at": {
+            "description": "When it was written",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "differs": {
+            "description": "Whether its suggested answer is not the answer the block's recommendation would record, compared exactly, which takes that recommendation away: Done records none for the block and is refused while it is unanswered (F168.4; DB 628). False where it suggests none, on a block with no recommendation, and on the item as a whole",
+            "title": "Differs",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The note's id",
+            "examples": [
+              12
+            ],
+            "title": "Id",
+            "type": "integer"
+          },
+          "late": {
+            "description": "Whether it was written after its place last came to a person: after its block was handed over to one, or, on the item as a whole, after the latest of its blocks was; false where none was. Derived, never stored",
+            "title": "Late",
+            "type": "boolean"
+          },
+          "offer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work Pilot would do about the action on a member's word, in a line (F168.7); null where it offers none",
+            "title": "Offer"
+          },
+          "offer_taken": {
+            "description": "Whether a member took its offer; false where it has none",
+            "title": "Offer Taken",
+            "type": "boolean"
+          },
+          "suggested_answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The answer Pilot suggests: an option's label, `Agree`, `Yes`, `No` or free words; null where it suggests none",
+            "examples": [
+              "Keep it to the turn"
+            ],
+            "title": "Suggested Answer"
+          },
+          "suggested_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The note Pilot suggests beside that answer, or for an action's Done; null where it suggests none",
+            "title": "Suggested Note"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its few lines, Markdown; null where it gives none",
+            "examples": [
+              "On 3 November you ruled one environment between runs."
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "suggested_answer",
+          "suggested_note",
+          "offer",
+          "offer_taken",
+          "differs",
+          "late",
+          "at"
+        ],
+        "title": "PilotNoteSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.PilotsWorkSchema": {
         "description": "What Pilot does on an item that is Pilot's (F13.7; DB 296), which its\nline shows in its kind's place and its strip says once opened (F28.9):\nread at every read, never stored.",
         "properties": {
@@ -12589,6 +13172,29 @@
           "heading"
         ],
         "title": "SectionSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.SendAlertSchema": {
+        "description": "Pilot's alert on an open item for what its Send starts, while another\nopen ask has to be answered before it is sent (F168.6; DB 631). It stops\nno Send.",
+        "properties": {
+          "awaits": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.AwaitedAskSchema",
+            "description": "The ask to answer first"
+          },
+          "text": {
+            "description": "What to answer first and what the Send starts, Markdown",
+            "examples": [
+              "Answer the dev check's decision before you send this."
+            ],
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "awaits"
+        ],
+        "title": "SendAlertSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.SessionState": {
@@ -12916,6 +13522,17 @@
             "title": "Kind",
             "type": "string"
           },
+          "pilots_note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.PilotNoteSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's note standing on the document as a whole (F168.5): its `text` alone; null where none stands, and on every item but a prose item"
+          },
           "pilots_work": {
             "anyOf": [
               {
@@ -12941,6 +13558,17 @@
               2
             ],
             "title": "Read Minutes"
+          },
+          "send_alert": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.SendAlertSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's alert standing on the item, while the item and the item of the ask it awaits are both open (F168.6; DB 631); null otherwise, and on every item but a prose item"
           },
           "seq": {
             "description": "Its place in the timeline, from 1",
@@ -13083,7 +13711,9 @@
           "pilots_work",
           "cancel",
           "job",
-          "after_turn"
+          "after_turn",
+          "pilots_note",
+          "send_alert"
         ],
         "title": "TimelineItemSchema",
         "type": "object"
@@ -20791,6 +21421,84 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/items/{item_id}/alerts": {
+      "post": {
+        "description": "Returns:     200: What the call did to the alert standing on the item     400: The body is invalid, or the stage is prd     404: No item has the id, or the awaited block is not of its project     409: As `alert` refuses the call: the reason",
+        "operationId": "post__api_testing_items_{item_id}_alerts",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedAlertCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put Pilot's alert on the open prose item that a block of another open item comes before its Send, as the pre-ruling pass's `alert` writes it (F86.11), in a pass's turn as `notes` writes a note. A body that gives neither takes the standing alert off.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/items/{item_id}/attachments": {
       "post": {
         "description": "Returns:     201: The batch and the attachments' ids     400: No file, a filename that is not one path segment or is named         twice, or content that is not base64 or is over 16 MiB     404: No item has the id     409: The project has no session",
@@ -21092,6 +21800,84 @@
           }
         ],
         "summary": "Mark a document Done as Pilot, by the project's session, as its `mark` does a document it settled or deferred whole: the text as it stands fixed in a `done` Version, the item done by Pilot.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/items/{item_id}/notes": {
+      "post": {
+        "description": "Returns:     200: What the call did to the note standing in its place     400: The body is invalid, or the stage is prd     404: No item has the id, or its document has no such block     409: As `note` refuses the call: the reason",
+        "operationId": "post__api_testing_items_{item_id}_notes",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedNoteCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StandingSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put Pilot's note on a block of the open prose item, by its local id, or without one on the item as a whole, as the pre-ruling pass's `note` writes it (F86.10): in the one turn of a job's session of its project placed for the pass and ended once it is written, nothing started. A body that gives none of the four takes the standing note off.",
         "tags": [],
         "x-required-role": "editor"
       }
