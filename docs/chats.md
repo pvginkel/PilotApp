@@ -247,7 +247,7 @@ sent while a turn is in flight.
 It answers `200` the chat as the list gives it (below), `answering` false. It is a `404` for an
 unknown project, a `409` for a caller who has not chosen a handle, and a `409` "Cannot stop Pilot in
 <project> because …" where "no chat is open", "it is not answering", "it was stopped already", "its
-chat failed to start" or "its chat's session has ended".
+session failed to start" or "its session has ended".
 
 ## The close
 

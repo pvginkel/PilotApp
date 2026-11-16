@@ -915,7 +915,7 @@ class TestStop:
         [
             (SessionState.IDLE, "it is not answering"),
             (SessionState.STOPPED, "it was stopped already"),
-            (SessionState.FAILED, "its chat failed to start"),
+            (SessionState.FAILED, "its session failed to start"),
         ],
     )
     def test_a_chat_pilot_is_not_answering_in_is_refused(

@@ -4641,8 +4641,8 @@ class TestStopChat:
         [
             (SessionState.IDLE, "it is not answering"),
             (SessionState.STOPPED, "it was stopped already"),
-            (SessionState.ENDED, "its chat's session has ended"),
-            (SessionState.FAILED, "its chat failed to start"),
+            (SessionState.ENDED, "its session has ended"),
+            (SessionState.FAILED, "its session failed to start"),
         ],
     )
     def test_a_chat_neither_running_starting_nor_held_is_refused(
