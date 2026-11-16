@@ -78,7 +78,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 - `blocks`: an ask inside a document, unique by document and `local_id`, with what its text says:
   kind, `confirmation`, `because_code`, `proposal`, `default_value`, `check_text`, and the answer
   (`answer`, `answered_by_user_id`, `answered_at`, `note`, `via_code`, `done_at`,
-  `deferred_to_task_id`).
+  `deferred_to_task_id`); and `handed_at`, the server's and read from no text: when the block last
+  came from Pilot's side to a person's to answer, none while it is Pilot's and none on one a
+  person's from its put ([`round-trip.md`](round-trip.md#when-an-ask-became-the-persons)).
 - `block_options`: a block's choices in order: `label`, `text` (none for a bare label),
   `recommended`. Deleting a block deletes its options.
 - `save_errors`: a fault the engine holds against the latest save of a path, the path from the
@@ -118,7 +120,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   resolves to one session: the sha256 of the token its latest create carried, and of one no one
   holds before its first ([`mcp.md`](mcp.md)). `nudge_owed_at`, indexed where it is set, is when
   its nudge came to be owed: a hard stop, a turn's end halted or paused, or a turn's end at the
-  quota wall; none once the nudge's Turn goes out ([`usage.md`](usage.md)).
+  quota wall; none once the nudge's Turn goes out ([`usage.md`](usage.md)). `ended_at` is when it
+  became `ended`, which only a project chat's close on its timeout does
+  ([`chats.md`](chats.md#the-close)).
 - `work`: a work item, the extension table its Item and its Session share their id with
   ([`work.md`](work.md)): `project_id`, `session_kind_code` (`work` or `job`, never a Chat's),
   `trigger_code` (a job's Work Trigger; a worker's run has none) and `trigger_item_id` (an item of
@@ -172,10 +176,18 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   quotes (one at most, only on a Turn with words; a quoted block's removal clears the key;
   `ck_turns_words`; a file quoted by its path stays in the words alone), `started_at`, `ended_at`,
   the `error` of a turn that failed, and its own `cost`, from its `result` line, `numeric`, in US
-  dollars ([`usage.md`](usage.md)).
+  dollars ([`usage.md`](usage.md)); and `cause_code`, why Pilot sent it, its Turn Cause, given at the
+  write and never changed: `person` exactly on a Turn with an author (`ck_turns_cause`)
+  ([`sessions.md`](sessions.md#a-turns-cause)).
 - `token_counts`: the tokens of one Token Kind a Turn used, `tokens`, summed over every model its
   run called, the turn's own: one per turn and kind, never negative (`ck_token_counts_tokens`),
   written as the turn's `result` line is recorded ([`usage.md`](usage.md)).
+- `holds`: a period in which Pilot kept one Session from running for one reason outside it: the
+  `session`, `kind_code`, its Hold Kind (`week_halt`, `five_hour_halt`, `pause`, `store_update`,
+  `outage`, `slot`, `queue`, `conversation`), `started_at`, and `ended_at`, none while it holds and
+  never before its start (`ck_holds_period`). A Session has one open at a time
+  (`uq_holds_open_session_id`). Written by the server alone, and nothing it decides reads one
+  ([`sessions.md`](sessions.md#the-holds)).
 - `chats`: a project's chat, sharing its id with its Session, one of kind `chat` of the same project
   (`session_kind_code`, held `chat`): its kind, `definition` or `project`, and its close,
   `closed_at` and `close_cause_code` (`timeout`, `created`, `finished`, `reopened`, `archived`) set
@@ -263,11 +275,13 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   membership and the item: named or counted in a push some browser of theirs took, or waiting while
   a page of theirs showed the project. Written and deleted by the reconcile alone, of the items of
   the membership's project; deleted once the item no longer waits on the member, and at Archive
-  and Leave.
+  and Leave. It keeps no time: when a member was first shown an item is stored nowhere, and when an
+  ask became a person's is its Block's `handed_at` (D231).
 
 ## The reference values
 
-Twenty-one are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and
+Twenty-three are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, the
+Turn Cause and the Hold Kind among them, and
 four are tables with rows, because each value carries a fact. The revisions write the rows; a value
 is added by a revision and nowhere else, and the backend starts once its revisions are applied. So a
 process keeps each row it looks up for its life (`References`, [`engine.md`](engine.md)), a kind's

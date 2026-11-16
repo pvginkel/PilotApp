@@ -298,7 +298,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   [`docs/sessions.md`](docs/sessions.md), [`docs/work.md`](docs/work.md): the supervisor that runs
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
   environments on demand and Pilot's own, with its fake; the sessions, the gate, its slot and the
-  jobs' queue, their records, relay and live stream, Stop, Resume, Close and Retry; a work item's status,
+  jobs' queue, a Turn's cause, the holds, their records, relay and live stream, Stop, Resume, Close and Retry; a work item's status,
   its line, its progress, its debrief, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the

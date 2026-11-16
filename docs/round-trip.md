@@ -75,6 +75,36 @@ document's Done, read under the project's row (`ItemService`). Read and Reviewed
 and are not refused. Pilot's own tools are not the app's controls, and the record takes their
 writes as it does any other ([`mcp.md`](mcp.md)).
 
+### When an ask became the person's
+
+A block's `handed_at` is when it last came from Pilot's side to the person's to answer
+(`backend/app/services/handing.py`). Whose a block is stays read from the rows: a block to answer,
+unanswered and of an open item, is Pilot's while its item is Pilot's or a run holds it
+([below](#held-through-the-run)). So a transaction that may move one reads the project's blocks
+that are Pilot's before its writes (`sides`) and compares them once it has written (`hand_over`):
+a block that was Pilot's and is the person's to answer now is handed at the move's instant, the
+latest move kept; one that is Pilot's after the move has no `handed_at`, so one Pilot answers has
+none; and any other keeps what it has, one the person's from its put none, one answered or of a
+closed item the instant it was handed at. Nothing reads it to decide anything.
+
+The moves compared are those to the person: a work item's or a job's turn end, done, failed or
+interrupted, a pass's among them; a start that failed; a Stop, a
+Close, a Stop and take over and the Cancel (below); the quota wall's settle
+([`usage.md`](usage.md)); an environment stopped under a turn ([`sessions.md`](sessions.md)); a
+project's transition that stops its Sessions, compared once after its closes, so that an Archive
+hands the blocks its stops leave and a Finish, which closes their items, hands none; and the
+store's update's lift that leaves a job to a person's Retry ([`store-update.md`](store-update.md)).
+And those back to Pilot: a Resume, a Retry, a work item added with its `claims` or `researches`,
+and a clarification run placed. The instant is the move's own where it has one, a Stop's
+`stopped_at`, a turn's end, a transition's, the lift's `lifted_at`, and the comparison's otherwise.
+A chat's turn end is not compared.
+
+Nor is the turn-end read (below). A read makes its own document's blocks, but it can move those of
+a document of its run read before it, which are Pilot's while another document of the run awaits
+its read: at the last read where no job follows it, after a Close for good or an Archive since,
+they become the person's with no `handed_at`. A block that became the person's before the column
+has none either.
+
 ## The read at the run's end
 
 A run ends when its turn's `result` makes the work item done, cause `turn_ended`, its turn neither
@@ -410,7 +440,11 @@ the retries, Undo, the outage, startup, Undo racing a write, the lock order),
 `TestRecordServiceWriteBackOwed`, `TestRecordServiceCancel`) and `test_documents.py`. What is
 Pilot's is pinned in `backend/tests/services/test_working_on.py` (the hold, its hand-back and its
 end, `TestWhatWaits`, `TestFlying`, `TestHoldingWork`, `TestACancel`), on records built by `Camp`
-(`backend/tests/support/working_on.py`); the timeline's fields in `TestPilotsWork`
+(`backend/tests/support/working_on.py`); when an ask became the person's in `test_handing.py`, at
+each move's own test (`TestHandedAt` in `test_session_start_service.py`, and in
+`test_relay_service.py`, `test_item_service.py`, `test_job_service.py`,
+`test_pilot_store_service.py`, `test_project_service.py` and `test_store_updater.py`) and in
+`backend/tests/migrations/test_0037_a_blocks_handed_at_and_a_sessions_end.py`; the timeline's fields in `TestPilotsWork`
 (`test_timeline_service.py`); the take-over in `TestTakeOver` (`test_session_start_service.py`),
 `TestItemServiceTakeOver` (`test_item_service.py`) and `TestTakeOver` (`tests/api/test_items.py`);
 the refusals while Pilot works in `TestItemServiceWhilePilotWorks` and `TestWhilePilotWorks`; and

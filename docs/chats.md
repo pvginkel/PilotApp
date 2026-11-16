@@ -252,7 +252,8 @@ is never sent to again: the next message starts a chat of its own.
   another transaction holds, a message's send among them: its controller session, where it has one,
   ended first, a `404` or a `409` counting as ended, and so does its name holding another
   conversation than the chat's, another session's, which the close leaves as it is; and its Session
-  `ended`, then the chat closed.
+  `ended`, `ended_at` the chat's `closed_at`, then the chat closed. A chat with no controller
+  session is closed with its Session's state as it was, and no `ended_at`.
   A controller that does not answer leaves the chat open for the next round. A definition chat
   never closes by timeout.
 - **`created`**: Create project closes the draft's definition chat in its transaction, once the

@@ -77,8 +77,10 @@ commit:
   since <time>. No chat answers and no job of Pilot's starts until it is done; work items go on."
   ([`ui.md`](ui.md)). It alarms nobody ([`notifications.md`](notifications.md)).
 
-The make tells no one. The timer tells the conditions at its tick's commit when the unlifted update
-is not the one this process last told of, and the lift tells them at its commit. So the gold bar shows the update
+The make tells no one. The timer asks the gate again and tells the conditions at its tick's commit
+when the unlifted update is not the one this process last told of, so that a held job's or Chat's
+Hold turns to the update ([`sessions.md`](sessions.md#the-holds)), and the lift does both at its
+commit. So the gold bar shows the update
 within a tick.
 
 ## The sequence
@@ -118,7 +120,8 @@ while the column is unwritten and no lift is asked:
    - the retry is placed as Retry places one, behind the project's held jobs (`retried <id>`);
    - a refusal rolls its transaction back, what the Retry wrote before it and the events it queued
      with it, and is then logged, the job's Retry left to a person (`left <id> to a person's Retry:
-     <reason>`);
+     <reason>`), and the asks that job kept Pilot's handed to the person at `lifted_at`
+     ([`round-trip.md`](round-trip.md#when-an-ask-became-the-persons));
    - a stopped turn still ending, which Retry refuses too, holds the lift to a later run (`lifts
      once <id>'s stopped turn ends`).
 

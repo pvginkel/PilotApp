@@ -222,7 +222,9 @@ quota again. Each, under its project's row and then its own lock, read again the
 a Resume carries one on (`_carry_on`): a Turn of the server's own with the nudge's words, or the
 ended Turn's message while the Session has no conversation, its `error` cleared and its nudge owed
 no more, through the gate, `held` or `starting`, a job held behind its project's jobs before it. A
-Session whose stopped turn is still ending waits for the next run.
+Session whose stopped turn is still ending waits for the next run. While a halt, the pause or the
+store's update keeps a nudge owed from going, its Session has a Hold of that reason, and the wall
+alone holds none ([`sessions.md`](sessions.md#the-holds)).
 
 | Owed to | Its words |
 |---|---|

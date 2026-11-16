@@ -5,8 +5,8 @@ the KubeCoder fleet, through the controller ([`controller.md`](controller.md)). 
 it is a Turn. Everything the session does is a list of Session Records that the server appends to as
 the controller's raw response stream comes in, numbered from 1; a browser reads the list by REST
 from any record number and follows it live on its SSE connection. This page is the sessions as
-built: the start through the gate, what a create is handed, the send, the relay, Stop, Resume, a work item's close for good and a
-job's Retry, an environment restarted or stopped under a turn, the current line, the records and
+built: the start through the gate, what a create is handed, the send and a Turn's cause, the relay, Stop, Resume, a work item's close for good and a
+job's Retry, the holds, an environment restarted or stopped under a turn, the current line, the records and
 their stream, and the recovery after a restart. A work item is a Session on the timeline, and what
 its line and its session log show is [`work.md`](work.md)'s, Pilot's own jobs among them; a
 project's chat is a Session of the brain's in the store, and what a message to it does is
@@ -17,6 +17,7 @@ on in [`jobs.md`](jobs.md).
 |---|---|
 | `SessionStartService` (`session_start_service.py`) | a work item placed by repository, a run's continuation or a clarification run, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store, a job briefed as it leaves the gate; Stop and Resume, and a document's Stop and take over ([`round-trip.md`](round-trip.md)); the usage halts' hard stop and the nudges ([`usage.md`](usage.md)) |
 | `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot; `setups` and `carried`, the setup the pause lets through and the conversation another run holds |
+| `holds.py` | `turn_hold`, the one writer of a Session's Holds, and `at_rest`, why a Session owed its nudge is kept from it |
 | `session_scope.py` | `scoped_create`, what each create of a Session is handed |
 | `RelayService` (`relay_service.py`) | the send of a Turn, the relay of each turn into the records, and the interrupt of a turn stopped under it |
 | `SessionRecordService` (`session_record_service.py`) | the records' one writer and the one read function |
@@ -50,7 +51,7 @@ Session's start, in the caller's transaction:
 - the Session, kind `work`, with its `cwd`, `agent`, `model` and `reasoning_effort`, none of them
   defaulted by the server, no Environment until its start provides one, and `token_hash` the sha256
   of a token no one holds, until its create mints the one its controller session carries (below);
-- Turn 1, the brief, with no author.
+- Turn 1, the brief, with no author, its cause `brief`.
 
 The repository and `cwd` are taken as the placement gives them: the server maps and checks
 neither. No controller call is made. It refuses with `InvalidOperationException` when no controller
@@ -263,9 +264,10 @@ environment its caller names.
 
 ## The send
 
-`RelayService.send(db, session_id, message, *, words=None) -> Turn` sends the Session a new Turn,
-`message`, in the caller's transaction; a person's message carries `words`, its author and their
-words verbatim, which `message` ends with ([`chats.md`](chats.md)). The controller's send goes
+`RelayService.send(db, session_id, message, cause, *, words=None) -> Turn` sends the Session a new
+Turn, `message`, sent for `cause` (below), in the caller's transaction; a person's message, its
+cause `person`, carries `words`, its author and their words verbatim, which `message` ends with
+([`chats.md`](chats.md)). The controller's send goes
 first, and on its `202`, under the Session row's lock:
 
 - the Turn, numbered after the Session's last, with its author and `words` when it has them, and
@@ -301,6 +303,33 @@ the turn already (the check below), and leaves alone a Turn whose send another p
 made `running`. A controller that does not answer raises `ControllerUnreachable` and writes
 nothing. A Turn a Stop ended while its send went out is put back in flight, since the controller
 has it: its relay records it, and its turn is interrupted.
+
+### A Turn's cause
+
+Every Turn records why Pilot sent it, its `cause_code`, given by its writer and never changed. The
+cause says why the Turn went out, not what it carries: a Resume or a nudge that sends the latest
+Turn's message again, a failed start's brief among them, is `resume` or `nudge`. The database
+refuses `person` on a Turn with no author and any other cause on one with an author
+(`ck_turns_cause`).
+
+| Cause | The Turn |
+|---|---|
+| `brief` | a work item's Turn 1 from `start_work`, and a job's brief, a wait's run's excepted ([`work.md`](work.md)) |
+| `wait_run` | a wait's run's first Turn, a follow-up on the run before it or its whole brief ([`waits.md`](waits.md)) |
+| `continuation` | a run's continuation's Turn 1 (`continue_run`, above) |
+| `clarification` | a clarification run's Turn 1, the pass's questions to the writer (`clarify`, above; D230) |
+| `resume` | a person's Resume of a stopped or failed work item (below) |
+| `nudge` | the nudge owed ([`usage.md`](usage.md)) |
+| `follow_up` | the server's follow-up turn for a save still held at a brain session's turn end ([`chats.md`](chats.md)) |
+| `carry_on` | the Turn the relay sends once it has created a gone controller session again (below) |
+| `person` | a Turn with an author: a chat's message, its first included ([`chats.md`](chats.md)) |
+
+The Turns written before the column took a cause read from their rows (revision `0035`): an
+author's `person`; a Turn 1 `clarification` for a clarification run, `wait_run` for a wait's run,
+`continuation` for a work item with a trigger item, else `brief`; a later one by its text, the
+re-create's opening line `carry_on`, the follow-up's last line `follow_up` and the nudges' last
+sentence `nudge`; and any other, `continue` among them, `resume` on a work item and `carry_on`
+elsewhere, so that a work item's re-create that sent `continue` reads `resume`.
 
 ## The relay
 
@@ -536,6 +565,53 @@ Pilot, or with a `reason` closes it for good (above), and is refused a job's as 
 ([`mcp.md`](mcp.md)). Finish and Archive stop a job as they
 stop every Session; a job held before its brief has no Turn to end.
 
+## The holds
+
+A Hold (`holds`, [`record.md`](record.md)) is a period in which Pilot kept one Session from running
+for one reason outside it, of that reason's Hold Kind: the gate's reasons, one to one, `week_halt`,
+`five_hour_halt`, `pause`, `store_update`, `outage`, `slot`, `queue` and `conversation`, a job
+waiting behind its project's job before it and a work item waiting for the other run on its
+conversation among them (D230). A pause that holds three Sessions is three Holds. Nothing reads a
+Hold to decide anything: the gate and the nudges decide from what they read themselves, and a held
+line reads the gate's reason at display.
+
+`turn_hold(db, session, held, at)` (`holds.py`) is its one writer, under the Session's lock, in the
+transaction that moves the Session, reads the gate for it or reads what keeps it at rest: it keeps
+an open Hold of the reason's kind, ends one of another kind and starts the next at the same
+instant, starts one where none is open, and with no reason ends the open one. A Session has one
+Hold open at a time, whatever writes at once (`uq_holds_open_session_id`), and a Hold never ends
+before it started: an instant read before the lock, or by another process's clock, is moved up to
+its start.
+
+- **A held start.** A start the gate holds, `start_work`'s, a brain session's, a run's
+  continuation's and a clarification run's, a Resume's and a nudge's, opens a Hold of the gate's
+  reason, and so does a start that meets the outage, of the reason the gate reads as it goes back
+  to `held`, the outage's where it reads none by then. The release turns it at every read of the
+  gate for a held Session, so that a held Session with no Hold gets one there, and ends it as it
+  moves the Session to `starting`; a Stop of a held Session and a job's withdrawal before its brief
+  end it too. The outage is a process's own ([`controller.md`](controller.md)), so an `outage` Hold
+  is that of the process that read the gate.
+- **A Session at rest.** A Session owed its nudge ([`usage.md`](usage.md)) is held while something
+  keeps the nudge from going (`at_rest`): the first, in the gate's order and by its rules, of a
+  usage halt, a work item's alone, its project's pause, never a setup's, and a store's update
+  unlifted, a job's alone. The quota wall alone holds nothing: a Session at the wall that waits for
+  quota alone has no Hold, and nor has one whose nudge goes out no more, its item done or its
+  project finished or archived. Its Hold opens where its nudge comes to be owed, at a turn's end
+  halted or paused or at the wall, and at the hard stop. The nudge's and a Resume's carry-on end it
+  before the gate's Hold opens, so that a Resume under the halt that stopped the run leaves two
+  Holds of one kind, the second starting where the first ends. A Stop, a Close, a Stop and take
+  over and the quota wall's settle end it in their own transaction, and Finish's and Archive's
+  stops at the transition's instant.
+
+The release (`release`) turns the Holds after it has read the gate for the held Sessions: each
+Session not `held` that is owed its nudge or has a Hold open, under its lock, one at a time, has
+its Hold turned to what keeps it at rest then, so that one left open on a Session owed no nudge,
+which a process of an earlier build moved on, is ended there. Besides the moments the gate opens
+(above), a pause asks for the release, a project brought back, the timer `store-update`'s tick
+that finds the unlifted update moved ([`store-update.md`](store-update.md)) and the outage's turn
+on, so a Hold that a pause or a store's update turns starts as the release reads the gate, a moment
+after the pause and up to a tick after the update is made.
+
 ## The current line
 
 `current_line` on the Session says what its turn in flight is doing, and is null while none is. Its
@@ -719,3 +795,11 @@ against the last slot, run on `committed_app` too (`TestLockOrder`), with the th
 of `backend/tests/support/locks.py`. The autouse
 `controller_outage` fixture gives each test an outage of its own, off. The stream's tests open test
 connections on the connection manager and read the frames queued on them.
+
+A Turn's cause is pinned at each writer's tests, and the cause of the Turns before the column in
+`backend/tests/migrations/test_0035_a_turns_cause.py`. The Holds are pinned in
+`test_holds.py` (`turn_hold`, the kinds), in `test_session_start_service.py` (`TestHoldOpens`,
+`TestHoldOfAStartSentBack`, `TestHoldTurns`, `TestHoldEnds`, `TestRestHoldOpens`,
+`TestRestHoldTurns`, `TestRestHoldEnds`, and `TestHoldsAtOnce`, two releases of one held Session
+and a Stop beside a release on `committed_app`), in `test_job_service.py` (a job held by the
+queue), and in `backend/tests/models/test_session.py` (`TestHold`, the table's checks).
