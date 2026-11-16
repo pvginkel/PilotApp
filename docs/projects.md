@@ -196,7 +196,8 @@ a project through `finish` the same way, as Pilot ([`mcp.md`](mcp.md)).
 decision's option of that name: under one hold on the project's row and at one instant, the finish
 by Pilot as above, then an `archived` transition with every effect of the menu's Archive, and no
 archive question (`ProjectService.finish_and_archive`). The archive is the person's whose word the
-call carries out: for a job, the person whose close of its trigger item placed it; for a chat, the
+call carries out: for a job, the person whose close of its trigger item placed it, or whose press of
+Pilot's offer did, the offer's taker; for a chat, the
 author of its turn in flight; Pilot's where no person stands behind the call, as for a job after a
 worker's turn, a wait's run or the setup. A finish the record refuses archives nothing.
 

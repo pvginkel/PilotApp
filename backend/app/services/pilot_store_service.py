@@ -699,10 +699,11 @@ class PilotStoreService:
 
     def _acts_for(self, brain: Brain) -> User | None:
         """The person whose word the brain's call carries out: a job's, the
-        one whose close of its trigger item placed it (`JobService.item_done`);
-        a chat's, the author of its Turn in flight. None where no person
-        stands behind it: a job after a worker's turn, a wait's run, the
-        setup, or a Turn the server wrote."""
+        one whose close of its trigger item placed it (`JobService.item_done`)
+        or whose press of an offer did, the note's taker
+        (`JobService.offer_taken`); a chat's, the author of its Turn in
+        flight. None where no person stands behind it: a job after a worker's
+        turn, a wait's run, the setup, or a Turn the server wrote."""
         if brain.kind_code == JOB:
             user_id = self.db.scalar(
                 select(Item.done_by_user_id)
@@ -710,6 +711,13 @@ class PilotStoreService:
                 .where(
                     Work.id == brain.session_id,
                     Work.trigger_code == WorkTrigger.ITEM_DONE,
+                )
+            ) or self.db.scalar(
+                select(PilotNote.offer_taken_by_user_id)
+                .join(Work, Work.trigger_note_id == PilotNote.id)
+                .where(
+                    Work.id == brain.session_id,
+                    Work.trigger_code == WorkTrigger.OFFER_TAKEN,
                 )
             )
         else:

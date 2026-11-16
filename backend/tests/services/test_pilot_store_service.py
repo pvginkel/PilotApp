@@ -1781,6 +1781,24 @@ class TestPilotStoreServiceFinish:
             None,
         )
 
+    def test_with_archive_an_offers_job_archives_as_the_person_who_took_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        _opened(session, project)
+        job = _job_after_offer(session, container, project, environment, person)
+
+        _service(container).finish(_admitted(job), TOOL_USE_ID, archive=True)
+        clear_after_commit_callbacks()
+
+        assert (project.state_code, project.archived) == (ProjectState.FINISHED, True)
+        assert _archived_by(session, project) == [person.id]
+        assert _archive_questions(session, project) == []
+
     def test_with_archive_a_chat_archives_as_the_author_of_its_turn_in_flight(
         self,
         session: DbSession,
@@ -1908,6 +1926,33 @@ def _job_after_close(
         "Deciding what is next",
         trigger=WorkTrigger.ITEM_DONE,
         trigger_item_id=item.id,
+    )
+    return job
+
+
+def _job_after_offer(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    environment: Environment,
+    person: User,
+) -> models.Session:
+    """The job after `person`'s press of Pilot's offer on an open action,
+    its turn in flight, its bearer `TOKEN` (DB 630)."""
+    noting = _brain(db, project, environment, "job", token="pass-token")
+    item = _noted(db, container, project, noting)
+    _note(container, noting, item, "A1", offer="Grow the volume")
+    note = db.scalars(select(PilotNote)).one()
+    note.offer_taken_at = datetime.now(UTC)
+    note.offer_taken_by_user_id = person.id
+    db.flush()
+    job = _brain(db, project, environment, "job")
+    container.record_service().place_work(
+        project,
+        job,
+        "Starting the work offered on A1",
+        trigger=WorkTrigger.OFFER_TAKEN,
+        trigger_note_id=note.id,
     )
     return job
 
