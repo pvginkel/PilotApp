@@ -36,7 +36,15 @@ from app import models
 from app.app_config import HaltSetting
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
-from app.engine.bus import EngineBus, EngineEvent, ProjectChanged, WorkMoved
+from app.engine.bus import (
+    EngineBus,
+    EngineEvent,
+    ProjectChanged,
+    TreeHashMoved,
+    WorkMoved,
+    _Delivery,
+)
+from app.engine.paths import TIMELINE, tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Block,
@@ -11789,3 +11797,204 @@ class TestHandedAt:
         assert _read(session, run.id).nudge_owed_at is None
         handed = _handed_at(session, block)
         assert handed is not None and before <= handed <= datetime.now(UTC)
+
+
+def _timeline(
+    container: ServiceContainer, project: Project
+) -> tuple[str, dict[uuid.UUID, dict[str, Any]]]:
+    """The project's `timeline.json` as the record has it: its hash, and its
+    rows by their ids."""
+    rendering = container.view_service().timeline(project)
+    rows = json.loads(rendering.text)["items"]
+    return rendering.hash, {uuid.UUID(row["id"]): row for row in rows}
+
+
+def _ran_in(rows: dict[uuid.UUID, dict[str, Any]], run_id: uuid.UUID) -> Any:
+    """The environment and the controller session the run's row names."""
+    return (rows[run_id]["environment"], rows[run_id]["session"])
+
+
+def _timeline_moves(events: list[EngineEvent], project: Project) -> list[str]:
+    """The hashes of the project's `timeline.json` the bus told of, in order."""
+    path = tree_path(project, TIMELINE)
+    return [
+        event.hash
+        for event in events
+        if isinstance(event, TreeHashMoved) and event.path == path
+    ]
+
+
+def _owed_timeline_moves(project: Project) -> list[str]:
+    """The hashes of the project's `timeline.json` the bus tells of once the
+    transaction commits."""
+    return _timeline_moves(
+        [
+            callback.event
+            for callback in after_commit_module._callbacks.get()
+            if isinstance(callback, _Delivery)
+        ],
+        project,
+    )
+
+
+class TestTheTimelineFollowsTheRun:
+    """A work item's or a job's row in `timeline.json` names its environment
+    and its controller session: each write that gives its run one, or clears
+    or replaces one, moves the timeline's hash once it commits."""
+
+    def test_the_environment_its_start_creates_and_its_session_each_move_it(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _brought_up(starts, session, project)
+
+        brought, rows = _timeline(container, project)
+        assert _ran_in(rows, run.id) == (run.environment_id, None)
+        assert _timeline_moves(engine_events, project) == [brought]
+        heard = len(engine_events)
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        started, rows = _timeline(container, project)
+        assert run.controller_session is not None
+        assert _ran_in(rows, run.id) == (run.environment_id, run.controller_session)
+        assert _timeline_moves(engine_events[heard:], project) == [started]
+
+    def test_a_free_environment_its_start_takes_moves_it(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        _free(session, fake)
+
+        run = _brought_up(starts, session, project)
+
+        taken, rows = _timeline(container, project)
+        assert _ran_in(rows, run.id) == (FREE, None)
+        assert _timeline_moves(engine_events, project) == [taken]
+
+    def test_the_store_a_job_takes_and_its_session_each_move_it(
+        self,
+        container: ServiceContainer,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        _store(fake)
+        _store_tree(fake)
+        now = datetime.now(UTC)
+        job = models.Session(
+            project_id=project.id,
+            kind_code="job",
+            cwd=STORE_REPO,
+            model="opus",
+            reasoning_effort="xhigh",
+            token_hash=uuid.uuid4().hex,
+            state_code=SessionState.HELD,
+            turns=1,
+            turn_started_at=now,
+        )
+        session.add(job)
+        session.flush()
+        session.add(
+            Turn(
+                session_id=job.id,
+                seq=1,
+                message=BRIEF,
+                started_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
+        )
+        container.record_service().place_work(
+            project, job, "Setting up the project", trigger=WorkTrigger.SETUP
+        )
+        boxing.start_brain(session, project, job, "place the job")
+        clear_after_commit_callbacks()
+        cut = LoopHandle(f"start:{job.id}")
+        cut._request_stop()
+
+        boxing.run(job.id, cut)
+
+        stored, rows = _timeline(container, project)
+        assert _ran_in(rows, job.id) == (STORE_ENVIRONMENT_ID, None)
+        assert _timeline_moves(engine_events, project) == [stored]
+        heard = len(engine_events)
+
+        _run(boxing, job)
+
+        job = _read(session, job.id)
+        started, rows = _timeline(container, project)
+        assert job.controller_session is not None
+        assert _ran_in(rows, job.id) == (STORE_ENVIRONMENT_ID, job.controller_session)
+        assert _timeline_moves(engine_events[heard:], project) == [started]
+
+    @pytest.mark.parametrize("leaving", [False, True])
+    def test_a_fresh_resume_moves_it_with_its_write(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        leaving: bool,
+    ) -> None:
+        failed = _failed_before_its_first_line(starts, fake, session, project)
+        env_id = _env(session, failed.id)
+        if leaving:
+            fake.remove_environment(env_id)
+            _row(session, env_id).last_state = "gone"
+            session.flush()
+        clear_after_commit_callbacks()
+
+        starts.resume(session, failed.id)
+
+        resumed, rows = _timeline(container, project)
+        assert _ran_in(rows, failed.id) == (None if leaving else env_id, None)
+        assert _owed_timeline_moves(project) == [resumed]
+
+    def test_a_gone_session_its_resume_gives_up_and_the_new_one_each_move_it(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        env_id = _env(session, stopped.id)
+        fake.restart(env_id)
+        fake.set_status(env_id, "running")
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+        heard = len(engine_events)
+        cut = LoopHandle(f"start:{run.id}")
+        cut._request_stop()
+
+        starts.run(run.id, cut)
+
+        lost, rows = _timeline(container, project)
+        assert _ran_in(rows, run.id) == (env_id, None)
+        assert _timeline_moves(engine_events[heard:], project) == [lost]
+        heard = len(engine_events)
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        resumed, rows = _timeline(container, project)
+        assert run.controller_session is not None
+        assert _ran_in(rows, run.id) == (env_id, run.controller_session)
+        assert _timeline_moves(engine_events[heard:], project) == [resumed]

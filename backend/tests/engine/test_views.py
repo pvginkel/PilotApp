@@ -44,8 +44,10 @@ from app.models.reference import (
     FiringCause,
     ProjectState,
     RecordKind,
+    SessionState,
     TaskStatus,
     UserKind,
+    WorkTrigger,
 )
 from app.services.container import ServiceContainer
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -812,6 +814,138 @@ class TestViewService:
         assert "notes" not in entry
         assert "alert" not in entry
 
+    def test_a_work_items_row_carries_its_runs_facts_beside_the_common_keys(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        project_session.model = "opus"
+        project_session.reasoning_effort = "xhigh"
+        project_session.controller_session = "camp-1"
+        container.record_service().place_work(
+            project, project_session, "Pitch the tent", repo="example/Camp"
+        )
+        placed = session.get_one(Item, project_session.id)
+
+        [entry] = _json(container.view_service().timeline(project))["items"]
+
+        assert entry == {
+            "id": str(project_session.id),
+            "seq": 1,
+            "kind": "work",
+            "title": "Pitch the tent",
+            "path": None,
+            "step": None,
+            "urgent": False,
+            "for": None,
+            "summary": None,
+            "created_at": utc_time(placed.created_at),
+            "done": None,
+            "attachments": [],
+            "repo": "example/Camp",
+            "environment": environment.id,
+            "model": "opus",
+            "reasoning_effort": "xhigh",
+            "session": "camp-1",
+        }
+
+    def test_a_jobs_row_carries_them_with_no_repository(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            model="opus",
+            reasoning_effort="high",
+            controller_session="pilotprojects-3",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(job)
+        session.flush()
+        container.record_service().place_work(
+            project, job, "Setting up the project", trigger=WorkTrigger.SETUP
+        )
+
+        [entry] = _json(container.view_service().timeline(project))["items"]
+
+        assert {key: entry[key] for key in _RUN_FACTS} == {
+            "repo": None,
+            "environment": environment.id,
+            "model": "opus",
+            "reasoning_effort": "high",
+            "session": "pilotprojects-3",
+        }
+
+    def test_a_run_not_yet_started_is_null_but_its_repository_and_no_other_kind_has_them(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        item: Item,
+    ) -> None:
+        run = models.Session(
+            project_id=project.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="3" * 64,
+            state_code=SessionState.STARTING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Pitch the tent", repo="example/Camp"
+        )
+
+        decision, work = _json(container.view_service().timeline(project))["items"]
+
+        assert (decision["kind"], work["kind"]) == ("decision", "work")
+        assert not set(_RUN_FACTS) & set(decision)
+        assert {key: work[key] for key in _RUN_FACTS} == {
+            "repo": "example/Camp",
+            "environment": None,
+            "model": None,
+            "reasoning_effort": None,
+            "session": None,
+        }
+
+    def test_run_moved_tells_the_bus_of_a_work_items_timeline_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        container.record_service().place_work(
+            project, project_session, "Pitch the tent", repo="example/Camp"
+        )
+        chat = open_chat(session, project)
+        clear_after_commit_callbacks()
+        views = container.view_service()
+        with scoped_session(container):
+            project_session.controller_session = "camp-1"
+            views.run_moved(project_session)
+            views.run_moved(chat)
+            assert engine_events == []
+
+        [entry] = _json(views.timeline(project))["items"]
+        assert entry["session"] == "camp-1"
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json", views.timeline(project).hash
+            )
+        ]
+
     def test_timeline_moved_tells_the_bus_after_the_commit(
         self,
         container: ServiceContainer,
@@ -830,6 +964,9 @@ class TestViewService:
             ProjectChanged(project.id),
         ]
 
+
+_RUN_FACTS = ("repo", "environment", "model", "reasoning_effort", "session")
+"""The keys of a work item's run in its row."""
 
 _COMMENT = f"<!-- {READONLY} -->"
 

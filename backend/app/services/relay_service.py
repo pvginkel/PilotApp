@@ -730,6 +730,7 @@ class RelayService:
             turn.ended_at = now
         session.controller_session = created.name
         session.token_hash = injected.token_hash
+        self._container.view_service().run_moved(session)
         if session.state_code == SessionState.RUNNING:
             session.state_code = SessionState.IDLE
             session.current_line = None

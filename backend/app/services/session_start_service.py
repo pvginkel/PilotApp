@@ -995,6 +995,7 @@ class SessionStartService:
                         session.token_hash = injected.token_hash
                         session.started_at = datetime.now(UTC)
                         self._moved(session)
+                        self._run_moved(session)
             if handle.stopping:
                 return
         with scoped_session(self._container) as db:
@@ -1747,15 +1748,18 @@ class SessionStartService:
         environment by name keeps it as it is, neither taken back nor let go
         (DB 344)."""
         session.controller_session = None
-        if session.environment_id is None or _placed_by_name(db, session):
-            return
-        if not self._environments.retake(db, session.environment_id):
+        if (
+            session.environment_id is not None
+            and not _placed_by_name(db, session)
+            and not self._environments.retake(db, session.environment_id)
+        ):
             logger.info(
                 "Session %s lets environment %s go: it is leaving",
                 session.id,
                 session.environment_id,
             )
             session.environment_id = None
+        self._run_moved(session)
 
     def _hand_to_timer(self, db: Session, session: AgentSession) -> None:
         """The shutdown timer of the environment the Session stops or fails
@@ -1815,6 +1819,7 @@ class SessionStartService:
             payload={"type": SESSION_GONE, "reason": reason},
         )
         session.controller_session = None
+        self._run_moved(session)
         environment = db.get_one(Environment, session.environment_id)
         self._phase(db, session_id, f"Starting {environment.name}…")
         logger.info(
@@ -1974,6 +1979,7 @@ class SessionStartService:
             ):
                 return False
             session.environment_id = self._store
+            self._run_moved(session)
             self._phase(
                 db,
                 session_id,
@@ -2045,6 +2051,7 @@ class SessionStartService:
             environment = self._environments.take(db, repo)
             if environment is not None:
                 session.environment_id = environment.id
+                self._run_moved(session)
                 logger.info(
                     "Session %s took environment %s", session_id, environment.id
                 )
@@ -2121,6 +2128,7 @@ class SessionStartService:
             )
             return False
         session.environment_id = environment.id
+        self._run_moved(session)
         self._phase(db, session_id, f"Preparing {environment.name}…")
         return True
 
@@ -2373,6 +2381,9 @@ class SessionStartService:
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
         work_moved(self._container.engine_bus(), session, state=state)
+
+    def _run_moved(self, session: AgentSession) -> None:
+        self._container.view_service().run_moved(session)
 
     def _records(self, db: Session) -> SessionRecordService:
         return SessionRecordService(

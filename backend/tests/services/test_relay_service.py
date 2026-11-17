@@ -27,8 +27,9 @@ from app import extensions, models
 from app.app_config import HaltSetting
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, WorkMoved
 from app.engine.documents import DocumentService
+from app.engine.paths import TIMELINE, tree_path
 from app.engine.record import MARKED, TURN_ENDED
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
@@ -2819,6 +2820,45 @@ class TestRelayWorkItem:
             WorkMoved(project.id, work_item.id),
             ProjectChanged(project.id),
         ]
+
+    def test_a_resume_of_its_gone_controller_session_moves_the_timeline(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        work_item: models.Session,
+        engine_events: list[EngineEvent],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _send(relays, session, work_item)
+        gone = work_item.token_hash
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+        handle = LoopHandle(f"relay:{work_item.id}")
+        resume = relays._resume
+
+        def resume_once(*args: Any) -> None:
+            resume(*args)
+            handle._request_stop()
+
+        monkeypatch.setattr(relays, "_resume", resume_once)
+        engine_events.clear()
+
+        relays.relay(work_item.id, handle)
+
+        # Its new controller session is the one its row names.
+        assert work_item.token_hash != gone
+        timeline = container.view_service().timeline(project)
+        [row] = json.loads(timeline.text)["items"]
+        assert row["session"] == work_item.controller_session
+        assert [
+            event
+            for event in engine_events
+            if isinstance(event, TreeHashMoved)
+            and event.path == tree_path(project, TIMELINE)
+        ] == [TreeHashMoved(tree_path(project, TIMELINE), timeline.hash)]
 
     @pytest.mark.parametrize(
         ("restart", "kinds", "result", "done"),

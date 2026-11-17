@@ -55,7 +55,7 @@ from app.services.session_record_service import (
     each_record,
     last_record,
 )
-from app.services.start_gate import CHAT_KIND, CONVERSATION_KIND
+from app.services.start_gate import CHAT_KIND, CONVERSATION_KIND, JOB_KIND, WORK_KIND
 
 _TRANSCRIPT_KINDS = (CHAT_KIND, CONVERSATION_KIND)
 """The Session Kinds whose records `chat.md` shows."""
@@ -161,7 +161,9 @@ class ViewService:
         §7.1); a done work item with its note, Pilot's reason for closing it
         for good, none after any other close (DB 350); a debrief's notice its
         Item's row alone, no debrief it carries in it (DB 611, 328); a prose
-        item with Pilot's notes and alert standing on it (F74.2)."""
+        item with Pilot's notes and alert standing on it (F74.2); a work item,
+        a job's among them, with its run's facts as the record holds them
+        (`_run`)."""
         rows = self.db.execute(
             select(
                 Item,
@@ -201,9 +203,11 @@ class ViewService:
             )
         }
         works = {
-            work.id: work
-            for work in self.db.scalars(
-                select(Work).where(Work.project_id == project.id)
+            work.id: (work, run)
+            for work, run in self.db.execute(
+                select(Work, AgentSession)
+                .join(AgentSession, AgentSession.id == Work.id)
+                .where(Work.project_id == project.id)
             )
         }
         firings: dict[uuid.UUID, list[tuple[WaitFiring, CardTransition | None]]] = {}
@@ -273,10 +277,24 @@ class ViewService:
     def timeline_moved(self, project: Project) -> None:
         """Tell the bus the project's timeline has a new hash, and that what
         its screens show moved, once the transaction commits."""
+        self._timeline_hash_moved(project)
+        self.engine_bus.emit(ProjectChanged(project.id))
+
+    def run_moved(self, session: AgentSession) -> None:
+        """The Session's environment or controller session was set or
+        cleared: when it is a work item's or a job's, tell the bus its
+        project's timeline, whose row names both, has a new hash, once the
+        transaction commits. Called after the write: the hash is the
+        timeline's as the transaction has it at the call. What the screens
+        show of the run moves through `work_moved`, so no `ProjectChanged`
+        goes with it."""
+        if session.kind_code in (WORK_KIND, JOB_KIND):
+            self._timeline_hash_moved(self.db.get_one(Project, session.project_id))
+
+    def _timeline_hash_moved(self, project: Project) -> None:
         self.engine_bus.emit(
             TreeHashMoved(tree_path(project, TIMELINE), self.timeline(project).hash)
         )
-        self.engine_bus.emit(ProjectChanged(project.id))
 
     def chat(self, project: Project) -> Rendering:
         """The project's chats and its conversations as `chat.md` gives them
@@ -553,7 +571,7 @@ def _item(
     attachments: list[dict[str, str]],
     wait: Wait | None,
     firings: list[tuple[WaitFiring, CardTransition | None]],
-    work: Work | None,
+    work: tuple[Work, AgentSession] | None,
 ) -> dict[str, Any]:
     done: dict[str, Any] | None = None
     if item.done_at is not None:
@@ -567,7 +585,7 @@ def _item(
         if wait is not None:
             done["note"] = wait.done_note
         elif work is not None:
-            done["note"] = work.done_note
+            done["note"] = work[0].done_note
     entry = {
         "id": str(item.id),
         "seq": item.seq,
@@ -584,7 +602,23 @@ def _item(
     }
     if wait is not None:
         entry |= _wait(wait, firings, handles)
+    if work is not None:
+        entry |= _run(*work)
     return entry
+
+
+def _run(work: Work, run: AgentSession) -> dict[str, Any]:
+    """A work item's run as the record holds it, none where it holds none:
+    the repository it was placed by, the environment's id, the model and the
+    effort its placement named, under `add_item`'s names, and its controller
+    session's name. Nothing is derived from them."""
+    return {
+        "repo": work.repo,
+        "environment": run.environment_id,
+        "model": run.model,
+        "reasoning_effort": run.reasoning_effort,
+        "session": run.controller_session,
+    }
 
 
 def _notes(notes: list[StandingNote], alert: StandingAlert | None) -> dict[str, Any]:
