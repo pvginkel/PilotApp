@@ -6,8 +6,8 @@
  * the block is answered, one line, what Pilot suggested or the start of its text, which its chevron
  * opens whole and folds again, nothing putting it away (F168.3). Its button takes what it
  * suggests into the block as the person's own: in a document the answer with its note, in a one-ask
- * item the choice and the note its Send carries, on an action a note alone in the paste-back; a
- * note that offers work has no such button (F168.2). A block Pilot's note suggests
+ * item the choice and the note its Send carries, on an action a note alone in the paste-back, the
+ * first field it fills taking the focus; a note that offers work has no such button (F168.2). A block Pilot's note suggests
  * another answer on takes no default: *Send answers* waits on it, its tooltip naming it (F168.4);
  * a note that agrees, or one on a block with no recommendation, changes nothing there. None shows
  * on a block Pilot answered, or on a confirmation. A claimed action's note, held and handed back,
@@ -268,7 +268,7 @@ test.describe('Send answers and Pilot’s note', () => {
 });
 
 test.describe('Taking Pilot’s note', () => {
-  test('in a document answers the block as the person’s own, its note with it, words no option has as free words, a question’s field opening on it, until another answer; on an action puts a note alone in the paste-back, the Done still the person’s', async ({
+  test('in a document answers the block as the person’s own, its note with it, words no option has as free words, a question’s field opening on it, until another answer; on an action puts a note alone in the paste-back, which takes the focus, the Done still the person’s', async ({
     people,
     projects,
     timeline,
@@ -314,6 +314,7 @@ test.describe('Taking Pilot’s note', () => {
     await expect(van.pilotsNote.take).toHaveText('Take this note');
     await van.pilotsNote.take.click();
     await expect(van.paste).toHaveValue(CARD);
+    await expect(van.paste).toBeFocused();
     await expect(van.answered).toHaveCount(0);
     expect((await blocks())[2].done).toBeNull();
     await van.paste.fill(`${CARD} Pick it up on Friday.`);
@@ -333,7 +334,7 @@ test.describe('Taking Pilot’s note', () => {
     await expect.poll(async () => (await blocks())[0]).toMatchObject({ answer: BELL, note: null });
   });
 
-  test('in a one-ask decision chooses the answer and puts its note in the field its Send carries, both the person’s to change and kept over a reload; words no option has open Other with them', async ({
+  test('in a one-ask decision chooses the answer and puts its note in the field its Send carries, which takes the focus, both the person’s to change and kept over a reload; words no option has open Other with them, its field focused', async ({
     people,
     projects,
     timeline,
@@ -351,6 +352,7 @@ test.describe('Taking Pilot’s note', () => {
     await block.pilotsNote.take.click();
     await expect(block.option('Tunnel')).toHaveAttribute('data-chosen', 'true');
     await expect(block.noteField).toHaveValue(STAKES);
+    await expect(block.noteField).toBeFocused();
     await expect(block.answerSend).toBeEnabled();
     await expect(item.root).toHaveAttribute('data-state', 'open');
     expect((await projects.block(project, tent)).answer).toBeNull();
@@ -373,13 +375,14 @@ test.describe('Taking Pilot’s note', () => {
     await again.pilotsNote.take.click();
     await expect(again.console).toBeVisible();
     await expect(again.field).toHaveValue(BELL);
+    await expect(again.field).toBeFocused();
     await expect(again.noteField).toHaveCount(0);
     await again.answerSend.click();
     await expect(timeline.item(other).root).toHaveAttribute('data-state', 'done');
     expect(await projects.block(project, other)).toMatchObject({ answer: BELL, note: null });
   });
 
-  test('in a one-ask question puts the answer in its field, and in a one-ask action chooses the option, the note in the field its Send carries; a note that offers work has nothing to take', async ({
+  test('in a one-ask question puts the answer in its field, which takes the focus, and in a one-ask action chooses the option, the note in the field its Send carries, which takes it; a note that offers work has nothing to take', async ({
     people,
     projects,
     timeline,
@@ -395,6 +398,7 @@ test.describe('Taking Pilot’s note', () => {
     const question = timeline.item(pitch).block;
     await question.pilotsNote.take.click();
     await expect(question.answerField).toHaveValue('Lake Como');
+    await expect(question.answerField).toBeFocused();
     await expect(question.noteField).toHaveValue(FERRY);
     expect((await projects.block(project, pitch)).answer).toBeNull();
     await question.answerSend.click();
@@ -405,6 +409,7 @@ test.describe('Taking Pilot’s note', () => {
     await action.pilotsNote.take.click();
     await expect(action.act('Booked')).toHaveAttribute('data-chosen', 'true');
     await expect(action.paste).toHaveValue(CARD);
+    await expect(action.paste).toBeFocused();
     await expect(action.noteField).toHaveCount(0);
     expect((await projects.block(project, van)).answer).toBeNull();
     await action.answerSend.click();

@@ -605,7 +605,11 @@ text, the recommendation and the option's Recommended stay as written.
   action's paste-back, or the note field of a decision or a question (`sent-note.tsx`, "Your note
   with the answer, if any", kept under `<block key>/note`, [`ui.md`](ui.md)), which shows once it
   holds words. A suggested note alone on an open action is "Take this note", into its paste-back,
-  the Done still the person's. The take moves no focus. A note with an offer has no take.
+  the Done still the person's. The first field the take fills takes the focus, as the mockup's
+  take gives it (`taken-focus.ts`): a question's answer field, Other's field, else the note field or
+  the paste-back, in the drawing whose button was pressed, not the block's other drawing under its
+  tab; a take in a document that answers through the record moves none. A note with an offer has no
+  take.
 - **The offer**, on an action: while the action is open and unanswered, its item open, the project
   not archived and the block not held, the note's primary button "Start a work item", "Pilot puts a
   work item for this on the timeline; the action stays yours, with its Done" its title and its icon

@@ -2,23 +2,28 @@
  * A one-ask decision's or question's note, which its Send carries with the answer (F17.4, F32.3):
  * Pilot's note taken puts the note it suggests there (F168.2; take-note.ts). The field stands once
  * it holds words, the person's to change before the Send, and, emptied, until the block is drawn
- * again. An action's paste-back and a No's reason are their own notes already.
+ * again; the take that fills it gives it the focus (taken-focus.ts). An action's paste-back and a
+ * No's reason are their own notes already.
  */
 
 import { useState } from 'react';
 import { TextField } from '@/components/shared/text-field';
+import { useTakenFocus } from '@/components/timeline/taken-focus';
 import type { useUnsentText } from '@/hooks/use-unsent-text';
 
 interface SentNoteProps {
-  /** The note's unsent words, kept under `<block key>/note`. */
+  /** The key its words are kept under, `<block key>/note`. */
+  field: string;
+  /** The note's unsent words, kept under `field`. */
   note: ReturnType<typeof useUnsentText>;
   disabled: boolean;
   /** The block's Send, Ctrl+Enter's in the field. */
   onSend: () => void;
 }
 
-export function SentNote({ note, disabled, onSend }: SentNoteProps) {
+export function SentNote({ field, note, disabled, onSend }: SentNoteProps) {
   const [typed, setTyped] = useState(false);
+  const taken = useTakenFocus(field);
   if (note.text === '' && !typed) return null;
   const change = (next: string) => {
     setTyped(true);
@@ -36,6 +41,7 @@ export function SentNote({ note, disabled, onSend }: SentNoteProps) {
         disabled={disabled}
         survivesReload
         testId="timeline.block.note-field"
+        ref={taken}
       />
     </div>
   );

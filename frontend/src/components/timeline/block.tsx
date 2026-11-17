@@ -35,8 +35,9 @@
  * person's stands between its head and its controls, wherever an item's block is drawn but on a
  * confirmation; none on a block Pilot's work holds or Pilot answered, in a document that is Pilot's,
  * in the draft or in a project's own document (F168.1; pilots-note.tsx), its button taking what
- * it suggests while the block takes an answer (F168.2; take-note.ts), and on an open action the
- * button that starts the work it offers until that is taken (F168.7).
+ * it suggests while the block takes an answer (F168.2; take-note.ts), the field it fills taking the
+ * focus in the drawing pressed (taken-focus.ts), and on an open action the button that starts the
+ * work it offers until that is taken (F168.7).
  */
 
 import { useContext, useState } from 'react';
@@ -60,6 +61,7 @@ import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { SectionsContext } from '@/components/timeline/sections';
 import { takeOf } from '@/components/timeline/take-note';
+import { TakenFocusContext, type FocusAsk } from '@/components/timeline/taken-focus';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { useAnswer, useDraftAnswer, type Answering } from '@/hooks/use-answer';
@@ -234,6 +236,8 @@ interface BlockPanelProps {
 
 function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, settled, disabled, quote, asked, flash, held, note, offerAt }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
+  // Its note's latest take's ask for the focus, on the field it filled.
+  const [focusing, setFocusing] = useState<FocusAsk | null>(null);
   const kept = useChoice(field);
   const choice = choosing ? kept : null;
   const saving = answering?.saving ?? null;
@@ -248,7 +252,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, 
   const undone = block.claim?.undone ?? false;
   // A done question opens to nothing more than its answer.
   const opens = closable && answering !== null && !(settled && block.kind === 'question');
-  const take = note === null || answering === null || disabled || !live ? null : takeOf({ field, block, note, answer: answering.answer, choice });
+  const take = note === null || answering === null || disabled || !live ? null : takeOf({ field, block, note, answer: answering.answer, choice, focus: (into) => setFocusing({ field: into }) });
   // The API takes an offer on an open action alone, once (DB 629).
   const offer = note === null || note.offer === null || note.offer_taken || answered || disabled || !live ? null : offerAt;
 
@@ -365,7 +369,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, 
       {note !== null && <PilotsNote note={note} answered={answered} take={take} offer={offer} />}
       <div className="block-controls">
         {deferred && <Deferral block={block} />}
-        {!(closed && deferred) && controls()}
+        {!(closed && deferred) && <TakenFocusContext value={focusing}>{controls()}</TakenFocusContext>}
       </div>
     </section>
   );

@@ -9,7 +9,7 @@
  * gives the choice back (F32.3).
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type Ref } from 'react';
 import { Send, X } from 'lucide-react';
 import { BusyIcon } from '@/components/shared/busy-icon';
 import { TextField } from '@/components/shared/text-field';
@@ -65,6 +65,8 @@ interface ConsoleBoxProps {
   /** Its own Send, by its name, disabled while held, busy while what it sent saves; none in a one-ask item. */
   send: { name: string; held: boolean; busy: boolean } | null;
   autoFocus: boolean;
+  /** Its field's, through which Pilot's note taken gives it the focus (taken-focus.ts). */
+  fieldRef?: Ref<HTMLTextAreaElement>;
   className?: string;
   testId: string;
   /** Ctrl+Enter's, and its own Send's. */
@@ -73,7 +75,7 @@ interface ConsoleBoxProps {
 }
 
 /** The console's box over words held outside it: a one-ask item's, which its block's Send sends. */
-export function ConsoleBox({ text, onChange, label, placeholder, send, autoFocus, className, testId, onSend, onClose }: ConsoleBoxProps) {
+export function ConsoleBox({ text, onChange, label, placeholder, send, autoFocus, fieldRef, className, testId, onSend, onClose }: ConsoleBoxProps) {
   useEscape('console', true, onClose);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -95,6 +97,7 @@ export function ConsoleBox({ text, onChange, label, placeholder, send, autoFocus
         placeholder={placeholder}
         autoFocus={autoFocus}
         testId={`${testId}.field`}
+        ref={fieldRef}
       />
       {send !== null && (
         <button

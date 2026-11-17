@@ -24,6 +24,7 @@ import { OTHER } from '@/components/timeline/decision';
 import { Note } from '@/components/timeline/note';
 import { DEFERRED, Said } from '@/components/timeline/said';
 import { SendChoice } from '@/components/timeline/send-choice';
+import { useTakenFocus } from '@/components/timeline/taken-focus';
 import type { Answer, Saving, Sent } from '@/hooks/use-answer';
 import type { Choosing } from '@/hooks/use-choice';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
@@ -140,6 +141,9 @@ function ActionControls({ field, block, closable, saving, disabled, onAnswer, on
   const pasted = useUnsentText(`${field}/paste`);
   // Other's words in a one-ask item, where no console of its own holds them.
   const other = useUnsentText(`${field}/other`);
+  // Each takes the focus where Pilot's note taken fills it (taken-focus.ts).
+  const pasteTaken = useTakenFocus(`${field}/paste`);
+  const otherTaken = useTakenFocus(`${field}/other`);
   const [opened, setOpened] = useState(false);
   const typing = choice === null ? opened : choice.typing;
   const optioned = block.options.length > 0;
@@ -178,6 +182,7 @@ function ActionControls({ field, block, closable, saving, disabled, onAnswer, on
         disabled={disabled}
         survivesReload={!closable}
         testId="timeline.block.paste"
+        ref={pasteTaken}
       />
       <div className="item-actions">
         {optioned ? (
@@ -236,6 +241,7 @@ function ActionControls({ field, block, closable, saving, disabled, onAnswer, on
                 placeholder={OTHER.placeholder}
                 send={null}
                 autoFocus={choice.opened}
+                fieldRef={otherTaken}
                 className="over-send"
                 testId="timeline.block.console"
                 onSend={send}

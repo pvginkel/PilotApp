@@ -23,6 +23,7 @@ import { LinkedText } from '@/components/shared/linked-text';
 import { Console, ConsoleBox } from '@/components/timeline/console';
 import { Note } from '@/components/timeline/note';
 import { SentNote } from '@/components/timeline/sent-note';
+import { useTakenFocus } from '@/components/timeline/taken-focus';
 import { SendChoice } from '@/components/timeline/send-choice';
 import type { Answer } from '@/hooks/use-answer';
 import type { Choosing } from '@/hooks/use-choice';
@@ -87,6 +88,7 @@ export function DecisionOptions({ field, block, chosen, saving, closed, live, se
   const held = own !== null && !rows.some((row) => row.answer === own) ? own : null;
   // Other's words in a one-ask item, where no console of its own holds them.
   const other = useUnsentText(`${field}/other`, held ?? '');
+  const otherTaken = useTakenFocus(`${field}/other`);
   // The note a one-ask item's Send carries, which Pilot's note taken puts there (F168.2).
   const sentNote = useUnsentText(`${field}/note`);
   const typing = choice === null ? opened : choice.typing;
@@ -184,6 +186,7 @@ export function DecisionOptions({ field, block, chosen, saving, closed, live, se
               placeholder={OTHER.placeholder}
               send={null}
               autoFocus={choice.opened}
+              fieldRef={otherTaken}
               className="over-send"
               testId="timeline.block.console"
               onSend={send}
@@ -209,7 +212,7 @@ export function DecisionOptions({ field, block, chosen, saving, closed, live, se
       </div>
       {choice !== null && (
         <>
-          <SentNote note={sentNote} disabled={!live || disabled} onSend={send} />
+          <SentNote field={`${field}/note`} note={sentNote} disabled={!live || disabled} onSend={send} />
           <div className="item-actions">
             <SendChoice ready={ready} busy={saving} starts={starts} onSend={send} />
           </div>

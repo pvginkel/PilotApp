@@ -13,6 +13,7 @@ import { BusyIcon } from '@/components/shared/busy-icon';
 import { TextField } from '@/components/shared/text-field';
 import { DEFERRED, Said } from '@/components/timeline/said';
 import { SentNote } from '@/components/timeline/sent-note';
+import { useTakenFocus } from '@/components/timeline/taken-focus';
 import type { Answer, Saving } from '@/hooks/use-answer';
 import type { Block } from '@/hooks/use-timeline';
 import { useUnsentText } from '@/hooks/use-unsent-text';
@@ -68,6 +69,7 @@ interface QuestionFieldProps {
 
 function QuestionField({ field, block, initial, closable, disabled, onAnswer, starts }: QuestionFieldProps) {
   const { text, change, sent } = useUnsentText(`${field}/answer`, initial);
+  const taken = useTakenFocus(`${field}/answer`);
   // The note its Send carries, which Pilot's note taken puts there in a one-ask item (F168.2).
   const note = useUnsentText(`${field}/note`);
   const words = text.trim() === '' ? block.default : text;
@@ -93,10 +95,11 @@ function QuestionField({ field, block, initial, closable, disabled, onAnswer, st
           disabled={disabled}
           survivesReload={!closable || text === initial}
           testId="timeline.block.field"
+          ref={taken}
         />
         <SendButton busy={false} disabled={disabled || words === null} starts={starts} onSend={send} />
       </div>
-      <SentNote note={note} disabled={disabled} onSend={send} />
+      <SentNote field={`${field}/note`} note={note} disabled={disabled} onSend={send} />
     </>
   );
 }
