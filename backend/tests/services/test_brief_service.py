@@ -1,12 +1,13 @@
 """The brief a brain session's first Turn carries, per kind, the server's
 trailer on a worker's, and the follow-up turn, against invented records
-(design 3 §5.1 to §5.4; D058; F46.1, F79, F129.5, F5.5; DB assertion 251;
+(design 3 §5.1 to §5.4; F46.1, F57.4, F79, F129.5, F5.5; DB assertion 251;
 V03, V08, V12, V13, V21)."""
 
 import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import func, select
@@ -86,10 +87,12 @@ HEAD = (
     "Pilot's brief · the project's chat · project \"Soup club\" ·"
     " /work/Projects/soup-club · 2026-10-26T09:30:15Z"
 )
-NOTES = (
-    "Open plan notes, by summary (the content and the blocks a read away in"
-    " plan.json; `pilot.py plan note list`):"
+TASKS = (
+    "The plan's tasks not done, in its order, as `pilot.py plan task list` prints them:"
 )
+ITEMS = "The open items, as `pilot.py items list --open` prints them:"
+NOTES = "The open plan notes, whole, as `pilot.py plan note list` prints them:"
+HANDBOOK = "The project's handbook, handbook.md, whole:"
 HOMELESS = (
     "Deferrals without a home (a note names none of these blocks — write one,"
     " or answer the block anew in a new item):"
@@ -111,9 +114,40 @@ PLAN = {
             "status": "pending",
             "notes": [{"id": "n3", "summary": "Two spoons", "content": "Two."}],
         },
+        {"id": "serve", "title": "Serve it", "status": "done", "notes": []},
     ],
     "notes": [{"id": "n2", "summary": "Add a sweep task", "content": "Later."}],
 }
+
+PLANNED = (
+    f"{TASKS}\n"
+    "fix · in_progress · Fix the stock · notes n1\n"
+    "taste · pending · Taste it · notes n3"
+)
+"""`PLAN`'s tasks in a brief: its done task left out."""
+
+PLAN_NOTES = (
+    f"{NOTES}\n"
+    "n1 · fix · Ask about salt\n"
+    "    Ask.\n"
+    "n3 · taste · Two spoons\n"
+    "    Two.\n"
+    "n2 · plan · Add a sweep task\n"
+    "    Later."
+)
+"""`PLAN`'s notes in a brief, whole."""
+
+FOR_ADA = """---
+title: Which salt?
+for: ada
+step: taste
+urgent: true
+---
+
+```question id=Q1
+```
+"""
+"""An open item of Pilot's own for ada, on a task and urgent."""
 
 DEFERRED = """# Soup chores
 
@@ -182,6 +216,50 @@ def _closed_chat(db: DbSession, project: Project, closed_at: datetime) -> None:
         )
     )
     db.flush()
+
+
+def _seq(db: DbSession, work: Work) -> int:
+    """The job's own seq, its Item's."""
+    return db.get_one(Item, work.id).seq
+
+
+def _referring(item_id: uuid.UUID) -> dict[str, Any]:
+    """`PLAN` with its note n1 naming the deferred decision D1 of the item
+    `item_id`, `DEFERRED`'s."""
+    plan = json.loads(json.dumps(PLAN))
+    plan["tasks"][0]["notes"][0]["refs"] = [f"{item_id}/D1"]
+    return cast(dict[str, Any], plan)
+
+
+def _job(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    trigger: WorkTrigger,
+    title: str,
+    *,
+    trigger_item_id: uuid.UUID | None = None,
+    trigger_note_id: int | None = None,
+) -> Work:
+    """A job of `trigger`, placed as the server places one: its own Item of
+    kind `work` at the project's next seq, open."""
+    job = models.Session(
+        project_id=project.id,
+        kind_code="job",
+        cwd="/work/PilotProjects",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.STARTING,
+    )
+    db.add(job)
+    db.flush()
+    return container.record_service().place_work(
+        project,
+        job,
+        title,
+        trigger=trigger,
+        trigger_item_id=trigger_item_id,
+        trigger_note_id=trigger_note_id,
+    )
 
 
 class TestProjectChat:
@@ -272,6 +350,11 @@ class TestProjectChat:
             TransitionKind.PAUSED,
             datetime(2026, 10, 26, 8, tzinfo=UTC),
         )
+        documents = container.document_service()
+        item = documents.bear_item(
+            opened, "decision", "Soup chores", project_session, DEFERRED
+        )
+        container.record_service().done(item, person)
         struck = {"id": "n4", "summary": "Struck", "content": "Gone."}
         plans = container.plan_service()
         assert (
@@ -280,11 +363,11 @@ class TestProjectChat:
             )
             == []
         )
-        assert plans.save(opened, json.dumps(PLAN).encode()) == []
-        item = container.document_service().bear_item(
-            opened, "decision", "Soup chores", project_session, DEFERRED
+        assert plans.save(opened, json.dumps(_referring(item.id)).encode()) == []
+        asked = documents.bear_item(
+            opened, "question", "Which salt?", project_session, FOR_ADA
         )
-        container.record_service().done(item, person)
+        documents.bear_handbook(opened, "# Handbook\n\n- Salt the stock last.\n")
         _closed_chat(session, opened, datetime(2026, 10, 24, 12, tzinfo=UTC))
         _closed_chat(session, opened, datetime(2026, 10, 25, 17, 10, tzinfo=UTC))
         words = f'<quoted_item id="{item.id}">Soup chores</quoted_item id="{item.id}"> Leek.'
@@ -292,19 +375,30 @@ class TestProjectChat:
         brief = briefs.project_chat(opened, person, words, AT)
 
         path = f"soup-club/{session.get_one(models.Document, item.id).path}"
+        asked_path = session.get_one(models.Document, asked.id).path
         assert brief == (
             f"{HEAD}\n\n"
             "Auto pilot: on — the granted column holds for this session"
             " (rules/grants.md).\n"
             "The project is paused since 2026-10-26T08:00:00Z: anything you start"
             " is held until it resumes — say so.\n\n"
+            f"{PLANNED}\n\n"
+            f"{ITEMS}\n"
+            f"{asked.seq} · question · Which salt? · open · for ada · step taste ·"
+            f" urgent · {asked_path} · {asked.id}\n\n"
             f"{NOTES}\n"
-            '- fix "Fix the stock" · n1: Ask about salt\n'
-            '- taste "Taste it" · n3: Two spoons\n'
-            "- the plan · n2: Add a sweep task\n"
+            "n1 · fix · Ask about salt\n"
+            "    Ask.\n"
+            f"    {item.id}/D1 · Soup chores · answer: deferred → fix by agent\n"
+            "n3 · taste · Two spoons\n"
+            "    Two.\n"
+            "n2 · plan · Add a sweep task\n"
+            "    Later.\n"
             f"{HOMELESS}\n"
-            f"- {item.id}/D1 in {path} (Soup chores), to: fix\n"
             f"- {item.id}/Q1 in {path} (Soup chores), to: plan\n\n"
+            f"{HANDBOOK}\n"
+            "# Handbook\n\n"
+            "- Salt the stock last.\n\n"
             "Earlier chats of this project are in chat.md; the latest closed"
             " 2026-10-25T17:10:00Z.\n\n"
             "The message, from ada (member):\n"
@@ -352,21 +446,36 @@ class TestProjectChat:
             " · 2026-10-26T09:30:15Z\n\n"
         )
 
-    def test_it_carries_nothing_of_the_handbook(
+    def test_it_carries_the_handbook_whole_before_the_message(
         self,
         container: ServiceContainer,
         briefs: BriefService,
         opened: Project,
         person: User,
     ) -> None:
+        """The handbook rides in the brief, so that no read of it comes before
+        the brain acts; its trailing blank lines are left off."""
         container.document_service().bear_handbook(
-            opened, "# Handbook\n\n- Salt the stock last.\n"
+            opened, "# Handbook\n\n- Salt the stock last.\n\n\n"
         )
 
         brief = briefs.project_chat(opened, person, "Hi", AT)
 
-        assert "handbook" not in brief.lower()
-        assert "Salt the stock last" not in brief
+        assert brief.endswith(
+            f"{HANDBOOK}\n# Handbook\n\n- Salt the stock last.\n\n"
+            "The message, from ada (not a member):\nHi"
+        )
+
+    def test_a_blank_handbook_is_left_out(
+        self,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        container.document_service().bear_handbook(opened, "\n  \n")
+
+        assert HANDBOOK not in briefs.project_chat(opened, person, "Hi", AT)
 
     def test_it_ends_with_the_words_verbatim(
         self, briefs: BriefService, opened: Project, person: User, item: Item
@@ -478,10 +587,8 @@ class TestConversation:
             " (rules/grants.md).\n"
             "The project is paused since 2026-10-26T08:00:00Z: anything you start"
             " is held until it resumes — say so.\n\n"
-            f"{NOTES}\n"
-            '- fix "Fix the stock" · n1: Ask about salt\n'
-            '- taste "Taste it" · n3: Two spoons\n'
-            "- the plan · n2: Add a sweep task\n"
+            f"{PLANNED}\n\n"
+            f"{PLAN_NOTES}\n"
             f"{HOMELESS}\n"
             f"- {item.id}/D1 in {path} (Soup chores), to: fix\n"
             f"- {item.id}/Q1 in {path} (Soup chores), to: plan\n\n"
@@ -489,7 +596,7 @@ class TestConversation:
             "Start triage here."
         )
 
-    def test_a_finished_projects_has_the_finish_line_and_no_switch_or_notes(
+    def test_a_finished_projects_has_the_finish_line_and_no_switch_or_deferrals(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -497,9 +604,17 @@ class TestConversation:
         opened: Project,
         person: User,
         caller: Environment,
+        project_session: models.Session,
     ) -> None:
-        """DB 334: it reads only, as the project's chat does."""
+        """DB 334: it reads only, as the project's chat does, so it carries
+        the state and the handbook but no deferral without a home, whose
+        line asks for a write."""
         assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        item = container.document_service().bear_item(
+            opened, "decision", "Soup chores", project_session, DEFERRED
+        )
+        container.record_service().done(item, person)
+        container.document_service().bear_handbook(opened, "# Handbook\n")
         _transition(
             session,
             opened,
@@ -516,6 +631,10 @@ class TestConversation:
         assert brief == (
             f"{CONVERSATION_HEAD}\n\n"
             f"{FINISH}\n\n"
+            f"{PLANNED}\n\n"
+            f"{PLAN_NOTES}\n\n"
+            f"{HANDBOOK}\n"
+            "# Handbook\n\n"
             "The message, from the session in RecipeBox-2:\n"
             "What was settled?"
         )
@@ -974,8 +1093,10 @@ class TestACallsBriefAgain:
         )
 
 
-SETUP = Work(trigger_code=WorkTrigger.SETUP)
-"""The setup's Work, as the brief reads it."""
+def _setup(db: DbSession, container: ServiceContainer, project: Project) -> Work:
+    """The setup, placed at Create project."""
+    return _job(db, container, project, WorkTrigger.SETUP, "Setting up the project")
+
 
 LATER = datetime(2026, 10, 26, 11, 5, 40, tzinfo=UTC)
 """When a job held since `AT` leaves the queue or the pause."""
@@ -987,16 +1108,22 @@ class TestSetup:
 
     def test_it_names_the_drafts_folder_the_opening_and_the_empty_plan(
         self,
+        session: DbSession,
         container: ServiceContainer,
         briefs: BriefService,
         opened: Project,
         person: User,
     ) -> None:
+        """Its state is its own seq, its trigger naming no item, and the open
+        items; the plan holds nothing and the handbook is born empty."""
         opening = container.document_service().bear_opening(
             opened, "Ada Example started this project", person, "Soup?"
         )
+        container.document_service().bear_handbook(opened, "")
+        setup = _setup(session, container, opened)
 
-        assert briefs.job(opened, SETUP, AT, AT) == (
+        opening_path = session.get_one(Document, opening.id).path
+        assert briefs.job(opened, setup, AT, AT) == (
             "/plan\n\n"
             'Pilot\'s brief · the setup · project "Soup club" ·'
             " /work/Projects/soup-club · 2026-10-26T09:30:15Z\n\n"
@@ -1007,7 +1134,13 @@ class TestSetup:
             f"The draft: project.md (the opening item {opening.id} holds the words"
             " that started it; the draft's copy and what the chat attached hang on"
             " it).\n"
-            "The plan: plan.json, empty."
+            "The plan: plan.json, empty.\n\n"
+            f"This job is seq {_seq(session, setup)} on the timeline.\n\n"
+            f"{ITEMS}\n"
+            f"{opening.seq} · opening · Ada Example started this project · open ·"
+            f" {opening_path} · {opening.id}\n"
+            f"{_seq(session, setup)} · work · Setting up the project · open ·"
+            f" no document · {setup.id}"
         )
 
     def test_under_creates_pause_it_says_what_it_adds_is_held(
@@ -1038,7 +1171,7 @@ class TestSetup:
             "Create project paused the project: every work item you add is held"
             " until a person resumes it.\n\n"
             "The project was created 2026-10-26T09:30:15Z from"
-        ) in briefs.job(opened, SETUP, AT, LATER)
+        ) in briefs.job(opened, _setup(session, container, opened), AT, LATER)
 
     def test_once_a_resume_ended_creates_pause_it_has_no_pause_line(
         self,
@@ -1054,7 +1187,8 @@ class TestSetup:
         container.document_service().bear_opening(
             opened, "Ada Example started this project", person, "Soup?"
         )
-        unpaused = briefs.job(opened, SETUP, AT, LATER)
+        setup = _setup(session, container, opened)
+        unpaused = briefs.job(opened, setup, AT, LATER)
         pilot = session.scalars(
             select(User).where(User.kind_code == UserKind.AGENT)
         ).one()
@@ -1064,7 +1198,7 @@ class TestSetup:
         opened.paused = True
         session.flush()
 
-        assert briefs.job(opened, SETUP, AT, LATER) == unpaused
+        assert briefs.job(opened, setup, AT, LATER) == unpaused
         assert "paused" not in unpaused
 
     def test_composed_later_its_stamp_and_switch_are_then_its_creation_creates(
@@ -1084,7 +1218,7 @@ class TestSetup:
         opened.autopilot = True
         session.flush()
 
-        brief = briefs.job(opened, SETUP, AT, LATER)
+        brief = briefs.job(opened, _setup(session, container, opened), AT, LATER)
 
         assert brief.startswith(
             "/plan\n\n"
@@ -1110,7 +1244,9 @@ class TestSetup:
             opened, "Ada Example started this project", person, "Soup?"
         )
 
-        assert briefs.job(opened, SETUP, AT, AT).startswith(
+        assert briefs.job(
+            opened, _setup(session, container, opened), AT, AT
+        ).startswith(
             "/plan\n\n"
             "Pilot's brief · the setup · /work/Projects/soup-club ·"
             " 2026-10-26T09:30:15Z\n\n"
@@ -1244,9 +1380,16 @@ def _records(db: DbSession, container: ServiceContainer) -> SessionRecordService
     )
 
 
-def _after(run: models.Session) -> Work:
-    """The job after the run's turn, as the brief reads it."""
-    return Work(trigger_code=WorkTrigger.WORKER_TURN_ENDED, trigger_item_id=run.id)
+def _after(db: DbSession, container: ServiceContainer, run: models.Session) -> Work:
+    """The job after the run's turn, placed at its end."""
+    return _job(
+        db,
+        container,
+        db.get_one(Project, run.project_id),
+        WorkTrigger.WORKER_TURN_ENDED,
+        "Deciding what is next",
+        trigger_item_id=run.id,
+    )
 
 
 class TestWorkerTurnEnded:
@@ -1299,7 +1442,9 @@ class TestWorkerTurnEnded:
             },
         )
 
-        brief = briefs.job(opened, _after(run), AT, LATER)
+        job = _after(session, container, run)
+
+        brief = briefs.job(opened, job, AT, LATER)
 
         stock_path = session.get_one(Document, stock.id).path
         notes_path = session.get_one(Document, notes.id).path
@@ -1319,10 +1464,15 @@ class TestWorkerTurnEnded:
             f"- {notes_path} ({notes.id}) — read failed: the controller answered"
             " 404 not-found: no such file\n"
             "Attached on the work item: 2 files (timeline.json lists them).\n\n"
-            f"{NOTES}\n"
-            '- fix "Fix the stock" · n1: Ask about salt\n'
-            '- taste "Taste it" · n3: Two spoons\n'
-            "- the plan · n2: Add a sweep task\n"
+            f"This job is seq {_seq(session, job)} on the timeline; the item its"
+            f" trigger names, seq {_seq(session, run)}.\n\n"
+            f"{PLANNED}\n\n"
+            f"{ITEMS}\n"
+            f"{stock.seq} · review · The stock · open · {stock_path} · {stock.id}\n"
+            f"{notes.seq} · review · (no title) · open · no document · {notes.id}\n"
+            f"{_seq(session, job)} · work · Deciding what is next · open ·"
+            f" no document · {job.id}\n\n"
+            f"{PLAN_NOTES}\n"
             f"{HOMELESS}\n"
             f"- {deferring.id}/D1 in {path} (Soup chores), to: fix\n"
             f"- {deferring.id}/Q1 in {path} (Soup chores), to: plan"
@@ -1335,16 +1485,22 @@ class TestWorkerTurnEnded:
         briefs: BriefService,
         opened: Project,
     ) -> None:
-        """No task, no text its turn ended with, nothing attached and no note:
-        each line left out."""
+        """No task, no text its turn ended with, nothing attached, no plan, no
+        open item but the job and no handbook: each line left out."""
         run = _worker_run(session, container, opened, None)
         _turn_ended(session, container, run, "")
+        job = _after(session, container, run)
 
-        assert briefs.job(opened, _after(run), AT, AT).split("\n\n")[3:] == [
+        assert briefs.job(opened, job, AT, AT).split("\n\n")[3:] == [
             f'The work item: "Fixing the stock" ({run.id}), repository'
             " example/Soup, environment example-soup-3f2a1c, session claude-7;"
             " its turn ended 2026-10-26T09:29:50Z.\n"
-            "Registered nothing this run."
+            "Registered nothing this run.",
+            f"This job is seq {_seq(session, job)} on the timeline; the item its"
+            f" trigger names, seq {_seq(session, run)}.",
+            f"{ITEMS}\n"
+            f"{_seq(session, job)} · work · Deciding what is next · open ·"
+            f" no document · {job.id}",
         ]
 
     def test_a_run_that_registered_nothing_carries_its_whole_final_message(
@@ -1359,7 +1515,9 @@ class TestWorkerTurnEnded:
         run = _worker_run(session, container, opened, None)
         _turn_ended(session, container, run, LAST_WORDS)
 
-        assert briefs.job(opened, _after(run), AT, AT).split("\n\n")[3:] == [
+        assert briefs.job(opened, _after(session, container, run), AT, AT).split(
+            "\n\n"
+        )[3] == (
             f'The work item: "Fixing the stock" ({run.id}), repository'
             " example/Soup, environment example-soup-3f2a1c, session claude-7;"
             " its turn ended 2026-10-26T09:29:50Z.\n"
@@ -1367,7 +1525,7 @@ class TestWorkerTurnEnded:
             "> Fixed the stock.\n"
             ">\n"
             ">   Registered the notes; ending the turn."
-        ]
+        )
 
     def test_the_claimed_actions_it_was_given_are_named_as_they_stand(
         self,
@@ -1416,7 +1574,9 @@ class TestWorkerTurnEnded:
         _turn_ended(session, container, run, "")
 
         path = session.get_one(Document, cut_over.id).path
-        assert briefs.job(opened, _after(run), AT, AT).split("\n\n")[3] == (
+        assert briefs.job(opened, _after(session, container, run), AT, AT).split(
+            "\n\n"
+        )[3] == (
             f'The work item: "Fixing the stock" ({run.id}), repository'
             " example/Soup, environment example-soup-3f2a1c, session claude-7;"
             " its turn ended 2026-10-26T09:29:50Z.\n"
@@ -1464,9 +1624,9 @@ class TestWorkerTurnEnded:
         _turn_ended(session, container, run, "")
 
         path = session.get_one(Document, own.id).path
-        assert briefs.job(opened, _after(run), AT, AT).split("\n\n")[3].split("\n")[
-            -2:
-        ] == [
+        assert briefs.job(opened, _after(session, container, run), AT, AT).split(
+            "\n\n"
+        )[3].split("\n")[-2:] == [
             "The claimed actions given to this work item, as they stand:",
             f"- {path} ({own.id}) A1 open, claimed",
         ]
@@ -1527,7 +1687,7 @@ class TestWorkerTurnEnded:
         )
         _turn_ended(session, container, run, "")
 
-        brief = briefs.job(opened, _after(run), AT, AT)
+        brief = briefs.job(opened, _after(session, container, run), AT, AT)
 
         path = session.get_one(Document, cut_over.id).path
         assert brief.split("\n\n")[3] == (
@@ -1608,7 +1768,9 @@ class TestWorkerTurnEnded:
         _turn_ended(session, container, continuation, "")
 
         path = session.get_one(Document, cut_over.id).path
-        assert briefs.job(opened, _after(continuation), AT, AT).split("\n\n")[3] == (
+        assert briefs.job(
+            opened, _after(session, container, continuation), AT, AT
+        ).split("\n\n")[3] == (
             f'The work item: "Fixing the stock" ({continuation.id}), repository'
             " example/Soup, environment example-soup-3f2a1c, session claude-8;"
             " its turn ended 2026-10-26T09:29:50Z.\n"
@@ -1682,7 +1844,9 @@ class TestWorkerTurnEnded:
         _turn_ended(session, container, continuation, "")
 
         path = session.get_one(Document, review.id).path
-        assert briefs.job(opened, _after(continuation), AT, AT).split("\n\n")[3] == (
+        assert briefs.job(
+            opened, _after(session, container, continuation), AT, AT
+        ).split("\n\n")[3] == (
             f'The work item: "Checking the hosts" ({continuation.id}), repository'
             " example/Soup, environment example-soup-3f2a1c, session claude-8;"
             " its turn ended 2026-10-26T09:29:50Z.\n"
@@ -1775,7 +1939,9 @@ class TestWorkerTurnEnded:
 
         cut_over_path = session.get_one(Document, cut_over.id).path
         review_path = session.get_one(Document, review.id).path
-        brief = briefs.job(opened, _after(continuation), AT, AT).split("\n\n")[3]
+        brief = briefs.job(
+            opened, _after(session, container, continuation), AT, AT
+        ).split("\n\n")[3]
         assert brief.splitlines()[-4:] == [
             "The claimed actions given to this work item, as they stand:",
             f"- {cut_over_path} ({cut_over.id}) A1 open, claimed, handed back to"
@@ -1798,7 +1964,9 @@ class TestWorkerTurnEnded:
         _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
         _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
 
-        assert briefs.job(opened, _after(run), AT, LATER).split("\n\n")[2] == (
+        assert briefs.job(opened, _after(session, container, run), AT, LATER).split(
+            "\n\n"
+        )[2] == (
             "Auto pilot: off — the granted column asks for this session"
             f" (rules/grants.md).\n{PAUSE_LINE}"
         )
@@ -1972,7 +2140,9 @@ class TestWriterAnswered:
         run = session.get_one(Item, session.get_one(Work, asking.id).trigger_item_id)
         cut_over = registered["/work/Soup/cut-over.md"]
 
-        brief = briefs.job(opened, _after(clarifying), AT, LATER)
+        job = _after(session, container, clarifying)
+
+        brief = briefs.job(opened, job, AT, LATER)
 
         path = session.get_one(Document, cut_over.id).path
         assert brief == (
@@ -1994,10 +2164,17 @@ class TestWriterAnswered:
             "- D4: The old loader,\n"
             "  kept until the client is regenerated.\n"
             f"Registered this run: nothing. {ASKS_NOTHING}\n\n"
-            f"{NOTES}\n"
-            '- fix "Fix the stock" · n1: Ask about salt\n'
-            '- taste "Taste it" · n3: Two spoons\n'
-            "- the plan · n2: Add a sweep task"
+            f"This job is seq {_seq(session, job)} on the timeline; the item its"
+            f" trigger names, seq {_seq(session, clarifying)}.\n\n"
+            f"{PLANNED}\n\n"
+            f"{ITEMS}\n"
+            f"{cut_over.seq} · document · The cut-over · open · {path} ·"
+            f" {cut_over.id}\n"
+            f"{_seq(session, asking)} · work · Pre-ruling soup-club/2 · open ·"
+            f" no document · {asking.id}\n"
+            f"{_seq(session, job)} · work · Deciding what is next · open ·"
+            f" no document · {job.id}\n\n"
+            f"{PLAN_NOTES}"
         )
 
     def test_a_debrief_its_session_gave_follows_what_it_registered(
@@ -2037,7 +2214,7 @@ class TestWriterAnswered:
             )
         session.flush()
 
-        brief = briefs.job(opened, _after(clarifying), AT, AT)
+        brief = briefs.job(opened, _after(session, container, clarifying), AT, AT)
 
         assert brief.split("\n\n")[3].endswith(
             f"Registered this run: nothing. {ASKS_NOTHING}\n"
@@ -2073,7 +2250,9 @@ class TestWriterAnswered:
             "Clarify cut-over.md",
         )
 
-        group = briefs.job(opened, _after(clarifying), AT, LATER).split("\n\n")[3]
+        group = briefs.job(
+            opened, _after(session, container, clarifying), AT, LATER
+        ).split("\n\n")[3]
 
         cut_over = registered["/work/Soup/cut-over.md"]
         path = session.get_one(Document, cut_over.id).path
@@ -2108,7 +2287,9 @@ class TestWriterAnswered:
             session, container, opened, asking, None, "Clarify cut-over.md"
         )
 
-        group = briefs.job(opened, _after(clarifying), AT, LATER).split("\n\n")[3]
+        group = briefs.job(
+            opened, _after(session, container, clarifying), AT, LATER
+        ).split("\n\n")[3]
 
         assert group.split("\n")[2:] == [
             "- Q1: How long?",
@@ -2164,7 +2345,9 @@ class TestWriterAnswered:
         )
         session.flush()
 
-        group = briefs.job(opened, _after(clarifying), AT, LATER).split("\n\n")[3]
+        group = briefs.job(
+            opened, _after(session, container, clarifying), AT, LATER
+        ).split("\n\n")[3]
 
         cut_over = session.get_one(Document, registered["/work/Soup/cut-over.md"].id)
         drain = session.get_one(Document, registered["/work/Soup/drain.md"].id)
@@ -2205,7 +2388,7 @@ class TestJobPause:
         """The job after a worker's turn, as the brief reads it."""
         run = _worker_run(session, container, opened, None)
         _turn_ended(session, container, run, LAST_WORDS)
-        return _after(run)
+        return _after(session, container, run)
 
     def test_a_trigger_in_a_pause_carries_it_after_the_switch(
         self,
@@ -2359,9 +2542,16 @@ note: Stirred twice.
 """
 
 
-def _closing(item: Item) -> Work:
-    """The job after the item's close, as the brief reads it."""
-    return Work(trigger_code=WorkTrigger.ITEM_DONE, trigger_item_id=item.id)
+def _closing(db: DbSession, container: ServiceContainer, item: Item) -> Work:
+    """The job after the item's close, placed at it."""
+    return _job(
+        db,
+        container,
+        db.get_one(Project, item.project_id),
+        WorkTrigger.ITEM_DONE,
+        "Deciding what is next",
+        trigger_item_id=item.id,
+    )
 
 
 def _item_line(db: DbSession, item: Item, closed: str) -> str:
@@ -2372,9 +2562,9 @@ def _item_line(db: DbSession, item: Item, closed: str) -> str:
 
 class TestItemDone:
     """The job after a person's close of an item of Pilot's own: the item and
-    what was done to it, as the record holds it, then the notes of the task
-    it names and the plan's own (design 3 §5.3; DB decision 45; F57.4; V03,
-    V12)."""
+    what was done to it, as the record holds it, then the project's state,
+    its return list the notes of the task it names and the plan's own (design
+    3 §5.3; DB decision 45; F57.4; V03, V12)."""
 
     @pytest.fixture
     def planned(self, container: ServiceContainer, opened: Project) -> Project:
@@ -2412,10 +2602,12 @@ class TestItemDone:
         )
         container.record_service().answer(document, "C1", person, "Yes")
 
-        brief = briefs.job(planned, _closing(item), AT, LATER)
+        job = _closing(session, container, item)
+
+        brief = briefs.job(planned, job, AT, LATER)
 
         assert item.done_at is not None
-        head, switch, closed, notes = brief.split("\n\n")[1:]
+        head, switch, closed, seqs, tasks, items, notes = brief.split("\n\n")[1:]
         assert head == (
             'Pilot\'s brief · an item of yours is done · project "Soup club" ·'
             " /work/Projects/soup-club · 2026-10-26T11:05:40Z"
@@ -2430,11 +2622,21 @@ class TestItemDone:
             item,
             f", task fix — answered Yes by ada at {_z(item.done_at)}.",
         )
+        assert seqs == (
+            f"This job is seq {_seq(session, job)} on the timeline; the item its"
+            f" trigger names, seq {item.seq}."
+        )
+        assert tasks == PLANNED
+        assert items == (
+            f"{ITEMS}\n"
+            f"{_seq(session, job)} · work · Deciding what is next · open ·"
+            f" no document · {job.id}"
+        )
         path = f"soup-club/{session.get_one(Document, deferring.id).path}"
         assert notes == (
-            f"{NOTES}\n"
-            '- fix "Fix the stock" · n1: Ask about salt\n'
-            "- the plan · n2: Add a sweep task\n"
+            f"{PLAN_NOTES}\n"
+            "Your return list, the open notes of task fix and the plan's own:"
+            " n1, n2.\n"
             f"{HOMELESS}\n"
             f"- {deferring.id}/D1 in {path} (Soup chores), to: fix\n"
             f"- {deferring.id}/Q1 in {path} (Soup chores), to: plan"
@@ -2456,7 +2658,9 @@ class TestItemDone:
             document, "C1", person, "No", via=AnswerChannel.CHAT, note="Not today"
         )
 
-        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+        assert briefs.job(planned, _closing(session, container, item), AT, LATER).split(
+            "\n\n"
+        )[3] == (
             _item_line(
                 session,
                 item,
@@ -2481,7 +2685,9 @@ class TestItemDone:
             document, "C1", person, "deferred", via=AnswerChannel.CHAT, to="plan"
         )
 
-        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+        assert briefs.job(planned, _closing(session, container, item), AT, LATER).split(
+            "\n\n"
+        )[3] == (
             _item_line(
                 session,
                 item,
@@ -2565,9 +2771,9 @@ class TestItemDone:
             to="fix" if answer == "deferred" else None,
         )
 
-        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
-            _item_line(session, item, f" — {said.format(at=_z(item.done_at))}")
-        )
+        assert briefs.job(planned, _closing(session, container, item), AT, LATER).split(
+            "\n\n"
+        )[3] == (_item_line(session, item, f" — {said.format(at=_z(item.done_at))}"))
 
     def test_an_actions_done_carries_what_was_pasted_back(
         self,
@@ -2583,7 +2789,9 @@ class TestItemDone:
         )
         container.record_service().done_action(document, "A1", person, note="Twice")
 
-        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+        assert briefs.job(planned, _closing(session, container, item), AT, LATER).split(
+            "\n\n"
+        )[3] == (
             _item_line(
                 session,
                 item,
@@ -2603,7 +2811,9 @@ class TestItemDone:
         item, _ = self._bear(container, planned, project_session, "document", PLAN_DONE)
         container.record_service().done(item, person)
 
-        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+        assert briefs.job(planned, _closing(session, container, item), AT, LATER).split(
+            "\n\n"
+        )[3] == (
             _item_line(
                 session, item, f", task fix — Done by ada at {_z(item.done_at)};"
             )
@@ -2628,26 +2838,64 @@ class TestItemDone:
         )
         container.record_service().reviewed(item, person)
 
-        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+        assert briefs.job(planned, _closing(session, container, item), AT, LATER).split(
+            "\n\n"
+        )[3] == (
             _item_line(session, item, f" — Reviewed by ada at {_z(item.done_at)}.")
         )
 
-    def test_an_item_naming_no_task_carries_the_plans_own_notes_alone(
+    def test_an_item_naming_no_task_returns_to_the_plans_own_notes_alone(
         self,
+        session: DbSession,
         container: ServiceContainer,
         briefs: BriefService,
         planned: Project,
         person: User,
         project_session: models.Session,
     ) -> None:
+        """Every open note rides in the brief; the return list names the
+        plan's own alone (F57.4)."""
         item, document = self._bear(
             container, planned, project_session, "question", ASK
         )
         container.record_service().answer(document, "Q1", person, "Now")
 
-        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[4] == (
-            f"{NOTES}\n- the plan · n2: Add a sweep task"
+        brief = briefs.job(planned, _closing(session, container, item), AT, LATER)
+
+        assert brief.split("\n\n")[7] == (
+            f"{PLAN_NOTES}\nYour return list, the plan's own open notes: n2."
         )
+
+    def test_with_no_note_to_return_to_no_return_list(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """Only another task's note is open: the line does not hold."""
+        plan = {
+            "tasks": [
+                {"id": "fix", "title": "Fix the stock", "status": "pending"},
+                {
+                    "id": "taste",
+                    "title": "Taste it",
+                    "status": "pending",
+                    "notes": [{"id": "n3", "summary": "Two spoons", "content": "Two."}],
+                },
+            ]
+        }
+        assert container.plan_service().save(opened, json.dumps(plan).encode()) == []
+        item, document = self._bear(
+            container, opened, project_session, "confirmation", CONFIRM
+        )
+        container.record_service().answer(document, "C1", person, "Yes")
+
+        brief = briefs.job(opened, _closing(session, container, item), AT, LATER)
+
+        assert brief.split("\n\n")[7] == f"{NOTES}\nn3 · taste · Two spoons\n    Two."
 
     def test_a_trigger_in_a_pause_carries_it_after_the_switch(
         self,
@@ -2663,7 +2911,9 @@ class TestItemDone:
         _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
         _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
 
-        assert briefs.job(opened, _closing(item), AT, LATER).split("\n\n")[2] == (
+        assert briefs.job(opened, _closing(session, container, item), AT, LATER).split(
+            "\n\n"
+        )[2] == (
             "Auto pilot: off — the granted column asks for this session"
             f" (rules/grants.md).\n{PAUSE_LINE}"
         )
@@ -2682,8 +2932,123 @@ FINISH = (
 )
 
 
+NAMED = """# Soup questions
+
+```decision id=D1
+options:
+  - Leek
+  - Onion
+answer: Leek
+by: ada
+at: 2026-10-12T09:30:00Z
+via: chat
+```
+
+```action id=A1
+done: 2026-10-12T11:00:00Z
+by: ada
+```
+
+```question id=Q1
+```
+"""
+"""An item whose blocks a note names, each read as it stands: answered by a
+person through the chat, done, and open."""
+
+
+class TestState:
+    """The project's state in a brain brief, each part as `pilot.py` prints
+    its listing: the tasks not done, the open items, every open note whole
+    with the blocks it names as they stand, and the handbook (design 3 §5.2;
+    F57.4, F129.3)."""
+
+    def test_a_removed_task_and_a_done_one_are_left_out(
+        self,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        plans = container.plan_service()
+        gone = {"id": "skim", "title": "Skim it", "status": "pending"}
+        assert (
+            plans.save(
+                opened, json.dumps(PLAN | {"tasks": [gone, *PLAN["tasks"]]}).encode()
+            )
+            == []
+        )
+        assert plans.save(opened, json.dumps(PLAN).encode()) == []
+
+        assert PLANNED in briefs.project_chat(opened, person, "Hi", AT).split("\n\n")
+
+    def test_a_notes_content_and_blocks_read_whole_as_they_stand(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        """Its content line by line, a blank one indented as the others; each
+        block its item's title, else its document's, and its answer line: a
+        person's with its `via`, a Done, none; in the order of the blocks'
+        rows, as `plan.json` lists them."""
+        item = container.document_service().bear_item(
+            opened, "decision", "Soup questions", project_session, NAMED
+        )
+        item.title = None
+        session.flush()
+        note = {
+            "id": "n1",
+            "summary": "Settle the soup",
+            "content": "Leek it is.\n\nStir once more.",
+            "refs": [f"{item.id}/Q1", f"{item.id}/D1", f"{item.id}/A1"],
+        }
+        assert (
+            container.plan_service().save(
+                opened, json.dumps({"notes": [note]}).encode()
+            )
+            == []
+        )
+
+        brief = briefs.project_chat(opened, person, "Hi", AT).split("\n\n")
+
+        assert (
+            f"{NOTES}\n"
+            "n1 · plan · Settle the soup\n"
+            "    Leek it is.\n"
+            "    \n"
+            "    Stir once more.\n"
+            f"    {item.id}/D1 · Soup questions · answer: Leek by ada via chat\n"
+            f"    {item.id}/A1 · Soup questions · done: 2026-10-12T11:00:00Z by ada\n"
+            f"    {item.id}/Q1 · Soup questions · no answer"
+        ) in brief
+
+    def test_a_jobs_brief_ends_with_the_handbook(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item = container.document_service().bear_item(
+            opened, "question", "When to taste", project_session, ASK
+        )
+        container.record_service().answer(
+            session.get_one(Document, item.id), "Q1", person, "Now"
+        )
+        container.document_service().bear_handbook(opened, "# Handbook\n\n- Taste.\n")
+
+        brief = briefs.job(opened, _closing(session, container, item), AT, LATER)
+
+        assert brief.endswith(f"\n\n{HANDBOOK}\n# Handbook\n\n- Taste.")
+
+
 class TestFinishedProjectChat:
-    def test_the_finish_line_stands_in_place_of_the_switch_and_no_notes(
+    def test_the_finish_line_stands_in_place_of_the_switch_and_no_deferrals(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -2719,6 +3084,11 @@ class TestFinishedProjectChat:
             "Pilot's brief · a finished project's chat · project \"Soup club\" ·"
             " /work/Projects/soup-club · 2026-10-26T09:30:15Z\n\n"
             f"{FINISH}\n\n"
+            f"{PLANNED}\n\n"
+            f"{PLAN_NOTES}\n\n"
+            f"{HANDBOOK}\n"
+            "# Handbook\n\n"
+            "- Salt the stock last.\n\n"
             "Earlier chats of this project are in chat.md; the latest closed"
             " 2026-10-25T18:00:00Z.\n\n"
             "The message, from ada (member):\n"
@@ -3088,20 +3458,12 @@ def _wait_run(
 ) -> Work:
     """A run of `wait`, as the batcher places it, having taken its wait's
     pending firings at its brief."""
-    job = models.Session(
-        project_id=project.id,
-        kind_code="job",
-        cwd="/work/PilotProjects",
-        token_hash=uuid.uuid4().hex,
-        state_code=SessionState.STARTING,
-    )
-    db.add(job)
-    db.flush()
-    work = container.record_service().place_work(
+    work = _job(
+        db,
+        container,
         project,
-        job,
+        WorkTrigger.WAIT_FIRED,
         "Checking the wait",
-        trigger=WorkTrigger.WAIT_FIRED,
         trigger_item_id=wait.id,
     )
     container.wait_service().take(project, work)
@@ -3139,7 +3501,8 @@ def _fired_at(db: DbSession, wait: Item) -> list[str]:
 
 class TestWaitFired:
     """A wait's run: the wait, the firings it took, oldest first, and the
-    notes of its task and the plan's own; resumed, the follow-up alone
+    project's state, its return list the notes of its task and the plan's
+    own; resumed, the follow-up alone
     (design 3 §5.3, *A wait's firings*; F136.5; DB 191, 196; V10)."""
 
     @pytest.fixture
@@ -3168,11 +3531,14 @@ class TestWaitFired:
         assert waits.fire_transition(TRANSITION) == 1
         _requested(session, wait, person)
         work = _wait_run(session, container, planned, wait)
+        # A firing after the run took its own: the wait's line counts it
+        # pending, and the run's firings leave it out.
+        _requested(session, wait, person)
 
         brief = briefs.job(planned, work, AT, LATER)
 
         assert brief.startswith("/plan\n\n")
-        head, switch, payload, notes = brief.split("\n\n")[1:]
+        head, switch, payload, seqs, tasks, items, notes = brief.split("\n\n")[1:]
         assert head == (
             'Pilot\'s brief · a wait fired · project "Soup club" ·'
             " /work/Projects/soup-club · 2026-10-26T11:05:40Z"
@@ -3181,7 +3547,7 @@ class TestWaitFired:
             "Auto pilot: off — the granted column asks for this session"
             " (rules/grants.md)."
         )
-        transition, request = _fired_at(session, wait)
+        transition, request, _ = _fired_at(session, wait)
         assert payload == (
             f'The wait: "Slice 058 completes" ({wait.id}), a card wait on ANS-312,'
             f" ANS-313 for Done, Won't fix; waiting since {_z(wait.created_at)};"
@@ -3190,10 +3556,23 @@ class TestWaitFired:
             f"- {transition} · ANS-312: In Progress → Done, by pieter\n"
             f"- {request} · the operator's request (Check now), by ada"
         )
+        assert seqs == (
+            f"This job is seq {_seq(session, work)} on the timeline; the item its"
+            f" trigger names, seq {wait.seq}."
+        )
+        assert tasks == PLANNED
+        assert items == (
+            f"{ITEMS}\n"
+            f"{wait.seq} · card_wait · Slice 058 completes · open · step fix ·"
+            " on ANS-312, ANS-313 for Done, Won't fix · 3 firings, 1 pending ·"
+            f" no document · {wait.id}\n"
+            f"{_seq(session, work)} · work · Checking the wait · open ·"
+            f" no document · {work.id}"
+        )
         assert notes == (
-            f"{NOTES}\n"
-            '- fix "Fix the stock" · n1: Ask about salt\n'
-            "- the plan · n2: Add a sweep task"
+            f"{PLAN_NOTES}\n"
+            "Your return list, the open notes of task fix and the plan's own:"
+            " n1, n2."
         )
 
     def test_a_timed_waits_brief_names_its_due_time_and_a_request_to_skip_it(
@@ -3219,15 +3598,19 @@ class TestWaitFired:
         _requested(session, wait, person)
         work = _wait_run(session, container, opened, wait)
 
-        payload = briefs.job(opened, work, AT, LATER).split("\n\n")[3]
+        brief = briefs.job(opened, work, AT, LATER).split("\n\n")
 
         fired, request = _fired_at(session, wait)
-        assert payload == (
+        assert brief[3] == (
             f'The wait: "ESO refreshes" ({wait.id}), a timed wait due {_z(due)};'
             f" waiting since {_z(wait.created_at)}.\n"
             "Firings pending, oldest first:\n"
             f"- {fired} · due {_z(due)} — fired at its due time\n"
             f"- {request} · the operator's request (Skip wait), by ada"
+        )
+        assert brief[5].split("\n")[1] == (
+            f"{wait.seq} · timed_wait · ESO refreshes · open · due {_z(due)} ·"
+            f" 2 firings · no document · {wait.id}"
         )
 
     def test_a_transition_with_no_state_left_and_no_one_named_reads_so(
@@ -3393,11 +3776,23 @@ Put the stock in the cellar before Friday.
 """
 
 
+def _offered(db: DbSession, container: ServiceContainer, note: PilotNote) -> Work:
+    """The job the offer's taking placed, naming its note."""
+    return _job(
+        db,
+        container,
+        db.get_one(Project, db.get_one(Item, note.item_id).project_id),
+        WorkTrigger.OFFER_TAKEN,
+        "Starting the work offered on A1",
+        trigger_note_id=note.id,
+    )
+
+
 class TestOfferTaken:
     """The job a member's press of the offer of Pilot's note placed: `/plan`,
     its own kind line, the note with its place and its taking, then the
-    notes of the task its item names and the plan's own (F168.7; DB 629,
-    630)."""
+    project's state, its return list the notes of the task its item names
+    and the plan's own (F168.7; DB 629, 630)."""
 
     @pytest.fixture
     def planned(self, container: ServiceContainer, opened: Project) -> Project:
@@ -3447,12 +3842,9 @@ class TestOfferTaken:
             offer="I can make room in the cellar.",
         )
 
-        brief = briefs.job(
-            planned,
-            Work(trigger_code=WorkTrigger.OFFER_TAKEN, trigger_note_id=note.id),
-            AT,
-            LATER,
-        )
+        job = _offered(session, container, note)
+
+        brief = briefs.job(planned, job, AT, LATER)
 
         path = session.get_one(Document, item.id).path
         assert brief == (
@@ -3470,9 +3862,17 @@ class TestOfferTaken:
             'Your suggested note: "Stored in the shed"\n'
             'Your offer: "I can make room in the cellar."\n'
             "Taken by ada at 2026-10-26T09:31:02Z.\n\n"
-            f"{NOTES}\n"
-            '- fix "Fix the stock" · n1: Ask about salt\n'
-            "- the plan · n2: Add a sweep task"
+            f"This job is seq {_seq(session, job)} on the timeline; the item its"
+            f" trigger names, seq {item.seq}.\n\n"
+            f"{PLANNED}\n\n"
+            f"{ITEMS}\n"
+            f"{item.seq} · document · Store the stock · open · step fix · {path} ·"
+            f" {item.id}\n"
+            f"{_seq(session, job)} · work · Starting the work offered on A1 · open ·"
+            f" no document · {job.id}\n\n"
+            f"{PLAN_NOTES}\n"
+            "Your return list, the open notes of task fix and the plan's own:"
+            " n1, n2."
         )
 
     def test_an_action_of_no_section_of_its_own_has_its_place_alone(
@@ -3497,16 +3897,11 @@ class TestOfferTaken:
             offer="I can make room in the cellar.",
         )
 
-        brief = briefs.job(
-            opened,
-            Work(trigger_code=WorkTrigger.OFFER_TAKEN, trigger_note_id=note.id),
-            AT,
-            LATER,
-        )
+        brief = briefs.job(opened, _offered(session, container, note), AT, LATER)
 
         path = session.get_one(Document, item.id).path
-        assert brief.split("\n\n")[3:] == [
+        assert brief.split("\n\n")[3] == (
             f'The offer, on action A2 of {path} ({item.id}), document "Store the stock":'
             '\nYour offer: "I can make room in the cellar."'
             "\nTaken by ada at 2026-10-26T09:31:02Z."
-        ]
+        )
