@@ -49,7 +49,7 @@ from app.models.reference import (
 )
 from app.schemas.timeline import HeldReason
 from app.services.auth_service import AuthContext
-from app.services.brief_service import Call
+from app.services.brief_service import QUOTED_HEADING, Call
 from app.services.chat_close_service import CLOSED, ChatCloseService
 from app.services.chat_service import (
     HANDBOOK_CHANGED_TOTAL,
@@ -378,6 +378,26 @@ class TestSendStartsTheChat:
         assert _sends(session, run.id) == [(1, WORDS)]
         assert "_LoopStart" in _callbacks()
         assert fake.calls == []
+
+    def test_a_quote_in_its_opening_message_rides_in_its_brief(
+        self,
+        container: ServiceContainer,
+        chats: ChatService,
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        item: Item,
+    ) -> None:
+        words = f'<quoted_item id="{item.id}">Badge</quoted_item id="{item.id}"> Blue.'
+
+        turn = _send(chats, opened, person, words)
+
+        assert turn.message == container.brief_service().project_chat(
+            opened, person, words, turn.started_at, quote_item_id=item.id
+        )
+        assert turn.message.endswith(
+            f"{_badge(item)}\n\nThe message, from ada (not a member):\n{words}"
+        )
 
     def test_a_calls_brief_starts_its_drafts_definition_chat_as_the_service_users_turn(
         self,
@@ -752,6 +772,7 @@ class TestSendToTheOpenChat:
         person: User,
         item: Item,
     ) -> None:
+        """The item it quotes rides before its words, as it stands now."""
         _idle_chat(services, chats, session, fake, opened, person)
         words = f'<quoted_item id="{item.id}">Badge</quoted_item id="{item.id}"> Blue.'
 
@@ -762,7 +783,8 @@ class TestSendToTheOpenChat:
             None,
             words,
         )
-        assert fake.sent == [words]
+        assert turn.message == f"{_badge(item)}\n\n{words}"
+        assert fake.sent == [turn.message]
 
 
 def _stopped_turn_ends(
@@ -972,6 +994,14 @@ def _elsewhere(db: DbSession, person: User) -> Item:
     db.add(entry)
     db.flush()
     return entry
+
+
+def _badge(item: Item) -> str:
+    """The quote of the conftest's `item`, as it stands: open, no document."""
+    return (
+        f"{QUOTED_HEADING}\n"
+        f"1 · decision · Which colour for the badge? · open · no document · {item.id}"
+    )
 
 
 def _quoting(kind: str, ref: str, text: str = "Which stock?") -> str:
@@ -1698,6 +1728,36 @@ class TestDefinitionChat:
             ChatKind.DEFINITION
         ]
 
+    def test_a_later_message_quoting_an_item_is_its_words_alone(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        draft: Project,
+        person: User,
+    ) -> None:
+        """A quoted item rides in a project's chat alone."""
+        _on_disk(fake, draft)
+        run = _idle_chat(services, chats, session, fake, draft, person)
+        quoted = Item(
+            project_id=draft.id,
+            seq=1,
+            kind_code="decision",
+            title="Which name?",
+            created_by_session_id=run.id,
+        )
+        session.add(quoted)
+        session.flush()
+        words = (
+            f'<quoted_item id="{quoted.id}">Name</quoted_item id="{quoted.id}"> Soup.'
+        )
+
+        turn = _send(chats, draft, person, words)
+
+        assert (turn.quote_item_id, turn.message) == (quoted.id, words)
+        assert fake.sent[-1] == words
+
     def test_after_archive_and_bring_back_a_message_starts_a_fresh_one(
         self,
         session: DbSession,
@@ -2350,6 +2410,31 @@ class TestNamedMessage:
         assert (turn.message, turn.words) == (
             f"{STORE_NOTIFICATION}\n\nThe message, from bea (member):\nTwo",
             "Two",
+        )
+
+    def test_a_quote_goes_after_the_handbooks_notice_before_the_naming_line(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+        item: Item,
+    ) -> None:
+        """The naming line heads the words, which the message ends with."""
+        _idle_chat(services, chats, session, fake, opened, person)
+        container.document_service().bear_handbook(opened, "# Handbook\n")
+        words = f'<quoted_item id="{item.id}">Badge</quoted_item id="{item.id}"> Blue.'
+
+        turn = _send(chats, opened, bea, words)
+
+        assert (turn.message, turn.words) == (
+            f"{STORE_NOTIFICATION}\n\n{_badge(item)}\n\n"
+            f"The message, from bea (member):\n{words}",
+            words,
         )
 
 

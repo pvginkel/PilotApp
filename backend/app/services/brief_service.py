@@ -9,8 +9,11 @@ A line that does not hold is left out, never written as "none", so that a
 brief reads as the facts of its session. Every brain brief but the definition
 chat's carries the project's state as the record holds it when the brief is
 composed, every open plan note whole among it, and the handbook whole
-(`BriefService._state`). A worker's carries the handbook verbatim, the worker
-having no tree (F129.5).
+(`BriefService._state`). A project chat's message that quotes an item or a
+block carries the item as it then stands (`BriefService.quoted`), and its
+opening brief what changed in the record since the project's previous chat
+closed (`BriefService._changed`). A worker's carries the handbook verbatim,
+the worker having no tree (F129.5).
 """
 
 import re
@@ -20,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import pilot_dsl as dsl
-from sqlalchemy import Select, func, literal, select
+from sqlalchemy import ColumnElement, Select, func, literal, select
 from sqlalchemy.orm import Session, aliased
 
 from app.engine import claims, researches
@@ -85,6 +88,11 @@ TASKS_HEADING = (
 ITEMS_HEADING = "The open items, as `pilot.py items list --open` prints them:"
 NOTES_HEADING = "The open plan notes, whole, as `pilot.py plan note list` prints them:"
 HANDBOOK_HEADING = "The project's handbook, handbook.md, whole:"
+CHANGED_HEADING = "What changed in the record since it closed, oldest first:"
+QUOTED_HEADING = "The item the message quotes, as it stands now:"
+QUOTED_BLOCK_HEADING = (
+    "The item whose block {block} the message quotes, as it stands now:"
+)
 
 TRAILER_HEADING = "From Pilot:"
 
@@ -141,35 +149,45 @@ class BriefService:
         self.plan_service = plan_service
 
     def project_chat(
-        self, project: Project, person: User, words: str, at: datetime
+        self,
+        project: Project,
+        person: User,
+        words: str,
+        at: datetime,
+        *,
+        quote_item_id: uuid.UUID | None = None,
+        quote_block_id: int | None = None,
     ) -> str:
         """The first Turn of a project's chat (§5.3), sent at `at`: `/chat`,
         the switch, the pause while the project is paused, the project's
-        state and the handbook (`_state`), the latest closed chat, then
-        `person`'s `words` verbatim, which it ends with (DB assertion 251). A
-        finished project's has the finish line in place of the switch
-        (F5.5)."""
-        message = [self.message_from(project, person), words]
+        state and the handbook (`_state`), the latest closed chat and what
+        changed in the record since it closed (`_changed`), the item the
+        words quote by `quote_item_id` or `quote_block_id` as it stands
+        (`quoted`), then `person`'s `words` verbatim, which it ends with (DB
+        assertion 251). A finished project's has the finish line in place of
+        the switch (F5.5)."""
+        closed = self.db.scalar(
+            select(func.max(Chat.closed_at)).where(Chat.project_id == project.id)
+        )
+        standing: Group
         if project.state_code is ProjectState.FINISHED:
-            return _frame(
-                CHAT_SKILL,
-                "a finished project's chat",
-                project,
-                at,
-                [self._finish(project)],
-                *self._state(project),
-                [self._earlier_chats(project)],
-                message,
+            kind, standing = "a finished project's chat", [self._finish(project)]
+        else:
+            kind, standing = (
+                "the project's chat",
+                [_switch(project), self._pause(project)],
             )
         return _frame(
             CHAT_SKILL,
-            "the project's chat",
+            kind,
             project,
             at,
-            [_switch(project), self._pause(project)],
+            standing,
             *self._state(project),
-            [self._earlier_chats(project)],
-            message,
+            [_earlier_chats(closed)],
+            self._changed(project, closed),
+            self.quoted(quote_item_id, quote_block_id),
+            [self.message_from(project, person), words],
         )
 
     def conversation(
@@ -1203,17 +1221,35 @@ class BriefService:
         return [TASKS_HEADING, *lines] if lines else []
 
     def _open_items(self, project: Project) -> list[str]:
-        """The project's open items in timeline order, as `pilot.py items
-        list --open` prints them from `timeline.json` (`ViewService.timeline`):
-        seq, kind, title, its addressee and its step, urgent, a wait's watch
-        and firings, its document's path, none before its text is read, and
-        its id."""
+        """The project's open items, as `pilot.py items list --open` prints
+        them (`_item_lines`)."""
+        lines = self._item_lines(Item.project_id == project.id, Item.done_at.is_(None))
+        return [ITEMS_HEADING, *lines] if lines else []
+
+    def _item_lines(self, *where: ColumnElement[bool]) -> list[str]:
+        """The items `where` holds for, in timeline order, each as `pilot.py
+        items list` prints it from `timeline.json` (`ViewService.timeline`):
+        seq, kind, title, open or its close, its addressee and its step,
+        urgent, a wait's watch and firings, a closed wait's or work item's
+        note, its document's path, none before its text is read, and its
+        id."""
+        closer = aliased(User)
         rows = self.db.execute(
-            select(Item, Document.path, Document.published_hash, User.handle, Wait)
+            select(
+                Item,
+                Document.path,
+                Document.published_hash,
+                User.handle,
+                closer.handle,
+                Wait,
+                Work.done_note,
+            )
             .outerjoin(Document, Document.id == Item.id)
             .outerjoin(User, User.id == Item.for_user_id)
+            .outerjoin(closer, closer.id == Item.done_by_user_id)
             .outerjoin(Wait, Wait.id == Item.id)
-            .where(Item.project_id == project.id, Item.done_at.is_(None))
+            .outerjoin(Work, Work.id == Item.id)
+            .where(*where)
             .order_by(Item.seq)
         ).all()
         fired = {
@@ -1226,15 +1262,22 @@ class BriefService:
                 )
                 .where(
                     WaitFiring.wait_id.in_(
-                        [wait.id for *_, wait in rows if wait is not None]
+                        [row.Wait.id for row in rows if row.Wait is not None]
                     )
                 )
                 .group_by(WaitFiring.wait_id)
             )
         }
         lines = []
-        for item, path, published, handle, wait in rows:
-            parts = [str(item.seq), item.kind_code, item.title or "(no title)", "open"]
+        for item, path, published, handle, done_by, wait, work_note in rows:
+            parts = [str(item.seq), item.kind_code, item.title or "(no title)"]
+            if item.done_at is None:
+                parts.append("open")
+            else:
+                by = "" if done_by is None else f" by {done_by}"
+                parts.append(
+                    f"done {utc_time(item.done_at)} ({item.done_cause_code}{by})"
+                )
             if handle is not None:
                 parts.append(f"for {handle}")
             if item.plan_task_id is not None:
@@ -1242,11 +1285,17 @@ class BriefService:
             if item.urgent:
                 parts.append("urgent")
             if wait is not None:
-                parts.extend(_watched(wait, *fired.get(wait.id, (0, 0))))
+                count, pending = fired.get(wait.id, (0, 0))
+                parts.extend(
+                    _watched(wait, count, pending if item.done_at is None else 0)
+                )
+            note = work_note if wait is None else wait.done_note
+            if item.done_at is not None and note is not None:
+                parts.append(f"note: {' '.join(note.split())}")
             parts.append("no document" if published is None else path)
             parts.append(str(item.id))
             lines.append(" · ".join(parts))
-        return [ITEMS_HEADING, *lines] if lines else []
+        return lines
 
     def _open_notes(self, project: Project) -> list[PlanNote]:
         """The project's open plan notes: the tasks' in the plan's order,
@@ -1324,16 +1373,153 @@ class BriefService:
             ),
         ]
 
-    def _earlier_chats(self, project: Project) -> str | None:
-        closed = self.db.scalar(
-            select(func.max(Chat.closed_at)).where(Chat.project_id == project.id)
+    def quoted(self, item_id: uuid.UUID | None, block_id: int | None) -> list[str]:
+        """The item a project chat's message quotes, a Turn's quote by
+        `item_id` or by its block `block_id`, as it stands when the message
+        is sent: its line as `pilot.py items list` prints it, open or closed
+        (`_item_lines`), then each of its blocks with its section's heading
+        and its answer as it stands, who gave it among it (`_answer_line`).
+        Nothing where the message quotes nothing, or a block of no item, a
+        draft's."""
+        heading = QUOTED_HEADING
+        if block_id is not None:
+            block = self.db.get_one(Block, block_id)
+            item_id = self.db.scalar(
+                select(Item.id).where(Item.id == block.document_id)
+            )
+            heading = QUOTED_BLOCK_HEADING.format(block=block.local_id)
+        if item_id is None:
+            return []
+        (line,) = self._item_lines(Item.id == item_id)
+        text = self.db.scalar(
+            select(Document.published_text).where(Document.id == item_id)
         )
+        blocks = [] if text is None else dsl.parse(text).blocks
+        return [
+            heading,
+            line,
+            *(
+                " · ".join(
+                    [
+                        block.local_id,
+                        block.kind,
+                        *([] if block.section is None else [block.section.heading]),
+                        _answer_line(block),
+                    ]
+                )
+                for block in blocks
+            ),
+        ]
+
+    def _changed(self, project: Project, closed: datetime | None) -> list[str]:
+        """What changed in the record since the project's chat that closed at
+        `closed`, oldest first, each by the time the record keeps for it, as
+        no log of it is kept: an item added and one closed, a block of an
+        item answered or done, a plan note added and one struck, and the
+        project paused or resumed. A task's status move is none of them: no
+        time dates one. Nothing with no chat closed before, or nothing
+        changed since."""
         if closed is None:
-            return None
-        return (
-            "Earlier chats of this project are in chat.md; the latest closed"
-            f" {utc_time(closed)}."
-        )
+            return []
+        changes: list[tuple[datetime, int, str]] = []
+        closer = aliased(User)
+        for item, done_by in self.db.execute(
+            select(Item, closer.handle)
+            .outerjoin(closer, closer.id == Item.done_by_user_id)
+            .where(
+                Item.project_id == project.id,
+                (Item.created_at > closed) | (Item.done_at > closed),
+            )
+            .order_by(Item.seq)
+        ):
+            named = f"{item.kind_code} · {item.title or '(no title)'}"
+            if item.created_at > closed:
+                changes.append((item.created_at, 0, f"item {item.seq} added · {named}"))
+            if item.done_at is not None and item.done_at > closed:
+                by = "" if done_by is None else f" by {done_by}"
+                changes.append(
+                    (
+                        item.done_at,
+                        2,
+                        f"item {item.seq} closed ({item.done_cause_code}{by})"
+                        f" · {named}",
+                    )
+                )
+        for block, seq, kind, title, by in self.db.execute(
+            select(Block, Item.seq, Item.kind_code, Item.title, User.handle)
+            .join(Item, Item.id == Block.document_id)
+            .outerjoin(User, User.id == Block.answered_by_user_id)
+            .where(
+                Item.project_id == project.id,
+                (Block.answered_at > closed) | (Block.done_at > closed),
+            )
+            .order_by(Item.seq, Block.position)
+        ):
+            named = f"{kind} · {title or '(no title)'}"
+            given = "" if by is None else f" by {by}"
+            if block.answered_at is not None and block.answered_at > closed:
+                changes.append(
+                    (
+                        block.answered_at,
+                        1,
+                        f"item {seq}'s {block.local_id} answered{given} · {named}",
+                    )
+                )
+            if block.done_at is not None and block.done_at > closed:
+                changes.append(
+                    (
+                        block.done_at,
+                        1,
+                        f"item {seq}'s {block.local_id} done{given} · {named}",
+                    )
+                )
+        for note in self.db.scalars(
+            select(PlanNote)
+            .where(
+                PlanNote.project_id == project.id,
+                (PlanNote.created_at > closed) | (PlanNote.deleted_at > closed),
+            )
+            .order_by(PlanNote.id)
+        ):
+            on = (
+                "the plan" if note.plan_task_id is None else f"task {note.plan_task_id}"
+            )
+            if note.created_at > closed:
+                changes.append(
+                    (
+                        note.created_at,
+                        3,
+                        f"note {note.note_id} added on {on} · {note.summary}",
+                    )
+                )
+            if note.deleted_at is not None and note.deleted_at > closed:
+                changes.append(
+                    (
+                        note.deleted_at,
+                        4,
+                        f"note {note.note_id} struck on {on} · {note.summary}",
+                    )
+                )
+        for transition, at, by in self.db.execute(
+            select(ProjectTransition.kind_code, ProjectTransition.at, User.handle)
+            .join(User, User.id == ProjectTransition.by_user_id)
+            .where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.kind_code.in_(
+                    [TransitionKind.PAUSED, TransitionKind.RESUMED]
+                ),
+                ProjectTransition.at > closed,
+            )
+            .order_by(ProjectTransition.id)
+        ):
+            changes.append((at, 5, f"the project {transition} by {by}"))
+        if not changes:
+            return []
+        changes.sort(key=lambda change: change[:2])
+        return [
+            CHANGED_HEADING,
+            *(f"{utc_time(at)} · {what}" for at, _, what in changes),
+        ]
 
     def _standing(self, project: Project, person: User) -> str:
         member = self.db.scalar(
@@ -1344,6 +1530,17 @@ class BriefService:
             )
         )
         return "not a member" if member is None else "member"
+
+
+def _earlier_chats(closed: datetime | None) -> str | None:
+    """The line naming `chat.md` and the project's latest chat to close, at
+    `closed`; None while none has."""
+    if closed is None:
+        return None
+    return (
+        "Earlier chats of this project are in chat.md; the latest closed"
+        f" {utc_time(closed)}."
+    )
 
 
 def _frame(
@@ -1570,9 +1767,9 @@ def _answer_line(block: dsl.Block) -> str:
 
 
 def _watched(wait: Wait, fired: int, pending: int) -> list[str]:
-    """An open wait's part of its item's line, as `pilot.py items list`
-    prints it: when it is due or what it watches, then its firings counted
-    and those no run has taken yet."""
+    """A wait's part of its item's line, as `pilot.py items list` prints
+    it: when it is due or what it watches, then its firings counted and the
+    `pending` no run has taken yet, a closed wait's line given none."""
     if wait.due_at is not None:
         on = f"due {utc_time(wait.due_at)}"
     else:
