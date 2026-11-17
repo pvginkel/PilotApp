@@ -933,9 +933,11 @@ class TestViewService:
         clear_after_commit_callbacks()
         views = container.view_service()
         with scoped_session(container):
+            # Before the write: an event of the chat's would carry the hash
+            # before it, and so stand beside the work item's, not merge into it.
+            views.run_moved(chat)
             project_session.controller_session = "camp-1"
             views.run_moved(project_session)
-            views.run_moved(chat)
             assert engine_events == []
 
         [entry] = _json(views.timeline(project))["items"]
