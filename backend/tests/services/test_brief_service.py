@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -27,6 +27,7 @@ from app.models import (
     Item,
     ItemAttachment,
     PilotNote,
+    PlanNote,
     PlanTask,
     Project,
     ProjectMember,
@@ -43,6 +44,7 @@ from app.models import (
 from app.models.reference import (
     AnswerChannel,
     AttachmentSource,
+    BlockKind,
     ChatKind,
     CloseCause,
     ErrorKind,
@@ -97,6 +99,8 @@ HOMELESS = (
     "Deferrals without a home (a note names none of these blocks — write one,"
     " or answer the block anew in a new item):"
 )
+CHANGED = "What changed in the record since it closed, oldest first:"
+QUOTED = "The item the message quotes, as it stands now:"
 
 PLAN = {
     "ticket": None,
@@ -216,6 +220,24 @@ def _closed_chat(db: DbSession, project: Project, closed_at: datetime) -> None:
         )
     )
     db.flush()
+
+
+def _dated(db: DbSession, project: Project, moment: datetime) -> None:
+    """The project's items and plan notes dated `moment`: each added then,
+    and each closed or struck then."""
+    for table, made, ended in (
+        (Item, Item.created_at, Item.done_at),
+        (PlanNote, PlanNote.created_at, PlanNote.deleted_at),
+    ):
+        db.execute(
+            update(table).where(table.project_id == project.id).values({made: moment})
+        )
+        db.execute(
+            update(table)
+            .where(table.project_id == project.id, ended.is_not(None))
+            .values({ended: moment})
+        )
+    db.expire_all()
 
 
 def _seq(db: DbSession, work: Work) -> int:
@@ -368,13 +390,15 @@ class TestProjectChat:
             opened, "question", "Which salt?", project_session, FOR_ADA
         )
         documents.bear_handbook(opened, "# Handbook\n\n- Salt the stock last.\n")
+        _dated(session, opened, datetime(2026, 10, 20, tzinfo=UTC))
         _closed_chat(session, opened, datetime(2026, 10, 24, 12, tzinfo=UTC))
         _closed_chat(session, opened, datetime(2026, 10, 25, 17, 10, tzinfo=UTC))
         words = f'<quoted_item id="{item.id}">Soup chores</quoted_item id="{item.id}"> Leek.'
 
-        brief = briefs.project_chat(opened, person, words, AT)
+        brief = briefs.project_chat(opened, person, words, AT, quote_item_id=item.id)
 
-        path = f"soup-club/{session.get_one(models.Document, item.id).path}"
+        item_path = session.get_one(models.Document, item.id).path
+        path = f"soup-club/{item_path}"
         asked_path = session.get_one(models.Document, asked.id).path
         assert brief == (
             f"{HEAD}\n\n"
@@ -401,6 +425,13 @@ class TestProjectChat:
             "- Salt the stock last.\n\n"
             "Earlier chats of this project are in chat.md; the latest closed"
             " 2026-10-25T17:10:00Z.\n\n"
+            f"{CHANGED}\n"
+            "2026-10-26T08:00:00Z · the project paused by ada\n\n"
+            f"{QUOTED}\n"
+            f"{item.seq} · document · Soup chores · done 2026-10-20T00:00:00Z"
+            f" (marked by ada) · {item_path} · {item.id}\n"
+            "D1 · decision · answer: deferred → fix by agent\n"
+            "Q1 · question · answer: deferred → plan by agent\n\n"
             "The message, from ada (member):\n"
             f"{words}"
         )
@@ -487,6 +518,415 @@ class TestProjectChat:
         )
 
 
+CLOSED = datetime(2026, 10, 25, 17, 10, tzinfo=UTC)
+BEFORE = datetime(2026, 10, 20, tzinfo=UTC)
+
+ASKED_SINCE = """# Which stock?
+
+## The base
+
+```decision id=D1
+options:
+  - Leek
+  - Onion
+answer: Leek
+by: ada
+at: 2026-10-26T08:30:00Z
+```
+
+## The rest
+
+```question id=Q1
+answer: Salt last
+by: ada
+at: 2026-10-24T10:00:00Z
+```
+
+```action id=A1
+done: 2026-10-26T09:00:00Z
+by: ada
+```
+"""
+"""A document whose D1 was answered and A1 done after `CLOSED`, its Q1
+before it; D1 alone has a section of its own."""
+
+
+def _changed(brief: str) -> list[str]:
+    """The lines of the brief's part saying what changed; none without it."""
+    for group in brief.split("\n\n"):
+        if group.startswith(CHANGED):
+            return group.split("\n")[1:]
+    return []
+
+
+class TestChangedSinceTheLastChat:
+    """The project chat's opening brief says what changed in the record since
+    the project's previous chat closed, from the times the record keeps
+    (P-402)."""
+
+    def test_each_change_since_the_close_by_its_time_and_nothing_before_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """An item added and one closed, a block answered and an action done,
+        a note added and one struck, a pause and a resume; no task's status,
+        which no time dates, and nothing at or before the close."""
+        plans = container.plan_service()
+        struck = {"id": "n4", "summary": "Struck", "content": "Gone."}
+        assert (
+            plans.save(
+                opened, json.dumps(PLAN | {"notes": [*PLAN["notes"], struck]}).encode()
+            )
+            == []
+        )
+        assert plans.save(opened, json.dumps(PLAN).encode()) == []
+        documents = container.document_service()
+        chore = documents.bear_item(
+            opened, "decision", "Soup chores", project_session, DEFERRED
+        )
+        container.record_service().done(chore, person)
+        asked = documents.bear_item(
+            opened, "decision", "Which stock?", project_session, ASKED_SINCE
+        )
+        _dated(session, opened, BEFORE)
+        notes = {
+            note.note_id: note
+            for note in session.scalars(
+                select(PlanNote).where(PlanNote.project_id == opened.id)
+            )
+        }
+        notes["n2"].created_at = datetime(2026, 10, 26, 7, tzinfo=UTC)
+        notes["n4"].deleted_at = datetime(2026, 10, 26, 7, 30, tzinfo=UTC)
+        session.get_one(Item, asked.id).created_at = datetime(
+            2026, 10, 26, 8, tzinfo=UTC
+        )
+        session.get_one(Item, chore.id).done_at = datetime(2026, 10, 26, 10, tzinfo=UTC)
+        _transition(session, opened, person, TransitionKind.PAUSED, BEFORE)
+        _transition(
+            session,
+            opened,
+            person,
+            TransitionKind.PAUSED,
+            datetime(2026, 10, 26, 6, tzinfo=UTC),
+        )
+        _transition(
+            session,
+            opened,
+            person,
+            TransitionKind.RESUMED,
+            datetime(2026, 10, 26, 11, tzinfo=UTC),
+        )
+        _transition(session, opened, person, TransitionKind.AUTOPILOT_ON, AT)
+        _closed_chat(session, opened, CLOSED)
+
+        brief = briefs.project_chat(opened, person, "What happened?", AT)
+
+        assert _changed(brief) == [
+            "2026-10-26T06:00:00Z · the project paused by ada",
+            "2026-10-26T07:00:00Z · note n2 added on the plan · Add a sweep task",
+            "2026-10-26T07:30:00Z · note n4 struck on the plan · Struck",
+            f"2026-10-26T08:00:00Z · item {asked.seq} added · document · Which stock?",
+            f"2026-10-26T08:30:00Z · item {asked.seq}'s D1 answered by ada"
+            " · document · Which stock?",
+            f"2026-10-26T09:00:00Z · item {asked.seq}'s A1 done by ada"
+            " · document · Which stock?",
+            f"2026-10-26T10:00:00Z · item {chore.seq} closed (marked by ada)"
+            " · document · Soup chores",
+            "2026-10-26T11:00:00Z · the project resumed by ada",
+        ]
+        assert (
+            "Earlier chats of this project are in chat.md; the latest closed"
+            f" 2026-10-25T17:10:00Z.\n\n{CHANGED}\n"
+        ) in brief
+
+    def test_a_definition_chats_close_counts_as_the_previous_chat(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """The close the brief names is the project's latest chat's, its
+        definition chat's included, as the earlier-chats line has it."""
+        chore = container.document_service().bear_item(
+            opened, "action", "Stir the pot", project_session, CHORE
+        )
+        _dated(session, opened, datetime(2026, 10, 26, 8, tzinfo=UTC))
+        _closed_chat(session, opened, CLOSED)
+        session.get_one(
+            Chat, session.scalars(select(Chat.id)).one()
+        ).kind_code = ChatKind.DEFINITION
+        session.flush()
+
+        assert _changed(briefs.project_chat(opened, person, "Hi", AT)) == [
+            f"2026-10-26T08:00:00Z · item {chore.seq} added · action · Stir the pot"
+        ]
+
+    def test_with_no_chat_closed_before_it_the_brief_has_no_such_part(
+        self,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        container.document_service().bear_item(
+            opened, "action", "Stir the pot", project_session, CHORE
+        )
+
+        assert CHANGED not in briefs.project_chat(opened, person, "Hi", AT)
+
+    def test_with_nothing_changed_since_the_close_the_part_is_left_out(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """A change at the close itself is before it."""
+        container.document_service().bear_item(
+            opened, "action", "Stir the pot", project_session, CHORE
+        )
+        _dated(session, opened, CLOSED)
+        _transition(session, opened, person, TransitionKind.PAUSED, CLOSED)
+        _closed_chat(session, opened, CLOSED)
+
+        brief = briefs.project_chat(opened, person, "Hi", AT)
+
+        assert CHANGED not in brief
+        assert brief.endswith(
+            "Earlier chats of this project are in chat.md; the latest closed"
+            " 2026-10-25T17:10:00Z.\n\n"
+            "The message, from ada (not a member):\nHi"
+        )
+
+    def test_a_change_by_no_one_names_no_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """An item Pilot's own read closed carries no person, and its title
+        given by no text is none."""
+        work = container.document_service().bear_item(
+            opened, "action", "Stir the pot", project_session, CHORE
+        )
+        _dated(session, opened, BEFORE)
+        item = session.get_one(Item, work.id)
+        item.title = None
+        item.done_at = datetime(2026, 10, 26, 8, tzinfo=UTC)
+        item.done_cause_code = "turn_ended"
+        _closed_chat(session, opened, CLOSED)
+
+        assert _changed(briefs.project_chat(opened, person, "Hi", AT)) == [
+            f"2026-10-26T08:00:00Z · item {item.seq} closed (turn_ended)"
+            " · action · (no title)"
+        ]
+
+    def test_a_finished_projects_chat_says_what_changed_too(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        chore = container.document_service().bear_item(
+            opened, "action", "Stir the pot", project_session, CHORE
+        )
+        _dated(session, opened, datetime(2026, 10, 26, 8, tzinfo=UTC))
+        _transition(session, opened, person, TransitionKind.FINISHED, CLOSED)
+        opened.state_code = ProjectState.FINISHED
+        _closed_chat(session, opened, CLOSED)
+
+        brief = briefs.project_chat(opened, person, "Hi", AT)
+
+        assert brief.startswith("/chat\n\nPilot's brief · a finished project's chat")
+        assert _changed(brief) == [
+            f"2026-10-26T08:00:00Z · item {chore.seq} added · action · Stir the pot"
+        ]
+
+
+class TestQuoted:
+    """The item a project chat's message quotes, as it stands when the
+    message is sent (P-402)."""
+
+    def test_an_item_quoted_is_its_line_then_each_block_as_it_stands(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """Each block with its own section's heading where it has one, and
+        its answer with who gave it."""
+        asked = container.document_service().bear_item(
+            opened, "decision", "Which stock?", project_session, ASKED_SINCE
+        )
+        path = session.get_one(models.Document, asked.id).path
+
+        assert briefs.quoted(asked.id, None) == [
+            QUOTED,
+            f"{asked.seq} · document · Which stock? · open · {path} · {asked.id}",
+            "D1 · decision · The base · answer: Leek by ada",
+            "Q1 · question · answer: Salt last by ada",
+            "A1 · action · done: 2026-10-26T09:00:00Z by ada",
+        ]
+
+    def test_a_block_quoted_brings_its_item_naming_the_block(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        asked = container.document_service().bear_item(
+            opened, "question", "Which salt?", project_session, FOR_ADA
+        )
+        block = session.scalars(
+            select(Block).where(Block.document_id == asked.id)
+        ).one()
+        path = session.get_one(models.Document, asked.id).path
+
+        assert briefs.quoted(None, block.id) == [
+            "The item whose block Q1 the message quotes, as it stands now:",
+            f"{asked.seq} · question · Which salt? · open · for ada · step taste"
+            f" · urgent · {path} · {asked.id}",
+            "Q1 · question · no answer",
+        ]
+
+    def test_a_closed_item_reads_closed_when_and_by_whom(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        chore = container.document_service().bear_item(
+            opened, "decision", "Soup chores", project_session, DEFERRED
+        )
+        container.record_service().done(chore, person)
+        _dated(session, opened, BEFORE)
+        path = session.get_one(models.Document, chore.id).path
+
+        assert briefs.quoted(chore.id, None)[1] == (
+            f"{chore.seq} · document · Soup chores · done 2026-10-20T00:00:00Z"
+            f" (marked by ada) · {path} · {chore.id}"
+        )
+
+    def test_an_item_with_no_document_is_its_line_alone(
+        self, briefs: BriefService, opened: Project, item: Item
+    ) -> None:
+        assert briefs.quoted(item.id, None) == [
+            QUOTED,
+            f"1 · decision · Which colour for the badge? · open · no document"
+            f" · {item.id}",
+        ]
+
+    def test_a_closed_wait_has_its_note_and_no_pending_firing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """Its line as `pilot.py items list` prints a closed wait's: the
+        firings counted, none pending once it is closed, and its note on one
+        line."""
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            opened, project_session, "Card done", ["ANS-312"], ["Done"], None
+        )
+        _requested(session, wait, person)
+        pilot = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        waits.close(
+            opened,
+            session.get_one(Wait, wait.id),
+            pilot,
+            project_session.id,
+            "Seen it\nmove.",
+        )
+        _dated(session, opened, BEFORE)
+
+        assert briefs.quoted(wait.id, None) == [
+            QUOTED,
+            f"{wait.seq} · card_wait · Card done · done 2026-10-20T00:00:00Z"
+            f" (marked by {pilot.handle}) · on ANS-312 for Done · 1 firing"
+            f" · note: Seen it move. · no document · {wait.id}",
+        ]
+
+    def test_a_block_of_the_draft_quotes_no_item(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        draft_document: models.Document,
+    ) -> None:
+        block = Block(
+            document_id=draft_document.id,
+            local_id="Q1",
+            position=0,
+            kind_code=BlockKind.QUESTION,
+        )
+        session.add(block)
+        session.flush()
+
+        assert briefs.quoted(None, block.id) == []
+
+    def test_nothing_quoted_is_nothing(self, briefs: BriefService) -> None:
+        assert briefs.quoted(None, None) == []
+
+    def test_the_opening_brief_carries_a_blocks_quote_before_the_message(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        asked = container.document_service().bear_item(
+            opened, "question", "Which salt?", project_session, FOR_ADA
+        )
+        block = session.scalars(
+            select(Block).where(Block.document_id == asked.id)
+        ).one()
+        words = f'<quoted_block id="{asked.id}/Q1">Which?</quoted_block id="{asked.id}/Q1"> Sea.'
+
+        brief = briefs.project_chat(opened, person, words, AT, quote_block_id=block.id)
+
+        assert brief.endswith(
+            "\n\n".join(
+                [
+                    "\n".join(briefs.quoted(None, block.id)),
+                    f"The message, from ada (not a member):\n{words}",
+                ]
+            )
+        )
+
+
 @pytest.fixture
 def caller(session: DbSession) -> Environment:
     """The environment a conversation is opened from."""
@@ -519,6 +959,29 @@ class TestConversation:
             "The message, from the session in RecipeBox-2:\n"
             "How is the fix going?"
         )
+
+    def test_it_carries_neither_what_changed_nor_a_quoted_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        caller: Environment,
+        project_session: models.Session,
+    ) -> None:
+        """A caller reads its own conversations alone: no chat's close is its
+        previous, and its words' quote tags are its own."""
+        chore = container.document_service().bear_item(
+            opened, "action", "Stir the pot", project_session, CHORE
+        )
+        _dated(session, opened, datetime(2026, 10, 26, 8, tzinfo=UTC))
+        _closed_chat(session, opened, datetime(2026, 10, 25, 17, 10, tzinfo=UTC))
+        words = f'<quoted_item id="{chore.id}">Old chore</quoted_item id="{chore.id}"> Done?'
+
+        brief = briefs.conversation(opened, caller, "triage", words, AT)
+
+        assert CHANGED not in brief and QUOTED not in brief
+        assert brief.endswith(f"The message, from the session in RecipeBox-2:\n{words}")
 
     def test_a_call_that_named_no_session_names_its_environment_alone(
         self, briefs: BriefService, opened: Project, caller: Environment
@@ -3074,6 +3537,7 @@ class TestFinishedProjectChat:
             (TransitionKind.FINISHED, datetime(2026, 10, 25, 18, tzinfo=UTC)),
         ):
             _transition(session, opened, person, kind, at)
+        _dated(session, opened, datetime(2026, 10, 19, tzinfo=UTC))
         opened.state_code = ProjectState.FINISHED
         _closed_chat(session, opened, datetime(2026, 10, 25, 18, tzinfo=UTC))
 

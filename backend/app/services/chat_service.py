@@ -31,9 +31,11 @@ starts the project's next chat, and one that finds its project archived is
 refused. Its words are
 sent as they are, unless the chat's previous Turn with an author has another
 author: then the line naming the person goes before them, as the brief names
-the first (DB decision 61); and unless the project's handbook changed since
-the chat's previous Turn: then the server's `<store_notification>` saying so
-goes before both, counted (D052).
+the first (DB decision 61); unless, in a project's chat, they quote an item
+or a block: then the item as it stands goes before both, as the brief carries
+the first's (`BriefService.quoted`); and unless the project's handbook
+changed since the chat's previous Turn: then the server's
+`<store_notification>` saying so goes before all, counted (D052).
 
 A finished project's chat reads only: a message starts it as in an open
 project, its create boxed with nothing to write and no surface
@@ -229,14 +231,21 @@ class ChatService:
     ) -> Turn:
         """`person`'s `words` sent to the chat's Session as a turn of it,
         after the line naming them when the chat's previous Turn with an
-        author that reached the brain has another author (DB decision 61),
-        and first the server's notice when the handbook changed since its
-        previous Turn (D052; DB assertion 251), the notice counted once it
-        went out."""
+        author that reached the brain has another author (DB decision 61);
+        in a project's chat, the item the words quote as it stands before
+        that (`BriefService.quoted`); and first the server's notice when the
+        handbook changed since its previous Turn (D052; DB assertion 251),
+        the notice counted once it went out."""
         changed = handbook_changed(self.db, project, session)
         message = words.text
         if self._previous_author(session) != person.id:
             message = f"{self.brief_service.message_from(project, person)}\n{message}"
+        if self.db.get_one(Chat, session.id).kind_code is ChatKind.PROJECT:
+            quoted = self.brief_service.quoted(
+                words.quote_item_id, words.quote_block_id
+            )
+            if quoted:
+                message = "\n".join([*quoted, "", message])
         if changed:
             message = f"{STORE_NOTIFICATION}\n\n{message}"
         turn = self.relay_service.send(
@@ -330,7 +339,14 @@ class ChatService:
                 project, person, words.text, now, call
             )
         else:
-            brief = self.brief_service.project_chat(project, person, words.text, now)
+            brief = self.brief_service.project_chat(
+                project,
+                person,
+                words.text,
+                now,
+                quote_item_id=words.quote_item_id,
+                quote_block_id=words.quote_block_id,
+            )
         turn = Turn(
             session_id=session.id,
             seq=(last or 0) + 1,
