@@ -131,6 +131,16 @@ The values the agent writes from a closed list:
     `requested`), `fired_at`, `transition` (`card`, `from`, `to`, `at`, `by`, null but for a
     transition's), `requested_by` (a handle, or null) and `job`, the run that took it, null while it
     is pending ([`waits.md`](waits.md));
+  - on a work item alone, a job's among them, its run's facts as the record holds them, each null
+    where it holds none, under `add_item`'s names: `repo`, the repository it was placed by, null for
+    a job and for a work item placed in an environment by name; `environment`, its environment's id;
+    `model` and `reasoning_effort`, as its placement set them; and `session`, its controller
+    session's name. Nothing is derived from them: no environment's name, no model resolved. The row
+    carries the run's facts and none of where the run stands, its state, how far it got or what it
+    waits on (D240). Each write that sets or clears a work item's or a job's environment or
+    controller session, at its start, a fresh Resume and a gone controller session replaced
+    ([`sessions.md`](sessions.md)), moves the file's hash, with no `ProjectChanged`
+    (`ViewService.run_moved`);
   - a debrief's notice these fields alone, its `path` null: no debrief is in the tree, neither a work
     item's nor what a notice carries ([`work.md`](work.md#its-debriefs-notice)).
 - `attachments`, every attachment of the project by batch and file name, a draft's hung on no item
