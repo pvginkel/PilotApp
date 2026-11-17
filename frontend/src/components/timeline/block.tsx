@@ -37,10 +37,12 @@
  * in the draft or in a project's own document (F168.1; pilots-note.tsx), its button taking what
  * it suggests while the block takes an answer (F168.2; take-note.ts), the field it fills taking the
  * focus in the drawing pressed (taken-focus.ts), and on an open action the button that starts the
- * work it offers until that is taken (F168.7).
+ * work it offers until that is taken (F168.7). Over Pilot's note on a one-ask item's block, at the
+ * top of its panel on the timeline, stand Pilot's alert and its note on the item (F168.6, F168.5;
+ * item.tsx).
  */
 
-import { useContext, useState } from 'react';
+import { useContext, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfBlock, quoteOfDraftBlock } from '@/components/chat/discuss-quotes';
@@ -79,10 +81,12 @@ interface BlockProps {
   solo?: boolean;
   /** Its own section's parts in their order, itself among them, which its line folds while it is held. */
   section?: BodyPart[];
+  /** What stands over Pilot's note on it, a one-ask item's alert and its note on the item, on the timeline. */
+  children?: ReactNode;
 }
 
 /** An item's block, answered through its item. */
-export function Block({ item, block, solo = false, section = [{ type: 'block', block }] }: BlockProps) {
+export function Block({ item, block, solo = false, section = [{ type: 'block', block }], children }: BlockProps) {
   const { id: projectId } = useShownProject();
   const answering = useAnswer(item.id, block.id);
   const archived = useArchived(projectId);
@@ -124,6 +128,7 @@ export function Block({ item, block, solo = false, section = [{ type: 'block', b
       held={held}
       note={item.kind === 'confirmation' || pilots ? null : block.pilots_note}
       offerAt={{ item: item.id, block: block.id }}
+      over={children}
     />
   );
 }
@@ -232,9 +237,11 @@ interface BlockPanelProps {
   note: PilotsNoteData | null;
   /** Where its note's offer is taken: its item's block; none where no item holds it. */
   offerAt: OfferPlace | null;
+  /** What stands over Pilot's note on it: a one-ask item's alert and its note on the item. */
+  over?: ReactNode;
 }
 
-function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, settled, disabled, quote, asked, flash, held, note, offerAt }: BlockPanelProps) {
+function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, settled, disabled, quote, asked, flash, held, note, offerAt, over }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
   // Its note's latest take's ask for the focus, on the field it filled.
   const [focusing, setFocusing] = useState<FocusAsk | null>(null);
@@ -366,6 +373,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, choosing, starts, 
           quote={quote}
         />
       )}
+      {over}
       {note !== null && <PilotsNote note={note} answered={answered} take={take} offer={offer} />}
       <div className="block-controls">
         {deferred && <Deferral block={block} />}

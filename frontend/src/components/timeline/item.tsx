@@ -1,7 +1,8 @@
 /**
  * An item on the timeline. A prose item open is its head (F12), its title and its text, the prose
- * drawn as GFM (F29.1) and whole, a one-ask item's block answered in its place (F19.1, F20, F21)
- * and a notice's Read alone under its text (F23),
+ * drawn as GFM (F29.1) and whole, a one-ask item's block answered in its place (F19.1, F20, F21),
+ * Pilot's alert and its note on the item at the top of its panel, over Pilot's note on its block
+ * (F168.6, F168.5), and a notice's Read alone under its text (F23),
  * and Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
  * (F24.2, F25.1); the archive question is its two buttons (F5.6); a debrief's notice is its box, the
@@ -57,6 +58,8 @@ import { ItemHead } from '@/components/timeline/item-head';
 import { JobButton, JobMark, JobMenuRow } from '@/components/timeline/job';
 import { isOneAsk, kindOf } from '@/components/timeline/kinds';
 import { PilotsButton } from '@/components/timeline/pilots';
+import { DocumentNote } from '@/components/timeline/pilots-note';
+import { SendAlert } from '@/components/timeline/send-alert';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WaitItem } from '@/components/timeline/wait';
 import { WorkItem, type LineFocus } from '@/components/timeline/work';
@@ -226,13 +229,21 @@ function OpenItem({ item, lineFocus }: { item: TimelineItem; lineFocus: LineFocu
   );
 }
 
-/** What an open item asks, answered in place: a one-ask item's one block, a notice's Read. */
+/**
+ * What an open item asks, answered in place: a one-ask item's one block, Pilot's alert and its note
+ * on the item at its top, as an inline document's are; a notice's Read.
+ */
 function askOf(item: TimelineItem): ReactNode {
   switch (item.kind) {
     case 'decision':
     case 'question':
     case 'action':
-      return <Block item={item} block={blocksOf(item)[0]} solo />;
+      return (
+        <Block item={item} block={blocksOf(item)[0]} solo>
+          {item.send_alert !== null && <SendAlert alert={item.send_alert} />}
+          {item.pilots_note !== null && <DocumentNote note={item.pilots_note} />}
+        </Block>
+      );
     case 'notice':
       return <Read item={item} />;
     default:

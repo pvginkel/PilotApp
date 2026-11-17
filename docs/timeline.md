@@ -621,8 +621,9 @@ text, the recommendation and the option's Recommended stay as written.
 
 **Pilot's note on the document** as a whole (`DocumentNote`), `pilots_note` on the item, is the same
 box, its text alone, its triangle's tooltip "Pilot’s own note on this document, not the writer’s":
-at the top of an inline document, and under the summary in the opened document
-([`documents.md`](documents.md)), in a document that is Pilot's too.
+at the top of an inline document, at the top of a one-ask item's panel on the timeline, under its
+alert, and under the summary in the opened document ([`documents.md`](documents.md)), in a document
+that is Pilot's too.
 
 **Pilot's alert** (`SendAlert`, `send-alert.tsx`), the item's `send_alert`, says what the document's
 Send starts where another open ask has to be answered first. It is a rounded gold box, as the halt's
@@ -633,9 +634,10 @@ document, and is the opened document's head's last line, under the segment bar, 
 the document is the person's ([`documents.md`](documents.md)). On a phone it is one line, cut with
 an ellipsis, its chevron "Show the whole alert" or "Show the alert’s first line only", a tap
 anywhere on it opening and closing it, closed each time the document opens. It blocks nothing, and
-the read drops it once the item of the ask it names is done. A document of one block is a one-ask
-item on the timeline, which shows neither its alert nor its note on the document there; both show
-once it is opened.
+the read drops it once the item of the ask it names is done. A one-ask item on the timeline, a
+document of one block among them, draws its alert and its note on the item at the top of its panel,
+over Pilot's note on its block (`askOf` in `item.tsx`), as an inline document draws them at its
+top.
 
 ## Done lines and Undo
 
@@ -806,8 +808,8 @@ kind and its fold (`timeline.item.kind`, `item.fold`, the box's `data-folded`) a
 button, what it waits on, its firings, its note and its phone menu (`item(id).wait`), the work
 items a debrief's notice carries (`item(id).debriefs`, `item(id).carried(workId)`), Pilot's note in
 a block (`pilotsNote`: `root`, `mark`, `text`, `answer`, `note`, `line`, `toggle`, `take`, `offer`,
-`start`), on an inline document (`item(id).pilotsNote`) and its alert (`item(id).alert`: `go`,
-`toggle`), which `projects.note(itemId, {block?, text?, suggested_answer?, suggested_note?,
+`start`), on an inline document or a one-ask item (`item(id).pilotsNote`) and its alert
+(`item(id).alert`: `go`, `toggle`), which `projects.note(itemId, {block?, text?, suggested_answer?, suggested_note?,
 offer?})` and `projects.alert(itemId, {text, awaits})` write as the pass does
 (`tests/timeline/pilots-note.spec.ts`, `send-alert.spec.ts`); `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. Whether an

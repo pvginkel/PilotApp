@@ -3,10 +3,11 @@
  * document is sent, a rounded gold box as the halt's popover is, the document's width — opened, the
  * last line of its head under the segment bar, not scrolling with its body; inline, the document's
  * top — its triangle, what to answer first and what the Send starts, and the popover's button, which
- * opens the ask it names. On a phone one line, cut with an ellipsis, a chevron; a tap opens and
- * closes it, and it is closed each time the document opens. It goes once the item of the ask it
- * names is done, live, and blocks nothing. None stands on a document that is Pilot's
- * (`tests/work/claimed.spec.ts`).
+ * opens the ask it names. On a one-ask item on the timeline it stands at the top of its panel, over
+ * Pilot's note on its block, Pilot's note on the item under it. On a phone one line, cut with an
+ * ellipsis, a chevron; a tap opens and closes it, and it is closed each time the document opens. It
+ * goes once the item of the ask it names is done, live, and blocks nothing. None stands on a
+ * document that is Pilot's (`tests/work/claimed.spec.ts`).
  */
 
 import type { Locator } from '@playwright/test';
@@ -25,6 +26,9 @@ const GEAR = [
 const FIRST = 'Answer Which field? first: sending this books the gear for the field it names.';
 const ALERT = `Answer **Which field?** first: sending this books the gear for the field it names.\n\nThe rental closes its list on Thursday.`;
 const PHONE = { width: 390, height: 844 };
+const STOVE = '```decision id=D1\noptions:\n  - Gas\n  - Spirit\nrecommend: Gas\n```\n';
+const SHOP = 'The camping shop in town sells gas cartridges only.';
+const SPIRIT = 'Spirit burns slower in the wind.';
 
 const box = async (locator: Locator) => (await locator.boundingBox())!;
 
@@ -95,6 +99,42 @@ test.describe('Pilot’s alert on a document', () => {
     await expect(timeline.item(field).root).toHaveAttribute('data-state', 'done');
     await expect(item.alert.root).toHaveCount(0);
     await expect(item.blockAt('D1').option('Rent')).toBeVisible();
+  });
+});
+
+test.describe('Pilot’s alert on a one-ask item', () => {
+  test('stands at the top of its panel on the timeline, over Pilot’s note on its block, Pilot’s note on the item under it; it blocks nothing and goes once the ask it names is done', async ({
+    people,
+    projects,
+    timeline,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Alerted'), members: [me.handle!] });
+    const field = await projects.place(project, { kind: 'decision', title: 'Which field?', text: FIELD });
+    const stove = await projects.place(project, { kind: 'decision', title: 'Which stove?', text: STOVE });
+    await projects.alert(stove, { text: ALERT, awaits: `${field}/D1` });
+    await projects.note(stove, { text: SHOP });
+    await projects.note(stove, { block: 'D1', text: SPIRIT, suggested_answer: 'Spirit' });
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+
+    const item = timeline.item(stove);
+    const panel = () => item.block.root.locator('> *').evaluateAll((parts) => parts.map((part) => part.className));
+    expect(await panel()).toEqual(['gold-line doc-alert', 'pilot-note doc', 'pilot-note', 'block-controls']);
+    await expect(item.alert.text.locator('p').first()).toHaveText(FIRST);
+    await expect(item.alert.go).toHaveText('Which field?');
+    await expect(item.pilotsNote.text).toHaveText(SHOP);
+    await expect(item.pilotsNote.mark).toHaveAttribute('title', 'Pilot’s own note on this document, not the writer’s');
+    await expect(item.block.pilotsNote.text).toHaveText(SPIRIT);
+    // Nothing waits on it.
+    await item.block.option('Gas').click();
+    await expect(item.block.answerSend).toBeEnabled();
+
+    await projects.answer(field, 'D1', 'South field');
+    await expect(timeline.item(field).root).toHaveAttribute('data-state', 'done');
+    await expect(item.alert.root).toHaveCount(0);
+    expect(await panel()).toEqual(['pilot-note doc', 'pilot-note', 'block-controls']);
   });
 });
 

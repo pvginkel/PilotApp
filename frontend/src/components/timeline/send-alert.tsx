@@ -4,9 +4,9 @@
  * as the halt's popover is, the document's width: the triangle, what to answer first and what the
  * Send starts, and the popover's button, which opens the ask it names (use-open-quote.ts).
  * Opened, it is the last line of the document's head, under the segment bar, not scrolling; inline,
- * the document's top. On a phone it is one line, cut with an ellipsis, a chevron at its end, which a
- * tap opens and closes, closed as it mounts. It blocks nothing, and the read drops it once the item
- * of the ask it names is done.
+ * the document's top; on a one-ask item on the timeline, the top of its panel (item.tsx). On a phone
+ * it is one line, cut with an ellipsis, a chevron at its end, which a tap opens and closes, closed
+ * as it mounts. It blocks nothing, and the read drops it once the item of the ask it names is done.
  */
 
 import { useState } from 'react';

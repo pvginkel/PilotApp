@@ -13,7 +13,8 @@
  * action itself or something beside it, its button a primary one that starts Pilot's work
  * (F168.7, F59.3): pressed once, it places Pilot's job that starts the work item, and the note
  * folds to its line, which says so; the action stays the person's, with its Done. A note on the
- * document as a whole is the same box at the document's head, under its summary (F168.5).
+ * document as a whole is the same box at the document's head, under its summary, and at the top of
+ * a one-ask item's panel on the timeline (F168.5).
  */
 
 import { useState } from 'react';

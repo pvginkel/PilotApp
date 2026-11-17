@@ -494,6 +494,11 @@
      inline document's top. */
   .pilot-note.doc { margin: 0 0 18px; padding: 10px 14px; }
   .inline-doc > .pilot-note.doc { margin: 12px 0 0; }
+  /* A one-ask item's alert and its note on the item, at the top of its panel on the timeline, over
+     Pilot's note on its block (F168.6, F168.5). */
+  .block.solo > :is(.doc-alert, .pilot-note.doc) { margin: 4px 14px 0; }
+  .block.solo > :is(.doc-alert, .pilot-note.doc):first-child { margin-top: 12px; }
+  .block.solo > :is(.doc-alert, .pilot-note.doc) + .pilot-note { margin-top: 8px; }
   .inline-doc > :is(.pilot-note.doc, .doc-alert) + .prose { margin-top: 12px; }
 
   /* Pilot's alert for what a document's Send starts (F168.6; send-alert.tsx): the halt's popover's
