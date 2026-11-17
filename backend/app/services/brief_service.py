@@ -6,10 +6,11 @@ still held (§5.1; F79); and the turn that carries a work item on after its
 environment's restart cut its turn (§9.6; F71).
 
 A line that does not hold is left out, never written as "none", so that a
-brief reads as the facts of its session. A brain's carries what the tree does
-not hold and names what it does: nothing of the handbook, which every skill
-but `create` reads itself (D058). A worker's carries the handbook verbatim,
-the worker having no tree (F129.5).
+brief reads as the facts of its session. Every brain brief but the definition
+chat's carries the project's state as the record holds it when the brief is
+composed, every open plan note whole among it, and the handbook whole
+(`BriefService._state`). A worker's carries the handbook verbatim, the worker
+having no tree (F129.5).
 """
 
 import re
@@ -41,6 +42,7 @@ from app.models import (
     ItemAttachment,
     PilotNote,
     PlanNote,
+    PlanNoteReference,
     PlanTask,
     Project,
     ProjectMember,
@@ -60,6 +62,7 @@ from app.models.reference import (
     FiringCause,
     ProjectState,
     RecordKind,
+    TaskStatus,
     TransitionKind,
     UserKind,
     WorkTrigger,
@@ -76,10 +79,12 @@ CREATE_SKILL = "/create"
 PLAN_SKILL = "/plan"
 PRE_RULE_SKILL = "/pre-rule"
 
-NOTES_HEADING = (
-    "Open plan notes, by summary (the content and the blocks a read away in"
-    " plan.json; `pilot.py plan note list`):"
+TASKS_HEADING = (
+    "The plan's tasks not done, in its order, as `pilot.py plan task list` prints them:"
 )
+ITEMS_HEADING = "The open items, as `pilot.py items list --open` prints them:"
+NOTES_HEADING = "The open plan notes, whole, as `pilot.py plan note list` prints them:"
+HANDBOOK_HEADING = "The project's handbook, handbook.md, whole:"
 
 TRAILER_HEADING = "From Pilot:"
 
@@ -139,11 +144,11 @@ class BriefService:
         self, project: Project, person: User, words: str, at: datetime
     ) -> str:
         """The first Turn of a project's chat (§5.3), sent at `at`: `/chat`,
-        the switch, the pause while the project is paused, every open plan
-        note by summary and the deferrals without a home, the latest closed
-        chat, then `person`'s `words` verbatim, which it ends with (DB
-        assertion 251). A finished project's has the finish line in place of
-        the switch and no notes (F5.5)."""
+        the switch, the pause while the project is paused, the project's
+        state and the handbook (`_state`), the latest closed chat, then
+        `person`'s `words` verbatim, which it ends with (DB assertion 251). A
+        finished project's has the finish line in place of the switch
+        (F5.5)."""
         message = [self.message_from(project, person), words]
         if project.state_code is ProjectState.FINISHED:
             return _frame(
@@ -152,6 +157,7 @@ class BriefService:
                 project,
                 at,
                 [self._finish(project)],
+                *self._state(project),
                 [self._earlier_chats(project)],
                 message,
             )
@@ -161,7 +167,7 @@ class BriefService:
             project,
             at,
             [_switch(project), self._pause(project)],
-            self._notes(project, None),
+            *self._state(project),
             [self._earlier_chats(project)],
             message,
         )
@@ -178,17 +184,22 @@ class BriefService:
         `at`: `/chat`, under a kind line of its own naming the Environment
         its caller called from, by its name and its id, and that caller's
         session where the call named one; the switch, the pause while the
-        project is paused, every open plan note by summary and the deferrals
-        without a home; then the caller's `words` verbatim, headed as the
-        session's, which it ends with (DB assertion 251). A finished
-        project's has the finish line in place of the switch and no notes, as
-        its chat's (DB 334). It names no earlier chat: a caller reads its own
-        conversations alone."""
+        project is paused, the project's state and the handbook (`_state`);
+        then the caller's `words` verbatim, headed as the session's, which it
+        ends with (DB assertion 251). A finished project's has the finish line
+        in place of the switch, as its chat's (DB 334). It names no earlier
+        chat: a caller reads its own conversations alone."""
         kind = conversation_kind(environment, caller_session)
         message = [f"The message, from the session in {environment.name}:", words]
         if project.state_code is ProjectState.FINISHED:
             return _frame(
-                CHAT_SKILL, kind, project, at, [self._finish(project)], message
+                CHAT_SKILL,
+                kind,
+                project,
+                at,
+                [self._finish(project)],
+                *self._state(project),
+                message,
             )
         return _frame(
             CHAT_SKILL,
@@ -196,7 +207,7 @@ class BriefService:
             project,
             at,
             [_switch(project), self._pause(project)],
-            self._notes(project, None),
+            *self._state(project),
             message,
         )
 
@@ -209,7 +220,7 @@ class BriefService:
         call: Call | None = None,
     ) -> str:
         """The first Turn of a draft's definition chat (§5.3), sent at `at`:
-        `/create`; no switch, no notes and no handbook, a draft having none
+        `/create`; no switch, no state and no handbook, a draft having none
         (F141.2, F129.2); the draft, who started it and the attachments so
         far; then `person`'s `words` verbatim, which it ends with, after the
         line naming them when another started the draft (DB decision 61).
@@ -302,27 +313,32 @@ class BriefService:
         """A job's first Turn (§5.3), composed at `at` as it leaves the queue
         or the pause, from the record as it then stands (F59), its trigger at
         `triggered`: the switch, the pause its trigger came in if it did
-        (F141.4, `_trigger_paused`), then its trigger's payload and the notes
-        it carries."""
+        (F141.4, `_trigger_paused`), then its trigger's payload, the
+        project's state with the job's seqs and the notes it returns to, and
+        the handbook (`_state`)."""
         if work.trigger_code is WorkTrigger.WORKER_TURN_ENDED:
             # The job after a worker's turn names its run.
             assert work.trigger_item_id is not None
             clarification = self.db.get(ClarificationRun, work.trigger_item_id)
             if clarification is not None:
-                return self._writer_answered(project, clarification, triggered, at)
-            return self._worker_turn_ended(project, work.trigger_item_id, triggered, at)
+                return self._writer_answered(
+                    project, work, clarification, triggered, at
+                )
+            return self._worker_turn_ended(
+                project, work, work.trigger_item_id, triggered, at
+            )
         if work.trigger_code is WorkTrigger.ITEM_DONE:
             # The job after an item's close names the item.
             assert work.trigger_item_id is not None
-            return self._item_done(project, work.trigger_item_id, triggered, at)
+            return self._item_done(project, work, work.trigger_item_id, triggered, at)
         if work.trigger_code is WorkTrigger.WAIT_FIRED:
             return self._wait_fired(project, work, triggered, at)
         if work.trigger_code is WorkTrigger.OFFER_TAKEN:
             # An offer's job names its Pilot Note (DB 630).
             assert work.trigger_note_id is not None
-            return self._offer_taken(project, work.trigger_note_id, triggered, at)
+            return self._offer_taken(project, work, work.trigger_note_id, triggered, at)
         assert work.trigger_code is WorkTrigger.SETUP
-        return self._setup(project, triggered, at)
+        return self._setup(project, work, triggered, at)
 
     def wait_follow_up(self, work: Work) -> str:
         """The first Turn of the wait's run `work` that resumes its previous
@@ -342,7 +358,8 @@ class BriefService:
         """A wait's run, fresh (§5.3, *A wait's firings*): `/plan`, then the
         wait's line and the firings the run took at its brief, oldest first,
         a Retry's with those the runs it retries took, which stay theirs (DB
-        191); then the open notes of the wait's task and the plan's own."""
+        191); then the project's state, its return list the notes of the
+        wait's task and the plan's own, and the handbook."""
         item, wait = self._wait(work)
         lines = [_wait_line(item, wait)]
         firings = self._firings(wait, _retried(self.db, work))
@@ -355,9 +372,7 @@ class BriefService:
             at,
             [_switch(project), self._trigger_paused(project, triggered)],
             lines,
-            self._notes(
-                project, [] if item.plan_task_id is None else [item.plan_task_id]
-            ),
+            *self._state(project, work, _task_of(item)),
         )
 
     def _wait(self, work: Work) -> tuple[Item, Wait]:
@@ -385,14 +400,17 @@ class BriefService:
             )
         ]
 
-    def _setup(self, project: Project, triggered: datetime, at: datetime) -> str:
+    def _setup(
+        self, project: Project, work: Work, triggered: datetime, at: datetime
+    ) -> str:
         """The setup's (F49), triggered at Create project's instant, which
         opened the project and took its slug: `/plan`, then the draft's folder
         and the project's, the draft, the opening that holds the words that
-        started it, and the plan, empty. No notes: its plan holds none. The
-        pause holds no setup (`setups`), so no pause line; but while Create's
-        pause stands (D083) the setup is told of it, since every work item it
-        adds is held (`_create_paused`)."""
+        started it, and the plan, empty; then the project's state and the
+        handbook, its plan holding no task and no note. The pause holds no
+        setup (`setups`), so no pause line; but while Create's pause stands
+        (D083) the setup is told of it, since every work item it adds is held
+        (`_create_paused`)."""
         opening = self.db.scalars(
             select(Item.id).where(
                 Item.project_id == project.id, Item.kind_code == OPENING
@@ -413,10 +431,16 @@ class BriefService:
                 " attached hang on it).",
                 "The plan: plan.json, empty.",
             ],
+            *self._state(project, work),
         )
 
     def _worker_turn_ended(
-        self, project: Project, run_id: uuid.UUID, triggered: datetime, at: datetime
+        self,
+        project: Project,
+        work: Work,
+        run_id: uuid.UUID,
+        triggered: datetime,
+        at: datetime,
     ) -> str:
         """The job after the turn of the worker's run `run_id` (design 3 D2):
         `/pre-rule`, then the work item's line, the documents the run
@@ -425,8 +449,8 @@ class BriefService:
         the whole text its turn ended with, which the line then leaves out
         (P-291), the files attached on the work item, the stage session's debrief
         (`_debriefed`), and the claimed actions it was given (`_given`) and
-        the blocks it researched (`_researched`); then every open note and the
-        deferrals without a home, the pass's (F57.4)."""
+        the blocks it researched (`_researched`); then the project's state,
+        whose every open note the pass takes (F57.4), and the handbook."""
         registered = self._registered(run_id)
         lines: list[str | None] = [self._run_line(run_id, last_line=bool(registered))]
         if registered:
@@ -444,12 +468,13 @@ class BriefService:
             at,
             [_switch(project), self._trigger_paused(project, triggered)],
             lines,
-            self._notes(project, None),
+            *self._state(project, work),
         )
 
     def _writer_answered(
         self,
         project: Project,
+        work: Work,
         run: ClarificationRun,
         triggered: datetime,
         at: datetime,
@@ -461,8 +486,8 @@ class BriefService:
         asked and the writer's answer as the document records it
         (`_clarified`); then the files attached on the run and what it
         registered, as any run's, and that this pass asks nothing, and the
-        debrief its session gave (`_debriefed`); then every open note and the
-        deferrals without a home."""
+        debrief its session gave (`_debriefed`); then the project's state and
+        the handbook."""
         item = self.db.get_one(Item, run.id)
         worker_id = self.db.get_one(Work, run.pass_id).trigger_item_id
         # A clarification run's pass is the job after a worker's turn (DB 254),
@@ -492,7 +517,7 @@ class BriefService:
             at,
             [_switch(project), self._trigger_paused(project, triggered)],
             lines,
-            self._notes(project, None),
+            *self._state(project, work),
         )
 
     def _clarified(self, clarification: Clarification) -> list[str]:
@@ -591,13 +616,19 @@ class BriefService:
         return f"Attached on the work item: {_files(attached)}."
 
     def _item_done(
-        self, project: Project, item_id: uuid.UUID, triggered: datetime, at: datetime
+        self,
+        project: Project,
+        work: Work,
+        item_id: uuid.UUID,
+        triggered: datetime,
+        at: datetime,
     ) -> str:
         """The job after a person's close of the item of Pilot's own
         `item_id` (DB decision 45): `/plan`, then the item and what was done
-        to it, as the record holds it (`_closed`); then the open notes of the
-        task the item names and the plan's own, the plan's alone where it
-        names none, and the deferrals without a home (F57.4)."""
+        to it, as the record holds it (`_closed`); then the project's state,
+        its return list the open notes of the task the item names and the
+        plan's own, the plan's alone where it names none (F57.4), and the
+        handbook."""
         item = self.db.get_one(Item, item_id)
         return _frame(
             PLAN_SKILL,
@@ -606,19 +637,23 @@ class BriefService:
             at,
             [_switch(project), self._trigger_paused(project, triggered)],
             [self._closed(item)],
-            self._notes(
-                project, [] if item.plan_task_id is None else [item.plan_task_id]
-            ),
+            *self._state(project, work, _task_of(item)),
         )
 
     def _offer_taken(
-        self, project: Project, note_id: int, triggered: datetime, at: datetime
+        self,
+        project: Project,
+        work: Work,
+        note_id: int,
+        triggered: datetime,
+        at: datetime,
     ) -> str:
         """The job a member's press of the offer of the Pilot Note `note_id`
         placed (F168.7; DB 629, 630): `/plan`, then the note and its taking
-        (`_taken`); then, as the job after an item's close, the open notes of
-        the task the note's item names and the plan's own, the plan's alone
-        where it names none, and the deferrals without a home (F57.4)."""
+        (`_taken`); then, as the job after an item's close, the project's
+        state, its return list the open notes of the task the note's item
+        names and the plan's own, the plan's alone where it names none
+        (F57.4), and the handbook."""
         note = self.db.get_one(PilotNote, note_id)
         item = self.db.get_one(Item, note.item_id)
         return _frame(
@@ -628,9 +663,7 @@ class BriefService:
             at,
             [_switch(project), self._trigger_paused(project, triggered)],
             self._taken(note, item),
-            self._notes(
-                project, [] if item.plan_task_id is None else [item.plan_task_id]
-            ),
+            *self._state(project, work, _task_of(item)),
         )
 
     def _taken(self, note: PilotNote, item: Item) -> list[str | None]:
@@ -996,15 +1029,20 @@ class BriefService:
             else "- Auto pilot is off: the grants above ask the operator first for"
             " this session."
         )
+        handbook = self._handbook(project)
+        if handbook is not None:
+            lines.extend(["- The project's handbook:", handbook])
+        return f"{brief.rstrip()}\n\n" + "\n".join(lines)
+
+    def _handbook(self, project: Project) -> str | None:
+        """The project's handbook as published; None where it is blank."""
         handbook = self.db.scalar(
             select(Document.published_text).where(
                 Document.project_id == project.id,
                 Document.role_code == DocumentRole.HANDBOOK,
             )
         )
-        if handbook is not None and handbook.strip():
-            lines.extend(["- The project's handbook:", handbook])
-        return f"{brief.rstrip()}\n\n" + "\n".join(lines)
+        return handbook if handbook is not None and handbook.strip() else None
 
     def _pause(self, project: Project) -> str | None:
         if not project.paused:
@@ -1099,46 +1137,192 @@ class BriefService:
             " and name who can."
         )
 
-    def _notes(self, project: Project, tasks: Collection[str] | None) -> list[str]:
-        """The open plan notes, by summary (F57.4): every one where `tasks` is
-        None, else those of `tasks` and the plan's own; the tasks' in the
-        plan's order and then the plan's own; then the deferrals without a
-        home, as the hook's check prints them (F79.3; DB 214)."""
-        lines: list[str] = []
-        scope = PlanNote.project_id == project.id
-        if tasks is not None:
-            scope &= PlanNote.plan_task_id.is_(None) | PlanNote.plan_task_id.in_(tasks)
-        for note, task_title in self.db.execute(
-            select(PlanNote, PlanTask.title)
-            .outerjoin(
-                PlanTask,
-                (PlanTask.project_id == PlanNote.project_id)
-                & (PlanTask.task_id == PlanNote.plan_task_id),
+    def _state(
+        self,
+        project: Project,
+        job: Work | None = None,
+        returns: Collection[str] | None = None,
+    ) -> list[Group]:
+        """The project's state as the record holds it when the brief is
+        composed, each part as `pilot.py` prints its listing, so that the
+        brain meets one shape whichever it reads: a job's seqs (`_seqs`);
+        the plan's tasks not done, with their status; the open items; every
+        open note whole, then, for a job on the tasks `returns`, the notes it
+        returns to, those tasks' and the plan's own (F57.4), and the
+        deferrals without a home (F79.3; DB 214), which a finished project's
+        leaves out, its sessions reading only (F5.5); then the handbook
+        whole."""
+        notes = self._open_notes(project)
+        noted: list[str | None] = [*self._noted(notes)]
+        if returns is not None:
+            noted.append(_return_list(notes, returns))
+        if project.state_code is not ProjectState.FINISHED:
+            noted.extend(self._homeless(project))
+        handbook = self._handbook(project)
+        return [
+            [] if job is None else [self._seqs(job)],
+            self._tasks(project, notes),
+            self._open_items(project),
+            noted,
+            [] if handbook is None else [HANDBOOK_HEADING, handbook.rstrip()],
+        ]
+
+    def _seqs(self, job: Work) -> str:
+        """The job's own seq and that of the item its trigger names: its
+        trigger Item, an offer's the item its Pilot Note is on; the setup's
+        names none."""
+        own = self.db.get_one(Item, job.id).seq
+        named = job.trigger_item_id
+        if job.trigger_note_id is not None:
+            named = self.db.get_one(PilotNote, job.trigger_note_id).item_id
+        if named is None:
+            return f"This job is seq {own} on the timeline."
+        return (
+            f"This job is seq {own} on the timeline; the item its trigger names,"
+            f" seq {self.db.get_one(Item, named).seq}."
+        )
+
+    def _tasks(self, project: Project, notes: Sequence[PlanNote]) -> list[str]:
+        """The plan's tasks not done, in its order, each with its status and
+        its open notes' ids, as `pilot.py plan task list` prints them."""
+        lines = []
+        for task in self.db.scalars(
+            select(PlanTask)
+            .where(
+                PlanTask.project_id == project.id,
+                PlanTask.removed_at.is_(None),
+                PlanTask.status_code != TaskStatus.DONE,
             )
-            .where(scope, PlanNote.deleted_at.is_(None))
-            .order_by(
-                PlanNote.plan_task_id.is_(None),
-                PlanTask.position.nulls_last(),
-                PlanNote.id,
-            )
+            .order_by(PlanTask.position)
         ):
-            on = (
-                "the plan"
-                if note.plan_task_id is None
-                else f'{note.plan_task_id} "{task_title}"'
+            line = f"{task.task_id} · {task.status_code.value} · {task.title}"
+            ids = [note.note_id for note in notes if note.plan_task_id == task.task_id]
+            if ids:
+                line += " · notes " + ", ".join(ids)
+            lines.append(line)
+        return [TASKS_HEADING, *lines] if lines else []
+
+    def _open_items(self, project: Project) -> list[str]:
+        """The project's open items in timeline order, as `pilot.py items
+        list --open` prints them from `timeline.json` (`ViewService.timeline`):
+        seq, kind, title, its addressee and its step, urgent, a wait's watch
+        and firings, its document's path, none before its text is read, and
+        its id."""
+        rows = self.db.execute(
+            select(Item, Document.path, Document.published_hash, User.handle, Wait)
+            .outerjoin(Document, Document.id == Item.id)
+            .outerjoin(User, User.id == Item.for_user_id)
+            .outerjoin(Wait, Wait.id == Item.id)
+            .where(Item.project_id == project.id, Item.done_at.is_(None))
+            .order_by(Item.seq)
+        ).all()
+        fired = {
+            wait_id: (count, pending)
+            for wait_id, count, pending in self.db.execute(
+                select(
+                    WaitFiring.wait_id,
+                    func.count(),
+                    func.count().filter(WaitFiring.job_id.is_(None)),
+                )
+                .where(
+                    WaitFiring.wait_id.in_(
+                        [wait.id for *_, wait in rows if wait is not None]
+                    )
+                )
+                .group_by(WaitFiring.wait_id)
             )
-            lines.append(f"- {on} · {note.note_id}: {note.summary}")
-        if lines:
-            lines.insert(0, NOTES_HEADING)
+        }
+        lines = []
+        for item, path, published, handle, wait in rows:
+            parts = [str(item.seq), item.kind_code, item.title or "(no title)", "open"]
+            if handle is not None:
+                parts.append(f"for {handle}")
+            if item.plan_task_id is not None:
+                parts.append(f"step {item.plan_task_id}")
+            if item.urgent:
+                parts.append("urgent")
+            if wait is not None:
+                parts.extend(_watched(wait, *fired.get(wait.id, (0, 0))))
+            parts.append("no document" if published is None else path)
+            parts.append(str(item.id))
+            lines.append(" · ".join(parts))
+        return [ITEMS_HEADING, *lines] if lines else []
+
+    def _open_notes(self, project: Project) -> list[PlanNote]:
+        """The project's open plan notes: the tasks' in the plan's order,
+        then the plan's own, each in the order made."""
+        return list(
+            self.db.scalars(
+                select(PlanNote)
+                .outerjoin(
+                    PlanTask,
+                    (PlanTask.project_id == PlanNote.project_id)
+                    & (PlanTask.task_id == PlanNote.plan_task_id),
+                )
+                .where(PlanNote.project_id == project.id, PlanNote.deleted_at.is_(None))
+                .order_by(
+                    PlanNote.plan_task_id.is_(None),
+                    PlanTask.position.nulls_last(),
+                    PlanNote.id,
+                )
+            )
+        )
+
+    def _noted(self, notes: Sequence[PlanNote]) -> list[str]:
+        """The open notes whole, as `pilot.py plan note list` prints them:
+        each its id, its task or the plan, and its summary, then its content
+        and each block it names, with its item's title and its answer as it
+        stands, indented under it."""
+        refs: dict[int, list[str]] = {}
+        parsed: dict[uuid.UUID, dsl.ParsedDocument] = {}
+        for note_id, local_id, item_id, title, text in self.db.execute(
+            select(
+                PlanNoteReference.plan_note_id,
+                Block.local_id,
+                Item.id,
+                Item.title,
+                Document.published_text,
+            )
+            .join(Block, Block.id == PlanNoteReference.block_id)
+            .join(Document, Document.id == Block.document_id)
+            .join(Item, Item.id == Document.id)
+            .where(PlanNoteReference.plan_note_id.in_([note.id for note in notes]))
+            .order_by(Block.id)
+        ):
+            # A Block is of its Document's published text (DB §7.4).
+            assert text is not None
+            if item_id not in parsed:
+                parsed[item_id] = dsl.parse(text)
+            document = parsed[item_id]
+            block = next(
+                block for block in document.blocks if block.local_id == local_id
+            )
+            refs.setdefault(note_id, []).append(
+                f"    {item_id}/{local_id} · {title or document.title or '(no title)'}"
+                f" · {_answer_line(block)}"
+            )
+        lines = []
+        for note in notes:
+            on = "plan" if note.plan_task_id is None else note.plan_task_id
+            lines.append(f"{note.note_id} · {on} · {note.summary}")
+            lines.extend(f"    {line}" for line in note.content.splitlines())
+            lines.extend(refs.get(note.id, []))
+        return [NOTES_HEADING, *lines] if lines else []
+
+    def _homeless(self, project: Project) -> list[str]:
+        """The deferrals without a home, as the hook's check prints them
+        (F79.3; DB 214)."""
         homeless = self.plan_service.homeless_deferrals(project)
-        if homeless:
-            lines.append(HOMELESS_HEADING)
-            lines.extend(
+        if not homeless:
+            return []
+        return [
+            HOMELESS_HEADING,
+            *(
                 f"- {deferral.block} in {deferral.document}"
                 f" ({deferral.title or ''}), to: {deferral.to}"
                 for deferral in homeless
-            )
-        return lines
+            ),
+        ]
 
     def _earlier_chats(self, project: Project) -> str | None:
         closed = self.db.scalar(
@@ -1338,6 +1522,67 @@ def _wait_line(item: Item, wait: Wait) -> str:
     if item.plan_task_id is not None:
         line += f"; task {item.plan_task_id}"
     return f"{line}."
+
+
+def _task_of(item: Item) -> list[str]:
+    """The tasks whose notes a job on `item` returns to beside the plan's
+    own: the one the item names, none where it names none (F57.4)."""
+    return [] if item.plan_task_id is None else [item.plan_task_id]
+
+
+def _return_list(notes: Sequence[PlanNote], tasks: Collection[str]) -> str | None:
+    """The line naming the open notes a job on `tasks` returns to (F57.4):
+    those tasks' and the plan's own, in `notes`' order; None for none."""
+    returned = [
+        note.note_id
+        for note in notes
+        if note.plan_task_id is None or note.plan_task_id in tasks
+    ]
+    if not returned:
+        return None
+    whose = (
+        f"the open notes of task {', '.join(tasks)} and the plan's own"
+        if tasks
+        else "the plan's own open notes"
+    )
+    return f"Your return list, {whose}: {', '.join(returned)}."
+
+
+def _answer_line(block: dsl.Block) -> str:
+    """A block's answer as it stands, as `pilot.py plan note list` prints
+    it: `answer: v4 by ada`, `answer: deferred → t5 by agent`, `done: <at>
+    by ada`, its `via` where given, or `no answer`."""
+    parts = []
+    if block.answer is not None:
+        parts.append(
+            f"answer: {block.answer}" + ("" if block.to is None else f" → {block.to}")
+        )
+    if block.done is not None:
+        parts.append(f"done: {utc_time(block.done)}")
+    if not parts:
+        return "no answer"
+    line = " · ".join(parts)
+    if block.by is not None:
+        line += f" by {block.by}"
+    if _given(block.via):
+        line += f" via {block.via}"
+    return line
+
+
+def _watched(wait: Wait, fired: int, pending: int) -> list[str]:
+    """An open wait's part of its item's line, as `pilot.py items list`
+    prints it: when it is due or what it watches, then its firings counted
+    and those no run has taken yet."""
+    if wait.due_at is not None:
+        on = f"due {utc_time(wait.due_at)}"
+    else:
+        # A card wait has its two lists (DB 186, 187).
+        assert wait.cards is not None and wait.states is not None
+        on = f"on {', '.join(wait.cards)} for {', '.join(wait.states)}"
+    count = f"{fired} firing{'' if fired == 1 else 's'}" if fired else "no firings"
+    if pending:
+        count += f", {pending} pending"
+    return [on, count]
 
 
 def _fired(
