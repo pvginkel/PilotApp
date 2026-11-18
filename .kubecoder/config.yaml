@@ -125,6 +125,13 @@ ports:
   - name: cost-dashboard
     port: 8082
     sslOffload: true
+  # The schema browser (PilotAppSpecs tools/schemabrowser/), started from
+  # PilotAppSpecs' VS Code task; it replays the backend's migrations on this
+  # environment's PostgreSQL. `sslOffload` gives it
+  # https://schemabrowser.<env-id>.home, as the dashboard has its own.
+  - name: schemabrowser
+    port: 8083
+    sslOffload: true
 
 preamble:
   instructions: |
