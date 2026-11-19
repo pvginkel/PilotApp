@@ -420,6 +420,19 @@ WORK_SURFACE = {
                     "title": "Completes",
                     "type": "boolean",
                 },
+                "figures": {
+                    "anyOf": [
+                        {"maxLength": 8000, "minLength": 1, "type": "string"},
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                    "description": (
+                        "The run's figures as your workflow gives them, at most"
+                        " 8,000 characters: Pilot reads them with your debrief and"
+                        " shows them nowhere"
+                    ),
+                    "title": "Figures",
+                },
             },
             "required": ["debrief", "entries"],
             "title": "register_debriefArguments",
@@ -444,19 +457,20 @@ WORK_SURFACE = {
         " its `round` of that part, its `role`, its `duration` in whole seconds, at"
         " most one of its `words` and `passed`, a pass or a fail, and, on an entry"
         " that opens a round past the first, its `why`; with it, `subject`, what the"
-        " debrief is an account of, and `completes`, false where a later debrief of"
-        " the same subject completes it. Pilot stores them as you give them and shows"
-        " them behind the work item's Debrief once your turn ends; a subject's"
-        " debriefs come together in one notice on the project's timeline once the"
-        " work item whose debrief completes it is done. A second call is refused with"
-        " the reason, and nothing changes. A call outside the limits — an empty"
-        " debrief or one over 16,000 characters, no entries or over 500, an empty"
-        " section, role, words or why, a section or a why over 120 characters, a role"
-        " over 64, words over 4,000, a round under 1, a duration under 0, both words"
-        " and passed, an unknown field in an entry, an empty subject or one over 120"
-        " characters, `completes` false without a subject — is refused with each"
-        " fault, and nothing is stored. Answers `{entries}`, the number of entries"
-        " stored.",
+        " debrief is an account of, `completes`, false where a later debrief of the"
+        " same subject completes it, and `figures`, the run's figures as your"
+        " workflow gives them. Pilot stores them as you give them and shows them"
+        " behind the work item's Debrief once your turn ends, the figures nowhere; a"
+        " subject's debriefs come together in one notice on the project's timeline"
+        " once the work item whose debrief completes it is done. A second call is"
+        " refused with the reason, and nothing changes. A call outside the limits —"
+        " an empty debrief or one over 16,000 characters, no entries or over 500, an"
+        " empty section, role, words or why, a section or a why over 120 characters,"
+        " a role over 64, words over 4,000, a round under 1, a duration under 0, both"
+        " words and passed, an unknown field in an entry, an empty subject or one"
+        " over 120 characters, `completes` false without a subject, empty figures or"
+        " ones over 8,000 characters — is refused with each fault, and nothing is"
+        " stored. Answers `{entries}`, the number of entries stored.",
     ),
 }
 
@@ -1121,6 +1135,50 @@ STORE_SURFACE = {
         " asks nothing is refused with the reason, and nothing is recorded."
         " Answers `{blocks}`, the document's blocks its writer is asked about.",
     ),
+    "write_notable": (
+        {
+            "properties": {
+                "text": {
+                    "description": (
+                        "What is notable about the stage, in your words, Markdown,"
+                        " at most 16,000 characters"
+                    ),
+                    "maxLength": 16000,
+                    "minLength": 1,
+                    "title": "Text",
+                    "type": "string",
+                },
+            },
+            "required": ["text"],
+            "title": "write_notableArguments",
+            "type": "object",
+        },
+        {
+            "description": "What the call did to your lines on the debrief.",
+            "properties": {
+                "outcome": {
+                    "description": (
+                        "`written` where none stood, `replaced` where some stood"
+                    ),
+                    "enum": ["written", "replaced"],
+                    "title": "Outcome",
+                    "type": "string",
+                }
+            },
+            "required": ["outcome"],
+            "title": "Written",
+            "type": "object",
+        },
+        "Write your lines on the debrief your brief carries: what is notable about"
+        " the stage, which the debrief's notice shows the operator above the debrief"
+        " itself. Only the job after a work item's turn writes them, on that work"
+        " item's debrief, which the call does not name; a later call, a retry's"
+        " included, replaces the lines standing. Nothing of them goes back to the"
+        " worker. A call from the chat or from any other job, one after a turn that"
+        " gave no debrief, or lines that are empty or over 16,000 characters are"
+        " refused with the reason, and nothing is written. Answers `{outcome}`:"
+        " `written` or `replaced`.",
+    ),
     "note": (
         {
             "properties": {
@@ -1295,7 +1353,7 @@ class TestTheSurface:
         pinned: dict[str, Any],
         instructions: str,
     ) -> None:
-        """Each of `pilot-store`'s ten tools carries the `_meta` on which
+        """Each of `pilot-store`'s eleven tools carries the `_meta` on which
         Claude Code loads a tool with no ToolSearch before it, and no tool of
         the worker's carries any (P-403)."""
         async with mcp_session(mcp_app, path=path) as (session, _):
@@ -1303,7 +1361,7 @@ class TestTheSurface:
 
         mark = {"anthropic/alwaysLoad": True} if path == STORE_PATH else None
         assert {tool.name: tool.meta for tool in tools} == dict.fromkeys(pinned, mark)
-        assert len(STORE_SURFACE) == 10
+        assert len(STORE_SURFACE) == 11
 
     @pytest.mark.parametrize(("path", "pinned", "instructions"), _SURFACES)
     async def test_the_server_is_pilot_with_its_instructions(

@@ -53,6 +53,7 @@ from app.models.reference import (
     TaskStatus,
     TurnCause,
     UsageWindow,
+    WorkTrigger,
 )
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
@@ -69,7 +70,7 @@ from pilot_mcp.server import PROJECTS_PATH, STORE_PATH
 from pilot_mcp.tools import STILL_RUNNING, TOOL_USE_ID_META
 from tests.support.adoption import FIRST_MENUS
 from tests.support.chats import ChatWriter, close_conversation, open_conversation
-from tests.support.debriefs import DEBRIEF, placed_notice
+from tests.support.debriefs import DEBRIEF, FIGURES, give_debrief, placed_notice
 from tests.support.fake_controller import ServedFakeController
 from tests.support.grants import store_grants
 from tests.support.pilot_mcp import (
@@ -572,6 +573,7 @@ class TestRegisterDebrief:
         assert json.loads(request.content) == _DEBRIEF | {
             "subject": None,
             "completes": True,
+            "figures": None,
         }
         assert answer.status_code == 201
         assert result.structuredContent == answer.json() == {"entries": 3}
@@ -603,10 +605,38 @@ class TestRegisterDebrief:
 
         assert not result.isError
         [(request, _)] = routes.calls
-        assert json.loads(request.content) == arguments
+        assert json.loads(request.content) == arguments | {"figures": None}
         session.expire_all()
         work = session.get_one(Work, worker.id)
         assert (work.debrief_subject, work.debrief_completes) == (_SUBJECT, False)
+
+    async def test_the_loops_figures_reach_the_route(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        session: DbSession,
+    ) -> None:
+        """DB 635: the client posts its fields one by one, so one the tool
+        takes and the client drops would be lost without a word."""
+        result = await call(
+            mcp_app, "register_debrief", _DEBRIEF | {"figures": FIGURES}
+        )
+
+        assert not result.isError
+        [(request, _)] = routes.calls
+        assert json.loads(request.content)["figures"] == FIGURES
+        session.expire_all()
+        assert session.get_one(Work, worker.id).debrief_figures == FIGURES
+
+    async def test_its_input_schema_lists_figures(self, mcp_app: Starlette) -> None:
+        """F92.15: the workflow hands its figures only to a `register_debrief`
+        whose input schema lists the property."""
+        async with mcp_session(mcp_app) as (mcp, _):
+            tools = (await mcp.list_tools()).tools
+
+        [tool] = [tool for tool in tools if tool.name == "register_debrief"]
+        assert "figures" in tool.inputSchema["properties"]
 
     async def test_a_second_call_is_the_routes_refusal_its_reason_whole(
         self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
@@ -655,6 +685,9 @@ class TestRegisterDebrief:
                 "subject": _SUBJECT,
                 "completes": "no",
             },
+            {"debrief": "Fine.", "entries": [_entry()], "figures": ""},
+            {"debrief": "Fine.", "entries": [_entry()], "figures": "  "},
+            {"debrief": "Fine.", "entries": [_entry()], "figures": "f" * 8_001},
         ],
         ids=[
             "empty-debrief",
@@ -682,6 +715,9 @@ class TestRegisterDebrief:
             "long-subject",
             "not-completing-without-subject",
             "completes-text",
+            "empty-figures",
+            "blank-figures",
+            "long-figures",
         ],
     )
     async def test_arguments_outside_the_limits_are_refused_without_calling_the_api(
@@ -1444,6 +1480,124 @@ class TestAskWriter:
             f" {item.id}/Q2 because session {brain.id} is a chat session: the"
             " pre-ruling pass, a job's, asks"
         )
+
+
+_LINES = "The third slice in a row whose test phase waited on the suite lock."
+
+
+def _pass_after_a_debrief(
+    session: DbSession,
+    container: ServiceContainer,
+    project: models.Project,
+    environment: Environment,
+) -> tuple[models.Session, models.Session]:
+    """A worker's run with its debrief given and the job after its turn, the
+    pre-ruling pass, running, whose bearer is `TOKEN`, its turn in flight."""
+    run = models.Session(
+        project_id=project.id,
+        environment_id=environment.id,
+        kind_code="work",
+        cwd="/work/Example",
+        token_hash="4" * 64,
+        state_code=SessionState.IDLE,
+    )
+    session.add(run)
+    session.flush()
+    container.record_service().place_work(project, run, "Refining the camp")
+    give_debrief(session, run)
+    job = _job(session, container, project, environment)
+    container.record_service().place_work(
+        project,
+        job,
+        "Pre-ruling",
+        trigger=WorkTrigger.WORKER_TURN_ENDED,
+        trigger_item_id=run.id,
+    )
+    session.commit()
+    return run, job
+
+
+@pytest.mark.anyio
+class TestWriteNotable:
+    async def test_the_passs_lines_are_written_on_the_debrief_it_follows(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+    ) -> None:
+        run, job = _pass_after_a_debrief(session, container, project, environment)
+
+        result = await call(mcp_app, "write_notable", {"text": _LINES}, path=STORE_PATH)
+
+        assert result.structuredContent == {"outcome": "written"}
+        [(request, answer)] = routes.calls
+        assert (request.method, str(request.url)) == (
+            "POST",
+            f"{API_URL}/tools/pilot-store/notable",
+        )
+        assert json.loads(request.content) == {"text": _LINES}
+        assert answer.status_code == 200
+        session.expire_all()
+        assert session.get_one(Work, run.id).debrief_notable == _LINES
+        assert read_records(session, job.id, limit=10) == []
+
+    async def test_a_later_call_answers_replaced(
+        self,
+        mcp_app: Starlette,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+    ) -> None:
+        run, _ = _pass_after_a_debrief(session, container, project, environment)
+
+        async with mcp_session(mcp_app, path=STORE_PATH) as (mcp, _):
+            await mcp.call_tool("write_notable", {"text": _LINES})
+            result = await mcp.call_tool("write_notable", {"text": "Its first stop."})
+
+        assert result.structuredContent == {"outcome": "replaced"}
+        session.expire_all()
+        assert session.get_one(Work, run.id).debrief_notable == "Its first stop."
+
+    async def test_a_chats_call_is_the_routes_refusal(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        brain: models.Session,
+    ) -> None:
+        result = await call(mcp_app, "write_notable", {"text": _LINES}, path=STORE_PATH)
+
+        assert routes.calls[-1][1].status_code == 403
+        assert error_text(result) == (
+            "Error executing tool write_notable: Cannot write Pilot's lines on a"
+            f" debrief because session {brain.id} is a chat session: the job after"
+            " a work item's turn writes them"
+        )
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [{}, {"text": ""}, {"text": " \n"}, {"text": "n" * 16_001}],
+        ids=["no-text", "empty", "blank", "long"],
+    )
+    async def test_lines_outside_the_limits_are_refused_without_calling_the_api(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+        arguments: dict[str, object],
+    ) -> None:
+        _pass_after_a_debrief(session, container, project, environment)
+
+        result = await call(mcp_app, "write_notable", arguments, path=STORE_PATH)
+
+        assert error_text(result).startswith("Error executing tool write_notable: ")
+        assert routes.calls == []
 
 
 @pytest.mark.anyio

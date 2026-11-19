@@ -6721,6 +6721,49 @@
         "title": "MarkRequestSchema",
         "type": "object"
       },
+      "NotableRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "Pilot's lines on the debrief of the work item whose turn the calling\njob follows.",
+        "properties": {
+          "text": {
+            "description": "What is notable about the stage, in Pilot's words, Markdown, as the debrief's notice shows it",
+            "examples": [
+              "The third slice in a row whose test phase waited on the suite lock."
+            ],
+            "maxLength": 16000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "NotableRequestSchema",
+        "type": "object"
+      },
+      "NotableSchema.4ff8b5e": {
+        "description": "What the call did to Pilot's lines on the debrief.",
+        "properties": {
+          "outcome": {
+            "description": "`written` where none stood, `replaced` where some stood",
+            "enum": [
+              "written",
+              "replaced"
+            ],
+            "examples": [
+              "written"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "NotableSchema",
+        "type": "object"
+      },
       "NoteRequestSchema.4ff8b5e": {
         "additionalProperties": false,
         "description": "Pilot's note on a block of an open prose item, or on the item as a\nwhole; a call that gives none of the four takes the standing one off.",
@@ -10045,6 +10088,24 @@
             "minItems": 1,
             "title": "Entries",
             "type": "array"
+          },
+          "figures": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The loop's figures as the workflow gives them, opaque text handed whole to the pass after the work item's turn and shown nowhere; none where not given",
+            "examples": [
+              "Phases: 8. Rounds: 11. Consults: 2. Duration: 4h 12m."
+            ],
+            "title": "Figures"
           },
           "subject": {
             "anyOf": [
@@ -21854,7 +21915,7 @@
     },
     "/api/testing/items/{item_id}/debrief": {
       "post": {
-        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120, with an optional subject of 1 to 120 characters and completes         false only beside a subject, or the stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or the work item has its         debrief already, nothing changed: the reason",
+        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120, with an optional subject of 1 to 120 characters, completes         false only beside a subject, and optional figures of 1 to 8,000         characters, or the stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or the work item has its         debrief already, nothing changed: the reason",
         "operationId": "post__api_testing_items_{item_id}_debrief",
         "parameters": [
           {
@@ -21935,7 +21996,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Store the work item's debrief, the stage session's own words and its entries in the call's order, with the subject it names and whether it completes it, once, as its worker's `register_debrief` does (F85.5; DB 323 to 325, 608), while the session's turn is in flight; its done line carries the Debrief once the turn ends (DB 329).",
+        "summary": "Store the work item's debrief, the stage session's own words and its entries in the call's order, with the subject it names, whether it completes it and the loop's figures, once, as its worker's `register_debrief` does (F85.5; DB 323 to 325, 608, 635), while the session's turn is in flight; its done line carries the Debrief once the turn ends (DB 329).",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -21997,6 +22058,84 @@
           }
         ],
         "summary": "Mark a document Done as Pilot, by the project's session, as its `mark` does a document it settled or deferred whole: the text as it stands fixed in a `done` Version, the item done by Pilot.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/items/{item_id}/notable": {
+      "post": {
+        "description": "Returns:     200: What the call did to the lines standing on the debrief     400: The body is not lines of 1 to 16,000 characters, or the stage         is prd     404: No work item has the id     409: The work item gave no debrief, nothing changed: the reason",
+        "operationId": "post__api_testing_items_{item_id}_notable",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotableRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotableSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Write Pilot's lines on the work item's debrief as `write_notable` writes them for the pass after its turn (F52.4; DB 636), with no pass: lines that stand there are replaced, and the debrief's notice that carries the work item shows them.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -25703,6 +25842,77 @@
         "tags": []
       }
     },
+    "/tools/pilot-store/notable": {
+      "post": {
+        "description": "Returns:     200: What the call did to the lines standing on the debrief     400: The body is not lines of 1 to 16,000 characters: each fault     401: No bearer, or one no session has     403: The bearer's session is not a job's, or has no turn running     409: The job follows no work item's turn, or the work item gave no         debrief, nothing changed: the reason",
+        "operationId": "post__tools_pilot-store_notable",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotableRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotableSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`write_notable(text)` (F52.4, F26.13; DB 636): Pilot's lines on the debrief of the work item whose turn the session's job follows, a later call replacing them; no effect.",
+        "tags": []
+      }
+    },
     "/tools/pilot-store/notes": {
       "post": {
         "description": "Returns:     200: What the call did to the note standing in its place     400: The body is not an item, a block's id and the note's fields     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project, or its document has         no such block     409: The item has no block or is done, the block is of another item,         is answered by Pilot or held by another run, a suggested answer         on an action with no options, an offer on anything but an open         action, anything but `text` on the item as a whole, or a         withdrawal where no note stands: the reason",
@@ -26039,7 +26249,7 @@
     },
     "/tools/pilot-work/debrief": {
       "post": {
-        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120, with an optional subject of 1 to 120 characters and completes         false only beside a subject: each fault     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: The work item has its debrief already, nothing changed",
+        "description": "Returns:     201: The debrief stored: the number of its entries     400: The body is not a debrief of 1 to 16,000 characters and 1 to 500         entries, each a section of 1 to 120 characters, a round of 1 or         more, a role of 1 to 64, a duration of 0 seconds or more, at most         one of words of 1 to 4,000 and passed, and an optional why of 1 to         120, with an optional subject of 1 to 120 characters, completes         false only beside a subject, and optional figures of 1 to 8,000         characters: each fault     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: The work item has its debrief already, nothing changed",
         "operationId": "post__tools_pilot-work_debrief",
         "parameters": [],
         "requestBody": {
@@ -26104,7 +26314,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "`register_debrief(debrief, entries, subject, completes)` (F85.5; DB 323 to 329, 608): the session's own work item's debrief and its entries, in the call's order, with the subject it names and whether it completes it, stored once; no effect.",
+        "summary": "`register_debrief(debrief, entries, subject, completes, figures)` (F85.5; DB 323 to 329, 608, 635): the session's own work item's debrief and its entries, in the call's order, with the subject it names, whether it completes it and the loop's figures, stored once; no effect.",
         "tags": []
       }
     },

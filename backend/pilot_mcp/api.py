@@ -104,8 +104,13 @@ MAX_ENTRY_WORDS = 4_000
 MAX_ENTRY_WHY = 120
 MAX_ENTRY_NUMBER = 2**31 - 1
 MAX_DEBRIEF_SUBJECT = 120
+MAX_DEBRIEF_FIGURES = 8_000
 """The limits of a work item's debrief, as its route takes them
 (`app/schemas/pilot_work.py`)."""
+
+MAX_NOTABLE = 16_000
+"""The limit of Pilot's lines on a debrief, as their route takes them
+(`app/schemas/pilot_store.py`)."""
 
 
 class NewItem(BaseModel):
@@ -365,6 +370,14 @@ class Standing(BaseModel):
             "`written` where none stood, `replaced` where one stood, `withdrawn`"
             " where the call took it off"
         )
+    )
+
+
+class Written(BaseModel):
+    """What the call did to your lines on the debrief."""
+
+    outcome: Literal["written", "replaced"] = Field(
+        description="`written` where none stood, `replaced` where some stood"
     )
 
 
@@ -972,6 +985,7 @@ class PilotWorkApi(_Routes):
         entries: list[DebriefEntry],
         subject: str | None,
         completes: bool,
+        figures: str | None,
     ) -> RegisteredDebrief:
         """No tool-use id is sent: the call records no effect to name it."""
         body = {
@@ -979,6 +993,7 @@ class PilotWorkApi(_Routes):
             "entries": [entry.model_dump(exclude_none=True) for entry in entries],
             "subject": subject,
             "completes": completes,
+            "figures": figures,
         }
         answer = await self._post("debrief", authorization, None, body)
         return RegisteredDebrief.model_validate(answer)
@@ -1088,6 +1103,12 @@ class PilotStoreApi(_Routes):
         body = {"block": block, "question": question}
         answer = await self._post("writer-questions", authorization, tool_use_id, body)
         return Asked.model_validate(answer)
+
+    async def write_notable(
+        self, authorization: str, tool_use_id: str | None, *, text: str
+    ) -> Written:
+        answer = await self._post("notable", authorization, tool_use_id, {"text": text})
+        return Written.model_validate(answer)
 
     async def note(
         self,

@@ -4,8 +4,9 @@ its turn runs (the planning ruling) and acting on its project alone. Each tool
 writes as the record's own writes do, Pilot the actor where it acts for itself
 and the person `for` names where it acts on their behalf. Each call that
 changed the record writes its Effect (F41); `ask_writer` writes its Writer
-Question in place of one (DB decision 59), and `note` and `alert` their Pilot
-Note and Send Alert (DB decision 84).
+Question in place of one (DB decision 59), `note` and `alert` their Pilot
+Note and Send Alert (DB decision 84), and `write_notable` Pilot's lines on a
+debrief (DB decision 85).
 
 Every write locks the Project's row first and the Session's for its effect
 after, the order Finish takes, which locks the project's Sessions before their
@@ -79,6 +80,7 @@ from app.models.reference import (
 from app.schemas.pilot_store import (
     AddItemRequestSchema,
     Mark,
+    NotableOutcome,
     StandingOutcome,
     source_parts,
 )
@@ -852,6 +854,39 @@ class PilotStoreService:
                 " one round per worker turn"
             )
         return None
+
+    def write_notable(self, brain: Brain, text: str) -> NotableOutcome:
+        """Pilot's lines `text` on the debrief of the work item whose turn
+        the brain's job follows, the pre-ruling pass after it, a Retry of
+        that pass included, which is a job for the same trigger; a later
+        call replaces them (F52.4; DB 636). No Effect: the call changes no
+        ask.
+
+        Raises:
+            AuthorizationException: the brain is a chat's.
+            InvalidOperationException: the job follows no work item's turn,
+                or the work item gave no debrief.
+        """
+        operation = "write Pilot's lines on a debrief"
+        if brain.kind_code != JOB:
+            raise AuthorizationException(
+                f"Cannot {operation} because session {brain.session_id} is a"
+                f" {brain.kind_code} session: the job after a work item's turn"
+                " writes them"
+            )
+        self._project(brain)
+        run_id = self.db.scalar(
+            select(Work.trigger_item_id).where(
+                Work.id == brain.session_id,
+                Work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
+            )
+        )
+        if run_id is None:
+            raise InvalidOperationException(
+                operation, "this job follows no work item's turn"
+            )
+        replaced = self.record_service.write_notable(run_id, text)
+        return "replaced" if replaced else "written"
 
     def note(
         self,

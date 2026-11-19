@@ -32,6 +32,7 @@ from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.pilot_server import token_hash
 from app.services.session_record_service import read_records
+from tests.support.debriefs import FIGURES
 from tests.support.fake_controller import ServedFakeController, client_of
 
 DOCUMENTS = "/tools/pilot-work/documents"
@@ -872,6 +873,36 @@ class TestRegisterDebrief:
         assert response.status_code == 201
         assert _subject(session, run) == stored
 
+    @pytest.mark.parametrize(
+        ("fields", "stored"),
+        [
+            ({"figures": FIGURES}, FIGURES),
+            ({"figures": "f" * 8_000}, "f" * 8_000),
+            ({"figures": None}, None),
+            ({}, None),
+        ],
+        ids=["figures", "at-the-limit", "none", "left-out"],
+    )
+    def test_the_loops_figures_are_stored_as_given(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        fields: dict[str, object],
+        stored: str | None,
+    ) -> None:
+        """DB 635: opaque text, stored whole; none where the call gives
+        none."""
+        run = _session(session, container, project, environment)
+
+        response = client.post(DEBRIEF, json=_DEBRIEF | fields, headers=_bearer())
+
+        assert response.status_code == 201
+        session.expire_all()
+        assert session.get_one(Work, run.id).debrief_figures == stored
+
     def test_a_second_call_is_409_with_the_reason_and_changes_nothing(
         self,
         client: FlaskClient,
@@ -957,6 +988,10 @@ class TestRegisterDebrief:
                 "subject": SUBJECT,
                 "completes": 0,
             },
+            {"debrief": "Fine.", "entries": [_entry()], "figures": ""},
+            {"debrief": "Fine.", "entries": [_entry()], "figures": " \n"},
+            {"debrief": "Fine.", "entries": [_entry()], "figures": "f" * 8_001},
+            {"debrief": "Fine.", "entries": [_entry()], "figures": 8},
         ],
         ids=[
             "no-debrief",
@@ -994,6 +1029,10 @@ class TestRegisterDebrief:
             "completes-none",
             "completes-text",
             "completes-number",
+            "empty-figures",
+            "blank-figures",
+            "long-figures",
+            "figures-number",
         ],
     )
     def test_a_body_outside_the_limits_is_400_and_stores_nothing(

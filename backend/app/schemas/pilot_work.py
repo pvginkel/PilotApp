@@ -23,9 +23,10 @@ MAX_ENTRY_WORDS = 4_000
 MAX_ENTRY_WHY = 120
 MAX_ENTRY_NUMBER = 2**31 - 1
 MAX_DEBRIEF_SUBJECT = 120
-"""The limits of a work item's debrief (DB 325, 608), which the schema of `work`
-and `debrief_entries` does not hold; `MAX_ENTRY_NUMBER` is the range of the
-columns of a round and a duration."""
+MAX_DEBRIEF_FIGURES = 8_000
+"""The limits of a work item's debrief (DB 325, 608, 635), which the schema of
+`work` and `debrief_entries` does not hold; `MAX_ENTRY_NUMBER` is the range of
+the columns of a round and a duration."""
 
 
 class RegisterDocumentRequestSchema(BaseModel):
@@ -264,6 +265,17 @@ class RegisterDebriefRequestSchema(BaseModel):
         ),
         examples=[False],
     )
+    figures: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_DEBRIEF_FIGURES,
+        description=(
+            "The loop's figures as the workflow gives them, opaque text handed"
+            " whole to the pass after the work item's turn and shown nowhere;"
+            " none where not given"
+        ),
+        examples=["Phases: 8. Rounds: 11. Consults: 2. Duration: 4h 12m."],
+    )
 
     @field_validator("debrief")
     @classmethod
@@ -283,6 +295,15 @@ class RegisterDebriefRequestSchema(BaseModel):
         if subject is not None and not subject.strip():
             raise ValueError("a subject has words")
         return subject
+
+    @field_validator("figures")
+    @classmethod
+    def _figures_say_something(cls, figures: str | None) -> str | None:
+        """The store keeps a blank text as none, and the figures are not
+        empty where given (DB 635)."""
+        if figures is not None and not figures.strip():
+            raise ValueError("the figures have words")
+        return figures
 
     @model_validator(mode="after")
     def _a_debrief_left_to_a_later_one_names_its_subject(self) -> Self:

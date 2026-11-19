@@ -160,7 +160,8 @@ class ViewService:
         shape, with its firings in order and, once marked, its note (TD
         §7.1); a done work item with its note, Pilot's reason for closing it
         for good, none after any other close (DB 350); a debrief's notice its
-        Item's row alone, no debrief it carries in it (DB 611, 328); a prose
+        Item's row with Pilot's lines on the debrief of each Work it carries,
+        in the Works' order, as `notable`, and no debrief (DB 611, 328); a prose
         item with Pilot's notes and alert standing on it (F74.2); a work item,
         a job's among them, with its run's facts as the record holds them
         (`_run`)."""
@@ -210,6 +211,16 @@ class ViewService:
                 .where(Work.project_id == project.id)
             )
         }
+        notable: dict[uuid.UUID, list[str]] = {}
+        for item, _, _, _, _ in rows:
+            if item.id not in works:
+                continue
+            carried, _ = works[item.id]
+            if carried.debrief_notice_id is None:
+                continue
+            lines = notable.setdefault(carried.debrief_notice_id, [])
+            if carried.debrief_notable is not None:
+                lines.append(carried.debrief_notable)
         firings: dict[uuid.UUID, list[tuple[WaitFiring, CardTransition | None]]] = {}
         for firing, transition in self.db.execute(
             select(WaitFiring, CardTransition)
@@ -261,6 +272,7 @@ class ViewService:
                         if prose
                         else {}
                     )
+                    | ({"notable": notable[item.id]} if item.id in notable else {})
                     for item, prose, path, summary, published_hash in rows
                 ],
                 "attachments": [

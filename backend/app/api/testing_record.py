@@ -11,7 +11,8 @@ environment of Pilot's own the stage's own controller creates, or placed by
 name in an environment of that controller's, named for the
 claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
-its effect, the list of steps it publishes and the debrief it gives; a pre-ruling pass's questions to a registered document's writer,
+its effect, the list of steps it publishes and the debrief it gives, with
+Pilot's lines on that debrief; a pre-ruling pass's questions to a registered document's writer,
 and its clarification run, with the writer's reply or to run; Pilot's
 notes on a prose item's blocks or on the item as a whole, and its alert for
 what an item's Send starts, each as the pass writes it; a person's
@@ -42,7 +43,12 @@ from app.engine.paths import folder
 from app.exceptions import RouteNotAvailableException
 from app.models.reference import DocumentRole
 from app.schemas.common import ApiErrorResponseSchema
-from app.schemas.pilot_store import RecordedSchema, StandingSchema
+from app.schemas.pilot_store import (
+    NotableRequestSchema,
+    NotableSchema,
+    RecordedSchema,
+    StandingSchema,
+)
 from app.schemas.pilot_work import (
     ProgressSchema,
     ProgressStepSchema,
@@ -754,10 +760,11 @@ def create_debrief(
     test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
 ) -> Any:
     """Store the work item's debrief, the stage session's own words and its
-    entries in the call's order, with the subject it names and whether it
-    completes it, once, as its worker's `register_debrief` does (F85.5; DB
-    323 to 325, 608), while the session's turn is in flight; its done line
-    carries the Debrief once the turn ends (DB 329).
+    entries in the call's order, with the subject it names, whether it
+    completes it and the loop's figures, once, as its worker's
+    `register_debrief` does (F85.5; DB 323 to 325, 608, 635), while the
+    session's turn is in flight; its done line carries the Debrief once the
+    turn ends (DB 329).
 
     Returns:
         201: The debrief stored: the number of its entries
@@ -765,8 +772,9 @@ def create_debrief(
             entries, each a section of 1 to 120 characters, a round of 1 or
             more, a role of 1 to 64, a duration of 0 seconds or more, at most
             one of words of 1 to 4,000 and passed, and an optional why of 1 to
-            120, with an optional subject of 1 to 120 characters and completes
-            false only beside a subject, or the stage is prd
+            120, with an optional subject of 1 to 120 characters, completes
+            false only beside a subject, and optional figures of 1 to 8,000
+            characters, or the stage is prd
         403: Its session has no turn running
         404: No work item has the id
         409: Its session has no environment yet, or the work item has its
@@ -779,8 +787,41 @@ def create_debrief(
         data.entries,
         subject=data.subject,
         completes=data.completes,
+        figures=data.figures,
     )
     return RegisteredDebriefSchema(entries=len(entries)).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/notable", methods=["POST"])
+@api.validate(
+    json=NotableRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=NotableSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def write_notable(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Write Pilot's lines on the work item's debrief as `write_notable`
+    writes them for the pass after its turn (F52.4; DB 636), with no pass:
+    lines that stand there are replaced, and the debrief's notice that
+    carries the work item shows them.
+
+    Returns:
+        200: What the call did to the lines standing on the debrief
+        400: The body is not lines of 1 to 16,000 characters, or the stage
+            is prd
+        404: No work item has the id
+        409: The work item gave no debrief, nothing changed: the reason
+    """
+    data = NotableRequestSchema.model_validate(request.get_json())
+    outcome = test_data_service.write_notable(item_id, data.text)
+    return NotableSchema(outcome=outcome).model_dump(mode="json")
 
 
 @testing_record_bp.route("/items/<uuid:item_id>/writer-questions", methods=["POST"])

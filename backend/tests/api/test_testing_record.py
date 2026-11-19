@@ -12,6 +12,7 @@ the waits' timer's tick, a wait's run and its close, and the invented
 scenario's load."""
 
 import base64
+import json
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -76,6 +77,7 @@ from app.services.supervisor import LoopHandle
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, open_chat
+from tests.support.debriefs import FIGURES
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
@@ -146,6 +148,10 @@ def _progress_path(item_id: uuid.UUID | str) -> str:
 
 def _debrief_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/debrief"
+
+
+def _notable_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/notable"
 
 
 def _worker_attachments_path(item_id: uuid.UUID | str) -> str:
@@ -2088,6 +2094,7 @@ ENDPOINTS = [
             "entries": [{"section": "S", "round": 1, "role": "r", "duration": 0}],
         },
     ),
+    (_notable_path(NO_ROW), {"text": "Its first stop."}),
     (
         _writer_questions_path(NO_ROW),
         {"questions": [{"block": "Q1", "question": "Which?"}]},
@@ -2734,6 +2741,18 @@ class TestCreateDebrief:
             "Slice 058 · The search page",
             False,
         )
+        assert work.debrief_figures is None
+
+    def test_it_stores_the_loops_figures(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        """DB 635, as the worker's call stores them."""
+        response = client.post(
+            _debrief_path(work_item.id), json=DEBRIEF | {"figures": FIGURES}
+        )
+
+        assert response.status_code == 201
+        assert session.get_one(Work, work_item.id).debrief_figures == FIGURES
 
     def test_a_second_conflicts_and_changes_nothing(
         self, client: FlaskClient, session: Session, work_item: models.Session
@@ -2803,6 +2822,8 @@ class TestCreateDebrief:
             },
             {"debrief": "Fine.", "entries": DEBRIEF["entries"], "subject": " "},
             {"debrief": "Fine.", "entries": DEBRIEF["entries"], "completes": False},
+            {"debrief": "Fine.", "entries": DEBRIEF["entries"], "figures": " "},
+            {"debrief": "Fine.", "entries": DEBRIEF["entries"], "figures": "f" * 8_001},
         ],
         ids=[
             "an empty debrief",
@@ -2813,6 +2834,8 @@ class TestCreateDebrief:
             "a field it does not know",
             "a blank subject",
             "not completing without a subject",
+            "blank figures",
+            "long figures",
         ],
     )
     def test_a_body_the_worker_s_call_refuses_is_invalid(
@@ -2827,6 +2850,134 @@ class TestCreateDebrief:
         assert response.status_code == 400
         assert session.get_one(Work, work_item.id).debrief is None
         assert _count(session, DebriefEntry) == 0
+
+
+@pytest.mark.usefixtures("person")
+class TestWriteNotable:
+    """`POST /api/testing/items/<id>/notable`: Pilot's lines on a work item's
+    debrief, as the pass's `write_notable` writes them (DB 636)."""
+
+    @pytest.fixture
+    def work_item(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session, its turn running, its debrief given."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo=WORK_REPO
+        )
+        assert client.post(_debrief_path(run.id), json=DEBRIEF).status_code == 201
+        return run
+
+    def test_it_writes_the_lines_and_a_later_call_replaces_them(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        first = client.post(
+            _notable_path(work_item.id), json={"text": "Its first stop."}
+        )
+
+        assert (first.status_code, first.get_json()) == (200, {"outcome": "written"})
+        assert session.get_one(Work, work_item.id).debrief_notable == "Its first stop."
+
+        second = client.post(
+            _notable_path(work_item.id), json={"text": "- A second stop."}
+        )
+
+        assert (second.status_code, second.get_json()) == (
+            200,
+            {"outcome": "replaced"},
+        )
+        session.expire_all()
+        assert session.get_one(Work, work_item.id).debrief_notable == "- A second stop."
+
+    def test_lines_on_a_work_its_notice_carries_show_in_its_row_of_the_tree(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        work_item: models.Session,
+    ) -> None:
+        """DB 611: written after the notice stands, as a Retry's pass writes
+        them."""
+        container.record_service().work_done(work_item.id, datetime.now(UTC))
+
+        response = client.post(
+            _notable_path(work_item.id), json={"text": "Its first stop."}
+        )
+
+        assert response.status_code == 200
+        timeline = json.loads(container.view_service().timeline(project).text)
+        assert [(row["kind"], row.get("notable")) for row in timeline["items"]][
+            -2:
+        ] == [("work", None), ("debrief_notice", ["Its first stop."])]
+
+    def test_no_work_item_of_the_id_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(_notable_path(uuid.uuid4()), json={"text": "Hi"})
+
+        assert response.status_code == 404
+
+    def test_a_work_item_that_gave_no_debrief_conflicts(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="3" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(project, run, "Building the camp")
+        # Committed, so that the refused call's rollback keeps it.
+        session.commit()
+
+        response = client.post(_notable_path(run.id), json={"text": "Hi"})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot write Pilot's lines on the debrief of work item {run.id}"
+            " because it gave no debrief"
+        )
+        assert session.get_one(Work, run.id).debrief_notable is None
+
+    @pytest.mark.parametrize(
+        "body",
+        [{}, {"text": ""}, {"text": " \n"}, {"text": "n" * 16_001}],
+        ids=["no text", "empty", "blank", "long"],
+    )
+    def test_a_body_the_pass_s_call_refuses_is_invalid(
+        self,
+        client: FlaskClient,
+        session: Session,
+        work_item: models.Session,
+        body: dict[str, Any],
+    ) -> None:
+        response = client.post(_notable_path(work_item.id), json=body)
+
+        assert response.status_code == 400
+        assert session.get_one(Work, work_item.id).debrief_notable is None
 
 
 @pytest.mark.usefixtures("person")

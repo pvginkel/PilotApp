@@ -36,6 +36,7 @@ from app.models import (
     User,
     Wait,
     WaitFiring,
+    Work,
 )
 from app.models.reference import (
     AttachmentSource,
@@ -58,7 +59,7 @@ from tests.support.chats import (
     open_chat,
     open_conversation,
 )
-from tests.support.debriefs import DEBRIEF, placed_notice
+from tests.support.debriefs import DEBRIEF, FIGURES, give_debrief, placed_notice
 from tests.support.pilot_notes import a_turn, alerted, noted
 
 _CONTENT = b"# Palette\n\nThe two colours compared.\n"
@@ -501,9 +502,12 @@ class TestViewService:
         project_session: models.Session,
     ) -> None:
         """DB 611, 328: its kind, title, task and done, as a wait's row has,
-        and nothing of the debriefs it carries, which no chat reads."""
+        with no lines where the pass wrote none, and nothing of the debriefs
+        it carries, their figures included, which no chat reads."""
         container.record_service().place_work(project, project_session, "Renaming")
         notice = placed_notice(session, container, project, project_session)
+        session.get_one(Work, project_session.id).debrief_figures = FIGURES
+        session.flush()
 
         rendering = container.view_service().timeline(project)
 
@@ -520,7 +524,59 @@ class TestViewService:
             "created_at": utc_time(notice.created_at),
             "done": None,
             "attachments": [],
+            "notable": [],
         }
+        assert DEBRIEF not in rendering.text
+        assert FIGURES not in rendering.text
+
+    def test_a_debrief_notice_carries_pilots_lines_of_its_works_in_their_order(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 611: the `debrief_notable` of each Work it carries, in the
+        Works' order on the timeline, a Work with none giving none; no other
+        row has the key, and another notice's lines stay its own."""
+        records = container.record_service()
+
+        def done(title: str, lines: str | None, **debrief: Any) -> models.Session:
+            run = models.Session(
+                project_id=project.id,
+                environment_id=environment.id,
+                kind_code="work",
+                cwd="/work/Example",
+                token_hash=uuid.uuid4().hex,
+                state_code=SessionState.RUNNING,
+            )
+            session.add(run)
+            session.flush()
+            records.place_work(project, run, title)
+            give_debrief(session, run, **debrief).debrief_notable = lines
+            records.work_done(run.id, datetime(2026, 11, 19, 9, 0, tzinfo=UTC))
+            return run
+
+        subject = "Slice 4 · The tent list"
+        done("Planning", "The plan took two rounds.", subject=subject, completes=False)
+        done("Planning again", None, subject=subject, completes=False)
+        done("Renaming", "Another notice's lines.")
+        done("Running", "Its first stop.", subject=subject)
+
+        rendering = container.view_service().timeline(project)
+
+        rows = _json(rendering)["items"]
+        assert [(row["title"], row.get("notable")) for row in rows] == [
+            ("Planning", None),
+            ("Planning again", None),
+            ("Renaming", None),
+            ("Debrief · Renaming", ["Another notice's lines."]),
+            ("Running", None),
+            (
+                f"Debrief · {subject}",
+                ["The plan took two rounds.", "Its first stop."],
+            ),
+        ]
         assert DEBRIEF not in rendering.text
 
     def test_a_wait_carries_what_it_waits_on_its_firings_and_its_note(

@@ -4840,6 +4840,162 @@ class TestRecordServiceDebriefNotice:
         ]
 
 
+class TestRecordServiceWriteNotable:
+    """Pilot's lines on a Work's debrief (DB 636), and the notice's row that
+    moves with them (DB 611)."""
+
+    AT = datetime(2026, 11, 19, 9, 30, 0, tzinfo=UTC)
+    LINES = "Its first stop: the suite lock was held for forty minutes."
+
+    def test_the_first_lines_are_written_and_later_ones_replace_them(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _debriefed_run(session, container, project, environment, "Renaming")
+        records = container.record_service()
+
+        assert records.write_notable(run.id, self.LINES) is False
+        assert session.get_one(Work, run.id).debrief_notable == self.LINES
+
+        assert records.write_notable(run.id, "Nothing else.") is True
+        assert session.get_one(Work, run.id).debrief_notable == "Nothing else."
+
+    def test_they_touch_nothing_else_of_the_debrief(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _debriefed_run(
+            session, container, project, environment, "Renaming", subject="Slice 4"
+        )
+        other = _debriefed_run(session, container, project, environment, "Planning")
+        session.get_one(Work, run.id).debrief_figures = "Phases: 3."
+        session.flush()
+
+        container.record_service().write_notable(run.id, self.LINES)
+
+        session.expire_all()
+        work = session.get_one(Work, run.id)
+        assert (work.debrief, work.debrief_subject, work.debrief_completes) == (
+            "How renaming went.",
+            "Slice 4",
+            True,
+        )
+        assert (work.debrief_figures, work.debrief_notice_id) == ("Phases: 3.", None)
+        assert session.get_one(Work, other.id).debrief_notable is None
+
+    def test_no_work_of_the_id_is_not_found(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        missing = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as refused:
+            container.record_service().write_notable(missing, self.LINES)
+
+        assert refused.value.message == f"Work item {missing} was not found"
+
+    def test_a_work_that_gave_no_debrief_is_refused_and_keeps_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _work_session(session, project, environment)
+        container.record_service().place_work(project, run, "Renaming")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().write_notable(run.id, self.LINES)
+
+        assert refused.value.message == (
+            f"Cannot write Pilot's lines on the debrief of work item {run.id}"
+            " because it gave no debrief"
+        )
+        assert session.get_one(Work, run.id).debrief_notable is None
+
+    def test_the_projects_row_is_held_before_the_work_is_read(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """The placement of the Work's notice takes the same row for the
+        notice's `seq`, so a write that waited on it reads the notice it
+        placed."""
+        run = _debriefed_run(session, container, project, environment, "Renaming")
+
+        with sent(session) as each:
+            container.record_service().write_notable(run.id, self.LINES)
+
+        held = next(
+            index
+            for index, text in enumerate(each.texts)
+            if "FROM projects" in text and text.rstrip().endswith("FOR UPDATE")
+        )
+        written = next(
+            index
+            for index, text in enumerate(each.texts)
+            if text.startswith("UPDATE work SET debrief_notable")
+        )
+        assert held < written
+        assert all("debrief_notable" not in text for text in each.texts[:held]), (
+            "the Work's lines are read under the project's row"
+        )
+
+    def test_lines_on_a_work_no_notice_carries_move_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 611: the tree holds the lines in their notice's row alone."""
+        with scoped_session(container):
+            run = _debriefed_run(session, container, project, environment, "Renaming")
+        engine_events.clear()
+        before = container.view_service().timeline(project).hash
+
+        with scoped_session(container):
+            container.record_service().write_notable(run.id, self.LINES)
+
+        assert engine_events == []
+        assert container.view_service().timeline(project).hash == before
+
+    def test_lines_on_a_work_its_notice_carries_move_the_timeline(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """F26.12: a Retry after a failed pass writes them once the notice
+        stands; its row in `timeline.json` and its box show them."""
+        with scoped_session(container):
+            run = _debriefed_run(session, container, project, environment, "Renaming")
+            container.record_service().work_done(run.id, self.AT)
+        engine_events.clear()
+        before = container.view_service().timeline(project).hash
+
+        with scoped_session(container):
+            container.record_service().write_notable(run.id, self.LINES)
+
+        timeline = container.view_service().timeline(project)
+        assert timeline.hash != before
+        assert engine_events == [
+            TreeHashMoved(f"draft-{project.number}/timeline.json", timeline.hash),
+            ProjectChanged(project.id),
+        ]
+        assert json.loads(timeline.text)["items"][1]["notable"] == [self.LINES]
+
+
 def _committed_notice(app: Flask, *, read: bool) -> tuple[uuid.UUID, uuid.UUID]:
     """A draft project whose worker's run placed its debrief's notice at its
     turn's end, committed, Read by the person where `read`: the person's id

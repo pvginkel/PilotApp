@@ -85,7 +85,7 @@ from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
 from app.services.working_on import Reading, holds
 from app.utils.after_commit import clear_after_commit_callbacks
-from tests.support.debriefs import placed_notice
+from tests.support.debriefs import give_debrief, placed_notice
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.grants import (
@@ -2413,6 +2413,165 @@ def _note(
         suggested_note=fields.get("suggested_note"),
         offer=fields.get("offer"),
     )
+
+
+LINES = "The third slice in a row whose test phase waited on the suite lock."
+
+
+def _debriefed(
+    db: DbSession, container: ServiceContainer, project: Project
+) -> models.Session:
+    """A worker's run with its debrief given."""
+    run = _work(db, container, project)
+    give_debrief(db, run)
+    return run
+
+
+class TestPilotStoreServiceWriteNotable:
+    """Pilot's lines on a debrief, the pass's alone to write (DB 636)."""
+
+    def test_the_pass_after_the_turn_writes_them_on_its_work_with_no_effect(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _debriefed(session, container, project)
+        other = _debriefed(session, container, project)
+        job = _pass(session, container, project, environment, run)
+
+        outcome = _service(container).write_notable(_admitted(job), LINES)
+
+        assert outcome == "written"
+        assert session.get_one(Work, run.id).debrief_notable == LINES
+        assert session.get_one(Work, other.id).debrief_notable is None
+        assert _effects(session) == []
+        assert read_records(session, job.id, limit=10) == []
+
+    def test_a_later_call_and_a_retrys_replace_them(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 278, 636: a Retry is another job for the same trigger and
+        trigger Item, so its lines land on the same Work."""
+        run = _debriefed(session, container, project)
+        job = _pass(session, container, project, environment, run)
+        retry = _pass(session, container, project, environment, run, token="retry")
+        session.get_one(Work, job.id).retried_by_id = retry.id
+        session.flush()
+        service = _service(container)
+
+        service.write_notable(_admitted(job), LINES)
+        again = service.write_notable(_admitted(job), "Its first stop.")
+        retried = service.write_notable(_admitted(retry), "The retry's lines.")
+
+        assert (again, retried) == ("replaced", "replaced")
+        assert session.get_one(Work, run.id).debrief_notable == "The retry's lines."
+
+    def test_a_chats_call_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _debriefed(session, container, project)
+        chat = _brain(session, project, environment, "chat")
+
+        with pytest.raises(AuthorizationException) as refused:
+            _service(container).write_notable(_admitted(chat), LINES)
+
+        assert refused.value.message == (
+            f"Cannot write Pilot's lines on a debrief because session {chat.id} is"
+            " a chat session: the job after a work item's turn writes them"
+        )
+        assert session.get_one(Work, run.id).debrief_notable is None
+
+    @pytest.mark.parametrize(
+        "trigger",
+        [None, WorkTrigger.ITEM_DONE],
+        ids=["no-work-item", "after-a-close"],
+    )
+    def test_a_job_that_follows_no_work_items_turn_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        trigger: WorkTrigger | None,
+    ) -> None:
+        """DB 636: no other job writes them, the one after the close of the
+        very work item included."""
+        run = _debriefed(session, container, project)
+        job = _brain(session, project, environment, "job")
+        if trigger is not None:
+            container.record_service().place_work(
+                project,
+                job,
+                "Deciding what is next",
+                trigger=trigger,
+                trigger_item_id=run.id,
+            )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).write_notable(_admitted(job), LINES)
+
+        assert refused.value.message == (
+            "Cannot write Pilot's lines on a debrief because this job follows no"
+            " work item's turn"
+        )
+        assert session.get_one(Work, run.id).debrief_notable is None
+
+    def test_a_turn_that_gave_no_debrief_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _work(session, container, project)
+        job = _pass(session, container, project, environment, run)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).write_notable(_admitted(job), LINES)
+
+        assert refused.value.message == (
+            f"Cannot write Pilot's lines on the debrief of work item {run.id}"
+            " because it gave no debrief"
+        )
+        assert session.get_one(Work, run.id).debrief_notable is None
+
+    def test_lines_written_once_the_notice_stands_move_the_timeline(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """F26.12: a Retry after a failed pass writes them into the notice
+        that was placed without them."""
+        run = _debriefed(session, container, project)
+        container.record_service().work_done(run.id, datetime.now(UTC))
+        job = _pass(session, container, project, environment, run)
+        brain, project_id = _admitted(job), project.id
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            _service(container).write_notable(brain, LINES)
+
+        timeline = container.view_service().timeline(project)
+        assert engine_events == [
+            TreeHashMoved(f"draft-{project.number}/timeline.json", timeline.hash),
+            ProjectChanged(project_id),
+        ]
+        assert LINES in timeline.text
 
 
 class TestPilotStoreServiceNote:

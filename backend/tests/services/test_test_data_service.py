@@ -65,7 +65,10 @@ from app.models.reference import (
     VersionCause,
     WorkTrigger,
 )
-from app.schemas.pilot_work import ProgressStepRequestSchema
+from app.schemas.pilot_work import (
+    DebriefEntryRequestSchema,
+    ProgressStepRequestSchema,
+)
 from app.schemas.testing_record import (
     OPENING_WORDS,
     InventedFileSchema,
@@ -81,6 +84,7 @@ from app.services.wait_service import ReportedTransition
 from app.startup import load_test_data_hook
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, open_chat
+from tests.support.debriefs import DEBRIEF, FIGURES
 from tests.support.fake_controller import ServedFakeController
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
@@ -2014,6 +2018,98 @@ class TestSetProgress:
 
 
 QUESTIONED = "```question id=Q1\n```\n\n```question id=Q2\n```\n"
+
+
+class TestRegisterDebriefAndWriteNotable:
+    """A work item's debrief with the loop's figures, and Pilot's lines on
+    it, each as its call stores it (DB 635, 636)."""
+
+    ENTRY = DebriefEntryRequestSchema(
+        section="P1 · The client", round=1, role="code-writer", duration=540
+    )
+
+    @pytest.fixture
+    def work_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session, its turn running."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo="example/Camp"
+        )
+        return run
+
+    def test_the_debrief_is_stored_with_its_figures_as_the_worker_stores_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        stored = container.test_data_service().register_debrief(
+            work_item.id,
+            DEBRIEF,
+            [self.ENTRY],
+            subject="Slice 4",
+            completes=False,
+            figures=FIGURES,
+        )
+
+        assert [(entry.position, entry.role) for entry in stored] == [
+            (1, "code-writer")
+        ]
+        work = session.get_one(Work, work_item.id)
+        assert (
+            work.debrief,
+            work.debrief_subject,
+            work.debrief_completes,
+            work.debrief_figures,
+        ) == (DEBRIEF, "Slice 4", False, FIGURES)
+
+    def test_pilots_lines_are_written_and_replaced_with_no_pass(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        service = container.test_data_service()
+        service.register_debrief(work_item.id, DEBRIEF, [self.ENTRY])
+        sessions = session.scalars(select(models.Session.id)).all()
+
+        first = service.write_notable(work_item.id, "Its first stop.")
+        second = service.write_notable(work_item.id, "A second stop.")
+
+        assert (first, second) == ("written", "replaced")
+        assert session.get_one(Work, work_item.id).debrief_notable == "A second stop."
+        assert session.scalars(select(models.Session.id)).all() == sessions
+
+    def test_lines_on_a_work_item_with_no_debrief_or_on_no_work_item_are_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        service = container.test_data_service()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            service.write_notable(work_item.id, "Its first stop.")
+        with pytest.raises(RecordNotFoundException):
+            service.write_notable(uuid.uuid4(), "Its first stop.")
+
+        assert refused.value.cause == "it gave no debrief"
+        assert session.get_one(Work, work_item.id).debrief_notable is None
 
 
 class TestAskWriter:

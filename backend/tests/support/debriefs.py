@@ -13,6 +13,9 @@ from app.services.container import ServiceContainer
 DEBRIEF = "It went well, if slowly: the second review was worth it."
 """A stage session's debrief, invented."""
 
+FIGURES = "Phases: 8. Rounds: 11. Consults: 2. Duration: 4h 12m. Cost: $31.40."
+"""The loop's figures as a workflow gives them, invented."""
+
 
 def give_debrief(
     db: DbSession,

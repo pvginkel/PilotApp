@@ -40,7 +40,7 @@ from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.sender import SENDER_HEADER
-from tests.support.debriefs import placed_notice
+from tests.support.debriefs import FIGURES, placed_notice
 from tests.support.pilot_notes import a_turn, noted
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
@@ -313,12 +313,15 @@ def _debriefed(
     *,
     done: bool,
 ) -> None:
-    """The run's work item, its debrief given with two entries, its turn
-    ended where `done`."""
+    """The run's work item, its debrief given with two entries, the loop's
+    figures and Pilot's lines on it, its turn ended where `done`."""
     container.record_service().place_work(
         camp, run, "Build the camp", repo="example/Camp"
     )
-    session.get_one(Work, run.id).debrief = "It went well, if slowly."
+    work = session.get_one(Work, run.id)
+    work.debrief = "It went well, if slowly."
+    work.debrief_figures = FIGURES
+    work.debrief_notable = "Its first stop."
     session.add_all(
         [
             DebriefEntry(

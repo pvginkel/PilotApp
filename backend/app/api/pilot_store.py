@@ -24,6 +24,8 @@ from app.schemas.pilot_store import (
     CancelAskRequestSchema,
     FinishRequestSchema,
     MarkRequestSchema,
+    NotableRequestSchema,
+    NotableSchema,
     NoteRequestSchema,
     RecordedSchema,
     StandingSchema,
@@ -424,6 +426,41 @@ def ask_writer(
     body = WriterQuestionRequestSchema.model_validate(request.get_json())
     blocks = pilot_store_service.ask_writer(g.brain, body.block, body.question)
     return WriterQuestionsSchema(blocks=blocks).model_dump(mode="json"), 201
+
+
+@pilot_store_bp.route("/notable", methods=["POST"])
+@public
+@api.validate(
+    json=NotableRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=NotableSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def write_notable(
+    pilot_store_service: PilotStoreService = Provide[
+        ServiceContainer.pilot_store_service
+    ],
+) -> Any:
+    """`write_notable(text)` (F52.4, F26.13; DB 636): Pilot's lines on the
+    debrief of the work item whose turn the session's job follows, a later
+    call replacing them; no effect.
+
+    Returns:
+        200: What the call did to the lines standing on the debrief
+        400: The body is not lines of 1 to 16,000 characters: each fault
+        401: No bearer, or one no session has
+        403: The bearer's session is not a job's, or has no turn running
+        409: The job follows no work item's turn, or the work item gave no
+            debrief, nothing changed: the reason
+    """
+    body = NotableRequestSchema.model_validate(request.get_json())
+    outcome = pilot_store_service.write_notable(g.brain, body.text)
+    return NotableSchema(outcome=outcome).model_dump(mode="json"), 200
 
 
 @pilot_store_bp.route("/notes", methods=["POST"])

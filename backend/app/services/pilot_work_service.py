@@ -330,10 +330,12 @@ class PilotWorkService:
         *,
         subject: str | None = None,
         completes: bool = True,
+        figures: str | None = None,
     ) -> list[DebriefEntry]:
         """The worker's own work item's debrief, `debrief` and its `entries`
-        in their order, with the `subject` it names and whether it `completes`
-        it, stored as given, once (F85.5; DB 323 to 325, 608). Nothing else of
+        in their order, with the `subject` it names, whether it `completes`
+        it and the loop's `figures`, stored as given, once (F85.5; DB 323 to
+        325, 608, 635). Nothing else of
         the Work changes: its steps take a call after it as before (DB 324).
         No Effect is recorded, no line written in the session's records and
         nothing moved (DB 328, 329).
@@ -357,6 +359,7 @@ class PilotWorkService:
         work.debrief = debrief
         work.debrief_subject = subject
         work.debrief_completes = completes
+        work.debrief_figures = figures
         stored = [
             DebriefEntry(
                 work_id=worker.work_item_id,

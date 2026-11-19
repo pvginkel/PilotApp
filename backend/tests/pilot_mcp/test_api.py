@@ -14,7 +14,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from app import models
 from app.models.reference import ProgressState
 from app.models.reference import ProjectState as RecordedProjectState
-from app.schemas import pilot_work
+from app.schemas import pilot_store, pilot_work
 from app.schemas.projects import ProjectStatus as ApiProjectStatus
 from app.schemas.timeline import HeldReason, ItemKindCode
 from pilot_mcp import api as pilot_mcp_api
@@ -87,6 +87,11 @@ def test_the_pages_are_the_fleets_file_tools() -> None:
 @pytest.mark.parametrize("limit", ["MAX_STEP_CODE", "MAX_STEP_LABEL", "MAX_STEPS"])
 def test_a_steps_limits_are_its_routes(limit: str) -> None:
     assert getattr(pilot_mcp_api, limit) == getattr(pilot_work, limit)
+
+
+def test_the_figures_and_the_liness_limits_are_their_routes() -> None:
+    assert pilot_mcp_api.MAX_DEBRIEF_FIGURES == pilot_work.MAX_DEBRIEF_FIGURES
+    assert pilot_mcp_api.MAX_NOTABLE == pilot_store.MAX_NOTABLE
 
 
 @pytest.mark.anyio

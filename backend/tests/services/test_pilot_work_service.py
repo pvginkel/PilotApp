@@ -68,6 +68,7 @@ from app.services.pilot_server import token_hash
 from app.services.pilot_work_service import Worker
 from app.services.session_record_service import read_records
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.debriefs import FIGURES
 from tests.support.fake_controller import ServedFakeController
 from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import wait_until
@@ -1827,6 +1828,29 @@ class TestPilotWorkServiceRegisterDebrief:
         )
 
         assert _subject_of(session, run.id) == (SUBJECT, False)
+
+    def test_the_loops_figures_are_stored_with_it_and_none_where_not_given(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 635: given with the debrief, as given; Pilot's lines, the
+        pass's to write, stay none."""
+        given = _session(session, container, project, environment)
+        bare = _session(session, container, project, environment, token="bare-token")
+        service = container.pilot_work_service()
+
+        service.register_debrief(_worker(given), DEBRIEF, _ACCOUNTS, figures=FIGURES)
+        service.register_debrief(_worker(bare), DEBRIEF, _ACCOUNTS)
+
+        works = {run.id: session.get_one(Work, run.id) for run in (given, bare)}
+        assert (works[given.id].debrief_figures, works[bare.id].debrief_figures) == (
+            FIGURES,
+            None,
+        )
+        assert works[given.id].debrief_notable is None
 
     def test_a_second_call_is_refused_and_changes_nothing(
         self,

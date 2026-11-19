@@ -39,6 +39,7 @@ from app.models.reference import (
     ProjectState,
     SessionState,
     TurnCause,
+    WorkTrigger,
 )
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
@@ -47,6 +48,7 @@ from app.services.session_record_service import read_records
 from app.services.session_scope import GRANTS_FILE
 from app.services.session_start_service import SessionStartService
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.debriefs import give_debrief
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.grants import grants_file, put_grants, store_grants
@@ -62,6 +64,7 @@ STOPS = "/tools/pilot-store/stops"
 FINISH = "/tools/pilot-store/finish"
 WRITER_QUESTIONS = "/tools/pilot-store/writer-questions"
 NOTES = "/tools/pilot-store/notes"
+NOTABLE = "/tools/pilot-store/notable"
 ALERTS = "/tools/pilot-store/alerts"
 
 TOKEN = "brain-token"
@@ -229,7 +232,7 @@ def _error(response: Any) -> str:
 
 
 class TestPilotStoreRoutes:
-    def test_the_surface_is_ten_routes_outside_the_api(self, app: Flask) -> None:
+    def test_the_surface_is_eleven_routes_outside_the_api(self, app: Flask) -> None:
         routes = sorted(
             (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
             for rule in app.url_map.iter_rules()
@@ -244,6 +247,7 @@ class TestPilotStoreRoutes:
             (FINISH, ["POST"]),
             (ITEMS, ["POST"]),
             (MARKS, ["POST"]),
+            (NOTABLE, ["POST"]),
             (NOTES, ["POST"]),
             (STOPS, ["POST"]),
             (WRITER_QUESTIONS, ["POST"]),
@@ -1183,6 +1187,190 @@ class TestAskWriter:
         assert _error(again).endswith(
             "because its writer was asked about block Q1 already"
         )
+
+
+LINES = "The third slice in a row whose test phase waited on the suite lock."
+
+
+def _pass_after(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    environment: Environment,
+    *,
+    debriefed: bool = True,
+) -> models.Session:
+    """A worker's run, with its debrief where `debriefed`, and the job after
+    its turn, whose bearer is `TOKEN`, its turn in flight. Committed, so that
+    a refused call's rollback keeps them.
+
+    Returns:
+        The worker's run.
+    """
+    run = _work(db, container, project)
+    if debriefed:
+        give_debrief(db, run)
+    job = _brain(db, project, environment, "job")
+    container.record_service().place_work(
+        project,
+        job,
+        "Pre-ruling",
+        trigger=WorkTrigger.WORKER_TURN_ENDED,
+        trigger_item_id=run.id,
+    )
+    db.commit()
+    return run
+
+
+def _notable(db: DbSession, run: models.Session) -> str | None:
+    db.expire_all()
+    return db.get_one(Work, run.id).debrief_notable
+
+
+class TestWriteNotable:
+    """`POST /tools/pilot-store/notable`: `write_notable(text)`, Pilot's lines
+    on the debrief of the work item whose turn the job follows (DB 636)."""
+
+    def test_the_lines_written_are_200_and_a_later_call_replaces_them(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _pass_after(session, container, project, environment)
+
+        first = client.post(NOTABLE, json={"text": LINES}, headers=_bearer())
+
+        assert first.status_code == 200
+        assert first.get_json() == {"outcome": "written"}
+        assert _notable(session, run) == LINES
+
+        second = client.post(
+            NOTABLE, json={"text": "Its first stop."}, headers=_bearer()
+        )
+
+        assert second.status_code == 200
+        assert second.get_json() == {"outcome": "replaced"}
+        assert _notable(session, run) == "Its first stop."
+
+    def test_lines_at_the_limit_are_taken(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _pass_after(session, container, project, environment)
+
+        response = client.post(NOTABLE, json={"text": "n" * 16_000}, headers=_bearer())
+
+        assert response.status_code == 200
+        assert _notable(session, run) == "n" * 16_000
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {},
+            {"text": ""},
+            {"text": "  \n"},
+            {"text": "n" * 16_001},
+            {"text": 3},
+            {"text": LINES, "item": "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"},
+        ],
+        ids=["no-text", "empty", "blank", "long", "a-number", "an-item"],
+    )
+    def test_a_body_that_is_not_lines_within_the_limit_is_400_and_writes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, Any],
+    ) -> None:
+        run = _pass_after(session, container, project, environment)
+
+        response = client.post(NOTABLE, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+        assert _notable(session, run) is None
+
+    def test_a_chats_call_is_403(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        chat = _brain(session, project, environment, "chat")
+
+        response = client.post(NOTABLE, json={"text": LINES}, headers=_bearer())
+
+        assert response.status_code == 403
+        assert _error(response) == (
+            f"Cannot write Pilot's lines on a debrief because session {chat.id} is"
+            " a chat session: the job after a work item's turn writes them"
+        )
+
+    def test_a_job_that_follows_no_work_items_turn_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _brain(session, project, environment, "job")
+
+        response = client.post(NOTABLE, json={"text": LINES}, headers=_bearer())
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot write Pilot's lines on a debrief because this job follows no"
+            " work item's turn"
+        )
+
+    def test_a_turn_that_gave_no_debrief_is_409_and_writes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _pass_after(session, container, project, environment, debriefed=False)
+
+        response = client.post(NOTABLE, json={"text": LINES}, headers=_bearer())
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot write Pilot's lines on the debrief of work item {run.id}"
+            " because it gave no debrief"
+        )
+        assert _notable(session, run) is None
+
+    def test_the_call_records_no_effect_and_no_line_of_the_session(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _pass_after(session, container, project, environment)
+
+        response = client.post(
+            NOTABLE,
+            json={"text": LINES},
+            headers=_bearer() | {"Tool-Use-Id": "toolu_01ABC"},
+        )
+
+        assert response.status_code == 200
+        assert session.scalars(select(Effect)).all() == []
+        for run in session.scalars(select(models.Session)):
+            assert read_records(session, run.id, limit=10) == []
 
 
 class TestNote:

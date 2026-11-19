@@ -1234,6 +1234,45 @@ class RecordService:
             each.debrief_notice_kind_code = DEBRIEF_NOTICE
         self.db.flush()
 
+    def write_notable(self, work_id: uuid.UUID, text: str) -> bool:
+        """Pilot's lines `text` on the debrief of the Work `work_id`, a write
+        after the first replacing them (DB 636). Its project's row is held
+        exclusively before the Work is read, the row the placement of its
+        notice takes for the notice's `seq` (`_place_debrief_notice`), so a
+        write that waited on a placement reads the Work as the placement left
+        it. Where a Debrief Notice carries the Work, its row in
+        `timeline.json` and its box move with the lines (DB 611, 612).
+
+        Returns:
+            Whether lines stood there, which `text` replaced.
+
+        Raises:
+            RecordNotFoundException: no Work has the id.
+            InvalidOperationException: the Work has no debrief, nothing
+                changed.
+        """
+        project_id = self.db.scalar(select(Work.project_id).where(Work.id == work_id))
+        if project_id is None:
+            raise RecordNotFoundException("Work item", str(work_id))
+        project = self.db.scalars(
+            select(Project)
+            .where(Project.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one()
+        work = self.db.get_one(Work, work_id, populate_existing=True)
+        if work.debrief is None:
+            raise InvalidOperationException(
+                f"write Pilot's lines on the debrief of work item {work_id}",
+                "it gave no debrief",
+            )
+        replaced = work.debrief_notable is not None
+        work.debrief_notable = text
+        self.db.flush()
+        if work.debrief_notice_id is not None:
+            self.view_service.timeline_moved(project)
+        return replaced
+
     def done_by_its_save(
         self,
         project: Project,

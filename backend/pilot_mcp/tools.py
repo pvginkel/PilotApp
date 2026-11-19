@@ -33,7 +33,9 @@ from pilot_mcp.api import (
     LIST_LIMIT_MAX,
     MAX_DEBRIEF,
     MAX_DEBRIEF_ENTRIES,
+    MAX_DEBRIEF_FIGURES,
     MAX_DEBRIEF_SUBJECT,
+    MAX_NOTABLE,
     MAX_STEP_CODE,
     MAX_STEPS,
     SESSION_HEADER,
@@ -70,6 +72,7 @@ from pilot_mcp.api import (
     Step,
     StepState,
     TurnResponse,
+    Written,
 )
 
 Call = Context[ServerSession, object, Request]
@@ -212,6 +215,20 @@ def _names_something(subject: str | None) -> str | None:
     if subject is not None and not subject.strip():
         raise ValueError("a subject has words")
     return subject
+
+
+def _figures_say_something(figures: str | None) -> str | None:
+    """Blank figures are refused here as their route refuses them."""
+    if figures is not None and not figures.strip():
+        raise ValueError("the figures have words")
+    return figures
+
+
+def _lines_say_something(text: str) -> str:
+    """Blank lines are refused here as their route refuses them."""
+    if not text.strip():
+        raise ValueError("the lines have words")
+    return text
 
 
 def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
@@ -383,6 +400,19 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
                 ),
             ),
         ] = True,
+        figures: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                max_length=MAX_DEBRIEF_FIGURES,
+                description=(
+                    "The run's figures as your workflow gives them, at most 8,000"
+                    " characters: Pilot reads them with your debrief and shows"
+                    " them nowhere"
+                ),
+            ),
+            AfterValidator(_figures_say_something),
+        ] = None,
     ) -> RegisteredDebrief:
         """Hand Pilot your work item's debrief, once, before your turn ends:
         `debrief`, your own account of how the run went, and `entries`, every
@@ -390,24 +420,26 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
         ran in, its `round` of that part, its `role`, its `duration` in whole
         seconds, at most one of its `words` and `passed`, a pass or a fail,
         and, on an entry that opens a round past the first, its `why`; with
-        it, `subject`, what the debrief is an account of, and `completes`,
-        false where a later debrief of the same subject completes it. Pilot
+        it, `subject`, what the debrief is an account of, `completes`, false
+        where a later debrief of the same subject completes it, and
+        `figures`, the run's figures as your workflow gives them. Pilot
         stores them as you give them and shows them behind the work item's
-        Debrief once your turn ends; a subject's debriefs come together in one
-        notice on the project's timeline once the work item whose debrief
-        completes it is done. A second call is refused with the reason, and
-        nothing changes. A call outside the limits — an empty debrief or one
-        over 16,000 characters, no entries or over 500, an empty section,
-        role, words or why, a section or a why over 120 characters, a role
-        over 64, words over 4,000, a round under 1, a duration under 0, both
-        words and passed, an unknown field in an entry, an empty subject or
-        one over 120 characters, `completes` false without a subject — is
+        Debrief once your turn ends, the figures nowhere; a subject's
+        debriefs come together in one notice on the project's timeline once
+        the work item whose debrief completes it is done. A second call is
+        refused with the reason, and nothing changes. A call outside the limits — an
+        empty debrief or one over 16,000 characters, no entries or over 500,
+        an empty section, role, words or why, a section or a why over 120
+        characters, a role over 64, words over 4,000, a round under 1, a
+        duration under 0, both words and passed, an unknown field in an
+        entry, an empty subject or one over 120 characters, `completes` false
+        without a subject, empty figures or ones over 8,000 characters — is
         refused with each fault, and nothing is stored. Answers `{entries}`,
         the number of entries stored."""
         if not completes and subject is None:
             raise ValueError("a debrief that does not complete names its subject")
         return await api.register_debrief(
-            _authorization(ctx), debrief, entries, subject, completes
+            _authorization(ctx), debrief, entries, subject, completes, figures
         )
 
 
@@ -765,6 +797,35 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         writer is asked about."""
         return await api.ask_writer(
             _authorization(ctx), _tool_use_id(ctx), block=block, question=question
+        )
+
+    @mcp.tool(meta=LOADED_UP_FRONT)
+    async def write_notable(
+        text: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=MAX_NOTABLE,
+                description=(
+                    "What is notable about the stage, in your words, Markdown, at"
+                    " most 16,000 characters"
+                ),
+            ),
+            AfterValidator(_lines_say_something),
+        ],
+        ctx: Call,
+    ) -> Written:
+        """Write your lines on the debrief your brief carries: what is notable
+        about the stage, which the debrief's notice shows the operator above
+        the debrief itself. Only the job after a work item's turn writes
+        them, on that work item's debrief, which the call does not name; a
+        later call, a retry's included, replaces the lines standing. Nothing
+        of them goes back to the worker. A call from the chat or from any
+        other job, one after a turn that gave no debrief, or lines that are
+        empty or over 16,000 characters are refused with the reason, and
+        nothing is written. Answers `{outcome}`: `written` or `replaced`."""
+        return await api.write_notable(
+            _authorization(ctx), _tool_use_id(ctx), text=text
         )
 
     @mcp.tool(meta=LOADED_UP_FRONT)

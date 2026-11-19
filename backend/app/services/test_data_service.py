@@ -71,7 +71,7 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
-from app.schemas.pilot_store import StandingOutcome
+from app.schemas.pilot_store import NotableOutcome, StandingOutcome
 from app.schemas.pilot_work import (
     DebriefEntryRequestSchema,
     ProgressStepRequestSchema,
@@ -977,12 +977,13 @@ class TestDataService:
         *,
         subject: str | None = None,
         completes: bool = True,
+        figures: str | None = None,
     ) -> list[DebriefEntry]:
         """The work item's debrief, `debrief` and its `entries` in their
-        order, with the `subject` it names and whether it `completes` it,
-        stored once as its worker's `register_debrief` stores it (F85.5; DB
-        323 to 325, 608), while the session's turn is in flight; its line
-        shows it once the turn ends (DB 329).
+        order, with the `subject` it names, whether it `completes` it and
+        the loop's `figures`, stored once as its worker's `register_debrief`
+        stores it (F85.5; DB 323 to 325, 608, 635), while the session's turn
+        is in flight; its line shows it once the turn ends (DB 329).
 
         Returns:
             The entries stored, in order.
@@ -997,8 +998,24 @@ class TestDataService:
         """
         worker = self._worker(item_id, f"register the debrief of work item {item_id}")
         return self.pilot_work_service.register_debrief(
-            worker, debrief, entries, subject=subject, completes=completes
+            worker,
+            debrief,
+            entries,
+            subject=subject,
+            completes=completes,
+            figures=figures,
         )
+
+    def write_notable(self, item_id: uuid.UUID, text: str) -> NotableOutcome:
+        """Pilot's lines `text` on the work item's debrief, written as the
+        pass's `write_notable` writes them (F52.4; DB 636), with no pass.
+
+        Raises:
+            RecordNotFoundException: no work item has the id.
+            InvalidOperationException: the work item gave no debrief.
+        """
+        replaced = self.record_service.write_notable(item_id, text)
+        return "replaced" if replaced else "written"
 
     def work(
         self,

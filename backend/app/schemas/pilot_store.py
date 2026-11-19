@@ -4,7 +4,14 @@ for the brain's tools (TD §4.5, F86)."""
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from app.engine.paths import DRAFT
 from app.schemas.timeline import HeldReason
@@ -298,6 +305,40 @@ class NoteRequestSchema(BaseModel):
     )
 
 
+MAX_NOTABLE = 16_000
+"""The limit of Pilot's lines on a debrief (DB 636), which the schema of
+`work` does not hold."""
+
+
+class NotableRequestSchema(BaseModel):
+    """Pilot's lines on the debrief of the work item whose turn the calling
+    job follows."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(
+        min_length=1,
+        max_length=MAX_NOTABLE,
+        description=(
+            "What is notable about the stage, in Pilot's words, Markdown, as the"
+            " debrief's notice shows it"
+        ),
+        examples=[
+            "The third slice in a row whose test phase waited on the suite lock."
+        ],
+    )
+
+    @field_validator("text")
+    @classmethod
+    def _says_something(cls, text: str) -> str:
+        """The store keeps a blank text as none
+        (`app/utils/empty_string_normalization.py`), and the lines are not
+        empty (DB 636)."""
+        if not text.strip():
+            raise ValueError("the lines have words")
+        return text
+
+
 class AlertRequestSchema(BaseModel):
     """Pilot's alert on an open prose item that another open ask comes
     before its Send; a call that gives neither takes the standing one off."""
@@ -529,6 +570,20 @@ class StandingSchema(BaseModel):
             "`written` where none stood, `replaced` where one stood, `withdrawn`"
             " where the call took it off"
         ),
+        examples=["written"],
+    )
+
+
+NotableOutcome = Literal["written", "replaced"]
+"""What a `write_notable` call did to the lines on the debrief: wrote the
+first, or replaced the ones standing (DB 636)."""
+
+
+class NotableSchema(BaseModel):
+    """What the call did to Pilot's lines on the debrief."""
+
+    outcome: NotableOutcome = Field(
+        description="`written` where none stood, `replaced` where some stood",
         examples=["written"],
     )
 
