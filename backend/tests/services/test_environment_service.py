@@ -392,6 +392,34 @@ class TestEnsureReported:
         assert (held.name, held.last_state, held.exempt) == ("Alpha", "stopped", True)
         assert held.last_seen_at is not None
 
+    def test_a_row_a_report_has_reached_is_left_unlocked(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> None:
+        # A placement by name asks before the Project's lock, and reads the
+        # controller after it: a lock held here would be held across both.
+        container = committed_app.container
+        service = _service(container, supervise)
+        with scoped_session(container) as db:
+            _environment(db, started=False)
+        fake_controller.add_environment(ENV, name="Renamed", status="stopped")
+        asking = container.session_maker()()
+        try:
+            service.ensure_reported(asking, ENV)
+
+            with scoped_session(container) as db:
+                locked = db.scalars(
+                    select(Environment)
+                    .where(Environment.id == ENV)
+                    .with_for_update(nowait=True)
+                ).one()
+                assert locked.name == "Env-A"
+        finally:
+            asking.close()
+
     @pytest.mark.parametrize("known_to_pilot", [False, True])
     def test_one_the_controller_does_not_have_is_its_not_found(
         self,

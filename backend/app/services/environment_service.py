@@ -36,7 +36,16 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import ColumnElement, Exists, Select, and_, exists, or_, select
+from sqlalchemy import (
+    ColumnElement,
+    Exists,
+    Select,
+    and_,
+    exists,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
@@ -172,15 +181,19 @@ class EnvironmentService:
         reported = reported_columns(report, datetime.now(UTC))
         # An exempt environment is never armed (DB Environment `stop_due_at`).
         unarmed = {"stop_due_at": None} if report.exempt else {}
-        # The row a session holds of the environment is read again as written.
-        db.scalars(
+        # Two statements, so that a row a report has reached is locked by
+        # neither: `ON CONFLICT DO UPDATE` locks the row it meets whatever its
+        # `WHERE` says, and callers ask before the Project's lock.
+        db.execute(
             insert(Environment)
             .values(id=env_id, **reported)
-            .on_conflict_do_update(
-                index_elements=[Environment.id],
-                set_=reported | unarmed,
-                where=Environment.last_seen_at.is_(None),
-            )
+            .on_conflict_do_nothing(index_elements=[Environment.id])
+        )
+        # The row a session holds of the environment is read again as written.
+        db.scalars(
+            update(Environment)
+            .where(Environment.id == env_id, Environment.last_seen_at.is_(None))
+            .values(reported | unarmed)
             .returning(Environment),
             execution_options={"populate_existing": True},
         ).all()
