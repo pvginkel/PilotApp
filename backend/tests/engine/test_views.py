@@ -538,7 +538,10 @@ class TestViewService:
     ) -> None:
         """DB 611: the `debrief_notable` of each Work it carries, in the
         Works' order on the timeline, a Work with none giving none; no other
-        row has the key, and another notice's lines stay its own."""
+        row has the key, and another notice's lines stay its own. The order
+        is the timeline's, whatever order the database hands the Works back
+        in: the same Works, the planning's and the run's places on the
+        timeline exchanged, give the lines the other way round."""
         records = container.record_service()
 
         def done(title: str, lines: str | None, **debrief: Any) -> models.Session:
@@ -557,16 +560,30 @@ class TestViewService:
             records.work_done(run.id, datetime(2026, 11, 19, 9, 0, tzinfo=UTC))
             return run
 
+        def shown() -> list[tuple[str, list[str] | None]]:
+            rendering = container.view_service().timeline(project)
+            assert DEBRIEF not in rendering.text
+            return [
+                (row["title"], row.get("notable")) for row in _json(rendering)["items"]
+            ]
+
         subject = "Slice 4 · The tent list"
-        done("Planning", "The plan took two rounds.", subject=subject, completes=False)
+        planning = session.get_one(
+            Item,
+            done(
+                "Planning",
+                "The plan took two rounds.",
+                subject=subject,
+                completes=False,
+            ).id,
+        )
         done("Planning again", None, subject=subject, completes=False)
         done("Renaming", "Another notice's lines.")
-        done("Running", "Its first stop.", subject=subject)
+        running = session.get_one(
+            Item, done("Running", "Its first stop.", subject=subject).id
+        )
 
-        rendering = container.view_service().timeline(project)
-
-        rows = _json(rendering)["items"]
-        assert [(row["title"], row.get("notable")) for row in rows] == [
+        assert shown() == [
             ("Planning", None),
             ("Planning again", None),
             ("Renaming", None),
@@ -577,7 +594,25 @@ class TestViewService:
                 ["The plan took two rounds.", "Its first stop."],
             ),
         ]
-        assert DEBRIEF not in rendering.text
+
+        # An item's `seq` is unique in its project at every statement, so the
+        # exchange goes through a place no item has.
+        first, last = planning.seq, running.seq
+        for item, seq in ((planning, last + 100), (running, first), (planning, last)):
+            item.seq = seq
+            session.flush()
+
+        assert shown() == [
+            ("Running", None),
+            ("Planning again", None),
+            ("Renaming", None),
+            ("Debrief · Renaming", ["Another notice's lines."]),
+            ("Planning", None),
+            (
+                f"Debrief · {subject}",
+                ["Its first stop.", "The plan took two rounds."],
+            ),
+        ]
 
     def test_a_wait_carries_what_it_waits_on_its_firings_and_its_note(
         self,
