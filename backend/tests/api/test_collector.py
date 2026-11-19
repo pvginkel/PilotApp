@@ -1,8 +1,13 @@
-"""The collector's routes (F152.2, F152.3): `GET /api/collector/inventory`
-and `POST /api/collector/publications` under the collector's bearer, outside
-the sign-in gate, each answer pinned beside the protocol's version."""
+"""The collector's routes (F152.2, F152.3, F152.14):
+`GET /api/collector/inventory`, `POST /api/collector/publications` and
+`POST /api/collector/walks` under the collector's bearer, outside the
+sign-in gate, each answer pinned beside the protocol's version."""
 
+import json
 import logging
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from queue import Empty
 from typing import Any
 
 import pytest
@@ -14,7 +19,7 @@ from sqlalchemy.orm import Session as DbSession
 from werkzeug.test import TestResponse
 
 from app import models
-from app.models import Call, Project, ToolCall, Transcript, User
+from app.models import Call, Project, ToolCall, Transcript, User, Walk
 from app.models.reference import ProjectState
 from app.schemas.publication import PublicationSchema
 from app.services.container import ServiceContainer
@@ -22,6 +27,8 @@ from app.services.publication_service import (
     COLLECTOR_PROTOCOL_MAX,
     COLLECTOR_PROTOCOL_MIN,
 )
+from app.services.sse_connection_manager import SSEConnection
+from app.services.walk_service import EVENT_NAME
 from tests.support.adoption import FIRST_MENUS
 from tests.support.database import writes
 from tests.support.publications import (
@@ -41,6 +48,7 @@ from tests.support.transcripts import CAMP, OTHER, SUB_AGENT
 
 URL = "/api/collector/publications"
 INVENTORY = "/api/collector/inventory"
+WALKS = "/api/collector/walks"
 LOGGER = "app.services.publication_service"
 
 
@@ -356,6 +364,127 @@ class TestInventory:
             response = client.open(
                 INVENTORY, method=method, headers=collector_headers()
             )
+            assert response.status_code == 405
+
+
+@pytest.fixture
+def ada(container: ServiceContainer, person: User) -> Iterator[SSEConnection]:
+    """A connection of the person's."""
+    manager = container.sse_connection_manager()
+    connection = manager.on_connect("ada-1", person.subject)
+    yield connection
+    manager.on_disconnect(connection)
+
+
+def _events(connection: SSEConnection) -> list[dict[str, Any]]:
+    """The events queued on the connection, in order."""
+    queued = []
+    while True:
+        try:
+            frame = connection.next_frame(timeout=0)
+        except Empty:
+            return queued
+        assert frame is not None
+        queued.append(json.loads(frame.removeprefix("data: ")))
+
+
+class TestEndWalk:
+    def test_a_walks_end_is_204_and_the_walk_is_stamped(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        before = datetime.now(UTC)
+
+        response = client.post(WALKS, headers=collector_headers())
+
+        assert (response.status_code, response.data) == (204, b"")
+        [ended_at] = session.scalars(select(Walk.ended_at)).all()
+        assert before <= ended_at <= datetime.now(UTC)
+
+    def test_a_walk_that_published_raises_one_event_once_the_call_committed(
+        self, client: FlaskClient, session: DbSession, ada: SSEConnection
+    ) -> None:
+        """F152.14, F154.8: one per walk, whatever it published."""
+        assert _post(client, _body(_camp())).status_code == 204
+        assert _post(client, _body(sub_agent())).status_code == 204
+        assert _events(ada) == []
+
+        assert client.post(WALKS, headers=collector_headers()).status_code == 204
+
+        [ended_at] = session.scalars(select(Walk.ended_at)).all()
+        assert _events(ada) == [
+            {
+                "type": EVENT_NAME,
+                "payload": {"as_of": ended_at.isoformat().replace("+00:00", "Z")},
+            }
+        ]
+
+    def test_a_walk_that_published_nothing_raises_none(
+        self, client: FlaskClient, session: DbSession, ada: SSEConnection
+    ) -> None:
+        assert _post(client, _body(_camp())).status_code == 204
+        assert client.post(WALKS, headers=collector_headers()).status_code == 204
+        _events(ada)
+
+        assert client.post(WALKS, headers=collector_headers()).status_code == 204
+
+        assert _events(ada) == []
+        assert len(session.scalars(select(Walk.id)).all()) == 2
+
+    def test_a_call_without_the_bearer_is_401_and_stamps_no_walk(
+        self, session: DbSession, client: FlaskClient, ada: SSEConnection
+    ) -> None:
+        assert _post(client, _body(_camp())).status_code == 204
+        headers = {**collector_headers(), "Authorization": "Bearer another-token"}
+
+        with writes(session) as wrote:
+            response = client.post(WALKS, headers=headers)
+
+        assert response.status_code == 401
+        assert response.json["code"] == "AUTHENTICATION_REQUIRED"
+        assert wrote == {}
+        assert _events(ada) == []
+
+    def test_every_call_is_401_while_the_token_is_empty(
+        self, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        _configure(container, "")
+
+        for bearer in (f"Bearer {COLLECTOR_TOKEN}", "Bearer ", "Bearer"):
+            headers = {**collector_headers(), "Authorization": bearer}
+            assert client.post(WALKS, headers=headers).status_code == 401
+
+    @pytest.mark.parametrize("version", ["0", "2", None])
+    def test_a_version_outside_the_range_is_426_with_the_range(
+        self, session: DbSession, client: FlaskClient, version: str | None
+    ) -> None:
+        headers = collector_headers()
+        if version is None:
+            del headers["X-Pilot-Collector-Protocol"]
+        else:
+            headers["X-Pilot-Collector-Protocol"] = version
+
+        with writes(session) as wrote:
+            response = client.post(WALKS, headers=headers)
+
+        assert response.status_code == 426
+        assert response.json == {
+            "min": COLLECTOR_PROTOCOL_MIN,
+            "max": COLLECTOR_PROTOCOL_MAX,
+        }
+        assert wrote == {}
+
+    def test_the_route_is_outside_the_oidc_gate(
+        self, oidc_app: Flask, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_app.container.config().oidc_enabled
+
+        response = oidc_client.post(WALKS, headers=collector_headers())
+
+        assert response.status_code == 204
+
+    def test_no_other_method_is_served(self, client: FlaskClient) -> None:
+        for method in ("GET", "PUT", "DELETE"):
+            response = client.open(WALKS, method=method, headers=collector_headers())
             assert response.status_code == 405
 
 

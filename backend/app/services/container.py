@@ -94,6 +94,7 @@ from app.services.usage_service import UsageService
 from app.services.wait_batcher import WaitBatcher
 from app.services.wait_service import WaitService
 from app.services.wait_timer import WaitTimer
+from app.services.walk_service import WalkService, register_collector_check
 from app.services.web_push import WebPushService
 from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -599,6 +600,12 @@ class ServiceContainer(containers.DeclarativeContainer):
         adoption_service=adoption_service,
         fleet_consumer=fleet_consumer,
     )
+
+    # A walk's end, its event and the collector's readiness check (F152.14)
+    walk_service = providers.Factory(
+        WalkService, db=db_session, sse_connection_manager=sse_connection_manager
+    )
+    register_for_background_startup(lambda c: register_collector_check(c))
 
     # The invented scenario, loaded through /api/testing/ (F122.6)
     scenario_service = providers.Factory(

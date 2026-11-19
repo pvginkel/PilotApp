@@ -16,6 +16,7 @@ import json
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from queue import Empty
 from typing import Any
 
 import pytest
@@ -51,6 +52,7 @@ from app.models import (
     User,
     Wait,
     WaitFiring,
+    Walk,
     Work,
     WriterQuestion,
 )
@@ -73,6 +75,7 @@ from app.services.fake_controller import CLIENT_NAME
 from app.services.relay_service import RelayService
 from app.services.session_record_service import read_records
 from app.services.session_start_service import SessionStartService
+from app.services.sse_connection_manager import SSEConnection
 from app.services.start_gate import WorkSlots
 from app.services.store_update_service import unlifted, utc_time
 from app.services.supervisor import LoopHandle
@@ -94,6 +97,7 @@ ENVIRONMENTS = "/api/testing/environments"
 PROJECTS = "/api/testing/projects"
 STORE_UPDATE = "/api/testing/store-update"
 SCENARIOS = "/api/testing/scenarios"
+WALKS = "/api/testing/walks"
 
 TASKS = [{"id": "build", "title": "Build the camp", "status": "pending"}]
 
@@ -2118,6 +2122,7 @@ ENDPOINTS = [
     (_wait_run_path(NO_ROW), {}),
     (_wait_close_path(NO_ROW), {"note": "Read"}),
     (SCENARIOS, {"projects": {"recipe-box": str(NO_ROW)}}),
+    (WALKS, {}),
 ]
 
 
@@ -4562,6 +4567,63 @@ class TestCreateScenario:
 
         assert response.status_code == 404
         assert _count(session, Transcript) == 0
+
+
+class TestCreateWalk:
+    @pytest.fixture
+    def ada(self, container: ServiceContainer, person: User) -> Iterator[SSEConnection]:
+        """A connection of the person's."""
+        manager = container.sse_connection_manager()
+        connection = manager.on_connect("ada-1", person.subject)
+        yield connection
+        manager.on_disconnect(connection)
+
+    @staticmethod
+    def _events(connection: SSEConnection) -> list[dict[str, Any]]:
+        queued = []
+        while True:
+            try:
+                frame = connection.next_frame(timeout=0)
+            except Empty:
+                return queued
+            assert frame is not None
+            queued.append(json.loads(frame.removeprefix("data: ")))
+
+    def test_a_walk_is_ended_as_a_collector_tells_its_end(
+        self, client: FlaskClient, session: Session, ada: SSEConnection
+    ) -> None:
+        response = client.post(WALKS)
+
+        assert response.status_code == 201
+        [ended_at] = session.scalars(select(Walk.ended_at)).all()
+        assert response.get_json() == {
+            "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
+            "announced": False,
+        }
+        assert self._events(ada) == []
+
+    @pytest.mark.usefixtures("service_user")
+    def test_the_walk_after_a_scenarios_load_raises_the_event_and_the_next_none(
+        self, client: FlaskClient, project: Project, ada: SSEConnection
+    ) -> None:
+        """F152.14: what a spec that loaded a scenario sees the event by."""
+        loaded = client.post(
+            SCENARIOS, json={"projects": {"recipe-box": str(project.id)}}
+        )
+        assert loaded.status_code == 201
+        assert self._events(ada) == []
+
+        first = client.post(WALKS).get_json()
+
+        assert first["announced"] is True
+        assert self._events(ada) == [
+            {"type": "collection_changed", "payload": {"as_of": first["ended_at"]}}
+        ]
+
+        second = client.post(WALKS).get_json()
+
+        assert second["announced"] is False
+        assert self._events(ada) == []
 
 
 @pytest.mark.usefixtures("person")

@@ -61,6 +61,7 @@ from app.models.transcript import (
     PromptSource,
     Repository,
     Transcript,
+    Walk,
 )
 from app.models.usage import UsageReading, WindowShare
 from app.models.user import User

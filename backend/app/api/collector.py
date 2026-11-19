@@ -1,5 +1,5 @@
-"""The collector's routes (F152.2, F152.3): Pilot's inventory and a
-publication of one transcript, under the collector's bearer.
+"""The collector's routes (F152.2, F152.3, F152.14): Pilot's inventory, a
+publication of one transcript and a walk's end, under the collector's bearer.
 
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them:
 the caller is a collector, which signs in to nothing, and every call passes
@@ -19,6 +19,7 @@ from app.schemas.inventory import InventorySchema
 from app.schemas.publication import CollectorProtocolRangeSchema, PublicationSchema
 from app.services.container import ServiceContainer
 from app.services.publication_service import PublicationService
+from app.services.walk_service import WalkService
 from app.utils.auth import public
 from app.utils.spectree_config import api
 
@@ -151,4 +152,40 @@ def publish(
     """
     publication = PublicationSchema.model_validate(request.get_json())
     publication_service.publish(publication)
+    return Response(status=204)
+
+
+@collector_bp.route("/walks", methods=["POST"])
+@public
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_426=CollectorProtocolRangeSchema,
+    ),
+)
+@inject
+def end_walk(
+    walk_service: WalkService = Provide[ServiceContainer.walk_service],
+) -> Any:
+    """A walk's end, which a collector tells once per walk, after its last
+    publication, whether the walk published anything or not. The call has no
+    body.
+
+    Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`;
+    `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.
+
+    - 204: the server stamped the walk at this moment, which the readiness
+      check `collector` reads. Where a transcript was published since the
+      walk before ended, every person's connections are sent one
+      `collection_changed` event, its `as_of` this walk's end; a walk that
+      published nothing raises none. A walk's end that does not arrive
+      raises nothing either: what it would have announced, the next walk's
+      end announces.
+    - 401: the call does not carry the collector's bearer, and every call
+      while `COLLECTOR_TOKEN` is empty.
+    - 426, with the range `{min, max}`: the call names a protocol version
+      outside it, or none.
+    """
+    walk_service.end()
     return Response(status=204)

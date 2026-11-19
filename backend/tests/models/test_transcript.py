@@ -1,6 +1,6 @@
-"""Transcript, Launch, Launch Component, Prompt, Hook Run and Compaction, with
-Repository and Component Version: what a row must hold (DB §2.6; the
-assertions of §4.31 and §4.33)."""
+"""Transcript, Launch, Launch Component, Prompt, Hook Run, Compaction and
+Walk, with Repository and Component Version: what a row must hold (DB §2.6;
+the assertions of §4.31 and §4.33)."""
 
 import uuid
 from datetime import timedelta
@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -26,6 +27,7 @@ from app.models import (
     Repository,
     Transcript,
     User,
+    Walk,
 )
 from app.models.reference import SessionState
 from tests.support import transcripts
@@ -734,3 +736,26 @@ class TestCompaction:
         setattr(made, column, -1)
 
         assert violated_constraint(session) == constraint
+
+
+class TestWalk:
+    def test_a_walk_holds_the_moment_it_ended(self, session: DbSession) -> None:
+        """DB decision 79.28: and nothing else."""
+        session.add_all(
+            Walk(ended_at=STARTED + timedelta(seconds=seconds)) for seconds in (0, 30)
+        )
+        session.flush()
+
+        assert {column.name for column in Walk.__table__.columns} == {"id", "ended_at"}
+        assert session.scalars(select(Walk.ended_at).order_by(Walk.id)).all() == [
+            STARTED,
+            STARTED + timedelta(seconds=30),
+        ]
+
+    def test_a_walk_without_its_end_is_refused(self, session: DbSession) -> None:
+        session.add(Walk())
+
+        with pytest.raises(IntegrityError) as raised:
+            session.flush()
+
+        assert raised.value.orig.diag.column_name == "ended_at"

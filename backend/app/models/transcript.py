@@ -1,7 +1,7 @@
-"""Transcript, Launch, Prompt, Hook Run and Compaction (DB §2.6), with
+"""Transcript, Launch, Prompt, Hook Run, Compaction and Walk (DB §2.6), with
 Repository (§2.9) and the reference entities that classify them (§2.11): a
 conversation's facts as a collector's publication gives them (DB decisions 79
-and 81).
+and 81), and the end of the collector's pass that published them.
 
 The reference entities here are the collector's: a row is written when a
 publication first names its code, and no revision writes one (DB §7.2).
@@ -291,3 +291,13 @@ class Compaction(db.Model):  # type: ignore[name-defined]
     tokens_before: Mapped[int] = mapped_column(Integer)
     tokens_after: Mapped[int | None] = mapped_column(Integer)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
+
+
+class Walk(db.Model):  # type: ignore[name-defined]
+    """A pass of the collector over the fleet's home, which the server stamps
+    when the collector tells it that the pass ended (DB decision 79.28)."""
+
+    __tablename__ = "walks"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

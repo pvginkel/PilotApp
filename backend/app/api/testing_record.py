@@ -22,7 +22,8 @@ does (F144.5); and the brain's waits, a card's transition delivered as the
 tracker-events endpoint takes it, past its token, which the dev stage has
 none of (R8), the waits' timer's tick, a wait's run placed as the batcher
 places it, and its close by Pilot's `mark`; and the invented scenario, its
-conversations as a collector publishes them (F122.6).
+conversations as a collector publishes them (F122.6), and a walk's end as a
+collector tells it (F152.14).
 Nothing in the UI places a work item, which the brain adds (F66).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
@@ -89,6 +90,7 @@ from app.schemas.testing_record import (
     InventedTranscriptSchema,
     InventedWaitCloseSchema,
     InventedWaitCreateSchema,
+    InventedWalkSchema,
     InventedWorkCreateSchema,
     InventedWorkerAttachmentCreateSchema,
     InventedWorkerAttachmentsSchema,
@@ -105,6 +107,7 @@ from app.services.store_update_service import StoreUpdateService
 from app.services.test_data_service import TestDataService
 from app.services.tracker_event_service import TrackerEventService
 from app.services.wait_service import WaitService
+from app.services.walk_service import WalkService
 from app.utils.flask_error_handlers import build_error_response
 from app.utils.spectree_config import api
 
@@ -1353,6 +1356,30 @@ def create_scenario(
             )
             for transcript in transcripts
         ]
+    ).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/walks", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(HTTP_201=InventedWalkSchema, HTTP_400=ApiErrorResponseSchema),
+)
+@inject
+def create_walk(
+    walk_service: WalkService = Provide[ServiceContainer.walk_service],
+) -> Any:
+    """End a walk as a collector tells its end, through the same service
+    (F152.14): the walk is stamped now, and where a transcript was published
+    since the walk before ended, a loaded scenario's among them, every
+    person's connections are sent `collection_changed` once the walk has
+    committed. The call has no body.
+
+    Returns:
+        201: The walk's end, and whether its event is sent
+        400: The stage is prd
+    """
+    ended = walk_service.end()
+    return InventedWalkSchema(
+        ended_at=ended.ended_at, announced=ended.announced
     ).model_dump(mode="json"), 201
 
 

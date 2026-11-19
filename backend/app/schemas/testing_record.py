@@ -718,3 +718,15 @@ class InventedScenarioSchema(BaseModel):
             "sub-agents'"
         )
     )
+
+
+class InventedWalkSchema(BaseModel):
+    """A walk of a collector's as the server took its end."""
+
+    ended_at: AwareDatetime = Field(description="When the walk ended: now")
+    announced: bool = Field(
+        description=(
+            "Whether a transcript was published since the walk before ended, "
+            "so that every person's connections are sent `collection_changed`"
+        )
+    )

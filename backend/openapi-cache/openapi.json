@@ -3494,6 +3494,28 @@
         "title": "InventedWaitCreateSchema",
         "type": "object"
       },
+      "InventedWalkSchema.6d6b324": {
+        "description": "A walk of a collector's as the server took its end.",
+        "properties": {
+          "announced": {
+            "description": "Whether a transcript was published since the walk before ended, so that every person's connections are sent `collection_changed`",
+            "title": "Announced",
+            "type": "boolean"
+          },
+          "ended_at": {
+            "description": "When the walk ended: now",
+            "format": "date-time",
+            "title": "Ended At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ended_at",
+          "announced"
+        ],
+        "title": "InventedWalkSchema",
+        "type": "object"
+      },
       "InventedWorkCreateSchema.6d6b324": {
         "description": "A work item placed and started, as Pilot starts one: by repository, in\nan environment of Pilot's own the stage's controller creates from it, or\nby name, in the environment of the stage's controller it names, as that\nstands. It names exactly one of the two.",
         "properties": {
@@ -16586,6 +16608,50 @@
         "tags": []
       }
     },
+    "/api/collector/walks": {
+      "post": {
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\n- 204: the server stamped the walk at this moment, which the readiness   check `collector` reads. Where a transcript was published since the   walk before ended, every person's connections are sent one   `collection_changed` event, its `as_of` this walk's end; a walk that   published nothing raises none. A walk's end that does not arrive   raises nothing either: what it would have announced, the next walk's   end announces. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none.",
+        "operationId": "post__api_collector_walks",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.e156e3e"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "A walk's end, which a collector tells once per walk, after its last publication, whether the walk published anything or not. The call has no body.",
+        "tags": []
+      }
+    },
     "/api/conditions": {
       "get": {
         "description": "Returns:     200: The conditions that hold; none while all work can go on     401: No one is signed in     403: The caller lacks the editor role",
@@ -25688,6 +25754,43 @@
           }
         ],
         "summary": "Place the wait's run now, as the batcher places it once the quiet window from its oldest pending firing has passed (F136.4): it starts through the gate once the request commits and takes the firings pending at its brief.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/walks": {
+      "post": {
+        "description": "Returns:     201: The walk's end, and whether its event is sent     400: The stage is prd",
+        "operationId": "post__api_testing_walks",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedWalkSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "End a walk as a collector tells its end, through the same service (F152.14): the walk is stamped now, and where a transcript was published since the walk before ended, a loaded scenario's among them, every person's connections are sent `collection_changed` once the walk has committed. The call has no body.",
         "tags": [],
         "x-required-role": "editor"
       }
