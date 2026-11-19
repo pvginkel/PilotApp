@@ -108,7 +108,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty-five stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twenty-six stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -210,7 +210,11 @@ into view, where the template raised the banner alone; under `reload`
 `tests/shell/new-version.spec.ts` pins the reload; the
 docstring of `scoped_session` in `backend/app/database.py`, which says that a nested call on the
 same thread hands back the outer session and commits and closes it, where the template's warns only
-of a request's session; the app's engine, which `create_app()` in `backend/app/__init__.py`
+of a request's session; the run of the after-commit callbacks, `run_after_commit_callbacks` in
+`backend/app/utils/after_commit.py`, which takes them off the list before the first runs, where the
+template's cleared the list only once they had run, so that a callback whose own commit ran them, a
+`scoped_session` it opened, ran itself again at that commit, without end
+(`tests/utils/test_after_commit.py` pins it); the app's engine, which `create_app()` in `backend/app/__init__.py`
 hands to `configure_engine()` in the app-owned `backend/app/startup.py` before anything connects,
 where the template gives an app no place for a listener on its engine: this app's turns
 PostgreSQL's JIT off in every transaction; the readiness check's migration lookup,

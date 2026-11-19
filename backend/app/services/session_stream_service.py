@@ -346,9 +346,9 @@ class SessionStreamService:
         )
 
     def _open_session(self) -> Session:
-        # Not `scoped_session`: a pass runs inside `run_after_commit_callbacks()`,
-        # whose callbacks are still registered, and its exit would run them,
-        # this wake included, again.
+        # Not `scoped_session`, which is not for use inside a request: a pass
+        # runs inside `run_after_commit_callbacks()`, which a request's teardown
+        # runs before it resets the request's session.
         session: Session = self._container.session_maker()()
         return session
 

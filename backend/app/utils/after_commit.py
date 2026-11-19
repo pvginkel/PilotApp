@@ -35,8 +35,15 @@ def after_commit(callback: Callable[[], None]) -> None:
 
 
 def run_after_commit_callbacks() -> None:
-    """Run the registered callbacks. Failures are logged, never raised."""
-    for callback in _callbacks.get():
+    """Run the registered callbacks. Failures are logged, never raised.
+
+    They are taken off the list before the first runs, so that a callback
+    whose own commit runs the callbacks — a ``scoped_session`` it opens —
+    runs what that commit registered, and neither itself nor the others again.
+    """
+    callbacks = _callbacks.get()
+    _callbacks.set(())
+    for callback in callbacks:
         try:
             callback()
         except Exception:

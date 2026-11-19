@@ -89,8 +89,8 @@ class ProjectEventService:
             self._manager.send_event(Target.subject(subject), payload, name, "project")
 
     def _open_session(self) -> Session:
-        # Not `scoped_session`: the bus delivers inside
-        # `run_after_commit_callbacks()`, whose callbacks are still
-        # registered, and its exit would run them again.
+        # Not `scoped_session`, which is not for use inside a request: the bus
+        # delivers inside `run_after_commit_callbacks()`, which a request's
+        # teardown runs before it resets the request's session.
         session: Session = self._container.session_maker()()
         return session

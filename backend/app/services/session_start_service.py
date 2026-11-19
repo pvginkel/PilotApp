@@ -367,8 +367,9 @@ class _StartFailed:
     session_id: uuid.UUID
 
     def __call__(self) -> None:
-        # On a loop of its own: a `scoped_session` opened under the commit
-        # that runs this would run the commit's callbacks again at its own.
+        # On a loop of its own: the commit that runs this may be a request's,
+        # whose teardown runs it before it resets the request's session, and
+        # `scoped_session` is not for use inside a request.
         self.starts._supervisor.start_loop(
             START_JOB,
             partial(self.starts._job_start_failed, self.session_id),
