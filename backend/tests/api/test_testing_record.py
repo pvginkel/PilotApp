@@ -43,6 +43,8 @@ from app.models import (
     Project,
     ProjectMember,
     ResearchAssignment,
+    StepTiming,
+    StepTranscript,
     StoreUpdate,
     Transcript,
     Turn,
@@ -2530,6 +2532,68 @@ class TestCreateProgress:
                 .order_by(ProgressStep.position)
             )
         ] == [None, why]
+
+    def test_a_steps_kind_conversations_duration_and_mark_are_taken_as_the_tools(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        """The real route's schema and service (F156.1, F156.2): the fields
+        kept on the step, and a step that goes done with a kind and a duration
+        timed."""
+        thread = "6f1d2c9e-0b7a-4e58-9a31-5c8e2f4d7b06"
+        step = {
+            "code": "P1.code",
+            "label": "P1 · code",
+            "kind": "code-writer",
+            "conversations": [thread],
+        }
+
+        listed = client.post(
+            _progress_path(work_item.id),
+            json={"steps": [{**step, "marked": False}]},
+        )
+        done = client.post(
+            _progress_path(work_item.id),
+            json={
+                "steps": [{**step, "state": "done", "duration": 1440, "marked": True}]
+            },
+        )
+        refused = client.post(
+            _progress_path(work_item.id),
+            json={"steps": [{**step, "state": "active", "duration": 5}]},
+        )
+        unknown = client.post(
+            _progress_path(work_item.id), json={"steps": [{**step, "size": 3}]}
+        )
+
+        assert [
+            response.status_code for response in (listed, done, refused, unknown)
+        ] == [200, 200, 409, 400]
+        assert refused.get_json()["error"] == (
+            f"Cannot set the progress of work item {work_item.id} because step"
+            " P1.code has a duration and is not done"
+        )
+        [stored] = session.scalars(select(ProgressStep)).all()
+        assert (stored.kind_code, stored.marked, stored.listed_ahead) == (
+            "code-writer",
+            True,
+            True,
+        )
+        assert [
+            (naming.code, naming.session_id)
+            for naming in session.scalars(select(StepTranscript))
+        ] == [("P1.code", thread)]
+        assert [
+            (
+                timing.work_id,
+                timing.code,
+                timing.kind_code,
+                timing.duration,
+                timing.listed_ahead,
+                timing.marked,
+                timing.repo,
+            )
+            for timing in session.scalars(select(StepTiming))
+        ] == [(work_item.id, "P1.code", "code-writer", 1440, True, True, WORK_REPO)]
 
     def test_an_item_that_is_no_work_item_is_not_found(
         self, client: FlaskClient, item: Item

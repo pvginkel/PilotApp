@@ -24,6 +24,9 @@ from app.models import (
     ItemAttachment,
     ProgressStep,
     Project,
+    StepKind,
+    StepTiming,
+    StepTranscript,
     Turn,
     Work,
 )
@@ -536,6 +539,24 @@ _ANSWERED = {
 
 _WHY = "The reviewer found the migration's downgrade left the column"
 
+_DONE = {"code": "docs", "label": "Docs", "state": "done"}
+"""A done step, which takes every field."""
+
+_THREAD = "6f1d2c9e-0b7a-4e58-9a31-5c8e2f4d7b06"
+"""Claude Code's session id of a conversation, invented."""
+
+
+def _conversations(session: DbSession, run: models.Session) -> list[tuple[str, str]]:
+    """The conversations the run's steps name, by step and id."""
+    return [
+        (naming.code, naming.session_id)
+        for naming in session.scalars(
+            select(StepTranscript)
+            .where(StepTranscript.work_id == run.id)
+            .order_by(StepTranscript.code, StepTranscript.session_id)
+        )
+    ]
+
 
 class TestSetProgress:
     """`PUT /tools/pilot-work/progress`: `set_progress(steps)`."""
@@ -626,6 +647,24 @@ class TestSetProgress:
             {"steps": [{"code": "test", "label": "Test", "why": "w" * 121}]},
             {"steps": [{"code": f"s{n}", "label": "Step"} for n in range(101)]},
             {"steps": [{"code": "test", "label": "Test", "note": "x"}]},
+            {"steps": [{**_DONE, "kind": ""}]},
+            {"steps": [{**_DONE, "kind": "  "}]},
+            {"steps": [{**_DONE, "kind": "k" * 65}]},
+            {"steps": [{**_DONE, "kind": 7}]},
+            {"steps": [{**_DONE, "duration": -1}]},
+            {"steps": [{**_DONE, "duration": 90.5}]},
+            {"steps": [{**_DONE, "duration": 90.0}]},
+            {"steps": [{**_DONE, "duration": "90"}]},
+            {"steps": [{**_DONE, "duration": True}]},
+            {"steps": [{**_DONE, "duration": 2**31}]},
+            {"steps": [{**_DONE, "marked": "yes"}]},
+            {"steps": [{**_DONE, "marked": 1}]},
+            {"steps": [{**_DONE, "conversations": _THREAD}]},
+            {"steps": [{**_DONE, "conversations": [""]}]},
+            {"steps": [{**_DONE, "conversations": [" "]}]},
+            {"steps": [{**_DONE, "conversations": ["c" * 65]}]},
+            {"steps": [{**_DONE, "conversations": [_THREAD, _THREAD]}]},
+            {"steps": [{**_DONE, "conversations": [f"c{n}" for n in range(101)]}]},
         ],
         ids=[
             "no-steps",
@@ -638,6 +677,24 @@ class TestSetProgress:
             "long-why",
             "long-list",
             "extra-field",
+            "empty-kind",
+            "blank-kind",
+            "long-kind",
+            "kind-not-text",
+            "negative-duration",
+            "duration-not-whole",
+            "duration-a-float",
+            "duration-a-text",
+            "duration-a-flag",
+            "long-duration",
+            "mark-a-text",
+            "mark-a-number",
+            "conversations-not-a-list",
+            "empty-conversation",
+            "blank-conversation",
+            "long-conversation",
+            "repeated-conversation",
+            "many-conversations",
         ],
     )
     def test_a_body_that_is_not_a_list_of_steps_is_400_and_changes_nothing(
@@ -656,6 +713,7 @@ class TestSetProgress:
 
         assert response.status_code == 400
         assert len(_steps(session, run)) == 3
+        assert session.scalars(select(StepKind)).all() == []
 
     def test_the_limits_themselves_are_taken(
         self,
@@ -666,15 +724,132 @@ class TestSetProgress:
         environment: Environment,
     ) -> None:
         run = _session(session, container, project, environment)
-        steps = [
-            {"code": f"{n:064d}", "label": "l" * 120, "why": "w" * 120}
+        steps: list[dict[str, object]] = [
+            {
+                "code": f"{n:064d}",
+                "label": "l" * 120,
+                "why": "w" * 120,
+                "kind": "k" * 64,
+            }
             for n in range(100)
         ]
+        steps[0] |= {
+            "state": "done",
+            "duration": 2**31 - 1,
+            "conversations": [f"{n:064d}" for n in range(100)],
+        }
 
         response = client.put(PROGRESS, json={"steps": steps}, headers=_bearer())
 
         assert response.status_code == 200
         assert len(_steps(session, run)) == 100
+        assert len(_conversations(session, run)) == 100
+
+    def test_a_steps_kind_mark_and_conversations_are_kept_and_a_done_step_timed(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """F156.1, F156.2: the four fields taken; the answer is the list as
+        the tile shows it."""
+        run = _session(session, container, project, environment)
+        listed = {
+            "steps": [
+                {
+                    "code": "P1.code",
+                    "label": "P1 · code",
+                    "state": "active",
+                    "kind": "code-writer",
+                    "marked": False,
+                    "conversations": [_THREAD],
+                },
+                {"code": "test", "label": "Test", "kind": "test"},
+            ]
+        }
+        done = {
+            "steps": [
+                {
+                    **listed["steps"][0],
+                    "state": "done",
+                    "duration": 1440,
+                    "marked": True,
+                },
+                {**listed["steps"][1], "state": "done", "duration": 300},
+            ]
+        }
+
+        published = client.put(PROGRESS, json=listed, headers=_bearer())
+        finished = client.put(PROGRESS, json=done, headers=_bearer())
+
+        assert (published.status_code, finished.status_code) == (200, 200)
+        assert finished.get_json() == {
+            "steps": [
+                {"code": "P1.code", "label": "P1 · code", "state": "done", "why": None},
+                {"code": "test", "label": "Test", "state": "done", "why": None},
+            ]
+        }
+        assert [
+            (step.code, step.kind_code, step.marked, step.listed_ahead)
+            for step in session.scalars(
+                select(ProgressStep)
+                .where(ProgressStep.work_id == run.id)
+                .order_by(ProgressStep.position)
+            )
+        ] == [("P1.code", "code-writer", True, None), ("test", "test", None, True)]
+        assert _conversations(session, run) == [("P1.code", _THREAD)]
+        assert [
+            (
+                timing.code,
+                timing.kind_code,
+                timing.duration,
+                timing.listed_ahead,
+                timing.marked,
+            )
+            for timing in session.scalars(
+                select(StepTiming)
+                .where(StepTiming.work_id == run.id)
+                .order_by(StepTiming.id)
+            )
+        ] == [
+            ("P1.code", "code-writer", 1440, None, True),
+            ("test", "test", 300, True, None),
+        ]
+
+    def test_a_duration_on_a_step_left_not_done_is_409_and_changes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+        early = {
+            "steps": [
+                {"code": "docs", "label": "Docs", "kind": "doc-writer"},
+                {
+                    "code": "test",
+                    "label": "Test",
+                    "state": "active",
+                    "kind": "test",
+                    "duration": 60,
+                },
+            ]
+        }
+
+        response = client.put(PROGRESS, json=early, headers=_bearer())
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot set the progress of work item {run.id} because step test has a"
+            " duration and is not done"
+        )
+        assert len(_steps(session, run)) == 3
+        assert session.scalars(select(StepKind)).all() == []
 
     def test_a_repeated_code_is_409_with_the_reason_and_changes_nothing(
         self,

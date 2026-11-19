@@ -10895,6 +10895,66 @@
             "title": "Code",
             "type": "string"
           },
+          "conversations": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The conversations that did the step's work, each by Claude Code's session id; without it, the step names none",
+            "examples": [
+              [
+                "6f1d2c9e-0b7a-4e58-9a31-5c8e2f4d7b06"
+              ]
+            ],
+            "title": "Conversations"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "On a step the call leaves `done`, the whole seconds its work took by the run's own measure",
+            "examples": [
+              1440
+            ],
+            "title": "Duration"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The kind the workflow gives the step, stored and shown as given; without it, the step has none",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind"
+          },
           "label": {
             "description": "The step's words on the tile",
             "examples": [
@@ -10904,6 +10964,22 @@
             "minLength": 1,
             "title": "Label",
             "type": "string"
+          },
+          "marked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the workflow holds the step to be in trouble; without it, the step has no mark",
+            "examples": [
+              false
+            ],
+            "title": "Marked"
           },
           "state": {
             "anyOf": [
@@ -22270,7 +22346,7 @@
     },
     "/api/testing/items/{item_id}/progress": {
       "post": {
-        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120, an optional state and an         optional why of 1 to 120, or the stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or a code is repeated,         nothing changed: the reason",
+        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120, an optional state, an optional         why of 1 to 120, an optional kind of 1 to 64, an optional duration         in whole seconds from 0, an optional mark and at most 100         conversations, each an id of 1 to 64 characters named once, or the         stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, a code is repeated, or a step         the call leaves not done has a duration, nothing changed: the         reason",
         "operationId": "post__api_testing_items_{item_id}_progress",
         "parameters": [
           {
@@ -22351,7 +22427,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Replace the work item's list of steps, as its worker's `set_progress` does (F85.3, F145.1): in the call's order, its status moved on every browser through the live event, while the session's turn is in flight.",
+        "summary": "Replace the work item's list of steps, as its worker's `set_progress` does (F85.3, F145.1, F156.1): in the call's order, each step's kind, mark, conversations and duration taken as that tool takes them, its status moved on every browser through the live event, while the session's turn is in flight.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -26530,7 +26606,7 @@
         "tags": []
       },
       "put": {
-        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120, an optional state and an         optional why of 1 to 120     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: A code is repeated, nothing changed: the reason",
+        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120, an optional state, an optional         why of 1 to 120, an optional kind of 1 to 64, an optional duration         in whole seconds from 0, an optional mark and at most 100         conversations, each an id of 1 to 64 characters named once     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: A code is repeated, or a step the call leaves not done has a         duration, nothing changed: the reason",
         "operationId": "put__tools_pilot-work_progress",
         "parameters": [],
         "requestBody": {
@@ -26595,7 +26671,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "`set_progress(steps)` (F85.3, F145.1): the session's own work item's list of steps replaced, in the call's order; no effect.",
+        "summary": "`set_progress(steps)` (F85.3, F145.1, F156.1): the session's own work item's list of steps replaced, in the call's order, a step that goes done with a kind and a duration kept as its timing; no effect.",
         "tags": []
       }
     }

@@ -145,17 +145,21 @@ def attach_file(
 def set_progress(
     pilot_work_service: PilotWorkService = Provide[ServiceContainer.pilot_work_service],
 ) -> Any:
-    """`set_progress(steps)` (F85.3, F145.1): the session's own work item's
-    list of steps replaced, in the call's order; no effect.
+    """`set_progress(steps)` (F85.3, F145.1, F156.1): the session's own work
+    item's list of steps replaced, in the call's order, a step that goes done
+    with a kind and a duration kept as its timing; no effect.
 
     Returns:
         200: The list as it stands
         400: The body is not a list of at most 100 steps, each a code of 1 to
-            64 characters, a label of 1 to 120, an optional state and an
-            optional why of 1 to 120
+            64 characters, a label of 1 to 120, an optional state, an optional
+            why of 1 to 120, an optional kind of 1 to 64, an optional duration
+            in whole seconds from 0, an optional mark and at most 100
+            conversations, each an id of 1 to 64 characters named once
         401: No bearer, or one no session has
         403: The bearer's session is not a work item's, or has no turn running
-        409: A code is repeated, nothing changed: the reason
+        409: A code is repeated, or a step the call leaves not done has a
+            duration, nothing changed: the reason
     """
     body = SetProgressRequestSchema.model_validate(request.get_json())
     steps = pilot_work_service.set_progress(g.worker, body.steps)

@@ -402,6 +402,9 @@ _PUBLISHED = [
 
 _WHY = "The reviewer found the migration's downgrade left the column"
 
+_THREAD = "6f1d2c9e-0b7a-4e58-9a31-5c8e2f4d7b06"
+"""Claude Code's session id of a conversation, invented."""
+
 
 @pytest.mark.anyio
 class TestSetProgress:
@@ -454,6 +457,67 @@ class TestSetProgress:
         assert result.structuredContent == answer.json()
         assert [step["why"] for step in answer.json()["steps"]] == [None, _WHY]
 
+    async def test_a_steps_kind_mark_conversations_and_duration_reach_its_route(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        session: DbSession,
+    ) -> None:
+        """F156.1: each sent as given, a field not given not sent; the step
+        that goes done with a kind and a duration is timed (F156.2)."""
+        listed = [
+            {
+                "code": "P1.code",
+                "label": "P1 · the client",
+                "state": "active",
+                "kind": "code-writer",
+                "marked": False,
+                "conversations": [_THREAD],
+            },
+            {"code": "test", "label": "Test"},
+        ]
+        done = [{**listed[0], "state": "done", "duration": 1440}, listed[1]]
+
+        async with mcp_session(mcp_app) as (mcp, _):
+            published = await mcp.call_tool("set_progress", {"steps": listed})
+            finished = await mcp.call_tool("set_progress", {"steps": done})
+
+        assert not published.isError and not finished.isError
+        assert [json.loads(request.content) for request, _ in routes.calls] == [
+            {"steps": listed},
+            {"steps": done},
+        ]
+        assert finished.structuredContent == routes.calls[-1][1].json()
+        assert [
+            (step.code, step.kind_code, step.marked)
+            for step in session.scalars(
+                select(models.ProgressStep).order_by(models.ProgressStep.position)
+            )
+        ] == [("P1.code", "code-writer", False), ("test", None, None)]
+        assert [
+            (naming.code, naming.session_id)
+            for naming in session.scalars(select(models.StepTranscript))
+        ] == [("P1.code", _THREAD)]
+        assert [
+            (timing.code, timing.kind_code, timing.duration, timing.marked)
+            for timing in session.scalars(select(models.StepTiming))
+        ] == [("P1.code", "code-writer", 1440, False)]
+
+    async def test_a_duration_on_a_step_left_not_done_is_the_routes_refusal(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        early = {**_PUBLISHED[1], "kind": "test", "duration": 60}
+
+        result = await call(mcp_app, "set_progress", {"steps": [early]})
+
+        assert routes.calls[-1][1].status_code == 409
+        assert error_text(result) == _refusal(routes, "set_progress")
+        assert error_text(result) == (
+            f"Error executing tool set_progress: Cannot set the progress of work"
+            f" item {worker.id} because step test has a duration and is not done"
+        )
+
     async def test_a_repeated_code_is_the_routes_refusal_its_reason_whole(
         self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
     ) -> None:
@@ -480,6 +544,19 @@ class TestSetProgress:
             [{"code": "test", "label": "Test", "why": "w" * 121}],
             [{"code": f"s{n}", "label": "Step"} for n in range(101)],
             [{"code": "test", "label": "Test", "note": "x"}],
+            [{**_PUBLISHED[0], "kind": ""}],
+            [{**_PUBLISHED[0], "kind": "  "}],
+            [{**_PUBLISHED[0], "kind": "k" * 65}],
+            [{**_PUBLISHED[0], "duration": -1}],
+            [{**_PUBLISHED[0], "duration": 90.5}],
+            [{**_PUBLISHED[0], "duration": "90"}],
+            [{**_PUBLISHED[0], "duration": 2**31}],
+            [{**_PUBLISHED[0], "marked": "yes"}],
+            [{**_PUBLISHED[0], "conversations": [""]}],
+            [{**_PUBLISHED[0], "conversations": [" "]}],
+            [{**_PUBLISHED[0], "conversations": ["c" * 65]}],
+            [{**_PUBLISHED[0], "conversations": [_THREAD, _THREAD]}],
+            [{**_PUBLISHED[0], "conversations": [f"c{n}" for n in range(101)]}],
         ],
         ids=[
             "empty-code",
@@ -491,6 +568,19 @@ class TestSetProgress:
             "long-why",
             "long-list",
             "extra-field",
+            "empty-kind",
+            "blank-kind",
+            "long-kind",
+            "negative-duration",
+            "duration-not-whole",
+            "duration-a-text",
+            "long-duration",
+            "mark-a-text",
+            "empty-conversation",
+            "blank-conversation",
+            "long-conversation",
+            "repeated-conversation",
+            "many-conversations",
         ],
     )
     async def test_steps_outside_the_limits_are_refused_without_calling_the_api(
@@ -498,7 +588,7 @@ class TestSetProgress:
         mcp_app: Starlette,
         routes: ApiRoutes,
         worker: models.Session,
-        steps: list[dict[str, str]],
+        steps: list[dict[str, object]],
     ) -> None:
         result = await call(mcp_app, "set_progress", {"steps": steps})
 

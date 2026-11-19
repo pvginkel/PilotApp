@@ -3,8 +3,9 @@ Session was created with resolved to the Session, `register_document`
 (ruling D1) and `attach_file`, each call that changed the record writing its
 Effects (F41), `set_progress` and `set_progress_step`, its work item's
 steps (F145), which write none, a change of the steps moving the work item's
-status alone (F145.4), and `register_debrief`, its work item's debrief, which
-writes none and moves nothing (F85.5; DB 328, 329)."""
+status alone (F145.4), a step that goes done with a kind and a duration kept
+as its Step Timing (F156.2), and `register_debrief`, its work item's debrief,
+which writes none and moves nothing (F85.5; DB 328, 329)."""
 
 import uuid
 from collections.abc import Callable, Sequence
@@ -12,7 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
-from sqlalchemy import select
+from sqlalchemy import delete, insert, select, tuple_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import (
@@ -37,10 +39,14 @@ from app.models import (
     Item,
     ProgressStep,
     Project,
+    StepKind,
+    StepTiming,
+    StepTranscript,
     Work,
 )
 from app.models import Session as AgentSession
 from app.models.reference import EffectKind, ProgressState, SessionState, Surface
+from app.models.step import repo_of_work
 from app.schemas.pilot_work import DebriefEntryRequestSchema, ProgressStepRequestSchema
 from app.services.controller_client import (
     ControllerClient,
@@ -246,17 +252,23 @@ class PilotWorkService:
         their order (F85.3, DB 288): a code on the list keeps its row, its
         stamps and, where its step gives no state, its state; a new code
         starts `pending`, or in the state its step gives; a code left out
-        goes, and no steps remove the list. Each step's label and why are as
-        its step gives them, a step given without a why having none (DB 327).
-        Each change of a state is stamped by the server's clock (DB 287). No
-        Effect is recorded (DB 289); a call that changed the list moves the
-        work item's status (`work_moved`).
+        goes, and no steps remove the list. Each step's label, why, kind,
+        mark and conversations are as its step gives them, a step given
+        without one having none (DB 327, 354, 355). Each change of a state is
+        stamped by the server's clock (DB 287), and a step's first start
+        notes whether it was listed ahead: yes for one that stood pending on
+        the list, no for one the call brings begun, none for one the Work's
+        first list brings begun. A step that stood not done and goes done
+        with a kind and a duration leaves its Step Timing, once per code of
+        the Work (F156.2, DB 572). No Effect is recorded (DB 289); a call
+        that changed the list moves the work item's status (`work_moved`).
 
         Returns:
             The list as it stands, in order.
 
         Raises:
-            InvalidOperationException: a code is repeated, nothing changed.
+            InvalidOperationException: a code is repeated, or a step the call
+                leaves not done has a duration, nothing changed.
             AuthorizationException: the worker's Session has no turn running
                 once its row is held, nothing changed.
         """
@@ -273,8 +285,21 @@ class PilotWorkService:
         before = self._steps(worker)
         shown = _shown(before)
         standing = {step.code: step for step in before}
+        for given in steps:
+            if given.duration is not None and _left_in(standing, given) != (
+                ProgressState.DONE
+            ):
+                raise InvalidOperationException(
+                    operation, f"step {given.code} has a duration and is not done"
+                )
+        self._meet_kinds({given.kind for given in steps if given.kind is not None})
+        # A step the Work's first list brings begun: whether it stood pending
+        # before is unknown.
+        brought_begun = False if before else None
+        timings: list[dict[str, object]] = []
         for position, given in enumerate(steps, start=1):
             step = standing.pop(given.code, None)
+            held_not_done = step is not None and step.state_code != ProgressState.DONE
             if step is None:
                 step = ProgressStep(
                     work_id=worker.work_item_id,
@@ -282,14 +307,36 @@ class PilotWorkService:
                     state_code=ProgressState.PENDING,
                 )
                 self.db.add(step)
+                listed_ahead = brought_begun
+            else:
+                listed_ahead = True
             step.label = given.label
             step.why = given.why
+            step.kind_code = given.kind
+            step.marked = given.marked
             step.position = position
             if given.state is not None:
-                _move(step, given.state, at)
+                _move(step, given.state, at, listed_ahead)
+            if (
+                held_not_done
+                and step.state_code == ProgressState.DONE
+                and given.kind is not None
+                and given.duration is not None
+            ):
+                timings.append(
+                    {
+                        "code": step.code,
+                        "kind_code": given.kind,
+                        "duration": given.duration,
+                        "listed_ahead": step.listed_ahead,
+                        "marked": given.marked,
+                    }
+                )
         for left_out in standing.values():
             self.db.delete(left_out)
         self.db.flush()
+        self._name_conversations(worker, steps)
+        self._time(worker, timings, at)
         after = self._steps(worker)
         if _shown(after) != shown:
             work_moved(self.engine_bus, session)
@@ -317,7 +364,9 @@ class PilotWorkService:
         )
         if step is None:
             raise RecordNotFoundException("Progress step", code)
-        if _move(step, state, datetime.now(UTC)):
+        # A step with no start stands pending on the list
+        # (`ck_progress_steps_started`).
+        if _move(step, state, datetime.now(UTC), True):
             work_moved(self.engine_bus, session)
         self.db.flush()
         return self._steps(worker)
@@ -399,6 +448,84 @@ class PilotWorkService:
             raise AuthorizationException(no_turn(Surface.WORK, session.id))
         return session
 
+    def _meet_kinds(self, kinds: set[str]) -> None:
+        """A Step Kind for each of `kinds` no publication named before, its
+        name the kind as given (DB §7.2). In the kinds' order, so that two
+        calls meeting the same kinds wait on each other one way."""
+        if kinds:
+            self.db.execute(
+                pg_insert(StepKind).on_conflict_do_nothing(),
+                [{"code": kind, "name": kind} for kind in sorted(kinds)],
+            )
+
+    def _name_conversations(
+        self, worker: Worker, steps: Sequence[ProgressStepRequestSchema]
+    ) -> None:
+        """The Step Transcripts of the worker's own work item's steps, each
+        step naming the conversations `steps` gives it and no other (DB 355).
+        Run once the steps are flushed: a Step Transcript's key references
+        its step, and a step deleted takes its own with it."""
+        given = {
+            (step.code, conversation)
+            for step in steps
+            for conversation in step.conversations or []
+        }
+        named = {
+            (code, conversation)
+            for code, conversation in self.db.execute(
+                select(StepTranscript.code, StepTranscript.session_id).where(
+                    StepTranscript.work_id == worker.work_item_id
+                )
+            )
+        }
+        if named - given:
+            self.db.execute(
+                delete(StepTranscript).where(
+                    StepTranscript.work_id == worker.work_item_id,
+                    tuple_(StepTranscript.code, StepTranscript.session_id).in_(
+                        sorted(named - given)
+                    ),
+                )
+            )
+        if given - named:
+            self.db.execute(
+                insert(StepTranscript),
+                [
+                    {
+                        "work_id": worker.work_item_id,
+                        "code": code,
+                        "session_id": conversation,
+                    }
+                    for code, conversation in sorted(given - named)
+                ],
+            )
+
+    def _time(
+        self, worker: Worker, timings: Sequence[dict[str, object]], at: datetime
+    ) -> None:
+        """A Step Timing for each of `timings`, ended at `at`, on the
+        worker's own work item with the repo it has now (`repo_of_work`). A
+        code the Work has a timing of already writes none (DB 572): a step
+        moved back and done again is timed once."""
+        if not timings:
+            return
+        repo = self.db.scalar(repo_of_work(worker.work_item_id))
+        self.db.execute(
+            pg_insert(StepTiming).on_conflict_do_nothing(
+                constraint="uq_step_timings_work_id_code"
+            ),
+            [
+                {
+                    **timing,
+                    "work_id": worker.work_item_id,
+                    "ended_at": at,
+                    "key": None,
+                    "repo": repo,
+                }
+                for timing in timings
+            ],
+        )
+
     def _steps(self, worker: Worker) -> list[ProgressStep]:
         """The worker's own work item's list of steps, in order."""
         return list(
@@ -411,18 +538,33 @@ class PilotWorkService:
         )
 
 
-def _move(step: ProgressStep, state: ProgressState, at: datetime) -> bool:
+def _move(
+    step: ProgressStep, state: ProgressState, at: datetime, listed_ahead: bool | None
+) -> bool:
     """`step` moved to `state` at `at` (DB 287): its start written when it
-    first goes `active` or `done`, never changed after; its end written when
-    it goes `done`, cleared when it leaves it. A step already in `state` is
-    left as it is, and answers False."""
+    first goes `active` or `done`, never changed after, and `listed_ahead`
+    with it, whether it stood pending on its Work's list before; its end
+    written when it goes `done`, cleared when it leaves it. A step already in
+    `state` is left as it is, and answers False."""
     if step.state_code == state:
         return False
     if state is not ProgressState.PENDING and step.started_at is None:
         step.started_at = at
+        step.listed_ahead = listed_ahead
     step.ended_at = at if state is ProgressState.DONE else None
     step.state_code = state
     return True
+
+
+def _left_in(
+    standing: dict[str, ProgressStep], given: ProgressStepRequestSchema
+) -> ProgressState:
+    """The state a call leaves the step `given` in, over the list `standing`:
+    the one it gives, else the one its code has, else `pending`."""
+    if given.state is not None:
+        return given.state
+    step = standing.get(given.code)
+    return ProgressState.PENDING if step is None else step.state_code
 
 
 def _shown(

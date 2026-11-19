@@ -235,6 +235,68 @@ WORK_SURFACE = {
                             ),
                             "title": "Why",
                         },
+                        "kind": {
+                            "anyOf": [
+                                {"maxLength": 64, "minLength": 1, "type": "string"},
+                                {"type": "null"},
+                            ],
+                            "default": None,
+                            "description": (
+                                "Your name for the kind of step it is, at most 64"
+                                " characters, kept and shown as given: steps of one"
+                                " kind are timed together; without it, the step has"
+                                " none"
+                            ),
+                            "title": "Kind",
+                        },
+                        "duration": {
+                            "anyOf": [
+                                {
+                                    "maximum": 2147483647,
+                                    "minimum": 0,
+                                    "type": "integer",
+                                },
+                                {"type": "null"},
+                            ],
+                            "default": None,
+                            "description": (
+                                "On a step this call leaves `done`, the whole"
+                                " seconds its work took by your own measure, 0 or"
+                                " more"
+                            ),
+                            "title": "Duration",
+                        },
+                        "marked": {
+                            "anyOf": [{"type": "boolean"}, {"type": "null"}],
+                            "default": None,
+                            "description": (
+                                "Whether you hold the step to be in trouble, true or"
+                                " false; without it, the step has no mark"
+                            ),
+                            "title": "Marked",
+                        },
+                        "conversations": {
+                            "anyOf": [
+                                {
+                                    "items": {
+                                        "maxLength": 64,
+                                        "minLength": 1,
+                                        "type": "string",
+                                    },
+                                    "maxItems": 100,
+                                    "type": "array",
+                                },
+                                {"type": "null"},
+                            ],
+                            "default": None,
+                            "description": (
+                                "The conversations that did the step's work, each by"
+                                " its Claude Code session id of at most 64"
+                                " characters, each once, at most 100; without it,"
+                                " the step names none"
+                            ),
+                            "title": "Conversations",
+                        },
                     },
                     "required": ["code", "label"],
                     "title": "Step",
@@ -261,17 +323,27 @@ WORK_SURFACE = {
         "Publish your work item's steps as your run moves through them, shown on its"
         " tile in Pilot: the whole list, in order, each step a `code`, your name for"
         " it, a `label`, its words, a `state`, `pending`, `active` or `done`, and,"
-        " where it has one, a `why`, a short line shown under its label. The list"
+        " where it has one, a `why`, a short line shown under its label, a `kind`,"
+        " your name for the kind of step it is, `marked`, whether you hold the step"
+        " to be in trouble, `conversations`, the Claude Code session ids of the"
+        " conversations that did its work, and, on a step the call leaves `done`, a"
+        " `duration`, the whole seconds its work took by your own measure. The list"
         " replaces the one standing: a code already on it keeps its state where you"
         " give none, a new code starts `pending`, a code left out goes, and `[]`"
-        " removes the list; a step's label and why are as you give them, a step"
-        " given without a why having none. Where the work grows, add a step; a"
-        " second round of a step is a step of its own. Pilot stamps each step's"
-        " start and end by its own clock. An empty or repeated code, an empty label"
-        " or why, a state outside the three, a code over 64 characters, a label or a"
-        " why over 120, an unknown field or a list over 100 steps is refused with"
-        " the reason, and nothing changes. Answers `{steps}`, the list as it"
-        " stands.",
+        " removes the list; a step's label, why, kind, mark and conversations are"
+        " as you give them, a step given without one having none. Where the work"
+        " grows, add a step; a second round of a step is a step of its own. Pilot"
+        " stamps each step's start and end by its own clock, and keeps a step's"
+        " kind and duration as its timing when a step on the list that was not done"
+        " goes `done` with both, once. An empty or repeated code, an empty label or"
+        " why, a state outside the three, a code over 64 characters, a label or a"
+        " why over 120, an empty kind or one over 64 characters, a duration that is"
+        " not a whole number from 0 to 2147483647 or stands on a step the call"
+        " leaves not `done`, a `marked` that is not true or false, a conversation"
+        " that is empty, over 64 characters or repeated on its step, over 100"
+        " conversations on a step, an unknown field or a list over 100 steps is"
+        " refused with the reason, and nothing changes. Answers `{steps}`, the list"
+        " as it stands.",
     ),
     "set_progress_step": (
         {

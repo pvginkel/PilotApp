@@ -985,7 +985,8 @@ class TestDataService:
             AuthorizationException: its session has no turn running, as
                 `PilotWorkService.set_progress` refuses it.
             InvalidOperationException: its start has given its session no
-                environment yet, or a code is repeated, as
+                environment yet, or a code is repeated or a step the call
+                leaves not done has a duration, as
                 `PilotWorkService.set_progress` refuses it.
         """
         worker = self._worker(item_id, f"set the progress of work item {item_id}")

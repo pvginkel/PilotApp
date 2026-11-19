@@ -2,9 +2,16 @@
 for a worker session's tools (TD §4.5)."""
 
 import uuid
-from typing import Self
+from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from app.models.reference import ProgressState
 
@@ -12,8 +19,18 @@ MAX_STEP_CODE = 64
 MAX_STEP_LABEL = 120
 MAX_STEP_WHY = 120
 MAX_STEPS = 100
+MAX_STEP_KIND = 64
+MAX_STEP_DURATION = 2**31 - 1
+MAX_STEP_CONVERSATION = 64
+MAX_STEP_CONVERSATIONS = 100
 """The limits of a work item's list of steps (F85.3, DB 327), which the
-schema of `progress_steps` does not hold."""
+schema of `progress_steps`, `step_kinds` and `step_transcripts` does not
+hold; `MAX_STEP_DURATION` is the range of `step_timings.duration`."""
+
+Conversation = Annotated[
+    str, StringConstraints(min_length=1, max_length=MAX_STEP_CONVERSATION)
+]
+"""Claude Code's session id of a conversation a step names."""
 
 MAX_DEBRIEF = 16_000
 MAX_DEBRIEF_ENTRIES = 500
@@ -118,6 +135,66 @@ class ProgressStepRequestSchema(BaseModel):
         ),
         examples=["The reviewer found the migration's downgrade left the column"],
     )
+    kind: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_STEP_KIND,
+        description=(
+            "The kind the workflow gives the step, stored and shown as given;"
+            " without it, the step has none"
+        ),
+        examples=["code-writer"],
+    )
+    duration: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_STEP_DURATION,
+        strict=True,
+        description=(
+            "On a step the call leaves `done`, the whole seconds its work took"
+            " by the run's own measure"
+        ),
+        examples=[1440],
+    )
+    marked: bool | None = Field(
+        default=None,
+        strict=True,
+        description=(
+            "Whether the workflow holds the step to be in trouble; without it,"
+            " the step has no mark"
+        ),
+        examples=[False],
+    )
+    conversations: list[Conversation] | None = Field(
+        default=None,
+        max_length=MAX_STEP_CONVERSATIONS,
+        description=(
+            "The conversations that did the step's work, each by Claude Code's"
+            " session id; without it, the step names none"
+        ),
+        examples=[["6f1d2c9e-0b7a-4e58-9a31-5c8e2f4d7b06"]],
+    )
+
+    @field_validator("kind")
+    @classmethod
+    def _names_a_kind(cls, kind: str | None) -> str | None:
+        """The store keeps a blank text as none
+        (`app/utils/empty_string_normalization.py`)."""
+        if kind is not None and not kind.strip():
+            raise ValueError("a kind has words")
+        return kind
+
+    @field_validator("conversations")
+    @classmethod
+    def _names_each_once(cls, conversations: list[str] | None) -> list[str] | None:
+        """A step names a conversation once (`step_transcripts`' key), and
+        the store keeps a blank text as none."""
+        for conversation in conversations or []:
+            if not conversation.strip():
+                raise ValueError("a conversation has an id")
+        if conversations is not None and len(set(conversations)) < len(conversations):
+            raise ValueError("a conversation is repeated")
+        return conversations
 
 
 class SetProgressRequestSchema(BaseModel):

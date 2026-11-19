@@ -718,18 +718,24 @@ def create_progress(
     test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
 ) -> Any:
     """Replace the work item's list of steps, as its worker's `set_progress`
-    does (F85.3, F145.1): in the call's order, its status moved on every
-    browser through the live event, while the session's turn is in flight.
+    does (F85.3, F145.1, F156.1): in the call's order, each step's kind, mark,
+    conversations and duration taken as that tool takes them, its status moved
+    on every browser through the live event, while the session's turn is in
+    flight.
 
     Returns:
         200: The list as it stands
         400: The body is not a list of at most 100 steps, each a code of 1 to
-            64 characters, a label of 1 to 120, an optional state and an
-            optional why of 1 to 120, or the stage is prd
+            64 characters, a label of 1 to 120, an optional state, an optional
+            why of 1 to 120, an optional kind of 1 to 64, an optional duration
+            in whole seconds from 0, an optional mark and at most 100
+            conversations, each an id of 1 to 64 characters named once, or the
+            stage is prd
         403: Its session has no turn running
         404: No work item has the id
-        409: Its session has no environment yet, or a code is repeated,
-            nothing changed: the reason
+        409: Its session has no environment yet, a code is repeated, or a step
+            the call leaves not done has a duration, nothing changed: the
+            reason
     """
     data = SetProgressRequestSchema.model_validate(request.get_json())
     steps = test_data_service.set_progress(item_id, data.steps)

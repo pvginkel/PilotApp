@@ -319,17 +319,27 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
         shown on its tile in Pilot: the whole list, in order, each step a
         `code`, your name for it, a `label`, its words, a `state`, `pending`,
         `active` or `done`, and, where it has one, a `why`, a short line shown
-        under its label. The list replaces the one standing: a code already
-        on it keeps its state where you give none, a new code starts
-        `pending`, a code left out goes, and `[]` removes the list; a step's
-        label and why are as you give them, a step given without a why having
-        none. Where the work grows, add a step; a second round of a step is a
-        step of its own. Pilot stamps each step's start and end by its own
-        clock. An empty or repeated code, an empty label or why, a state
-        outside the three, a code over 64 characters, a label or a why over
-        120, an unknown field or a list over 100 steps is refused with the
-        reason, and nothing changes. Answers `{steps}`, the list as it
-        stands."""
+        under its label, a `kind`, your name for the kind of step it is,
+        `marked`, whether you hold the step to be in trouble, `conversations`,
+        the Claude Code session ids of the conversations that did its work,
+        and, on a step the call leaves `done`, a `duration`, the whole seconds
+        its work took by your own measure. The list replaces the one standing:
+        a code already on it keeps its state where you give none, a new code
+        starts `pending`, a code left out goes, and `[]` removes the list; a
+        step's label, why, kind, mark and conversations are as you give them,
+        a step given without one having none. Where the work grows, add a
+        step; a second round of a step is a step of its own. Pilot stamps each
+        step's start and end by its own clock, and keeps a step's kind and
+        duration as its timing when a step on the list that was not done goes
+        `done` with both, once. An empty or repeated code, an empty label or
+        why, a state outside the three, a code over 64 characters, a label or
+        a why over 120, an empty kind or one over 64 characters, a duration
+        that is not a whole number from 0 to 2147483647 or stands on a step
+        the call leaves not `done`, a `marked` that is not true or false, a
+        conversation that is empty, over 64 characters or repeated on its
+        step, over 100 conversations on a step, an unknown field or a list
+        over 100 steps is refused with the reason, and nothing changes.
+        Answers `{steps}`, the list as it stands."""
         return await api.set_progress(_authorization(ctx), steps)
 
     @mcp.tool()

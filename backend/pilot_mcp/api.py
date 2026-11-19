@@ -38,6 +38,8 @@ from pydantic import (
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
+    StringConstraints,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -93,8 +95,17 @@ MAX_STEP_CODE = 64
 MAX_STEP_LABEL = 120
 MAX_STEP_WHY = 120
 MAX_STEPS = 100
+MAX_STEP_KIND = 64
+MAX_STEP_DURATION = 2**31 - 1
+MAX_STEP_CONVERSATION = 64
+MAX_STEP_CONVERSATIONS = 100
 """The limits of a work item's list of steps, as its route takes them
 (`app/schemas/pilot_work.py`)."""
+
+StepConversation = Annotated[
+    str, StringConstraints(min_length=1, max_length=MAX_STEP_CONVERSATION)
+]
+"""Claude Code's session id of a conversation a step names."""
 
 MAX_DEBRIEF = 16_000
 MAX_DEBRIEF_ENTRIES = 500
@@ -415,6 +426,60 @@ class Step(BaseModel):
             " without it, the step has none"
         ),
     )
+    kind: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_STEP_KIND,
+        description=(
+            "Your name for the kind of step it is, at most 64 characters, kept"
+            " and shown as given: steps of one kind are timed together; without"
+            " it, the step has none"
+        ),
+    )
+    duration: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_STEP_DURATION,
+        strict=True,
+        description=(
+            "On a step this call leaves `done`, the whole seconds its work took"
+            " by your own measure, 0 or more"
+        ),
+    )
+    marked: bool | None = Field(
+        default=None,
+        strict=True,
+        description=(
+            "Whether you hold the step to be in trouble, true or false; without"
+            " it, the step has no mark"
+        ),
+    )
+    conversations: list[StepConversation] | None = Field(
+        default=None,
+        max_length=MAX_STEP_CONVERSATIONS,
+        description=(
+            "The conversations that did the step's work, each by its Claude Code"
+            " session id of at most 64 characters, each once, at most 100;"
+            " without it, the step names none"
+        ),
+    )
+
+    @field_validator("kind")
+    @classmethod
+    def _names_a_kind(cls, kind: str | None) -> str | None:
+        if kind is not None and not kind.strip():
+            raise ValueError("a kind has words")
+        return kind
+
+    @field_validator("conversations")
+    @classmethod
+    def _names_each_once(cls, conversations: list[str] | None) -> list[str] | None:
+        for conversation in conversations or []:
+            if not conversation.strip():
+                raise ValueError("a conversation has an id")
+        if conversations is not None and len(set(conversations)) < len(conversations):
+            raise ValueError("a conversation is repeated")
+        return conversations
 
 
 class PublishedStep(BaseModel):

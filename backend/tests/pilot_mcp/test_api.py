@@ -84,7 +84,19 @@ def test_the_pages_are_the_fleets_file_tools() -> None:
     ) == (100, 1000, 50, 200)
 
 
-@pytest.mark.parametrize("limit", ["MAX_STEP_CODE", "MAX_STEP_LABEL", "MAX_STEPS"])
+@pytest.mark.parametrize(
+    "limit",
+    [
+        "MAX_STEP_CODE",
+        "MAX_STEP_LABEL",
+        "MAX_STEP_WHY",
+        "MAX_STEPS",
+        "MAX_STEP_KIND",
+        "MAX_STEP_DURATION",
+        "MAX_STEP_CONVERSATION",
+        "MAX_STEP_CONVERSATIONS",
+    ],
+)
 def test_a_steps_limits_are_its_routes(limit: str) -> None:
     assert getattr(pilot_mcp_api, limit) == getattr(pilot_work, limit)
 
