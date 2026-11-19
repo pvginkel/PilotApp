@@ -199,6 +199,13 @@ class Walker:
         except (UnreadableError, OSError) as error:
             self._set_aside(listed, walked, f"it cannot be read: {error}")
             return
+        except Exception as error:
+            # A file's lines can make the reader raise what it does not turn
+            # into an UnreadableError.
+            self._set_aside(
+                listed, walked, f"reading it raised {type(error).__name__}: {error}"
+            )
+            return
         try:
             self._pilot.publish(publication)
         except Refused as error:

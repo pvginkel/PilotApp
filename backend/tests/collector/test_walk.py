@@ -147,6 +147,38 @@ def _grown(path: Path) -> None:
         file.write(b"\n")
 
 
+def _lines(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in path.read_bytes().splitlines()]
+
+
+def _written(path: Path, lines: list[dict[str, Any]]) -> None:
+    path.write_bytes(b"".join(json.dumps(line).encode() + b"\n" for line in lines))
+
+
+def _directory_a_number(path: Path) -> None:
+    lines = _lines(path)
+    next(line for line in lines if "cwd" in line)["cwd"] = 0
+    _written(path, lines)
+
+
+def _tool_with_no_name(path: Path) -> None:
+    lines = _lines(path)
+    asked = next(
+        block
+        for line in lines
+        if line["type"] == "assistant"
+        for block in line["message"]["content"]
+        if block["type"] == "tool_use"
+    )
+    asked["name"] = None
+    _written(path, lines)
+
+
+def _line_nested_past_reading(path: Path) -> None:
+    with path.open("ab") as file:
+        file.write(b"[" * 100_000 + b"]" * 100_000 + b"\n")
+
+
 def _stands(path: Path) -> tuple[int, datetime]:
     """The file's size and time as a publication names them."""
     status = path.stat()
@@ -199,6 +231,12 @@ def _walks(app: Flask) -> int:
         return record.scalar(select(func.count()).select_from(Walk))
 
 
+def _ends(app: Flask) -> list[datetime]:
+    """When Pilot stamped each walk's end, in their order."""
+    with _record(app) as record:
+        return list(record.scalars(select(Walk.ended_at).order_by(Walk.ended_at)))
+
+
 def _calls(app: Flask, session_id: str) -> int:
     """How many Calls Pilot holds of that conversation's main thread."""
     with _record(app) as record:
@@ -223,6 +261,18 @@ def _set_aside(caplog: pytest.LogCaptureFixture) -> list[str]:
         for record in caplog.records
         if record.name == LOGGER and "is set aside" in record.getMessage()
     ]
+
+
+class _Stop(threading.Event):
+    """A walker's stop that keeps how long each wait on it was to last."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waits: list[float | None] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.waits.append(timeout)
+        return super().wait(timeout)
 
 
 class TestAWalk:
@@ -258,6 +308,33 @@ class TestAWalk:
         assert (walked.listed, walked.published, walked.ended) == (3, 0, True)
         assert _held(committed_app) == held
         assert _walks(committed_app) == 2
+
+    def test_it_tells_its_end_after_its_last_publication(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Pilot counts a publication to the walk whose end comes next. The
+        second walk publishes in both its turns: a file that grew, and two
+        read under an older version of the collector's."""
+
+        def collected() -> list[datetime]:
+            return [each["collected_at"] for each in _held(committed_app).values()]
+
+        with monkeypatch.context() as older:
+            _read_under(older, OLDER)
+            walker.walk()
+        before = collected()
+        _grown(_file(home, RECIPES))
+
+        walked = walker.walk()
+
+        assert (walked.published, walked.waiting) == (3, 0)
+        first, second = _ends(committed_app)
+        assert max(before) <= first < min(collected())
+        assert max(collected()) <= second
 
     def test_a_new_file_and_a_changed_one_are_published_and_the_rest_left(
         self, committed_app: Flask, home: Path, walker: Walker
@@ -540,6 +617,50 @@ class TestWhatAWalkSetsAside:
         ]
         assert set(_held(committed_app)) == {SCALER, RIDES}
 
+    @pytest.mark.parametrize(
+        ("spoil", "raised"),
+        [
+            (
+                _directory_a_number,
+                "TypeError: argument should be a str or an os.PathLike object",
+            ),
+            (
+                _tool_with_no_name,
+                "AttributeError: 'NoneType' object has no attribute 'split'",
+            ),
+            (
+                _line_nested_past_reading,
+                "RecursionError: maximum recursion depth exceeded",
+            ),
+        ],
+        ids=["a directory that is a number", "a tool with no name", "a nested line"],
+    )
+    def test_a_file_the_reader_raises_on_costs_the_walk_that_transcript_alone(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        caplog: pytest.LogCaptureFixture,
+        spoil: Any,
+        raised: str,
+    ) -> None:
+        """The newest file of the home is one whose lines the reader does
+        not refuse as unreadable."""
+        path = _copied(home)
+        spoil(path)
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            walks = [walker.walk(), walker.walk()]
+
+        assert [(walk.published, walk.set_aside) for walk in walks] == [(3, 1), (0, 0)]
+        assert all(walk.ended for walk in walks)
+        [logged] = _set_aside(caplog)
+        assert logged.startswith(
+            f"The transcript {TOURS}, {path}, is set aside until its file changes:"
+            f" reading it raised {raised}"
+        )
+        assert set(_held(committed_app)) == SCENARIOS
+
     def test_a_file_gone_since_the_walk_listed_it_is_no_longer_on_the_home(
         self,
         committed_app: Flask,
@@ -726,6 +847,30 @@ class TestTheWalksRhythm:
         walks = _walks(committed_app)
         time.sleep(0.2)
         assert _walks(committed_app) == walks
+
+    def test_it_waits_out_what_a_walk_left_of_the_interval(
+        self, committed_app: Flask, pilot_url: str, home: Path
+    ) -> None:
+        """A walk begins the interval after the one before it began."""
+        _configure(committed_app, interval=45.0)
+        stop = _Stop()
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            walker = Walker(pilot, _settings(pilot_url, home), stop)
+            walking = threading.Thread(target=walker.run, daemon=True)
+            began = time.perf_counter()
+            walking.start()
+            try:
+                _await(lambda: stop.waits)
+                took = time.perf_counter() - began
+            finally:
+                stop.set()
+                walking.join(timeout=10)
+
+        assert not walking.is_alive()
+        wait = stop.waits[0]
+        assert wait is not None
+        assert 45.0 - took <= wait < 45.0
+        assert _walks(committed_app) == 1
 
 
 def _await(holds: Any, seconds: float = 10.0) -> None:
