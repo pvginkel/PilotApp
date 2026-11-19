@@ -77,7 +77,7 @@ from app.services.supervisor import LoopHandle
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, open_chat
-from tests.support.debriefs import FIGURES
+from tests.support.debriefs import FIGURES, pass_ended
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
@@ -2915,6 +2915,7 @@ class TestWriteNotable:
         """DB 611: written after the notice stands, as a Retry's pass writes
         them."""
         container.record_service().work_done(work_item.id, datetime.now(UTC))
+        pass_ended(session, container, project, work_item)
 
         response = client.post(
             _notable_path(work_item.id), json={"text": "Its first stop."}
@@ -2925,6 +2926,7 @@ class TestWriteNotable:
         assert [(row["kind"], row.get("notable")) for row in timeline["items"]][
             -2:
         ] == [("work", None), ("debrief_notice", ["Its first stop."])]
+        assert [row["title"] for row in timeline["items"]][-2] == "Pre-ruling"
 
     def test_no_work_item_of_the_id_is_not_found(self, client: FlaskClient) -> None:
         response = client.post(_notable_path(uuid.uuid4()), json={"text": "Hi"})

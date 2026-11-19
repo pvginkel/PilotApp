@@ -59,7 +59,13 @@ from tests.support.chats import (
     open_chat,
     open_conversation,
 )
-from tests.support.debriefs import DEBRIEF, FIGURES, give_debrief, placed_notice
+from tests.support.debriefs import (
+    DEBRIEF,
+    FIGURES,
+    give_debrief,
+    pass_ended,
+    placed_notice,
+)
 from tests.support.pilot_notes import a_turn, alerted, noted
 
 _CONTENT = b"# Palette\n\nThe two colours compared.\n"
@@ -511,9 +517,9 @@ class TestViewService:
 
         rendering = container.view_service().timeline(project)
 
-        assert _json(rendering)["items"][1] == {
+        assert _json(rendering)["items"][2] == {
             "id": str(notice.id),
-            "seq": 2,
+            "seq": 3,
             "kind": "debrief_notice",
             "title": "Debrief · Renaming",
             "path": None,
@@ -557,14 +563,19 @@ class TestViewService:
             session.flush()
             records.place_work(project, run, title)
             give_debrief(session, run, **debrief).debrief_notable = lines
-            records.work_done(run.id, datetime(2026, 11, 19, 9, 0, tzinfo=UTC))
+            at = datetime(2026, 11, 19, 9, 0, tzinfo=UTC)
+            records.work_done(run.id, at)
+            pass_ended(session, container, project, run, at)
             return run
 
         def shown() -> list[tuple[str, list[str] | None]]:
+            """The rows but the passes' own."""
             rendering = container.view_service().timeline(project)
             assert DEBRIEF not in rendering.text
             return [
-                (row["title"], row.get("notable")) for row in _json(rendering)["items"]
+                (row["title"], row.get("notable"))
+                for row in _json(rendering)["items"]
+                if row["title"] != "Pre-ruling"
             ]
 
         subject = "Slice 4 · The tent list"

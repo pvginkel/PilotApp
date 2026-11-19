@@ -41,6 +41,7 @@ from app.services.clarification_service import (
 from app.services.container import ServiceContainer
 from app.services.session_start_service import SessionStartService
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.debriefs import give_debrief
 from tests.support.starts import configured_starts
 from tests.support.statements import sent
 from tests.support.supervisor import Supervise
@@ -376,7 +377,65 @@ class TestTitle:
 
 
 @pytest.mark.usefixtures("starts")
+def _notices(db: DbSession, project: Project) -> list[Item]:
+    """The project's debrief's notices."""
+    return list(
+        db.scalars(
+            select(Item).where(
+                Item.project_id == project.id, Item.kind_code == "debrief_notice"
+            )
+        )
+    )
+
+
 class TestPassEnded:
+    def test_a_passs_end_places_the_debriefs_notice_of_the_run_whose_turn_it_took(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 609: the run's done placed none; the pass's end places it, a
+        pass that asked nothing too."""
+        run = _run(session, container, project, environment)
+        give_debrief(session, run)
+        job, _ = _job(session, container, project, WorkTrigger.WORKER_TURN_ENDED, run)
+        assert _notices(session, project) == []
+
+        _service(container).pass_ended(job)
+
+        [notice] = _notices(session, project)
+        assert session.get_one(Work, run.id).debrief_notice_id == notice.id
+        assert notice.seq == session.get_one(Item, job.id).seq + 1
+        assert _clarifying(session, job.id) == []
+
+    def test_a_pass_that_asked_has_the_notice_placed_before_its_clarification_run(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _run(session, container, project, environment)
+        give_debrief(session, run)
+        cut_over = _registered(
+            session, container, project, run, CUT_OVER, CUT_OVER_TEXT
+        )
+        asking, turn = _job(
+            session, container, project, WorkTrigger.WORKER_TURN_ENDED, run
+        )
+        _ask(session, turn, cut_over, "D1", "Which Friday?")
+
+        _service(container).pass_ended(asking)
+
+        [notice] = _notices(session, project)
+        [clarification] = _clarifying(session, asking.id)
+        assert [
+            session.get_one(Item, each).seq
+            for each in (asking.id, notice.id, clarification.id)
+        ] == [notice.seq - 1, notice.seq, notice.seq + 1]
+
     def test_a_pass_that_asked_places_one_run_with_every_question(
         self,
         session: DbSession,
@@ -428,6 +487,8 @@ class TestPassEnded:
         trigger: WorkTrigger,
     ) -> None:
         run = _run(session, container, project, environment)
+        if trigger is not WorkTrigger.WORKER_TURN_ENDED:
+            give_debrief(session, run)
         cut_over = _registered(
             session, container, project, run, CUT_OVER, CUT_OVER_TEXT
         )

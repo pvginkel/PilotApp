@@ -766,12 +766,14 @@ class ServiceContainer(containers.DeclarativeContainer):
         brain_model=app_config.provided.brain_model,
         brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
     )
-    # The clarification run a pass's questions place, and its reply (DB
-    # decision 63), at the turn ends the relay records
+    # A pass's end: the debrief's notice of the run it followed (DB 609) and
+    # the clarification run its questions place, with its reply (DB decision
+    # 63), at the turn ends the relay records
     clarification_service = providers.Factory(
         ClarificationService,
         db=db_session,
         session_start_service=session_start_service,
+        record_service=record_service,
         view_service=view_service,
     )
     project_service = providers.Factory(

@@ -2693,7 +2693,7 @@ class TestListItems:
         assert result.structuredContent == {
             "items": [
                 {
-                    "seq": 4,
+                    "seq": 5,
                     "kind": "debrief_notice",
                     "title": "Debrief · Refining the camp",
                     "created_at": utc_time(notice.created_at),

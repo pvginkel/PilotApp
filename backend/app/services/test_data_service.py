@@ -8,8 +8,8 @@ Documents, attachments, the record's writes and the plan go through the
 engine's own operations, so the seed is a record the engine could have
 produced. The rows the engine does not write (people, projects with their
 members and transitions, an environment, the session that added the items, and
-the sessions and debriefs of two runs, whose done places a debrief's notice)
-are written through the models. Every name and text in it is
+the sessions and debriefs of two runs, the second with its debrief's notice,
+placed as the end of its pass places it) are written through the models. Every name and text in it is
 invented: this repository is public.
 """
 
@@ -1752,8 +1752,9 @@ class TestDataService:
         titled `title`, its debrief `debrief` with its one `entry`, naming
         `DEBRIEF_SUBJECT` and whether it `completes` it, as its
         `register_debrief` stores them, and done at its turn's end at `now`,
-        which places the debrief's notice where it completes (DB 609). Its
-        session has no start, so that the session started last, the one the
+        with the debrief's notice where it completes, placed as the end of
+        the job after its turn places it (DB 609), the seed holding no job.
+        Its session has no start, so that the session started last, the one the
         testing routes act through (`_session_of`), stays the one that added
         the items."""
         session = AgentSession(
@@ -1784,6 +1785,9 @@ class TestDataService:
         )
         self.db.flush()
         self.record_service.work_done(work.id, now)
+        self.record_service.place_debrief_notice(
+            project, self.db.get_one(Item, work.id)
+        )
 
     def _transitions(
         self, project: Project, by: User, at: datetime, *kinds: TransitionKind

@@ -2221,12 +2221,13 @@ class SessionStartService:
 
     def _continuation_failed(self, session_id: uuid.UUID) -> None:
         """A job's continuation, its nudge's, failed to start, which ends
-        its run: its pass's questions put to the writer as a failed turn's end
-        puts them (DB 254), under its project's row and then its own."""
+        its run: a pass's end, as a failed turn's is, the debrief's notice of
+        the run it followed placed (DB 609) and its questions put to the
+        writer (DB 254), under its project's row and then its own."""
         with scoped_session(self._container) as db:
             unlocked = db.get_one(AgentSession, session_id)
-            # Before the Session's lock (the lock order): the clarification
-            # run's placement is an Item's birth.
+            # Before the Session's lock (the lock order): the notice's and
+            # the clarification run's placements are Items' births.
             _standing(db, unlocked.project_id, births=True)
             session = self._records(db).lock_session(session_id)
             handing = sides(db, session.project_id)
@@ -2238,12 +2239,13 @@ class SessionStartService:
         under its project's row and then its own, while it still is: the
         failed end it is, its nudge owed no more, its Hold ended, a Block it
         leaves to a person handed (`hand_over`), and a
-        pass's questions put to the writer now, unless its project is
-        finished or archived, where nothing starts (the ruling on the wall;
-        DB 254; F5.1, F128.1)."""
+        pass at its end: the debrief's notice of the run it followed placed
+        and its questions put to the writer now, unless its project is
+        finished or archived, where nothing starts and no notice is placed
+        (the ruling on the wall; DB 254, 609; F5.1, F128.1)."""
         unlocked = db.get_one(AgentSession, session_id)
-        # Before the Session's lock (the lock order): the clarification run's
-        # placement is an Item's birth.
+        # Before the Session's lock (the lock order): the notice's and the
+        # clarification run's placements are Items' births.
         project = _standing(db, unlocked.project_id, births=True)
         session = self._records(db).lock_session(session_id)
         if not db.scalar(

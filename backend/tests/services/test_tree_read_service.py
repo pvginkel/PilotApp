@@ -165,7 +165,7 @@ class TestTreeReadServiceItems:
 
         assert container.tree_read_service().items(project, True, "debrief_notice") == [
             IndexedItem(
-                seq=2,
+                seq=3,
                 kind="debrief_notice",
                 title="Debrief · Renaming",
                 path=None,

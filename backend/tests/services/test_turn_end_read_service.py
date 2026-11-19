@@ -598,7 +598,7 @@ class TestTurnEndReadServiceRunEnded:
         assert "_ReadStart" not in _pending()
         assert _jobs_after(session, run) == [NEXT_TITLE]
 
-    def test_the_debriefs_notice_is_placed_after_what_it_registered_not_its_reads(
+    def test_the_debriefs_notice_waits_on_the_pass_and_is_placed_at_its_end(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -606,25 +606,30 @@ class TestTurnEndReadServiceRunEnded:
         project: Project,
         run: models.Session,
     ) -> None:
-        """F26.15, DB 609: at the turn's end, after the Items it registered,
-        waiting on neither their reads nor the job after the turn, which
-        follows them."""
+        """F26.12, F26.15, DB 609: neither the turn's end nor the read of
+        what it registered places it; the end of the job after the turn
+        does, after that job's own item."""
         registered = _register(container, project, run)
         give_debrief(session, run)
         _end(session, container, run)
 
         reads.run_ended(session, run)
 
-        notice = _notice(session, project)
-        assert notice.seq == registered.seq + 1
+        assert _notices(session, project) == []
         assert awaits_read(registered, _document(session, registered))
         assert _jobs_after(session, run) == []
 
         _read(reads, run.id)
 
-        assert _job_after(session, run).seq == notice.seq + 1
+        job = _job_after(session, run)
+        assert _notices(session, project) == []
 
-    def test_a_run_that_registered_none_has_its_notice_before_its_job(
+        _pass_ends(session, container, job)
+
+        [notice] = _notices(session, project)
+        assert (job.seq, notice.seq) == (registered.seq + 1, registered.seq + 2)
+
+    def test_a_run_that_registered_none_has_its_notice_at_its_jobs_end(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -637,16 +642,31 @@ class TestTurnEndReadServiceRunEnded:
 
         reads.run_ended(session, run)
 
-        assert _job_after(session, run).seq == _notice(session, project).seq + 1
+        job = _job_after(session, run)
+        assert _notices(session, project) == []
+
+        _pass_ends(session, container, job)
+
+        [notice] = _notices(session, project)
+        assert notice.seq == job.seq + 1
 
 
-def _notice(db: DbSession, project: Project) -> Item:
-    """The project's one debrief's notice."""
-    return db.scalars(
-        select(Item).where(
-            Item.project_id == project.id, Item.kind_code == "debrief_notice"
+def _notices(db: DbSession, project: Project) -> list[Item]:
+    """The project's debrief's notices."""
+    return list(
+        db.scalars(
+            select(Item).where(
+                Item.project_id == project.id, Item.kind_code == "debrief_notice"
+            )
         )
-    ).one()
+    )
+
+
+def _pass_ends(db: DbSession, container: ServiceContainer, job: Item) -> None:
+    """The job `job`, the pass after a run's turn, ended well: its work item
+    done and its end's hook run."""
+    container.record_service().work_done(job.id, datetime.now(UTC))
+    container.clarification_service().pass_ended(db.get_one(models.Session, job.id))
 
 
 def _job_after(db: DbSession, run: models.Session) -> Item:

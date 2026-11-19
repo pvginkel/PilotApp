@@ -1100,7 +1100,8 @@ class RelayService:
         stays `running` with the follow-up turn (`_follow_up`), a job's work
         item done at that turn's end, not this one's. A worker's done run
         that registered nothing has the job after its turn placed here
-        (`TurnEndReadService.run_ended`), and a pass that asked its writer its
+        (`TurnEndReadService.run_ended`); a pass's end places the debrief's
+        notice of the run it followed and, where it asked its writer, its
         clarification run (`ClarificationService.pass_ended`). Every turn end
         locks its project's row before its Session's, the start's lock order:
         a worker's and a pass's exclusively, any other's shared. After the
@@ -1188,8 +1189,9 @@ class RelayService:
         job's is done at its last turn's end (design 3 §5.1). A worker's done
         run has its documents read, the job after its turn following them,
         and a clarification run's reply recorded; a pass's last turn ended
-        `idle` or `failed` puts the questions it asked to the writer (DB 254,
-        255). A worker's run whose turn ends `idle` while the halt file is
+        `idle` or `failed` places the debrief's notice of the run it followed
+        (DB 609) and puts the questions it asked to the writer (DB 254, 255).
+        A worker's run whose turn ends `idle` while the halt file is
         wanted for it, a cooperative usage halt holding or its project
         paused, is not done: its nudge is owed, and a clarification run's
         reply is recorded now, as the turn's final text (DB 232, 255). One
@@ -1289,8 +1291,8 @@ def _lock_ending_project(records: SessionRecordService, session_id: uuid.UUID) -
     """The project's row of a Session at its turn's end, before the Session's
     (`SessionRecordService.lock_project`): exclusively for a worker's, whose
     done run places the job after its turn, and a pass's, the job after a
-    worker's turn, whose end places its clarification run; shared for any
-    other."""
+    worker's turn, whose end places the run's debrief's notice and its
+    clarification run; shared for any other."""
     db = records.db
     session = db.get_one(AgentSession, session_id)
     records.lock_project(

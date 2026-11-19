@@ -133,6 +133,7 @@ from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.chats import ChatWriter, open_chat
+from tests.support.debriefs import give_debrief
 from tests.support.fake_controller import (
     FAKE_CONTROLLER_TOKEN,
     ServedFakeController,
@@ -9186,6 +9187,18 @@ def _pass(
     return job
 
 
+def _debrief_notices(db: DbSession, project: Project) -> list[Item]:
+    """The project's debrief's notices."""
+    db.expire_all()
+    return list(
+        db.scalars(
+            select(Item).where(
+                Item.project_id == project.id, Item.kind_code == "debrief_notice"
+            )
+        )
+    )
+
+
 def _clarifying(db: DbSession, asking: models.Session) -> models.Session:
     """The Session of the clarification run of the pass `asking`."""
     run_id = db.scalars(
@@ -9402,9 +9415,11 @@ class TestQuotaWallsPass:
         db: DbSession,
         project: Project,
     ) -> models.Session:
-        """The pass after a run's turn, asking its writer, `failed` at the
-        wall with its nudge owed, a reading at 0.5 the one at its end."""
+        """The pass after a run's turn, which gave a debrief that completes,
+        asking its writer, `failed` at the wall with its nudge owed, a
+        reading at 0.5 the one at its end."""
         run = _ended_run(db, container, fake, project)
+        give_debrief(db, run)
         refinement = _read_at_its_end(
             db, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
         )
@@ -9427,6 +9442,8 @@ class TestQuotaWallsPass:
         session: DbSession,
         project: Project,
     ) -> None:
+        """And places the debrief's notice of the run whose turn it took
+        (DB 609), before the clarification run."""
         asking = self._walled_pass(container, fake, session, project)
         _nudge(continues)
         assert (
@@ -9435,12 +9452,16 @@ class TestQuotaWallsPass:
             ).all()
             == []
         )
+        assert _debrief_notices(session, project) == []
 
         _usage(session, week=0.51, five_hour=0.1)
         _nudge(continues)
 
         assert _read(session, asking.id).nudge_owed_at is None
-        assert _clarifying(session, asking).state_code == SessionState.STARTING
+        clarifying = _clarifying(session, asking)
+        assert clarifying.state_code == SessionState.STARTING
+        [notice] = _debrief_notices(session, project)
+        assert session.get_one(Item, clarifying.id).seq == notice.seq + 1
 
     @pytest.mark.parametrize(
         "standing",
@@ -9485,6 +9506,7 @@ class TestQuotaWallsPass:
             ).all()
             == []
         )
+        assert _debrief_notices(session, project) == []
         assert _read(session, elsewhere.id).state_code == SessionState.STARTING
 
     def test_a_continuation_that_fails_to_start_asks_the_writer_once_it_commits(
@@ -9521,10 +9543,13 @@ class TestQuotaWallsPass:
             ).all()
             == []
         )
+        assert _debrief_notices(session, project) == []
         clear_after_commit_callbacks()
         continues._continuation_failed(asking.id)
         assert _clarifying(session, asking).state_code == SessionState.STARTING
         assert _handed_at(session, asked) is None
+        # The pass's end, with the debrief's notice of the run it followed.
+        assert len(_debrief_notices(session, project)) == 1
 
 
 def _fired_job(

@@ -92,6 +92,7 @@ from app.services.usage_halts import UsageHalts
 from app.services.wait_service import ReportedTransition
 from app.services.working_on import Reading
 from tests.support.chats import ChatWriter, open_chat
+from tests.support.debriefs import pass_ended
 from tests.support.parses import parses
 from tests.support.pilot_notes import a_turn, alerted, block_of, noted
 from tests.support.statements import sent
@@ -396,6 +397,20 @@ def _debriefed(
         for position, entry in enumerate(entries, start=1)
     )
     session.flush()
+
+
+def _pass_ended(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    work: Item,
+    at: datetime,
+) -> None:
+    """The pass after the turn of the done work item `work`, placed and ended
+    well at `at`: its end places the debrief's notice the work item owes."""
+    pass_ended(
+        session, container, project, session.get_one(models.Session, work.id), at
+    )
 
 
 def _work(
@@ -4563,8 +4578,8 @@ class TestDebriefNotice:
         project: Project,
         environment: Environment,
     ) -> tuple[Item, Item]:
-        """A planning and the run that completes its subject, done in turn, the
-        run's done placing the notice."""
+        """A planning and the run that completes its subject, done in turn,
+        each with its pass ended, the run's pass's end placing the notice."""
         records = container.record_service()
         planning = _work(session, project, environment, SessionState.IDLE)
         planning.title = "Planning the tent list"
@@ -4577,9 +4592,11 @@ class TestDebriefNotice:
             completes=False,
         )
         records.work_done(planning.id, REPLIED)
+        _pass_ended(session, container, project, planning, REPLIED)
         run = _work(session, project, environment, SessionState.IDLE)
         _debriefed(session, run, self.ENTRY, subject=self.SUBJECT, completes=True)
         records.work_done(run.id, REPLIED + timedelta(hours=1))
+        _pass_ended(session, container, project, run, REPLIED + timedelta(hours=1))
         return planning, run
 
     def test_it_shows_the_work_items_it_carries_in_timeline_order(
@@ -4589,7 +4606,10 @@ class TestDebriefNotice:
         environment: Environment,
     ) -> None:
         """DB 612: each its title, its turn's end and its debrief whole, by
-        its id, which its full debrief and session log open by."""
+        its id, which its full debrief and session log open by. The order is
+        the timeline's, whatever order the database hands the Works back in:
+        the same Works, their places on the timeline exchanged, show the
+        other way round."""
         project = _make(container)
         planning, run = self._carried(container, session, project, environment)
 
@@ -4644,7 +4664,20 @@ class TestDebriefNotice:
             ("prose", None),
             ("work", None),
             ("work", None),
+            ("work", None),
+            ("work", None),
         ]
+
+        # An item's `seq` is unique in its project at every statement, so the
+        # exchange goes through a place no item has.
+        first, last = planning.seq, run.seq
+        for item, seq in ((planning, last + 100), (run, first), (planning, last)):
+            item.seq = seq
+            session.flush()
+
+        assert [
+            carried["id"] for carried in _items(container, project)[-1]["debriefs"]
+        ] == [str(run.id), str(planning.id)]
 
     def test_it_has_no_document_to_read_on_its_own(
         self,
@@ -4677,7 +4710,7 @@ class TestDebriefNotice:
         assert {
             item["id"]: item["work"]["debriefed"]
             for item in _items(container, project)
-            if item["form"] == "work"
+            if item["form"] == "work" and not item["work"]["pilots_own"]
         } == {str(planning.id): True, str(run.id): True}
 
 
@@ -5017,6 +5050,7 @@ class TestBadges:
             session, run, {"section": "Test", "role": "test-agent"}, completes=True
         )
         container.record_service().work_done(run.id, REPLIED)
+        _pass_ended(session, container, project, run, REPLIED)
         notice = session.scalars(
             select(Item).where(
                 Item.project_id == project.id, Item.kind_code == "debrief_notice"

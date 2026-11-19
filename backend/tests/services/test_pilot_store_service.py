@@ -2554,10 +2554,11 @@ class TestPilotStoreServiceWriteNotable:
         environment: Environment,
     ) -> None:
         """F26.12: a Retry after a failed pass writes them into the notice
-        that was placed without them."""
+        that its failure placed without them."""
         run = _debriefed(session, container, project)
         container.record_service().work_done(run.id, datetime.now(UTC))
         job = _pass(session, container, project, environment, run)
+        container.clarification_service().pass_ended(job)
         brain, project_id = _admitted(job), project.id
         with scoped_session(container):
             pass

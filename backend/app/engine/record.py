@@ -851,7 +851,8 @@ class RecordService:
         item's Session, `stopped`: the item done at once by `user`, its Done
         Cause `cancelled`, which offers no undo, and `note`, Pilot's reason,
         its Work's `done_note`, none for a person's Close, with the debrief's
-        notice its done places (`_place_debrief_notice`). No document is
+        notice, which the close places, no pass following it
+        (`_place_debrief_notice`). No document is
         closed, no job is placed and nothing continues its conversation
         (`_release`).
 
@@ -1161,10 +1162,10 @@ class RecordService:
 
     def work_done(self, work_id: uuid.UUID, at: datetime) -> None:
         """The work item done at `at`, its turn's end, by no one, its Done
-        Cause `turn_ended`, which is final (decision 44), with the debrief's
-        notice its done places (`_place_debrief_notice`), after every Item
-        its turn registered. An item Finish closed first stays as Finish
-        closed it."""
+        Cause `turn_ended`, which is final (decision 44). An item Finish
+        closed first stays as Finish closed it. A worker's run's debrief's
+        notice is placed at the end of the job after its turn
+        (`debrief_notice_after_pass`), never here."""
         item = self.db.get_one(
             Item, work_id, with_for_update=True, populate_existing=True
         )
@@ -1172,27 +1173,51 @@ class RecordService:
             return
         item.done_at = at
         item.done_cause_code = TURN_ENDED
-        project = self.db.get_one(Project, item.project_id)
-        self._place_debrief_notice(project, item)
-        self.view_service.timeline_moved(project)
+        self.view_service.timeline_moved(self.db.get_one(Project, item.project_id))
 
-    def _place_debrief_notice(self, project: Project, work_item: Item) -> None:
-        """At the done of the work item `work_item`, under its project's row
-        held exclusively: where its Work's debrief completes, its Debrief
-        Notice placed next on the timeline, by Pilot and no session, on the
-        work item's task, titled by the debrief's subject, else by the work
-        item's title, never urgent and for no one (DB 609, 611). It carries
-        that debrief and, where it names a subject, the debrief of every done
-        Work of the project with the same subject that does not complete and
-        that no notice carries yet, each Work naming it (DB 610). None in a project finished or archived,
-        whose Finish left nothing open (DB 613), for a debrief that does not
-        complete, and for one given before its completion was taken, which
-        has none (DB 609)."""
+    def debrief_notice_after_pass(self, project: Project, job: Work) -> None:
+        """The end of the job `job` of `project`, at its last turn's end or
+        its failure, in the caller's transaction, which holds the project's
+        row exclusively: where it is the job after a worker's turn, the pass,
+        the debrief's notice of the run whose turn it followed, placed now,
+        so that the lines the pass wrote are in it when it is first seen (DB
+        609; `place_debrief_notice`). A job of any other trigger places
+        none."""
+        if job.trigger_code is not WorkTrigger.WORKER_TURN_ENDED:
+            return
+        # The job after a worker's turn names the run.
+        assert job.trigger_item_id is not None
+        self.place_debrief_notice(project, self.db.get_one(Item, job.trigger_item_id))
+
+    def place_debrief_notice(self, project: Project, work_item: Item) -> None:
+        """The debrief's notice of the done work item `work_item`, placed
+        where it is owed (`_place_debrief_notice`), the project's timeline
+        told. Under the project's row held exclusively."""
+        if self._place_debrief_notice(project, work_item):
+            self.view_service.timeline_moved(project)
+
+    def _place_debrief_notice(self, project: Project, work_item: Item) -> bool:
+        """For the done work item `work_item`, under its project's row held
+        exclusively: where its Work's debrief completes, its Debrief Notice
+        placed next on the timeline, by Pilot and no session, on the work
+        item's task, titled by the debrief's subject, else by the work item's
+        title, never urgent and for no one (DB 609, 611). It carries that
+        debrief and, where it names a subject, the debrief of every done Work
+        of the project with the same subject that does not complete and that
+        no notice carries yet, each Work naming it (DB 610). None in a
+        project finished or archived, whose Finish left nothing open (DB
+        613), for a debrief that does not complete, for one given before its
+        completion was taken, which has none (DB 609), and for a Work a
+        notice carries already: once per Work (DB 607).
+
+        Returns:
+            Whether it placed one.
+        """
         if project.archived or project.state_code is ProjectState.FINISHED:
-            return
+            return False
         work = self.db.get_one(Work, work_item.id)
-        if not work.debrief_completes:
-            return
+        if not work.debrief_completes or work.debrief_notice_id is not None:
+            return False
         carried = [work]
         if work.debrief_subject is not None:
             carried.extend(
@@ -1233,6 +1258,7 @@ class RecordService:
             each.debrief_notice_id = notice.id
             each.debrief_notice_kind_code = DEBRIEF_NOTICE
         self.db.flush()
+        return True
 
     def write_notable(self, work_id: uuid.UUID, text: str) -> bool:
         """Pilot's lines `text` on the debrief of the Work `work_id`, a write

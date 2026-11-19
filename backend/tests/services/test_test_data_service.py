@@ -339,11 +339,12 @@ class TestTestDataService:
         assert confirmation.for_user_id == _user(session, "ada").id
         assert confirmation.plan_task_id == "import"
 
-    def test_a_planning_and_a_run_whose_done_placed_their_debriefs_notice(
+    def test_a_planning_and_a_run_with_their_debriefs_notice(
         self, counts: dict[str, int], container: ServiceContainer, session: DbSession
     ) -> None:
         """DB 609 to 611: the run's debrief completes the planning's subject,
-        so its done places the one notice, which carries both."""
+        so the one notice, placed as the end of the run's pass places it,
+        carries both."""
         recipes = _project(session, test_data_service.SLUG)
         planning, run, notice = _items(session, recipes)[-3:]
 

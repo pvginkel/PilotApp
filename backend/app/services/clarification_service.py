@@ -8,6 +8,10 @@ Stop places none (DB 254). It waits at the gate while another Session runs or
 starts on the conversation, the run's continuation after its documents close
 among them, which waits for it in turn (DB 183; `start_gate.carried`).
 
+The pass's end is one hook, `pass_ended`: it also places the debrief's notice
+of the run whose turn the pass took, before the clarification run (DB 609;
+`RecordService.debrief_notice_after_pass`).
+
 A document's clarification is read from the run, never stored (DB 257): the
 pass's questions on its blocks, and each asked block's part of the reply, the
 text under the heading the run's first turn asked for it.
@@ -25,6 +29,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 
+from app.engine.record import RecordService
 from app.engine.views import ViewService
 from app.models import (
     Block,
@@ -337,17 +342,20 @@ def title(questions: Sequence[Asked]) -> str:
 
 
 class ClarificationService:
-    """Places a pass's clarification run and records the writer's reply, in
-    the turn end's transaction."""
+    """At a pass's end, places the debrief's notice of the run it followed
+    and its clarification run; records the writer's reply. In the turn end's
+    transaction."""
 
     def __init__(
         self,
         db: Session,
         session_start_service: "SessionStartService",
+        record_service: RecordService,
         view_service: ViewService,
     ) -> None:
         self.db = db
         self.session_start_service = session_start_service
+        self.record_service = record_service
         self.view_service = view_service
 
     def pass_ended(self, session: AgentSession) -> None:
@@ -355,12 +363,15 @@ class ClarificationService:
         end, at the reading that decided its quota wall missed, or at its
         continuation's failed start — in the caller's transaction, which holds
         its project's row exclusively: a pass, the job after a worker's turn,
-        whose Turns asked the writer has every question put to the writer by
-        one clarification run placed now, on the conversation of the run
-        whose turn it took (DB 254). A stopped end never reaches it."""
+        has the debrief's notice of the run whose turn it took placed now (DB
+        609), and, where its Turns asked the writer, every question put to
+        the writer by one clarification run placed after it, on that run's
+        conversation (DB 254). A stopped end never reaches it."""
         work = self.db.get_one(Work, session.id)
         if work.trigger_code is not WorkTrigger.WORKER_TURN_ENDED:
             return
+        project = self.db.get_one(Project, session.project_id)
+        self.record_service.debrief_notice_after_pass(project, work)
         questions = asked(self.db, session.id)
         if not questions:
             return
@@ -368,7 +379,7 @@ class ClarificationService:
         assert work.trigger_item_id is not None
         self.session_start_service.clarify(
             self.db,
-            self.db.get_one(Project, session.project_id),
+            project,
             session.id,
             work.trigger_item_id,
             title(questions),

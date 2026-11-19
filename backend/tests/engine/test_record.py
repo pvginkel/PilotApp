@@ -64,7 +64,7 @@ from app.services.session_scope import STORE_REPO
 from app.services.timeline_service import waiting_on
 from app.services.working_on import Reading
 from app.utils.after_commit import clear_after_commit_callbacks
-from tests.support.debriefs import placed_notice
+from tests.support.debriefs import pass_after, placed_notice
 from tests.support.fake_sidecar import FakeSidecar
 from tests.support.locks import in_thread, lock_waits
 from tests.support.pilot_notes import a_turn, noted
@@ -4578,21 +4578,40 @@ def _notices(session: DbSession, project: Project) -> list[tuple[Item, set[uuid.
     ]
 
 
+def _pass_ends(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    run: models.Session,
+    at: datetime,
+) -> Item:
+    """The pass after the turn of `run`, a done run, placed and ended at
+    `at`, its end placing the debrief's notice the run owes: its work
+    item."""
+    records = container.record_service()
+    job = pass_after(session, container, project, run)
+    records.work_done(job.id, at)
+    records.debrief_notice_after_pass(project, session.get_one(Work, job.id))
+    return session.get_one(Item, job.id)
+
+
 class TestRecordServiceDebriefNotice:
-    """The debrief's notice a work item's done places (DB 609 to 611)."""
+    """The debrief's notice the end of the pass after a work item's turn
+    places, and its close for good (DB 609 to 611)."""
 
     AT = datetime(2026, 11, 16, 9, 30, 0, tzinfo=UTC)
     SUBJECT = "Slice 4 · The tent list"
 
-    def test_a_completing_debrief_places_its_notice_after_what_its_turn_registered(
+    def test_the_passs_end_places_a_completing_debriefs_notice_its_runs_done_none(
         self,
         session: DbSession,
         container: ServiceContainer,
         project: Project,
         environment: Environment,
     ) -> None:
-        """DB 609, 611: at its turn's end, once the Items that turn registered
-        are placed; titled by its work item, it naming no subject."""
+        """DB 609, 611: once the pass after its turn has ended, after the
+        Items that turn registered and the pass's own; titled by its work
+        item, it naming no subject."""
         _task(session, project, "build")
         run = _debriefed_run(
             session, container, project, environment, "Renaming", task="build"
@@ -4601,9 +4620,14 @@ class TestRecordServiceDebriefNotice:
 
         container.record_service().work_done(run.id, self.AT)
 
+        assert _notices(session, project) == []
+        assert session.get_one(Work, run.id).debrief_notice_id is None
+
+        job = _pass_ends(session, container, project, run, self.AT)
+
         ((notice, carried),) = _notices(session, project)
         assert carried == {run.id}
-        assert notice.seq == registered.seq + 1
+        assert (job.seq, notice.seq) == (registered.seq + 1, registered.seq + 2)
         assert (notice.title, notice.plan_task_id, notice.urgent) == (
             "Debrief · Renaming",
             "build",
@@ -4628,8 +4652,8 @@ class TestRecordServiceDebriefNotice:
     ) -> None:
         """DB 609, 610: a slice planned twice carries both plannings; a
         subject's debrief carried once is carried by no later notice; another
-        subject's, an open one's and one that completes, done in a finished
-        project, stay as they are."""
+        subject's, an open one's and one that completes, its pass ended in a
+        finished project, stay as they are."""
         records = container.record_service()
 
         def done(title: str, **debrief: object) -> models.Session:
@@ -4637,6 +4661,7 @@ class TestRecordServiceDebriefNotice:
                 session, container, project, environment, title, **debrief
             )
             records.work_done(run.id, self.AT)
+            _pass_ends(session, container, project, run, self.AT)
             return run
 
         first = done("Planning", subject=self.SUBJECT, completes=False)
@@ -4694,14 +4719,17 @@ class TestRecordServiceDebriefNotice:
             completes=False,
         )
         records.work_done(elsewhere.id, self.AT)
+        _pass_ends(session, container, other, elsewhere, self.AT)
         run = _debriefed_run(
             session, container, project, environment, "Running", subject=self.SUBJECT
         )
-
         records.work_done(run.id, self.AT)
+
+        _pass_ends(session, container, project, run, self.AT)
 
         ((_, carried),) = _notices(session, project)
         assert carried == {run.id}
+        assert _notices(session, other) == []
         assert session.get_one(Work, elsewhere.id).debrief_notice_id is None
 
     @pytest.mark.parametrize(
@@ -4728,14 +4756,15 @@ class TestRecordServiceDebriefNotice:
             run = _debriefed_run(
                 session, container, project, environment, "Renaming", **debrief
             )
-
         container.record_service().work_done(run.id, self.AT)
+
+        _pass_ends(session, container, project, run, self.AT)
 
         assert _notices(session, project) == []
         assert session.get_one(Work, run.id).debrief_notice_id is None
 
     @pytest.mark.parametrize("closed", ["finished", "archived"])
-    def test_a_project_finished_or_archived_gets_none(
+    def test_a_project_finished_or_archived_before_its_pass_ended_gets_none(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -4743,34 +4772,83 @@ class TestRecordServiceDebriefNotice:
         environment: Environment,
         closed: str,
     ) -> None:
-        """DB 613: a Finish leaves nothing open, and an archived project's
-        timeline takes nothing new."""
+        """DB 609, 613: a Finish leaves nothing open, and an archived
+        project's timeline takes nothing new, the run done before either."""
         run = _debriefed_run(session, container, project, environment, "Renaming")
+        container.record_service().work_done(run.id, self.AT)
         if closed == "finished":
             project.slug, project.state_code = "camp", ProjectState.FINISHED
         else:
             project.archived = True
         session.flush()
 
-        container.record_service().work_done(run.id, self.AT)
+        _pass_ends(session, container, project, run, self.AT)
 
         assert _notices(session, project) == []
+        assert session.get_one(Work, run.id).debrief_notice_id is None
 
-    def test_an_item_finish_closed_first_places_none_at_its_turns_end(
+    @pytest.mark.parametrize(
+        "trigger", [WorkTrigger.ITEM_DONE, WorkTrigger.WAIT_FIRED, WorkTrigger.SETUP]
+    )
+    def test_the_end_of_a_job_that_is_no_pass_places_none(
         self,
         session: DbSession,
         container: ServiceContainer,
         project: Project,
         environment: Environment,
-        person: User,
+        trigger: WorkTrigger,
     ) -> None:
+        """A job names its trigger Item whatever its trigger: only the job
+        after a worker's turn ends as that run's pass."""
         run = _debriefed_run(session, container, project, environment, "Renaming")
         records = container.record_service()
-        records.close_unanswered(project, person, FINISH)
-
         records.work_done(run.id, self.AT)
+        job = pass_after(session, container, project, run)
+        work = session.get_one(Work, job.id)
+        work.trigger_code = trigger
+        if trigger is WorkTrigger.SETUP:
+            work.trigger_item_id = None
+        session.flush()
+        records.work_done(job.id, self.AT)
+
+        records.debrief_notice_after_pass(project, work)
 
         assert _notices(session, project) == []
+
+    @pytest.mark.parametrize("first", ["a failed pass", "the run's done"])
+    def test_a_work_its_notice_carries_already_is_skipped(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        first: str,
+    ) -> None:
+        """DB 607: once per Work. A person's Retry of the pass whose failure
+        placed it ends as a job after the same run, and a pass in flight when
+        this rule landed follows a run whose done had placed it: neither
+        places a second, and neither moves the timeline."""
+        with scoped_session(container):
+            run = _debriefed_run(session, container, project, environment, "Renaming")
+            records = container.record_service()
+            records.work_done(run.id, self.AT)
+            if first == "a failed pass":
+                _pass_ends(session, container, project, run, self.AT)
+            else:
+                records.place_debrief_notice(project, session.get_one(Item, run.id))
+            job = pass_after(session, container, project, run)
+            ((notice, _),) = _notices(session, project)
+            placed = notice.id
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.record_service().debrief_notice_after_pass(
+                project, session.get_one(Work, job.id)
+            )
+
+        assert [each.id for each, _ in _notices(session, project)] == [placed]
+        assert engine_events == []
 
     @pytest.mark.parametrize("by", ["person", "Pilot"])
     def test_the_close_for_good_places_it(
@@ -4782,7 +4860,8 @@ class TestRecordServiceDebriefNotice:
         person: User,
         by: str,
     ) -> None:
-        """DB 609: a person's Close and Pilot's `stop_work` alike."""
+        """DB 609: a person's Close and Pilot's `stop_work` alike, at the
+        close, which no pass follows."""
         planning = _debriefed_run(
             session,
             container,
@@ -4811,7 +4890,7 @@ class TestRecordServiceDebriefNotice:
         assert notice.seq == session.get_one(Item, run.id).seq + 1
         assert carried == {planning.id, run.id}
 
-    def test_its_placement_moves_the_timeline_with_the_done(
+    def test_its_placement_moves_the_timeline(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -4821,10 +4900,16 @@ class TestRecordServiceDebriefNotice:
     ) -> None:
         with scoped_session(container):
             run = _debriefed_run(session, container, project, environment, "Renaming")
+            records = container.record_service()
+            records.work_done(run.id, self.AT)
+            job = pass_after(session, container, project, run)
+            records.work_done(job.id, self.AT)
         engine_events.clear()
 
         with scoped_session(container):
-            container.record_service().work_done(run.id, self.AT)
+            container.record_service().debrief_notice_after_pass(
+                project, session.get_one(Work, job.id)
+            )
 
         assert engine_events == [
             TreeHashMoved(
@@ -4836,6 +4921,7 @@ class TestRecordServiceDebriefNotice:
         timeline = json.loads(container.view_service().timeline(project).text)
         assert [(item["kind"], item["title"]) for item in timeline["items"]] == [
             ("work", "Renaming"),
+            ("work", "Pre-ruling"),
             ("debrief_notice", "Debrief · Renaming"),
         ]
 
@@ -4981,6 +5067,7 @@ class TestRecordServiceWriteNotable:
         with scoped_session(container):
             run = _debriefed_run(session, container, project, environment, "Renaming")
             container.record_service().work_done(run.id, self.AT)
+            _pass_ends(session, container, project, run, self.AT)
         engine_events.clear()
         before = container.view_service().timeline(project).hash
 
@@ -4993,12 +5080,12 @@ class TestRecordServiceWriteNotable:
             TreeHashMoved(f"draft-{project.number}/timeline.json", timeline.hash),
             ProjectChanged(project.id),
         ]
-        assert json.loads(timeline.text)["items"][1]["notable"] == [self.LINES]
+        assert json.loads(timeline.text)["items"][-1]["notable"] == [self.LINES]
 
 
 def _committed_notice(app: Flask, *, read: bool) -> tuple[uuid.UUID, uuid.UUID]:
-    """A draft project whose worker's run placed its debrief's notice at its
-    turn's end, committed, Read by the person where `read`: the person's id
+    """A draft project whose worker's run had its debrief's notice placed at
+    its pass's end, committed, Read by the person where `read`: the person's id
     and the notice's."""
     container = app.container
     with scoped_session(container) as session:

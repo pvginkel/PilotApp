@@ -107,6 +107,7 @@ from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support import publications
+from tests.support.debriefs import give_debrief
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
 from tests.support.locks import in_thread, lock_waits
 from tests.support.starts import configured_starts
@@ -5884,6 +5885,188 @@ def _clarifications(db: DbSession, asking: models.Session) -> list[Clarification
             .execution_options(populate_existing=True)
         )
     )
+
+
+def _debrief_notices(db: DbSession, project: Project) -> list[Item]:
+    """The project's debrief's notices."""
+    return list(
+        db.scalars(
+            select(Item).where(
+                Item.project_id == project.id, Item.kind_code == "debrief_notice"
+            )
+        )
+    )
+
+
+def _notable(container: ServiceContainer, project: Project, notice: Item) -> object:
+    """Pilot's lines in the notice's row of `timeline.json`."""
+    [row] = [
+        row
+        for row in json.loads(container.view_service().timeline(project).text)["items"]
+        if row["id"] == str(notice.id)
+    ]
+    return row["notable"]
+
+
+class TestDebriefNoticeAtThePassEnd:
+    """The debrief's notice of a worker's run is placed once the pass after
+    its turn has ended, `idle` or `failed`, the lines the pass wrote in it; a
+    stopped end places none and the end of its retry, a fresh job after the
+    same run, does; a turn dead at the quota wall is no end (F26.12; DB 609,
+    281)."""
+
+    LINES = "Its first stop: the suite lock was held for forty minutes."
+
+    @pytest.mark.parametrize(
+        ("outcome", "state"),
+        [("success", SessionState.IDLE), ("error", SessionState.FAILED)],
+    )
+    def test_the_passs_last_turns_end_places_it_with_the_lines_it_wrote(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        outcome: FinishOutcome,
+        state: SessionState,
+    ) -> None:
+        """A pass that failed before it wrote any places it without them."""
+        run, _, _ = _done_run(session, container, project)
+        give_debrief(session, run)
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        if outcome == "success":
+            container.pilot_store_service().write_notable(
+                Brain(asking.id, project.id, "job"), self.LINES
+            )
+        assert _debrief_notices(session, project) == []
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"), outcome)
+
+        _relay(relays, asking)
+
+        assert asking.state_code is state
+        [notice] = _debrief_notices(session, project)
+        assert session.get_one(Work, run.id).debrief_notice_id == notice.id
+        assert notice.seq == session.get_one(Item, asking.id).seq + 1
+        assert _notable(container, project, notice) == (
+            [self.LINES] if outcome == "success" else []
+        )
+
+    @pytest.mark.parametrize("stop", ["interrupted", "stopped"])
+    def test_a_stopped_end_places_none_and_the_end_of_its_retry_places_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_session: str,
+        project: Project,
+        stop: str,
+    ) -> None:
+        """DB 281: the store's update stops the pass under its turn and the
+        server retries it at the lift, a fresh job after the same run
+        (`JobService.retry`), whose end places the notice."""
+        run, _, _ = _done_run(session, container, project)
+        give_debrief(session, run)
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        if stop == "stopped":
+            _stopped(asking)
+            session.flush()
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
+        )
+        _relay(relays, asking)
+        assert asking.state_code is SessionState.STOPPED
+        assert _debrief_notices(session, project) == []
+
+        retried = controller_client.create_headless_session(
+            ENV, HeadlessCreateRequest()
+        ).name
+        retrying = _pass_of(session, container, project, run, retried)
+        _send(relays, session, retrying, "/pre-rule")
+        container.pilot_store_service().write_notable(
+            Brain(retrying.id, project.id, "job"), self.LINES
+        )
+        _turn_of(fake_controller, retried, raw_turn("turn_text"))
+        _relay(relays, retrying)
+
+        assert retrying.state_code is SessionState.IDLE
+        [notice] = _debrief_notices(session, project)
+        assert notice.seq == session.get_one(Item, retrying.id).seq + 1
+        assert _notable(container, project, notice) == [self.LINES]
+
+    def test_a_persons_retry_after_the_failure_that_placed_it_places_no_second(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        """DB 607: once per Work; the lines of the Retry, a fresh job after
+        the same run, show in the notice the failure placed (F26.12)."""
+        run, _, _ = _done_run(session, container, project)
+        give_debrief(session, run)
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"), "error")
+        _relay(relays, asking)
+        [notice] = _debrief_notices(session, project)
+        assert _notable(container, project, notice) == []
+
+        retried = controller_client.create_headless_session(
+            ENV, HeadlessCreateRequest()
+        ).name
+        retrying = _pass_of(session, container, project, run, retried)
+        _send(relays, session, retrying, "/pre-rule")
+        container.pilot_store_service().write_notable(
+            Brain(retrying.id, project.id, "job"), self.LINES
+        )
+        _turn_of(fake_controller, retried, raw_turn("turn_text"))
+        _relay(relays, retrying)
+
+        assert retrying.state_code is SessionState.IDLE
+        assert _debrief_notices(session, project) == [notice]
+        assert _notable(container, project, notice) == [self.LINES]
+
+    def test_a_pass_dead_at_the_wall_places_it_once_its_nudges_run_ends(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        """The ruling on the wall: a pass `failed` there with its nudge owed
+        is not at its end."""
+        run, _, _ = _done_run(session, container, project)
+        give_debrief(session, run)
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_wall"), "error", LIMIT
+        )
+        _relay(relays, asking)
+        assert asking.state_code is SessionState.FAILED
+        assert asking.nudge_owed_at is not None
+        assert _debrief_notices(session, project) == []
+
+        # The nudge's turn, as its send leaves the Session.
+        asking.nudge_owed_at = None
+        session.flush()
+        _send(relays, session, asking, "The subscription quota ran out.")
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+        _relay(relays, asking)
+
+        [notice] = _debrief_notices(session, project)
+        assert session.get_one(Work, run.id).debrief_notice_id == notice.id
 
 
 class TestClarificationRun:

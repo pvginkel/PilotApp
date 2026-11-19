@@ -1,6 +1,7 @@
 /**
- * The debrief's notice (F26.12, F26.13, F26.14): placed by the server when the work item whose
- * debrief completes its subject is done, an open box of its own, the Debrief's notebook and
+ * The debrief's notice (F26.12, F26.13, F26.14): placed by the server once the pre-ruling pass after
+ * the turn of the work item whose debrief completes its subject has ended, never at that work
+ * item's done, an open box of its own, the Debrief's notebook and
  * "Notice" in its head, "Debrief · <subject>" its title; per work item it carries, in timeline
  * order, a head with the item's title and the time its turn ended, the stage session's debrief
  * whole as prose, and Full debrief and Session log under it, opening where the work item's Debrief
@@ -33,11 +34,14 @@ interface Fixtures {
   people: People;
   projects: Projects;
   controller: Controller;
-  /** Given, the job Pilot's server places after each work item's turn runs in the store and ends there. */
-  chats?: Chats;
+  /** The job Pilot's server places after each work item's turn runs in the store and ends there. */
+  chats: Chats;
 }
 
-/** A work item started in the project, done at its turn's end, its session having given `words` as its debrief, about `about`. */
+/**
+ * A work item started in the project, done at its turn's end, its session having given `words` as
+ * its debrief, about `about`, and the pass after its turn ended, whose end places the notice.
+ */
 async function debriefed(
   { projects, controller, chats }: Fixtures,
   project: string,
@@ -49,10 +53,10 @@ async function debriefed(
   await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
   const { id: environment } = await projects.environment(project, work);
   await projects.debrief(work, words, undefined, about);
-  const passed = await chats?.passing(project);
+  const passed = await chats.passing(project);
   await controller.finish(environment, 'claude-1');
   await expect.poll(async () => (await projects.item(project, work)).done?.cause).toBe('turn_ended');
-  await passed?.();
+  await passed();
   return work;
 }
 
@@ -63,7 +67,7 @@ async function noticesIn(projects: Projects, project: string): Promise<string[]>
 
 /**
  * A project whose slice was planned and then run, each work item's debrief about the slice, the
- * planning's not completing it: the run's done placed one notice carrying both.
+ * planning's not completing it: the end of the run's pass placed one notice carrying both.
  */
 async function plannedAndRun(fixtures: Fixtures) {
   const { people, projects } = fixtures;
@@ -87,9 +91,10 @@ test.describe('The debrief’s notice', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
   }) => {
-    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller });
+    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller, chats });
     await timeline.open(project);
     const item = timeline.item(notice);
 
@@ -100,9 +105,10 @@ test.describe('The debrief’s notice', () => {
     await expect(item.kind.locator('svg.lucide-notebook-pen')).toBeVisible();
     await expect(item.urgent).toHaveCount(0);
     await expect(item.title).toHaveText(`Debrief · ${SUBJECT}`);
-    // Placed after the run whose done placed it.
+    // Placed last, after the run and the pass whose end placed it.
     const order = await timeline.items.evaluateAll((items) => items.map((each) => each.getAttribute('data-item-id')));
-    expect(order.slice(-3)).toEqual([planning, run, notice]);
+    expect(order.filter((id) => [planning, run, notice].includes(id!))).toEqual([planning, run, notice]);
+    expect(order.at(-1)).toBe(notice);
 
     await expect(item.debriefs).toHaveCount(2);
     expect(await item.debriefs.evaluateAll((each) => each.map((carried) => carried.getAttribute('data-item-id')))).toEqual([planning, run]);
@@ -132,14 +138,46 @@ test.describe('The debrief’s notice', () => {
     expect(read!.y).toBeGreaterThan(last!.y + last!.height);
   });
 
+  test('is placed once the pass after the run’s turn has ended, never at the run’s done: the page shows it then, with no reload', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Passing'), members: [me.handle!] });
+    const work = await projects.startWork(project, { title: RUN, brief: 'Survey the search page.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    const { id: environment } = await projects.environment(project, work);
+    await projects.debrief(work, RAN, undefined, { subject: SUBJECT });
+    const pass = await chats.pass(project);
+    await controller.finish(environment, 'claude-1');
+    await expect.poll(async () => (await projects.item(project, work)).done?.cause).toBe('turn_ended');
+
+    // The run is done and its pass at work: no notice yet.
+    await pass.running();
+    expect(await noticesIn(projects, project)).toEqual([]);
+    await timeline.open(project);
+    await expect(timeline.item(work).root).toHaveAttribute('data-state', 'done');
+    await expect(timeline.root.locator('[data-kind="debrief_notice"]')).toHaveCount(0);
+
+    await pass.end();
+    const [notice] = await noticesIn(projects, project);
+    await expect(timeline.item(notice).title).toHaveText(`Debrief · ${SUBJECT}`);
+    await expect(timeline.item(notice).debriefs).toHaveCount(1);
+    expect(await timeline.items.last().getAttribute('data-item-id')).toBe(notice);
+  });
+
   test('gives the time a work item it carries ended with its date once that is an earlier day, as a wait’s Since does', async ({
     page,
     people,
     projects,
     controller,
+    chats,
     timeline,
   }) => {
-    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller });
+    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller, chats });
     const ended = await Promise.all([planning, run].map(async (work) => (await projects.item(project, work)).done!.at));
 
     // The page opened on the day after the run's turn ended.
@@ -160,10 +198,10 @@ test.describe('The debrief’s notice', () => {
     }
   });
 
-  test('a debrief that names no subject gets a notice of its own, titled with its work item’s title', async ({ people, projects, controller, timeline }) => {
+  test('a debrief that names no subject gets a notice of its own, titled with its work item’s title', async ({ people, projects, controller, chats, timeline }) => {
     const me = await people.signIn();
     const project = await projects.make({ name: makeUnique('Unnamed'), members: [me.handle!] });
-    const work = await debriefed({ people, projects, controller }, project, 'Surveying the stylesheets', RAN, {});
+    const work = await debriefed({ people, projects, controller, chats }, project, 'Surveying the stylesheets', RAN, {});
     const [notice] = await noticesIn(projects, project);
     await timeline.open(project);
     const item = timeline.item(notice);
@@ -178,11 +216,12 @@ test.describe('The debrief’s notice', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     debrief,
     sessionLog,
   }) => {
-    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller });
+    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller, chats });
     await timeline.open(project);
     const item = timeline.item(notice);
 
@@ -209,9 +248,10 @@ test.describe('The debrief’s notice', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
   }) => {
-    const { project, notice } = await plannedAndRun({ people, projects, controller });
+    const { project, notice } = await plannedAndRun({ people, projects, controller, chats });
     await timeline.open(project);
     const item = timeline.item(notice);
 
@@ -238,8 +278,8 @@ test.describe('The debrief’s notice', () => {
     await expect(item.read).toBeEnabled();
   });
 
-  test('folds as any open item, and Discuss quotes it by its title', async ({ page, people, projects, controller, timeline, chat }) => {
-    const { project, notice } = await plannedAndRun({ people, projects, controller });
+  test('folds as any open item, and Discuss quotes it by its title', async ({ page, people, projects, controller, chats, timeline, chat }) => {
+    const { project, notice } = await plannedAndRun({ people, projects, controller, chats });
     await timeline.open(project);
     const item = timeline.item(notice);
 
@@ -312,13 +352,14 @@ test.describe('The debrief’s notice on a phone', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     debrief,
     sessionLog,
     projectHead,
     phoneTabs,
   }) => {
-    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller });
+    const { project, planning, run, notice } = await plannedAndRun({ people, projects, controller, chats });
     await timeline.open(project);
     const item = timeline.item(notice);
 
@@ -354,10 +395,11 @@ test.describe('The debrief’s notice on a phone', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     overlay,
   }) => {
-    const { project, notice } = await plannedAndRun({ people, projects, controller });
+    const { project, notice } = await plannedAndRun({ people, projects, controller, chats });
     await timeline.open(project);
     const item = timeline.item(notice);
 
