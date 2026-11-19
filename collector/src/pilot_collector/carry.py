@@ -17,12 +17,11 @@ the environment the file named first, the Launch open there, and the prompts
 waiting in the queue. No id of any other line before the boundary is held.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
-both settings. Past either, the transcript published longest ago is forgotten
-first, and its next growth is one whole publication.
+both settings. Past either, the transcript whose file changed longest ago is
+forgotten first, and its next growth is one whole publication.
 """
 
 import hashlib
-from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -114,8 +113,7 @@ class Carries:
     def __init__(self, transcripts: int, size: int) -> None:
         self._transcripts = transcripts
         self._size = size
-        self._held: OrderedDict[Path, Carry] = OrderedDict()
-        """The carries, the one kept longest ago first."""
+        self._held: dict[Path, Carry] = {}
         self._counted = 0
 
     def __len__(self) -> int:
@@ -131,14 +129,17 @@ class Carries:
 
     def keep(self, path: Path, carry: Carry) -> None:
         """Hold `carry` for the transcript filed at `path`, in place of the
-        one held for it, and forget the carries kept longest ago for as long
-        as the bound is passed."""
+        one held for it, and for as long as the bound is passed forget the
+        carry whose file changed longest ago, `carry` itself where it is
+        that one."""
         self.forget(path)
         self._held[path] = carry
         self._counted += carry.size
         while len(self._held) > self._transcripts or self._counted > self._size:
-            _, forgotten = self._held.popitem(last=False)
-            self._counted -= forgotten.size
+            self.forget(min(self._held, key=self._changed))
+
+    def _changed(self, path: Path) -> datetime:
+        return self._held[path].file_modified_at
 
     def forget(self, path: Path) -> None:
         carry = self._held.pop(path, None)

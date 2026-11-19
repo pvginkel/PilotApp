@@ -58,8 +58,8 @@ class Settings(BaseSettings):
         ge=0,
         description=(
             "How many transcripts' carries the collector keeps between walks:"
-            " past it the transcript published longest ago is forgotten first,"
-            " and is published whole when it next grows (F152.15)"
+            " past it the transcript whose file changed longest ago is forgotten"
+            " first, and is published whole when it next grows (F152.15)"
         ),
     )
     COLLECTOR_CARRY_BYTES: int = Field(

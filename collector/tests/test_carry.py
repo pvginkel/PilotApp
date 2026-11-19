@@ -75,9 +75,10 @@ class TestTheBound:
         assert carries.get(_path("a")) == _carry(2)
         assert (len(carries), carries.size) == (1, _carry(2).size)
 
-    def test_past_the_number_the_one_kept_longest_ago_is_forgotten_first(
+    def test_past_the_number_the_one_whose_file_changed_longest_ago_is_forgotten(
         self,
     ) -> None:
+        """A carry's file changed its `place` seconds after the first's."""
         carries = Carries(2, 64_000_000)
         carries.keep(_path("a"), _carry(1))
         carries.keep(_path("b"), _carry(2))
@@ -88,14 +89,32 @@ class TestTheBound:
         assert carries.get(_path("a")) == _carry(3)
         assert carries.get(_path("c")) == _carry(4)
 
-    def test_past_the_size_the_one_kept_longest_ago_is_forgotten_first(self) -> None:
-        small, large = _carry(1), _carry(2, queued=50)
+    def test_a_carry_kept_last_is_the_one_forgotten_where_its_file_is_the_oldest(
+        self,
+    ) -> None:
+        """A walk publishes the most recently changed first."""
+        carries = Carries(2, 64_000_000)
+        for place in (9, 8, 7, 6):
+            carries.keep(_path(f"file-{place}"), _carry(place))
+
+        assert [carries.get(_path(f"file-{place}")) for place in (9, 8, 7, 6)] == [
+            _carry(9),
+            _carry(8),
+            None,
+            None,
+        ]
+
+    def test_past_the_size_the_one_whose_file_changed_longest_ago_is_forgotten(
+        self,
+    ) -> None:
+        small, large = _carry(3), _carry(2, queued=50)
+        assert small.size == _carry(1).size
         carries = Carries(2_500, 2 * small.size + large.size - 1)
         carries.keep(_path("a"), small)
-        carries.keep(_path("b"), small)
+        carries.keep(_path("b"), _carry(1))
         carries.keep(_path("c"), large)
 
-        assert carries.get(_path("a")) is None
+        assert carries.get(_path("b")) is None
         assert (len(carries), carries.size) == (2, small.size + large.size)
 
     def test_one_carry_past_the_size_alone_is_not_held(self) -> None:

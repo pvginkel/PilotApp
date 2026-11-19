@@ -1620,7 +1620,7 @@ class TestTheBoundarysPlaces:
 
 
 class TestTheCarrysBound:
-    def test_past_it_the_transcript_published_longest_ago_is_published_whole_once(
+    def test_past_it_the_transcript_that_grew_longest_ago_is_published_whole_once(
         self,
         committed_app: Flask,
         pilot_url: str,
@@ -1628,33 +1628,32 @@ class TestTheCarrysBound:
         walker: Walker,
         stop: threading.Event,
     ) -> None:
-        """Two carries are kept of three transcripts. The first walk
-        publishes the newest file first, so its carry is the one forgotten,
-        and the files then grow so that it is published last."""
+        """Two carries are kept of three transcripts: after the first walk
+        those of the two files changed last. The third then grows, and its
+        carry takes the place of the older of the two."""
         bound = Walker(
             walker._pilot,
             _settings(pilot_url, home, COLLECTOR_CARRY_TRANSCRIPTS=2),
             stop,
         )
         bound.walk()
-        assert _in_order(committed_app)[0] == RIDES
         before = _held(committed_app)
-        for name in (RIDES, RECIPES, SCALER):
-            _grown(_file(home, name))
-            _aged(_file(home, name), minutes={RIDES: 3, RECIPES: 2, SCALER: 1}[name])
+        newest, older, oldest = sorted(
+            SCENARIOS, key=lambda name: before[name]["stands"][1], reverse=True
+        )
 
-        walked = bound.walk()
+        def grown(*names: str) -> tuple[int, int]:
+            for name in names:
+                _grown(_file(home, name))
+            walked = bound.walk()
+            return walked.published, walked.appended
 
-        assert (walked.published, walked.appended) == (3, 2)
-        held = _held(committed_app)
-        assert held[RIDES]["replayed_size"] == held[RIDES]["stands"][0]
-        for name in (RECIPES, SCALER):
-            assert held[name]["replayed_size"] == before[name]["stands"][0]
-
-        _grown(_file(home, RIDES))
-        walked = bound.walk()
-
-        assert (walked.published, walked.appended) == (1, 1)
+        assert grown(oldest) == (1, 0)
+        held = _held(committed_app)[oldest]
+        assert held["replayed_size"] == held["stands"][0] > before[oldest]["stands"][0]
+        assert grown(oldest, newest) == (2, 2)
+        assert grown(older) == (1, 0)
+        assert grown(older) == (1, 1)
 
 
 def _await(holds: Any, seconds: float = 10.0) -> None:
