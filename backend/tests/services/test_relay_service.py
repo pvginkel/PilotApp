@@ -104,7 +104,7 @@ from app.services.session_start_service import (
 )
 from app.services.sse_connection_manager import SSEConnection
 from app.services.start_gate import WorkSlots
-from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
+from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle, LoopRun
 from app.services.token_counts import CACHE_READ, CACHE_WRITE, INPUT, OUTPUT
 from app.services.turn_end_read_service import READ_JOB, TurnEndReadService
 from app.services.usage_halts import UsageHalts
@@ -121,6 +121,7 @@ from tests.support.supervisor import (
     LogWaiter,
     Supervise,
     listening,
+    loops_asked,
     metric_value,
     reconciled,
     wait_until,
@@ -6072,23 +6073,6 @@ class TestDebriefNoticeAtThePassEnd:
         assert session.get_one(Work, run.id).debrief_notice_id == notice.id
 
 
-def _loops_asked(
-    starts: SessionStartService, monkeypatch: pytest.MonkeyPatch
-) -> list[str]:
-    """Each loop the start's supervisor is asked for from now on, none of
-    them run."""
-    asked: list[str] = []
-
-    def recording(
-        job: str, run: Any, key: str | int | None = None, *, again: bool = False
-    ) -> bool:
-        asked.append(job if key is None else f"{job}:{key}")
-        return True
-
-    monkeypatch.setattr(starts._supervisor, "start_loop", recording)
-    return asked
-
-
 class TestDebriefNoticeAtAStopMadeElsewhere:
     """A pass stopped under its turn by a stop made elsewhere, which nothing
     retries, has the debrief's notice of the run it followed placed once the
@@ -6141,20 +6125,21 @@ class TestDebriefNoticeAtAStopMadeElsewhere:
     def _placed(
         self,
         db: DbSession,
-        starts: SessionStartService,
         project: Project,
         run: models.Session,
         asking: models.Session,
-        asked: list[str],
+        asked: dict[str, LoopRun],
     ) -> Item:
-        """The notice the stop's loop places, asked for and not yet run."""
+        """The notice the stop's loop places, asked for and not yet run,
+        placed by the run the stop handed the supervisor."""
         assert (asking.state_code, asking.stopped_by_user_id) == (
             SessionState.STOPPED,
             None,
         )
-        assert f"{START_JOB}:{PASS_STOPPED_KEY}:{asking.id}" in asked
+        name = f"{START_JOB}:{PASS_STOPPED_KEY}:{asking.id}"
+        assert name in asked
         assert _debrief_notices(db, project) == []
-        starts._pass_stopped(asking.id, LoopHandle("pass-stopped"))
+        asked[name](LoopHandle(name))
         [notice] = _debrief_notices(db, project)
         assert db.get_one(Work, run.id).debrief_notice_id == notice.id
         assert notice.seq == db.get_one(Item, asking.id).seq + 1
@@ -6176,11 +6161,11 @@ class TestDebriefNoticeAtAStopMadeElsewhere:
     ) -> None:
         """Without Pilot's lines, as a failure places it."""
         fake_controller.set_status(ENV, status)
-        asked = _loops_asked(starts, monkeypatch)
+        asked = loops_asked(starts._supervisor, monkeypatch)
 
         _relay(relays, asking)
 
-        notice = self._placed(session, starts, project, run, asking, asked)
+        notice = self._placed(session, project, run, asking, asked)
         assert _notable(container, project, notice) == []
 
     def test_an_environment_gone_while_waited_for_places_it_with_the_lines_written(
@@ -6200,11 +6185,11 @@ class TestDebriefNoticeAtAStopMadeElsewhere:
         )
         fake_controller.set_status(ENV, "stopping")
         fake_controller.script = [None]
-        asked = _loops_asked(starts, monkeypatch)
+        asked = loops_asked(starts._supervisor, monkeypatch)
 
         _relay(relays, asking)
 
-        notice = self._placed(session, starts, project, run, asking, asked)
+        notice = self._placed(session, project, run, asking, asked)
         assert _notable(container, project, notice) == [self.LINES]
 
     def test_an_environment_the_resume_does_not_find_places_it(
@@ -6219,11 +6204,11 @@ class TestDebriefNoticeAtAStopMadeElsewhere:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         fake_controller.remove_environment(ENV)
-        asked = _loops_asked(starts, monkeypatch)
+        asked = loops_asked(starts._supervisor, monkeypatch)
 
         _relay(relays, asking)
 
-        self._placed(session, starts, project, run, asking, asked)
+        self._placed(session, project, run, asking, asked)
 
     def test_a_turn_interrupted_from_elsewhere_places_it_at_the_turns_end(
         self,
@@ -6268,7 +6253,7 @@ class TestDebriefNoticeAtAStopMadeElsewhere:
         stopped_at = _stopped(asking)
         session.flush()
         fake_controller.set_status(ENV, "stopped")
-        asked = _loops_asked(starts, monkeypatch)
+        asked = loops_asked(starts._supervisor, monkeypatch)
 
         _relay(relays, asking)
 
@@ -6297,7 +6282,7 @@ class TestDebriefNoticeAtAStopMadeElsewhere:
         )
         _send(relays, session, setup, "/setup")
         fake_controller.set_status(ENV, "stopped")
-        asked = _loops_asked(starts, monkeypatch)
+        asked = loops_asked(starts._supervisor, monkeypatch)
 
         _relay(relays, setup)
 

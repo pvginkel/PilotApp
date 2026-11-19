@@ -126,7 +126,7 @@ from app.services.session_start_service import (
 )
 from app.services.start_gate import Held, WorkSlots, queued
 from app.services.store_update_service import stopped_by
-from app.services.supervisor import LoopHandle
+from app.services.supervisor import LoopHandle, LoopRun
 from app.services.timeline_service import work_status
 from app.services.turn_end_read_service import READ_JOB, TurnEndReadService
 from app.services.usage_halts import UsageHalts
@@ -152,6 +152,7 @@ from tests.support.supervisor import (
     RoundsHandle,
     Supervise,
     listening,
+    loops_asked,
     wait_until,
 )
 from tests.support.working_on import AT, Camp
@@ -9535,7 +9536,8 @@ class TestQuotaWallsPass:
 
         continues._fail(session, asking.id, nudged.id, "refused", recorded=False)
 
-        assert "_StartFailed" in _callbacks()
+        name, ends = _asked_at_commit(continues, "_StartFailed")
+        assert name == f"{START_JOB}:{START_FAILED_KEY}:{asking.id}"
         # The failed pass leaves its document to the person, until its
         # questions go to the writer.
         assert _handed_at(session, asked) == _turns(session, asking.id)[-1].ended_at
@@ -9547,28 +9549,27 @@ class TestQuotaWallsPass:
         )
         assert _debrief_notices(session, project) == []
         clear_after_commit_callbacks()
-        continues._job_start_failed(asking.id, LoopHandle("start-failed"))
+        ends(LoopHandle(name))
         assert _clarifying(session, asking).state_code == SessionState.STARTING
         assert _handed_at(session, asked) is None
         # The pass's end, with the debrief's notice of the run it followed.
         assert len(_debrief_notices(session, project)) == 1
 
 
-def _loops_asked(
-    starts: SessionStartService, monkeypatch: pytest.MonkeyPatch
-) -> list[str]:
-    """Each loop the start's supervisor is asked for from now on, none of
-    them run."""
-    asked: list[str] = []
-
-    def recording(
-        job: str, run: Any, key: str | int | None = None, *, again: bool = False
-    ) -> bool:
-        asked.append(job if key is None else f"{job}:{key}")
-        return True
-
-    monkeypatch.setattr(starts._supervisor, "start_loop", recording)
-    return asked
+def _asked_at_commit(starts: SessionStartService, kind: str) -> tuple[str, LoopRun]:
+    """The loop the waiting callback of `kind` asks the start's supervisor
+    for, as the commit runs it: its name and the run it hands over, not
+    run."""
+    [callback] = [
+        callback
+        for callback in after_commit_module._callbacks.get()
+        if type(callback).__name__ == kind
+    ]
+    with pytest.MonkeyPatch.context() as patch:
+        asked = loops_asked(starts._supervisor, patch)
+        callback()
+    [(name, run)] = asked.items()
+    return name, run
 
 
 class TestPassEndsOffItsTurnsEnd:
@@ -9608,10 +9609,11 @@ class TestPassEndsOffItsTurnsEnd:
         starts._fail(session, asking.id, brief.id, "refused", recorded=False)
 
         assert _read(session, asking.id).state_code == SessionState.FAILED
-        assert "_StartFailed" in _callbacks()
+        name, ends = _asked_at_commit(starts, "_StartFailed")
+        assert name == f"{START_JOB}:{START_FAILED_KEY}:{asking.id}"
         assert _debrief_notices(session, project) == []
         clear_after_commit_callbacks()
-        starts._job_start_failed(asking.id, LoopHandle("start-failed"))
+        ends(LoopHandle(name))
         [notice] = _debrief_notices(session, project)
         assert session.get_one(Work, run.id).debrief_notice_id == notice.id
         assert notice.seq == session.get_one(Item, asking.id).seq + 1
@@ -9635,7 +9637,7 @@ class TestPassEndsOffItsTurnsEnd:
         """A `scoped_session` opened by a callback of the commit would run
         that commit's callbacks again at its own, this one among them."""
         _, asking, brief = self._starting_pass(container, fake, session, project)
-        asked = _loops_asked(starts, monkeypatch)
+        asked = loops_asked(starts._supervisor, monkeypatch)
         clear_after_commit_callbacks()
 
         with scoped_session(container) as db:
@@ -9656,18 +9658,19 @@ class TestPassEndsOffItsTurnsEnd:
         run = _ended_run(session, container, fake, project)
         give_debrief(session, run)
         asking = _pass(session, container, project, run)
-        asked = _loops_asked(starts, monkeypatch)
+        asked = loops_asked(starts._supervisor, monkeypatch)
 
         with scoped_session(container) as db:
             starts.pass_stopped(db, db.get_one(models.Session, asking.id))
 
-        assert asked == [f"{START_JOB}:{PASS_STOPPED_KEY}:{asking.id}"]
+        name = f"{START_JOB}:{PASS_STOPPED_KEY}:{asking.id}"
+        assert list(asked) == [name]
         assert _debrief_notices(session, project) == []
-        starts._pass_stopped(asking.id, LoopHandle("pass-stopped"))
+        asked[name](LoopHandle(name))
         [notice] = _debrief_notices(session, project)
         assert session.get_one(Work, run.id).debrief_notice_id == notice.id
         # Once per Work (DB 607): a second run of the loop places no other.
-        starts._pass_stopped(asking.id, LoopHandle("pass-stopped"))
+        asked[name](LoopHandle(name))
         assert _debrief_notices(session, project) == [notice]
 
     def test_a_job_of_another_trigger_stopped_elsewhere_asks_for_no_placement(

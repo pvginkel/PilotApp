@@ -8,9 +8,10 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
+import pytest
 from prometheus_client.metrics import MetricWrapperBase
 
-from app.services.supervisor import LoopHandle, Supervisor
+from app.services.supervisor import LoopHandle, LoopRun, Supervisor
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 
 # The longest a test waits for a thread to get somewhere.
@@ -112,3 +113,25 @@ def wait_until(condition: Callable[[], bool], what: str) -> None:
     while not condition():
         assert time.perf_counter() < deadline, f"not {what} in {WAIT_SECONDS} s"
         time.sleep(0.01)
+
+
+def loops_asked(
+    supervisor: Supervisor, monkeypatch: pytest.MonkeyPatch
+) -> dict[str, LoopRun]:
+    """Each loop `supervisor` is asked for from now on, by its name, with the
+    run it was handed; none of them run."""
+    asked: dict[str, LoopRun] = {}
+
+    def recording(
+        job: str,
+        run: LoopRun,
+        key: str | int | None = None,
+        *,
+        again: bool = False,
+        quiet: bool = False,
+    ) -> bool:
+        asked[job if key is None else f"{job}:{key}"] = run
+        return True
+
+    monkeypatch.setattr(supervisor, "start_loop", recording)
+    return asked
