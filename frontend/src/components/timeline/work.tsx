@@ -4,7 +4,9 @@
  * environment's name in words that go nowhere, its full name their tooltip; on a phone its icon
  * alone, a button that shows the full name in a popover under it; a pulse while its run is under
  * way, from its start, and the running time, "17m", beside it once its run began (F26.1, F12),
- * the tile's one motion, its line standing still (D167); then Session log and Stop as icons, their
+ * the tile's one motion, its line standing still (D167); after the time, the badge of the time it
+ * still takes and the running step's kind as its run published it (F156.8), both on a line of their
+ * own under the head where its row would cut them, as on a phone; then Session log and Stop as icons, their
  * names their tooltips, before the head's Discuss (F26.8). Under its title is its one line
  * (F26.2): the server's own words while its session comes up, or comes back while its environment
  * restarts; the call it runs alone, "Reading …/chat/tools.ts", Thinking or Writing alone, the
@@ -38,6 +40,7 @@ import { Link } from '@tanstack/react-router';
 import { CircleAlert, Play, RotateCw, ScrollText, Server, Square, X } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { BusyIcon } from '@/components/shared/busy-icon';
+import { EtaBadge } from '@/components/shared/eta-badge';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Popover } from '@/components/shared/popover';
 import { StepsButton } from '@/components/shared/steps-button';
@@ -106,6 +109,7 @@ export function WorkItem({ item, lineFocus }: { item: TimelineItem; lineFocus: L
         {/* A job's environment is the store's once its start takes it. */}
         {!work.pilots_own && work.environment !== null && <EnvironmentChip name={work.environment.name} />}
         {underWay(work) && <Live since={work.state === 'running' ? work.started_at : null} />}
+        {work.estimate !== null && <Eta estimate={work.estimate} />}
         <SessionLog item={item} />
         {actions === 'stop' && (
           <button
@@ -455,6 +459,52 @@ function Running({ since }: { since: string }) {
     <span role="timer" title={`Running for ${figure}`} aria-label={`Running for ${figure}`} data-testid="timeline.work.running">
       {figure}
     </span>
+  );
+}
+
+/**
+ * The badge of the time the work item still takes, then the running step's kind, shown as given. In
+ * the head's row they stand after the running time; where that row wraps with them in it, they take
+ * a line of their own under it (`eta-below`, timeline.css), the row as it was.
+ */
+function Eta({ estimate }: { estimate: NonNullable<Work['estimate']> }) {
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (box === null) return undefined;
+    const head = box.closest<HTMLElement>('.item-head')!;
+    // React writes `className` only when it changes, so the class set here stays.
+    const fit = () => {
+      head.classList.remove('eta-below');
+      const row = head.firstElementChild!.getBoundingClientRect().bottom;
+      const under = (part: Element) => part.getBoundingClientRect().top >= row - 1;
+      head.classList.toggle('eta-below', under(box) || under(head.lastElementChild!));
+    };
+    fit();
+    // The line it takes changes the head's height, never its width.
+    let width = head.clientWidth;
+    const resized = new ResizeObserver(() => {
+      if (head.clientWidth === width) return;
+      width = head.clientWidth;
+      fit();
+    });
+    resized.observe(head);
+    const changed = new MutationObserver(fit);
+    changed.observe(head, { childList: true, subtree: true, characterData: true });
+    return () => {
+      resized.disconnect();
+      changed.disconnect();
+      head.classList.remove('eta-below');
+    };
+  }, [box]);
+  return (
+    <div ref={setBox} className="work-eta">
+      <EtaBadge estimate={estimate} testId="timeline.work.eta" />
+      {estimate.kind !== null && (
+        <span className="eta-more" title={estimate.kind} data-testid="timeline.work.eta.kind">
+          {estimate.kind}
+        </span>
+      )}
+    </div>
   );
 }
 

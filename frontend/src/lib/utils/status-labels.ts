@@ -5,7 +5,8 @@
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
  * of the app's people stopped it (F71, F135.6), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). What Pilot
  * does on an item that is Pilot's, on its line (F13.7) and on the strip over it opened (F28.9). How a condition that holds all work reads
- * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2).
+ * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2). How the time a running
+ * work item still takes reads on its badge, at rest and as the alert (F156.7, F156.8).
  */
 
 import { Circle, CircleCheck, CircleDashed, Hourglass, OctagonPause, Pause, RefreshCw, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
@@ -27,6 +28,7 @@ type Condition = components['schemas']['ConditionsSchema.6c014b4.ConditionSchema
 type OverruleKind = components['schemas']['ConditionsSchema.6c014b4.OverruleKind'];
 type HaltSetting = components['schemas']['ConditionsSchema.6c014b4.HaltSetting'];
 type Doing = components['schemas']['TimelineSchema.1fdd8ae.Doing'];
+type Estimate = components['schemas']['TimelineSchema.1fdd8ae.EstimateSchema'];
 
 interface StepReading {
   text: string;
@@ -626,4 +628,53 @@ export function sessionLogTail(work: Work, selfHandle: string, endedAt: string |
       return { mark: 'ended', text: String(unknown), at: endedAt };
     }
   }
+}
+
+/** A span of minutes in the badge's units: "25 min", "1 h", "1 h 5 min". */
+function minutesWords(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
+}
+
+interface EstimateBadge {
+  /** The badge is the alert's: red, with the clock's alert. */
+  alert: boolean;
+  /** What stands after the clock: the time left as the server rounds it, with no tilde; the alert's em dash; nothing. */
+  text: string | null;
+}
+
+/**
+ * The badge of the time a running work item still takes (F156.7, F156.8), from the estimate as the
+ * server gives it: at rest the time left; a running step that has outrun every past step it is read
+ * against, the alert with an em dash where the time stood; a step the workflow marked, the alert
+ * with the time left, or alone where the work item has no estimate.
+ */
+export function estimateBadge(estimate: Estimate): EstimateBadge {
+  const left = estimate.minutes === null ? null : minutesWords(estimate.minutes);
+  switch (estimate.longer_than_usual) {
+    case null:
+      return { alert: false, text: left };
+    case 'outrun':
+      return { alert: true, text: '—' };
+    case 'marked':
+      return { alert: true, text: left };
+    default: {
+      const unknown: never = estimate.longer_than_usual;
+      return unknown;
+    }
+  }
+}
+
+/** A badge at rest as a screen reader names it: "25 min left". */
+export const estimateLeftLabel = (text: string) => `${text} left`;
+
+/**
+ * The alert's sentence, on hover or a press (F156.8): the work item by its `title` in a project's
+ * head, "It" on the work item itself, and how long its run has taken where the server says.
+ */
+export function estimateAlertSentence(estimate: Estimate, title: string | null): string {
+  const who = title ?? 'It';
+  const ran = estimate.ran_seconds === null ? 'runs' : `has run ${minutesWords(Math.round(estimate.ran_seconds / 60))},`;
+  return `${who} ${ran} longer than such work usually takes: it may be stuck.`;
 }

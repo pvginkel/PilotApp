@@ -55,6 +55,7 @@ import { Timeline } from '@/components/timeline/timeline';
 import { DocTabContext, tabLeftOn, TabMovesContext, useDocTabs } from '@/hooks/use-doc-tabs';
 import { discussIn, DiscussContext } from '@/hooks/use-discuss';
 import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
+import { useEstimates } from '@/hooks/use-estimates';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePanel } from '@/hooks/use-panel';
 import { isPhone, usePhone } from '@/hooks/use-phone';
@@ -151,6 +152,7 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
       opened !== null || attached !== null || loose !== null || alone !== null || handbook || journal || projectDocument || sessionId !== undefined;
     return (
       <ShownProjectContext.Provider value={shown}>
+        <Estimates projectId={projectId} />
         <PhoneProject projectId={projectId} project={data} overlaid={overlaid}>
           {documents}
           {alone !== null && <ItemOverlay projectId={projectId} project={data} {...alone} />}
@@ -181,11 +183,18 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
               : null;
   return (
     <ShownProjectContext.Provider value={shown}>
+      <Estimates projectId={projectId} />
       <DeskProject projectId={projectId} project={data} tab={tab} goneTo={goneTo} log={log}>
         {documents}
       </DeskProject>
     </ShownProjectContext.Provider>
   );
+}
+
+/** Keeps the badges of the project's running work current (use-estimates.ts), drawing nothing: each of the timeline's moves draws it alone. */
+function Estimates({ projectId }: { projectId: string }) {
+  useEstimates(projectId);
+  return null;
 }
 
 interface DeskProjectProps {

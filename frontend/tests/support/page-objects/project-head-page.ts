@@ -9,12 +9,15 @@ type Ask = Exclude<Act, 'join' | 'leave'>;
 /**
  * A project's head (F2), auto pilot's switch, its dialog and its warning triangle (F4), the plan popover its
  * step button opens (F3), the plan's notes (F2.7), the members and the count they fold to in a
- * tight head (F2.5), and the project's menu and the dialogs it opens (F2.4). On a phone the head is
+ * tight head (F2.5), the badge of the time its running work still takes (F156.8), and the project's menu and the dialogs it opens (F2.4). On a phone the head is
  * one line, its donut alone standing for the step button (F2.8, F3.7).
  */
 export class ProjectHeadPage {
   readonly root: Locator;
   readonly name: Locator;
+  /** The badge of the time the project's running work still takes, after its name, and the alert's sentence (F156.8). */
+  readonly eta: Locator;
+  readonly etaSays: Locator;
   readonly ticket: Locator;
   readonly repo: Locator;
   readonly draft: Locator;
@@ -45,6 +48,8 @@ export class ProjectHeadPage {
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('project.head');
     this.name = page.getByTestId('project.name');
+    this.eta = page.getByTestId('project.eta');
+    this.etaSays = page.getByTestId('project.eta.says');
     this.ticket = page.getByTestId('project.ticket');
     this.repo = page.getByTestId('project.repo');
     this.draft = page.getByTestId('project.draft');

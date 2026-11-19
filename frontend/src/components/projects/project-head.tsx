@@ -3,7 +3,9 @@
  * its dialog as it turns on while confirmations it would take are open (F4.2), its warning
  * triangle while work briefed under the other setting runs (F4.3), or the Finished chip
  * once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
- * (F2.5); the plan's notes (F2.7); the project's menu (F2.4). The side panel beside it is always
+ * (F2.5); the plan's notes (F2.7); the project's menu (F2.4). Right after its name stands the badge
+ * of the time its running work still takes (F156.8), the one of its work items' the server picks,
+ * whose alert's sentence names that work item. The side panel beside it is always
  * open, and nothing in the head toggles it (F2.3): the chat is its Chat tab, the documents and the
  * handbook its Documents tab. A draft, which has no handbook (F129.2), has in its head its name,
  * the Draft chip, its members and its menu (F46.2); its Create project stands at its definition
@@ -12,7 +14,7 @@
  *
  * In a tight head its parts give way in one order: the repo, the name down to its floor, 250px or
  * its own width where it is narrower, the step's name down to its floor, then the members, folding
- * to the first avatars and a count; the ticket, the chips, auto pilot and the icons keep their size,
+ * to the first avatars and a count; the badge, the ticket, the chips, auto pilot and the icons keep their size,
  * and the step button stands no wider than 350px. Where they still run past the head, it stands in
  * its two rows: the name and auto pilot, the name taking what its row leaves, then the step, the
  * members and the icons.
@@ -25,6 +27,7 @@ import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
+import { EtaBadge } from '@/components/shared/eta-badge';
 import { LinkedText } from '@/components/shared/linked-text';
 import { useAutopilotFlip } from '@/hooks/use-autopilot-flip';
 import { usePress } from '@/hooks/use-press';
@@ -57,6 +60,7 @@ export function ProjectHead({ project, ref }: ProjectHeadProps) {
         <h1 ref={heading} data-testid="project.name">
           <LinkedText text={name} />
         </h1>
+        <HeadEta project={project} />
         {draft && (
           <span className="chip draft-chip" data-testid="project.draft">
             Draft
@@ -89,6 +93,15 @@ export function ProjectHead({ project, ref }: ProjectHeadProps) {
       </div>
     </header>
   );
+}
+
+/** The head's badge (F156.8): the estimate the head carries, its alert's sentence naming the work item it is of. */
+export function HeadEta({ project }: { project: Project }) {
+  const { estimate } = project;
+  if (estimate === null) return null;
+  // A head's read names one of its own running work; an estimate read since may name one started after it.
+  const title = project.running_work.find((work) => work.id === estimate.item_id)?.title ?? null;
+  return <EtaBadge estimate={estimate} title={title} testId="project.eta" />;
 }
 
 const AUTOPILOT_FORM = 'project.autopilot';

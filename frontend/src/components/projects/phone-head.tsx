@@ -1,6 +1,7 @@
 /**
  * A project's head on a phone (F2.8, F98.3), one line: the arrow to the home; the name and its chip,
- * with no ticket and no repo; the auto pilot switch without its label, its warning triangle after
+ * with no ticket and no repo; after the name the badge of the time its running work still takes,
+ * its alert's sentence spanning the page under the head (F156.8); the auto pilot switch without its label, its warning triangle after
  * it (F4.3), or the Finished chip in its place, the Archived and Finished chips their icon alone,
  * their word the tooltip's and a screen reader's; the plan's donut alone, a tap on it showing the Plan
  * tab (F3.7); the members, two circles at most (F2.5); the plan's notes button while it shows (F2.7);
@@ -13,7 +14,7 @@
 import { Archive } from 'lucide-react';
 import { PlanDonut } from '@/components/projects/plan-popover';
 import { NotesButton } from '@/components/projects/plan-notes';
-import { Autopilot } from '@/components/projects/project-head';
+import { Autopilot, HeadEta } from '@/components/projects/project-head';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
@@ -36,6 +37,7 @@ export function PhoneHead({ project, onHome, onPlan }: PhoneHeadProps) {
       <h1 data-testid="project.name">
         <LinkedText text={project.name ?? 'New project'} />
       </h1>
+      <HeadEta project={project} />
       {draft && (
         <span className="chip draft-chip" data-testid="project.draft">
           Draft

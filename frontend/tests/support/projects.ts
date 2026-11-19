@@ -43,7 +43,8 @@ type InventedFile = components['schemas']['InventedAttachmentsCreateSchema.6d6b3
 /** A file to attach, its bytes as they are. */
 export type AttachedFile = Omit<InventedFile, 'content'> & { content: string | Buffer };
 type WorkSpec = components['schemas']['InventedWorkCreateSchema.6d6b324'];
-type ProgressStep = components['schemas']['SetProgressRequestSchema.ce33d8b.ProgressStepRequestSchema'];
+export type ProgressStep = components['schemas']['SetProgressRequestSchema.ce33d8b.ProgressStepRequestSchema'];
+type Estimates = components['schemas']['ProjectEstimatesSchema.e86ccd6'];
 type Progress = components['schemas']['ProgressSchema.ce33d8b'];
 export type DebriefEntry = components['schemas']['RegisterDebriefRequestSchema.ce33d8b.DebriefEntryRequestSchema'];
 /** What a debrief is an account of, and whether it completes it (F85.5). */
@@ -391,6 +392,13 @@ export class Projects {
   /** A work item's session, as the signed-in person reads the project's timeline. */
   async work(projectId: string, itemId: string): Promise<Work> {
     return (await this.item(projectId, itemId)).work!;
+  }
+
+  /** The estimates of a project's running work as the server reads them now, the read the page makes each minute (F156.8). */
+  async estimates(id: string): Promise<Estimates> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/projects/${id}/estimates`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as Estimates;
   }
 
   /** Stops a work item's session, as the signed-in person: answers its status. */

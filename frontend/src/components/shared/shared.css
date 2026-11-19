@@ -346,6 +346,53 @@
   .menu-item:hover { background: hsl(var(--accent)); }
   .menu-item .icon { position: relative; top: calc(0.5em - 0.5cap); color: hsl(var(--muted-foreground)); }
 
+  /* ---- The time a running work item still takes (eta-badge.tsx; PilotAppSpecs design/mockup
+     style.css, "The ETA, a badge") ----------------------------------------------------------- */
+
+  /* A clock and the time left on the muted primary, 22px high, its text and icon in the size of
+     what it stands in; red, with the clock's alert, while the work runs longer than usual. The
+     alert's sentence drops under it on hover off a phone, and on a press. */
+  .eta-wrap { position: relative; flex: none; align-self: center; display: inline-flex; }
+  .eta-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 7px;
+    border: 0;
+    border-radius: 6px;
+    background: hsl(var(--primary-muted));
+    color: hsl(var(--primary-muted-foreground));
+    font: inherit;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .eta-badge .icon { vertical-align: 0; }
+  .eta-badge.long { background: hsl(var(--destructive) / 0.12); color: hsl(var(--destructive-text)); cursor: pointer; }
+  :root[data-theme="dark"] .eta-badge.long { background: hsl(var(--destructive) / 0.24); }
+  .eta-pop {
+    display: none;
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 30;
+    width: max-content;
+    max-width: 300px;
+    padding: 8px 12px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    box-shadow: var(--shadow-lg);
+    color: hsl(var(--foreground));
+    font-size: var(--text-sm);
+    font-weight: 400;
+    line-height: 1.45;
+    white-space: normal;
+  }
+  .eta-badge[aria-expanded="true"] + .eta-pop { display: block; }
+  @media (hover: hover) { .eta-wrap:hover .eta-pop { display: block; } }
+
   /* ---- Popovers (popover.tsx) ----------------------------------------------------------- */
 
   .popover-anchor { position: relative; }
