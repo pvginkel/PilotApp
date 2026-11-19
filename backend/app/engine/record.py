@@ -1176,13 +1176,13 @@ class RecordService:
         self.view_service.timeline_moved(self.db.get_one(Project, item.project_id))
 
     def debrief_notice_after_pass(self, project: Project, job: Work) -> None:
-        """The end of the job `job` of `project`, at its last turn's end or
-        its failure, in the caller's transaction, which holds the project's
-        row exclusively: where it is the job after a worker's turn, the pass,
-        the debrief's notice of the run whose turn it followed, placed now,
-        so that the lines the pass wrote are in it when it is first seen (DB
-        609; `place_debrief_notice`). A job of any other trigger places
-        none."""
+        """The end of the job `job` of `project`, at its last turn's end, its
+        failure, or a stop nothing of the server's retries, in the caller's
+        transaction, which holds the project's row exclusively: where it is
+        the job after a worker's turn, the pass, the debrief's notice of the
+        run whose turn it followed, placed now, so that the lines the pass
+        wrote are in it when it is first seen (DB 609;
+        `place_debrief_notice`). A job of any other trigger places none."""
         if job.trigger_code is not WorkTrigger.WORKER_TURN_ENDED:
             return
         # The job after a worker's turn names the run.

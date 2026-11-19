@@ -851,7 +851,10 @@ class RelayService:
         documents it was writing are let go, as at a turn's end, and the
         environment's shutdown timer is armed. A work item's slot opens once
         this commits. A Block its stop leaves to a person is handed then
-        (`hand_over`)."""
+        (`hand_over`). A pass stopped here, which nothing retries, has the
+        debrief's notice of the run it followed placed once this commits
+        (`SessionStartService.pass_stopped`; DB 609); one stopped already
+        keeps what its stop owes."""
         handing = _sides(db, session)
         self._records(db).append(
             session.id,
@@ -872,6 +875,8 @@ class RelayService:
             session.current_line = None
             self._moved(session, state=True)
             self._slots.left(session, SessionState.RUNNING)
+            if session.kind_code == JOB_KIND:
+                self._container.session_start_service().pass_stopped(db, session)
         self._container.document_service().turn_ended(session)
         self._closes.turn_ended(db, session)
         self._reads.run_closed(db, session)
@@ -1190,7 +1195,9 @@ class RelayService:
         run has its documents read, the job after its turn following them,
         and a clarification run's reply recorded; a pass's last turn ended
         `idle` or `failed` places the debrief's notice of the run it followed
-        (DB 609) and puts the questions it asked to the writer (DB 254, 255).
+        (DB 609) and puts the questions it asked to the writer (DB 254, 255),
+        and one ended interrupted, a stop made elsewhere, places the notice
+        alone.
         A worker's run whose turn ends `idle` while the halt file is
         wanted for it, a cooperative usage halt holding or its project
         paused, is not done: its nudge is owed, and a clarification run's
@@ -1204,6 +1211,15 @@ class RelayService:
             session.state_code = SessionState.STOPPED
             session.stopped_at = at
             session.stopped_by_user_id = None
+            if session.kind_code == JOB_KIND:
+                # A stop of Pilot's or a person's writes the Session
+                # `stopped` before it interrupts the turn, and never comes
+                # here: this interrupt was made elsewhere, and nothing
+                # retries the job.
+                self._container.record_service().debrief_notice_after_pass(
+                    db.get_one(Project, session.project_id),
+                    db.get_one(Work, session.id),
+                )
         elif work and frame.is_error:
             session.state_code = SessionState.FAILED
             if turn_shows_wall(db, session.id, turn.id):

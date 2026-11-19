@@ -63,7 +63,7 @@ from app.models.reference import (
     WorkTrigger,
 )
 from app.schemas.timeline import StopCause
-from app.services.brief_service import RESTARTED
+from app.services.brief_service import RESTARTED, is_restarted
 from app.services.chat_close_service import CLOSED, ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
@@ -97,6 +97,11 @@ from app.services.session_record_service import (
     read_records,
 )
 from app.services.session_scope import project_folder
+from app.services.session_start_service import (
+    PASS_STOPPED_KEY,
+    START_JOB,
+    SessionStartService,
+)
 from app.services.sse_connection_manager import SSEConnection
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
@@ -5954,7 +5959,6 @@ class TestDebriefNoticeAtThePassEnd:
             [self.LINES] if outcome == "success" else []
         )
 
-    @pytest.mark.parametrize("stop", ["interrupted", "stopped"])
     def test_a_stopped_end_places_none_and_the_end_of_its_retry_places_it(
         self,
         session: DbSession,
@@ -5964,18 +5968,17 @@ class TestDebriefNoticeAtThePassEnd:
         controller_client: ControllerClient,
         controller_session: str,
         project: Project,
-        stop: str,
     ) -> None:
-        """DB 281: the store's update stops the pass under its turn and the
-        server retries it at the lift, a fresh job after the same run
+        """DB 281: the store's update stops the pass under its turn, the
+        Session `stopped` before the interrupt ends the turn, and the server
+        retries it at the lift, a fresh job after the same run
         (`JobService.retry`), whose end places the notice."""
         run, _, _ = _done_run(session, container, project)
         give_debrief(session, run)
         asking = _pass_of(session, container, project, run, controller_session)
         _send(relays, session, asking, "/pre-rule")
-        if stop == "stopped":
-            _stopped(asking)
-            session.flush()
+        _stopped(asking)
+        session.flush()
         _turn_of(
             fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
         )
@@ -6065,6 +6068,308 @@ class TestDebriefNoticeAtThePassEnd:
         _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
         _relay(relays, asking)
 
+        [notice] = _debrief_notices(session, project)
+        assert session.get_one(Work, run.id).debrief_notice_id == notice.id
+
+
+def _loops_asked(
+    starts: SessionStartService, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
+    """Each loop the start's supervisor is asked for from now on, none of
+    them run."""
+    asked: list[str] = []
+
+    def recording(
+        job: str, run: Any, key: str | int | None = None, *, again: bool = False
+    ) -> bool:
+        asked.append(job if key is None else f"{job}:{key}")
+        return True
+
+    monkeypatch.setattr(starts._supervisor, "start_loop", recording)
+    return asked
+
+
+class TestDebriefNoticeAtAStopMadeElsewhere:
+    """A pass stopped under its turn by a stop made elsewhere, which nothing
+    retries, has the debrief's notice of the run it followed placed once the
+    stop commits, on the start's loop for it; one the store's update stopped
+    already keeps that stop, whose lift's retry places it (F26.12; DB 609,
+    281; decision 85, "Every way the pass can end places the notice")."""
+
+    LINES = "Its first stop: the suite lock was held for forty minutes."
+
+    @pytest.fixture
+    def fake_controller(self) -> Iterator[_Settling]:
+        fake = _Settling(keepalive_seconds=0.2)
+        try:
+            yield fake
+        finally:
+            fake.close()
+
+    @pytest.fixture
+    def starts(
+        self, container: ServiceContainer, relays: RelayService
+    ) -> SessionStartService:
+        """The start the relays reach through the container."""
+        starts: SessionStartService = container.session_start_service()
+        return starts
+
+    @pytest.fixture
+    def run(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> models.Session:
+        """A worker's done run whose debrief completes."""
+        run, _, _ = _done_run(session, container, project)
+        give_debrief(session, run)
+        return run
+
+    @pytest.fixture
+    def asking(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        project: Project,
+        run: models.Session,
+        controller_session: str,
+    ) -> models.Session:
+        """The pass after the run's turn, its turn in flight."""
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        return asking
+
+    def _placed(
+        self,
+        db: DbSession,
+        starts: SessionStartService,
+        project: Project,
+        run: models.Session,
+        asking: models.Session,
+        asked: list[str],
+    ) -> Item:
+        """The notice the stop's loop places, asked for and not yet run."""
+        assert (asking.state_code, asking.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            None,
+        )
+        assert f"{START_JOB}:{PASS_STOPPED_KEY}:{asking.id}" in asked
+        assert _debrief_notices(db, project) == []
+        starts._pass_stopped(asking.id, LoopHandle("pass-stopped"))
+        [notice] = _debrief_notices(db, project)
+        assert db.get_one(Work, run.id).debrief_notice_id == notice.id
+        assert notice.seq == db.get_one(Item, asking.id).seq + 1
+        return notice
+
+    @pytest.mark.parametrize("status", ["stopped", "deleting", "error"])
+    def test_an_environment_that_settles_stopped_under_the_pass_places_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        starts: SessionStartService,
+        fake_controller: _Settling,
+        project: Project,
+        run: models.Session,
+        asking: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+        status: EnvironmentStatus,
+    ) -> None:
+        """Without Pilot's lines, as a failure places it."""
+        fake_controller.set_status(ENV, status)
+        asked = _loops_asked(starts, monkeypatch)
+
+        _relay(relays, asking)
+
+        notice = self._placed(session, starts, project, run, asking, asked)
+        assert _notable(container, project, notice) == []
+
+    def test_an_environment_gone_while_waited_for_places_it_with_the_lines_written(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        starts: SessionStartService,
+        fake_controller: _Settling,
+        project: Project,
+        run: models.Session,
+        asking: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        container.pilot_store_service().write_notable(
+            Brain(asking.id, project.id, "job"), self.LINES
+        )
+        fake_controller.set_status(ENV, "stopping")
+        fake_controller.script = [None]
+        asked = _loops_asked(starts, monkeypatch)
+
+        _relay(relays, asking)
+
+        notice = self._placed(session, starts, project, run, asking, asked)
+        assert _notable(container, project, notice) == [self.LINES]
+
+    def test_an_environment_the_resume_does_not_find_places_it(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        starts: SessionStartService,
+        fake_controller: _Settling,
+        project: Project,
+        run: models.Session,
+        asking: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_controller.remove_environment(ENV)
+        asked = _loops_asked(starts, monkeypatch)
+
+        _relay(relays, asking)
+
+        self._placed(session, starts, project, run, asking, asked)
+
+    def test_a_turn_interrupted_from_elsewhere_places_it_at_the_turns_end(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: _Settling,
+        controller_session: str,
+        project: Project,
+        run: models.Session,
+        asking: models.Session,
+    ) -> None:
+        """An interrupt no stop of Pilot's made finds the pass `running`:
+        it stops by no one, and the lift retries Pilot's stops alone."""
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
+        )
+
+        _relay(relays, asking)
+
+        assert (asking.state_code, asking.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            None,
+        )
+        [notice] = _debrief_notices(session, project)
+        assert session.get_one(Work, run.id).debrief_notice_id == notice.id
+        assert notice.seq == session.get_one(Item, asking.id).seq + 1
+        assert _notable(container, project, notice) == []
+
+    def test_a_pass_the_stores_update_stopped_already_keeps_that_stop(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        starts: SessionStartService,
+        fake_controller: _Settling,
+        project: Project,
+        asking: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """DB 281: its lift retries it, and the retry's end places the
+        notice; a stop a person made keeps what it placed."""
+        stopped_at = _stopped(asking)
+        session.flush()
+        fake_controller.set_status(ENV, "stopped")
+        asked = _loops_asked(starts, monkeypatch)
+
+        _relay(relays, asking)
+
+        assert asking.turn_ended_at is not None
+        assert asking.stopped_at == stopped_at
+        assert f"{START_JOB}:{PASS_STOPPED_KEY}:{asking.id}" not in asked
+        assert _debrief_notices(session, project) == []
+
+    def test_a_job_of_another_trigger_stopped_elsewhere_asks_for_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        starts: SessionStartService,
+        fake_controller: _Settling,
+        project: Project,
+        controller_session: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _environment_row(session)
+        setup = _agent_session(session, project, controller_session)
+        setup.kind_code = "job"
+        session.flush()
+        container.record_service().place_work(
+            project, setup, "Setting up the project", trigger=WorkTrigger.SETUP
+        )
+        _send(relays, session, setup, "/setup")
+        fake_controller.set_status(ENV, "stopped")
+        asked = _loops_asked(starts, monkeypatch)
+
+        _relay(relays, setup)
+
+        assert setup.state_code is SessionState.STOPPED
+        assert not [name for name in asked if PASS_STOPPED_KEY in name]
+
+
+class TestDebriefNoticeAfterARestart:
+    """A pass's turn cut by its environment's restart is carried on as any
+    job's is, never by the restart's turn a work item gets, so one that then
+    ends with no text and no tool call ends `idle`, its pass's end, which
+    places the notice: the failure of a turn that came back empty is a work
+    item's alone (F71; DB 609)."""
+
+    def test_a_resume_carries_a_pass_on_with_no_restarts_turn(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        project.state_code, project.slug = ProjectState.OPEN, "soup-club"
+        run, _, _ = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, controller_session)
+        asking.cwd = "/work/PilotProjects"
+        session.flush()
+        _send(relays, session, asking, "/pre-rule")
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+        # The box the re-create keeps: the store's repo and the project's
+        # folder.
+        fake_controller.put_file(ENV, "/work/PilotProjects/CLAUDE.md", b"# Pilot\n")
+        fake_controller.put_file(ENV, "/work/Projects/soup-club/plan.json", b"{}")
+        handle = LoopHandle(f"relay:{asking.id}")
+        resume = relays._resume
+
+        def resume_once(*args: Any) -> None:
+            resume(*args)
+            handle._request_stop()
+
+        monkeypatch.setattr(relays, "_resume", resume_once)
+
+        relays.relay(asking.id, handle)
+
+        carried_on = session.scalars(
+            select(Turn).where(Turn.session_id == asking.id).order_by(Turn.seq.desc())
+        ).first()
+        assert carried_on is not None
+        assert carried_on.cause_code is TurnCause.CARRY_ON
+        assert not is_restarted(carried_on)
+
+    def test_a_pass_carried_on_that_ends_empty_ends_idle_and_places_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        run, _, _ = _done_run(session, container, project)
+        give_debrief(session, run)
+        asking = _pass_of(session, container, project, run, controller_session)
+        turn = _send(relays, session, asking, CONTINUE)
+        _turn_of(fake_controller, controller_session, _turn_saying(), result="")
+
+        _relay(relays, asking)
+
+        assert (asking.state_code, turn.error) == (SessionState.IDLE, None)
         [notice] = _debrief_notices(session, project)
         assert session.get_one(Work, run.id).debrief_notice_id == notice.id
 

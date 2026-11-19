@@ -33,8 +33,9 @@ is asked (`lift_requested_at`):
    person. A stopped turn still ending, which that Retry refuses too, holds
    the lift to a later run. Once `lifted_at` commits, the held starts are
    released, the nudges sent, the conditions told, and each project of a job
-   left to a person's Retry changed, its pass's documents the person's. The
-   server retries no other job (D078).
+   left to a person's Retry changed, its pass's documents the person's, the
+   debrief's notice of the run a pass so left followed placed in that
+   transaction (DB 609). The server retries no other job (D078).
 
 A lift asked goes to 4 from wherever the sequence stands. The job's reconcile
 at STARTUP and the timer `store-update`, on every tick, run the loop while an
@@ -63,7 +64,7 @@ from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import ProjectChanged
 from app.exceptions import InvalidOperationException
-from app.models import Item, StoreUpdate, Work
+from app.models import Item, Project, StoreUpdate, Work
 from app.models import Session as AgentSession
 from app.models.reference import SessionState
 from app.services.advisory_turn import advisory_turn
@@ -309,18 +310,35 @@ class StoreUpdater:
             update = _locked(db, update_id)
             if update.lifted_at is not None:
                 return
-            left = db.scalars(
-                _retriable(update).with_only_columns(AgentSession.project_id)
-            ).all()
-            handing = [sides(db, project_id) for project_id in sorted(set(left))]
+            left = [
+                db.get_one(Work, job_id)
+                for job_id in db.scalars(_retriable(update)).all()
+            ]
+            # Before any Session's row (the lock order), and as an Item's
+            # birth holds them: a notice is placed under each.
+            projects = {
+                project.id: project
+                for project in db.scalars(
+                    select(Project)
+                    .where(Project.id.in_({job.project_id for job in left}))
+                    .order_by(Project.id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            }
+            handing = [sides(db, project_id) for project_id in projects]
             update.lifted_at = datetime.now(UTC)
             # A job left to a person's Retry is in flight no more from this
             # commit on, and its pass's documents are the person's (DB 296),
-            # handed at the lift.
+            # handed at the lift; a pass so left is at its end, which places
+            # the debrief's notice of the run it followed (DB 609).
             for before in handing:
                 hand_over(db, before, update.lifted_at)
+            records = self._container.record_service()
+            for job in left:
+                records.debrief_notice_after_pass(projects[job.project_id], job)
             bus = self._container.engine_bus()
-            for project_id in left:
+            for project_id in projects:
                 bus.emit(ProjectChanged(project_id))
             after_commit(self._lifted)
             logger.info("The store's update %s: lifted", update_id)

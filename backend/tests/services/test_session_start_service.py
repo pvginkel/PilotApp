@@ -115,8 +115,10 @@ from app.services.session_start_service import (
     NUDGE_AFTER_A_PAUSE,
     NUDGE_AFTER_A_STOP,
     NUDGE_KEY,
+    PASS_STOPPED_KEY,
     RELEASE_KEY,
     START_FAILED,
+    START_FAILED_KEY,
     START_JOB,
     STARTING,
     THE_STORE,
@@ -9533,7 +9535,7 @@ class TestQuotaWallsPass:
 
         continues._fail(session, asking.id, nudged.id, "refused", recorded=False)
 
-        assert "_ContinuationFailed" in _callbacks()
+        assert "_StartFailed" in _callbacks()
         # The failed pass leaves its document to the person, until its
         # questions go to the writer.
         assert _handed_at(session, asked) == _turns(session, asking.id)[-1].ended_at
@@ -9545,11 +9547,170 @@ class TestQuotaWallsPass:
         )
         assert _debrief_notices(session, project) == []
         clear_after_commit_callbacks()
-        continues._continuation_failed(asking.id)
+        continues._job_start_failed(asking.id, LoopHandle("start-failed"))
         assert _clarifying(session, asking).state_code == SessionState.STARTING
         assert _handed_at(session, asked) is None
         # The pass's end, with the debrief's notice of the run it followed.
         assert len(_debrief_notices(session, project)) == 1
+
+
+def _loops_asked(
+    starts: SessionStartService, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
+    """Each loop the start's supervisor is asked for from now on, none of
+    them run."""
+    asked: list[str] = []
+
+    def recording(
+        job: str, run: Any, key: str | int | None = None, *, again: bool = False
+    ) -> bool:
+        asked.append(job if key is None else f"{job}:{key}")
+        return True
+
+    monkeypatch.setattr(starts._supervisor, "start_loop", recording)
+    return asked
+
+
+class TestPassEndsOffItsTurnsEnd:
+    """An end of a pass that is no turn's end, and that nothing of the
+    server's retries, places the debrief's notice of the run it followed: its
+    first turn's failed start, and a stop made elsewhere, each once its
+    transaction has committed, on a loop of its own (F26.12; DB 609; decision
+    85, "Every way the pass can end places the notice")."""
+
+    def _starting_pass(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        db: DbSession,
+        project: Project,
+    ) -> tuple[models.Session, models.Session, Turn]:
+        """A run whose debrief completes, done, and the pass after its turn,
+        `starting` to send its brief, with that Turn."""
+        run = _ended_run(db, container, fake, project)
+        give_debrief(db, run)
+        asking = _pass(db, container, project, run)
+        asking.state_code = SessionState.STARTING
+        db.flush()
+        [brief] = _turns(db, asking.id)
+        return run, asking, brief
+
+    def test_a_first_turn_that_fails_to_start_places_it_once_the_failure_commits(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run, asking, brief = self._starting_pass(container, fake, session, project)
+
+        starts._fail(session, asking.id, brief.id, "refused", recorded=False)
+
+        assert _read(session, asking.id).state_code == SessionState.FAILED
+        assert "_StartFailed" in _callbacks()
+        assert _debrief_notices(session, project) == []
+        clear_after_commit_callbacks()
+        starts._job_start_failed(asking.id, LoopHandle("start-failed"))
+        [notice] = _debrief_notices(session, project)
+        assert session.get_one(Work, run.id).debrief_notice_id == notice.id
+        assert notice.seq == session.get_one(Item, asking.id).seq + 1
+        # It asked nothing, and no clarification run follows it.
+        assert (
+            session.scalars(
+                select(ClarificationRun).where(ClarificationRun.pass_id == asking.id)
+            ).all()
+            == []
+        )
+
+    def test_a_failed_starts_end_runs_on_a_loop_of_its_own_never_under_the_commit(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A `scoped_session` opened by a callback of the commit would run
+        that commit's callbacks again at its own, this one among them."""
+        _, asking, brief = self._starting_pass(container, fake, session, project)
+        asked = _loops_asked(starts, monkeypatch)
+        clear_after_commit_callbacks()
+
+        with scoped_session(container) as db:
+            starts._fail(db, asking.id, brief.id, "refused", recorded=False)
+
+        assert f"{START_JOB}:{START_FAILED_KEY}:{asking.id}" in asked
+        assert _debrief_notices(session, project) == []
+
+    def test_a_pass_stopped_elsewhere_has_it_placed_once_the_stop_commits(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        run = _ended_run(session, container, fake, project)
+        give_debrief(session, run)
+        asking = _pass(session, container, project, run)
+        asked = _loops_asked(starts, monkeypatch)
+
+        with scoped_session(container) as db:
+            starts.pass_stopped(db, db.get_one(models.Session, asking.id))
+
+        assert asked == [f"{START_JOB}:{PASS_STOPPED_KEY}:{asking.id}"]
+        assert _debrief_notices(session, project) == []
+        starts._pass_stopped(asking.id, LoopHandle("pass-stopped"))
+        [notice] = _debrief_notices(session, project)
+        assert session.get_one(Work, run.id).debrief_notice_id == notice.id
+        # Once per Work (DB 607): a second run of the loop places no other.
+        starts._pass_stopped(asking.id, LoopHandle("pass-stopped"))
+        assert _debrief_notices(session, project) == [notice]
+
+    def test_a_job_of_another_trigger_stopped_elsewhere_asks_for_no_placement(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        setup = _job(container, session, project, environment, SessionState.STOPPED)
+        clear_after_commit_callbacks()
+
+        starts.pass_stopped(session, setup)
+
+        assert "_PassStopped" not in _callbacks()
+
+    @pytest.mark.parametrize(
+        "standing",
+        [{"state_code": ProjectState.FINISHED}, {"archived": True}],
+        ids=["finished", "archived"],
+    )
+    def test_a_pass_stopped_in_a_project_closed_since_gets_none(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        standing: dict[str, Any],
+    ) -> None:
+        """DB 609: none in a project finished before the pass ended, nor in
+        one archived, whose Bring back leaves the notice to a Retry's end."""
+        run = _ended_run(session, container, fake, project)
+        give_debrief(session, run)
+        asking = _pass(session, container, project, run)
+        for column, value in standing.items():
+            setattr(project, column, value)
+        session.flush()
+
+        starts._pass_stopped(asking.id, LoopHandle("pass-stopped"))
+
+        assert _debrief_notices(session, project) == []
 
 
 def _fired_job(
@@ -10071,6 +10232,53 @@ class TestTakeOver:
             None,
             None,
         )
+
+    @pytest.mark.parametrize(
+        "found", ["running", "held", "walled", "stopped for the store's update"]
+    )
+    def test_a_pass_taken_over_has_the_debriefs_notice_of_its_run_placed_then(
+        self, starts: SessionStartService, camp: Camp, person: User, found: str
+    ) -> None:
+        """Whatever state the pass is found in: nothing of the server's runs
+        it again, the lift's retry included (F26.12; DB 609, 281)."""
+        run = camp.worker()
+        camp.registered(run, "# Where?\n\n```question id=Q1\n```\n")
+        give_debrief(camp.session, run)
+        camp.ended(run)
+        if found == "stopped for the store's update":
+            camp.session.add(StoreUpdate(made_at=AT))
+            job = camp.job_after(run)
+            camp.stopped(job, by=camp.pilot())
+            job.stopped_at = datetime.now(UTC)
+        elif found == "walled":
+            job = camp.job_after(run, SessionState.FAILED)
+            job.nudge_owed_at = AT
+        else:
+            job = camp.job_after(
+                run,
+                SessionState.RUNNING if found == "running" else SessionState.HELD,
+            )
+        camp.session.flush()
+        assert _debrief_notices(camp.session, camp.project) == []
+
+        starts.take_over(camp.session, [job.id], person)
+
+        [notice] = _debrief_notices(camp.session, camp.project)
+        assert camp.session.get_one(Work, run.id).debrief_notice_id == notice.id
+        assert notice.seq == camp.line(job).seq + 1
+
+    def test_a_take_over_of_no_pass_places_no_debriefs_notice(
+        self, starts: SessionStartService, camp: Camp, person: User
+    ) -> None:
+        """A run's own continuation holds the document: its debrief's notice
+        waits for the pass after its turn."""
+        run = camp.worker()
+        give_debrief(camp.session, run)
+
+        starts.take_over(camp.session, [run.id], person)
+
+        assert run.state_code == SessionState.STOPPED
+        assert _debrief_notices(camp.session, camp.project) == []
 
     def test_one_no_longer_in_flight_under_its_lock_is_left_as_it_is(
         self, starts: SessionStartService, camp: Camp, person: User

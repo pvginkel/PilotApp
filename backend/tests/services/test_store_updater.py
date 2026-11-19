@@ -62,6 +62,7 @@ from app.services.supervisor import JOB_RESTARTS_TOTAL, TIMER_RUNS_TOTAL, LoopHa
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
+from tests.support.debriefs import give_debrief
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
 from tests.support.locks import lock_waits
@@ -830,6 +831,54 @@ class TestLift:
         session.refresh(asked)
         assert asked.id not in sides(session, record.project.id).pilots
         assert asked.handed_at == lifted_at
+
+    @pytest.mark.parametrize("refused", [True, False], ids=["refused", "retried"])
+    def test_a_pass_its_retry_refuses_has_its_runs_debriefs_notice_placed_at_the_lift(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+        refused: bool,
+    ) -> None:
+        """Left to a person's Retry, the pass is at its end, which places the
+        notice without Pilot's lines; one the lift retried has it placed at
+        the retry's end (F26.12; DB 609, 281)."""
+        update = _at_lift(session)
+        record = Camp(container, session)
+        writer = record.worker()
+        give_debrief(session, writer)
+        record.ended(writer)
+        left = record.job_after(writer, SessionState.STOPPED)
+        left.stopped_at = left.turn_started_at = left.turn_ended_at = datetime.now(UTC)
+        left.stopped_by_user_id = record.pilot().id
+        left.turns = 1
+        session.flush()
+        if refused:
+            # The start refuses the Retry's job: no store environment.
+            monkeypatch.setattr(container.session_start_service(), "_store", "")
+        clear_after_commit_callbacks()
+
+        _run(updater)
+
+        assert (_retry_of(session, left) is None) is refused
+        assert _update(session, update.id).lifted_at is not None
+        notices = session.scalars(
+            select(Item).where(
+                Item.project_id == record.project.id,
+                Item.kind_code == "debrief_notice",
+            )
+        ).all()
+        carrying = session.get_one(
+            Work, writer.id, populate_existing=True
+        ).debrief_notice_id
+        if refused:
+            [notice] = notices
+            assert carrying == notice.id
+            assert notice.seq == session.get_one(Item, left.id).seq + 1
+        else:
+            assert (notices, carrying) == ([], None)
 
     def test_a_stopped_turn_still_ending_holds_the_lift_to_a_later_run(
         self,

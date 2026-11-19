@@ -236,6 +236,14 @@ usage halt's hard stop."""
 NUDGE_KEY = "nudges"
 """The key of the start job's loop that sends the nudges owed."""
 
+START_FAILED_KEY = "start-failed"
+"""The key, with the Session's id, of the start job's loop that ends a job
+whose start failed (`_job_start_failed`)."""
+
+PASS_STOPPED_KEY = "pass-stopped"
+"""The key, with the Session's id, of the start job's loop that places the
+debrief's notice a pass stopped elsewhere owes (`_pass_stopped`)."""
+
 PROBE_TIMER = "controller-probe"
 
 NUDGE_TIMER = "nudges"
@@ -353,13 +361,34 @@ class _HeldWritten:
 
 
 @dataclass(frozen=True)
-class _ContinuationFailed:
+class _StartFailed:
     # `after_commit()` runs a callback equal to one it holds once.
     starts: "SessionStartService"
     session_id: uuid.UUID
 
     def __call__(self) -> None:
-        self.starts._continuation_failed(self.session_id)
+        # On a loop of its own: a `scoped_session` opened under the commit
+        # that runs this would run the commit's callbacks again at its own.
+        self.starts._supervisor.start_loop(
+            START_JOB,
+            partial(self.starts._job_start_failed, self.session_id),
+            key=f"{START_FAILED_KEY}:{self.session_id}",
+        )
+
+
+@dataclass(frozen=True)
+class _PassStopped:
+    # `after_commit()` runs a callback equal to one it holds once.
+    starts: "SessionStartService"
+    session_id: uuid.UUID
+
+    def __call__(self) -> None:
+        # On a loop of its own, as `_StartFailed`.
+        self.starts._supervisor.start_loop(
+            START_JOB,
+            partial(self.starts._pass_stopped, self.session_id),
+            key=f"{PASS_STOPPED_KEY}:{self.session_id}",
+        )
 
 
 @dataclass(frozen=True)
@@ -1317,13 +1346,18 @@ class SessionStartService:
         Store Update stopped, is `stopped` by `person` now, its turn as it
         ended; one failed at the quota wall stays `failed`. None is owed its
         nudge afterwards, none has a Hold open, and the lift retries none: it
-        retries Pilot's stops alone (DB 280, 281). The Blocks the stops leave
-        to a person are handed at them (`hand_over`)."""
+        retries Pilot's stops alone (DB 280, 281). A pass among them, the job
+        after a worker's turn, is at its end, whatever state it was found in:
+        the debrief's notice of the run whose turn it took is placed now (DB
+        609), under the project's row, which the caller holds exclusively.
+        The Blocks the stops leave to a person are handed at them
+        (`hand_over`)."""
         records = self._records(db)
         locked = [records.lock_session(work_id) for work_id in sorted(work_ids)]
         at = datetime.now(UTC)
         # The Works are of one project, whose row the caller holds.
-        handing = sides(db, locked[0].project_id)
+        project = db.get_one(Project, locked[0].project_id)
+        handing = sides(db, project.id)
         for work_id in sorted(flying(db, work_ids)):
             session = db.get_one(AgentSession, work_id)
             before = session.state_code
@@ -1335,6 +1369,9 @@ class SessionStartService:
                 self._moved(session, state=True)
             session.nudge_owed_at = None
             turn_hold(db, session, None, at)
+            self._container.record_service().debrief_notice_after_pass(
+                project, db.get_one(Work, work_id)
+            )
             logger.info(
                 "Session %s taken over by %s, %s", work_id, person.handle, before
             )
@@ -2189,9 +2226,11 @@ class SessionStartService:
         send `recorded` one. Then its environment is handed to the shutdown
         timer (`_hand_to_timer`), and a work item's slot opens once this
         commits. A Block the failure leaves to a person is handed at it
-        (`hand_over`). A Session no longer `starting` to send that Turn is left
-        as it is. Its project's row is held shared before the Session's (the lock
-        order, `SessionRecordService.lock_project`)."""
+        (`hand_over`). A job's failed start ends its run, which a loop of its
+        own takes up once this commits (`_job_start_failed`). A Session no
+        longer `starting` to send that Turn is left as it is. Its project's
+        row is held shared before the Session's (the lock order,
+        `SessionRecordService.lock_project`)."""
         records = self._records(db)
         records.lock_project(session_id)
         if not _sends(db, records.lock_session(session_id), turn_id):
@@ -2215,15 +2254,17 @@ class SessionStartService:
         self._moved(session, state=True)
         self._hand_to_timer(db, session)
         self._slots.left(session, SessionState.STARTING)
-        if session.kind_code == JOB_KIND and turn.seq > 1:
-            after_commit(_ContinuationFailed(self, session_id))
+        if session.kind_code == JOB_KIND:
+            after_commit(_StartFailed(self, session_id))
         logger.warning("Session %s failed to start: %s", session_id, reason)
 
-    def _continuation_failed(self, session_id: uuid.UUID) -> None:
-        """A job's continuation, its nudge's, failed to start, which ends
-        its run: a pass's end, as a failed turn's is, the debrief's notice of
-        the run it followed placed (DB 609) and its questions put to the
-        writer (DB 254), under its project's row and then its own."""
+    def _job_start_failed(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
+        """A job's start failed, its first turn's or its continuation's, its
+        nudge's, which ends its run: a pass's end, as a failed turn's is, the
+        debrief's notice of the run it followed placed (DB 609) and its
+        questions put to the writer (DB 254), under its project's row and
+        then its own. The run of a loop of its own, once the failure has
+        committed."""
         with scoped_session(self._container) as db:
             unlocked = db.get_one(AgentSession, session_id)
             # Before the Session's lock (the lock order): the notice's and
@@ -2233,6 +2274,28 @@ class SessionStartService:
             handing = sides(db, session.project_id)
             self._container.clarification_service().pass_ended(session)
             hand_over(db, handing, datetime.now(UTC))
+
+    def pass_stopped(self, db: Session, session: AgentSession) -> None:
+        """The job `session` was stopped under its turn by a stop made
+        elsewhere, which nothing of the server's retries, in the caller's
+        transaction, which holds its project's row shared or not at all: a
+        pass, the job after a worker's turn, has the debrief's notice of the
+        run whose turn it took placed once that commits, on a loop of its
+        own (`_pass_stopped`). A job of any other trigger has none."""
+        trigger = db.scalar(select(Work.trigger_code).where(Work.id == session.id))
+        if trigger is WorkTrigger.WORKER_TURN_ENDED:
+            after_commit(_PassStopped(self, session.id))
+
+    def _pass_stopped(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
+        """The debrief's notice of the run the stopped pass `session_id`
+        followed, placed without Pilot's lines unless the pass wrote them
+        before its stop (DB 609), under its project's row, held as an Item's
+        birth holds it. None in a project finished or archived, and none for
+        a run a notice carries already (`debrief_notice_after_pass`)."""
+        with scoped_session(self._container) as db:
+            work = db.get_one(Work, session_id)
+            project = _standing(db, work.project_id, births=True)
+            self._container.record_service().debrief_notice_after_pass(project, work)
 
     def _settle_missed(self, db: Session, session_id: uuid.UUID) -> None:
         """A Session at the quota wall that a reading decided missed,
