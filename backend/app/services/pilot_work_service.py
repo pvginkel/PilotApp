@@ -4,8 +4,10 @@ Session was created with resolved to the Session, `register_document`
 Effects (F41), `set_progress` and `set_progress_step`, its work item's
 steps (F145), which write none, a change of the steps moving the work item's
 status alone (F145.4), a step that goes done with a kind and a duration kept
-as its Step Timing (F156.2), and `register_debrief`, its work item's debrief,
-which writes none and moves nothing (F85.5; DB 328, 329)."""
+as its Step Timing (F156.2), `seed_step_timings`, past runs' Step Timings by
+their keys (F156.3), which writes none and moves nothing, and
+`register_debrief`, its work item's debrief, which writes none and moves
+nothing (F85.5; DB 328, 329)."""
 
 import uuid
 from collections.abc import Callable, Sequence
@@ -47,7 +49,11 @@ from app.models import (
 from app.models import Session as AgentSession
 from app.models.reference import EffectKind, ProgressState, SessionState, Surface
 from app.models.step import repo_of_work
-from app.schemas.pilot_work import DebriefEntryRequestSchema, ProgressStepRequestSchema
+from app.schemas.pilot_work import (
+    DebriefEntryRequestSchema,
+    ProgressStepRequestSchema,
+    StepTimingRequestSchema,
+)
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
@@ -370,6 +376,77 @@ class PilotWorkService:
             work_moved(self.engine_bus, session)
         self.db.flush()
         return self._steps(worker)
+
+    def seed_step_timings(
+        self, worker: Worker, timings: Sequence[StepTimingRequestSchema]
+    ) -> int:
+        """Past runs' finished steps kept as Step Timings of the worker's own
+        work item, each with its `key`, no code and no mark, in the Work's
+        repo (`repo_of_work`), stored as given (F156.3; DB 572). A key the
+        repo has a timing of already has that timing replaced whole, the Work
+        it hangs on included, by the one statement that writes a new one, so
+        that two seeds of a repo at once leave each key once. Nothing is read
+        out of a key. No Effect is recorded and nothing moved.
+
+        Returns:
+            The number of timings written.
+
+        Raises:
+            InvalidOperationException: a key is repeated in the call, or the
+                Work has no repo, neither its own nor its environment's,
+                nothing written.
+            AuthorizationException: the worker's Session has no turn running
+                once its row is held, nothing written.
+        """
+        operation = f"seed the step timings of work item {worker.work_item_id}"
+        keys: set[str] = set()
+        for given in timings:
+            if given.key in keys:
+                raise InvalidOperationException(
+                    operation, f"key {given.key} is repeated"
+                )
+            keys.add(given.key)
+        self._holding_its_turn(worker)
+        repo = self.db.scalar(repo_of_work(worker.work_item_id))
+        if repo is None:
+            raise InvalidOperationException(
+                operation,
+                "it is placed in no repo, neither its own nor its environment's,"
+                " and a key is unique within a repo",
+            )
+        self._meet_kinds({given.kind for given in timings})
+        seeded = pg_insert(StepTiming)
+        # In the keys' order, so that two seeds of one repo wait on each
+        # other one way.
+        self.db.execute(
+            seeded.on_conflict_do_update(
+                index_elements=[StepTiming.repo, StepTiming.key],
+                index_where=StepTiming.key.is_not(None),
+                set_={
+                    column: seeded.excluded[column]
+                    for column in (
+                        "work_id",
+                        "kind_code",
+                        "ended_at",
+                        "duration",
+                        "listed_ahead",
+                    )
+                },
+            ),
+            [
+                {
+                    "work_id": worker.work_item_id,
+                    "kind_code": given.kind,
+                    "ended_at": given.ended_at,
+                    "duration": given.duration,
+                    "listed_ahead": given.listed_ahead,
+                    "key": given.key,
+                    "repo": repo,
+                }
+                for given in sorted(timings, key=lambda given: given.key)
+            ],
+        )
+        return len(timings)
 
     def register_debrief(
         self,

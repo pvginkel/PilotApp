@@ -10334,6 +10334,114 @@
         "title": "SSEOutageQuerySchema",
         "type": "object"
       },
+      "SeedStepTimingsRequestSchema.ce33d8b": {
+        "additionalProperties": false,
+        "description": "Past runs' finished steps, to keep as Step Timings by their keys.",
+        "properties": {
+          "timings": {
+            "description": "The timings, each key once",
+            "items": {
+              "$ref": "#/components/schemas/SeedStepTimingsRequestSchema.ce33d8b.StepTimingRequestSchema"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Timings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "timings"
+        ],
+        "title": "SeedStepTimingsRequestSchema",
+        "type": "object"
+      },
+      "SeedStepTimingsRequestSchema.ce33d8b.StepTimingRequestSchema": {
+        "additionalProperties": false,
+        "description": "A finished step of a past run, as the seed gives it: every value the\nseed's, stored as given (F156.3).",
+        "properties": {
+          "duration": {
+            "description": "The whole seconds the step's work took, by the run's own measure",
+            "examples": [
+              540
+            ],
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Duration",
+            "type": "integer"
+          },
+          "ended_at": {
+            "description": "When the step ended, with its offset",
+            "examples": [
+              "2026-10-03T14:05:00Z"
+            ],
+            "format": "date-time",
+            "title": "Ended At",
+            "type": "string"
+          },
+          "key": {
+            "description": "The seed's name for the timing, unique within the repo",
+            "examples": [
+              "021_the_search_page/P3.review-2"
+            ],
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The kind the workflow gave the step, stored and shown as given",
+            "examples": [
+              "code-reviewer"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "listed_ahead": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether the step stood pending on its run's list before it began; without it, unknown",
+            "examples": [
+              true
+            ],
+            "title": "Listed Ahead"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "ended_at",
+          "duration"
+        ],
+        "title": "StepTimingRequestSchema",
+        "type": "object"
+      },
+      "SeededStepTimingsSchema.ce33d8b": {
+        "description": "The timings written.",
+        "properties": {
+          "timings": {
+            "description": "Their number",
+            "examples": [
+              412
+            ],
+            "title": "Timings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "timings"
+        ],
+        "title": "SeededStepTimingsSchema",
+        "type": "object"
+      },
       "SelfResponseSchema.d1d9f70": {
         "description": "The signed-in person, as the app's shell and the handle step draw them.",
         "properties": {
@@ -26672,6 +26780,77 @@
           }
         },
         "summary": "`set_progress(steps)` (F85.3, F145.1, F156.1): the session's own work item's list of steps replaced, in the call's order, a step that goes done with a kind and a duration kept as its timing; no effect.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-work/step-timings": {
+      "post": {
+        "description": "Returns:     200: The number of timings written     400: The body is not a list of 1 to 1,000 timings, each a key of 1 to         200 characters, a kind of 1 to 64, an end as a date and time with         its offset, a duration in whole seconds from 0 and an optional         listed_ahead     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: A key is repeated, or the work item has no repo, neither its own         nor its environment's, nothing written: the reason",
+        "operationId": "post__tools_pilot-work_step-timings",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeedStepTimingsRequestSchema.ce33d8b"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeededStepTimingsSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`seed_step_timings(timings)` (F156.3): past runs' finished steps kept as timings of the session's own work item, in its repo, a key the repo has already replacing its timing whole; no effect.",
         "tags": []
       }
     }

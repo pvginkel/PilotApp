@@ -1,8 +1,9 @@
 """`pilot-work`'s routes (TD §4.5, F85): the REST calls Pilot's MCP server
 makes for a worker session's tools, under the session's bearer, outside `/api/`
 (review 2), pinned as the surface they are, a work item's progress among them
-(F85.3, F85.4), a step's why with it (DB 327), and its debrief (F85.5; DB 323
-to 329), with its subject and whether it completes it (DB 608)."""
+(F85.3, F85.4), a step's why with it (DB 327), past runs' timings by their
+keys (F156.3), and its debrief (F85.5; DB 323 to 329), with its subject and
+whether it completes it (DB 608)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -43,6 +44,8 @@ DOCUMENTS = "/tools/pilot-work/documents"
 ATTACHMENTS = "/tools/pilot-work/attachments"
 
 PROGRESS = "/tools/pilot-work/progress"
+
+STEP_TIMINGS = "/tools/pilot-work/step-timings"
 
 DEBRIEF = "/tools/pilot-work/debrief"
 
@@ -88,7 +91,7 @@ def _file(fake_controller: ServedFakeController, environment: Environment) -> No
 
 
 class TestPilotWorkRoutes:
-    def test_the_surface_is_five_routes_outside_the_api(self, app: Flask) -> None:
+    def test_the_surface_is_six_routes_outside_the_api(self, app: Flask) -> None:
         routes = sorted(
             (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
             for rule in app.url_map.iter_rules()
@@ -101,6 +104,7 @@ class TestPilotWorkRoutes:
             (DOCUMENTS, ["POST"]),
             (PROGRESS, ["PATCH"]),
             (PROGRESS, ["PUT"]),
+            (STEP_TIMINGS, ["POST"]),
         ]
 
     def test_the_routes_are_outside_the_oidc_gate(
@@ -907,6 +911,297 @@ class TestSetProgress:
             f"Cannot call pilot-work because session {run.id} {error}"
         )
         assert session.scalars(select(ProgressStep)).all() == []
+
+
+REPO = "example/Example"
+
+_PAST = {
+    "key": "021/P1.code",
+    "kind": "code-writer",
+    "ended_at": "2026-10-03T16:05:00+02:00",
+    "duration": 2400,
+}
+"""A finished step of a past run, invented."""
+
+_SEED = {
+    "timings": [
+        {**_PAST, "listed_ahead": True},
+        {**_PAST, "key": "021/P1.review", "kind": "review", "duration": 0},
+    ]
+}
+
+
+def _in_a_repo(session: DbSession, run: models.Session, repo: str = REPO) -> None:
+    session.get_one(Work, run.id).repo = repo
+    session.flush()
+
+
+def _seeded(session: DbSession) -> list[tuple[object, ...]]:
+    """Every seeded timing: its key, repo, Work, kind, end, duration, listing
+    and mark, by key."""
+    return [
+        (
+            timing.key,
+            timing.repo,
+            timing.work_id,
+            timing.kind_code,
+            timing.ended_at,
+            timing.duration,
+            timing.listed_ahead,
+            timing.marked,
+        )
+        for timing in session.scalars(
+            select(StepTiming)
+            .where(StepTiming.key.is_not(None))
+            .order_by(StepTiming.key)
+            .execution_options(populate_existing=True)
+        )
+    ]
+
+
+class TestSeedStepTimings:
+    """`POST /tools/pilot-work/step-timings`: `seed_step_timings(timings)`."""
+
+    def test_the_timings_written_are_200_with_their_number(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _in_a_repo(session, run)
+        ended = datetime(2026, 10, 3, 14, 5, tzinfo=UTC)
+
+        response = client.post(STEP_TIMINGS, json=_SEED, headers=_bearer())
+
+        assert response.status_code == 200
+        assert response.get_json() == {"timings": 2}
+        assert _seeded(session) == [
+            ("021/P1.code", REPO, run.id, "code-writer", ended, 2400, True, None),
+            ("021/P1.review", REPO, run.id, "review", ended, 0, None, None),
+        ]
+        assert session.scalars(select(ProgressStep)).all() == []
+
+    def test_a_key_published_again_replaces_its_timing_whole(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _in_a_repo(session, run)
+        client.post(STEP_TIMINGS, json=_SEED, headers=_bearer())
+        again = {**_PAST, "kind": "review", "ended_at": "2026-10-09T08:00:00Z"}
+
+        response = client.post(
+            STEP_TIMINGS, json={"timings": [again]}, headers=_bearer()
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"timings": 1}
+        later = datetime(2026, 10, 9, 8, 0, tzinfo=UTC)
+        assert [timing[:1] + timing[3:] for timing in _seeded(session)] == [
+            ("021/P1.code", "review", later, 2400, None, None),
+            (
+                "021/P1.review",
+                "review",
+                datetime(2026, 10, 3, 14, 5, tzinfo=UTC),
+                0,
+                None,
+                None,
+            ),
+        ]
+
+    def test_the_limits_themselves_are_taken(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _in_a_repo(session, run)
+        timings = [
+            {
+                "key": f"{n:0200d}",
+                "kind": "k" * 64,
+                "ended_at": "2026-10-03T14:05:00Z",
+                "duration": 2**31 - 1,
+                "listed_ahead": False,
+            }
+            for n in range(1000)
+        ]
+
+        response = client.post(
+            STEP_TIMINGS, json={"timings": timings}, headers=_bearer()
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"timings": 1000}
+        assert len(_seeded(session)) == 1000
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {},
+            {"timings": []},
+            {"timings": [{**_PAST, "key": f"k{n}"} for n in range(1001)]},
+            {"timings": [{name: _PAST[name] for name in _PAST if name != "key"}]},
+            {"timings": [{**_PAST, "key": ""}]},
+            {"timings": [{**_PAST, "key": "  "}]},
+            {"timings": [{**_PAST, "key": "k" * 201}]},
+            {"timings": [{**_PAST, "key": 21}]},
+            {"timings": [{name: _PAST[name] for name in _PAST if name != "kind"}]},
+            {"timings": [{**_PAST, "kind": ""}]},
+            {"timings": [{**_PAST, "kind": "  "}]},
+            {"timings": [{**_PAST, "kind": "k" * 65}]},
+            {"timings": [{name: _PAST[name] for name in _PAST if name != "ended_at"}]},
+            {"timings": [{**_PAST, "ended_at": "2026-10-03T14:05:00"}]},
+            {"timings": [{**_PAST, "ended_at": "2026-10-03"}]},
+            {"timings": [{**_PAST, "ended_at": "last week"}]},
+            {"timings": [{**_PAST, "ended_at": 1790000000}]},
+            {"timings": [{**_PAST, "ended_at": None}]},
+            {"timings": [{name: _PAST[name] for name in _PAST if name != "duration"}]},
+            {"timings": [{**_PAST, "duration": -1}]},
+            {"timings": [{**_PAST, "duration": 90.5}]},
+            {"timings": [{**_PAST, "duration": "90"}]},
+            {"timings": [{**_PAST, "duration": True}]},
+            {"timings": [{**_PAST, "duration": 2**31}]},
+            {"timings": [{**_PAST, "listed_ahead": "yes"}]},
+            {"timings": [{**_PAST, "listed_ahead": 1}]},
+            {"timings": [{**_PAST, "marked": False}]},
+            {"timings": [{**_PAST, "code": "P1.code"}]},
+        ],
+        ids=[
+            "no-timings",
+            "empty-list",
+            "long-list",
+            "no-key",
+            "empty-key",
+            "blank-key",
+            "long-key",
+            "key-not-text",
+            "no-kind",
+            "empty-kind",
+            "blank-kind",
+            "long-kind",
+            "no-end",
+            "end-without-offset",
+            "end-a-date",
+            "end-not-a-time",
+            "end-a-number",
+            "end-none",
+            "no-duration",
+            "negative-duration",
+            "duration-not-whole",
+            "duration-a-text",
+            "duration-a-flag",
+            "long-duration",
+            "listing-a-text",
+            "listing-a-number",
+            "a-mark",
+            "a-code",
+        ],
+    )
+    def test_a_body_that_is_not_a_list_of_timings_is_400_and_writes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, object],
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _in_a_repo(session, run)
+
+        response = client.post(STEP_TIMINGS, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+        assert _seeded(session) == []
+        assert session.scalars(select(StepKind)).all() == []
+
+    def test_a_work_item_placed_in_no_repo_is_409_and_writes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+
+        response = client.post(STEP_TIMINGS, json=_SEED, headers=_bearer())
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot seed the step timings of work item {run.id} because it is"
+            " placed in no repo, neither its own nor its environment's, and a key"
+            " is unique within a repo"
+        )
+        assert _seeded(session) == []
+        assert session.scalars(select(StepKind)).all() == []
+
+    def test_a_repeated_key_is_409_with_the_reason_and_writes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _in_a_repo(session, run)
+        repeated = {"timings": [_PAST, {**_PAST, "kind": "review"}]}
+
+        response = client.post(STEP_TIMINGS, json=repeated, headers=_bearer())
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot seed the step timings of work item {run.id} because key"
+            " 021/P1.code is repeated"
+        )
+        assert _seeded(session) == []
+        assert session.scalars(select(StepKind)).all() == []
+
+    def test_no_bearer_is_401(self, client: FlaskClient) -> None:
+        response = client.post(STEP_TIMINGS, json=_SEED)
+
+        assert response.status_code == 401
+
+    @pytest.mark.parametrize(
+        ("kind", "state", "error"),
+        [
+            ("chat", SessionState.RUNNING, "is a chat session, not a work item's"),
+            ("work", SessionState.STOPPED, "has no turn running"),
+        ],
+        ids=["chat", "stopped"],
+    )
+    def test_a_session_that_is_not_a_running_work_items_is_403_and_writes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        kind: str,
+        state: SessionState,
+        error: str,
+    ) -> None:
+        run = _session(session, container, project, environment, kind, state)
+
+        response = client.post(STEP_TIMINGS, json=_SEED, headers=_bearer())
+
+        assert response.status_code == 403
+        assert response.get_json()["error"] == (
+            f"Cannot call pilot-work because session {run.id} {error}"
+        )
+        assert _seeded(session) == []
 
 
 SUBJECT = "Slice 058 · The search page"

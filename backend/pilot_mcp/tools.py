@@ -38,6 +38,7 @@ from pilot_mcp.api import (
     MAX_NOTABLE,
     MAX_STEP_CODE,
     MAX_STEPS,
+    MAX_TIMINGS,
     SESSION_HEADER,
     SOURCE,
     WAIT_MS_DEFAULT,
@@ -66,11 +67,13 @@ from pilot_mcp.api import (
     Recorded,
     RegisteredDebrief,
     RegisteredDocument,
+    SeededStepTimings,
     SentMessage,
     Standing,
     StartedProject,
     Step,
     StepState,
+    StepTiming,
     TurnResponse,
     Written,
 )
@@ -362,6 +365,42 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
         reason, and nothing changes; `set_progress` adds a step. Answers
         `{steps}`, the list as it stands."""
         return await api.set_progress_step(_authorization(ctx), code, state)
+
+    @mcp.tool()
+    async def seed_step_timings(
+        timings: Annotated[
+            list[StepTiming],
+            Field(
+                min_length=1,
+                max_length=MAX_TIMINGS,
+                description="The timings, each key once, 1 to 1,000",
+            ),
+        ],
+        ctx: Call,
+    ) -> SeededStepTimings:
+        """Publish the finished steps of past runs in your work item's
+        repository as timings, which Pilot keeps beside the ones
+        `set_progress` leaves of a run's steps: each timing a `key`, your
+        name for it, unique within the repository, a `kind`, your name for
+        the kind of step it was, as `set_progress` takes a step's,
+        `ended_at`, when the step ended, a date and time with its offset, a
+        `duration`, the whole seconds its work took by the run's own measure,
+        and, where you know it, `listed_ahead`, whether the step stood
+        pending on its run's list before it began. The timings hang on this
+        work item, in its repository: its own, else its environment's. A key
+        the repository has a timing of already, whichever work item published
+        it, has that timing replaced whole, a `listed_ahead` you leave out
+        leaving none. Pilot reads nothing out of a key, and a timing takes no
+        mark. A call takes 1 to 1,000 timings; publish more in several calls.
+        A work item placed in no repository, a key repeated in the call, an
+        empty key or one over 200 characters, an empty kind or one over 64
+        characters, an `ended_at` that is not a text of a date and time with
+        its offset, a duration that is not a whole number from 0 to
+        2147483647, a `listed_ahead` that is not true or false, an unknown
+        field, no timings or over 1,000 is refused with the reason, and
+        nothing is written. Answers `{timings}`, the number of timings
+        written."""
+        return await api.seed_step_timings(_authorization(ctx), timings)
 
     @mcp.tool()
     async def register_debrief(

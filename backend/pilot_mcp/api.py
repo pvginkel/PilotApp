@@ -35,6 +35,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import (
     AwareDatetime,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
@@ -106,6 +107,22 @@ StepConversation = Annotated[
     str, StringConstraints(min_length=1, max_length=MAX_STEP_CONVERSATION)
 ]
 """Claude Code's session id of a conversation a step names."""
+
+MAX_TIMING_KEY = 200
+MAX_TIMINGS = 1000
+"""The limits of a call that seeds timings, as its route takes them
+(`app/schemas/pilot_work.py`)."""
+
+
+def _written_out(time: object) -> object:
+    """A time is no number, as its route takes it."""
+    if isinstance(time, int | float):
+        raise ValueError("a time is a text, a date and time with its offset")
+    return time
+
+
+WrittenTime = Annotated[AwareDatetime, BeforeValidator(_written_out)]
+"""A date and time with its offset, as text."""
 
 MAX_DEBRIEF = 16_000
 MAX_DEBRIEF_ENTRIES = 500
@@ -491,6 +508,62 @@ class PublishedStep(BaseModel):
     why: str | None = Field(
         default=None, description="Its line under the label; none where not given"
     )
+
+
+class StepTiming(BaseModel):
+    """A finished step of a past run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(
+        min_length=1,
+        max_length=MAX_TIMING_KEY,
+        description=(
+            "Your name for the timing, unique within the repository, at most"
+            " 200 characters: publishing it again replaces the timing"
+        ),
+    )
+    kind: str = Field(
+        min_length=1,
+        max_length=MAX_STEP_KIND,
+        description=(
+            "Your name for the kind of step it was, at most 64 characters, as"
+            " `set_progress` takes a step's: steps of one kind are timed"
+            " together"
+        ),
+    )
+    ended_at: WrittenTime = Field(
+        description="When the step ended, a date and time with its offset"
+    )
+    duration: int = Field(
+        ge=0,
+        le=MAX_STEP_DURATION,
+        strict=True,
+        description=(
+            "The whole seconds the step's work took by the run's own measure, 0 or more"
+        ),
+    )
+    listed_ahead: bool | None = Field(
+        default=None,
+        strict=True,
+        description=(
+            "Whether the step stood pending on its run's list before it began,"
+            " true or false; without it, unknown"
+        ),
+    )
+
+    @field_validator("key", "kind")
+    @classmethod
+    def _names_something(cls, name: str) -> str:
+        if not name.strip():
+            raise ValueError("a key and a kind have words")
+        return name
+
+
+class SeededStepTimings(BaseModel):
+    """The timings written."""
+
+    timings: int = Field(description="Their number")
 
 
 class DebriefEntry(BaseModel):
@@ -1042,6 +1115,18 @@ class PilotWorkApi(_Routes):
         body = {"code": code, "state": state}
         answer = await self._send("PATCH", "progress", authorization, None, body)
         return Progress.model_validate(answer)
+
+    async def seed_step_timings(
+        self, authorization: str, timings: list[StepTiming]
+    ) -> SeededStepTimings:
+        """No tool-use id is sent: the call records no effect to name it."""
+        body = {
+            "timings": [
+                timing.model_dump(mode="json", exclude_none=True) for timing in timings
+            ]
+        }
+        answer = await self._post("step-timings", authorization, None, body)
+        return SeededStepTimings.model_validate(answer)
 
     async def register_debrief(
         self,

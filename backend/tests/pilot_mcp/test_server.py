@@ -110,7 +110,7 @@ _PROGRESS = {
 }
 
 # Each tool: its parameters, its result and its description, the words as the
-# worker reads them (FM §5 step 1, F65.3, F85, F85.3, F85.4, F85.5).
+# worker reads them (FM §5 step 1, F65.3, F85, F85.3, F85.4, F85.5, F156.3).
 WORK_SURFACE = {
     "register_document": (
         {
@@ -372,6 +372,117 @@ WORK_SURFACE = {
         " or a state outside the three is refused with the reason, and nothing"
         " changes; `set_progress` adds a step. Answers `{steps}`, the list as it"
         " stands.",
+    ),
+    "seed_step_timings": (
+        {
+            "$defs": {
+                "StepTiming": {
+                    "additionalProperties": False,
+                    "description": "A finished step of a past run.",
+                    "properties": {
+                        "key": {
+                            "description": (
+                                "Your name for the timing, unique within the"
+                                " repository, at most 200 characters: publishing it"
+                                " again replaces the timing"
+                            ),
+                            "maxLength": 200,
+                            "minLength": 1,
+                            "title": "Key",
+                            "type": "string",
+                        },
+                        "kind": {
+                            "description": (
+                                "Your name for the kind of step it was, at most 64"
+                                " characters, as `set_progress` takes a step's:"
+                                " steps of one kind are timed together"
+                            ),
+                            "maxLength": 64,
+                            "minLength": 1,
+                            "title": "Kind",
+                            "type": "string",
+                        },
+                        "ended_at": {
+                            "description": (
+                                "When the step ended, a date and time with its offset"
+                            ),
+                            "format": "date-time",
+                            "title": "Ended At",
+                            "type": "string",
+                        },
+                        "duration": {
+                            "description": (
+                                "The whole seconds the step's work took by the run's"
+                                " own measure, 0 or more"
+                            ),
+                            "maximum": 2147483647,
+                            "minimum": 0,
+                            "title": "Duration",
+                            "type": "integer",
+                        },
+                        "listed_ahead": {
+                            "anyOf": [{"type": "boolean"}, {"type": "null"}],
+                            "default": None,
+                            "description": (
+                                "Whether the step stood pending on its run's list"
+                                " before it began, true or false; without it,"
+                                " unknown"
+                            ),
+                            "title": "Listed Ahead",
+                        },
+                    },
+                    "required": ["key", "kind", "ended_at", "duration"],
+                    "title": "StepTiming",
+                    "type": "object",
+                }
+            },
+            "properties": {
+                "timings": {
+                    "description": "The timings, each key once, 1 to 1,000",
+                    "items": {"$ref": "#/$defs/StepTiming"},
+                    "maxItems": 1000,
+                    "minItems": 1,
+                    "title": "Timings",
+                    "type": "array",
+                }
+            },
+            "required": ["timings"],
+            "title": "seed_step_timingsArguments",
+            "type": "object",
+        },
+        {
+            "description": "The timings written.",
+            "properties": {
+                "timings": {
+                    "description": "Their number",
+                    "title": "Timings",
+                    "type": "integer",
+                }
+            },
+            "required": ["timings"],
+            "title": "SeededStepTimings",
+            "type": "object",
+        },
+        "Publish the finished steps of past runs in your work item's repository as"
+        " timings, which Pilot keeps beside the ones `set_progress` leaves of a"
+        " run's steps: each timing a `key`, your name for it, unique within the"
+        " repository, a `kind`, your name for the kind of step it was, as"
+        " `set_progress` takes a step's, `ended_at`, when the step ended, a date and"
+        " time with its offset, a `duration`, the whole seconds its work took by the"
+        " run's own measure, and, where you know it, `listed_ahead`, whether the"
+        " step stood pending on its run's list before it began. The timings hang on"
+        " this work item, in its repository: its own, else its environment's. A key"
+        " the repository has a timing of already, whichever work item published it,"
+        " has that timing replaced whole, a `listed_ahead` you leave out leaving"
+        " none. Pilot reads nothing out of a key, and a timing takes no mark. A call"
+        " takes 1 to 1,000 timings; publish more in several calls. A work item"
+        " placed in no repository, a key repeated in the call, an empty key or one"
+        " over 200 characters, an empty kind or one over 64 characters, an"
+        " `ended_at` that is not a text of a date and time with its offset, a"
+        " duration that is not a whole number from 0 to 2147483647, a"
+        " `listed_ahead` that is not true or false, an unknown field, no timings or"
+        " over 1,000 is refused with the reason, and nothing is written. Answers"
+        " `{timings}`, the number of timings written.",
     ),
     "register_debrief": (
         {

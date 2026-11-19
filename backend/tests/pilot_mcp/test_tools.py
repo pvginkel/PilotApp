@@ -596,6 +596,215 @@ class TestSetProgress:
         assert routes.calls == []
 
 
+_PAST = {
+    "key": "021/P1.code",
+    "kind": "code-writer",
+    "ended_at": "2026-10-03T16:05:00+02:00",
+    "duration": 2400,
+}
+"""A finished step of a past run, invented."""
+
+
+def _in_a_repo(session: DbSession, worker: models.Session) -> None:
+    session.get_one(Work, worker.id).repo = "example/Example"
+    session.commit()
+
+
+@pytest.mark.anyio
+class TestSeedStepTimings:
+    async def test_the_timings_are_written_through_their_route_naming_no_call(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        session: DbSession,
+    ) -> None:
+        """F156.3: each sent as given, its end with the offset it came with,
+        a listing not given not sent; the call records no effect, so its
+        tool-use id goes nowhere."""
+        _in_a_repo(session, worker)
+        timings = [
+            {**_PAST, "listed_ahead": True},
+            {**_PAST, "key": "021/P1.review", "kind": "review", "duration": 0},
+        ]
+
+        result = await call(
+            mcp_app,
+            "seed_step_timings",
+            {"timings": timings},
+            meta={TOOL_USE_ID_META: "toolu_01ABC"},
+        )
+
+        assert not result.isError
+        [(request, answer)] = routes.calls
+        assert (request.method, str(request.url)) == (
+            "POST",
+            f"{API_URL}/tools/pilot-work/step-timings",
+        )
+        assert request.headers["authorization"] == BEARER["Authorization"]
+        assert "tool-use-id" not in request.headers
+        assert json.loads(request.content) == {"timings": timings}
+        assert answer.status_code == 200
+        assert result.structuredContent == answer.json() == {"timings": 2}
+        assert [
+            (
+                timing.key,
+                timing.repo,
+                timing.work_id,
+                timing.kind_code,
+                timing.ended_at,
+                timing.duration,
+                timing.listed_ahead,
+                timing.marked,
+                timing.code,
+            )
+            for timing in session.scalars(
+                select(models.StepTiming).order_by(models.StepTiming.key)
+            )
+        ] == [
+            (
+                "021/P1.code",
+                "example/Example",
+                worker.id,
+                "code-writer",
+                datetime(2026, 10, 3, 14, 5, tzinfo=UTC),
+                2400,
+                True,
+                None,
+                None,
+            ),
+            (
+                "021/P1.review",
+                "example/Example",
+                worker.id,
+                "review",
+                datetime(2026, 10, 3, 14, 5, tzinfo=UTC),
+                0,
+                None,
+                None,
+                None,
+            ),
+        ]
+
+    async def test_a_key_published_again_replaces_its_timing(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        session: DbSession,
+    ) -> None:
+        _in_a_repo(session, worker)
+        again = {**_PAST, "kind": "review", "duration": 60}
+
+        async with mcp_session(mcp_app) as (mcp, _):
+            first = await mcp.call_tool("seed_step_timings", {"timings": [_PAST]})
+            second = await mcp.call_tool("seed_step_timings", {"timings": [again]})
+
+        assert not first.isError and not second.isError
+        assert second.structuredContent == {"timings": 1}
+        assert [
+            (timing.key, timing.kind_code, timing.duration)
+            for timing in session.scalars(select(models.StepTiming))
+        ] == [("021/P1.code", "review", 60)]
+
+    async def test_a_work_item_placed_in_no_repo_is_the_routes_refusal_its_reason_whole(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        session: DbSession,
+    ) -> None:
+        result = await call(mcp_app, "seed_step_timings", {"timings": [_PAST]})
+
+        assert routes.calls[-1][1].status_code == 409
+        assert error_text(result) == _refusal(routes, "seed_step_timings")
+        assert error_text(result) == (
+            f"Error executing tool seed_step_timings: Cannot seed the step timings"
+            f" of work item {worker.id} because it is placed in no repo, neither"
+            " its own nor its environment's, and a key is unique within a repo"
+        )
+        assert session.scalars(select(models.StepTiming)).all() == []
+
+    async def test_a_repeated_key_is_the_routes_refusal(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        session: DbSession,
+    ) -> None:
+        _in_a_repo(session, worker)
+
+        result = await call(mcp_app, "seed_step_timings", {"timings": [_PAST, _PAST]})
+
+        assert routes.calls[-1][1].status_code == 409
+        assert error_text(result) == _refusal(routes, "seed_step_timings")
+        assert error_text(result) == (
+            f"Error executing tool seed_step_timings: Cannot seed the step timings"
+            f" of work item {worker.id} because key 021/P1.code is repeated"
+        )
+
+    @pytest.mark.parametrize(
+        "timings",
+        [
+            [],
+            [{**_PAST, "key": f"k{n}"} for n in range(1001)],
+            [{name: _PAST[name] for name in _PAST if name != "key"}],
+            [{**_PAST, "key": ""}],
+            [{**_PAST, "key": "  "}],
+            [{**_PAST, "key": "k" * 201}],
+            [{**_PAST, "kind": ""}],
+            [{**_PAST, "kind": "  "}],
+            [{**_PAST, "kind": "k" * 65}],
+            [{name: _PAST[name] for name in _PAST if name != "ended_at"}],
+            [{**_PAST, "ended_at": "2026-10-03T14:05:00"}],
+            [{**_PAST, "ended_at": "last week"}],
+            [{**_PAST, "ended_at": 1790000000}],
+            [{name: _PAST[name] for name in _PAST if name != "duration"}],
+            [{**_PAST, "duration": -1}],
+            [{**_PAST, "duration": 90.5}],
+            [{**_PAST, "duration": "90"}],
+            [{**_PAST, "duration": 2**31}],
+            [{**_PAST, "listed_ahead": "yes"}],
+            [{**_PAST, "marked": False}],
+            [{**_PAST, "code": "P1.code"}],
+        ],
+        ids=[
+            "empty-list",
+            "long-list",
+            "no-key",
+            "empty-key",
+            "blank-key",
+            "long-key",
+            "empty-kind",
+            "blank-kind",
+            "long-kind",
+            "no-end",
+            "end-without-offset",
+            "end-not-a-time",
+            "end-a-number",
+            "no-duration",
+            "negative-duration",
+            "duration-not-whole",
+            "duration-a-text",
+            "long-duration",
+            "listing-a-text",
+            "a-mark",
+            "a-code",
+        ],
+    )
+    async def test_timings_outside_the_limits_are_refused_without_calling_the_api(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        timings: list[dict[str, object]],
+    ) -> None:
+        result = await call(mcp_app, "seed_step_timings", {"timings": timings})
+
+        assert error_text(result).startswith("Error executing tool seed_step_timings: ")
+        assert routes.calls == []
+
+
 _ACCOUNTS = [
     {
         "section": "P1 · The client",

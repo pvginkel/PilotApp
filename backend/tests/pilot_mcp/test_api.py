@@ -95,6 +95,8 @@ def test_the_pages_are_the_fleets_file_tools() -> None:
         "MAX_STEP_DURATION",
         "MAX_STEP_CONVERSATION",
         "MAX_STEP_CONVERSATIONS",
+        "MAX_TIMING_KEY",
+        "MAX_TIMINGS",
     ],
 )
 def test_a_steps_limits_are_its_routes(limit: str) -> None:

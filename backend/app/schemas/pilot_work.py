@@ -5,7 +5,9 @@ import uuid
 from typing import Annotated, Self
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StringConstraints,
@@ -31,6 +33,24 @@ Conversation = Annotated[
     str, StringConstraints(min_length=1, max_length=MAX_STEP_CONVERSATION)
 ]
 """Claude Code's session id of a conversation a step names."""
+
+MAX_TIMING_KEY = 200
+MAX_TIMINGS = 1000
+"""The limits of a call that seeds Step Timings (F156.3), which the schema of
+`step_timings` does not hold; a seeded timing's kind and duration take a
+step's."""
+
+
+def _written_out(time: object) -> object:
+    """A time is no number: pydantic reads one as a Unix time, in seconds or
+    milliseconds by its size."""
+    if isinstance(time, int | float):
+        raise ValueError("a time is a text, a date and time with its offset")
+    return time
+
+
+WrittenTime = Annotated[AwareDatetime, BeforeValidator(_written_out)]
+"""A date and time with its offset, as text."""
 
 MAX_DEBRIEF = 16_000
 MAX_DEBRIEF_ENTRIES = 500
@@ -244,6 +264,73 @@ class ProgressSchema(BaseModel):
     """The work item's list of steps as it stands."""
 
     steps: list[ProgressStepSchema] = Field(description="Its steps, in order")
+
+
+class StepTimingRequestSchema(BaseModel):
+    """A finished step of a past run, as the seed gives it: every value the
+    seed's, stored as given (F156.3)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(
+        min_length=1,
+        max_length=MAX_TIMING_KEY,
+        description="The seed's name for the timing, unique within the repo",
+        examples=["021_the_search_page/P3.review-2"],
+    )
+    kind: str = Field(
+        min_length=1,
+        max_length=MAX_STEP_KIND,
+        description="The kind the workflow gave the step, stored and shown as given",
+        examples=["code-reviewer"],
+    )
+    ended_at: WrittenTime = Field(
+        description="When the step ended, with its offset",
+        examples=["2026-10-03T14:05:00Z"],
+    )
+    duration: int = Field(
+        ge=0,
+        le=MAX_STEP_DURATION,
+        strict=True,
+        description="The whole seconds the step's work took, by the run's own measure",
+        examples=[540],
+    )
+    listed_ahead: bool | None = Field(
+        default=None,
+        strict=True,
+        description=(
+            "Whether the step stood pending on its run's list before it began;"
+            " without it, unknown"
+        ),
+        examples=[True],
+    )
+
+    @field_validator("key", "kind")
+    @classmethod
+    def _names_something(cls, name: str) -> str:
+        """The store keeps a blank text as none
+        (`app/utils/empty_string_normalization.py`)."""
+        if not name.strip():
+            raise ValueError("a key and a kind have words")
+        return name
+
+
+class SeedStepTimingsRequestSchema(BaseModel):
+    """Past runs' finished steps, to keep as Step Timings by their keys."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timings: list[StepTimingRequestSchema] = Field(
+        min_length=1,
+        max_length=MAX_TIMINGS,
+        description="The timings, each key once",
+    )
+
+
+class SeededStepTimingsSchema(BaseModel):
+    """The timings written."""
+
+    timings: int = Field(description="Their number", examples=[412])
 
 
 class DebriefEntryRequestSchema(BaseModel):

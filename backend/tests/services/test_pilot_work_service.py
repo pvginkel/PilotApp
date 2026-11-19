@@ -5,7 +5,8 @@
 F85.4, F145.1; DB 285 to 289, a step's why 327), each change moving its
 status alone (F145.4), a step's kind, mark and conversations, whether it was
 listed ahead and the Step Timing of one that goes done (F156.1, F156.2; DB
-353 to 358, 562 to 565, 572, 573), and `register_debrief`, its debrief,
+353 to 358, 562 to 565, 572, 573), `seed_step_timings`, past runs' timings by
+their keys (F156.3), and `register_debrief`, its debrief,
 stored once with its subject and whether it completes it, and moving nothing
 (F85.5; DB 322 to 329, 608)."""
 
@@ -59,6 +60,7 @@ from app.models.reference import (
 from app.schemas.pilot_work import (
     DebriefEntryRequestSchema,
     ProgressStepRequestSchema,
+    StepTimingRequestSchema,
 )
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
@@ -2366,6 +2368,431 @@ class TestPilotWorkServiceProgressAtOnce:
             call.result()
         with scoped_session(container) as db_session:
             assert db_session.scalars(select(ProgressStep)).all() == []
+
+
+ENDED = datetime(2026, 10, 3, 14, 5, tzinfo=UTC)
+"""When a past run's step ended, invented."""
+
+
+def _past(
+    key: str,
+    kind: str = CODE_WRITER,
+    duration: int = 540,
+    listed_ahead: bool | None = None,
+    ended_at: datetime = ENDED,
+) -> StepTimingRequestSchema:
+    return StepTimingRequestSchema(
+        key=key,
+        kind=kind,
+        ended_at=ended_at,
+        duration=duration,
+        listed_ahead=listed_ahead,
+    )
+
+
+_Seeded = tuple[str | None, str | None, uuid.UUID, str, datetime, int, bool | None]
+
+
+def _seeded(session: DbSession) -> list[_Seeded]:
+    """Every seeded timing: its repo, key, Work, kind, end, duration and
+    listing, by repo and key."""
+    return [
+        (
+            timing.repo,
+            timing.key,
+            timing.work_id,
+            timing.kind_code,
+            timing.ended_at,
+            timing.duration,
+            timing.listed_ahead,
+        )
+        for timing in session.scalars(
+            select(StepTiming)
+            .where(StepTiming.key.is_not(None))
+            .order_by(StepTiming.repo, StepTiming.key)
+            .execution_options(populate_existing=True)
+        )
+    ]
+
+
+class TestPilotWorkServiceSeedStepTimings:
+    """F156.3: past runs' finished steps, kept as the Step Timings of the
+    work item that ran the seed, one per key and repo."""
+
+    def test_the_timings_hang_on_the_work_item_with_their_keys_and_no_mark(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """Each as given, its repo the Work's, its code and mark none, and a
+        kind met as given."""
+        run = _session(session, container, project, environment)
+        later = datetime(2026, 10, 4, 9, 0, tzinfo=UTC)
+
+        written = container.pilot_work_service().seed_step_timings(
+            _worker(run),
+            [
+                _past("021/P2.review", REVIEW, 0, False, later),
+                _past("021/P1.code", duration=2400, listed_ahead=True),
+                _past("021/sweep", "sweep", 2**31 - 1),
+            ],
+        )
+
+        assert written == 3
+        assert _seeded(session) == [
+            ("example/Example", "021/P1.code", run.id, CODE_WRITER, ENDED, 2400, True),
+            ("example/Example", "021/P2.review", run.id, REVIEW, later, 0, False),
+            ("example/Example", "021/sweep", run.id, "sweep", ENDED, 2**31 - 1, None),
+        ]
+        assert [(timing.code, timing.marked) for timing in _timings(session, run)] == [
+            (None, None)
+        ] * 3
+        assert _kinds(session) == [
+            (CODE_WRITER, CODE_WRITER),
+            (REVIEW, REVIEW),
+            ("sweep", "sweep"),
+        ]
+
+    def test_a_key_published_again_replaces_its_timing_whole(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """Its Work the one that published it last, a listing left out
+        leaving none; a key not published again stands, and no row is
+        added."""
+        first = _session(session, container, project, environment)
+        again = _session(session, container, project, environment, token="again")
+        pilot_work = container.pilot_work_service()
+        pilot_work.seed_step_timings(
+            _worker(first),
+            [_past("021/P1.code", listed_ahead=True), _past("021/P2.code")],
+        )
+        [replaced_id, kept_id] = [timing.id for timing in _timings(session, first)]
+        later = datetime(2026, 10, 9, 8, 0, tzinfo=UTC)
+
+        written = pilot_work.seed_step_timings(
+            _worker(again),
+            [_past("021/P1.code", REVIEW, 60, ended_at=later), _past("022/P1.code")],
+        )
+
+        assert written == 2
+        assert _seeded(session) == [
+            ("example/Example", "021/P1.code", again.id, REVIEW, later, 60, None),
+            ("example/Example", "021/P2.code", first.id, CODE_WRITER, ENDED, 540, None),
+            ("example/Example", "022/P1.code", again.id, CODE_WRITER, ENDED, 540, None),
+        ]
+        assert [timing.id for timing in _timings(session, first)] == [kept_id]
+        assert replaced_id in {timing.id for timing in _timings(session, again)}
+
+    def test_a_key_is_unique_within_its_repo_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """The same key seeded in another repo stands beside the first."""
+        here = _session(session, container, project, environment)
+        there = _session(session, container, project, environment, token="there")
+        session.get_one(Work, there.id).repo = "example/Other"
+        session.flush()
+        pilot_work = container.pilot_work_service()
+
+        pilot_work.seed_step_timings(_worker(here), [_past("021/P1.code")])
+        pilot_work.seed_step_timings(_worker(there), [_past("021/P1.code", REVIEW)])
+
+        assert [
+            (repo, key, work, kind) for repo, key, work, kind, *_ in _seeded(session)
+        ] == [
+            ("example/Example", "021/P1.code", here.id, CODE_WRITER),
+            ("example/Other", "021/P1.code", there.id, REVIEW),
+        ]
+
+    def test_a_work_item_with_no_repo_of_its_own_seeds_its_environments(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        session.get_one(Work, run.id).repo = None
+        environment.server_created_at = EARLIER
+        environment.repo = "example/Other"
+        session.flush()
+
+        container.pilot_work_service().seed_step_timings(
+            _worker(run), [_past("021/P1.code")]
+        )
+
+        assert [(repo, key) for repo, key, *_ in _seeded(session)] == [
+            ("example/Other", "021/P1.code")
+        ]
+
+    def test_a_work_item_placed_in_no_repo_is_refused_and_writes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """Neither its own nor its environment's; no kind met."""
+        run = _session(session, container, project, environment)
+        session.get_one(Work, run.id).repo = None
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.pilot_work_service().seed_step_timings(
+                _worker(run), [_past("021/P1.code")]
+            )
+
+        assert refused.value.message == (
+            f"Cannot seed the step timings of work item {run.id} because it is"
+            " placed in no repo, neither its own nor its environment's, and a key"
+            " is unique within a repo"
+        )
+        assert _seeded(session) == []
+        assert _kinds(session) == []
+
+    def test_a_key_repeated_in_the_call_is_refused_and_writes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.pilot_work_service().seed_step_timings(
+                _worker(run),
+                [_past("021/P1.code"), _past("021/P2.code"), _past("021/P1.code")],
+            )
+
+        assert refused.value.message == (
+            f"Cannot seed the step timings of work item {run.id} because key"
+            " 021/P1.code is repeated"
+        )
+        assert _seeded(session) == []
+        assert _kinds(session) == []
+
+    def test_a_key_is_stored_as_given_and_read_as_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """F92.13: keys that differ in case or in a space are two, and one
+        that reads as a step's code or a kind is neither."""
+        run = _session(session, container, project, environment)
+        keys = ["P1.code", "p1.code", " P1.code", CODE_WRITER]
+
+        container.pilot_work_service().seed_step_timings(
+            _worker(run), [_past(key, REVIEW) for key in keys]
+        )
+
+        assert sorted(key or "" for _, key, *_ in _seeded(session)) == sorted(keys)
+        assert _kinds(session) == [(REVIEW, REVIEW)]
+        assert _stored(session, run) == []
+
+    def test_a_steps_own_timing_stands_beside_a_seeded_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A timing written live has no key, and a seed whose key is its
+        code leaves it; the list is untouched."""
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(
+            _worker(run), [_step("P1.code", state=ACTIVE, kind=CODE_WRITER)]
+        )
+        pilot_work.set_progress(
+            _worker(run),
+            [_step("P1.code", state=DONE, kind=CODE_WRITER, duration=1440)],
+        )
+
+        pilot_work.seed_step_timings(_worker(run), [_past("P1.code", duration=60)])
+
+        assert [
+            (timing.code, timing.key, timing.duration)
+            for timing in _timings(session, run)
+        ] == [("P1.code", None, 1440), (None, "P1.code", 60)]
+        assert _listed(_stored(session, run)) == [("P1.code", "P1.code", 1, DONE)]
+
+    def test_a_turn_ended_after_the_gate_writes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        worker = _worker(run)
+        run.state_code = SessionState.STOPPED
+        session.flush()
+
+        with pytest.raises(AuthorizationException):
+            container.pilot_work_service().seed_step_timings(
+                worker, [_past("021/P1.code")]
+            )
+
+        assert _seeded(session) == []
+        assert _kinds(session) == []
+
+    def test_it_records_no_effect_or_line_and_moves_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _turn_in_flight(session, run)
+        clear_after_commit_callbacks()
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.pilot_work_service().seed_step_timings(
+                _worker(run), [_past("021/P1.code")]
+            )
+
+        assert len(_seeded(session)) == 1
+        assert _effect_records(session, run) == []
+        assert _effects(session) == []
+        assert engine_events == []
+
+
+def _another_work(app: Flask, worker: Worker, token: str) -> Worker:
+    """A second running work Session of the worker's project and repo,
+    committed: its worker."""
+    with scoped_session(app.container) as db_session:
+        run = models.Session(
+            project_id=worker.project_id,
+            environment_id=ENVIRONMENT_ID,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash=token_hash(token),
+            state_code=SessionState.RUNNING,
+        )
+        db_session.add(run)
+        db_session.flush()
+        app.container.record_service().place_work(
+            db_session.get_one(Project, worker.project_id),
+            run,
+            "Seeding the camp again",
+            repo="example/Example",
+        )
+        return Worker(run.id, worker.project_id, ENVIRONMENT_ID, run.id)
+
+
+class TestPilotWorkServiceSeedStepTimingsAtOnce:
+    """Two seeds of one repo at once, each a work item's of its own, so that
+    no Session's row serves them one after the other: the second waits on
+    the first's keys and replaces them (DB 572)."""
+
+    def test_two_seeds_of_a_repo_at_once_leave_each_key_once(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        worker = _committed_work(committed_app)
+        other = _another_work(committed_app, worker, "other")
+        keys = [f"021/P{n}.code" for n in range(1, 6)]
+
+        def others() -> int:
+            with scoped_session(container):
+                return container.pilot_work_service().seed_step_timings(
+                    other, [_past(key, REVIEW, 60) for key in reversed(keys)]
+                )
+
+        with scoped_session(container):
+            first = container.pilot_work_service().seed_step_timings(
+                worker, [_past(key) for key in keys]
+            )
+            second = in_thread(others)
+            wait_until(lambda: lock_waits(container) == 1, "the other's seed waiting")
+
+        assert (first, second.result()) == (5, 5)
+        with scoped_session(container) as db_session:
+            assert [
+                (repo, key, work, kind, duration)
+                for repo, key, work, kind, _, duration, _ in _seeded(db_session)
+            ] == [
+                ("example/Example", key, other.work_item_id, REVIEW, 60) for key in keys
+            ]
+
+    def test_a_seed_writes_its_keys_in_their_order_whatever_the_calls(
+        self, committed_app: Flask
+    ) -> None:
+        """Two seeds that share keys wait on each other one way: a seed
+        given `b` before `a` holds `a` while it waits on `b`, so a third
+        seed of `a` waits on it."""
+        container = committed_app.container
+        worker = _committed_work(committed_app)
+        second = _another_work(committed_app, worker, "second")
+        third = _another_work(committed_app, worker, "third")
+        with scoped_session(container):
+            # The kind met and committed: no seed below waits on it.
+            container.pilot_work_service().seed_step_timings(worker, [_past("z")])
+
+        def seed(seeder: Worker, keys: list[str]) -> int:
+            with scoped_session(container):
+                return container.pilot_work_service().seed_step_timings(
+                    seeder, [_past(key) for key in keys]
+                )
+
+        with scoped_session(container):
+            container.pilot_work_service().seed_step_timings(worker, [_past("b")])
+            seconds = in_thread(lambda: seed(second, ["b", "a"]))
+            wait_until(lambda: lock_waits(container) == 1, "the second seed waiting")
+            thirds = in_thread(lambda: seed(third, ["a"]))
+            wait_until(lambda: lock_waits(container) == 2, "the third seed waiting")
+
+        assert (seconds.result(), thirds.result()) == (2, 1)
+        with scoped_session(container) as db_session:
+            assert [(key, work) for _, key, work, *_ in _seeded(db_session)] == [
+                ("a", third.work_item_id),
+                ("b", second.work_item_id),
+                ("z", worker.work_item_id),
+            ]
+
+    def test_a_seed_that_waited_out_a_stop_writes_nothing(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        worker = _committed_work(committed_app)
+        with committed_app.app_context():
+            engine = db.engine
+
+        def seed() -> object:
+            with scoped_session(container):
+                return container.pilot_work_service().seed_step_timings(
+                    worker, [_past("021/P1.code")]
+                )
+
+        with engine.connect() as stop:
+            stop.execute(
+                sql("UPDATE sessions SET state_code = 'stopped' WHERE id = :id"),
+                {"id": worker.session_id},
+            )
+            call = in_thread(seed)
+            wait_until(lambda: lock_waits(container) == 1, "the call waiting")
+            stop.commit()
+
+        with pytest.raises(AuthorizationException):
+            call.result()
+        with scoped_session(container) as db_session:
+            assert _seeded(db_session) == []
+            assert _kinds(db_session) == []
 
 
 DEBRIEF = "It went well, if slowly: the second review was worth it."

@@ -27,6 +27,8 @@ from app.schemas.pilot_work import (
     RegisterDocumentRequestSchema,
     RegisteredDebriefSchema,
     RegisteredDocumentSchema,
+    SeededStepTimingsSchema,
+    SeedStepTimingsRequestSchema,
     SetProgressRequestSchema,
     SetProgressStepRequestSchema,
 )
@@ -195,6 +197,42 @@ def set_progress_step(
     body = SetProgressStepRequestSchema.model_validate(request.get_json())
     steps = pilot_work_service.set_progress_step(g.worker, body.code, body.state)
     return _progress(steps), 200
+
+
+@pilot_work_bp.route("/step-timings", methods=["POST"])
+@public
+@api.validate(
+    json=SeedStepTimingsRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=SeededStepTimingsSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def seed_step_timings(
+    pilot_work_service: PilotWorkService = Provide[ServiceContainer.pilot_work_service],
+) -> Any:
+    """`seed_step_timings(timings)` (F156.3): past runs' finished steps kept
+    as timings of the session's own work item, in its repo, a key the repo
+    has already replacing its timing whole; no effect.
+
+    Returns:
+        200: The number of timings written
+        400: The body is not a list of 1 to 1,000 timings, each a key of 1 to
+            200 characters, a kind of 1 to 64, an end as a date and time with
+            its offset, a duration in whole seconds from 0 and an optional
+            listed_ahead
+        401: No bearer, or one no session has
+        403: The bearer's session is not a work item's, or has no turn running
+        409: A key is repeated, or the work item has no repo, neither its own
+            nor its environment's, nothing written: the reason
+    """
+    body = SeedStepTimingsRequestSchema.model_validate(request.get_json())
+    written = pilot_work_service.seed_step_timings(g.worker, body.timings)
+    return SeededStepTimingsSchema(timings=written).model_dump(mode="json"), 200
 
 
 @pilot_work_bp.route("/debrief", methods=["POST"])
