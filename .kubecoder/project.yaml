@@ -41,6 +41,18 @@ projects:
       - cexec modern-app uv run mypy .
       - cexec modern-app uv run vulture app/ vulture_whitelist.py --min-confidence 80
 
+  collector:
+    description: >-
+      The collector: it reads the Claude Code transcripts on a fleet's home and
+      publishes their facts into Pilot's record — Python, a uv project of its own.
+    setup: cexec modern-app uv sync --locked
+    test: cexec modern-app uv run pytest
+    lint:
+      - cexec modern-app uv run ruff check .
+      - cexec modern-app uv run ruff format --check .
+      - cexec modern-app uv run mypy .
+      - cexec modern-app uv run vulture src/ --min-confidence 80
+
   frontend:
     description: >-
       React SPA with a generated OpenAPI client; Playwright E2E suite that boots

@@ -1,0 +1,75 @@
+[project]
+name = "pilot-collector"
+version = "1.0.0"
+description = "Pilot's collector: it reads the Claude Code transcripts on a fleet's home and publishes their facts into Pilot's record"
+authors = [{ name = "Pieter van Ginkel", email = "pvginkel@gmail.com" }]
+requires-python = ">=3.13,<4"
+dependencies = [
+    "pydantic>=2.5.0,<3",
+    "pydantic-settings>=2.1.0,<3",
+    "pilot-collection",
+]
+
+# The shapes that pass between a collector and Pilot, which the backend takes
+# too, and the invented scenario with its builder, whose transcript files the
+# tests read (F152.1, F122.3). Editable: uv reinstalls a path dependency
+# installed whole only when its pyproject.toml changes, never its source.
+[tool.uv.sources]
+pilot-collection = { path = "../backend/packages/pilot-collection", editable = true }
+pilot-scenario = { path = "../backend/packages/pilot-scenario", editable = true }
+
+[dependency-groups]
+dev = [
+    "pilot-scenario",
+    "ruff>=0.15.0,<0.16",
+    "mypy>=1.8.0,<2",
+    "pytest>=9.0.0,<10",
+    "vulture>=2.14,<3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pilot_collector"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "UP",    # pyupgrade
+    "ERA",   # eradicate (commented-out code)
+    "RUF100", # unused noqa directives
+]
+ignore = [
+    "E501", # line too long, handled by the formatter
+]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src", "tests"]
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"
