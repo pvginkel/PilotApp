@@ -18,7 +18,8 @@
  * a folder attached as its `attach_file` attaches it (/api/testing/items/<id>/worker-attachments),
  * each the effect of the call a tool-use id names, and its list of steps replaced as its
  * `set_progress` replaces it (/api/testing/items/<id>/progress), and its debrief given as its
- * `register_debrief` gives it (/api/testing/items/<id>/debrief); a registered document's writer is asked about
+ * `register_debrief` gives it (/api/testing/items/<id>/debrief), Pilot's lines on it written as the
+ * pass's `write_notable` writes them (/api/testing/items/<id>/notable); a registered document's writer is asked about
  * its blocks as the pre-ruling pass's `ask_writer` asks (/api/testing/items/<id>/writer-questions),
  * Pilot's note put on a block or on an item as the pass's `note` puts it (/api/testing/items/<id>/notes),
  * its alert on an item as the pass's `alert` puts it (/api/testing/items/<id>/alerts),
@@ -69,16 +70,17 @@ export function slugOf(projectId: string): string {
 /** An invented account of a debrief. */
 const AN_ENTRY: DebriefEntry = { section: 'P1 · The schema', round: 1, role: 'code-writer', duration: 540, words: 'The schema went in cleanly.' };
 
-/** Each project the worker's specs made, by its id: its folder in the store's tree, as the testing route answered it. */
+/** Each project the worker's specs made, and each of the seed's they opened, by its id: its folder in the store's tree, as the testing route answered it or as the list reads it. */
 const folders = new Map<string, string>();
 
 /**
- * A project's own address (H3), of a project the worker's specs made: `/projects/<slug>`, or a
- * draft's `/projects/draft-<number>`, as it was made; a draft created since is at its slug.
+ * A project's own address (H3), of a project the worker's specs made or one of the seed's they
+ * named (`Projects.seeded()`): `/projects/<slug>`, or a draft's `/projects/draft-<number>`, as it
+ * was made; a draft created since is at its slug.
  */
 export function projectAddress(projectId: string): string {
   const folder = folders.get(projectId);
-  if (folder === undefined) throw new Error(`Project ${projectId} was not made by the worker's specs`);
+  if (folder === undefined) throw new Error(`Project ${projectId} was not made by the worker's specs, nor named of the seed's`);
   return `/projects/${folder}`;
 }
 
@@ -322,6 +324,17 @@ export class Projects {
     expect(response.status(), await response.text()).toBe(201);
   }
 
+  /**
+   * Pilot's lines on a work item's debrief, Markdown, as the pass after its turn writes them with
+   * `write_notable`, with no pass running; lines that stand there are replaced (F52.4).
+   */
+  async writeNotable(workId: string, text: string): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${workId}/notable`, {
+      data: { text },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+  }
+
   /** A registered document's writer asked about its blocks, by their local ids, as the pre-ruling pass asks. */
   async askWriter(documentId: string, questions: WriterQuestion[]): Promise<void> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${documentId}/writer-questions`, {
@@ -412,6 +425,13 @@ export class Projects {
     const response = await this.page.request.get(`${this.backendUrl}/api/projects?archived=${archived}`);
     expect(response.status(), await response.text()).toBe(200);
     return ((await response.json()) as { projects: ProjectTab[] }).projects;
+  }
+
+  /** A project of the backend's seed, by its name: its id, its address known as a made project's is. */
+  async seeded(name: string): Promise<string> {
+    const tab = (await this.list()).find((each) => each.name === name)!;
+    folders.set(tab.id, tab.address);
+    return tab.id;
   }
 
   /** A project's head, as the signed-in person reads it. */

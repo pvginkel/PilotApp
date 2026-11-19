@@ -559,11 +559,21 @@
   .wait-on { color: hsl(var(--foreground)); }
   .wait-firings { margin: 6px 0 0; padding: 0; list-style: none; font-size: var(--text-sm); line-height: 22px; color: hsl(var(--muted-foreground)); }
 
-  /* ---- A debrief's notice open: per work item it carries, its head, its debrief and its two
-     links, set in behind a rule as the full debrief's entries are (debrief-notice.tsx) -------- */
+  /* ---- A debrief's notice open: the work items it carries, each with its stage's time, Pilot's
+     lines, and under Details each work item's head, its debrief and its two links
+     (debrief-notice.tsx) ------------------------------------------------------------------ */
 
-  .carried { margin-top: 12px; padding-left: 12px; border-left: 2px solid hsl(var(--border)); }
-  .carried-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin-bottom: 2px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
+  /* The times stand in a column of their own, right of the longest title, each whole beside a title that wraps. */
+  .stage-times { display: grid; grid-template-columns: minmax(0, max-content) max-content; gap: 0 12px; margin: 0; padding: 0; list-style: none; }
+  .stage-times li { display: contents; }
+  .stage-times .stage-title { overflow-wrap: anywhere; }
+  .stage-times .stage-time { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+  .notable { margin-top: 8px; }
+  .notable > .prose + .prose { margin-top: 0.7em; }
+  .debrief-foot { display: flex; margin-top: 6px; }
+  .carried { margin-top: 12px; }
+  /* Halfway between the body's size and the box's title's. */
+  .carried-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin-bottom: 2px; font-size: calc((var(--text-base) + var(--text-lg)) / 2); color: hsl(var(--muted-foreground)); }
   .carried-head .carried-title { min-width: 0; font-weight: 600; color: hsl(var(--foreground)); overflow-wrap: anywhere; }
   .carried-head .dotted { display: inline-flex; align-items: baseline; gap: inherit; }
   .carried-head .sep { opacity: 0.75; }

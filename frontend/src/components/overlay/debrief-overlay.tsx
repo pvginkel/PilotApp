@@ -32,6 +32,7 @@ import type { components } from '@/lib/api/generated/types';
 import { smoothly } from '@/lib/motion';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 import { cn } from '@/lib/utils';
+import { took } from '@/lib/utils/time-format';
 
 type Section = components['schemas']['DebriefSchema.1fdd8ae.DebriefSectionSchema'];
 type Entry = components['schemas']['DebriefSchema.1fdd8ae.DebriefEntrySchema'];
@@ -208,12 +209,4 @@ function EntryLines({ entry }: { entry: Entry }) {
       </li>
     </>
   );
-}
-
-/** A time in whole seconds as the full debrief shows it: "<1m", "17m", "1h 40m". */
-function took(seconds: number): string {
-  if (seconds < 60) return '<1m';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
 }

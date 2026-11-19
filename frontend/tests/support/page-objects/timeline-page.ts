@@ -23,8 +23,9 @@ import { projectAddress } from '../projects';
  * its popover and Resume or Retry (F26, F26.8, F67, F145.2, F145.3). A wait open shows its request's
  * button, what it waits on — a card wait's cards and states and since when, a timed wait's due
  * time — and its firings; done, the note Pilot closed it with, and on a phone the menu its line
- * opens (F27, F13.9). A debrief's notice open shows the work items it carries, each its head, its
- * debrief, Full debrief and Session log (F26.13). Pilot's job on an item stands in its line or its
+ * opens (F27, F13.9). A debrief's notice open shows the work items it carries, each with its
+ * stage's time, Pilot's lines, and under Details each work item's head, its debrief, Full debrief
+ * and Session log (F26.13). Pilot's job on an item stands in its line or its
  * head (F59.1).
  */
 export class TimelinePage {
@@ -268,7 +269,15 @@ export class TimelinePage {
         /** The note Pilot closed it with, under its done line's title. */
         note: root.getByTestId('timeline.line.wait-note'),
       },
-      /** A debrief's notice open: the work items it carries, in their order, and each by its id (F26.13). */
+      /**
+       * A debrief's notice open (F26.13): the lines of the work items it carries, in their order,
+       * and each by its id, its title and the time its stage took; Pilot's lines; Details; and,
+       * under it once open, the work items' parts, in their order, and each by its id.
+       */
+      stages: root.getByTestId('timeline.debrief.stage'),
+      stage: (workId: string) => stageParts(root, workId),
+      notable: root.getByTestId('timeline.debrief.notable'),
+      debriefDetails: root.getByTestId('timeline.debrief.details'),
       debriefs: root.getByTestId('timeline.debrief'),
       carried: (workId: string) => carriedParts(root, workId),
       card: {
@@ -365,9 +374,19 @@ export function addressOf(projectId: string, itemId: string, blockId?: string): 
   return `${projectAddress(projectId)}/items/${itemId}${blockId === undefined ? '' : `/blocks/${blockId}`}`;
 }
 
+/** A work item's line at the top of the debrief's notice that carries it, by its id (F26.13): its title and the time its stage took (F26.17). */
+function stageParts(within: Locator, workId: string) {
+  const root = within.locator(`[data-testid="timeline.debrief.stage"][data-item-id="${workId}"]`);
+  return {
+    root,
+    title: root.getByTestId('timeline.debrief.stage.title'),
+    time: root.getByTestId('timeline.debrief.stage.time'),
+  };
+}
+
 /**
- * A work item a debrief's notice carries, by its id (F26.13): its head's title and the time its turn
- * ended, its debrief, and Full debrief and Session log under it.
+ * A work item's part under a debrief's notice's Details, by its id (F26.13): its head's title and
+ * the time its turn ended, its debrief, and Full debrief and Session log under it.
  */
 function carriedParts(within: Locator, workId: string) {
   const root = within.locator(`[data-testid="timeline.debrief"][data-item-id="${workId}"]`);

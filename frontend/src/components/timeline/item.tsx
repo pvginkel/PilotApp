@@ -5,8 +5,9 @@
  * (F168.6, F168.5), and a notice's Read alone under its text (F23),
  * and Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
- * (F24.2, F25.1); the archive question is its two buttons (F5.6); a debrief's notice is its box, the
- * debriefs it carries and its Read (debrief-notice.tsx, F26.13). A one-ask item whose writer Pilot
+ * (F24.2, F25.1); the archive question is its two buttons (F5.6); a debrief's notice is its box, its
+ * stages' times, Pilot's lines, the debriefs it carries under Details and its Read
+ * (debrief-notice.tsx, F26.13). A one-ask item whose writer Pilot
  * asked about its block carries the block's mark in its head (F52.2; writer-asked.tsx).
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
