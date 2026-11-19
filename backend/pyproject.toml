@@ -38,9 +38,12 @@ dependencies = [
 # route loads on every stage but prd (F122.2, F122.6), and the shapes that pass
 # between a collector and Pilot, which the collector takes too (F152.1).
 # Editable: uv reinstalls a path dependency installed whole only when its
-# pyproject.toml changes, never its source.
+# pyproject.toml changes, never its source. The collector is the dev group's:
+# the suite walks a home with it against Pilot's routes (F152.2), and the
+# image, whose build context lacks it, installs no dev group.
 [tool.uv.sources]
 pilot-collection = { path = "packages/pilot-collection", editable = true }
+pilot-collector = { path = "../collector", editable = true }
 pilot-dsl = { path = "packages/pilot-dsl", editable = true }
 pilot-scenario = { path = "packages/pilot-scenario", editable = true }
 
@@ -52,6 +55,7 @@ check = "scripts.check:main"
 [dependency-groups]
 dev = [
     "copier>=9.0.0,<10",
+    "pilot-collector",
     "ruff>=0.15.0,<0.16",
     "mypy>=1.8.0,<2",
     "pytest>=9.0.0,<10",

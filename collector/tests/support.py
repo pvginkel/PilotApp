@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pilot_collector.home import Transcript
+from pilot_collector.settings import Settings
 
 SESSION = "4f0c6a1e-8b2d-4d57-9e3a-71c5d2b8a690"
 AGENT = "a3f9c1d27b6e4805c"
@@ -18,6 +19,17 @@ MANAGED = "/etc/claude-code/CLAUDE.md"
 START = datetime(2026, 11, 12, 9, 0, tzinfo=UTC)
 
 type Line = dict[str, Any]
+
+
+def settings(**given: Any) -> Settings:
+    """The collector's settings, those with no default invented and
+    `given` over them."""
+    named: dict[str, Any] = {
+        "COLLECTOR_PILOT_URL": "http://pilot.invalid",
+        "COLLECTOR_TOKEN": "an-invented-collector-token",
+        "COLLECTOR_HOME": "/home/ubuntu/.claude",
+    }
+    return Settings(**(named | given))
 
 
 def moment(seconds: float) -> datetime:

@@ -5,6 +5,7 @@ description = "Pilot's collector: it reads the Claude Code transcripts on a flee
 authors = [{ name = "Pieter van Ginkel", email = "pvginkel@gmail.com" }]
 requires-python = ">=3.13,<4"
 dependencies = [
+    "httpx>=0.28.1,<0.29",
     "pydantic>=2.5.0,<3",
     "pydantic-settings>=2.1.0,<3",
     "pilot-collection",
@@ -17,6 +18,9 @@ dependencies = [
 [tool.uv.sources]
 pilot-collection = { path = "../backend/packages/pilot-collection", editable = true }
 pilot-scenario = { path = "../backend/packages/pilot-scenario", editable = true }
+
+[project.scripts]
+pilot-collector = "pilot_collector.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -56,6 +60,9 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.13"
+# The settings are a BaseSettings: built with no argument, each read from the
+# environment, which the plugin tells mypy.
+plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
 check_untyped_defs = true
 disallow_any_generics = true

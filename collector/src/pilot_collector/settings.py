@@ -2,10 +2,10 @@
 name."""
 
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Annotated
 
-from pydantic import AfterValidator, Field
+from pydantic import AfterValidator, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,25 @@ def _are_absolute(roots: list[str]) -> list[str]:
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
+
+    COLLECTOR_PILOT_URL: str = Field(
+        description=(
+            "Where Pilot's backend answers, the address its `/api/collector`"
+            " routes are under (F152.1)"
+        ),
+    )
+    COLLECTOR_TOKEN: SecretStr = Field(
+        description=(
+            "The bearer between the collector and Pilot, the backend's"
+            " `COLLECTOR_TOKEN` (F152.1)"
+        ),
+    )
+    COLLECTOR_HOME: Path = Field(
+        description=(
+            "The fleet's home as the collector sees it: the folder that holds"
+            " `projects`, Claude Code's `.claude` (F152.1)"
+        ),
+    )
 
     COLLECTOR_ENVIRONMENT_PATTERN: Annotated[
         re.Pattern[str], AfterValidator(_names_the_id)

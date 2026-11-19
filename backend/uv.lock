@@ -982,6 +982,7 @@ dependencies = [
 dev = [
     { name = "copier" },
     { name = "mypy" },
+    { name = "pilot-collector" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-rerunfailures" },
@@ -1026,6 +1027,7 @@ requires-dist = [
 dev = [
     { name = "copier", specifier = ">=9.0.0,<10" },
     { name = "mypy", specifier = ">=1.8.0,<2" },
+    { name = "pilot-collector", editable = "../collector" },
     { name = "pytest", specifier = ">=9.0.0,<10" },
     { name = "pytest-cov", specifier = ">=7.0.0,<8" },
     { name = "pytest-rerunfailures", specifier = ">=16.7,<17" },
@@ -1052,6 +1054,34 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.5.0,<3" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.0,<10" }]
+
+[[package]]
+name = "pilot-collector"
+version = "1.0.0"
+source = { editable = "../collector" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pilot-collection" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1,<0.29" },
+    { name = "pilot-collection", editable = "packages/pilot-collection" },
+    { name = "pydantic", specifier = ">=2.5.0,<3" },
+    { name = "pydantic-settings", specifier = ">=2.1.0,<3" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.8.0,<2" },
+    { name = "pilot-scenario", editable = "packages/pilot-scenario" },
+    { name = "pytest", specifier = ">=9.0.0,<10" },
+    { name = "ruff", specifier = ">=0.15.0,<0.16" },
+    { name = "vulture", specifier = ">=2.14,<3" },
+]
 
 [[package]]
 name = "pilot-dsl"

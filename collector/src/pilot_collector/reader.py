@@ -47,7 +47,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -55,13 +55,11 @@ from pilot_collection.publication import CallTokenKind, PublicationSchema
 from pydantic import ValidationError
 
 from pilot_collector import VERSION
-from pilot_collector.home import Transcript, saved_output
+from pilot_collector.home import Transcript, modified_at, saved_output
 from pilot_collector.settings import Settings
 
 CLAUDE_CODE = "claude-code"
 """The Component whose version a Launch's lines carry."""
-
-_EPOCH = datetime.fromtimestamp(0, UTC)
 
 _COST = "cost-state"
 """The type of the line a process writes as it exits."""
@@ -480,8 +478,7 @@ def read(transcript: Transcript, settings: Settings) -> PublicationSchema:
                 "session_id": transcript.session_id,
                 "agent_id": transcript.agent_id,
                 "file_size": status.st_size,
-                "file_modified_at": _EPOCH
-                + timedelta(microseconds=status.st_mtime_ns // 1000),
+                "file_modified_at": modified_at(status),
                 "collector": {"version": VERSION},
                 "working_directory": thread.directory,
                 "repository": _repository(thread.directory, settings),

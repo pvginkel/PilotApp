@@ -11,8 +11,11 @@ COPY pyproject.toml uv.lock /app/
 # sync below installs.
 COPY packages /app/packages
 
-# Install project deps into .venv
-RUN uv sync --locked --no-dev --no-install-project
+# Install project deps into .venv. --frozen: the lock names the collector, a
+# path dependency of the dev group's outside this build context, which
+# --locked would read to check the lock; the suite's `uv sync --locked` checks
+# it before any image is built.
+RUN uv sync --frozen --no-dev --no-install-project
 
 # copy your source (no re-resolution needed)
 COPY *.py /app/

@@ -16,7 +16,6 @@ from pilot_scenario.script import Call, Launch, Prompt, Session, Tokens
 from pilot_collector import VERSION
 from pilot_collector.home import transcript
 from pilot_collector.reader import UnreadableError, read
-from pilot_collector.settings import Settings
 from tests import support
 from tests.support import (
     AGENT,
@@ -47,7 +46,7 @@ UNTIL = datetime(2026, 11, 12, 9, 30, 0, 250_000, tzinfo=UTC)
 INTERRUPTED = "[Request interrupted by user for tool use]"
 """Claude Code's words for the result of a tool call the person interrupted."""
 
-SETTINGS = Settings()
+SETTINGS = support.settings()
 
 THREAD = (
     "session_id",
@@ -304,7 +303,9 @@ class TestThePlace:
         assert publication.repository == repository
 
     def test_the_checkout_roots_are_a_setting(self, tmp_path: Path) -> None:
-        settings = Settings(COLLECTOR_CHECKOUT_ROOTS=["/srv/checkouts", "/srv/more"])
+        settings = support.settings(
+            COLLECTOR_CHECKOUT_ROOTS=["/srv/checkouts", "/srv/more"]
+        )
         elsewhere = filed(tmp_path, [typed(0) | {"cwd": "/srv/more/Shuttle/src"}])
 
         assert read(elsewhere, settings).repository == "Shuttle"
@@ -349,7 +350,9 @@ class TestThePlace:
         assert publication.environment == "cleo-loom-7a41d9"
 
     def test_the_pattern_that_finds_the_id_is_a_setting(self, tmp_path: Path) -> None:
-        settings = Settings(COLLECTOR_ENVIRONMENT_PATTERN=re.compile(r"# Host: (\S+)"))
+        settings = support.settings(
+            COLLECTOR_ENVIRONMENT_PATTERN=re.compile(r"# Host: (\S+)")
+        )
         hosted = filed(
             tmp_path,
             [typed(0), instructions(0, loaded("Managed", "# Host: loom-9\n"))],

@@ -1,11 +1,23 @@
 """A transcript's file by its place under the home's `projects`."""
 
+import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from pilot_collector.home import Transcript, saved_output, transcript
-from tests.support import AGENT, FOLDER, SESSION
+from pilot_collector.home import (
+    Listed,
+    Transcript,
+    saved_output,
+    transcript,
+    transcripts,
+)
+from pilot_collector.reader import read
+from tests.support import AGENT, FOLDER, SESSION, filed, settings, typed
+
+OTHER = "9d3b7e52-1c4a-4f80-b6e9-05a7c3f1d248"
+"""Claude Code's id of another conversation."""
 
 PROJECTS = Path("/home/ubuntu/.claude/projects")
 
@@ -79,3 +91,83 @@ class TestASavedOutputsPlace:
     )
     def test_a_path_of_another_shape_is_no_saved_outputs(self, named: str) -> None:
         assert saved_output(PROJECTS, named) is None
+
+
+def _put(path: Path, content: bytes = b"{}\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return path
+
+
+def _names(projects: Path) -> set[str]:
+    return {listed.transcript.name for listed in transcripts(projects)}
+
+
+class TestTheHomesTranscripts:
+    def test_every_threads_file_is_listed_with_its_size_and_time(
+        self, tmp_path: Path
+    ) -> None:
+        main = _put(tmp_path / FOLDER / f"{SESSION}.jsonl", b"{}\n{}\n")
+        sub_agents = tmp_path / FOLDER / SESSION / "subagents"
+        sub_agent = _put(sub_agents / f"agent-{AGENT}.jsonl")
+        workflows = _put(sub_agents / "workflows" / "wf_7c21" / "agent-b81e.jsonl")
+        other = _put(tmp_path / "-work-Spindle" / f"{OTHER}.jsonl")
+        stood = datetime(2026, 11, 12, 10, 2, 3, 456789, tzinfo=UTC)
+        at = int(stood.timestamp()) * 10**9 + 456_789_321
+        for path in (main, sub_agent, workflows, other):
+            os.utime(path, ns=(at, at))
+
+        listed = sorted(transcripts(tmp_path), key=lambda each: each.transcript.name)
+
+        assert listed == [
+            Listed(Transcript(tmp_path, main, SESSION), 6, stood),
+            Listed(Transcript(tmp_path, sub_agent, SESSION, AGENT), 3, stood),
+            Listed(Transcript(tmp_path, workflows, SESSION, "b81e"), 3, stood),
+            Listed(Transcript(tmp_path, other, OTHER), 3, stood),
+        ]
+
+    def test_a_files_time_is_the_one_its_publication_names(
+        self, tmp_path: Path
+    ) -> None:
+        filed(tmp_path, [typed(0)])
+        at = 1_794_474_123_456_789_123
+        os.utime(tmp_path / FOLDER / f"{SESSION}.jsonl", ns=(at, at))
+
+        [listed] = transcripts(tmp_path)
+
+        publication = read(listed.transcript, settings())
+        assert listed.file_modified_at == publication.file_modified_at
+        assert listed.file_size == publication.file_size
+
+    def test_what_is_no_transcripts_is_not_listed(self, tmp_path: Path) -> None:
+        session = tmp_path / FOLDER / SESSION
+        _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
+        _put(tmp_path / f"{OTHER}.jsonl")
+        _put(tmp_path / FOLDER / f"{OTHER}.json")
+        _put(session / "notes.jsonl")
+        _put(session / "tool-results" / f"agent-{AGENT}.jsonl")
+        _put(session / "tool-results" / "subagents" / f"agent-{AGENT}.jsonl")
+        _put(session / "subagents" / f"agent-{AGENT}.meta.json")
+        _put(session / "subagents" / "workflows" / "wf_7c21" / "journal.jsonl")
+
+        assert _names(tmp_path) == {SESSION}
+
+    def test_no_symlink_is_followed(self, tmp_path: Path) -> None:
+        """A sub-agent's file linked into another session's folder is its own
+        session's, and a linked folder's files are where the folder is."""
+        _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
+        own = _put(tmp_path / FOLDER / SESSION / "subagents" / f"agent-{AGENT}.jsonl")
+        elsewhere = tmp_path / FOLDER / OTHER / "subagents"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / f"agent-{AGENT}.jsonl").symlink_to(own)
+        (tmp_path / FOLDER / f"{OTHER}.jsonl").symlink_to(
+            tmp_path / FOLDER / f"{SESSION}.jsonl"
+        )
+        (tmp_path / "-work-Spindle").symlink_to(tmp_path / FOLDER)
+        (elsewhere / "workflows").symlink_to(tmp_path / FOLDER / SESSION / "subagents")
+
+        assert _names(tmp_path) == {SESSION, f"{SESSION}/{AGENT}"}
+
+    def test_a_home_with_no_projects_is_an_error(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            transcripts(tmp_path / "projects")
