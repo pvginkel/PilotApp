@@ -106,6 +106,7 @@ from app.models import (
 )
 from app.models import Session as AgentSession
 from app.models.call import RECORDED_ELSEWHERE
+from app.schemas.inventory import HeldTranscriptSchema, InventorySchema
 from app.schemas.publication import (
     CallTokenKind,
     PublicationSchema,
@@ -330,8 +331,8 @@ def _faults(publication: PublicationSchema) -> list[str]:
 
 
 class PublicationService:
-    """Admits a collector's call, and writes its publication into the record
-    on the caller's transaction."""
+    """Admits a collector's call, hands a walk Pilot's inventory, and writes
+    a publication into the record on the caller's transaction."""
 
     def __init__(
         self,
@@ -379,6 +380,32 @@ class PublicationService:
             raise CollectorProtocolUnsupportedException(
                 protocol, COLLECTOR_PROTOCOL_MIN, COLLECTOR_PROTOCOL_MAX
             )
+
+    def inventory(self) -> InventorySchema:
+        """What Pilot holds, for a walk to compare the home against (F152.2):
+        every Transcript with its collection record, in one read, by
+        `session_id`, a main thread before its sub-agents', and the walk's
+        two settings."""
+        held = self.db.execute(
+            select(
+                Transcript.session_id,
+                Transcript.agent_id,
+                Transcript.file_size,
+                Transcript.file_modified_at,
+                Transcript.replayed_size,
+                ComponentVersion.version.label("collector"),
+            )
+            .join(ComponentVersion, ComponentVersion.id == Transcript.read_under_id)
+            .order_by(Transcript.session_id, Transcript.agent_id.nulls_first())
+        )
+        return InventorySchema(
+            walk_interval_seconds=self.app_settings.collector_walk_interval_seconds,
+            settling_seconds=self.app_settings.collector_settling_seconds,
+            transcripts=[
+                HeldTranscriptSchema.model_validate(row, from_attributes=True)
+                for row in held
+            ],
+        )
 
     def publish(self, publication: PublicationSchema) -> Transcript:
         """Take a publication of one Transcript, whole or appended, and

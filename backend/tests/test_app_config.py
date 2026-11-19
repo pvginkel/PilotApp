@@ -76,6 +76,35 @@ class TestAppSettings:
 
         assert settings.collector_token == "an-invented-collector-token"
 
+    def test_a_collector_walks_every_30_s_and_a_file_settles_in_ten_minutes(
+        self,
+    ) -> None:
+        for settings in (AppSettings(), AppSettings.load(AppEnvironment())):
+            assert (
+                settings.collector_walk_interval_seconds,
+                settings.collector_settling_seconds,
+            ) == (30.0, 600.0)
+
+    def test_load_reads_the_walks_two_settings_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                COLLECTOR_WALK_INTERVAL_SECONDS=300, COLLECTOR_SETTLING_SECONDS=0
+            )
+        )
+
+        assert (
+            settings.collector_walk_interval_seconds,
+            settings.collector_settling_seconds,
+        ) == (300.0, 0.0)
+
+    def test_load_refuses_a_walk_interval_that_is_not_positive(self) -> None:
+        with pytest.raises(ValidationError, match="COLLECTOR_WALK_INTERVAL_SECONDS"):
+            AppEnvironment.model_validate({"COLLECTOR_WALK_INTERVAL_SECONDS": 0})
+
+    def test_load_refuses_a_negative_settling_time(self) -> None:
+        with pytest.raises(ValidationError, match="COLLECTOR_SETTLING_SECONDS"):
+            AppEnvironment.model_validate({"COLLECTOR_SETTLING_SECONDS": -1})
+
     def test_load_refuses_a_put_limit_below_one_byte(self) -> None:
         with pytest.raises(ValueError):
             AppEnvironment(SYNC_PUT_MAX_BYTES=0)
@@ -487,6 +516,8 @@ class TestAppSettings:
             "store_environment_id": "'example-env-1'",
             "youtrack_webhook_token": "***",
             "collector_token": "***",
+            "collector_walk_interval_seconds": repr(30.0),
+            "collector_settling_seconds": repr(600.0),
             "sync_put_max_bytes": "2097152",
             "sync_heartbeat_seconds": "15.0",
             "ticket_url_template": "None",
@@ -595,6 +626,8 @@ class TestAppSettings:
             "store_environment_id": repr(""),
             "youtrack_webhook_token": "***",
             "collector_token": "***",
+            "collector_walk_interval_seconds": repr(30.0),
+            "collector_settling_seconds": repr(600.0),
             "sync_put_max_bytes": "2097152",
             "sync_heartbeat_seconds": "15.0",
             "ticket_url_template": repr("https://tracker.example.com/{id}"),

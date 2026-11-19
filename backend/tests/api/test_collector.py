@@ -1,6 +1,6 @@
-"""The collector's routes (F152.3): `POST /api/collector/publications` under
-the collector's bearer, outside the sign-in gate, each answer pinned beside
-the protocol's version."""
+"""The collector's routes (F152.2, F152.3): `GET /api/collector/inventory`
+and `POST /api/collector/publications` under the collector's bearer, outside
+the sign-in gate, each answer pinned beside the protocol's version."""
 
 import logging
 from typing import Any
@@ -37,9 +37,10 @@ from tests.support.publications import (
     tool_call,
     whole,
 )
-from tests.support.transcripts import CAMP, SUB_AGENT
+from tests.support.transcripts import CAMP, OTHER, SUB_AGENT
 
 URL = "/api/collector/publications"
+INVENTORY = "/api/collector/inventory"
 LOGGER = "app.services.publication_service"
 
 
@@ -77,6 +78,19 @@ def _post(
     return client.post(
         URL, json=body, headers=collector_headers() if headers is None else headers
     )
+
+
+def _configure_walks(
+    container: ServiceContainer, interval: float, settling: float
+) -> None:
+    """The app settings with those two as the walk's, for this test."""
+    settings = container.app_config().model_copy(
+        update={
+            "collector_walk_interval_seconds": interval,
+            "collector_settling_seconds": settling,
+        }
+    )
+    container.app_config.override(providers.Object(settings))
 
 
 def _held(session: DbSession) -> dict[str, list[int]]:
@@ -200,6 +214,149 @@ class TestCollectorGate:
 
         assert response.status_code == 204
         assert session.scalars(select(Transcript.session_id)).all() == [CAMP]
+
+
+class TestInventory:
+    def test_a_record_with_no_transcript_answers_the_walks_settings_alone(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(INVENTORY, headers=collector_headers())
+
+        assert response.status_code == 200
+        assert response.json == {
+            "walk_interval_seconds": 30.0,
+            "settling_seconds": 600.0,
+            "transcripts": [],
+        }
+
+    def test_each_transcript_pilot_holds_is_named_as_its_last_publication_left_it(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        """A main thread grown since its whole publication, its sub-agent's
+        thread, and another main thread read under another version."""
+        another = whole(
+            session_id=OTHER,
+            file_size=912,
+            file_modified_at="2026-11-12T11:02:03.456789+01:00",
+            collector={"version": "1.1.0"},
+        )
+        grown = appended(
+            call=2,
+            launch=2,
+            prompt=2,
+            calls=[call(2, predecessor="msg_0001"), call(3, predecessor="msg_0002")],
+        )
+        for publication in (another, _camp(), sub_agent(), grown):
+            assert _post(client, _body(publication)).status_code == 204
+
+        response = client.get(INVENTORY, headers=collector_headers())
+
+        assert response.status_code == 200
+        assert response.json["transcripts"] == [
+            {
+                "session_id": CAMP,
+                "agent_id": None,
+                "file_size": 61_000,
+                "file_modified_at": "2026-11-12T10:00:00Z",
+                "replayed_size": 48_112,
+                "collector": "1.0.0",
+            },
+            {
+                "session_id": CAMP,
+                "agent_id": SUB_AGENT,
+                "file_size": 48_112,
+                "file_modified_at": "2026-11-12T09:42:00Z",
+                "replayed_size": 48_112,
+                "collector": "1.0.0",
+            },
+            {
+                "session_id": OTHER,
+                "agent_id": None,
+                "file_size": 912,
+                "file_modified_at": "2026-11-12T10:02:03.456789Z",
+                "replayed_size": 912,
+                "collector": "1.1.0",
+            },
+        ]
+
+    def test_the_walks_settings_are_the_servers(
+        self, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        _configure_walks(container, interval=300.0, settling=0.0)
+
+        response = client.get(INVENTORY, headers=collector_headers())
+
+        assert response.json == {
+            "walk_interval_seconds": 300.0,
+            "settling_seconds": 0.0,
+            "transcripts": [],
+        }
+
+    def test_the_inventory_writes_nothing(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        assert _post(client, _body(_camp())).status_code == 204
+
+        with writes(session) as wrote:
+            assert client.get(INVENTORY, headers=collector_headers()).status_code == 200
+
+        assert wrote == {}
+
+    def test_a_call_without_the_bearer_is_401(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        assert _post(client, _body(_camp())).status_code == 204
+        headers = {**collector_headers(), "Authorization": "Bearer another-token"}
+
+        response = client.get(INVENTORY, headers=headers)
+
+        assert response.status_code == 401
+        assert response.json["code"] == "AUTHENTICATION_REQUIRED"
+        assert "transcripts" not in response.json
+
+    def test_every_call_is_401_while_the_token_is_empty(
+        self, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        _configure(container, "")
+
+        for bearer in (f"Bearer {COLLECTOR_TOKEN}", "Bearer ", "Bearer"):
+            headers = {**collector_headers(), "Authorization": bearer}
+            assert client.get(INVENTORY, headers=headers).status_code == 401
+
+    @pytest.mark.parametrize("version", ["0", "2", None])
+    def test_a_version_outside_the_range_is_426_with_the_range(
+        self, client: FlaskClient, version: str | None
+    ) -> None:
+        headers = collector_headers()
+        if version is None:
+            del headers["X-Pilot-Collector-Protocol"]
+        else:
+            headers["X-Pilot-Collector-Protocol"] = version
+
+        response = client.get(INVENTORY, headers=headers)
+
+        assert response.status_code == 426
+        assert response.json == {
+            "min": COLLECTOR_PROTOCOL_MIN,
+            "max": COLLECTOR_PROTOCOL_MAX,
+        }
+
+    def test_the_route_is_outside_the_oidc_gate(
+        self, oidc_app: Flask, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_app.container.config().oidc_enabled
+
+        response = oidc_client.get(INVENTORY, headers=collector_headers())
+
+        assert response.status_code == 200
+        assert response.json["transcripts"] == []
+
+    def test_no_other_method_is_served(self, client: FlaskClient) -> None:
+        for method in ("POST", "PUT", "DELETE"):
+            response = client.open(
+                INVENTORY, method=method, headers=collector_headers()
+            )
+            assert response.status_code == 405
 
 
 class TestPublish:

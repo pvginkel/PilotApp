@@ -3754,6 +3754,96 @@
         "title": "InventedWriterQuestionsSchema",
         "type": "object"
       },
+      "InventorySchema.46800bd": {
+        "description": "What Pilot holds, whole, and the walk's two settings.",
+        "properties": {
+          "settling_seconds": {
+            "description": "Seconds a file stands unchanged before a Transcript whose `replayed_size` is short of its `file_size` is published whole, its replay at rest",
+            "title": "Settling Seconds",
+            "type": "number"
+          },
+          "transcripts": {
+            "description": "Every Transcript Pilot holds, a main thread's and a sub-agent's, by `session_id`, a main thread before its sub-agents'",
+            "items": {
+              "$ref": "#/components/schemas/InventorySchema.46800bd.HeldTranscriptSchema"
+            },
+            "title": "Transcripts",
+            "type": "array"
+          },
+          "walk_interval_seconds": {
+            "description": "Seconds from one walk of the collector's to its next",
+            "title": "Walk Interval Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "walk_interval_seconds",
+          "settling_seconds",
+          "transcripts"
+        ],
+        "title": "InventorySchema",
+        "type": "object"
+      },
+      "InventorySchema.46800bd.HeldTranscriptSchema": {
+        "description": "A Transcript as Pilot holds it: what an appended publication of its\nfile builds on, and how much of the file its last whole one read.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude Code's id of the sub-agent, none on a main thread",
+            "title": "Agent Id"
+          },
+          "collector": {
+            "description": "The collector's version that read it at its last publication",
+            "minLength": 1,
+            "title": "Collector",
+            "type": "string"
+          },
+          "file_modified_at": {
+            "description": "The file's time at its last publication, to the microsecond",
+            "format": "date-time",
+            "title": "File Modified At",
+            "type": "string"
+          },
+          "file_size": {
+            "description": "The file's size in bytes at its last publication",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "File Size",
+            "type": "integer"
+          },
+          "replayed_size": {
+            "description": "The file's size in bytes at its last whole publication: short of `file_size` while appended publications were taken since",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Replayed Size",
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "Claude Code's id of the main thread",
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "agent_id",
+          "file_size",
+          "file_modified_at",
+          "replayed_size",
+          "collector"
+        ],
+        "title": "HeldTranscriptSchema",
+        "type": "object"
+      },
       "ItemDocumentSchema.1fdd8ae": {
         "description": "An item's document read on its own, as the overlay draws it (F28): its\ntimeline entry, but that a document done by Done reads as Done fixed it\n(F13.3), its `title`, `summary`, `body`, `word_count` and `read_minutes`\nfrom the text of its `done` Version.",
         "properties": {
@@ -16368,6 +16458,57 @@
           }
         },
         "summary": "Get current authenticated user information.",
+        "tags": []
+      }
+    },
+    "/api/collector/inventory": {
+      "get": {
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\n- 200: every transcript Pilot holds, a main thread's and a sub-agent's,   each by its `session_id` and `agent_id` with its last publication's   `file_size`, `file_modified_at` and collector's version, which are what   an appended publication of it builds on, and its `replayed_size`; and   the walk's two settings, `COLLECTOR_WALK_INTERVAL_SECONDS` and   `COLLECTOR_SETTLING_SECONDS`. A transcript the home has and the answer   lacks, or holds at another size, time or version, is one to publish;   one whose `replayed_size` is short of its `file_size`, its file   unchanged for the settling time, is published whole once. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none.",
+        "operationId": "get__api_collector_inventory",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventorySchema.46800bd"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.e156e3e"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "Pilot's inventory, which a collector asks for as each walk starts: what Pilot holds, whole, for the walk to compare the home against.",
         "tags": []
       }
     },

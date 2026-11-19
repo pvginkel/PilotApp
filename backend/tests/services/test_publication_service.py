@@ -12,7 +12,8 @@ writes from its boundary on alone (`TestAppended`), and one that does not
 continue what Pilot holds is refused whole (`TestNotAppendable`). The rows a
 replay at rest writes are logged (`TestReplayedAtRest`; F152.16, decision 81
 point 2). A Launch a Turn of Pilot's started stands under its Session and
-Turn (`TestRan`)."""
+Turn (`TestRan`). What Pilot holds is handed to a walk as its inventory
+(`TestInventory`; F152.2)."""
 
 import logging
 from datetime import UTC, datetime, timedelta, timezone
@@ -93,6 +94,7 @@ from tests.support.publications import (
     tool_call,
     whole,
 )
+from tests.support.statements import sent
 from tests.support.supervisor import wait_until
 from tests.support.transcripts import (
     CAMP,
@@ -3589,6 +3591,103 @@ class TestAdmitted:
     ) -> None:
         with pytest.raises(AuthenticationException):
             publications.admit("Bearer another-token", "2")
+
+
+class TestInventory:
+    """What a walk compares the home against (F152.2)."""
+
+    def test_the_transcripts_come_by_session_a_main_thread_before_its_sub_agents(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        for publication in (
+            sub_agent(agent_id=DEEPER, spawned_by=None),
+            _camp(session_id=OTHER),
+            sub_agent(),
+            _camp(),
+        ):
+            publications.publish(publication)
+
+        inventory = publications.inventory()
+
+        assert [(held.session_id, held.agent_id) for held in inventory.transcripts] == [
+            (CAMP, None),
+            (CAMP, SUB_AGENT),
+            (CAMP, DEEPER),
+            (OTHER, None),
+        ]
+
+    def test_a_transcript_is_held_as_its_last_publication_left_it(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """Republished whole by another version after an appended call: the
+        file's size and time, the size replayed and the version move."""
+        publications.publish(_camp())
+        publications.publish(_grown())
+        [taken_in_parts] = publications.inventory().transcripts
+        later = STARTED + timedelta(hours=2)
+
+        publications.publish(
+            _camp(
+                calls=[*_calls(), call(5, prompt=3, predecessor="msg_0004")],
+                file_size=70_000,
+                file_modified_at=later.isoformat(),
+                collector={"version": "1.1.0"},
+            )
+        )
+
+        assert taken_in_parts.model_dump() == {
+            "session_id": CAMP,
+            "agent_id": None,
+            "file_size": 61_000,
+            "file_modified_at": STARTED + timedelta(minutes=30),
+            "replayed_size": 48_112,
+            "collector": "1.0.0",
+        }
+        [replayed] = publications.inventory().transcripts
+        assert replayed.model_dump() == {
+            "session_id": CAMP,
+            "agent_id": None,
+            "file_size": 70_000,
+            "file_modified_at": later,
+            "replayed_size": 70_000,
+            "collector": "1.1.0",
+        }
+
+    def test_the_inventory_is_one_read_however_many_transcripts_and_versions(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        publications.publish(sub_agent())
+        publications.publish(_camp(session_id=OTHER, collector={"version": "1.1.0"}))
+
+        with sent(session) as each:
+            inventory = publications.inventory()
+
+        assert len(inventory.transcripts) == 3
+        assert len(each.texts) == 1
+
+    def test_the_walks_settings_are_the_servers(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        settings = container.app_config().model_copy(
+            update={
+                "collector_walk_interval_seconds": 300.0,
+                "collector_settling_seconds": 45.0,
+            }
+        )
+        publications = PublicationService(
+            session,
+            settings,
+            container.adoption_service(),
+            container.fleet_consumer(),
+        )
+
+        inventory = publications.inventory()
+
+        assert (inventory.walk_interval_seconds, inventory.settling_seconds) == (
+            300.0,
+            45.0,
+        )
 
 
 class TestRefused:

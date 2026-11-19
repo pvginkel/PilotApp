@@ -75,6 +75,22 @@ class AppEnvironment(BaseSettings):
             "call of a collector's"
         ),
     )
+    COLLECTOR_WALK_INTERVAL_SECONDS: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "Seconds from one walk of a collector's to its next, which each "
+            "inventory hands it (F152.2)"
+        ),
+    )
+    COLLECTOR_SETTLING_SECONDS: float = Field(
+        default=600.0,
+        ge=0,
+        description=(
+            "Seconds a transcript's file stands unchanged before its replay at "
+            "rest, which each inventory hands the collector (F152.16)"
+        ),
+    )
     SYNC_PUT_MAX_BYTES: int = Field(
         default=2 * 1024 * 1024,
         gt=0,
@@ -326,6 +342,15 @@ class AppSettings(BaseModel):
     """The bearer a collector publishes with (F152.3): empty refuses every
     call of a collector's."""
 
+    collector_walk_interval_seconds: float = 30.0
+    """How long after one walk of a collector's its next begins (F152.2): the
+    inventory hands it to the collector."""
+
+    collector_settling_seconds: float = 600.0
+    """How long a Transcript's file stands unchanged before the collector
+    publishes it whole once, its replay at rest (DB decision 81 point 2): the
+    inventory hands it to the collector."""
+
     sync_put_max_bytes: int = 2 * 1024 * 1024
     """The largest body a sync PUT takes."""
 
@@ -510,6 +535,8 @@ class AppSettings(BaseModel):
             store_environment_id=env.STORE_ENVIRONMENT_ID,
             youtrack_webhook_token=env.YOUTRACK_WEBHOOK_TOKEN,
             collector_token=env.COLLECTOR_TOKEN,
+            collector_walk_interval_seconds=env.COLLECTOR_WALK_INTERVAL_SECONDS,
+            collector_settling_seconds=env.COLLECTOR_SETTLING_SECONDS,
             sync_put_max_bytes=env.SYNC_PUT_MAX_BYTES,
             sync_heartbeat_seconds=env.SYNC_HEARTBEAT_SECONDS,
             ticket_url_template=env.TICKET_URL_TEMPLATE or None,

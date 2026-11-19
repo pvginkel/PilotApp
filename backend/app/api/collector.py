@@ -1,5 +1,5 @@
-"""The collector's routes (F152.3): a publication of one transcript, under the
-collector's bearer.
+"""The collector's routes (F152.2, F152.3): Pilot's inventory and a
+publication of one transcript, under the collector's bearer.
 
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them:
 the caller is a collector, which signs in to nothing, and every call passes
@@ -15,6 +15,7 @@ from spectree import Response as SpectreeResponse
 
 from app.exceptions import CollectorProtocolUnsupportedException
 from app.schemas.common import ApiErrorResponseSchema
+from app.schemas.inventory import InventorySchema
 from app.schemas.publication import CollectorProtocolRangeSchema, PublicationSchema
 from app.services.container import ServiceContainer
 from app.services.publication_service import PublicationService
@@ -49,6 +50,44 @@ def answer_the_protocol_range(
     logger.warning("Collector's call refused: %s", error.message)
     body = CollectorProtocolRangeSchema(min=error.minimum, max=error.maximum)
     return jsonify(body.model_dump()), 426
+
+
+@collector_bp.route("/inventory", methods=["GET"])
+@public
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=InventorySchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_426=CollectorProtocolRangeSchema,
+    ),
+)
+@inject
+def inventory(
+    publication_service: PublicationService = Provide[
+        ServiceContainer.publication_service
+    ],
+) -> Any:
+    """Pilot's inventory, which a collector asks for as each walk starts:
+    what Pilot holds, whole, for the walk to compare the home against.
+
+    Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`;
+    `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.
+
+    - 200: every transcript Pilot holds, a main thread's and a sub-agent's,
+      each by its `session_id` and `agent_id` with its last publication's
+      `file_size`, `file_modified_at` and collector's version, which are what
+      an appended publication of it builds on, and its `replayed_size`; and
+      the walk's two settings, `COLLECTOR_WALK_INTERVAL_SECONDS` and
+      `COLLECTOR_SETTLING_SECONDS`. A transcript the home has and the answer
+      lacks, or holds at another size, time or version, is one to publish;
+      one whose `replayed_size` is short of its `file_size`, its file
+      unchanged for the settling time, is published whole once.
+    - 401: the call does not carry the collector's bearer, and every call
+      while `COLLECTOR_TOKEN` is empty.
+    - 426, with the range `{min, max}`: the call names a protocol version
+      outside it, or none.
+    """
+    return publication_service.inventory()
 
 
 @collector_bp.route("/publications", methods=["POST"])
