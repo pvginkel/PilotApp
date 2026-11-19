@@ -254,7 +254,7 @@ signals tell it (D098, `quota_wall.py`):
 - **The turn's own recorded stream shows it**: a `rate_limit_event` line whose window, the one its
   `rateLimitType` names or one of its `unifiedWindows`, has the `status` `rejected`; or a `result`
   line with `is_error` whose `api_error_status` is `429` or whose text says "limit reached" or "hit
-  your limit".
+  your limit", a window's name allowed before the limit, as in "hit your weekly limit".
 - **A reading confirms it**: a window's share at or over 1 in the reading at the turn's end, the
   latest received by then, or in the next one received after it.
 

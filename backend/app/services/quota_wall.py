@@ -43,9 +43,12 @@ REJECTED = "rejected"
 
 _LIMIT_STATUS = 429
 
-_LIMIT_WORDS = re.compile(r"\blimit reached\b|\bhit your limit\b", re.IGNORECASE)
+_LIMIT_WORDS = re.compile(
+    r"\blimit reached\b|\bhit your (?:[\w-]+ )?limit\b", re.IGNORECASE
+)
 """Claude's words for a usage limit reached, as its `result` line gives
-them."""
+them: "hit your limit", or with the window named, "hit your weekly limit",
+as the first real wall's did (P-136)."""
 
 _SIGNS = ("rate_limit_event", "result")
 """The `type`s of the lines that may show the wall."""

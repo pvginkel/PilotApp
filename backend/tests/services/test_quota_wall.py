@@ -82,6 +82,7 @@ class TestShowsWall:
             _result("API Error: 429", status=429),
             _result(LIMIT),
             _result("You've hit your limit · resets 3am (Europe/Amsterdam)"),
+            _result("You've hit your weekly limit · resets 11am (Europe/Amsterdam)"),
             _result("Claude AI usage limit reached|1893715200"),
         ],
         ids=[
@@ -91,6 +92,7 @@ class TestShowsWall:
             "a 429",
             "a limit reached",
             "a limit hit",
+            "the week's limit hit",
             "a usage limit reached",
         ],
     )
