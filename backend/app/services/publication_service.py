@@ -21,6 +21,12 @@ written. It is taken only where it continues what Pilot holds (`_continued`),
 so it removes no Launch, Prompt, Compaction or Call; any other is refused,
 for the collector to publish the transcript whole.
 
+A whole publication of the file Pilot holds, read by the collector's version
+Pilot holds it under, while part of it was taken appended, is the replay at
+rest (DB decision 81 point 2; F152.16). It writes a row only where what the
+appended calls left is not what the file read whole gives, and those rows
+are logged with the Transcript.
+
 Publications of one conversation, its main thread's and its sub-agents',
 take turns, so that a sub-agent's thread finds its main thread and its
 spawning Tool Call whichever comes first.
@@ -40,7 +46,9 @@ import hmac
 import logging
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections import Counter
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, get_args
 
@@ -58,7 +66,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Row
+from sqlalchemy.event import listen, remove
 from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm.session import UOWTransaction
 
 from app.app_config import AppSettings
 from app.exceptions import (
@@ -105,6 +116,8 @@ from app.schemas.publication import (
     PublishedLaunchSchema,
 )
 from app.services.adoption_service import AdoptionService, group_faults
+from app.services.environment_service import reported_columns
+from app.services.fleet_consumer import FleetConsumer
 from app.services.launch_placement import conversation_turn, place_launches
 
 logger = logging.getLogger(__name__)
@@ -138,6 +151,70 @@ version."""
 type _Surplus = dict[type[Any], list[Any]]
 """The held rows past the last the call names under their parent, by
 entity."""
+
+type _Held = Row[uuid.UUID, int, datetime, int, str]
+"""A Transcript as Pilot holds it (`PublicationService._held`): its id, its
+`file_size`, `file_modified_at` and `replayed_size`, and the collector's
+`version` it was read under."""
+
+_FACTS: tuple[type[Any], ...] = (
+    Launch,
+    LaunchComponent,
+    Prompt,
+    HookRun,
+    Compaction,
+    Call,
+    ToolCall,
+    Event,
+    ContextPart,
+)
+"""The entities whose rows a publication writes under its Transcript."""
+
+
+class _Replay:
+    """The rows under a Transcript that a write changes, adds and removes,
+    counted by table from its making to its `end`. A row that goes with the
+    one it hangs on is not counted."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+        self._rows: set[Any] = set()
+        self._removed: Counter[str] = Counter()
+        listen(session, "before_flush", self._flushing)
+
+    def removed(self, entity: type[Any], rows: int) -> None:
+        """Count the entity's rows a statement removes, which no flush
+        shows."""
+        if entity in _FACTS:
+            self._removed[entity.__tablename__] += rows
+
+    def end(self) -> dict[str, int]:
+        """Stop counting; the number of rows written, by table."""
+        remove(self._session, "before_flush", self._flushing)
+        wrote = Counter(row.__tablename__ for row in self._rows) + self._removed
+        return dict(sorted(wrote.items()))
+
+    def _flushing(
+        self, session: Session, _flush_context: UOWTransaction, _instances: Any
+    ) -> None:
+        self._rows.update(
+            row for row in (*session.new, *session.deleted) if isinstance(row, _FACTS)
+        )
+        self._rows.update(
+            row
+            for row in session.dirty
+            if isinstance(row, _FACTS) and session.is_modified(row)
+        )
+
+
+def _not_held(fact: str, place: int, did: str, held: datetime, first: datetime) -> str:
+    """Why an appended call is refused whose first `fact` is another than
+    the row Pilot holds at the boundary's place, told by its time."""
+    return (
+        f"the boundary's `{fact}` is {place}, where Pilot holds a {fact} {did} at"
+        f" {held.astimezone(UTC).isoformat()}, and the call's first was {did} at"
+        f" {first.astimezone(UTC).isoformat()}"
+    )
 
 
 def _name(publication: PublicationSchema) -> str:
@@ -261,10 +338,18 @@ class PublicationService:
         db: Session,
         app_settings: AppSettings,
         adoption_service: AdoptionService,
+        fleet_consumer: FleetConsumer,
     ) -> None:
+        """
+        Args:
+            fleet_consumer: The fleet stream's latest report of each
+                environment, for the row of one a call names first
+        """
         self.db = db
         self.app_settings = app_settings
         self.adoption_service = adoption_service
+        self.fleet_consumer = fleet_consumer
+        self._replay: _Replay | None = None
 
     def admit(self, authorization: str | None, protocol: str | None) -> None:
         """Let a collector's call through, its two headers' values given.
@@ -301,7 +386,8 @@ class PublicationService:
 
         After a whole one its `replayed_size` is its `file_size` (DB 605). A
         Call Pilot held of it that the call no longer names is removed with
-        what hangs on it, and their number logged. After an appended one
+        what hangs on it, and their number logged. The rows its replay at
+        rest writes are logged with it (`_replayed`). After an appended one
         Pilot holds what the call carries from its boundary on, what lies
         before it as it was, and `replayed_size` as it stood. After either,
         each Launch of a main thread that a Turn of Pilot's started stands
@@ -311,7 +397,8 @@ class PublicationService:
         was, and by none where the call names none.
 
         An Environment, a Repository, a Component Version and a reference
-        code the call names that Pilot has no row for are written, the code
+        code the call names that Pilot has no row for are written, the
+        Environment as the fleet stream reports it (`_environment`), the code
         as its own name and with what the call says of its category; one
         Pilot has met stands as it is.
 
@@ -333,15 +420,94 @@ class PublicationService:
         conversation_turn(self.db, publication.session_id)
         boundary = _WHOLE
         ids: dict[str, int] = {}
+        held = self._held(publication)
         if publication.appended is not None:
             boundary = publication.appended.boundary
-            ids = self._continued(publication, publication.appended)
+            ids = self._continued(publication, publication.appended, held)
         adopted_by = self._adopted_by(publication)
         self._meet_references(publication)
         versions = self._versions(publication)
         thread = self._thread(
             publication, versions[COLLECTOR, publication.collector.version], adopted_by
         )
+        with self._replayed(publication, held):
+            self._facts(thread, publication, versions, boundary, ids)
+        self._join(publication.session_id)
+        if publication.agent_id is None:
+            place_launches(self.db, publication.session_id)
+        return thread
+
+    def _held(self, publication: PublicationSchema) -> _Held | None:
+        """The Transcript as Pilot holds it; None where it does not."""
+        return self.db.execute(
+            select(
+                Transcript.id,
+                Transcript.file_size,
+                Transcript.file_modified_at,
+                Transcript.replayed_size,
+                ComponentVersion.version,
+            )
+            .join(ComponentVersion, ComponentVersion.id == Transcript.read_under_id)
+            .where(
+                Transcript.session_id == publication.session_id,
+                Transcript.agent_id.is_not_distinct_from(publication.agent_id),
+            )
+        ).one_or_none()
+
+    @contextmanager
+    def _replayed(
+        self, publication: PublicationSchema, held: _Held | None
+    ) -> Iterator[None]:
+        """Log the rows the block writes under the Transcript where the call
+        is its replay at rest (DB decision 81 point 2; F152.16): a whole one
+        of the file Pilot holds, at that size and time and read under that
+        collector's version, part of it taken in appended calls since the
+        last whole one. `held` is the Transcript as Pilot held it before the
+        call. Pilot holds no boundary, so each row written is logged, by its
+        table, with how much of the file was taken in parts; a whole call of
+        a file that changed, or read under another version, writes rows that
+        say nothing of the appended calls, and is not logged."""
+        if (
+            publication.appended is not None
+            or held is None
+            or held.replayed_size == held.file_size
+            or (held.file_size, held.file_modified_at, held.version)
+            != (
+                publication.file_size,
+                publication.file_modified_at,
+                publication.collector.version,
+            )
+        ):
+            yield
+            return
+        self._replay = _Replay(self.db)
+        try:
+            yield
+            self.db.flush()
+        finally:
+            wrote = self._replay.end()
+            self._replay = None
+        if wrote:
+            logger.warning(
+                "The replay at rest of transcript %s, %d of its %d bytes taken in"
+                " parts, wrote rows that differ from what Pilot held: %s",
+                _name(publication),
+                held.file_size - held.replayed_size,
+                held.file_size,
+                ", ".join(f"{table} {rows}" for table, rows in wrote.items()),
+            )
+
+    def _facts(
+        self,
+        thread: Transcript,
+        publication: PublicationSchema,
+        versions: dict[_Version, int],
+        boundary: PublishedBoundarySchema,
+        ids: dict[str, int],
+    ) -> None:
+        """The rows under the Transcript from the boundary on as the call
+        has them. `ids` comes with the Calls before the boundary that the
+        call's name as their predecessor."""
         surplus: _Surplus = {}
         prompts = self._launches(
             thread, publication.launches, versions, surplus, boundary
@@ -388,25 +554,28 @@ class PublicationService:
                 for call in calls
             },
         )
-        self._join(publication.session_id)
-        if publication.agent_id is None:
-            place_launches(self.db, publication.session_id)
-        return thread
 
     def _continued(
-        self, publication: PublicationSchema, appended: PublishedAppendedSchema
+        self,
+        publication: PublicationSchema,
+        appended: PublishedAppendedSchema,
+        held: _Held | None,
     ) -> dict[str, int]:
         """Check that an appended call continues what Pilot holds of its
-        Transcript, and return the id of each Call before its boundary that
-        one of its Calls names as its predecessor, by `message_id`.
+        Transcript, `held` (`_held`), and return the id of each Call before
+        its boundary that one of its Calls names as its predecessor, by
+        `message_id`.
 
         It does where Pilot holds the Transcript as the call builds on it,
         at that size and time and read under that collector's version; where
-        Pilot holds a row at every place before the boundary's; and where
-        the call carries every Launch, Prompt, Compaction and Call Pilot
-        holds from there on, and no Call or Tool Call Pilot holds before.
-        The write that follows then removes none of those and touches
-        nothing before the boundary.
+        Pilot holds a row at every place before the boundary's; where the
+        call carries every Launch, Prompt, Compaction and Call Pilot holds
+        from there on, and no Call or Tool Call Pilot holds before; and
+        where the call's first Launch, its first Prompt and its first
+        Compaction are each the row Pilot holds at the boundary's place, if
+        it holds one there, told by its time. The write that follows then
+        removes none of those, touches nothing before the boundary, and
+        gives no held row another's facts.
 
         Raises:
             PublicationNotAppendableException: it does not; nothing is
@@ -414,19 +583,6 @@ class PublicationService:
         """
         name = _name(publication)
         base = appended.builds_on
-        held = self.db.execute(
-            select(
-                Transcript.id,
-                Transcript.file_size,
-                Transcript.file_modified_at,
-                ComponentVersion.version,
-            )
-            .join(ComponentVersion, ComponentVersion.id == Transcript.read_under_id)
-            .where(
-                Transcript.session_id == publication.session_id,
-                Transcript.agent_id.is_not_distinct_from(publication.agent_id),
-            )
-        ).one_or_none()
         if held is None:
             raise PublicationNotAppendableException(name, ["Pilot does not hold it"])
         if (held.file_size, held.file_modified_at, held.version) != (
@@ -458,11 +614,14 @@ class PublicationService:
     ) -> list[str]:
         """Why an appended call's Launches and their Prompts do not continue
         the Transcript's as Pilot holds them, each in a line."""
-        held = self.db.scalars(
-            select(Launch.id)
-            .where(Launch.transcript_id == thread_id)
-            .order_by(Launch.id)
-        ).all()
+        began: dict[int, datetime] = dict(
+            self.db.execute(
+                select(Launch.id, Launch.started_at)
+                .where(Launch.transcript_id == thread_id)
+                .order_by(Launch.id)
+            ).all()
+        )
+        held = list(began)
         received: dict[int, int] = dict(
             self.db.execute(
                 select(Prompt.launch_id, func.count())
@@ -482,22 +641,49 @@ class PublicationService:
                 f"the call carries {len(launches)} launches from its boundary on,"
                 f" and Pilot holds {len(since)}"
             ]
+        # The boundary's `prompt` is a place under the boundary's Launch, so
+        # it is read only once that Launch is the one Pilot holds there.
+        if since and launches[0].started_at != began[since[0]]:
+            return [
+                _not_held(
+                    "launch",
+                    boundary.launch,
+                    "begun",
+                    began[since[0]],
+                    launches[0].started_at,
+                )
+            ]
         # The Prompts the boundary's Launch keeps: those before the
         # boundary's that lie under no Launch before it.
         kept = boundary.prompt - 1 - sum(received.get(row, 0) for row in before)
-        if not 0 <= kept <= (received.get(since[0], 0) if since else 0):
+        under = received.get(since[0], 0) if since else 0
+        if not 0 <= kept <= under:
             return [
                 f"the boundary's `prompt` is {boundary.prompt}, which is neither"
                 " a prompt Pilot holds under the boundary's launch nor the next"
                 " under it"
             ]
-        return [
+        causes = [
             f"launch {boundary.launch + place}: the call carries fewer prompts"
             " than Pilot holds under it"
             for place, launch_id in enumerate(since)
             if len(launches[place].prompts) + (0 if place else kept)
             < received.get(launch_id, 0)
         ]
+        if kept < under and launches[0].prompts:
+            received_at = self.db.scalars(
+                select(Prompt.received_at)
+                .where(Prompt.launch_id == since[0])
+                .order_by(Prompt.id)
+                .offset(kept)
+                .limit(1)
+            ).one()
+            first = launches[0].prompts[0].received_at
+            if first != received_at:
+                causes.append(
+                    _not_held("prompt", boundary.prompt, "received", received_at, first)
+                )
+        return causes
 
     def _compaction_gaps(
         self,
@@ -508,20 +694,30 @@ class PublicationService:
         """Why an appended call's Compactions do not continue the
         Transcript's as Pilot holds them, each in a line."""
         held = self.db.scalars(
-            select(func.count())
-            .select_from(Compaction)
+            select(Compaction.at)
             .where(Compaction.transcript_id == thread_id)
-        ).one()
-        since = held - (boundary.compaction - 1)
-        if since < 0:
+            .order_by(Compaction.id)
+        ).all()
+        since = held[boundary.compaction - 1 :]
+        if len(held) < boundary.compaction - 1:
             return [
                 f"the boundary's `compaction` is {boundary.compaction}, and Pilot"
-                f" holds {held} compactions"
+                f" holds {len(held)} compactions"
             ]
-        if len(compactions) < since:
+        if len(compactions) < len(since):
             return [
                 f"the call carries {len(compactions)} compactions from its"
-                f" boundary on, and Pilot holds {since}"
+                f" boundary on, and Pilot holds {len(since)}"
+            ]
+        if since and compactions[0].at != since[0]:
+            return [
+                _not_held(
+                    "compaction",
+                    boundary.compaction,
+                    "made",
+                    since[0],
+                    compactions[0].at,
+                )
             ]
         return []
 
@@ -769,15 +965,24 @@ class PublicationService:
         return repository_id
 
     def _environment(self, env_id: str) -> None:
-        """Write the Environment of that id where Pilot has none: named by
-        its id, as the controller's report names one with no name
-        (`environment_service.reported_columns`), until the fleet consumer
-        updates it."""
+        """Write the Environment of that id where Pilot has none: as the
+        fleet stream reports it, its name and exemption with it. One the
+        stream has not given, and any while it is down, is named by its id
+        and not exempt, with no `last_seen_at`: a row no report of the
+        controller's has reached, which Pilot's first touch of the
+        environment asks the controller about
+        (`EnvironmentService.ensure_environment`)."""
         held = self.db.scalar(select(Environment.id).where(Environment.id == env_id))
         if held is None:
+            report = self.fleet_consumer.environment(env_id)
+            columns = (
+                {"name": env_id, "exempt": False}
+                if report is None
+                else reported_columns(report, datetime.now(UTC))
+            )
             self.db.execute(
                 pg_insert(Environment)
-                .values(id=env_id, name=env_id, exempt=False)
+                .values(id=env_id, **columns)
                 .on_conflict_do_nothing(index_elements=["id"])
             )
 
@@ -1230,6 +1435,8 @@ class PublicationService:
                     entity.id == any_(literal(list(ids), ARRAY(BigInteger)))
                 )
             )
+            if self._replay is not None:
+                self._replay.removed(entity, len(ids))
 
     def _grouped[Row](self, rows: Select[Row], parent: str) -> dict[int, list[Row]]:
         """The rows in their order, under each one's `parent` column."""

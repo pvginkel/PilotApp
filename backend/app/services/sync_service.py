@@ -126,15 +126,17 @@ class SyncService:
         """Let a sync call through, its three headers' values given, and make
         the store's Environment row if it has none: from the controller's
         report while a controller is configured (`ensure_environment`), so
-        the store's exemption holds from the row's first moment; without one,
-        named by its id and not exempt.
+        the store's exemption holds from the row's first moment, a row no
+        report has reached taking it too; without one, named by its id and
+        not exempt.
 
         Refused, in this order: without the store's bearer, and always while
         `SYNC_TOKEN` is empty; from an environment other than
         `STORE_ENVIRONMENT_ID`, and always while that is empty; in a protocol
         version outside the accepted range. A refused call touches nothing.
-        While the store has no row, a call let through fails, and makes none,
-        when the controller does not report the store.
+        While the store has no row, or one no report has reached, a call
+        let through fails, and makes none, when the controller does not
+        report the store.
         """
         token = self.app_settings.sync_token
         if not token or not hmac.compare_digest(

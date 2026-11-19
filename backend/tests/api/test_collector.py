@@ -327,6 +327,29 @@ class TestPublish:
         assert _post(client, whole_again).status_code == 204
         assert len(_held(session)["calls"]) == 3
 
+    def test_an_appended_call_whose_first_launch_is_not_the_one_held_there_is_409(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        """A boundary one Launch short: the file's second Launch, named at
+        the place of the first, which Pilot holds."""
+        assert _post(client, _body(_camp())).status_code == 204
+        held = _held(session)
+        second = launch(started_at="2026-11-12T09:45:00+00:00")
+        short = appended(call=3, prompt=2, launches=[second], calls=[call(3)])
+
+        with writes(session) as wrote:
+            response = _post(client, _body(short))
+
+        assert response.status_code == 409
+        assert response.json["code"] == "PUBLICATION_NOT_APPENDABLE"
+        assert response.json["error"] == (
+            f"Cannot append to transcript {CAMP} because the boundary's `launch` is"
+            " 1, where Pilot holds a launch begun at 2026-11-12T09:30:00+00:00, and"
+            " the call's first was begun at 2026-11-12T09:45:00+00:00"
+        )
+        assert wrote == {}
+        assert _held(session) == held
+
     def test_an_appended_call_for_a_transcript_pilot_does_not_hold_is_409(
         self, session: DbSession, client: FlaskClient
     ) -> None:

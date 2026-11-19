@@ -8070,6 +8070,7 @@ def _ended_run(
             name=SLUG,
             exempt=False,
             last_state="stopped",
+            last_seen_at=datetime.now(UTC) - timedelta(days=1),
             server_created_at=datetime.now(UTC) - timedelta(days=1),
             repo=REPO,
         )

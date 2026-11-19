@@ -96,8 +96,10 @@ def publish(
       does not continue what Pilot holds of the transcript, the reasons in
       `error`: Pilot does not hold it at the size and time and under the
       collector's version the call builds on, holds no row at a place before
-      the boundary's, or holds from there on, or before, what the call does
-      not carry so. The collector publishes the transcript whole.
+      the boundary's, holds from there on, or before, what the call does
+      not carry so, or holds at the boundary's `launch`, `prompt` or
+      `compaction` another one than the call's first, told by its time. The
+      collector publishes the transcript whole.
     - 409, with the `code` `TRANSCRIPT_NOT_ADOPTABLE`: the call names a
       `group` for a transcript a session of Pilot's ran, which no adopted
       project adopts. The same call is refused again, and the call without

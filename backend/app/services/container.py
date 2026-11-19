@@ -597,6 +597,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         db=db_session,
         app_settings=app_config,
         adoption_service=adoption_service,
+        fleet_consumer=fleet_consumer,
     )
 
     # The invented scenario, loaded through /api/testing/ (F122.6)

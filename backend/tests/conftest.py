@@ -18,6 +18,7 @@ Without one the suite passes where ``.env`` sets it, and fails in CI.
 """
 
 from collections.abc import Generator
+from datetime import UTC, datetime
 
 import pytest
 from dependency_injector import providers
@@ -209,8 +210,14 @@ def project(session: DbSession, person: User) -> Project:
 
 @pytest.fixture
 def environment(session: DbSession) -> Environment:
-    """An environment Pilot has touched: the store's."""
-    touched = Environment(id=STORE_ENVIRONMENT_ID, name="Example-1", exempt=False)
+    """An environment Pilot has touched: the store's, its row as a report of
+    the controller's left it."""
+    touched = Environment(
+        id=STORE_ENVIRONMENT_ID,
+        name="Example-1",
+        exempt=False,
+        last_seen_at=datetime.now(UTC),
+    )
     session.add(touched)
     session.flush()
     return touched

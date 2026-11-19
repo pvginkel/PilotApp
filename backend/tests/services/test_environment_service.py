@@ -48,6 +48,7 @@ from app.services.environment_service import (
 from app.services.fake_controller import CLIENT_NAME, FakeController
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.locks import Outcome, in_thread, lock_waits
+from tests.support.publications import whole
 from tests.support.supervisor import Supervise, listening, wait_until
 
 STOP_AFTER = timedelta(minutes=30)
@@ -88,17 +89,29 @@ def _environment(
     due: datetime | None = None,
     exempt: bool = False,
 ) -> Environment:
-    """An environment's row; `started` as Pilot's own start leaves it, its
-    claim on the pod that started at `pod`."""
+    """An environment's row, as a report of the controller's left it;
+    `started` as Pilot's own start leaves it, its claim on the pod that
+    started at `pod`."""
     row = Environment(
         id=env_id,
         name=env_id.title(),
         exempt=exempt,
         last_state="running",
+        last_seen_at=datetime.now(UTC) - timedelta(hours=1),
         server_started_at=datetime.now(UTC) - timedelta(hours=1) if started else None,
         started_pod_at=pod,
         stop_due_at=due,
     )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _unreported(db: Session, **columns: Any) -> Environment:
+    """An environment's row no report of the controller's has reached: named
+    by its id and not exempt, as a transcript's publication writes one while
+    the fleet stream gives none."""
+    row = Environment(id=ENV, name=ENV, exempt=False, **columns)
     db.add(row)
     db.flush()
     return row
@@ -182,7 +195,7 @@ class TestEnsureEnvironment:
         row = _row(session)
         assert row is not None and row.name == ENV
 
-    def test_a_row_pilot_has_is_left_as_it_is(
+    def test_a_row_a_report_has_reached_is_left_as_it_is(
         self,
         environments: EnvironmentService,
         fake_controller: ServedFakeController,
@@ -196,6 +209,112 @@ class TestEnsureEnvironment:
         row = _row(session)
         assert row is not None and (row.name, row.last_state) == ("Env-A", "running")
         assert fake_controller.calls == []
+
+    def test_a_row_no_report_has_reached_takes_the_controllers_report(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        """The row as a publication or a Conversation's opening writes it
+        with no report: its name and its exemption are the controller's from
+        Pilot's first touch, and what Pilot set on it stays."""
+        claimed = datetime.now(UTC) - timedelta(minutes=5)
+        held = _unreported(session, server_started_at=claimed)
+        fake_controller.add_environment(
+            ENV, name="Alpha", status="running", exempt=True
+        )
+        before = datetime.now(UTC)
+
+        environments.ensure_environment(session, ENV)
+
+        assert (held.name, held.last_state, held.exempt) == ("Alpha", "running", True)
+        assert held.last_seen_at is not None and held.last_seen_at >= before
+        assert held.server_started_at == claimed
+        assert fake_controller.calls == [f"GET /environments/{ENV}"]
+
+    def test_an_exempt_one_no_report_had_reached_loses_its_deadline(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _unreported(session, stop_due_at=datetime.now(UTC) + STOP_AFTER)
+        fake_controller.add_environment(ENV, status="running", exempt=True)
+
+        environments.ensure_environment(session, ENV)
+
+        row = _row(session)
+        assert row is not None and row.exempt and row.stop_due_at is None
+
+    def test_one_not_exempt_keeps_its_deadline(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        due = datetime.now(UTC) + STOP_AFTER
+        _unreported(session, stop_due_at=due)
+        fake_controller.add_environment(ENV, status="running")
+
+        environments.ensure_environment(session, ENV)
+
+        row = _row(session)
+        assert row is not None and row.stop_due_at == due
+
+    def test_a_reported_row_is_not_asked_about_again(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _unreported(session)
+        fake_controller.add_environment(ENV, name="Alpha")
+        environments.ensure_environment(session, ENV)
+        fake_controller.set_exempt(ENV, True)
+
+        environments.ensure_environment(session, ENV)
+
+        row = _row(session)
+        assert row is not None and (row.name, row.exempt) == ("Alpha", False)
+        assert fake_controller.calls == [f"GET /environments/{ENV}"]
+
+    def test_a_row_no_report_has_reached_of_one_the_controller_lacks_is_not_found(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        _unreported(session)
+
+        with pytest.raises(ControllerProblem) as raised:
+            environments.ensure_environment(session, ENV)
+
+        assert raised.value.problem_type is ControllerProblemType.NOT_FOUND
+        row = _row(session)
+        assert row is not None
+        assert (row.name, row.exempt, row.last_seen_at) == (ENV, False, None)
+
+    def test_the_row_a_publication_wrote_takes_the_controllers_report(
+        self,
+        environments: EnvironmentService,
+        container: ServiceContainer,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        """An environment a transcript names before Pilot touched it, the
+        fleet stream down: Pilot's first touch names and exempts it."""
+        container.publication_service().publish(whole(environment=ENV))
+        written = _row(session)
+        assert written is not None
+        assert (written.name, written.exempt, written.last_seen_at) == (
+            ENV,
+            False,
+            None,
+        )
+        fake_controller.add_environment(ENV, name="Alpha", exempt=True)
+
+        environments.ensure_environment(session, ENV)
+
+        row = _row(session)
+        assert row is not None and (row.name, row.exempt) == ("Alpha", True)
 
     def test_the_row_is_the_callers_to_commit(
         self,
@@ -242,7 +361,7 @@ class TestEnsureReported:
         assert (row.name, row.last_state, row.exempt) == ("Alpha", "running", False)
         assert (row.server_created_at, row.server_started_at) == (None, None)
 
-    def test_a_row_pilot_has_is_left_as_it_is_the_controller_asked(
+    def test_a_row_a_report_has_reached_is_left_as_it_is_the_controller_asked(
         self,
         environments: EnvironmentService,
         fake_controller: ServedFakeController,
@@ -256,6 +375,22 @@ class TestEnsureReported:
         row = _row(session)
         assert row is not None and (row.name, row.last_state) == ("Env-A", "running")
         assert fake_controller.calls == [f"GET /environments/{ENV}"]
+
+    def test_a_row_no_report_has_reached_takes_the_report(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        held = _unreported(session)
+        fake_controller.add_environment(
+            ENV, name="Alpha", status="stopped", exempt=True
+        )
+
+        environments.ensure_reported(session, ENV)
+
+        assert (held.name, held.last_state, held.exempt) == ("Alpha", "stopped", True)
+        assert held.last_seen_at is not None
 
     @pytest.mark.parametrize("known_to_pilot", [False, True])
     def test_one_the_controller_does_not_have_is_its_not_found(

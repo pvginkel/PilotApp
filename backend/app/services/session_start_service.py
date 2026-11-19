@@ -561,11 +561,11 @@ class SessionStartService:
         """The environment a work item is to be placed in by name
         (`start_work_in`), asked of the controller before the placing takes a
         lock: its row is made from the controller's report on Pilot's first
-        touch of it, in the caller's transaction, and one that exists is left
-        as it is (DB Environment). The controller is asked whether Pilot has
-        the row or not: a Conversation's caller has one the controller may
-        not know (`CallerEnvironmentService.row`), and the work must start
-        there.
+        touch of it, in the caller's transaction; one a report has reached is
+        left as it is, and one none has takes this one (DB Environment). The
+        controller is asked whether Pilot has the row or not: a
+        Conversation's caller has one the controller may not know
+        (`CallerEnvironmentService.row`), and the work must start there.
 
         Raises:
             InvalidOperationException: No controller is configured

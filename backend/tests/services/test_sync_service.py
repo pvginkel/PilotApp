@@ -221,7 +221,7 @@ class TestSyncService:
         )
         assert fake_controller.calls == [f"GET /environments/{STORE_ENVIRONMENT_ID}"]
 
-    def test_admit_with_a_controller_leaves_an_environment_that_exists(
+    def test_admit_with_a_controller_leaves_an_environment_a_report_has_reached(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -236,6 +236,25 @@ class TestSyncService:
         session.refresh(environment)
         assert (environment.name, environment.exempt) == ("Example-1", False)
         assert fake_controller.calls == []
+
+    def test_admit_with_a_controller_gives_a_row_no_report_has_reached_its_report(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        environment: Environment,
+    ) -> None:
+        environment.last_seen_at = None
+        session.flush()
+        _configure(container, controller_url=fake_controller.url)
+        fake_controller.add_environment(
+            STORE_ENVIRONMENT_ID, name="Store", status="running", exempt=True
+        )
+
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
+
+        assert (environment.name, environment.exempt) == ("Store", True)
 
     def test_admit_with_a_controller_that_does_not_report_the_store_makes_no_row(
         self,

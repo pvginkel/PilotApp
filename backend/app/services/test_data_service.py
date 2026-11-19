@@ -471,7 +471,9 @@ class TestDataService:
         self.document_service.bear_draft(recipes, RECIPE_DRAFT)
         self.document_service.bear_handbook(recipes, HANDBOOK)
         self.document_service.bear_journal(recipes)
-        environment = Environment(id=ENVIRONMENT_ID, name="Recipes-1", exempt=False)
+        environment = Environment(
+            id=ENVIRONMENT_ID, name="Recipes-1", exempt=False, last_seen_at=now
+        )
         self.db.add(environment)
         self.db.flush()
         session = AgentSession(
@@ -644,14 +646,20 @@ class TestDataService:
         )
 
     def environment(self, environment_id: str, name: str) -> Environment:
-        """An environment Pilot has touched.
+        """An environment Pilot has touched, its row as a report of the
+        controller's left it.
 
         Raises:
             ResourceConflictException: an environment has the id.
         """
         if self.db.get(Environment, environment_id) is not None:
             raise ResourceConflictException("Environment", environment_id)
-        environment = Environment(id=environment_id, name=name, exempt=False)
+        environment = Environment(
+            id=environment_id,
+            name=name,
+            exempt=False,
+            last_seen_at=datetime.now(UTC),
+        )
         self.db.add(environment)
         self.db.flush()
         return environment

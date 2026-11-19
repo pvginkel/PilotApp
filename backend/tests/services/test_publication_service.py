@@ -9,11 +9,13 @@ differ, and a row keeps its identity wherever the call names the same fact
 again (`TestRepublished`). What a whole call no longer names goes, and only
 that (`TestRewritten`; F152.17, decision 81 point 4). An appended call
 writes from its boundary on alone (`TestAppended`), and one that does not
-continue what Pilot holds is refused whole (`TestNotAppendable`). A Launch a
-Turn of Pilot's started stands under its Session and Turn (`TestRan`)."""
+continue what Pilot holds is refused whole (`TestNotAppendable`). The rows a
+replay at rest writes are logged (`TestReplayedAtRest`; F152.16, decision 81
+point 2). A Launch a Turn of Pilot's started stands under its Session and
+Turn (`TestRan`)."""
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -63,6 +65,7 @@ from app.models import (
 from app.models.reference import ProjectState, UserKind
 from app.schemas.publication import PublicationSchema
 from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerEnvironment
 from app.services.publication_service import (
     COLLECTOR_PROTOCOL_MAX,
     COLLECTOR_PROTOCOL_MIN,
@@ -834,9 +837,43 @@ class TestScope:
     """Every transcript is taken, under the environment and the repository
     its publication names (F152.4)."""
 
-    def test_an_environment_pilot_never_touched_is_written_named_by_its_id(
+    def test_an_environment_the_fleet_stream_reports_is_written_as_reported(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Its name and its exemption are the controller's from the row's
+        first moment, so no timer of Pilot's stops an exempt environment a
+        transcript named first."""
+        report = ControllerEnvironment.model_validate(
+            {
+                "envId": "env-9c41",
+                "name": "Recipes-1",
+                "repo": "example/RecipeBox",
+                "status": "stopped",
+                "setupRunning": False,
+                "capabilities": {"capacityExempt": {"enabled": True}},
+            }
+        )
+        monkeypatch.setattr(
+            publications.fleet_consumer, "environment", {"env-9c41": report}.get
+        )
+        before = datetime.now(UTC)
+
+        thread = publications.publish(_camp(environment="env-9c41"))
+
+        assert thread.environment_id == "env-9c41"
+        row = session.get_one(Environment, "env-9c41")
+        assert (row.name, row.exempt, row.last_state) == ("Recipes-1", True, "stopped")
+        assert row.last_seen_at is not None and row.last_seen_at >= before
+        assert (row.server_created_at, row.server_started_at) == (None, None)
+
+    def test_an_environment_the_fleet_stream_has_not_given_is_written_named_by_its_id(
         self, session: DbSession, publications: PublicationService
     ) -> None:
+        """With no `last_seen_at`: Pilot's first touch of it asks the
+        controller (`TestEnsureEnvironment`)."""
         thread = publications.publish(_camp(environment="env-9c41"))
 
         assert thread.environment_id == "env-9c41"
@@ -2558,6 +2595,43 @@ class TestNotAppendable:
                 " holds 1",
             ),
             (
+                _grown(
+                    launches=[
+                        launch(
+                            started_at=_at(20), prompts=[prompt(received_at=_at(20))]
+                        )
+                    ],
+                    calls=[_calls()[3], call(5, prompt=4, predecessor="msg_0004")],
+                ),
+                "the boundary's `launch` is 2, where Pilot holds a launch begun at"
+                f" {_at(10)}, and the call's first was begun at {_at(20)}",
+            ),
+            (
+                _grown(
+                    prompt=3,
+                    launches=[_second_launch(prompts=[prompt(received_at=_at(15))])],
+                ),
+                "the boundary's `prompt` is 3, where Pilot holds a prompt received"
+                f" at {_at(10)}, and the call's first was received at {_at(15)}",
+            ),
+            (
+                _grown(
+                    launch=1,
+                    prompt=2,
+                    launches=[
+                        _first_launch(prompts=[prompt(received_at=_at(6))]),
+                        _second_launch(),
+                    ],
+                ),
+                "the boundary's `prompt` is 2, where Pilot holds a prompt received"
+                f" at {_at(4)}, and the call's first was received at {_at(6)}",
+            ),
+            (
+                _grown(compaction=1, compactions=[compaction(at=_at(13))]),
+                "the boundary's `compaction` is 1, where Pilot holds a compaction"
+                f" made at {_at(8)}, and the call's first was made at {_at(13)}",
+            ),
+            (
                 _grown(call=3, calls=[call(4, prompt=3)]),
                 "the call lacks 1 of the calls Pilot holds from its boundary on",
             ),
@@ -2665,6 +2739,292 @@ class TestNotAppendable:
             select(Transcript.file_size, Transcript.replayed_size)
         ).one() == (61_000, 61_000)
         assert _count(session, Call) == 5
+
+    def test_a_launch_place_one_short_leaves_the_held_launch_as_it_began(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The file grew by a third Launch, and the call names the second's
+        place for it: the second keeps its start and its versions, where a
+        check by count alone gave it the third's."""
+        publications.publish(_camp())
+        third = launch(
+            started_at=_at(20),
+            components=[CLAUDE_CODE, {"component": "plugin:dev", "version": "0.10.56"}],
+        )
+
+        with pytest.raises(PublicationNotAppendableException):
+            publications.publish(_grown(launches=[third]))
+
+        assert session.scalars(select(Launch.started_at).order_by(Launch.id)).all() == [
+            STARTED,
+            STARTED + timedelta(minutes=10),
+        ]
+        assert _count(session, ComponentVersion) == 4
+
+    def test_a_first_row_named_at_the_same_moment_in_another_zone_is_the_held_one(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        plus_two = timezone(timedelta(hours=2))
+
+        publications.publish(
+            _grown(
+                launch=1,
+                prompt=1,
+                compaction=1,
+                launches=[
+                    _first_launch(
+                        started_at=STARTED.astimezone(plus_two).isoformat(),
+                        prompts=[
+                            prompt(
+                                received_at=STARTED.astimezone(plus_two).isoformat(),
+                                hook_runs=[
+                                    hook_run(),
+                                    hook_run(
+                                        command="hold_open.sh",
+                                        duration_ms=40,
+                                        prevented_end=True,
+                                    ),
+                                ],
+                            ),
+                            prompt(
+                                received_at=_at(4),
+                                source="task_notification",
+                                characters=88,
+                            ),
+                        ],
+                    ),
+                    _second_launch(),
+                ],
+                compactions=[
+                    compaction(
+                        at=_at_time(8).astimezone(plus_two).isoformat(),
+                        tokens_after=21_000,
+                        duration_ms=5_200,
+                    )
+                ],
+            )
+        )
+
+        assert _count(session, Call) == 5
+
+
+class TestReplayedAtRest:
+    """A whole publication of the file Pilot holds, part of it taken in
+    appended calls: the replay at rest. A row it writes is one the appended
+    calls left other than the file read whole gives, and is logged with its
+    Transcript and how much of the file was taken in parts (F152.16;
+    decision 81 point 2)."""
+
+    FIFTH = call(5, prompt=3, predecessor="msg_0004")
+
+    def _replay(self, **overrides: Any) -> PublicationSchema:
+        """The grown file, whole: as `_grown` left Pilot holding it."""
+        values: dict[str, Any] = {
+            "file_size": 61_000,
+            "file_modified_at": _at(30),
+            "calls": [*_calls(), self.FIFTH],
+        }
+        return _camp(**values | overrides)
+
+    def _logged(self, caplog: pytest.LogCaptureFixture) -> list[str]:
+        return [
+            record.getMessage() for record in caplog.records if record.name == LOGGER
+        ]
+
+    def test_one_that_finds_the_file_as_pilot_holds_it_logs_nothing(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        publications.publish(_camp())
+        publications.publish(_grown())
+
+        with caplog.at_level(logging.DEBUG, LOGGER), writes(session) as wrote:
+            publications.publish(self._replay())
+
+        assert wrote == {"transcripts": Written(updated=1)}
+        assert self._logged(caplog) == []
+        assert session.execute(
+            select(Transcript.file_size, Transcript.replayed_size)
+        ).one() == (61_000, 61_000)
+
+    def test_a_row_it_changes_is_logged_with_its_transcript(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The appended call left the fifth Call's tokens and the fourth's
+        Tool Call other than the file has them."""
+        publications.publish(_camp())
+        left = call(5, prompt=3, predecessor="msg_0004", tokens={"output": 12})
+        fourth = _calls()[3] | {
+            "tool_calls": [tool_call(5, interrupted=True, result_characters=7)]
+        }
+        publications.publish(_grown(calls=[fourth, left]))
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            publications.publish(self._replay())
+
+        assert self._logged(caplog) == [
+            f"The replay at rest of transcript {CAMP}, 12888 of its 61000 bytes"
+            " taken in parts, wrote rows that differ from what Pilot held:"
+            " calls 1, tool_calls 1"
+        ]
+        assert (
+            session.scalars(
+                select(Call.output_tokens).where(Call.message_id == "msg_0005")
+            ).one()
+            == 2_870
+        )
+
+    def test_a_row_it_adds_and_one_it_removes_are_logged_too(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The appended calls left a sixth Call the file does not have, and
+        the second Launch without the Prompt it received last."""
+        publications.publish(_camp())
+        sixth = call(6, prompt=3, predecessor="msg_0005")
+        publications.publish(_grown(calls=[_calls()[3], self.FIFTH, sixth]))
+        later = prompt(received_at=_at(15), characters=64)
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            publications.publish(
+                self._replay(
+                    launches=[
+                        _first_launch(),
+                        _second_launch(
+                            prompts=[prompt(received_at=_at(10), characters=31), later]
+                        ),
+                    ]
+                )
+            )
+
+        assert self._logged(caplog) == [
+            f"Transcript {CAMP} no longer has 1 of the calls Pilot held",
+            f"The replay at rest of transcript {CAMP}, 12888 of its 61000 bytes"
+            " taken in parts, wrote rows that differ from what Pilot held:"
+            " calls 1, prompts 1",
+        ]
+
+    def test_a_sub_agents_is_logged_with_its_thread(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        publications.publish(sub_agent(calls=[call(1)]))
+        publications.publish(
+            appended(
+                agent_id=SUB_AGENT,
+                call=2,
+                calls=[call(2, predecessor="msg_0001", effort="low")],
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            publications.publish(
+                sub_agent(
+                    file_size=61_000,
+                    file_modified_at=_at(30),
+                    calls=[call(1), call(2, predecessor="msg_0001", effort="high")],
+                )
+            )
+
+        assert self._logged(caplog) == [
+            f"The replay at rest of transcript {CAMP}/{SUB_AGENT}, 12888 of its"
+            " 61000 bytes taken in parts, wrote rows that differ from what Pilot"
+            " held: calls 1"
+        ]
+
+    @pytest.mark.parametrize(
+        "other",
+        [
+            {"file_size": 70_000},
+            {"file_modified_at": _at(31)},
+            {"collector": {"version": "1.1.0"}},
+        ],
+        ids=["another size", "another time", "another collector's version"],
+    )
+    def test_a_whole_call_of_another_file_or_reader_than_pilot_holds_is_none(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+        other: dict[str, Any],
+    ) -> None:
+        """A file that changed, or one read anew, gives rows that say
+        nothing of the appended calls."""
+        publications.publish(_camp())
+        publications.publish(_grown())
+        changed = call(5, prompt=3, predecessor="msg_0004", effort="max")
+
+        with caplog.at_level(logging.DEBUG, LOGGER):
+            publications.publish(self._replay(calls=[*_calls(), changed], **other))
+
+        assert self._logged(caplog) == []
+        assert (
+            session.scalars(
+                select(Call.effort).where(Call.message_id == "msg_0005")
+            ).one()
+            == "max"
+        )
+
+    def test_a_whole_call_of_a_transcript_taken_whole_is_none(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        publications.publish(_camp())
+        calls = _calls()
+        calls[3]["effort"] = "max"
+
+        with caplog.at_level(logging.DEBUG, LOGGER):
+            publications.publish(_camp(calls=calls))
+
+        assert self._logged(caplog) == []
+
+    def test_the_replay_is_over_once_it_was_taken(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A whole call after it finds `replayed_size` at the file's size."""
+        publications.publish(_camp())
+        publications.publish(_grown())
+        publications.publish(self._replay())
+        changed = call(5, prompt=3, predecessor="msg_0004", effort="max")
+
+        with caplog.at_level(logging.DEBUG, LOGGER):
+            publications.publish(self._replay(calls=[*_calls(), changed]))
+
+        assert self._logged(caplog) == []
+
+    def test_a_launch_it_places_under_its_session_is_no_row_it_changed(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        project_session: models.Session,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The placing is Pilot's own, and not the file's."""
+        turn_at(session, project_session, _at_time(0) - timedelta(seconds=4))
+        publications.publish(_camp())
+        publications.publish(_grown())
+        project_session.conversation_id = CAMP
+
+        with caplog.at_level(logging.DEBUG, LOGGER):
+            publications.publish(self._replay())
+
+        assert _ran(session) == [(project_session.id, 1), (project_session.id, 1)]
+        assert self._logged(caplog) == []
 
 
 class TestRan:
@@ -3201,7 +3561,10 @@ class TestAdmitted:
     ) -> None:
         settings = container.app_config().model_copy(update={"collector_token": ""})
         publications = PublicationService(
-            session, settings, container.adoption_service()
+            session,
+            settings,
+            container.adoption_service(),
+            container.fleet_consumer(),
         )
 
         with pytest.raises(AuthenticationException):

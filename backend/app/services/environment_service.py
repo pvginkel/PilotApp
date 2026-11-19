@@ -144,31 +144,46 @@ class EnvironmentService:
 
     def ensure_environment(self, db: Session, env_id: str) -> None:
         """Make the environment's row from the controller's own report, on
-        Pilot's first touch of it, in the caller's transaction; a row that
-        exists is left as it is.
+        Pilot's first touch of it, in the caller's transaction. A row a
+        report of the controller's has reached is left as it is, the
+        controller not asked. One no report has reached, with no
+        `last_seen_at`, takes this one: a transcript's publication or a
+        Conversation's opening wrote it, named by its id and not exempt
+        (`PublicationService`, `CallerEnvironmentService.row`).
 
         Raises:
             ControllerProblem: `not-found` if the controller has no such
                 environment
         """
-        if db.get(Environment, env_id) is None:
+        row = db.get(Environment, env_id)
+        if row is None or row.last_seen_at is None:
             self.ensure_reported(db, env_id)
 
     def ensure_reported(self, db: Session, env_id: str) -> None:
         """Make the environment's row as `ensure_environment` makes it, the
-        controller asked whether Pilot has the row or not; a row that exists
-        is left as it is.
+        controller asked whether Pilot has the row or not; a row a report
+        has reached is left as it is.
 
         Raises:
             ControllerProblem: `not-found` if the controller has no such
                 environment
         """
         report = self._client().get_environment(env_id)
-        db.execute(
+        reported = reported_columns(report, datetime.now(UTC))
+        # An exempt environment is never armed (DB Environment `stop_due_at`).
+        unarmed = {"stop_due_at": None} if report.exempt else {}
+        # The row a session holds of the environment is read again as written.
+        db.scalars(
             insert(Environment)
-            .values(id=env_id, **reported_columns(report, datetime.now(UTC)))
-            .on_conflict_do_nothing(index_elements=[Environment.id])
-        )
+            .values(id=env_id, **reported)
+            .on_conflict_do_update(
+                index_elements=[Environment.id],
+                set_=reported | unarmed,
+                where=Environment.last_seen_at.is_(None),
+            )
+            .returning(Environment),
+            execution_options={"populate_existing": True},
+        ).all()
 
     def create(self, repo: str, slug: str | None) -> ControllerEnvironment:
         """Create an environment of Pilot's own from `repo`, `owner/Name`,
