@@ -4,10 +4,14 @@ and its shapes are the ones Pilot's routes read and answer with."""
 import ast
 import sys
 from pathlib import Path
+from typing import Any
 
 import pilot_collection
+import pytest
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import PublicationSchema
+from pilot_collection.reading import ReadingSchema, ToolCallBlockSchema
+from pydantic import ValidationError
 
 
 class TestThePackage:
@@ -60,3 +64,101 @@ class TestThePackage:
         (held,) = inventory.transcripts
         assert (held.file_size, held.replayed_size) == (2_048, 1_024)
         assert held.file_modified_at.microsecond == 123_456
+
+    def test_a_reading_is_read_by_the_shape_a_collector_serves(self) -> None:
+        at = "2026-11-12T09:30:04.250Z"
+        asked = {
+            "kind": "tool_call",
+            "at": at,
+            "tool_use_id": "toolu_0001",
+            "tool": "Read",
+            "input": {"file_path": "/work/RecipeBox/stew.md"},
+            "started": None,
+            "result": {
+                "at": at,
+                "error": False,
+                "text": "Two onions.",
+                "images": [{"media_type": "image/png", "size": 4_096}],
+            },
+        }
+        reading = ReadingSchema.model_validate(
+            {
+                "session_id": "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b",
+                "agent_id": None,
+                "file_size": 2_048,
+                "file_modified_at": "2026-11-12T09:30:00.123456Z",
+                "calls": [
+                    {
+                        "message_id": "msg_0001",
+                        "received": [
+                            {
+                                "kind": "user",
+                                "at": at,
+                                "writer": "brief",
+                                "text": "Halve the stew.",
+                            },
+                            {
+                                "kind": "image",
+                                "at": at,
+                                "media_type": "image/jpeg",
+                                "size": 12,
+                            },
+                        ],
+                        "sent": [
+                            {"kind": "thinking", "at": at, "text": ""},
+                            {"kind": "text", "at": at, "text": "Reading it."},
+                            asked,
+                        ],
+                    }
+                ],
+                "after": [
+                    {"kind": "synthetic", "at": at, "text": "No response requested."},
+                    {
+                        "kind": "attachment",
+                        "at": at,
+                        "type": "date_change",
+                        "text": '{"newDate": "2026-11-13"}',
+                    },
+                    {
+                        "kind": "system",
+                        "at": at,
+                        "subtype": "turn_duration",
+                        "text": None,
+                    },
+                    {
+                        "kind": "tool_result",
+                        "at": at,
+                        "tool_use_id": "toolu_0000",
+                        "error": True,
+                        "text": "Too late.",
+                        "images": [],
+                    },
+                ],
+            }
+        )
+
+        (call,) = reading.calls
+        assert [block.kind for block in call.received] == ["user", "image"]
+        assert isinstance(call.sent[2], ToolCallBlockSchema)
+        assert call.sent[2].result is not None
+        assert call.sent[2].result.images[0].size == 4_096
+        assert [block.kind for block in reading.after] == [
+            "synthetic",
+            "attachment",
+            "system",
+            "tool_result",
+        ]
+
+    def test_a_reading_takes_no_field_its_shape_does_not_name(self) -> None:
+        reading: dict[str, Any] = {
+            "session_id": "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b",
+            "agent_id": None,
+            "file_size": 2_048,
+            "file_modified_at": "2026-11-12T09:30:00Z",
+            "calls": [],
+            "after": [],
+        }
+
+        ReadingSchema.model_validate(reading)
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            ReadingSchema.model_validate(reading | {"lines": []})

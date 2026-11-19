@@ -32,9 +32,11 @@ class Settings(BaseSettings):
         ),
     )
     COLLECTOR_TOKEN: SecretStr = Field(
+        min_length=1,
         description=(
             "The bearer between the collector and Pilot, the backend's"
-            " `COLLECTOR_TOKEN` (F152.1)"
+            " `COLLECTOR_TOKEN`: its calls to Pilot carry it, and a call for a"
+            " reading is refused without it (F152.1, F152.13)"
         ),
     )
     COLLECTOR_HOME: Path = Field(
@@ -44,6 +46,15 @@ class Settings(BaseSettings):
         ),
     )
 
+    COLLECTOR_PORT: int = Field(
+        default=3503,
+        ge=0,
+        le=65_535,
+        description=(
+            "The port the collector serves a conversation's reading on, to"
+            " Pilot's backend (F152.13); 0 takes one that is free"
+        ),
+    )
     COLLECTOR_ENVIRONMENT_PATTERN: Annotated[
         re.Pattern[str], AfterValidator(_names_the_id)
     ] = Field(

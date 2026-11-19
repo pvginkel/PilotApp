@@ -9,6 +9,7 @@ import pytest
 from pilot_collector.home import (
     Listed,
     Transcript,
+    find,
     saved_output,
     transcript,
     transcripts,
@@ -171,3 +172,79 @@ class TestTheHomesTranscripts:
     def test_a_home_with_no_projects_is_an_error(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             transcripts(tmp_path / "projects")
+
+
+class TestATranscriptByItsIds:
+    def test_each_listed_transcript_is_found_as_it_is_listed(
+        self, tmp_path: Path
+    ) -> None:
+        _put(tmp_path / FOLDER / f"{SESSION}.jsonl", b"{}\n{}\n")
+        sub_agents = tmp_path / FOLDER / SESSION / "subagents"
+        _put(sub_agents / f"agent-{AGENT}.jsonl")
+        _put(sub_agents / "workflows" / "wf_7c21" / "agent-b81e.jsonl")
+        _put(tmp_path / "-work-Spindle" / f"{OTHER}.jsonl")
+        _put(tmp_path / "-work-Spindle" / OTHER / "subagents" / "agent-c02f.jsonl")
+
+        listed = transcripts(tmp_path)
+
+        assert len(listed) == 5
+        for each in listed:
+            named = each.transcript
+            assert find(tmp_path, named.session_id, named.agent_id) == each
+
+    def test_ids_the_home_has_no_file_under_find_none(self, tmp_path: Path) -> None:
+        _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
+        _put(tmp_path / FOLDER / SESSION / "subagents" / f"agent-{AGENT}.jsonl")
+        _put(tmp_path / "-work-Spindle" / f"{OTHER}.jsonl")
+        _put(tmp_path / f"{OTHER}.jsonl")
+
+        assert find(tmp_path, "0e5a9b1c-3d7f-4e26-8a4b-c6d0f2e1a397") is None
+        assert find(tmp_path, SESSION, "b81e") is None
+        assert find(tmp_path, OTHER, AGENT) is None
+        assert find(tmp_path, FOLDER) is None
+
+    def test_what_a_walk_does_not_list_is_not_found(self, tmp_path: Path) -> None:
+        """A symlink, and what is no transcript's by its place."""
+        main = _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
+        own = _put(tmp_path / FOLDER / SESSION / "subagents" / f"agent-{AGENT}.jsonl")
+        elsewhere = tmp_path / FOLDER / OTHER / "subagents"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / f"agent-{AGENT}.jsonl").symlink_to(own)
+        (tmp_path / FOLDER / f"{OTHER}.jsonl").symlink_to(main)
+        _put(tmp_path / FOLDER / SESSION / "tool-results" / "agent-b81e.jsonl")
+        (tmp_path / FOLDER / "a-folder.jsonl").mkdir()
+
+        assert find(tmp_path, OTHER) is None
+        assert find(tmp_path, OTHER, AGENT) is None
+        assert find(tmp_path, SESSION, "b81e") is None
+        assert find(tmp_path, "a-folder") is None
+
+    @pytest.mark.parametrize(
+        ("session_id", "agent_id"),
+        [
+            ("..", None),
+            (".", None),
+            ("", None),
+            (f"{SESSION}/subagents/agent-{AGENT}", None),
+            (f"../{FOLDER}/{SESSION}", None),
+            (f"{SESSION}\0", None),
+            ("..", AGENT),
+            (SESSION, ""),
+            (SESSION, f"../agent-{AGENT}"),
+            (SESSION, f"workflows/wf_7c21/agent-{AGENT}"),
+        ],
+    )
+    def test_an_id_that_is_more_than_a_name_finds_none(
+        self, tmp_path: Path, session_id: str, agent_id: str | None
+    ) -> None:
+        _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
+        sub_agents = tmp_path / FOLDER / SESSION / "subagents"
+        _put(sub_agents / f"agent-{AGENT}.jsonl")
+        _put(sub_agents / "workflows" / "wf_7c21" / f"agent-agent-{AGENT}.jsonl")
+        _put(tmp_path / "subagents" / f"agent-{AGENT}.jsonl")
+
+        assert find(tmp_path, session_id, agent_id) is None
+
+    def test_a_home_with_no_projects_is_an_error(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            find(tmp_path / "projects", SESSION)

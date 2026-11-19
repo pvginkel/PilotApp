@@ -1064,6 +1064,7 @@ dependencies = [
     { name = "pilot-collection" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "waitress" },
 ]
 
 [package.metadata]
@@ -1072,6 +1073,7 @@ requires-dist = [
     { name = "pilot-collection", editable = "packages/pilot-collection" },
     { name = "pydantic", specifier = ">=2.5.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.1.0,<3" },
+    { name = "waitress", specifier = ">=3.0.0,<4" },
 ]
 
 [package.metadata.requires-dev]
@@ -1080,6 +1082,7 @@ dev = [
     { name = "pilot-scenario", editable = "packages/pilot-scenario" },
     { name = "pytest", specifier = ">=9.0.0,<10" },
     { name = "ruff", specifier = ">=0.15.0,<0.16" },
+    { name = "types-waitress", specifier = ">=3.0.1.20250801,<4" },
     { name = "vulture", specifier = ">=2.14,<3" },
 ]
 

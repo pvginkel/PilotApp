@@ -32,6 +32,9 @@ class TestTheSettings:
         assert settings.COLLECTOR_CARRY_TRANSCRIPTS == 2_500
         assert settings.COLLECTOR_CARRY_BYTES == 64_000_000
 
+    def test_the_readings_are_served_on_port_3503(self) -> None:
+        assert given().COLLECTOR_PORT == 3_503
+
     def test_each_is_read_from_the_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -41,6 +44,7 @@ class TestTheSettings:
         monkeypatch.setenv("COLLECTOR_CHECKOUT_ROOTS", '["/srv/checkouts", "/work"]')
         monkeypatch.setenv("COLLECTOR_CARRY_TRANSCRIPTS", "40")
         monkeypatch.setenv("COLLECTOR_CARRY_BYTES", "0")
+        monkeypatch.setenv("COLLECTOR_PORT", "8088")
 
         settings = Settings()
 
@@ -51,6 +55,7 @@ class TestTheSettings:
         assert settings.COLLECTOR_CHECKOUT_ROOTS == ["/srv/checkouts", "/work"]
         assert settings.COLLECTOR_CARRY_TRANSCRIPTS == 40
         assert settings.COLLECTOR_CARRY_BYTES == 0
+        assert settings.COLLECTOR_PORT == 8_088
 
     @pytest.mark.parametrize("missing", sorted(WALKS))
     def test_pilots_address_the_bearer_and_the_home_have_no_default(
@@ -62,6 +67,15 @@ class TestTheSettings:
 
         with pytest.raises(ValidationError, match=f"{missing}\n  Field required"):
             Settings()
+
+    def test_a_bearer_of_no_characters_is_refused(self) -> None:
+        """A reading is served to a call that carries the bearer, so there
+        is one."""
+        with pytest.raises(
+            ValidationError,
+            match="COLLECTOR_TOKEN\n  Value should have at least 1 item",
+        ):
+            given(COLLECTOR_TOKEN="")
 
     def test_the_bearer_is_kept_out_of_what_the_settings_print(self) -> None:
         settings = given(COLLECTOR_TOKEN="an-invented-bearer")
@@ -91,3 +105,11 @@ class TestTheSettings:
     def test_a_bound_of_the_carries_below_none_is_refused(self, bound: str) -> None:
         with pytest.raises(ValidationError, match="greater than or equal to 0"):
             given(**{bound: -1})
+
+    @pytest.mark.parametrize(
+        ("port", "fault"),
+        [(-1, "greater than or equal to 0"), (65_536, "less than or equal to 65535")],
+    )
+    def test_a_port_that_is_none_is_refused(self, port: int, fault: str) -> None:
+        with pytest.raises(ValidationError, match=fault):
+            given(COLLECTOR_PORT=port)

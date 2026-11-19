@@ -52,7 +52,7 @@ from pilot_collection.inventory import HeldTranscriptSchema, InventorySchema
 
 from pilot_collector import VERSION
 from pilot_collector.carry import Carries, Carry
-from pilot_collector.home import Listed, transcripts
+from pilot_collector.home import PROJECTS, Listed, transcripts
 from pilot_collector.pilot import (
     NotAdmitted,
     NotAppendable,
@@ -64,9 +64,6 @@ from pilot_collector.reader import NotContinuedError, UnreadableError, read
 from pilot_collector.settings import Settings
 
 logger = logging.getLogger(__name__)
-
-_PROJECTS = "projects"
-"""The folder of the home that holds the transcripts."""
 
 _UNASKED = 30.0
 """Seconds from a walk's start to the next one's while no inventory has
@@ -143,7 +140,7 @@ class Walker:
         self._pilot = pilot
         self._settings = settings
         self._stop = stop
-        self._projects = settings.COLLECTOR_HOME / _PROJECTS
+        self._projects = settings.COLLECTOR_HOME / PROJECTS
         self._aside: dict[Path, tuple[int, datetime]] = {}
         """The transcripts set aside, by their file: its size and time as
         the walk that set it aside listed it."""

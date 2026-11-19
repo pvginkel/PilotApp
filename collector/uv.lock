@@ -276,6 +276,7 @@ dependencies = [
     { name = "pilot-collection" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "waitress" },
 ]
 
 [package.dev-dependencies]
@@ -284,6 +285,7 @@ dev = [
     { name = "pilot-scenario" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "types-waitress" },
     { name = "vulture" },
 ]
 
@@ -293,6 +295,7 @@ requires-dist = [
     { name = "pilot-collection", editable = "../backend/packages/pilot-collection" },
     { name = "pydantic", specifier = ">=2.5.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.1.0,<3" },
+    { name = "waitress", specifier = ">=3.0.0,<4" },
 ]
 
 [package.metadata.requires-dev]
@@ -301,6 +304,7 @@ dev = [
     { name = "pilot-scenario", editable = "../backend/packages/pilot-scenario" },
     { name = "pytest", specifier = ">=9.0.0,<10" },
     { name = "ruff", specifier = ">=0.15.0,<0.16" },
+    { name = "types-waitress", specifier = ">=3.0.1.20250801,<4" },
     { name = "vulture", specifier = ">=2.14,<3" },
 ]
 
@@ -503,6 +507,15 @@ wheels = [
 ]
 
 [[package]]
+name = "types-waitress"
+version = "3.0.1.20260724"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a0/79/87852f3ed81730ad64cdd16fe14dd664f7403aec9643c5a72d1bf36ec454/types_waitress-3.0.1.20260724.tar.gz", hash = "sha256:dc05abee59c067cf94edc273b19d38b2b9b456e544ead280b2edfefdc8851811", size = 14533, upload-time = "2026-07-24T04:57:51.05Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/76/9892eacf410bf177167257284afbe9fb565d98f8905e29246f31f57463c6/types_waitress-3.0.1.20260724-py3-none-any.whl", hash = "sha256:bcbeb4fd3d7e864e228c9bea01580acab0d9addb10ffc8d37b914a625a13fc34", size = 17499, upload-time = "2026-07-24T04:57:50.137Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -530,4 +543,13 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/66/3e/4d08c5903b2c0c70cad583c170cc4a663fc6a61e2ad00b711fcda61358cd/vulture-2.16.tar.gz", hash = "sha256:f8d9f6e2af03011664a3c6c240c9765b3f392917d3135fddca6d6a68d359f717", size = 52680, upload-time = "2026-03-25T14:41:27.141Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/be/f935130312330614811dae2ea9df3f395f6d63889eb6c2e68c14507152ee/vulture-2.16-py3-none-any.whl", hash = "sha256:6e0f1c312cef1c87856957e5c2ca9608834a7c794c2180477f30bf0e4cc58eee", size = 26993, upload-time = "2026-03-25T14:41:26.21Z" },
+]
+
+[[package]]
+name = "waitress"
+version = "3.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/cb/04ddb054f45faa306a230769e868c28b8065ea196891f09004ebace5b184/waitress-3.0.2.tar.gz", hash = "sha256:682aaaf2af0c44ada4abfb70ded36393f0e307f4ab9456a215ce0020baefc31f", size = 179901, upload-time = "2024-11-16T20:02:35.195Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/57/a27182528c90ef38d82b636a11f606b0cbb0e17588ed205435f8affe3368/waitress-3.0.2-py3-none-any.whl", hash = "sha256:c56d67fd6e87c2ee598b76abdd4e96cfad1f24cacdea5078d382b1f9d7b5ed2e", size = 56232, upload-time = "2024-11-16T20:02:33.858Z" },
 ]

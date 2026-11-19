@@ -81,7 +81,7 @@ CLAUDE_CODE = "claude-code"
 _COST = "cost-state"
 """The type of the line a process writes as it exits."""
 
-_SYNTHETIC = "<synthetic>"
+SYNTHETIC = "<synthetic>"
 """The model of an `assistant` line Claude Code wrote itself: no response."""
 
 _MANAGED = "Managed"
@@ -192,19 +192,19 @@ class _Call:
     """The tool calls it requested, by Claude's id of the request."""
 
 
-def _time(line: dict[str, Any]) -> datetime | None:
+def written_at(line: dict[str, Any]) -> datetime | None:
     """A line's time, none on a line that carries none."""
     stamp = line.get("timestamp")
     return None if stamp is None else datetime.fromisoformat(stamp)
 
 
-def _is_a_tools_result(content: Any) -> bool:
+def is_a_tools_result(content: Any) -> bool:
     return isinstance(content, list) and any(
         block["type"] == "tool_result" for block in content
     )
 
 
-def _text(content: Any) -> str:
+def text_of(content: Any) -> str:
     """The words of a prompt or a result: a string, or the text blocks of a
     list."""
     if isinstance(content, str):
@@ -218,7 +218,7 @@ def _words(text: str) -> bytes:
     return digest(text.encode("utf-8", "surrogatepass"))
 
 
-def _source(line: dict[str, Any]) -> str | None:
+def source_of(line: dict[str, Any]) -> str | None:
     """A `user` line's source in Claude Code's word, none where it names
     none."""
     named: str | None = line.get("promptSource")
@@ -309,7 +309,7 @@ class _Thread:
     def take(self, line: dict[str, Any], byte: int) -> None:
         """Take the line that starts at `byte` of the file."""
         kind = line["type"]
-        at = _time(line)
+        at = written_at(line)
         named = line.get("uuid")
         if self._before.byte:
             follows = line.get("parentUuid")
@@ -326,7 +326,7 @@ class _Thread:
         if (
             kind == "assistant"
             and at is not None
-            and line["message"]["model"] != _SYNTHETIC
+            and line["message"]["model"] != SYNTHETIC
             and line["message"]["id"] not in self.calls
         ):
             self.stands = self._standing(byte)
@@ -352,7 +352,7 @@ class _Thread:
             self._answered(line["message"], at)
         elif kind == "user":
             content = line["message"]["content"]
-            if _is_a_tools_result(content):
+            if is_a_tools_result(content):
                 self._returned(content, line.get("toolUseResult"), at)
             elif self._main:
                 self._prompted(line, content, at)
@@ -418,10 +418,10 @@ class _Thread:
                 return
 
     def _prompted(self, line: dict[str, Any], content: Any, at: datetime) -> None:
-        source = _source(line)
+        source = source_of(line)
         if source is None:
             return
-        text = _text(content)
+        text = text_of(content)
         self._prompts += 1
         self.launches[-1].prompts.append(
             {
@@ -432,7 +432,7 @@ class _Thread:
         )
 
     def _answered(self, message: dict[str, Any], at: datetime) -> None:
-        if message["model"] == _SYNTHETIC:
+        if message["model"] == SYNTHETIC:
             return
         model, tokens = message["model"], _tokens(message["usage"])
         call = self.calls.get(message["id"])
@@ -462,7 +462,7 @@ class _Thread:
                 )
             if asked is None or asked.returned_at is not None:
                 continue
-            said = _text(block["content"])
+            said = text_of(block["content"])
             asked.returned_at = at
             asked.failed = block.get("is_error") is True
             asked.result_characters = len(said)

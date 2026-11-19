@@ -8,6 +8,7 @@ dependencies = [
     "httpx>=0.28.1,<0.29",
     "pydantic>=2.5.0,<3",
     "pydantic-settings>=2.1.0,<3",
+    "waitress>=3.0.0,<4",
     "pilot-collection",
 ]
 
@@ -28,6 +29,7 @@ dev = [
     "ruff>=0.15.0,<0.16",
     "mypy>=1.8.0,<2",
     "pytest>=9.0.0,<10",
+    "types-waitress>=3.0.1.20250801,<4",
     "vulture>=2.14,<3",
 ]
 

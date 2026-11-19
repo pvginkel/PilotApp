@@ -15,14 +15,19 @@ sees the home.
 
 A walk lists every transcript with a `stat` (F152.2) and follows no symlink:
 a sub-agent's file linked into another session's folder is its own
-session's, where the walk meets the file itself.
+session's, where the walk meets the file itself. A transcript found by its
+ids is one a walk lists.
 """
 
 import os
+import stat
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
+
+PROJECTS = "projects"
+"""The folder of the home that holds the transcripts."""
 
 _EPOCH = datetime.fromtimestamp(0, UTC)
 
@@ -126,6 +131,63 @@ def transcripts(projects: Path) -> list[Listed]:
             continue
         listed.append(Listed(found, status.st_size, modified_at(status)))
     return listed
+
+
+def _is_a_name(named: str) -> bool:
+    """Whether an id can name one file or folder: it is one part of a
+    path."""
+    return named not in ("", ".", "..") and "/" not in named and "\0" not in named
+
+
+def find(projects: Path, session_id: str, agent_id: str | None = None) -> Listed | None:
+    """The transcript of those ids under `projects` as a walk lists it, with
+    a `stat`: a main thread's or, with `agent_id`, a sub-agent's. None where
+    the home has no file a walk lists under those ids.
+
+    Raises:
+        FileNotFoundError: There is no folder `projects`.
+    """
+    if not _is_a_name(session_id) or not (agent_id is None or _is_a_name(agent_id)):
+        return None
+    with os.scandir(projects) as folders:
+        for folder in folders:
+            if folder.is_symlink() or not folder.is_dir(follow_symlinks=False):
+                continue
+            if agent_id is None:
+                found = _main_thread(projects, folder.path, session_id)
+            else:
+                found = _sub_agent(projects, folder.path, session_id, agent_id)
+            if found is not None:
+                return found
+    return None
+
+
+def _main_thread(projects: Path, folder: str, session_id: str) -> Listed | None:
+    path = Path(folder, f"{session_id}{_SUFFIX}")
+    try:
+        status = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    if stat.S_ISLNK(status.st_mode) or stat.S_ISDIR(status.st_mode):
+        return None
+    return Listed(
+        Transcript(projects, path, session_id), status.st_size, modified_at(status)
+    )
+
+
+def _sub_agent(
+    projects: Path, folder: str, session_id: str, agent_id: str
+) -> Listed | None:
+    for entry in _files(os.path.join(folder, session_id), 2):
+        found = transcript(projects, Path(entry.path))
+        if found is None or found.agent_id != agent_id:
+            continue
+        try:
+            status = entry.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        return Listed(found, status.st_size, modified_at(status))
+    return None
 
 
 def saved_output(projects: Path, named: str) -> Path | None:

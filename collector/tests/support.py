@@ -2,6 +2,7 @@
 carries what the reader reads of its kind and no more, and every word in
 them is invented."""
 
+import base64
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -151,6 +152,34 @@ def requesting(
         }
     ]
     return line
+
+
+def answering(seconds: float, message_id: str, *blocks: dict[str, Any]) -> Line:
+    """A line of the response of that id that holds `blocks`."""
+    line = assistant(seconds, message_id, output=3)
+    line["message"]["content"] = list(blocks)
+    return line
+
+
+def synthetic(seconds: float, said: str) -> Line:
+    """A line Claude Code wrote itself where a response would stand."""
+    line = assistant(seconds, "msg_synthetic", "<synthetic>")
+    line["message"]["content"] = [{"type": "text", "text": said}]
+    return line
+
+
+def words(said: str) -> dict[str, str]:
+    """A block of text."""
+    return {"type": "text", "text": said}
+
+
+def image(size: int, media_type: str = "image/png") -> dict[str, Any]:
+    """A block holding an image of `size` invented bytes."""
+    data = base64.b64encode(bytes(place % 251 for place in range(size))).decode()
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": media_type, "data": data},
+    }
 
 
 def too_large(path: str, size: str) -> str:

@@ -1,15 +1,19 @@
 """The collector as a process: `python -m pilot_collector`, or the script
 `pilot-collector`. It walks the home named in its settings for the Pilot
-named there until it is told to stop, by SIGTERM or SIGINT, which a walk
-obeys before its next publication."""
+named there, and serves that home's readings on the port named there, until
+it is told to stop, by SIGTERM or SIGINT, which a walk obeys before its next
+publication."""
 
 import logging
 import signal
 import threading
 
 from pilot_collector.pilot import Pilot
+from pilot_collector.serve import server
 from pilot_collector.settings import Settings
 from pilot_collector.walk import Walker
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -23,6 +27,10 @@ def main() -> None:
     stop = threading.Event()
     for told in (signal.SIGTERM, signal.SIGINT):
         signal.signal(told, lambda *_: stop.set())
+    readings, port = server(settings)
+    # A daemon: a reading being served ends with the process.
+    threading.Thread(target=readings.run, name="readings", daemon=True).start()
+    logger.info("The readings are served on port %d", port)
     with Pilot(
         settings.COLLECTOR_PILOT_URL, settings.COLLECTOR_TOKEN.get_secret_value()
     ) as pilot:

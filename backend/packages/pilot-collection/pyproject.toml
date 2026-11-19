@@ -1,7 +1,7 @@
 [project]
 name = "pilot-collection"
 version = "0.1.0"
-description = "What passes between a collector and Pilot: the shapes of a publication and of Pilot's inventory"
+description = "What passes between a collector and Pilot: the shapes of a publication, of Pilot's inventory and of a conversation's reading"
 authors = [{ name = "Pieter van Ginkel", email = "pvginkel@gmail.com" }]
 requires-python = ">=3.13,<4"
 dependencies = ["pydantic>=2.5.0,<3"]
