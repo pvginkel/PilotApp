@@ -24,22 +24,38 @@ its newline is written. The facts are read off the lines in the file's order:
   holds one with its text, else at its own time.
 - **A Call** is the `assistant` lines under one `message.id`, placed by the
   first of them; its usage, model and completion time are the last one's.
+- **A Tool Call** is a `tool_use` block of a Call's lines, requested at its
+  line's time, and its result the first `tool_result` block that names its
+  id, in a `user` line of the thread. Its argument is the first of its input
+  that is text, cut to its first line that is not blank, and its MCP server
+  the one its name is under, `mcp__<server>__<tool>`. The result gives when
+  it returned, whether it was an error, and the characters of its text.
+  - An exit code is Bash's alone: the `Exit code N` its error opens with,
+    and 0 where its result is no error, which is not published: Pilot
+    holds an exit code where it was not zero, and refuses a 0.
+  - It was interrupted where Bash's own record of the result says so, and
+    where an error opens in Claude Code's words for a person's interruption.
+  - Its output was saved to disk where the result opens in Claude Code's
+    words for that, never where it quotes them. The full size is the saved
+    file's characters, the file found under `projects` by the path the
+    result names; else the characters the result states; else none.
 
-Tool Calls, and the facts slices 051 and 052 read, are not read here.
+The facts slices 051 and 052 read are not read here.
 """
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from pilot_collection.publication import CallTokenKind, PublicationSchema
 from pydantic import ValidationError
 
 from pilot_collector import VERSION
-from pilot_collector.home import Transcript
+from pilot_collector.home import Transcript, saved_output
 from pilot_collector.settings import Settings
 
 CLAUDE_CODE = "claude-code"
@@ -59,6 +75,38 @@ _MANAGED = "Managed"
 _SCRATCH = "scratch"
 """The folder of a checkout root that holds clones that are no repository of
 the environment's."""
+
+_BASH = "Bash"
+"""The tool whose result says how its command exited."""
+
+_MCP = "mcp"
+"""What the name of an MCP server's tool opens with, before the server."""
+
+_EXIT = re.compile(r"Exit code (-?\d+)(?:\n|\Z)")
+"""How a failed command's result opens."""
+
+_INTERRUPTED = re.compile(
+    r"(?:Exit code -?\d+\n)?"
+    r"(?:\[Request interrupted by user for tool use\]|Interrupted by user)"
+    r"(?:\n|\Z)"
+)
+"""How the error opens that stands for the result of a tool call the person
+interrupted, past a command's exit code."""
+
+_SAVED = re.compile(
+    r"<persisted-output>\nOutput too large \([^)\n]*\)\."
+    r" Full output saved to: (?P<path>.+)\n"
+)
+"""How a result opens whose output was saved to disk: the size it gives is
+rounded, in bytes."""
+
+_SAVED_STATED = re.compile(
+    r"Error: result \((?P<characters>[\d,]+) characters"
+    r"(?: across [\d,]+ lines?)?\) exceeds maximum allowed tokens\."
+    r" Output has been saved to (?P<path>.+)\.\n"
+)
+"""How a result opens whose output was saved to disk for its tokens, with
+the output's characters."""
 
 _NEWER = {
     "human": "typed",
@@ -90,11 +138,26 @@ class _Launch:
 
 
 @dataclass
+class _ToolCall:
+    tool: str
+    argument: str | None
+    requested_at: datetime
+    returned_at: datetime | None = None
+    failed: bool = False
+    exit_code: int | None = None
+    interrupted: bool = False
+    result_characters: int | None = None
+    saved_characters: int | None = None
+
+
+@dataclass
 class _Call:
     prompt: int | None
     completed_at: datetime
     model: str
     tokens: dict[str, int]
+    tool_calls: dict[str, _ToolCall] = field(default_factory=dict)
+    """The tool calls it requested, by Claude's id of the request."""
 
 
 def _time(line: dict[str, Any]) -> datetime | None:
@@ -110,7 +173,8 @@ def _is_a_tools_result(content: Any) -> bool:
 
 
 def _text(content: Any) -> str:
-    """The words of a prompt: a string, or the text blocks of a list."""
+    """The words of a prompt or a result: a string, or the text blocks of a
+    list."""
     if isinstance(content, str):
         return content
     return "".join(block["text"] for block in content if block["type"] == "text")
@@ -132,21 +196,57 @@ def _source(line: dict[str, Any]) -> str | None:
     return _NEWER.get(older, older)
 
 
+def _argument(given: dict[str, Any]) -> str | None:
+    """A tool's argument: the first of its input that is text, cut to its
+    first line that is not blank."""
+    for value in given.values():
+        if isinstance(value, str):
+            return next((line for line in value.splitlines() if line.strip()), None)
+    return None
+
+
+def _server(tool: str) -> str | None:
+    """The MCP server a tool is of, by its name; none for another tool."""
+    parts = tool.split("__")
+    return parts[1] if len(parts) >= 3 and parts[0] == _MCP else None
+
+
+def _saved(said: str, projects: Path) -> int | None:
+    """The full size of the output a result says was saved to disk: the
+    saved file's characters, its bytes read as UTF-8 and one that is none
+    counted as a character; the characters the result states where the file
+    is gone; none where the result says no such thing, or states none."""
+    named = _SAVED.match(said) or _SAVED_STATED.match(said)
+    if named is None:
+        return None
+    on_home = saved_output(projects, named["path"])
+    if on_home is not None:
+        try:
+            return len(on_home.read_bytes().decode(errors="replace"))
+        except FileNotFoundError:
+            pass
+    stated: str | None = named.groupdict().get("characters")
+    return None if stated is None else int(stated.replace(",", ""))
+
+
 class _Thread:
     """One thread's facts as its lines are taken, in the file's order."""
 
-    def __init__(self, main: bool, settings: Settings) -> None:
+    def __init__(self, main: bool, projects: Path, settings: Settings) -> None:
         self.directory: str | None = None
         self.environment: str | None = None
         self.launches: list[_Launch] = []
         self.calls: dict[str, _Call] = {}
         self._main = main
+        self._projects = projects
         self._settings = settings
         self._exited = True
         self._prompts = 0
         self._queue: list[tuple[str, datetime]] = []
         """The prompts waiting in the process's queue, in the order they
         arrived: each one's text and the time of its `enqueue` line."""
+        self._requested: dict[str, _ToolCall] = {}
+        """The tool calls requested, by Claude's id of the request."""
 
     def take(self, line: dict[str, Any]) -> None:
         if self.directory is None and "cwd" in line:
@@ -167,14 +267,18 @@ class _Thread:
                 launch.version = line.get("version")
         if kind == "assistant":
             self._answered(line["message"], at)
+        elif kind == "user":
+            content = line["message"]["content"]
+            if _is_a_tools_result(content):
+                self._returned(content, line.get("toolUseResult"), at)
+            elif self._main:
+                self._prompted(line, content, at)
         elif not self._main:
             return
         elif kind == "queue-operation":
             self._queued(line, at)
         elif kind == "attachment":
             self._attached(line["attachment"])
-        elif kind == "user":
-            self._prompted(line, at)
 
     def _queued(self, line: dict[str, Any], at: datetime) -> None:
         operation, content = line["operation"], line.get("content")
@@ -208,10 +312,7 @@ class _Thread:
                 self.environment = named.group(1)
                 return
 
-    def _prompted(self, line: dict[str, Any], at: datetime) -> None:
-        content = line["message"]["content"]
-        if _is_a_tools_result(content):
-            return
+    def _prompted(self, line: dict[str, Any], content: Any, at: datetime) -> None:
         source = _source(line)
         if source is None:
             return
@@ -231,10 +332,41 @@ class _Thread:
         model, tokens = message["model"], _tokens(message["usage"])
         call = self.calls.get(message["id"])
         if call is None:
-            prompt = self._prompts or None
-            self.calls[message["id"]] = _Call(prompt, at, model, tokens)
+            call = _Call(self._prompts or None, at, model, tokens)
+            self.calls[message["id"]] = call
         else:
             call.completed_at, call.model, call.tokens = at, model, tokens
+        for block in message["content"]:
+            if block["type"] == "tool_use" and block["id"] not in self._requested:
+                asked = _ToolCall(block["name"], _argument(block["input"]), at)
+                self._requested[block["id"]] = call.tool_calls[block["id"]] = asked
+
+    def _returned(
+        self, content: list[dict[str, Any]], record: Any, at: datetime
+    ) -> None:
+        """The results a line carries, each its tool call's where the thread
+        requested one of its id that no result has reached; `record` is the
+        tool's own record of the result."""
+        for block in content:
+            if block["type"] != "tool_result":
+                continue
+            asked = self._requested.get(block["tool_use_id"])
+            if asked is None or asked.returned_at is not None:
+                continue
+            said = _text(block["content"])
+            asked.returned_at = at
+            asked.failed = block.get("is_error") is True
+            asked.result_characters = len(said)
+            asked.saved_characters = _saved(said, self._projects)
+            if asked.tool == _BASH:
+                exited = _EXIT.match(said) if asked.failed else None
+                if exited is not None:
+                    asked.exit_code = int(exited.group(1))
+                elif not asked.failed:
+                    asked.exit_code = 0
+            asked.interrupted = (
+                isinstance(record, dict) and record.get("interrupted") is True
+            ) or (asked.failed and _INTERRUPTED.match(said) is not None)
 
 
 def _repository(directory: str, settings: Settings) -> str | None:
@@ -283,6 +415,35 @@ def _launches(thread: _Thread) -> list[dict[str, Any]]:
     return launches
 
 
+def _calls(thread: _Thread) -> list[dict[str, Any]]:
+    return [
+        {
+            "message_id": message_id,
+            "prompt": call.prompt,
+            "completed_at": call.completed_at,
+            "model": call.model,
+            "tokens": call.tokens,
+            "tool_calls": [
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool": asked.tool,
+                    "mcp_server": _server(asked.tool),
+                    "first_argument": asked.argument,
+                    "requested_at": asked.requested_at,
+                    "returned_at": asked.returned_at,
+                    "failed": asked.failed,
+                    "exit_code": asked.exit_code or None,
+                    "interrupted": asked.interrupted,
+                    "result_characters": asked.result_characters,
+                    "saved_characters": asked.saved_characters,
+                }
+                for tool_use_id, asked in call.tool_calls.items()
+            ],
+        }
+        for message_id, call in thread.calls.items()
+    ]
+
+
 def _lines(content: bytes) -> list[bytes]:
     """The file's lines, each without its newline; what follows the last
     newline is a line still being written."""
@@ -299,7 +460,7 @@ def read(transcript: Transcript, settings: Settings) -> PublicationSchema:
     with transcript.path.open("rb") as file:
         status = os.fstat(file.fileno())
         content = file.read(status.st_size)
-    thread = _Thread(transcript.agent_id is None, settings)
+    thread = _Thread(transcript.agent_id is None, transcript.projects, settings)
     for number, raw in enumerate(_lines(content), start=1):
         try:
             line = json.loads(raw)
@@ -326,16 +487,7 @@ def read(transcript: Transcript, settings: Settings) -> PublicationSchema:
                 "repository": _repository(thread.directory, settings),
                 "environment": thread.environment,
                 "launches": _launches(thread),
-                "calls": [
-                    {
-                        "message_id": message_id,
-                        "prompt": call.prompt,
-                        "completed_at": call.completed_at,
-                        "model": call.model,
-                        "tokens": call.tokens,
-                    }
-                    for message_id, call in thread.calls.items()
-                ],
+                "calls": _calls(thread),
             }
         )
     except ValidationError as error:

@@ -68,10 +68,20 @@ def typed(seconds: float, text: Any = "Warp the loom.") -> Line:
     return user(seconds, text, promptSource="typed")
 
 
-def result(seconds: float, tool_use_id: str = "toolu_01") -> Line:
-    """A tool's result."""
-    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": "Done."}
-    return user(seconds, [block])
+def result(
+    seconds: float,
+    tool_use_id: str = "toolu_01",
+    said: Any = "Done.",
+    error: bool | None = None,
+    record: Any = None,
+) -> Line:
+    """A tool's result saying `said`: in error or not where the tool says
+    which, with `record`, the tool's own record of it, where it keeps one."""
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": said}
+    if error is not None:
+        block["is_error"] = error
+    line = user(seconds, [block])
+    return line if record is None else line | {"toolUseResult": record}
 
 
 def assistant(
@@ -110,6 +120,46 @@ def assistant(
     return chained("assistant", seconds, message=message)
 
 
+def requesting(
+    seconds: float,
+    tool_use_id: str = "toolu_01",
+    tool: str = "Bash",
+    given: dict[str, Any] | None = None,
+    message_id: str = "msg_01",
+) -> Line:
+    """A line of the response of that id that requests a tool, `given` its
+    input."""
+    line = assistant(seconds, message_id, output=3)
+    line["message"]["content"] = [
+        {
+            "type": "tool_use",
+            "id": tool_use_id,
+            "name": tool,
+            "input": {"command": "ls looms"} if given is None else given,
+        }
+    ]
+    return line
+
+
+def too_large(path: str, size: str) -> str:
+    """A result in Claude Code's words for an output too large for it, saved
+    at `path`: it gives a rounded `size` and the output's first part."""
+    return (
+        f"<persisted-output>\nOutput too large ({size}). Full output saved to:"
+        f" {path}\n\nPreview (first 2KB):\ntwill\nsatin\n...\n</persisted-output>"
+    )
+
+
+def over_the_tokens(path: str, stated: str) -> str:
+    """A result in Claude Code's words for an output over the tokens a
+    result may hold, saved at `path`: `stated` is its size as the result
+    gives it, in characters and, on some versions, lines."""
+    return (
+        f"Error: result ({stated}) exceeds maximum allowed tokens. Output has"
+        f" been saved to {path}.\nFormat: Plain text\n"
+    )
+
+
 def loaded(kind: str, content: str, path: str = MANAGED) -> dict[str, str]:
     """An instruction file a process loaded."""
     return {"type": kind, "path": path, "content": content}
@@ -136,4 +186,13 @@ def filed(
         path = projects / FOLDER / SESSION / "subagents" / f"agent-{agent}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(lines if isinstance(lines, bytes) else content(lines))
-    return Transcript(path, SESSION, agent)
+    return Transcript(projects, path, SESSION, agent)
+
+
+def saved(projects: Path, name: str, content: bytes, session: str = SESSION) -> str:
+    """An output saved to disk under that conversation's folder; its path as
+    a result names it, on the session's own home."""
+    path = projects / FOLDER / session / "tool-results" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return f"/home/ubuntu/.claude/projects/{FOLDER}/{session}/tool-results/{name}"

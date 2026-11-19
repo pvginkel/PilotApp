@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pilot_collector.home import Transcript, transcript
+from pilot_collector.home import Transcript, saved_output, transcript
 from tests.support import AGENT, FOLDER, SESSION
 
 PROJECTS = Path("/home/ubuntu/.claude/projects")
@@ -14,18 +14,18 @@ class TestATranscriptsPlace:
     def test_a_main_threads_file_is_named_for_its_conversation(self) -> None:
         path = PROJECTS / FOLDER / f"{SESSION}.jsonl"
 
-        assert transcript(PROJECTS, path) == Transcript(path, SESSION)
+        assert transcript(PROJECTS, path) == Transcript(PROJECTS, path, SESSION)
 
     def test_a_sub_agents_file_lies_under_its_conversations_subagents(self) -> None:
         path = PROJECTS / FOLDER / SESSION / "subagents" / f"agent-{AGENT}.jsonl"
 
-        assert transcript(PROJECTS, path) == Transcript(path, SESSION, AGENT)
+        assert transcript(PROJECTS, path) == Transcript(PROJECTS, path, SESSION, AGENT)
 
     def test_a_workflows_sub_agent_lies_deeper_and_is_its_conversations(self) -> None:
         folder = PROJECTS / FOLDER / SESSION / "subagents" / "workflows" / "wf_7c21"
         path = folder / f"agent-{AGENT}.jsonl"
 
-        assert transcript(PROJECTS, path) == Transcript(path, SESSION, AGENT)
+        assert transcript(PROJECTS, path) == Transcript(PROJECTS, path, SESSION, AGENT)
 
     @pytest.mark.parametrize(
         "place",
@@ -46,5 +46,36 @@ class TestATranscriptsPlace:
     def test_a_message_names_a_thread_by_its_ids(self) -> None:
         path = PROJECTS / FOLDER / f"{SESSION}.jsonl"
 
-        assert Transcript(path, SESSION).name == SESSION
-        assert Transcript(path, SESSION, AGENT).name == f"{SESSION}/{AGENT}"
+        assert Transcript(PROJECTS, path, SESSION).name == SESSION
+        assert Transcript(PROJECTS, path, SESSION, AGENT).name == f"{SESSION}/{AGENT}"
+
+
+class TestASavedOutputsPlace:
+    @pytest.mark.parametrize(
+        "home", ["/home/ubuntu/.claude", "/home/cleo/.config/claude", "/srv/a home"]
+    )
+    def test_it_lies_under_projects_by_the_last_four_parts_of_its_path(
+        self, home: str
+    ) -> None:
+        named = f"{home}/projects/{FOLDER}/{SESSION}/tool-results/b7q2x9k1m.txt"
+
+        assert saved_output(PROJECTS, named) == (
+            PROJECTS / FOLDER / SESSION / "tool-results" / "b7q2x9k1m.txt"
+        )
+
+    @pytest.mark.parametrize(
+        "named",
+        [
+            "/etc/passwd",
+            "b7q2x9k1m.txt",
+            "/tool-results/b7q2x9k1m.txt",
+            "/looms/tool-results/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/{FOLDER}/{SESSION}/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/{FOLDER}/{SESSION}/subagents/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/{FOLDER}/../tool-results/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/../{SESSION}/tool-results/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/{FOLDER}/{SESSION}/tool-results/..",
+        ],
+    )
+    def test_a_path_of_another_shape_is_no_saved_outputs(self, named: str) -> None:
+        assert saved_output(PROJECTS, named) is None

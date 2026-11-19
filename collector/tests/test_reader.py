@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pilot_collection.publication import PublicationSchema
+from pilot_collection.publication import PublicationSchema, PublishedToolCallSchema
 from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario
 from pilot_scenario.script import Call, Launch, Prompt, Session, Tokens
 
@@ -21,6 +21,7 @@ from tests import support
 from tests.support import (
     AGENT,
     DIRECTORY,
+    FOLDER,
     SESSION,
     Line,
     assistant,
@@ -31,13 +32,20 @@ from tests.support import (
     instructions,
     loaded,
     moment,
+    over_the_tokens,
     queue,
+    requesting,
     result,
+    saved,
+    too_large,
     typed,
     user,
 )
 
 UNTIL = datetime(2026, 11, 12, 9, 30, 0, 250_000, tzinfo=UTC)
+
+INTERRUPTED = "[Request interrupted by user for tool use]"
+"""Claude Code's words for the result of a tool call the person interrupted."""
 
 SETTINGS = Settings()
 
@@ -52,7 +60,7 @@ THREAD = (
     "environment",
 )
 PROMPT = ("received_at", "source", "characters")
-CALL = ("message_id", "prompt", "completed_at", "model", "tokens")
+CALL = ("message_id", "prompt", "completed_at", "model", "tokens", "tool_calls")
 
 
 def _resumed() -> Scenario:
@@ -125,6 +133,17 @@ def _read(projects: Path, lines: list[Line] | bytes) -> PublicationSchema:
     return read(filed(projects, lines), SETTINGS)
 
 
+def _tool_call(projects: Path, *lines: Line) -> PublishedToolCallSchema:
+    """The one tool call of a main thread's file that holds a prompt and
+    `lines`."""
+    (asked,) = _tool_calls(_read(projects, [typed(0), *lines]))
+    return asked
+
+
+def _tool_calls(publication: PublicationSchema) -> list[PublishedToolCallSchema]:
+    return [asked for call in publication.calls for asked in call.tool_calls]
+
+
 def _sources(publication: PublicationSchema) -> list[str]:
     return [
         prompt.source for launch in publication.launches for prompt in launch.prompts
@@ -177,6 +196,22 @@ class TestTheScenario:
             "output",
         }
         assert all("environment" in one for one in publications if "launches" in one)
+        tool_calls = [
+            asked
+            for publication in publications
+            for call in publication["calls"]
+            for asked in call.get("tool_calls", [])
+        ]
+        assert {asked["tool"] for asked in tool_calls} >= {"Bash", "Edit", "Agent"}
+        assert any("mcp_server" in asked for asked in tool_calls)
+        assert any(asked.get("exit_code") for asked in tool_calls)
+        assert any(asked["interrupted"] for asked in tool_calls)
+        assert sum("saved_characters" in asked for asked in tool_calls) == 2
+        assert any(
+            "agent_id" in publication and call.get("tool_calls")
+            for publication in publications
+            for call in publication["calls"]
+        )
         assert len(resumed[0]["launches"]) == 2
         assert "environment" not in resumed[0] and "repository" not in resumed[0]
 
@@ -786,6 +821,398 @@ class TestCalls:
 
         assert (call.message_id, call.completed_at) == ("msg_07", moment(4))
         assert call.tokens == {"input": 5, "output": 22}
+
+
+class TestToolCalls:
+    def test_a_tool_call_is_a_calls_request_with_the_result_that_names_its_id(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                assistant(4, "msg_01", output=1),
+                requesting(4.5, "toolu_01", "Read", {"file_path": "warp.md"}),
+                requesting(5, "toolu_02", "Bash", {"command": "ls looms"}),
+                result(7, "toolu_02", "twill\nsatin", error=False),
+                result(9, "toolu_01", "Sixty ends."),
+                requesting(12, "toolu_03", "Grep", {"pattern": "weft"}, "msg_02"),
+            ],
+        )
+
+        first, second = publication.calls
+        assert [
+            (asked.tool_use_id, asked.tool, asked.requested_at, asked.returned_at)
+            for asked in first.tool_calls
+        ] == [
+            ("toolu_01", "Read", moment(4.5), moment(9)),
+            ("toolu_02", "Bash", moment(5), moment(7)),
+        ]
+        assert [asked.tool_use_id for asked in second.tool_calls] == ["toolu_03"]
+        assert first.completed_at == moment(5)
+
+    def test_a_request_no_result_reached_has_no_fact_of_one(
+        self, tmp_path: Path
+    ) -> None:
+        asked = _tool_call(tmp_path, requesting(4))
+
+        assert asked.returned_at is None
+        assert (asked.failed, asked.interrupted) == (False, False)
+        assert asked.exit_code is None
+        assert (asked.result_characters, asked.saved_characters) == (None, None)
+
+    def test_a_request_and_a_result_written_twice_are_one_tool_call(
+        self, tmp_path: Path
+    ) -> None:
+        asked = _tool_call(
+            tmp_path,
+            requesting(4),
+            result(6, said="Twill."),
+            requesting(60),
+            result(66, said="Twill and satin."),
+        )
+
+        assert (asked.requested_at, asked.returned_at) == (moment(4), moment(6))
+        assert asked.result_characters == 6
+
+    def test_a_result_that_names_no_request_of_the_file_is_no_tool_calls(
+        self, tmp_path: Path
+    ) -> None:
+        asked = _tool_call(
+            tmp_path, result(2, "toolu_00"), requesting(4), result(6, "toolu_09")
+        )
+
+        assert (asked.tool_use_id, asked.returned_at) == ("toolu_01", None)
+
+    def test_a_line_claude_code_wrote_itself_requests_no_tool(
+        self, tmp_path: Path
+    ) -> None:
+        synthetic = requesting(5, "toolu_02", message_id="5c0e-a1")
+        synthetic["message"]["model"] = "<synthetic>"
+
+        asked = _tool_call(tmp_path, requesting(4), synthetic)
+
+        assert asked.tool_use_id == "toolu_01"
+
+    def test_a_sub_agents_tool_calls_are_read_as_a_main_threads(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            user(0, "Count the heddles."),
+            requesting(3, given={"command": "wc -l heddles"}),
+            result(5, said="Exit code 1\nwc: heddles", error=True),
+        ]
+
+        (call,) = read(filed(tmp_path, lines, AGENT), SETTINGS).calls
+
+        (asked,) = call.tool_calls
+        assert (asked.tool, asked.first_argument) == ("Bash", "wc -l heddles")
+        assert (asked.returned_at, asked.failed) == (moment(5), True)
+        assert asked.exit_code == 1
+
+    @pytest.mark.parametrize(
+        ("tool", "server"),
+        [
+            ("mcp__loomhouse__list_patterns", "loomhouse"),
+            ("mcp__plugin_dye_vat__mix", "plugin_dye_vat"),
+            ("Bash", None),
+            ("mcp_tools", None),
+            ("Weave__mcp__twill", None),
+        ],
+    )
+    def test_an_mcp_servers_tool_names_its_server(
+        self, tool: str, server: str | None, tmp_path: Path
+    ) -> None:
+        asked = _tool_call(tmp_path, requesting(4, tool=tool, given={"query": "x"}))
+
+        assert (asked.tool, asked.mcp_server) == (tool, server)
+
+    @pytest.mark.parametrize(
+        ("given", "argument"),
+        [
+            ({"command": "ls looms", "description": "List the looms"}, "ls looms"),
+            (
+                {"replace_all": False, "file_path": "warp.md", "old_string": "a"},
+                "warp.md",
+            ),
+            ({"limit": 5, "ids": ["a", "b"], "query": "twill"}, "twill"),
+            ({"command": "cd looms &&\n  ls\nwc -l *"}, "cd looms &&"),
+            ({"command": "\n  \n  ls looms\n"}, "  ls looms"),
+            ({"command": "ls looms\r\nwc"}, "ls looms"),
+            ({"command": " \n", "description": "Nothing"}, None),
+            ({"todos": [{"content": "Tie on"}], "merge": True}, None),
+            ({}, None),
+        ],
+        ids=[
+            "the first of its input",
+            "the first that is text",
+            "past a number and a list",
+            "cut to a line",
+            "its first line that is not blank",
+            "a line a carriage return ends",
+            "a blank text",
+            "no text",
+            "no input",
+        ],
+    )
+    def test_its_argument_is_the_first_text_of_its_input_cut_to_a_line(
+        self, given: dict[str, Any], argument: str | None, tmp_path: Path
+    ) -> None:
+        asked = _tool_call(tmp_path, requesting(4, tool="Loom", given=given))
+
+        assert asked.first_argument == argument
+
+    @pytest.mark.parametrize(
+        ("error", "failed"), [(True, True), (False, False), (None, False)]
+    )
+    def test_it_failed_where_its_result_is_an_error(
+        self, error: bool | None, failed: bool, tmp_path: Path
+    ) -> None:
+        asked = _tool_call(tmp_path, requesting(4), result(6, error=error))
+
+        assert asked.failed is failed
+
+    @pytest.mark.parametrize(
+        ("tool", "said", "error", "exit_code"),
+        [
+            ("Bash", "Exit code 2\nls: no looms", True, 2),
+            ("Bash", "Exit code 137", True, 137),
+            ("Bash", "Exit code -1\nKilled", True, -1),
+            ("Bash", "The command timed out.", True, None),
+            ("Bash", "ls: no looms\nExit code 2", True, None),
+            ("Bash", "Exit code 2 was the last run's.", True, None),
+            ("Bash", "Exit code 2\nls: no looms", False, None),
+            ("Bash", "twill", False, None),
+            ("Loom", "Exit code 2\nThe shed jammed.", True, None),
+        ],
+        ids=[
+            "an error that opens with it",
+            "an error that is it alone",
+            "a negative one",
+            "an error that names none",
+            "an error that names one further on",
+            "an error that opens with the words and no line of them",
+            "a result that is no error",
+            "a command that exited with 0",
+            "another tool's error",
+        ],
+    )
+    def test_an_exit_code_is_the_one_a_commands_error_opens_with(
+        self, tool: str, said: str, error: bool, exit_code: int | None, tmp_path: Path
+    ) -> None:
+        asked = _tool_call(
+            tmp_path, requesting(4, tool=tool), result(6, said=said, error=error)
+        )
+
+        assert asked.exit_code == exit_code
+
+    @pytest.mark.parametrize(
+        ("said", "error", "record", "interrupted"),
+        [
+            ("twi", False, {"stdout": "twi", "interrupted": True}, True),
+            ("twill", False, {"stdout": "twill", "interrupted": False}, False),
+            (INTERRUPTED, True, f"Error: {INTERRUPTED}", True),
+            (f"Exit code 145\n{INTERRUPTED}\nCommand aborted", True, None, True),
+            ("Interrupted by user", True, "Interrupted by user", True),
+            (f"{INTERRUPTED} was what the log said.", True, None, False),
+            (f"The log:\n{INTERRUPTED}", True, None, False),
+            (INTERRUPTED, False, {"stdout": INTERRUPTED, "interrupted": False}, False),
+            ("Interrupted by user input on the loom.", True, None, False),
+            ("Done.", None, "interrupted", False),
+        ],
+        ids=[
+            "the command's record says so",
+            "the command's record says not",
+            "an error that is Claude Code's words for it",
+            "an error that opens with them past the exit code",
+            "an error that is the words of a file's tool",
+            "an error that opens with the words and no line of them",
+            "an error that quotes them further on",
+            "an output that is the words, and no error",
+            "an error that opens with other words",
+            "a record that is a text",
+        ],
+    )
+    def test_it_was_interrupted_where_its_record_or_its_error_says_so(
+        self,
+        said: str,
+        error: bool | None,
+        record: Any,
+        interrupted: bool,
+        tmp_path: Path,
+    ) -> None:
+        asked = _tool_call(
+            tmp_path, requesting(4), result(6, said=said, error=error, record=record)
+        )
+
+        assert asked.interrupted is interrupted
+
+    def test_its_results_size_is_the_characters_of_its_text(
+        self, tmp_path: Path
+    ) -> None:
+        blocks = [
+            {"type": "text", "text": "Schußfaden, "},
+            {"type": "image", "source": {"type": "base64", "data": "aGVkZGxl"}},
+            {"type": "tool_reference", "tool_name": "mcp__loomhouse__list_patterns"},
+            {"type": "text", "text": "twill."},
+        ]
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                requesting(4, "toolu_01"),
+                requesting(4, "toolu_02"),
+                requesting(4, "toolu_03"),
+                result(6, "toolu_01", "Schußfaden"),
+                result(7, "toolu_02", blocks),
+                result(8, "toolu_03", [blocks[2]]),
+            ],
+        )
+
+        assert [asked.result_characters for asked in _tool_calls(publication)] == [
+            10,
+            18,
+            0,
+        ]
+
+
+class TestAnOutputSavedToDisk:
+    """The two wordings are Claude Code's; the paths and outputs invented."""
+
+    def test_its_full_size_is_the_saved_files_characters(self, tmp_path: Path) -> None:
+        output = "Schußfaden und Kettfaden.\n" * 400
+        path = saved(tmp_path, "b7q2x9k1m.txt", output.encode())
+
+        asked = _tool_call(
+            tmp_path,
+            requesting(4),
+            result(6, said=too_large(path, "10.6KB"), error=False),
+        )
+
+        assert asked.saved_characters == len(output) == 10_400
+        assert asked.result_characters == len(too_large(path, "10.6KB"))
+
+    def test_the_file_is_found_by_the_path_the_result_names(
+        self, tmp_path: Path
+    ) -> None:
+        """Under another conversation's folder, on a home filed elsewhere,
+        and by no name the tool call's id gives."""
+        other = "9d3e7b52-1c4f-4a68-b0d9-5e2f8a1c6b37"
+        name = "mcp-loomhouse-list_patterns-1794474000123.txt"
+        path = saved(tmp_path, name, b"twill", other)
+        saved(tmp_path, "toolu_01.txt", b"not this one")
+        elsewhere = path.replace("/home/ubuntu/.claude", "/home/cleo/.config/claude")
+
+        asked = _tool_call(
+            tmp_path,
+            requesting(4, tool="mcp__loomhouse__list_patterns"),
+            result(6, said=over_the_tokens(elsewhere, "48,300 characters")),
+        )
+
+        assert asked.saved_characters == 5
+
+    def test_a_saved_file_that_is_no_utf_8_counts_each_such_byte_a_character(
+        self, tmp_path: Path
+    ) -> None:
+        path = saved(tmp_path, "b7q2x9k1m.txt", b"Schu\xdffaden\xff\n")
+
+        asked = _tool_call(
+            tmp_path, requesting(4), result(6, said=too_large(path, "30KB"))
+        )
+
+        assert asked.saved_characters == 12
+
+    @pytest.mark.parametrize(
+        ("stated", "characters"),
+        [
+            ("48,300 characters", 48_300),
+            ("1,343,190 characters", 1_343_190),
+            ("912 characters across 1 line", 912),
+            ("61,004 characters across 2,210 lines", 61_004),
+        ],
+    )
+    def test_a_file_that_is_gone_leaves_the_characters_the_result_states(
+        self, stated: str, characters: int, tmp_path: Path
+    ) -> None:
+        path = saved(tmp_path, "mcp-loomhouse-list_patterns-17.txt", b"twill")
+        (tmp_path / FOLDER / SESSION / "tool-results").rename(tmp_path / "gone")
+
+        asked = _tool_call(
+            tmp_path,
+            requesting(4),
+            result(6, said=over_the_tokens(path, stated), error=True),
+        )
+
+        assert asked.saved_characters == characters
+
+    def test_a_file_that_is_gone_leaves_none_where_the_result_states_a_rounded_size(
+        self, tmp_path: Path
+    ) -> None:
+        path = f"/home/ubuntu/.claude/projects/{FOLDER}/{SESSION}/tool-results/b7.txt"
+
+        asked = _tool_call(
+            tmp_path, requesting(4), result(6, said=too_large(path, "207.8KB"))
+        )
+
+        assert asked.saved_characters is None
+
+    @pytest.mark.parametrize(
+        "quoting",
+        [
+            "The log said:\n{wording}",
+            " {wording}",
+            "Exit code 1\n{wording}",
+            "[{wording}]",
+        ],
+    )
+    @pytest.mark.parametrize("wording", ["too large", "over the tokens"])
+    def test_an_output_that_quotes_the_words_was_not_saved(
+        self, wording: str, quoting: str, tmp_path: Path
+    ) -> None:
+        path = saved(tmp_path, "b7q2x9k1m.txt", b"twill")
+        said = (
+            too_large(path, "30KB")
+            if wording == "too large"
+            else over_the_tokens(path, "48,300 characters")
+        )
+
+        asked = _tool_call(
+            tmp_path,
+            requesting(4),
+            result(6, said=quoting.format(wording=said), error=True),
+        )
+
+        assert asked.saved_characters is None
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/etc/passwd",
+            "/tool-results/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/{FOLDER}/{SESSION}/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/{FOLDER}/../tool-results/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/../{SESSION}/tool-results/b7q2x9k1m.txt",
+            f"/home/ubuntu/.claude/projects/{FOLDER}/{SESSION}/tool-results/..",
+        ],
+    )
+    def test_a_path_that_is_no_saved_outputs_place_is_not_read(
+        self, path: str, tmp_path: Path
+    ) -> None:
+        saved(tmp_path, "b7q2x9k1m.txt", b"twill")
+        (tmp_path / "tool-results").mkdir()
+        (tmp_path / "tool-results" / "b7q2x9k1m.txt").write_bytes(b"not this one")
+
+        large = _tool_call(
+            tmp_path, requesting(4), result(6, said=too_large(path, "30KB"))
+        )
+        stated = _tool_call(
+            tmp_path,
+            requesting(4),
+            result(6, said=over_the_tokens(path, "48,300 characters")),
+        )
+
+        assert large.saved_characters is None
+        assert stated.saved_characters == 48_300
 
 
 class TestAFileTheCollectorCannotRead:
