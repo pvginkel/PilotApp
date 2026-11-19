@@ -20,6 +20,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Select,
+    SQLColumnExpression,
     Text,
     UniqueConstraint,
     and_,
@@ -93,8 +94,23 @@ class StepTiming(db.Model):  # type: ignore[name-defined]
             unique=True,
             postgresql_where=text("key IS NOT NULL"),
         ),
-        # A kind's last timings by their end.
-        Index("ix_step_timings_kind_code_ended_at", "kind_code", "ended_at"),
+        # A kind's last timings by their end, those listed ahead and those
+        # not each a range of their own: in all repos, and in one.
+        Index(
+            "ix_step_timings_kind_code_listed_ahead_ended_at",
+            "kind_code",
+            "listed_ahead",
+            "ended_at",
+            "id",
+        ),
+        Index(
+            "ix_step_timings_repo_kind_code_listed_ahead_ended_at",
+            "repo",
+            "kind_code",
+            "listed_ahead",
+            "ended_at",
+            "id",
+        ),
         # Written live or seeded, never both (DB 572).
         CheckConstraint(
             "(code IS NULL) <> (key IS NULL)", name="ck_step_timings_code_or_key"
@@ -135,10 +151,13 @@ def names_main_thread() -> ColumnElement[bool]:
     )
 
 
-def repo_of_work(work_id: uuid.UUID) -> Select[str | None]:
+def repo_of_work(
+    work_id: uuid.UUID | SQLColumnExpression[uuid.UUID],
+) -> Select[str | None]:
     """The repo of a Work, which a Step Timing of it is written with: its
     `repo` label, else the `repo` of the Environment its Session runs in,
-    none with neither (DB 572)."""
+    none with neither (DB 572). `work_id` is an id, or a column of an
+    enclosing statement the select then reads as a subquery."""
     return (
         select(func.coalesce(Work.repo, Environment.repo))
         .select_from(Work)

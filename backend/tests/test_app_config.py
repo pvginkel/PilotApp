@@ -244,6 +244,35 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match=name):
             AppEnvironment.model_validate({name: 0})
 
+    def test_the_estimates_window_is_20_steps_and_its_running_steps_60_by_default(
+        self,
+    ) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert (settings.estimate_window_steps, settings.estimate_running_steps) == (
+            20,
+            60,
+        )
+
+    def test_load_reads_the_estimates_two_counts_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                _env_file=None, ESTIMATE_WINDOW_STEPS=10, ESTIMATE_RUNNING_STEPS=30
+            )
+        )
+
+        assert (settings.estimate_window_steps, settings.estimate_running_steps) == (
+            10,
+            30,
+        )
+
+    @pytest.mark.parametrize(
+        "name", ["ESTIMATE_WINDOW_STEPS", "ESTIMATE_RUNNING_STEPS"]
+    )
+    def test_load_refuses_a_count_of_the_estimates_below_one(self, name: str) -> None:
+        with pytest.raises(ValidationError, match=name):
+            AppEnvironment.model_validate({name: 0})
+
     def test_the_usage_limits_and_halt_settings_are_the_ruled_ones_by_default(
         self,
     ) -> None:
@@ -473,6 +502,8 @@ class TestAppSettings:
             "environment_delete_after_seconds": repr(604800.0),
             "work_parallelism_max": "3",
             "project_parallelism_max": "3",
+            "estimate_window_steps": "20",
+            "estimate_running_steps": "60",
             "week_first_limit": "0.9",
             "week_allowance": "0.05",
             "week_second_limit": "0.98",
@@ -579,6 +610,8 @@ class TestAppSettings:
             "environment_delete_after_seconds": repr(604800.0),
             "work_parallelism_max": "3",
             "project_parallelism_max": "3",
+            "estimate_window_steps": "20",
+            "estimate_running_steps": "60",
             "week_first_limit": "0.9",
             "week_allowance": "0.05",
             "week_second_limit": "0.98",

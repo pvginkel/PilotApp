@@ -175,6 +175,23 @@ class AppEnvironment(BaseSettings):
             "holds its work items' starts; unset, WORK_PARALLELISM_MAX (F143.4)"
         ),
     )
+    ESTIMATE_WINDOW_STEPS: int = Field(
+        default=20,
+        gt=0,
+        description=(
+            "The last Step Timings of a kind, by their end, that the price of "
+            "a step of that kind is read from (F156.4, F156.10)"
+        ),
+    )
+    ESTIMATE_RUNNING_STEPS: int = Field(
+        default=60,
+        gt=0,
+        description=(
+            "The last Step Timings of its kind a running step is read against, "
+            "for the time it still takes and for longer than usual (F156.5, "
+            "F156.10)"
+        ),
+    )
     WEEK_FIRST_LIMIT: float = Field(
         default=0.90,
         gt=0,
@@ -407,6 +424,14 @@ class AppSettings(BaseModel):
     """The work items running or starting in one Project at which the gate
     holds its work items' starts (design 2 §13.5; F143.4)."""
 
+    estimate_window_steps: int = 20
+    """A kind's window: its last Step Timings by their end, which a step's
+    price is read from (F156.4)."""
+
+    estimate_running_steps: int = 60
+    """The last Step Timings of its kind a running step is read against
+    (F156.5, F156.7)."""
+
     week_first_limit: float = 0.90
     """The week's share at or over which the week's halt holds the work items,
     unless a Quota Overrule holds (F135.1; DB 266)."""
@@ -506,6 +531,8 @@ class AppSettings(BaseModel):
                 if env.PROJECT_PARALLELISM_MAX is None
                 else env.PROJECT_PARALLELISM_MAX
             ),
+            estimate_window_steps=env.ESTIMATE_WINDOW_STEPS,
+            estimate_running_steps=env.ESTIMATE_RUNNING_STEPS,
             week_first_limit=env.WEEK_FIRST_LIMIT,
             week_allowance=env.WEEK_ALLOWANCE,
             week_second_limit=env.WEEK_SECOND_LIMIT,
