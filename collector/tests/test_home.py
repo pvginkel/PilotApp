@@ -135,7 +135,7 @@ class TestTheHomesTranscripts:
 
         [listed] = transcripts(tmp_path)
 
-        publication = read(listed.transcript, settings())
+        publication = read(listed.transcript, settings()).publication
         assert listed.file_modified_at == publication.file_modified_at
         assert listed.file_size == publication.file_size
 

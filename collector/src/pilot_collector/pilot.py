@@ -3,10 +3,12 @@ of one transcript and the walk's end, the three routes behind Pilot's door
 for a collector.
 
 Every call carries the collector's bearer and names the version of the
-collector's API it speaks. An answer is the call's own, or one of three
-failures a walk tells apart: `Refused`, the same call refused again, which
-costs the walk that transcript; `NotAdmitted`, no call of this collector's
-taken; and `Unreachable`, no answer of Pilot's to the call.
+collector's API it speaks. An answer is the call's own, or one of four
+failures a walk tells apart: `NotAppendable`, an appended publication that
+does not continue what Pilot holds, whose transcript is then published
+whole; `Refused`, the same call refused again, which costs the walk that
+transcript; `NotAdmitted`, no call of this collector's taken; and
+`Unreachable`, no answer of Pilot's to the call.
 """
 
 from typing import Any, Self
@@ -28,6 +30,14 @@ included."""
 
 _SAID = 2_000
 """The characters of a refusal's body a message quotes."""
+
+_NOT_APPENDABLE = "PUBLICATION_NOT_APPENDABLE"
+"""The `code` of the 409 that refuses an appended publication."""
+
+
+class NotAppendable(Exception):
+    """Pilot refused an appended publication: it does not continue what
+    Pilot holds of the transcript. The message has Pilot's reasons."""
 
 
 class Refused(Exception):
@@ -77,6 +87,7 @@ class Pilot:
         """Publish one transcript: Pilot then holds it as the call says.
 
         Raises:
+            NotAppendable: Pilot answered 409 `PUBLICATION_NOT_APPENDABLE`.
             Refused: Pilot answered 400 or 413; the message has what it said.
         """
         answer = self._call(
@@ -85,6 +96,13 @@ class Pilot:
             content=publication.model_dump_json(exclude_none=True),
             headers={"Content-Type": "application/json"},
         )
+        if answer.status_code == 409:
+            try:
+                said = answer.json()
+            except ValueError:
+                said = None
+            if isinstance(said, dict) and said.get("code") == _NOT_APPENDABLE:
+                raise NotAppendable(str(said.get("error"))[:_SAID])
         if answer.status_code in (400, 413):
             raise Refused(f"{answer.status_code}: {answer.text[:_SAID]}")
         if answer.status_code != 204:

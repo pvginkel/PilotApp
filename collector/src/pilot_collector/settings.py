@@ -53,6 +53,23 @@ class Settings(BaseSettings):
             " hosted session: its first group is the environment's id (F152.4)"
         ),
     )
+    COLLECTOR_CARRY_TRANSCRIPTS: int = Field(
+        default=2_500,
+        ge=0,
+        description=(
+            "How many transcripts' carries the collector keeps between walks:"
+            " past it the transcript published longest ago is forgotten first,"
+            " and is published whole when it next grows (F152.15)"
+        ),
+    )
+    COLLECTOR_CARRY_BYTES: int = Field(
+        default=64_000_000,
+        ge=0,
+        description=(
+            "The bytes of memory the carries are kept within, forgotten in the"
+            " same order past it (F152.15)"
+        ),
+    )
     COLLECTOR_CHECKOUT_ROOTS: Annotated[list[str], AfterValidator(_are_absolute)] = (
         Field(
             default=["/work"],

@@ -1,4 +1,5 @@
-"""A transcript's file read into its whole publication (F152.3).
+"""A transcript's file read into its publication (F152.3): whole, or from
+its boundary on where the file grew (F152.15).
 
 A transcript's file is JSON Lines, a line an object, and a line is read once
 its newline is written. The facts are read off the lines in the file's order:
@@ -41,6 +42,21 @@ its newline is written. The facts are read off the lines in the file's order:
     result names; else the characters the result states; else none.
 
 The facts slices 051 and 052 read are not read here.
+
+**From the boundary on.** A reading leaves a carry (`carry.py`): where it
+stood before the file's last Call. Given that carry, a file that grew is read
+from the boundary's byte on, and its publication is an appended one: the
+Calls from the boundary's on, the Launches that wrote a line from there on,
+the first with its Prompts from there on, and the four places the boundary
+names. Such a reading holds no line before the boundary's byte but the one
+the carry names, so it stops, and the file is read whole, where:
+
+- the file is no larger than the one the carry was built on, or its bytes
+  from the boundary's to its old end are other than those read then
+  (F152.17);
+- a line's `parentUuid` names a line before the boundary's byte that is not
+  the carry's, or a tool's result names a request no line from that byte on
+  makes: either reaches behind the boundary.
 """
 
 import json
@@ -55,6 +71,7 @@ from pilot_collection.publication import CallTokenKind, PublicationSchema
 from pydantic import ValidationError
 
 from pilot_collector import VERSION
+from pilot_collector.carry import Carry, Open, Standing, digest
 from pilot_collector.home import Transcript, modified_at, saved_output
 from pilot_collector.settings import Settings
 
@@ -128,11 +145,28 @@ class UnreadableError(Exception):
     """A transcript's file the collector cannot read, with the reason."""
 
 
+class NotContinuedError(Exception):
+    """A transcript's file that does not continue what a carry was built on,
+    or whose lines reach behind the carry's boundary, with the reason: it is
+    read whole."""
+
+
+@dataclass(frozen=True)
+class Read:
+    """A transcript's file as one reading took it."""
+
+    publication: PublicationSchema
+    carry: Carry
+    """What a reading of the file, grown, continues."""
+
+
 @dataclass
 class _Launch:
     started_at: datetime
     version: str | None = None
     prompts: list[dict[str, Any]] = field(default_factory=list)
+    kept: int = 0
+    """The Prompts it received before the reading's first line."""
 
 
 @dataclass
@@ -176,6 +210,12 @@ def _text(content: Any) -> str:
     if isinstance(content, str):
         return content
     return "".join(block["text"] for block in content if block["type"] == "text")
+
+
+def _words(text: str) -> bytes:
+    """A digest of a prompt's text, a lone surrogate among its characters
+    included."""
+    return digest(text.encode("utf-8", "surrogatepass"))
 
 
 def _source(line: dict[str, Any]) -> str | None:
@@ -228,32 +268,77 @@ def _saved(said: str, projects: Path) -> int | None:
 
 
 class _Thread:
-    """One thread's facts as its lines are taken, in the file's order."""
+    """One thread's facts as its lines are taken, in the file's order, from
+    the line a reading stands before."""
 
-    def __init__(self, main: bool, projects: Path, settings: Settings) -> None:
-        self.directory: str | None = None
-        self.environment: str | None = None
+    def __init__(
+        self, main: bool, projects: Path, settings: Settings, before: Standing
+    ) -> None:
+        self.directory = before.directory
+        self.environment = before.environment
         self.launches: list[_Launch] = []
+        """The Launches that wrote a line taken, the one open before the
+        first among them."""
         self.calls: dict[str, _Call] = {}
+        self.stands = before
+        """Where the reading stood before the last Call's first line."""
         self._main = main
         self._projects = projects
         self._settings = settings
-        self._exited = True
-        self._prompts = 0
-        self._queue: list[tuple[str, datetime]] = []
+        self._before = before
+        self._exited = before.launch is None
+        if before.launch is not None:
+            opened = before.launch
+            self.launches.append(
+                _Launch(opened.started_at, opened.version, kept=opened.received)
+            )
+        self._published = before.launches
+        """The Launches that exited and are published."""
+        self._prompts = before.prompts
+        self._queue = before.queue
         """The prompts waiting in the process's queue, in the order they
-        arrived: each one's text and the time of its `enqueue` line."""
+        arrived: a digest of each one's text and the time of its `enqueue`
+        line."""
         self._requested: dict[str, _ToolCall] = {}
         """The tool calls requested, by Claude's id of the request."""
+        self._link = before.link
+        """The `uuid` of the last line taken that carries one."""
+        self._linked: set[str] = set()
+        """The `uuid` of every line taken."""
 
-    def take(self, line: dict[str, Any]) -> None:
+    def take(self, line: dict[str, Any], byte: int) -> None:
+        """Take the line that starts at `byte` of the file."""
+        kind = line["type"]
+        at = _time(line)
+        named = line.get("uuid")
+        if self._before.byte:
+            follows = line.get("parentUuid")
+            if not (
+                follows is None
+                or follows == self._before.link
+                or follows in self._linked
+            ):
+                raise NotContinuedError(
+                    "a line follows one before its boundary that is not the last there"
+                )
+            if named is not None:
+                self._linked.add(named)
+        if (
+            kind == "assistant"
+            and at is not None
+            and line["message"]["model"] != _SYNTHETIC
+            and line["message"]["id"] not in self.calls
+        ):
+            self.stands = self._standing(byte)
+        if named is not None:
+            self._link = named
         if self.directory is None and "cwd" in line:
             self.directory = line["cwd"]
-        kind = line["type"]
         if kind == _COST:
+            if not self._exited and self.launches[-1].version is not None:
+                self._published += 1
             self._exited = True
-            self._queue.clear()
-        at = _time(line)
+            self._queue = ()
         if at is None:
             return
         if self._main:
@@ -278,23 +363,45 @@ class _Thread:
         elif kind == "attachment":
             self._attached(line["attachment"])
 
+    def _standing(self, byte: int) -> Standing:
+        """Where the reading stands before the line that starts at `byte`,
+        none of it taken."""
+        opened = None if self._exited else self.launches[-1]
+        return Standing(
+            byte=byte,
+            calls=self._before.calls + len(self.calls),
+            launches=self._published,
+            prompts=self._prompts,
+            link=self._link,
+            directory=self.directory,
+            environment=self.environment,
+            launch=None
+            if opened is None
+            else Open(
+                opened.started_at, opened.version, opened.kept + len(opened.prompts)
+            ),
+            queue=self._queue,
+        )
+
     def _queued(self, line: dict[str, Any], at: datetime) -> None:
+        """A prompt's text is words: content that is none is no prompt's."""
         operation, content = line["operation"], line.get("content")
         if operation == "popAll":
-            self._queue.clear()
-        elif content is None:
+            self._queue = ()
+        elif not isinstance(content, str):
             return
         elif operation == "enqueue":
-            self._queue.append((content, at))
+            self._queue += ((_words(content), at),)
         elif operation == "remove":
             self._waited(content)
 
     def _waited(self, text: str) -> datetime | None:
         """Take the first prompt of that text out of the queue: the time
         it arrived, none where the queue holds none."""
+        words = _words(text)
         for place, (queued, at) in enumerate(self._queue):
-            if queued == text:
-                del self._queue[place]
+            if queued == words:
+                self._queue = self._queue[:place] + self._queue[place + 1 :]
                 return at
         return None
 
@@ -349,6 +456,10 @@ class _Thread:
             if block["type"] != "tool_result":
                 continue
             asked = self._requested.get(block["tool_use_id"])
+            if asked is None and self._before.byte:
+                raise NotContinuedError(
+                    "a tool's result names a request no line from its boundary on makes"
+                )
             if asked is None or asked.returned_at is not None:
                 continue
             said = _text(block["content"])
@@ -397,7 +508,7 @@ def _launches(thread: _Thread) -> list[dict[str, Any]]:
     launches: list[dict[str, Any]] = []
     for launch in thread.launches:
         if launch.version is None:
-            if launch.prompts:
+            if launch.prompts or launch.kept:
                 raise UnreadableError(
                     "a launch received a prompt and none of its lines names"
                     " Claude Code's version"
@@ -448,44 +559,86 @@ def _lines(content: bytes) -> list[bytes]:
     return content.split(b"\n")[:-1]
 
 
-def read(transcript: Transcript, settings: Settings) -> PublicationSchema:
-    """The transcript's whole publication, as its file stands.
+def read(
+    transcript: Transcript, settings: Settings, carry: Carry | None = None
+) -> Read:
+    """The transcript's publication as its file stands, and the carry the
+    reading leaves: whole, or with `carry`, what an earlier reading of the
+    file left, appended, read from the carry's boundary on.
 
     Raises:
         UnreadableError: The file is no transcript the collector reads; the
             message says why.
+        NotContinuedError: The file does not continue what `carry` was built
+            on, or a line read reaches behind its boundary; the message says
+            which.
     """
+    before = Standing() if carry is None else carry.stands
     with transcript.path.open("rb") as file:
         status = os.fstat(file.fileno())
-        content = file.read(status.st_size)
-    thread = _Thread(transcript.agent_id is None, transcript.projects, settings)
+        if carry is not None and status.st_size <= carry.file_size:
+            raise NotContinuedError("its file is no larger than the one last read")
+        file.seek(before.byte)
+        content = file.read(status.st_size - before.byte)
+    if (
+        carry is not None
+        and digest(content[: carry.file_size - before.byte]) != carry.end
+    ):
+        raise NotContinuedError("its file has other bytes before its old end")
+    thread = _Thread(transcript.agent_id is None, transcript.projects, settings, before)
+    byte = before.byte
     for number, raw in enumerate(_lines(content), start=1):
         try:
             line = json.loads(raw)
             if not isinstance(line, dict):
                 raise TypeError("the line is no object")
-            thread.take(line)
+            thread.take(line, byte)
         except (ValueError, KeyError, TypeError, AttributeError) as error:
             raise UnreadableError(
                 f"line {number} is not a line the collector reads:"
                 f" {type(error).__name__}: {error}"
             ) from error
+        byte += len(raw) + 1
     if thread.directory is None:
         raise UnreadableError("no line names a working directory")
+    facts: dict[str, Any] = {
+        "session_id": transcript.session_id,
+        "agent_id": transcript.agent_id,
+        "file_size": status.st_size,
+        "file_modified_at": modified_at(status),
+        "collector": {"version": VERSION},
+        "working_directory": thread.directory,
+        "repository": _repository(thread.directory, settings),
+        "environment": thread.environment,
+        "launches": _launches(thread),
+        "calls": _calls(thread),
+    }
+    if carry is not None:
+        facts["appended"] = {
+            "builds_on": {
+                "file_size": carry.file_size,
+                "file_modified_at": carry.file_modified_at,
+                "collector": carry.collector,
+            },
+            "boundary": {
+                "call": before.calls + 1,
+                "launch": before.launches + 1,
+                "prompt": before.prompts + 1,
+                "compaction": 1,
+            },
+        }
     try:
-        return PublicationSchema.model_validate(
-            {
-                "session_id": transcript.session_id,
-                "agent_id": transcript.agent_id,
-                "file_size": status.st_size,
-                "file_modified_at": modified_at(status),
-                "collector": {"version": VERSION},
-                "working_directory": thread.directory,
-                "repository": _repository(thread.directory, settings),
-                "environment": thread.environment,
-                "launches": _launches(thread),
-                "calls": _calls(thread),
-            }
-        )
+        publication = PublicationSchema.model_validate(facts)
     except ValidationError as error:
         raise UnreadableError(f"its facts are no publication: {error}") from error
+    stands = thread.stands
+    return Read(
+        publication,
+        Carry(
+            file_size=publication.file_size,
+            file_modified_at=publication.file_modified_at,
+            collector=VERSION,
+            stands=stands,
+            end=digest(content[stands.byte - before.byte :]),
+        ),
+    )

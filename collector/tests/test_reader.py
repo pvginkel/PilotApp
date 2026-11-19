@@ -129,7 +129,7 @@ def _cut(publication: dict[str, Any]) -> dict[str, Any]:
 
 def _read(projects: Path, lines: list[Line] | bytes) -> PublicationSchema:
     """The publication of a main thread's file holding `lines`."""
-    return read(filed(projects, lines), SETTINGS)
+    return read(filed(projects, lines), SETTINGS).publication
 
 
 def _tool_call(projects: Path, *lines: Line) -> PublishedToolCallSchema:
@@ -166,7 +166,9 @@ class TestTheScenario:
             named = transcript(projects, tmp_path / file.path)
             assert named is not None
             expected = PublicationSchema.model_validate(_cut(publication))
-            assert read(named, SETTINGS).model_dump() == expected.model_dump()
+            assert (
+                read(named, SETTINGS).publication.model_dump() == expected.model_dump()
+            )
 
     def test_the_scenario_has_each_fact_the_reading_is_proved_on(self) -> None:
         """The reading above proves nothing of a fact no thread has."""
@@ -220,9 +222,12 @@ class TestTheScenario:
         named = transcript(tmp_path / "projects", tmp_path / builder.files()[0].path)
         assert named is not None
 
-        sent = read(named, SETTINGS).model_dump_json(exclude_none=True)
+        sent = read(named, SETTINGS).publication.model_dump_json(exclude_none=True)
 
-        assert PublicationSchema.model_validate_json(sent) == read(named, SETTINGS)
+        assert (
+            PublicationSchema.model_validate_json(sent)
+            == read(named, SETTINGS).publication
+        )
 
 
 class TestTheCollectionRecord:
@@ -231,8 +236,8 @@ class TestTheCollectionRecord:
     ) -> None:
         lines = [typed(0), assistant(4, output=3)]
 
-        main = read(filed(tmp_path, lines), SETTINGS)
-        sub = read(filed(tmp_path, lines, AGENT), SETTINGS)
+        main = read(filed(tmp_path, lines), SETTINGS).publication
+        sub = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
 
         assert (main.session_id, main.agent_id) == (SESSION, None)
         assert (sub.session_id, sub.agent_id) == (SESSION, AGENT)
@@ -245,7 +250,7 @@ class TestTheCollectionRecord:
         written = 1_794_474_000_123_456_789
         os.utime(named.path, ns=(written, written))
 
-        publication = read(named, SETTINGS)
+        publication = read(named, SETTINGS).publication
 
         assert publication.file_size == named.path.stat().st_size
         assert publication.file_modified_at == datetime(
@@ -308,8 +313,10 @@ class TestThePlace:
         )
         elsewhere = filed(tmp_path, [typed(0) | {"cwd": "/srv/more/Shuttle/src"}])
 
-        assert read(elsewhere, settings).repository == "Shuttle"
-        assert read(filed(tmp_path, [typed(0)]), settings).repository is None
+        assert read(elsewhere, settings).publication.repository == "Shuttle"
+        assert (
+            read(filed(tmp_path, [typed(0)]), settings).publication.repository is None
+        )
 
     def test_the_environment_is_the_id_the_managed_file_opens_with(
         self, tmp_path: Path
@@ -358,8 +365,8 @@ class TestThePlace:
             [typed(0), instructions(0, loaded("Managed", "# Host: loom-9\n"))],
         )
 
-        assert read(hosted, settings).environment == "loom-9"
-        assert read(hosted, SETTINGS).environment is None
+        assert read(hosted, settings).publication.environment == "loom-9"
+        assert read(hosted, SETTINGS).publication.environment is None
 
     def test_the_id_is_read_where_the_managed_file_opens_and_nowhere_else(
         self, tmp_path: Path
@@ -387,7 +394,10 @@ class TestThePlace:
             assistant(3, output=2),
         ]
 
-        assert read(filed(tmp_path, lines, AGENT), SETTINGS).environment is None
+        assert (
+            read(filed(tmp_path, lines, AGENT), SETTINGS).publication.environment
+            is None
+        )
         assert _read(tmp_path, lines).environment == "cleo-loom-7a41d9"
 
 
@@ -497,7 +507,7 @@ class TestLaunches:
     def test_a_sub_agents_thread_has_no_launch(self, tmp_path: Path) -> None:
         lines = [typed(0), assistant(4, output=3), cost(), typed(60)]
 
-        publication = read(filed(tmp_path, lines, AGENT), SETTINGS)
+        publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
 
         assert publication.launches == []
         assert [call.prompt for call in publication.calls] == [None]
@@ -820,7 +830,7 @@ class TestCalls:
             assistant(4, "msg_07", input=5, output=22),
         ]
 
-        (call,) = read(filed(tmp_path, lines, AGENT), SETTINGS).calls
+        (call,) = read(filed(tmp_path, lines, AGENT), SETTINGS).publication.calls
 
         assert (call.message_id, call.completed_at) == ("msg_07", moment(4))
         assert call.tokens == {"input": 5, "output": 22}
@@ -906,7 +916,7 @@ class TestToolCalls:
             result(5, said="Exit code 1\nwc: heddles", error=True),
         ]
 
-        (call,) = read(filed(tmp_path, lines, AGENT), SETTINGS).calls
+        (call,) = read(filed(tmp_path, lines, AGENT), SETTINGS).publication.calls
 
         (asked,) = call.tool_calls
         assert (asked.tool, asked.first_argument) == ("Bash", "wc -l heddles")

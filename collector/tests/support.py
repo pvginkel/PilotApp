@@ -183,6 +183,22 @@ def instructions(seconds: float, *files: dict[str, str]) -> Line:
     return chained("attachment", seconds, attachment=attachment)
 
 
+def linked(lines: list[Line], name: str = "line") -> list[Line]:
+    """The lines as a chain: each that has a time and is no operation of the
+    queue's is named by a `uuid`, `name` and its place among them, and
+    follows the one before; the first follows none."""
+    chain: list[Line] = []
+    last: str | None = None
+    for line in lines:
+        if "timestamp" not in line or line["type"] == "queue-operation":
+            chain.append(line)
+            continue
+        named = f"{name}-{sum('uuid' in each for each in chain) + 1}"
+        chain.append(line | {"uuid": named, "parentUuid": last})
+        last = named
+    return chain
+
+
 def content(lines: list[Line]) -> bytes:
     """The lines as a file holds them."""
     return b"".join(json.dumps(line).encode() + b"\n" for line in lines)

@@ -26,6 +26,12 @@ class TestTheSettings:
         assert named is not None and named.group(1) == "cleo-loom-7a41d9"
         assert settings.COLLECTOR_CHECKOUT_ROOTS == ["/work"]
 
+    def test_the_carries_are_bound_at_2500_transcripts_and_64_mb(self) -> None:
+        settings = given()
+
+        assert settings.COLLECTOR_CARRY_TRANSCRIPTS == 2_500
+        assert settings.COLLECTOR_CARRY_BYTES == 64_000_000
+
     def test_each_is_read_from_the_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -33,6 +39,8 @@ class TestTheSettings:
             monkeypatch.setenv(name, value)
         monkeypatch.setenv("COLLECTOR_ENVIRONMENT_PATTERN", r"# Host: (\w+)")
         monkeypatch.setenv("COLLECTOR_CHECKOUT_ROOTS", '["/srv/checkouts", "/work"]')
+        monkeypatch.setenv("COLLECTOR_CARRY_TRANSCRIPTS", "40")
+        monkeypatch.setenv("COLLECTOR_CARRY_BYTES", "0")
 
         settings = Settings()
 
@@ -41,6 +49,8 @@ class TestTheSettings:
         assert settings.COLLECTOR_HOME == Path("/srv/home/.claude")
         assert settings.COLLECTOR_ENVIRONMENT_PATTERN.pattern == r"# Host: (\w+)"
         assert settings.COLLECTOR_CHECKOUT_ROOTS == ["/srv/checkouts", "/work"]
+        assert settings.COLLECTOR_CARRY_TRANSCRIPTS == 40
+        assert settings.COLLECTOR_CARRY_BYTES == 0
 
     @pytest.mark.parametrize("missing", sorted(WALKS))
     def test_pilots_address_the_bearer_and_the_home_have_no_default(
@@ -74,3 +84,10 @@ class TestTheSettings:
     def test_a_checkout_root_that_is_no_absolute_path_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="`work` is no absolute path"):
             given(COLLECTOR_CHECKOUT_ROOTS=["work"])
+
+    @pytest.mark.parametrize(
+        "bound", ["COLLECTOR_CARRY_TRANSCRIPTS", "COLLECTOR_CARRY_BYTES"]
+    )
+    def test_a_bound_of_the_carries_below_none_is_refused(self, bound: str) -> None:
+        with pytest.raises(ValidationError, match="greater than or equal to 0"):
+            given(**{bound: -1})
