@@ -490,7 +490,8 @@ class BriefService:
         (P-291), the files attached on the work item, the stage session's debrief
         (`_debriefed`), and the claimed actions it was given (`_given`) and
         the blocks it researched (`_researched`); then the project's state,
-        whose every open note the pass takes (F57.4), and the handbook."""
+        whose every open note the pass takes (F57.4), or `/plan` where the job
+        opens on it, and the handbook."""
         registered = self._registered(run_id)
         debriefed = self._debriefed(run_id)
         researched = self._researched(run_id)
@@ -931,7 +932,8 @@ class BriefService:
     def _registered_nothing(self, run_id: uuid.UUID) -> list[str]:
         """That the run registered nothing, and where its turn ended with
         text, the whole of it, quoted: a finding the worker stated only there
-        is all the pass has to go on (P-291)."""
+        is all the pass, or `/plan` where the job opens on it, has to go on
+        (P-291)."""
         lines = [line.rstrip() for line in self._final_text(run_id).splitlines()]
         while lines and not lines[0]:
             lines.pop(0)
