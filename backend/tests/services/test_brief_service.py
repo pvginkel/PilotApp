@@ -2415,6 +2415,19 @@ class TestWorkerTurnEnded:
             subject=SUBJECT,
             figures=FIGURES,
         )
+        # The first three entries moved off their positions and back: each
+        # such UPDATE writes the row anew, at the table's end, so that a read
+        # in the table's own order hands the entries back out of position.
+        for moved, by in (
+            (DebriefEntry.position <= 3, 100),
+            (DebriefEntry.position > 100, -100),
+        ):
+            session.execute(
+                update(DebriefEntry)
+                .where(DebriefEntry.work_id == run.id, moved)
+                .values(position=DebriefEntry.position + by)
+                .execution_options(synchronize_session=False)
+            )
         _turn_ended(session, container, run, "")
         _took(session, run, minutes=100)
 
