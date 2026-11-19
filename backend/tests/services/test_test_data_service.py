@@ -344,7 +344,8 @@ class TestTestDataService:
     ) -> None:
         """DB 609 to 611: the run's debrief completes the planning's subject,
         so the one notice, placed as the end of the run's pass places it,
-        carries both."""
+        carries both, each with the time its one turn took (DB 637), the run
+        with Pilot's lines (DB 636)."""
         recipes = _project(session, test_data_service.SLUG)
         planning, run, notice = _items(session, recipes)[-3:]
 
@@ -365,10 +366,22 @@ class TestTestDataService:
             )
         } == {planning.id, run.id}
         timeline = container.timeline_service().timeline(recipes.id)
-        assert [debrief.title for debrief in timeline.items[-1].debriefs or []] == [
-            "Planning the recipe card page",
-            "Building the recipe card page",
+        assert [
+            (debrief.title, debrief.stage_time, debrief.notable)
+            for debrief in timeline.items[-1].debriefs or []
+        ] == [
+            ("Planning the recipe card page", 1380, None),
+            ("Building the recipe card page", 6000, test_data_service.NOTABLE),
         ]
+        for run_id in (planning.id, run.id):
+            cached = session.get_one(models.Session, run_id)
+            turn = session.scalars(select(Turn).where(Turn.session_id == run_id)).one()
+            assert (cached.turns, cached.turn_started_at, cached.turn_ended_at) == (
+                1,
+                turn.started_at,
+                turn.ended_at,
+            )
+            assert cached.started_at is None
 
     def test_a_save_on_the_recipes_is_the_session_that_added_their_items(
         self, counts: dict[str, int], container: ServiceContainer, session: DbSession

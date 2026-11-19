@@ -1029,8 +1029,8 @@ class WaitSchema(BaseModel):
 
 class CarriedDebriefSchema(BaseModel):
     """A work item whose debrief a debrief's notice carries, as the notice's
-    box shows it (F26.13): read from the work item at each read, never
-    stored on the notice (DB 612)."""
+    box shows it (F26.13): read from the work item at each read, its stage's
+    time measured then (DB 637), never stored on the notice (DB 612)."""
 
     id: uuid.UUID = Field(
         description=(
@@ -1051,6 +1051,21 @@ class CarriedDebriefSchema(BaseModel):
     debrief: str = Field(
         description="The stage session's own debrief, whole, as given",
         examples=["It went well, if slowly: the second review was worth it."],
+    )
+    stage_time: int = Field(
+        description=(
+            "The time the work item's stage took, in whole seconds (F26.17): the "
+            "turns that have ended of every work item of its conversation up to it, "
+            "summed, the time between turns counting nothing; measured at each read"
+        ),
+        examples=[6000],
+    )
+    notable: str | None = Field(
+        description=(
+            "Pilot's notable events on the work item's debrief, Markdown, as the "
+            "pre-ruling pass wrote them (F52.4); null where it wrote none"
+        ),
+        examples=["The phone's layout cost a review round again, as in slice 2."],
     )
 
 

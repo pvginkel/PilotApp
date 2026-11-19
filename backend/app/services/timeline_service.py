@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased, defer
 
 from app.engine.claims import standing
+from app.engine.debriefs import stage_times
 from app.engine.documents import ARCHIVE_QUESTION, OPENING, PROSE, awaits_read
 from app.engine.paths import tree_path
 from app.engine.pilot_notes import (
@@ -987,14 +988,19 @@ class TimelineService:
         self, project: Project, notice_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, list[CarriedDebriefSchema]]:
         """The work items each of `project`'s debrief's notices `notice_ids`
-        carries, in their order on the timeline, as they stand now (DB
-        612)."""
-        carried: dict[uuid.UUID, list[CarriedDebriefSchema]] = {}
+        carries, in their order on the timeline, as they stand now, each with
+        the time its stage took and Pilot's lines on its debrief (DB 612,
+        637)."""
         if not notice_ids:
-            return carried
-        for notice_id, item_id, title, done_at, debrief in self.db.execute(
+            return {}
+        rows = self.db.execute(
             select(
-                Work.debrief_notice_id, Item.id, Item.title, Item.done_at, Work.debrief
+                Work.debrief_notice_id,
+                Item.id,
+                Item.title,
+                Item.done_at,
+                Work.debrief,
+                Work.debrief_notable,
             )
             .join(Item, Item.id == Work.id)
             .where(
@@ -1002,14 +1008,22 @@ class TimelineService:
                 Work.debrief_notice_id.in_(list(notice_ids)),
             )
             .order_by(Item.seq)
-        ):
+        ).all()
+        times = stage_times(self.db, [row.id for row in rows])
+        carried: dict[uuid.UUID, list[CarriedDebriefSchema]] = {}
+        for notice_id, item_id, title, done_at, debrief, notable in rows:
             # Each row is a carried Work's, done with its debrief (DB 609), of
             # an Item that has the title it was placed with.
             assert notice_id is not None and title is not None
             assert done_at is not None and debrief is not None
             carried.setdefault(notice_id, []).append(
                 CarriedDebriefSchema(
-                    id=item_id, title=title, ended_at=done_at, debrief=debrief
+                    id=item_id,
+                    title=title,
+                    ended_at=done_at,
+                    debrief=debrief,
+                    stage_time=times[item_id],
+                    notable=notable,
                 )
             )
         return carried

@@ -4690,7 +4690,7 @@
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.CarriedDebriefSchema": {
-        "description": "A work item whose debrief a debrief's notice carries, as the notice's\nbox shows it (F26.13): read from the work item at each read, never\nstored on the notice (DB 612).",
+        "description": "A work item whose debrief a debrief's notice carries, as the notice's\nbox shows it (F26.13): read from the work item at each read, its stage's\ntime measured then (DB 637), never stored on the notice (DB 612).",
         "properties": {
           "debrief": {
             "description": "The stage session's own debrief, whole, as given",
@@ -4712,6 +4712,29 @@
             "title": "Id",
             "type": "string"
           },
+          "notable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's notable events on the work item's debrief, Markdown, as the pre-ruling pass wrote them (F52.4); null where it wrote none",
+            "examples": [
+              "The phone's layout cost a review round again, as in slice 2."
+            ],
+            "title": "Notable"
+          },
+          "stage_time": {
+            "description": "The time the work item's stage took, in whole seconds (F26.17): the turns that have ended of every work item of its conversation up to it, summed, the time between turns counting nothing; measured at each read",
+            "examples": [
+              6000
+            ],
+            "title": "Stage Time",
+            "type": "integer"
+          },
           "title": {
             "description": "The work item's title",
             "examples": [
@@ -4725,7 +4748,9 @@
           "id",
           "title",
           "ended_at",
-          "debrief"
+          "debrief",
+          "stage_time",
+          "notable"
         ],
         "title": "CarriedDebriefSchema",
         "type": "object"
@@ -12295,7 +12320,7 @@
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.CarriedDebriefSchema": {
-        "description": "A work item whose debrief a debrief's notice carries, as the notice's\nbox shows it (F26.13): read from the work item at each read, never\nstored on the notice (DB 612).",
+        "description": "A work item whose debrief a debrief's notice carries, as the notice's\nbox shows it (F26.13): read from the work item at each read, its stage's\ntime measured then (DB 637), never stored on the notice (DB 612).",
         "properties": {
           "debrief": {
             "description": "The stage session's own debrief, whole, as given",
@@ -12317,6 +12342,29 @@
             "title": "Id",
             "type": "string"
           },
+          "notable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's notable events on the work item's debrief, Markdown, as the pre-ruling pass wrote them (F52.4); null where it wrote none",
+            "examples": [
+              "The phone's layout cost a review round again, as in slice 2."
+            ],
+            "title": "Notable"
+          },
+          "stage_time": {
+            "description": "The time the work item's stage took, in whole seconds (F26.17): the turns that have ended of every work item of its conversation up to it, summed, the time between turns counting nothing; measured at each read",
+            "examples": [
+              6000
+            ],
+            "title": "Stage Time",
+            "type": "integer"
+          },
           "title": {
             "description": "The work item's title",
             "examples": [
@@ -12330,7 +12378,9 @@
           "id",
           "title",
           "ended_at",
-          "debrief"
+          "debrief",
+          "stage_time",
+          "notable"
         ],
         "title": "CarriedDebriefSchema",
         "type": "object"

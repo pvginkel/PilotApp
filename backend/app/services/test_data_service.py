@@ -18,7 +18,7 @@ import json
 import uuid
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import exists, func, select
@@ -327,22 +327,36 @@ REMOVED_TASK = ("spike", "Try a static site generator", "pending")
 DEBRIEF_SUBJECT = "Slice 3 · The recipe card page"
 """The subject the recipes' planning and run give their debriefs."""
 
+NOTABLE = """The phone's layout cost a round again, as it did in slice 2: the plan left it \
+to the build, and the review sent the card back from two columns to one.
+
+- **Second slice in a row** where the phone's layout was settled in a review.
+- The planning took two rounds for the same reason.
+"""
+"""Pilot's lines on the recipes' run, invented, as its pass's `write_notable`
+gives them."""
+
 DEBRIEFED_RUNS = [
     (
         "Planning the recipe card page",
         "The plan took two rounds: the reviewer asked for the phone's layout first.",
         ("Plan", "plan-writer", 600, "The phases follow the card's parts."),
         False,
+        1380,
+        None,
     ),
     (
         "Building the recipe card page",
         "It went well: the card reads in one column, and the review found one slip.",
         ("P1 · The card", "code-writer", 1260, "The card reads well on a phone."),
         True,
+        6000,
+        NOTABLE,
     ),
 ]
 """The recipes' planning and run, each its title, its debrief, its one entry's
-section, role, seconds and words, and whether it completes the subject."""
+section, role, seconds and words, whether it completes the subject, the
+seconds its one turn took, and Pilot's lines on it, if any."""
 
 BIKES_DRAFT = """---
 slug: bike-log
@@ -519,9 +533,17 @@ class TestDataService:
             ],
             environment_id=environment.id,
         )
-        for run_title, debrief, entry, completes in DEBRIEFED_RUNS:
+        for run_title, debrief, entry, completes, took, notable in DEBRIEFED_RUNS:
             self._debriefed_run(
-                recipes, environment, now, run_title, debrief, entry, completes
+                recipes,
+                environment,
+                now,
+                run_title,
+                debrief,
+                entry,
+                completes,
+                took,
+                notable,
             )
 
         self._save_plan(
@@ -1747,16 +1769,19 @@ class TestDataService:
         debrief: str,
         entry: tuple[str, str, int, str],
         completes: bool,
+        took: int,
+        notable: str | None,
     ) -> None:
         """A worker's run of `project` in `environment` on the task `build`,
         titled `title`, its debrief `debrief` with its one `entry`, naming
         `DEBRIEF_SUBJECT` and whether it `completes` it, as its
-        `register_debrief` stores them, and done at its turn's end at `now`,
-        with the debrief's notice where it completes, placed as the end of
-        the job after its turn places it (DB 609), the seed holding no job.
-        Its session has no start, so that the session started last, the one the
-        testing routes act through (`_session_of`), stays the one that added
-        the items."""
+        `register_debrief` stores them, and done at `now`, at the end of its
+        one turn, which `took` that many seconds, its stage's time (DB 637);
+        with Pilot's lines `notable` on it, if any, and the debrief's notice
+        where it completes, placed as the end of the job after its turn
+        places it (DB 609), the seed holding no job. Its session has no
+        start, so that the session started last, the one the testing routes
+        act through (`_session_of`), stays the one that added the items."""
         session = AgentSession(
             project_id=project.id,
             environment_id=environment.id,
@@ -1783,8 +1808,22 @@ class TestDataService:
                 words=words,
             )
         )
+        started = now - timedelta(seconds=took)
+        session.turns, session.turn_started_at, session.turn_ended_at = 1, started, now
+        self.db.add(
+            Turn(
+                session_id=session.id,
+                seq=1,
+                message=title,
+                started_at=started,
+                ended_at=now,
+                cause_code=TurnCause.BRIEF,
+            )
+        )
         self.db.flush()
         self.record_service.work_done(work.id, now)
+        if notable is not None:
+            self.record_service.write_notable(work.id, notable)
         self.record_service.place_debrief_notice(
             project, self.db.get_one(Item, work.id)
         )

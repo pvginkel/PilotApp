@@ -47,6 +47,7 @@ from app.models.reference import (
     BlockKind,
     ChatKind,
     CloseCause,
+    DocumentRole,
     ErrorKind,
     FiringCause,
     ProjectState,
@@ -82,9 +83,11 @@ from tests.support.chats import (
     open_chat,
     open_conversation,
 )
+from tests.support.debriefs import FIGURES
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.grants import GRANTS_OFF, GRANTS_ON, granted, grants_file
 from tests.support.pilot_notes import a_turn, noted
+from tests.support.turns import turn_at
 
 AT = datetime(2026, 10, 26, 9, 30, 15, tzinfo=UTC)
 HEAD = (
@@ -98,6 +101,18 @@ TASKS = (
 ITEMS = "The open items, as `pilot.py items list --open` prints them:"
 NOTES = "The open plan notes, whole, as `pilot.py plan note list` prints them:"
 HANDBOOK = "The project's handbook, handbook.md, whole:"
+DEBRIEFED = "The stage session's debrief, as given:"
+ENTRIES = (
+    "The debrief's entries, each whole and as given, in the order given, under its"
+    " section, round, role and time:"
+)
+FIGURES_GIVEN = "The loop's figures, as given:"
+STAGE_TIMES = (
+    "The work items the debrief's notice carries, each with the time its stage"
+    " took, its turns summed:"
+)
+JOURNAL = "The project's journal, journal.md, whole:"
+JOURNAL_EMPTY = "The project's journal: journal.md, empty."
 HOMELESS = (
     "Deferrals without a home (a note names none of these blocks — write one,"
     " or answer the block anew in a new item):"
@@ -1728,7 +1743,7 @@ DEBRIEF = "It went well, if slowly.\n  The second review was worth it.\n"
 its indent and leaves off its end."""
 
 ENTRY_WORDS = "The tests held; one flake, not mine."
-"""A role's account in the debrief, which no brief carries."""
+"""A role's account in the debrief."""
 STOCK = "# The stock\n\nLeek, not onion.\n"
 CUT_OVER = """# The cut-over
 
@@ -1844,6 +1859,52 @@ def _records(db: DbSession, container: ServiceContainer) -> SessionRecordService
         container.session_stream_service(),
         ViewService(db, container.engine_bus(), container.closed_chats()),
     )
+
+
+SUBJECT = "Slice 4 · The stock"
+"""What a planning's debrief and its run's are an account of, invented."""
+
+SEQS = "\n\nThis job is seq "
+"""Where the project's state begins in a job's brief, after its own lines."""
+
+
+def _planned(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    beside: models.Session,
+    *,
+    minutes: int,
+) -> Item:
+    """A planning of `SUBJECT` in `beside`'s environment, done: its debrief
+    given, not completing the subject, and its one turn, which took
+    `minutes`."""
+    planning = models.Session(
+        project_id=project.id,
+        environment_id=beside.environment_id,
+        kind_code="work",
+        cwd="/work/Soup",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.IDLE,
+    )
+    db.add(planning)
+    db.flush()
+    work = container.record_service().place_work(
+        project, planning, "Planning the stock"
+    )
+    work.debrief = "The plan took two rounds."
+    work.debrief_subject, work.debrief_completes = SUBJECT, False
+    turn_at(db, planning, ENDED - timedelta(minutes=minutes), ENDED)
+    container.record_service().work_done(planning.id, ENDED)
+    return db.get_one(Item, planning.id)
+
+
+def _took(db: DbSession, run: models.Session, *, minutes: int) -> None:
+    """The run's one Turn started `minutes` before it ended."""
+    turn = db.scalars(select(Turn).where(Turn.session_id == run.id)).one()
+    assert turn.ended_at is not None
+    turn.started_at = turn.ended_at - timedelta(minutes=minutes)
+    db.flush()
 
 
 def _after(db: DbSession, container: ServiceContainer, run: models.Session) -> Work:
@@ -2070,7 +2131,10 @@ class TestWorkerTurnEnded:
         briefs: BriefService,
         opened: Project,
     ) -> None:
-        """The debrief is the pass's to read against the run (F52.4)."""
+        """The debrief is the pass's to read against the run (F52.4). One
+        that gave no entry and no figures has neither heading; its work item
+        is the one its notice carries, and a project with no journal saved
+        is told it is empty."""
         run = _worker_run(session, container, opened, None)
         container.pilot_work_service().register_debrief(
             Worker(run.id, opened.id, WORKER_ENV, run.id), DEBRIEF, []
@@ -2082,8 +2146,11 @@ class TestWorkerTurnEnded:
         assert brief.split("\n\n")[0] == "/pre-rule"
         assert brief.split("\n\n")[3].split("\n")[1:] == [
             "Registered nothing this run.",
-            "The stage session's debrief, as given:",
+            DEBRIEFED,
             *DEBRIEF.rstrip().split("\n"),
+            STAGE_TIMES,
+            f'- "Fixing the stock" ({run.id}) — <1m',
+            JOURNAL_EMPTY,
         ]
 
     def test_a_researched_block_alone_opens_on_pre_rule(
@@ -2254,7 +2321,7 @@ class TestWorkerTurnEnded:
             f"- {path} ({own.id}) A1 open, claimed",
         ]
 
-    def test_the_stage_sessions_debrief_follows_what_is_attached_whole(
+    def test_the_stages_full_debrief_follows_what_is_attached_whole(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -2262,16 +2329,22 @@ class TestWorkerTurnEnded:
         opened: Project,
         project_session: models.Session,
     ) -> None:
-        """F52.4, DB 328: as given, after the documents registered and the
-        files attached, before the claimed actions; the roles' entries left
-        out (design 3 §5.3)."""
+        """F52.4, DB 328: after the documents registered and the files
+        attached, before the claimed actions: the stage session's words as
+        given; every entry in the order given, under its section, round, role
+        and time, a pass or a fail where it has one, the why of the round it
+        opens and its words whole, set in; the loop's figures as given; the
+        planning that waits on the run's subject and the run, each with its
+        stage's time; and the journal whole (design 3 §5.3)."""
         documents = container.document_service()
+        documents.bear_journal(opened, JOURNALLED)
         cut_over = documents.register(
             opened, project_session, "/work/Soup/cut-over.md"
         ).item
         documents.publish_read(
             session.get_one(Document, cut_over.id), CUT_OVER, project_session.id
         )
+        planning = _planned(session, container, opened, project_session, minutes=17)
         run = _worker_run(session, container, opened, None)
         session.add(
             ClaimAssignment(
@@ -2300,32 +2373,119 @@ class TestWorkerTurnEnded:
             DEBRIEF,
             [
                 DebriefEntryRequestSchema(
+                    section="P1 · The stock",
+                    round=1,
+                    role="code-writer",
+                    duration=6000,
+                    words="Leek, not onion.\n\nIt took a while to find.\n",
+                ),
+                DebriefEntryRequestSchema(
+                    section="P1 · The stock", round=1, role="gate", duration=59
+                ),
+                DebriefEntryRequestSchema(
+                    section="P1 · The stock",
+                    round=2,
+                    role="code-writer",
+                    duration=90,
+                    words="Salted it.",
+                    why="The gate was red:\nthe stock boiled over.",
+                ),
+                DebriefEntryRequestSchema(
+                    section="P1 · The stock",
+                    round=2,
+                    role="gate",
+                    duration=60,
+                    passed=False,
+                ),
+                DebriefEntryRequestSchema(
                     section="Test phase",
                     round=1,
                     role="test-agent",
-                    duration=60,
+                    duration=3570,
                     words=ENTRY_WORDS,
-                )
+                ),
+                DebriefEntryRequestSchema(
+                    section="Test phase",
+                    round=1,
+                    role="suite",
+                    duration=3600,
+                    passed=True,
+                ),
             ],
+            subject=SUBJECT,
+            figures=FIGURES,
         )
         _turn_ended(session, container, run, "")
+        _took(session, run, minutes=100)
 
         brief = briefs.job(opened, _after(session, container, run), AT, AT)
 
         path = session.get_one(Document, cut_over.id).path
-        assert brief.split("\n\n")[3] == (
+        assert brief[brief.index("The work item:") : brief.index(SEQS)] == (
             f'The work item: "Fixing the stock" ({run.id}), repository'
             " example/Soup, environment example-soup-3f2a1c, session claude-7;"
             " its turn ended 2026-10-26T09:29:50Z.\n"
             "Registered nothing this run.\n"
             "Attached on the work item: 1 file (timeline.json lists it).\n"
-            "The stage session's debrief, as given:\n"
+            f"{DEBRIEFED}\n"
             f"{DEBRIEF.rstrip()}\n"
+            f"{ENTRIES}\n"
+            "- P1 · The stock · round 1 · code-writer · 1h 40m\n"
+            "  Leek, not onion.\n"
+            "  \n"
+            "  It took a while to find.\n"
+            "- P1 · The stock · round 1 · gate · <1m\n"
+            "- P1 · The stock · round 2 · code-writer · 2m\n"
+            "  Why this round was needed: The gate was red:\n"
+            "  the stock boiled over.\n"
+            "  Salted it.\n"
+            "- P1 · The stock · round 2 · gate · 1m · failed\n"
+            "- Test phase · round 1 · test-agent · 1h 00m\n"
+            f"  {ENTRY_WORDS}\n"
+            "- Test phase · round 1 · suite · 1h 00m · passed\n"
+            f"{FIGURES_GIVEN}\n"
+            f"{FIGURES}\n"
+            f"{STAGE_TIMES}\n"
+            f'- "Planning the stock" ({planning.id}) — 17m\n'
+            f'- "Fixing the stock" ({run.id}) — 1h 40m\n'
+            f"{JOURNAL}\n"
+            f"{JOURNALLED.rstrip()}\n"
             "The claimed actions given to this work item, as they stand:\n"
             f"- {path} ({cut_over.id}) A1 open, claimed"
         )
-        assert ENTRY_WORDS not in brief
-        assert "test-agent" not in brief
+
+    def test_a_retrys_brief_names_the_work_items_the_notice_carries_already(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """A pass's stop or failure placed the notice before the Retry that
+        writes its lines (DB 609): the brief names the work items it carries,
+        not a planning of the subject done since."""
+        planning = _planned(session, container, opened, project_session, minutes=17)
+        run = _worker_run(session, container, opened, None)
+        container.pilot_work_service().register_debrief(
+            Worker(run.id, opened.id, WORKER_ENV, run.id), DEBRIEF, [], subject=SUBJECT
+        )
+        _turn_ended(session, container, run, "")
+        container.record_service().place_debrief_notice(
+            opened, session.get_one(Item, run.id)
+        )
+        later = _planned(session, container, opened, project_session, minutes=5)
+
+        brief = briefs.job(opened, _after(session, container, run), AT, AT)
+
+        lines = brief.split("\n")
+        at = lines.index(STAGE_TIMES)
+        assert lines[at + 1 : at + 4] == [
+            f'- "Planning the stock" ({planning.id}) — 17m',
+            f'- "Fixing the stock" ({run.id}) — <1m',
+            JOURNAL_EMPTY,
+        ]
+        assert str(later.id) not in brief
 
     def test_a_continuation_names_the_claimed_actions_of_the_run_it_continues(
         self,
@@ -2808,8 +2968,9 @@ class TestWriterAnswered:
         opened: Project,
     ) -> None:
         """DB 328: the pass after the clarification run's turn is handed the
-        run's own debrief, its entries left out; the work item's it clarifies
-        stays the work item's."""
+        run's own debrief, in full as any run's; the work item's it clarifies
+        stays the work item's. Its stage's time is its conversation's up to
+        it, the work item's turn with its own (DB 637)."""
         asking, _ = self._asked(
             session,
             container,
@@ -2822,7 +2983,10 @@ class TestWriterAnswered:
         )
         worker_id = session.get_one(Work, asking.id).trigger_item_id
         assert worker_id is not None
-        for work_id, debrief in ((clarifying.id, DEBRIEF), (worker_id, "Not this.")):
+        for work_id, debrief, words in (
+            (clarifying.id, DEBRIEF, ENTRY_WORDS),
+            (worker_id, "Not this.", "Nor this."),
+        ):
             session.get_one(Work, work_id).debrief = debrief
             session.add(
                 DebriefEntry(
@@ -2832,20 +2996,28 @@ class TestWriterAnswered:
                     round=1,
                     role="test-agent",
                     duration=60,
-                    words=ENTRY_WORDS,
+                    words=words,
                 )
             )
         session.flush()
+        _took(session, session.get_one(models.Session, worker_id), minutes=10)
+        turn_at(session, clarifying, REPLIED - timedelta(minutes=3), REPLIED)
 
         brief = briefs.job(opened, _after(session, container, clarifying), AT, AT)
 
-        assert brief.split("\n\n")[3].endswith(
+        assert brief[: brief.index(SEQS)].endswith(
             f"Registered this run: nothing. {ASKS_NOTHING}\n"
-            "The stage session's debrief, as given:\n"
-            f"{DEBRIEF.rstrip()}"
+            f"{DEBRIEFED}\n"
+            f"{DEBRIEF.rstrip()}\n"
+            f"{ENTRIES}\n"
+            "- Test phase · round 1 · test-agent · 1m\n"
+            f"  {ENTRY_WORDS}\n"
+            f"{STAGE_TIMES}\n"
+            f'- "Clarify it" ({clarifying.id}) — 13m\n'
+            f"{JOURNAL_EMPTY}"
         )
-        assert ENTRY_WORDS not in brief
         assert "Not this." not in brief
+        assert "Nor this." not in brief
 
     def test_a_reply_that_did_not_keep_the_headings_is_quoted_whole(
         self,
@@ -4012,8 +4184,10 @@ JOURNALLED = "# Journal\n\nWatching: the stock boils over (slices 003, 007).\n"
 
 
 class TestTheJournal:
-    """No brief carries the project's journal (F169.3; DB 634): the state
-    block names the handbook alone, and a worker's trailer too."""
+    """The brief of the pass after a worker's turn that gave a debrief
+    carries the project's journal whole, and no other brief carries it
+    (F169.3; DB 634): the state block names the handbook alone, and a
+    worker's trailer too."""
 
     @pytest.fixture
     def journalled(self, container: ServiceContainer, opened: Project) -> Project:
@@ -4021,6 +4195,48 @@ class TestTheJournal:
         documents.bear_handbook(opened, "# Handbook\n\n- Taste.\n")
         documents.bear_journal(opened, JOURNALLED)
         return opened
+
+    def test_the_brief_of_the_pass_after_a_debrief_carries_it_whole(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        journalled: Project,
+    ) -> None:
+        """After the debrief and the stages' times, under its path, as
+        published, the space it ends in left off; one born and never saved
+        is said to be empty."""
+        run = _worker_run(session, container, journalled, None)
+        container.pilot_work_service().register_debrief(
+            Worker(run.id, journalled.id, WORKER_ENV, run.id), DEBRIEF, []
+        )
+        _turn_ended(session, container, run, "")
+        job = _after(session, container, run)
+
+        brief = briefs.job(journalled, job, AT, AT)
+
+        assert brief[: brief.index(SEQS)].endswith(
+            f'- "Fixing the stock" ({run.id}) — <1m\n'
+            f"{JOURNAL}\n"
+            "# Journal\n\n"
+            "Watching: the stock boils over (slices 003, 007)."
+        )
+        assert brief.count("Watching") == 1
+
+        journal = session.scalars(
+            select(Document).where(
+                Document.project_id == journalled.id,
+                Document.role_code == DocumentRole.JOURNAL,
+            )
+        ).one()
+        journal.published_text = "\n"
+        session.flush()
+
+        assert (
+            briefs.job(journalled, job, AT, AT)
+            .split(SEQS)[0]
+            .endswith(f'- "Fixing the stock" ({run.id}) — <1m\n{JOURNAL_EMPTY}')
+        )
 
     def test_a_chats_and_a_conversations_brief_carry_none_of_it(
         self,

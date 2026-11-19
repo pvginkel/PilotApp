@@ -9,7 +9,10 @@ A line that does not hold is left out, never written as "none", so that a
 brief reads as the facts of its session. Every brain brief but the definition
 chat's carries the project's state as the record holds it when the brief is
 composed, every open plan note whole among it, and the handbook whole
-(`BriefService._state`). A project chat's message that quotes an item or a
+(`BriefService._state`). The brief of the job after a worker's turn that gave
+a debrief carries the stage's full debrief and the project's journal whole,
+which no other brief carries (`BriefService._debriefed`; F52.4, F169.3). A
+project chat's message that quotes an item or a
 block carries the item as it then stands (`BriefService.quoted`), and its
 opening brief what changed in the record since the project's previous chat
 closed (`BriefService._changed`). A worker's carries the grants text its
@@ -29,8 +32,9 @@ from sqlalchemy import ColumnElement, Select, func, literal, select
 from sqlalchemy.orm import Session, aliased
 
 from app.engine import claims, researches
+from app.engine.debriefs import of_notice, stage_times
 from app.engine.documents import OPENING, REVIEW
-from app.engine.paths import draft_folder, folder
+from app.engine.paths import JOURNAL, draft_folder, folder
 from app.engine.plan import PlanService
 from app.engine.record import ANSWERED
 from app.engine.views import caller_named, utc_time
@@ -41,6 +45,7 @@ from app.models import (
     Chat,
     ClaimAssignment,
     ClarificationRun,
+    DebriefEntry,
     Document,
     Environment,
     Item,
@@ -90,6 +95,18 @@ TASKS_HEADING = (
 ITEMS_HEADING = "The open items, as `pilot.py items list --open` prints them:"
 NOTES_HEADING = "The open plan notes, whole, as `pilot.py plan note list` prints them:"
 HANDBOOK_HEADING = "The project's handbook, handbook.md, whole:"
+DEBRIEF_HEADING = "The stage session's debrief, as given:"
+ENTRIES_HEADING = (
+    "The debrief's entries, each whole and as given, in the order given, under its"
+    " section, round, role and time:"
+)
+FIGURES_HEADING = "The loop's figures, as given:"
+STAGE_TIMES_HEADING = (
+    "The work items the debrief's notice carries, each with the time its stage"
+    " took, its turns summed:"
+)
+JOURNAL_HEADING = f"The project's journal, {JOURNAL}, whole:"
+JOURNAL_EMPTY = f"The project's journal: {JOURNAL}, empty."
 CHANGED_HEADING = "What changed in the record since it closed, oldest first:"
 QUOTED_HEADING = "The item the message quotes, as it stands now:"
 QUOTED_BLOCK_HEADING = (
@@ -487,13 +504,14 @@ class BriefService:
         registered in the order registered, each published or its read failed
         with the reason the read recorded, else that it registered nothing and
         the whole text its turn ended with, which the line then leaves out
-        (P-291), the files attached on the work item, the stage session's debrief
-        (`_debriefed`), and the claimed actions it was given (`_given`) and
-        the blocks it researched (`_researched`); then the project's state,
+        (P-291), the files attached on the work item, the stage's full debrief
+        with the project's journal (`_debriefed`), and the claimed actions it
+        was given (`_given`) and the blocks it researched (`_researched`);
+        then the project's state,
         whose every open note the pass takes (F57.4), or `/plan` where the job
         opens on it, and the handbook."""
         registered = self._registered(run_id)
-        debriefed = self._debriefed(run_id)
+        debriefed = self._debriefed(project, run_id)
         researched = self._researched(run_id)
         lines: list[str | None] = [self._run_line(run_id, last_line=bool(registered))]
         if registered:
@@ -529,8 +547,8 @@ class BriefService:
         asked and the writer's answer as the document records it
         (`_clarified`); then the files attached on the run and what it
         registered, as any run's, and that this pass asks nothing, and the
-        debrief its session gave (`_debriefed`); then the project's state and
-        the handbook."""
+        full debrief its session gave, with the project's journal
+        (`_debriefed`); then the project's state and the handbook."""
         item = self.db.get_one(Item, run.id)
         worker_id = self.db.get_one(Work, run.pass_id).trigger_item_id
         # A clarification run's pass is the job after a worker's turn (DB 254),
@@ -552,7 +570,7 @@ class BriefService:
             lines.extend([*registered, ASKS_NOTHING])
         else:
             lines.append(f"Registered this run: nothing. {ASKS_NOTHING}")
-        lines.extend(self._debriefed(run.id))
+        lines.extend(self._debriefed(project, run.id))
         return _frame(
             PRE_RULE_SKILL,
             "the writer answered",
@@ -637,15 +655,47 @@ class BriefService:
             ),
         ]
 
-    def _debriefed(self, run_id: uuid.UUID) -> list[str]:
-        """The debrief the run's session gave, whole and as given, under its
-        heading (F52.4; design 3 §5.3; DB 328), the space it ends in left off
-        so that the next line follows it; none where it gave none. Its
-        entries, the roles' accounts, stay out."""
-        debrief = self.db.scalar(select(Work.debrief).where(Work.id == run_id))
-        if debrief is None:
+    def _debriefed(self, project: Project, run_id: uuid.UUID) -> list[str]:
+        """The full debrief the run's session gave (F52.4; design 3 §5.3; DB
+        328), none where it gave none: the stage session's own words, whole
+        and as given, under their heading, the space they end in left off so
+        that the next line follows them; every entry in the order given
+        (`_entry`); the loop's figures as given, where it gave them; each
+        work item the debrief's notice carries, or takes when it is placed
+        (`of_notice`), with the time its stage took (`stage_times`); and the
+        project's journal whole, or that it is empty (F169.3; DB 634)."""
+        work = self.db.get_one(Work, run_id)
+        if work.debrief is None:
             return []
-        return ["The stage session's debrief, as given:", debrief.rstrip()]
+        lines = [DEBRIEF_HEADING, work.debrief.rstrip()]
+        entries = self.db.scalars(
+            select(DebriefEntry)
+            .where(DebriefEntry.work_id == run_id)
+            .order_by(DebriefEntry.position)
+        ).all()
+        if entries:
+            lines.append(ENTRIES_HEADING)
+            lines.extend(_entry(entry) for entry in entries)
+        if work.debrief_figures is not None:
+            lines.extend([FIGURES_HEADING, work.debrief_figures.rstrip()])
+        carried = of_notice(self.db, work)
+        times = stage_times(self.db, [item.id for item in carried])
+        lines.append(STAGE_TIMES_HEADING)
+        lines.extend(
+            f'- "{item.title}" ({item.id}) — {_took(times[item.id])}'
+            for item in carried
+        )
+        journal = self.db.scalar(
+            select(Document.published_text).where(
+                Document.project_id == project.id,
+                Document.role_code == DocumentRole.JOURNAL,
+            )
+        )
+        if journal is not None and journal.strip():
+            lines.extend([JOURNAL_HEADING, journal.rstrip()])
+        else:
+            lines.append(JOURNAL_EMPTY)
+        return lines
 
     def _attached(self, run_id: uuid.UUID) -> str | None:
         """The files attached on the work item, counted; None for none."""
@@ -1577,6 +1627,42 @@ def _earlier_chats(closed: datetime | None) -> str | None:
         "Earlier chats of this project are in chat.md; the latest closed"
         f" {utc_time(closed)}."
     )
+
+
+def _entry(entry: DebriefEntry) -> str:
+    """A debrief's entry as the brief of the pass gives it (F85.5; DB 326):
+    one line with its section, its round, its role and its time, as given,
+    and its pass or fail where it has one in place of words; then, set in
+    under it, the why of the round it opens and its words, whole."""
+    head = " · ".join(
+        part
+        for part in (
+            entry.section,
+            f"round {entry.round}",
+            entry.role,
+            _took(entry.duration),
+            None if entry.passed is None else "passed" if entry.passed else "failed",
+        )
+        if part is not None
+    )
+    under = [
+        None if entry.why is None else f"Why this round was needed: {entry.why}",
+        None if entry.words is None else entry.words.rstrip(),
+    ]
+    return "\n  ".join(
+        [f"- {head}", *(part.replace("\n", "\n  ") for part in under if part)]
+    )
+
+
+def _took(seconds: int) -> str:
+    """A time in whole seconds as the full debrief shows it (F26.10): "<1m",
+    "17m", "1h 40m"."""
+    if seconds < 60:
+        return "<1m"
+    minutes = (seconds + 30) // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    return f"{minutes // 60}h {minutes % 60:02d}m"
 
 
 def _frame(

@@ -97,7 +97,7 @@ from tests.support.parses import parses
 from tests.support.pilot_notes import a_turn, alerted, block_of, noted
 from tests.support.statements import sent
 from tests.support.store_updates import hold, lift, stopped_job
-from tests.support.turns import end_turns, turn_in_flight
+from tests.support.turns import end_turns, turn_at, turn_in_flight
 from tests.support.working_on import Camp
 
 ENVIRONMENT_CAUSES = [
@@ -4570,6 +4570,7 @@ class TestDebriefNotice:
 
     SUBJECT = "Slice 4 · The tent list"
     ENTRY = {"section": "Test", "role": "test-agent"}
+    NOTABLE = "The project's **first stop**: the tent list waited on a card."
 
     def _carried(
         self,
@@ -4579,10 +4580,18 @@ class TestDebriefNotice:
         environment: Environment,
     ) -> tuple[Item, Item]:
         """A planning and the run that completes its subject, done in turn,
-        each with its pass ended, the run's pass's end placing the notice."""
+        each with its pass ended, the run's pass's end placing the notice:
+        the planning's one turn took 23 minutes, the run's two 40 and 10 with
+        half an hour between them, and the run's pass wrote Pilot's lines."""
         records = container.record_service()
         planning = _work(session, project, environment, SessionState.IDLE)
         planning.title = "Planning the tent list"
+        turn_at(
+            session,
+            session.get_one(models.Session, planning.id),
+            REPLIED - timedelta(minutes=23),
+            REPLIED,
+        )
         _debriefed(
             session,
             planning,
@@ -4595,7 +4604,15 @@ class TestDebriefNotice:
         _pass_ended(session, container, project, planning, REPLIED)
         run = _work(session, project, environment, SessionState.IDLE)
         _debriefed(session, run, self.ENTRY, subject=self.SUBJECT, completes=True)
+        for started, minutes in ((-80, 40), (-10, 10)):
+            turn_at(
+                session,
+                session.get_one(models.Session, run.id),
+                REPLIED + timedelta(minutes=60 + started),
+                REPLIED + timedelta(minutes=60 + started + minutes),
+            )
         records.work_done(run.id, REPLIED + timedelta(hours=1))
+        records.write_notable(run.id, self.NOTABLE)
         _pass_ended(session, container, project, run, REPLIED + timedelta(hours=1))
         return planning, run
 
@@ -4606,7 +4623,9 @@ class TestDebriefNotice:
         environment: Environment,
     ) -> None:
         """DB 612: each its title, its turn's end and its debrief whole, by
-        its id, which its full debrief and session log open by. The order is
+        its id, which its full debrief and session log open by, with the time
+        its stage took, its turns summed (DB 637), and Pilot's lines where
+        its pass wrote any. The order is
         the timeline's, whatever order the database hands the Works back in:
         the same Works, their places on the timeline exchanged, show the
         other way round."""
@@ -4652,12 +4671,16 @@ class TestDebriefNotice:
                 "title": "Planning the tent list",
                 "ended_at": _stamp(REPLIED),
                 "debrief": "The plan took two rounds.",
+                "stage_time": 23 * 60,
+                "notable": None,
             },
             {
                 "id": str(run.id),
                 "title": "Build the camp",
                 "ended_at": _stamp(REPLIED + timedelta(hours=1)),
                 "debrief": DEBRIEF,
+                "stage_time": 50 * 60,
+                "notable": self.NOTABLE,
             },
         ]
         assert [(item["form"], item["debriefs"]) for item in before] == [
@@ -4678,6 +4701,36 @@ class TestDebriefNotice:
         assert [
             carried["id"] for carried in _items(container, project)[-1]["debriefs"]
         ] == [str(run.id), str(planning.id)]
+
+    def test_its_times_and_pilots_lines_are_read_anew_at_each_read(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """DB 612, 637: neither is stored on the notice. Lines a Retry's
+        pass writes once it is placed, in place of the first or where none
+        stood, and a carried work item's turn that ends later show at the
+        next read."""
+        project = _make(container)
+        planning, run = self._carried(container, session, project, environment)
+        records = container.record_service()
+        records.write_notable(planning.id, "The planning's second round.")
+        records.write_notable(run.id, "A second stop.")
+        turn_at(
+            session,
+            session.get_one(models.Session, run.id),
+            REPLIED + timedelta(hours=2),
+            REPLIED + timedelta(hours=2, minutes=5),
+        )
+
+        assert [
+            (carried["stage_time"], carried["notable"])
+            for carried in _items(container, project)[-1]["debriefs"]
+        ] == [
+            (23 * 60, "The planning's second round."),
+            (55 * 60, "A second stop."),
+        ]
 
     def test_it_has_no_document_to_read_on_its_own(
         self,

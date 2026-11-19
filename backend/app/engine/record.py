@@ -46,6 +46,7 @@ from sqlalchemy import ColumnElement, Select, and_, exists, select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, ProjectChanged, WriteBackOwed
+from app.engine.debriefs import awaiting_notice
 from app.engine.documents import (
     ARCHIVE,
     ARCHIVE_BLOCK,
@@ -1224,13 +1225,7 @@ class RecordService:
                 self.db.scalars(
                     select(Work)
                     .join(Item, Item.id == Work.id)
-                    .where(
-                        Work.project_id == project.id,
-                        Work.debrief_subject == work.debrief_subject,
-                        Work.debrief_notice_id.is_(None),
-                        Work.debrief_completes.is_(False),
-                        Item.done_at.is_not(None),
-                    )
+                    .where(awaiting_notice(work))
                 )
             )
         # A work item has the title it was placed with.
