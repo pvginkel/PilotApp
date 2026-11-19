@@ -1969,6 +1969,163 @@ class TestWorkerTurnEnded:
             f" no document · {job.id}",
         ]
 
+    def test_a_run_with_nothing_to_pre_rule_opens_on_plan(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """P-405: no document registered, no debrief and no block researched
+        leave the pass nothing, so the job opens on `/plan` under its own
+        kind line, its lines as they were; a file attached and a claimed
+        action given, which are `/plan`'s, leave it there."""
+        documents = container.document_service()
+        cut_over = documents.register(
+            opened, project_session, "/work/Soup/cut-over.md"
+        ).item
+        documents.publish_read(
+            session.get_one(Document, cut_over.id), CUT_OVER, project_session.id
+        )
+        run = _worker_run(session, container, opened, None)
+        session.add(
+            ClaimAssignment(
+                work_id=run.id,
+                block_id=session.scalars(
+                    select(Block.id).where(
+                        Block.document_id == cut_over.id, Block.local_id == "A1"
+                    )
+                ).one(),
+            )
+        )
+        _attached(session, opened, run, "stock.txt")
+        session.add(
+            ItemAttachment(
+                item_id=run.id,
+                attachment_id=session.scalars(select(Attachment.id)).one(),
+                position=1,
+                attached_at=AT,
+            )
+        )
+        session.flush()
+        _turn_ended(session, container, run, "")
+
+        brief = briefs.job(opened, _after(session, container, run), AT, LATER)
+
+        path = session.get_one(Document, cut_over.id).path
+        assert brief.split("\n\n")[:4] == [
+            "/plan",
+            "Pilot's brief · a worker's turn ended · project \"Soup club\" ·"
+            " /work/Projects/soup-club · 2026-10-26T11:05:40Z",
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md).",
+            f'The work item: "Fixing the stock" ({run.id}), repository'
+            " example/Soup, environment example-soup-3f2a1c, session claude-7;"
+            " its turn ended 2026-10-26T09:29:50Z.\n"
+            "Registered nothing this run.\n"
+            "Attached on the work item: 1 file (timeline.json lists it).\n"
+            "The claimed actions given to this work item, as they stand:\n"
+            f"- {path} ({cut_over.id}) A1 open, claimed",
+        ]
+
+    def test_a_document_whose_read_failed_opens_on_pre_rule(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        """A document the run registered is the pass's, read or not, as the
+        job's title has it."""
+        run = _worker_run(session, container, opened, None)
+        documents = container.document_service()
+        notes = documents.register(opened, run, "/work/Soup/notes.md").item
+        _turn_ended(session, container, run, "")
+        documents.fail_read(session.get_one(Document, notes.id))
+        _records(session, container).append(
+            run.id,
+            RecordKind.SERVER,
+            payload={
+                "type": READ_FAILED,
+                "item": str(notes.id),
+                "path": "/work/Soup/notes.md",
+                "reason": "no such file",
+            },
+        )
+
+        brief = briefs.job(opened, _after(session, container, run), AT, AT)
+
+        assert brief.split("\n\n")[0] == "/pre-rule"
+        assert brief.split("\n\n")[3].split("\n")[1:] == [
+            "Registered this run, in the order registered:",
+            f"- {session.get_one(Document, notes.id).path} ({notes.id}) — read"
+            " failed: no such file",
+        ]
+
+    def test_a_debrief_alone_opens_on_pre_rule(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        """The debrief is the pass's to read against the run (F52.4)."""
+        run = _worker_run(session, container, opened, None)
+        container.pilot_work_service().register_debrief(
+            Worker(run.id, opened.id, WORKER_ENV, run.id), DEBRIEF, []
+        )
+        _turn_ended(session, container, run, "")
+
+        brief = briefs.job(opened, _after(session, container, run), AT, AT)
+
+        assert brief.split("\n\n")[0] == "/pre-rule"
+        assert brief.split("\n\n")[3].split("\n")[1:] == [
+            "Registered nothing this run.",
+            "The stage session's debrief, as given:",
+            *DEBRIEF.rstrip().split("\n"),
+        ]
+
+    def test_a_researched_block_alone_opens_on_pre_rule(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """A block the run researched is the pass's to route (F52.3)."""
+        documents = container.document_service()
+        review = documents.register(
+            opened, project_session, "/work/Soup/review.md"
+        ).item
+        documents.publish_read(
+            session.get_one(Document, review.id), HOSTS, project_session.id
+        )
+        run = _worker_run(session, container, opened, None)
+        session.add(
+            ResearchAssignment(
+                work_id=run.id,
+                block_id=session.scalars(
+                    select(Block.id).where(
+                        Block.document_id == review.id, Block.local_id == "D1"
+                    )
+                ).one(),
+            )
+        )
+        session.flush()
+        _turn_ended(session, container, run, "")
+
+        brief = briefs.job(opened, _after(session, container, run), AT, AT)
+
+        path = session.get_one(Document, review.id).path
+        assert brief.split("\n\n")[0] == "/pre-rule"
+        assert brief.split("\n\n")[3].split("\n")[1:] == [
+            "Registered nothing this run.",
+            "The blocks this work item researched, as they stand:",
+            f"- {path} ({review.id}) D1 open",
+        ]
+
     def test_a_run_that_registered_nothing_carries_its_whole_final_message(
         self,
         session: DbSession,

@@ -1023,8 +1023,9 @@ class TestWorkerTurnEnded:
             SessionState.STARTING,
         )
         assert before <= job.created_at <= datetime.now(UTC)
+        skill = "/pre-rule" if files else "/plan"
         assert _brief(container, job).message.startswith(
-            "/pre-rule\n\nPilot's brief · a worker's turn ended · "
+            f"{skill}\n\nPilot's brief · a worker's turn ended · "
         )
 
     def test_a_run_gets_one_job(

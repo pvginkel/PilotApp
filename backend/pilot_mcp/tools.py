@@ -78,6 +78,11 @@ TOOL_USE_ID_META = "claudecode/toolUseId"
 """The `_meta` key of the tool-use id Claude Code sends with every
 `tools/call`."""
 
+LOADED_UP_FRONT = {"anthropic/alwaysLoad": True}
+"""The `_meta` of a tool in `tools/list` whose schema Claude Code loads at the
+session's start, where it defers any other behind its ToolSearch:
+`pilot-store`'s tools carry it, `pilot-work`'s and `pilot-projects`' none."""
+
 
 def _authorization(ctx: Call) -> str:
     request = ctx.request_context.request
@@ -407,7 +412,7 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
 
 
 def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     async def add_item(
         item: Annotated[
             NewItem, Field(description="The item, in `timeline.json`'s shape")
@@ -452,7 +457,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         Answers `{id, path, state, held, effect}`."""
         return await api.add_item(_authorization(ctx), _tool_use_id(ctx), item)
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     async def attach_file(
         source: Annotated[
             str,
@@ -494,7 +499,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             _authorization(ctx), _tool_use_id(ctx), source=source, to=to
         )
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     @_taking_for
     async def answer(
         block: Annotated[
@@ -565,7 +570,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             to=to,
         )
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     @_taking_for
     async def mark(
         item: Annotated[uuid.UUID, Field(description="The item's id")],
@@ -629,7 +634,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             note=note,
         )
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     @_taking_for
     async def cancel_ask(
         item: Annotated[uuid.UUID, Field(description="The ask's item id")],
@@ -659,7 +664,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             _authorization(ctx), _tool_use_id(ctx), item=item, person=for_
         )
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     async def stop_work(
         item: Annotated[uuid.UUID, Field(description="The work item's id")],
         ctx: Call,
@@ -697,7 +702,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             _authorization(ctx), _tool_use_id(ctx), item=item, reason=reason
         )
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     async def finish(
         ctx: Call,
         archive: Annotated[
@@ -724,7 +729,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         the call's effect line."""
         return await api.finish(_authorization(ctx), _tool_use_id(ctx), archive=archive)
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     async def ask_writer(
         block: Annotated[
             str,
@@ -762,7 +767,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             _authorization(ctx), _tool_use_id(ctx), block=block, question=question
         )
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     async def note(
         item: Annotated[uuid.UUID, Field(description="The document's item id")],
         ctx: Call,
@@ -850,7 +855,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             offer=offer,
         )
 
-    @mcp.tool()
+    @mcp.tool(meta=LOADED_UP_FRONT)
     async def alert(
         item: Annotated[uuid.UUID, Field(description="The document's item id")],
         ctx: Call,

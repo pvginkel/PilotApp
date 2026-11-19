@@ -1288,6 +1288,24 @@ class TestTheSurface:
         assert routes.calls == []
 
     @pytest.mark.parametrize(("path", "pinned", "instructions"), _SURFACES)
+    async def test_the_store_tools_alone_are_marked_to_load_up_front(
+        self,
+        mcp_app: Starlette,
+        path: str,
+        pinned: dict[str, Any],
+        instructions: str,
+    ) -> None:
+        """Each of `pilot-store`'s ten tools carries the `_meta` on which
+        Claude Code loads a tool with no ToolSearch before it, and no tool of
+        the worker's carries any (P-403)."""
+        async with mcp_session(mcp_app, path=path) as (session, _):
+            tools = (await session.list_tools()).tools
+
+        mark = {"anthropic/alwaysLoad": True} if path == STORE_PATH else None
+        assert {tool.name: tool.meta for tool in tools} == dict.fromkeys(pinned, mark)
+        assert len(STORE_SURFACE) == 10
+
+    @pytest.mark.parametrize(("path", "pinned", "instructions"), _SURFACES)
     async def test_the_server_is_pilot_with_its_instructions(
         self,
         mcp_app: Starlette,
@@ -2749,6 +2767,20 @@ class TestTheProjectsSurface:
         assert surface == PROJECTS_SURFACE
         assert gated_routes.calls == []
         assert token_endpoint.forms == []
+
+    async def test_no_tool_is_marked_to_load_up_front(
+        self, projects_app: Starlette
+    ) -> None:
+        """The surface's tools stay behind a session's ToolSearch (P-403)."""
+        async with mcp_session(projects_app, PROJECTS_HEADERS, PROJECTS_PATH) as (
+            session,
+            _,
+        ):
+            tools = (await session.list_tools()).tools
+
+        assert {tool.name: tool.meta for tool in tools} == dict.fromkeys(
+            PROJECTS_SURFACE
+        )
 
     async def test_the_server_is_pilot_projects_with_its_instructions(
         self, projects_app: Starlette

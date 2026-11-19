@@ -481,7 +481,9 @@ class BriefService:
         at: datetime,
     ) -> str:
         """The job after the turn of the worker's run `run_id` (design 3 D2):
-        `/pre-rule`, then the work item's line, the documents the run
+        `/pre-rule` where the run left the pass something, a document it
+        registered, a debrief or a block it researched, else `/plan`, under
+        the same kind line; then the work item's line, the documents the run
         registered in the order registered, each published or its read failed
         with the reason the read recorded, else that it registered nothing and
         the whole text its turn ended with, which the line then leaves out
@@ -490,17 +492,19 @@ class BriefService:
         the blocks it researched (`_researched`); then the project's state,
         whose every open note the pass takes (F57.4), and the handbook."""
         registered = self._registered(run_id)
+        debriefed = self._debriefed(run_id)
+        researched = self._researched(run_id)
         lines: list[str | None] = [self._run_line(run_id, last_line=bool(registered))]
         if registered:
             lines.extend(registered)
         else:
             lines.extend(self._registered_nothing(run_id))
         lines.append(self._attached(run_id))
-        lines.extend(self._debriefed(run_id))
+        lines.extend(debriefed)
         lines.extend(self._given(run_id))
-        lines.extend(self._researched(run_id))
+        lines.extend(researched)
         return _frame(
-            PRE_RULE_SKILL,
+            PRE_RULE_SKILL if registered or debriefed or researched else PLAN_SKILL,
             "a worker's turn ended",
             project,
             at,
