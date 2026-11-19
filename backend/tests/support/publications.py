@@ -7,7 +7,8 @@ under."""
 from datetime import timedelta
 from typing import Any
 
-from app.schemas.publication import PublicationSchema
+from pilot_collection.publication import PublicationSchema
+
 from app.services.publication_service import COLLECTOR_PROTOCOL_MAX
 from tests.support.adoption import FIRST_MENUS
 from tests.support.transcripts import CAMP, OPUS, STARTED, SUB_AGENT

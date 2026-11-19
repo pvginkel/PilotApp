@@ -11,12 +11,12 @@ from typing import Any
 
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, Response, g, jsonify, request
+from pilot_collection.inventory import InventorySchema
+from pilot_collection.publication import CollectorProtocolRangeSchema, PublicationSchema
 from spectree import Response as SpectreeResponse
 
 from app.exceptions import CollectorProtocolUnsupportedException
 from app.schemas.common import ApiErrorResponseSchema
-from app.schemas.inventory import InventorySchema
-from app.schemas.publication import CollectorProtocolRangeSchema, PublicationSchema
 from app.services.container import ServiceContainer
 from app.services.publication_service import PublicationService
 from app.services.walk_service import WalkService

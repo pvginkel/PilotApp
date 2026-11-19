@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 from flask import Flask
+from pilot_collection.publication import PublicationSchema
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session as DbSession
 
@@ -64,7 +65,6 @@ from app.models import (
     User,
 )
 from app.models.reference import ProjectState, UserKind
-from app.schemas.publication import PublicationSchema
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerEnvironment
 from app.services.publication_service import (

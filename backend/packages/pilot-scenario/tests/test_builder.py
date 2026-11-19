@@ -1,6 +1,7 @@
 """The builder: a scenario's conversations as a collector publishes them
 whole, the Turns of Pilot's its sessions ran under, the ids it gives them and
-its times laid back from its last moment (F122.2)."""
+its times laid back from its last moment (F122.2). What its files say is
+`test_transcript.py`'s."""
 
 import ast
 import json
@@ -82,6 +83,13 @@ class TestABuild:
         assert built["halving"]["launches"][0]["started_at"] == _at(4)
         assert Builder(SCENARIO, UNTIL).when(0) == UNTIL - timedelta(seconds=LENGTH)
 
+    def test_its_last_moment_is_cut_to_the_millisecond_a_line_is_written_to(
+        self,
+    ) -> None:
+        later = Builder(SCENARIO, UNTIL + timedelta(microseconds=123_987))
+
+        assert later.when(LENGTH) == UNTIL + timedelta(milliseconds=123)
+
     def test_a_publication_is_json_and_whole(self) -> None:
         for publication in Builder(SCENARIO, UNTIL).publications():
             assert json.loads(json.dumps(publication)) == publication
@@ -98,7 +106,7 @@ class TestAMainThread:
             for name, fact in halving.items()
             if name not in ("session_id", "launches", "compactions", "calls")
         } == {
-            "file_size": 61_904,
+            "file_size": len(Builder(SCENARIO, UNTIL).files()[0].content),
             "file_modified_at": _at(221),
             "collector": {"version": "1.0.0"},
             "working_directory": "/work/RecipeBox",
@@ -119,7 +127,7 @@ class TestAMainThread:
             "prompts": [
                 {
                     "received_at": _at(4),
-                    "source": "person",
+                    "source": "sdk",
                     "characters": 412,
                     "hook_runs": [
                         {
@@ -184,7 +192,8 @@ class TestAMainThread:
                     "returned_at": _at(93),
                     "failed": False,
                     "interrupted": False,
-                    "result_characters": 312,
+                    "result_characters": 1_240,
+                    "saved_characters": 48_300,
                 },
                 {
                     "tool_use_id": "toolu_0004",
@@ -205,6 +214,32 @@ class TestAMainThread:
                 {"kind": "skill_body", "name": "pantry:scaling", "characters": 4_300}
             ],
         }
+
+    def test_a_command_the_person_interrupted_says_so(self) -> None:
+        gears = _built()["gears"]
+
+        assert gears["calls"][2]["tool_calls"] == [
+            {
+                "tool_use_id": "toolu_0002",
+                "tool": "Bash",
+                "first_argument": "python ratios.py --every-gear",
+                "requested_at": _at(362),
+                "returned_at": _at(371),
+                "failed": False,
+                "interrupted": True,
+                "result_characters": 148,
+            }
+        ]
+
+    def test_a_prompts_source_is_in_claude_codes_word(self) -> None:
+        built = _built()
+
+        assert [
+            prompt["source"]
+            for thread in ("halving", "gears")
+            for launch in built[thread]["launches"]
+            for prompt in launch["prompts"]
+        ] == ["sdk", "typed", "typed", "typed", "typed"]
 
     def test_a_compaction_is_crossed_by_the_call_after_it_alone(self) -> None:
         halving = _built()["halving"]
@@ -274,7 +309,8 @@ class TestAMainThread:
 
     def test_prompts_are_counted_through_the_launches(self) -> None:
         """A thread a process resumed: its second Launch's Prompt is the
-        thread's second, and each Launch ends at its own last line."""
+        thread's second, and each Launch starts as its first Prompt arrives
+        and ends at its own last line."""
         resumed = Scenario(
             name="resumed",
             people=("ada",),
@@ -284,17 +320,15 @@ class TestAMainThread:
             sessions=(
                 Session(
                     name="resumed",
-                    directory="/work/BikeLog",
-                    size=2_048,
+                    directory="/tmp/rides",
                     person="ada",
                     launches=(
                         Launch(
-                            at=0,
                             versions=(("claude-code", "2.1.317"),),
                             prompts=(
                                 Prompt(
                                     at=0,
-                                    source="person",
+                                    source="typed",
                                     characters=20,
                                     steps=(
                                         Call(
@@ -307,12 +341,11 @@ class TestAMainThread:
                             ),
                         ),
                         Launch(
-                            at=40,
                             versions=(("claude-code", "2.1.318"),),
                             prompts=(
                                 Prompt(
                                     at=41,
-                                    source="person",
+                                    source="queued",
                                     characters=12,
                                     steps=(
                                         Compaction(at=44, trigger="manual", before=900),
@@ -334,7 +367,7 @@ class TestAMainThread:
         assert [
             (launch["started_at"], launch["ended_at"])
             for launch in publication["launches"]
-        ] == [(at(0), at(5)), (at(40), at(50))]
+        ] == [(at(0), at(5)), (at(41), at(50))]
         assert _calls(publication, "prompt") == [1, 2]
         assert _calls(publication, "compaction") == [None, 1]
         assert publication["compactions"] == [
@@ -397,7 +430,6 @@ class TestASubAgent:
         assert built["counting"]["session_id"] == built["halving"]["session_id"]
         assert built["counting"]["working_directory"] == "/work/RecipeBox"
         assert built["counting"]["repository"] == "RecipeBox"
-        assert built["counting"]["file_size"] == 9_480
         assert built["counting"]["file_modified_at"] == _at(74)
 
     def test_it_has_no_launch_no_prompt_and_no_environment(self) -> None:

@@ -52,6 +52,16 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, get_args
 
+from pilot_collection.inventory import HeldTranscriptSchema, InventorySchema
+from pilot_collection.publication import (
+    CallTokenKind,
+    PublicationSchema,
+    PublishedAppendedSchema,
+    PublishedBoundarySchema,
+    PublishedCallSchema,
+    PublishedCompactionSchema,
+    PublishedLaunchSchema,
+)
 from sqlalchemy import (
     BigInteger,
     Select,
@@ -106,16 +116,6 @@ from app.models import (
 )
 from app.models import Session as AgentSession
 from app.models.call import RECORDED_ELSEWHERE
-from app.schemas.inventory import HeldTranscriptSchema, InventorySchema
-from app.schemas.publication import (
-    CallTokenKind,
-    PublicationSchema,
-    PublishedAppendedSchema,
-    PublishedBoundarySchema,
-    PublishedCallSchema,
-    PublishedCompactionSchema,
-    PublishedLaunchSchema,
-)
 from app.services.adoption_service import AdoptionService, group_faults
 from app.services.environment_service import reported_columns
 from app.services.fleet_consumer import FleetConsumer

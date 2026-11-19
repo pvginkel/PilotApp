@@ -217,7 +217,9 @@ class TestLoad:
     ) -> None:
         now = session.scalar(select(func.now()))
 
-        assert max(thread.file_modified_at for thread in loaded) == now
+        assert max(thread.file_modified_at for thread in loaded) == now.replace(
+            microsecond=now.microsecond // 1000 * 1000
+        )
         assert all(thread.replayed_size == thread.file_size for thread in loaded)
 
     def test_a_second_load_writes_the_transcripts_rows_alone(

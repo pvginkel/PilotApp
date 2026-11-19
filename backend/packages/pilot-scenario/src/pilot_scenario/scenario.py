@@ -3,10 +3,11 @@ and `ben`, the projects `recipe-box` and `bike-log`.
 
 Pilot is sent to halve the stew in the recipe box, an errand's first leg. Its
 session reads the recipe, has a sub-agent count the servings, meets an API
-error and a failing command, and carries on past a compaction. Ada, by hand,
-looks at the bike log's gear table, takes back her second question and comes
-back after the cache has lapsed: one of the first rides' conversations, a
-group of work done before Pilot ran any.
+error and a failing command, and carries on past a compaction; two of its
+tools' outputs are too large and are saved to disk. Ada, by hand, looks at
+the bike log's gear table, stops the command her second question started,
+takes that question back and comes back after the cache has lapsed: one of
+the first rides' conversations, a group of work done before Pilot ran any.
 
 The model names are the public ones. Everything else is invented.
 """
@@ -38,7 +39,6 @@ PANTRY = ("plugin:pantry", "0.3.1")
 COUNTING = SubAgent(
     name="counting",
     type="Explore",
-    size=9_480,
     steps=(
         Call(
             at=46,
@@ -49,7 +49,13 @@ COUNTING = SubAgent(
                 Carried("tool_schemas", 11_800),
             ),
             tools=(
-                ToolUse("Bash", "grep -rn servings recipes", took=2, characters=840),
+                ToolUse(
+                    "Bash",
+                    "grep -rn servings recipes",
+                    took=2,
+                    characters=2_164,
+                    saved=33_180,
+                ),
             ),
         ),
         Call(
@@ -71,7 +77,6 @@ HALVING = Session(
     directory="/work/RecipeBox",
     environment="ben-recipebox-51f0c2",
     repository="RecipeBox",
-    size=61_904,
     turn=Turn(
         project="recipe-box",
         message="Halve the stew: it serves eight, and the pot holds four.",
@@ -81,12 +86,11 @@ HALVING = Session(
     unit="Halve the stew",
     launches=(
         Launch(
-            at=4,
             versions=(CLAUDE_CODE, PANTRY),
             prompts=(
                 Prompt(
                     at=4,
-                    source="person",
+                    source="sdk",
                     characters=412,
                     steps=(
                         Call(
@@ -143,8 +147,9 @@ HALVING = Session(
                                     "mcp__pantry__list_recipes",
                                     "stew",
                                     took=1,
-                                    characters=312,
+                                    characters=1_240,
                                     server="pantry",
+                                    saved=48_300,
                                 ),
                                 ToolUse(
                                     "Bash",
@@ -231,17 +236,15 @@ GEARS = Session(
     directory="/work/BikeLog",
     environment="ada-bikelog-3c9e1f",
     repository="BikeLog",
-    size=18_260,
     person="ada",
     group=FIRST_RIDES,
     launches=(
         Launch(
-            at=300,
             versions=(CLAUDE_CODE,),
             prompts=(
                 Prompt(
                     at=300,
-                    source="person",
+                    source="typed",
                     characters=188,
                     steps=(
                         Call(
@@ -271,7 +274,7 @@ GEARS = Session(
                 ),
                 Prompt(
                     at=350,
-                    source="person",
+                    source="typed",
                     characters=54,
                     steps=(
                         Call(
@@ -282,12 +285,21 @@ GEARS = Session(
                                 cache_read=20_400,
                                 output=512,
                             ),
+                            tools=(
+                                ToolUse(
+                                    "Bash",
+                                    "python ratios.py --every-gear",
+                                    took=9,
+                                    characters=148,
+                                    interrupted=True,
+                                ),
+                            ),
                         ),
                     ),
                 ),
                 Prompt(
                     at=390,
-                    source="person",
+                    source="typed",
                     characters=71,
                     steps=(
                         Call(
@@ -305,7 +317,7 @@ GEARS = Session(
                 ),
                 Prompt(
                     at=960,
-                    source="person",
+                    source="typed",
                     characters=37,
                     steps=(
                         Call(

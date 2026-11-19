@@ -20,6 +20,7 @@ import hashlib
 import uuid
 from collections.abc import Mapping
 
+from pilot_collection.publication import PublicationSchema
 from pilot_scenario import SCENARIO, Builder, SentTurn
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -29,7 +30,6 @@ from app.exceptions import RecordNotFoundException, ValidationException
 from app.models import Environment, Project, Transcript, Turn
 from app.models import Session as AgentSession
 from app.models.reference import SessionState, TurnCause
-from app.schemas.publication import PublicationSchema
 from app.services.launch_placement import conversation_turn
 from app.services.publication_service import PublicationService
 

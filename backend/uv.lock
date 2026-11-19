@@ -962,6 +962,7 @@ dependencies = [
     { name = "httpx" },
     { name = "mcp" },
     { name = "paste" },
+    { name = "pilot-collection" },
     { name = "pilot-dsl" },
     { name = "pilot-scenario" },
     { name = "prometheus-flask-exporter" },
@@ -1005,6 +1006,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1,<0.29" },
     { name = "mcp", specifier = ">=1.28,<2" },
     { name = "paste", specifier = ">=3.10.1,<4" },
+    { name = "pilot-collection", editable = "packages/pilot-collection" },
     { name = "pilot-dsl", editable = "packages/pilot-dsl" },
     { name = "pilot-scenario", editable = "packages/pilot-scenario" },
     { name = "prometheus-flask-exporter", specifier = ">=0.23.0,<0.24" },
@@ -1036,6 +1038,20 @@ dev = [
     { name = "vulture", specifier = ">=2.14,<3" },
     { name = "watchdog", extras = ["watchmedo"], specifier = ">=6.0.0,<7" },
 ]
+
+[[package]]
+name = "pilot-collection"
+version = "0.1.0"
+source = { editable = "packages/pilot-collection" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.5.0,<3" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.0,<10" }]
 
 [[package]]
 name = "pilot-dsl"

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from flask import Flask
+from pilot_collection.publication import PublicationSchema
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
@@ -25,7 +26,6 @@ from app.models import (
     User,
 )
 from app.models.reference import SessionState, UserKind
-from app.schemas.publication import PublicationSchema
 from app.services.launch_placement import conversation_named, place_launches
 from tests.support import publications, transcripts
 from tests.support.adoption import adopted_project

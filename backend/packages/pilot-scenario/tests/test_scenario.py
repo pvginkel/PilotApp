@@ -204,4 +204,4 @@ class TestItsStory:
             if session.turn is None:
                 continue
             (launch,) = session.launches
-            assert session.turn.at <= launch.at <= session.turn.ended
+            assert session.turn.at <= launch.prompts[0].at <= session.turn.ended

@@ -1187,7 +1187,7 @@
         "title": "SessionState",
         "type": "string"
       },
-      "CollectorProtocolRangeSchema.e156e3e": {
+      "CollectorProtocolRangeSchema.9ed0c05": {
         "description": "The protocol versions the server accepts of a collector, both ends\nincluded: a 426's body.",
         "properties": {
           "max": {
@@ -3776,7 +3776,7 @@
         "title": "InventedWriterQuestionsSchema",
         "type": "object"
       },
-      "InventorySchema.46800bd": {
+      "InventorySchema.be59cad": {
         "description": "What Pilot holds, whole, and the walk's two settings.",
         "properties": {
           "settling_seconds": {
@@ -3787,7 +3787,7 @@
           "transcripts": {
             "description": "Every Transcript Pilot holds, a main thread's and a sub-agent's, by `session_id`, a main thread before its sub-agents'",
             "items": {
-              "$ref": "#/components/schemas/InventorySchema.46800bd.HeldTranscriptSchema"
+              "$ref": "#/components/schemas/InventorySchema.be59cad.HeldTranscriptSchema"
             },
             "title": "Transcripts",
             "type": "array"
@@ -3806,7 +3806,7 @@
         "title": "InventorySchema",
         "type": "object"
       },
-      "InventorySchema.46800bd.HeldTranscriptSchema": {
+      "InventorySchema.be59cad.HeldTranscriptSchema": {
         "description": "A Transcript as Pilot holds it: what an appended publication of its\nfile builds on, and how much of the file its last whole one read.",
         "properties": {
           "agent_id": {
@@ -9301,7 +9301,7 @@
         "title": "ProjectLookupQuerySchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e": {
+      "PublicationSchema.9ed0c05": {
         "additionalProperties": false,
         "description": "One Transcript as its file stands: read whole or, with `appended`,\nfrom a boundary on.",
         "properties": {
@@ -9335,7 +9335,7 @@
           "appended": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedAppendedSchema"
+                "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedAppendedSchema"
               },
               {
                 "type": "null"
@@ -9347,19 +9347,19 @@
           "calls": {
             "description": "Its Calls, in the file's order: the first has position 1, and on an appended call the boundary's",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedCallSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedCallSchema"
             },
             "title": "Calls",
             "type": "array"
           },
           "collector": {
-            "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedVersionSchema",
+            "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedVersionSchema",
             "description": "The collector's version that read the file"
           },
           "compactions": {
             "description": "Its Compactions, in the file's order, from the boundary's on",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedCompactionSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedCompactionSchema"
             },
             "title": "Compactions",
             "type": "array"
@@ -9407,7 +9407,7 @@
           "group": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedGroupSchema"
+                "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedGroupSchema"
               },
               {
                 "type": "null"
@@ -9419,7 +9419,7 @@
           "launches": {
             "description": "A main thread's Launches, in the file's order; on an appended call those that wrote a line of what it carries, the first with its Prompts from the boundary's on",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedLaunchSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedLaunchSchema"
             },
             "title": "Launches",
             "type": "array"
@@ -9474,16 +9474,16 @@
         "title": "PublicationSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedAppendedSchema": {
+      "PublicationSchema.9ed0c05.PublishedAppendedSchema": {
         "additionalProperties": false,
         "description": "What makes a publication an appended one (DB decision 81 point 1).",
         "properties": {
           "boundary": {
-            "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedBoundarySchema",
+            "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedBoundarySchema",
             "description": "Where the call's `launches`, `compactions` and `calls` start: from there on the call carries all the file holds"
           },
           "builds_on": {
-            "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedBaseSchema",
+            "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedBaseSchema",
             "description": "What Pilot must hold of the Transcript, or the call is refused and the transcript published whole"
           }
         },
@@ -9494,7 +9494,7 @@
         "title": "PublishedAppendedSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedBaseSchema": {
+      "PublicationSchema.9ed0c05.PublishedBaseSchema": {
         "additionalProperties": false,
         "description": "What an appended publication builds on: the Transcript's file as the\npublication before it read it.",
         "properties": {
@@ -9526,7 +9526,7 @@
         "title": "PublishedBaseSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedBoundarySchema": {
+      "PublicationSchema.9ed0c05.PublishedBoundarySchema": {
         "additionalProperties": false,
         "description": "Where what an appended publication carries starts in the file. Each is\nthe place of the first one the call carries or, where it carries none,\nthe place the file's next would take.",
         "properties": {
@@ -9568,7 +9568,7 @@
         "title": "PublishedBoundarySchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedCallSchema": {
+      "PublicationSchema.9ed0c05.PublishedCallSchema": {
         "additionalProperties": false,
         "description": "A request the Transcript made to the model, with its response.",
         "properties": {
@@ -9622,7 +9622,7 @@
           "context_parts": {
             "description": "What it carried that no earlier Call of its Launch did",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedContextPartSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedContextPartSchema"
             },
             "title": "Context Parts",
             "type": "array"
@@ -9643,7 +9643,7 @@
           "events": {
             "description": "The Events it marks, in the file's order: each on the last Call before it, else the first",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedEventSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedEventSchema"
             },
             "title": "Events",
             "type": "array"
@@ -9785,7 +9785,7 @@
           "tool_calls": {
             "description": "The calls of a tool it requested, in the file's order",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedToolCallSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedToolCallSchema"
             },
             "title": "Tool Calls",
             "type": "array"
@@ -9799,7 +9799,7 @@
         "title": "PublishedCallSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedCompactionSchema": {
+      "PublicationSchema.9ed0c05.PublishedCompactionSchema": {
         "additionalProperties": false,
         "description": "A compaction of the Transcript's context.",
         "properties": {
@@ -9865,7 +9865,7 @@
         "title": "PublishedCompactionSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedComponentSchema": {
+      "PublicationSchema.9ed0c05.PublishedComponentSchema": {
         "additionalProperties": false,
         "description": "A version of one piece of software a Launch ran with.",
         "properties": {
@@ -9907,7 +9907,7 @@
         "title": "PublishedComponentSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedContextPartSchema": {
+      "PublicationSchema.9ed0c05.PublishedContextPartSchema": {
         "additionalProperties": false,
         "description": "A component of what a Call carried that no earlier Call of its Launch\ndid.",
         "properties": {
@@ -9949,7 +9949,7 @@
         "title": "PublishedContextPartSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedEventSchema": {
+      "PublicationSchema.9ed0c05.PublishedEventSchema": {
         "additionalProperties": false,
         "description": "An occurrence at one moment that no other part of the call records.",
         "properties": {
@@ -9996,7 +9996,7 @@
         "title": "PublishedEventSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedGroupSchema": {
+      "PublicationSchema.9ed0c05.PublishedGroupSchema": {
         "additionalProperties": false,
         "description": "The group of slices run before Pilot that a main thread's labels name\n(F152.8): what Pilot makes the group's adopted project from, and finds it\nagain by.",
         "properties": {
@@ -10029,7 +10029,7 @@
         "title": "PublishedGroupSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedHookRunSchema": {
+      "PublicationSchema.9ed0c05.PublishedHookRunSchema": {
         "additionalProperties": false,
         "description": "A run of one hook command at the end of a Prompt's run.",
         "properties": {
@@ -10065,14 +10065,14 @@
         "title": "PublishedHookRunSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedLaunchSchema": {
+      "PublicationSchema.9ed0c05.PublishedLaunchSchema": {
         "additionalProperties": false,
         "description": "A start of a Claude Code process on the main thread.",
         "properties": {
           "components": {
             "description": "The versions it ran with, one of each Component",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedComponentSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedComponentSchema"
             },
             "minItems": 1,
             "title": "Components",
@@ -10095,7 +10095,7 @@
           "prompts": {
             "description": "The inputs it received, in the file's order",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedPromptSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedPromptSchema"
             },
             "title": "Prompts",
             "type": "array"
@@ -10114,7 +10114,7 @@
         "title": "PublishedLaunchSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedPromptSchema": {
+      "PublicationSchema.9ed0c05.PublishedPromptSchema": {
         "additionalProperties": false,
         "description": "An input a Launch received.",
         "properties": {
@@ -10128,7 +10128,7 @@
           "hook_runs": {
             "description": "The hook runs at its run's end, in order",
             "items": {
-              "$ref": "#/components/schemas/PublicationSchema.e156e3e.PublishedHookRunSchema"
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedHookRunSchema"
             },
             "title": "Hook Runs",
             "type": "array"
@@ -10158,7 +10158,7 @@
         "title": "PublishedPromptSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedToolCallSchema": {
+      "PublicationSchema.9ed0c05.PublishedToolCallSchema": {
         "additionalProperties": false,
         "description": "A call of one tool a Call requested, with its result.",
         "properties": {
@@ -10310,7 +10310,7 @@
         "title": "PublishedToolCallSchema",
         "type": "object"
       },
-      "PublicationSchema.e156e3e.PublishedVersionSchema": {
+      "PublicationSchema.9ed0c05.PublishedVersionSchema": {
         "additionalProperties": false,
         "description": "The collector's version that read the file.",
         "properties": {
@@ -16493,7 +16493,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InventorySchema.46800bd"
+                  "$ref": "#/components/schemas/InventorySchema.be59cad"
                 }
               }
             },
@@ -16523,7 +16523,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.e156e3e"
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.9ed0c05"
                 }
               }
             },
@@ -16543,7 +16543,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PublicationSchema.e156e3e"
+                "$ref": "#/components/schemas/PublicationSchema.9ed0c05"
               }
             }
           },
@@ -16597,7 +16597,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.e156e3e"
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.9ed0c05"
                 }
               }
             },
@@ -16641,7 +16641,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.e156e3e"
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.9ed0c05"
                 }
               }
             },

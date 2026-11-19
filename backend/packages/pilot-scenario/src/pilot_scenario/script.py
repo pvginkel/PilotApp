@@ -42,8 +42,11 @@ class Occurrence:
 @dataclass(frozen=True)
 class ToolUse:
     """A call of one tool, requested as its Call completed. `took` is the
-    seconds to its result, none where none arrived; `spawns` the sub-agent it
-    started, by name."""
+    seconds to its result, none where none arrived, and `characters` that
+    result's length; `saved` the output's full length where it was saved to
+    disk, the result then saying so in Claude Code's words; `interrupted`
+    whether the person interrupted a command, which came back with no error;
+    `spawns` the sub-agent it started, by name."""
 
     tool: str
     argument: str | None = None
@@ -52,6 +55,8 @@ class ToolUse:
     server: str | None = None
     failed: bool = False
     exit_code: int | None = None
+    interrupted: bool = False
+    saved: int | None = None
     spawns: str | None = None
 
 
@@ -99,8 +104,9 @@ class HookRun:
 
 @dataclass(frozen=True)
 class Prompt:
-    """An input a Launch received, with what followed it, in order, and the
-    hooks run at its run's end."""
+    """An input a Launch received, its `source` in Claude Code's word for it
+    (`sdk`, `typed`, `queued`, `system` or `suggestion_accepted`), with what
+    followed it, in order, and the hooks run at its run's end."""
 
     at: int
     source: str
@@ -112,22 +118,21 @@ class Prompt:
 @dataclass(frozen=True)
 class Launch:
     """A start of a Claude Code process, under a version of each component
-    it ran with, by `(component, version)`. It ends with the last moment of
-    what it received."""
+    it ran with, by `(component, version)`, `claude-code` among them. It
+    starts as its first Prompt arrives, its file's first line with a time,
+    and ends with the last moment of what it received."""
 
-    at: int
     versions: tuple[tuple[str, str], ...]
-    prompts: tuple[Prompt, ...] = ()
+    prompts: tuple[Prompt, ...]
 
 
 @dataclass(frozen=True)
 class SubAgent:
     """A sub-agent's thread of a session, started by the `ToolUse` that
-    `spawns` it; `size` is its file's, in bytes."""
+    `spawns` it."""
 
     name: str
     type: str
-    size: int
     steps: tuple[Call | Compaction, ...]
 
 
@@ -157,12 +162,12 @@ class Session:
     """A conversation with Claude Code in one directory, its main thread and
     its sub-agents'. One Pilot ran has its `turn`; one a person ran by hand
     has that `person`, is on no project of Pilot's running, and may belong to
-    a `group`. `unit` is the unit of work it ran; `size` its main thread's
-    file's, in bytes."""
+    a `group`. `unit` is the unit of work it ran. Its `repository` is the
+    checkout its `directory` lies under, and its `environment` the one that
+    hosted it, each none where it has none."""
 
     name: str
     directory: str
-    size: int
     launches: tuple[Launch, ...]
     environment: str | None = None
     repository: str | None = None

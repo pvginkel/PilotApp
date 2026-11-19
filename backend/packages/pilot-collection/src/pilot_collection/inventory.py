@@ -8,7 +8,7 @@ settings, which the server holds.
 
 from pydantic import AwareDatetime, BaseModel, Field
 
-from app.schemas.publication import Name, Size
+from pilot_collection.publication import Name, Size
 
 
 class HeldTranscriptSchema(BaseModel):

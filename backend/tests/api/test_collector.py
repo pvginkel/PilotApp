@@ -14,6 +14,7 @@ import pytest
 from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
+from pilot_collection.publication import PublicationSchema
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 from werkzeug.test import TestResponse
@@ -21,7 +22,6 @@ from werkzeug.test import TestResponse
 from app import models
 from app.models import Call, Project, ToolCall, Transcript, User, Walk
 from app.models.reference import ProjectState
-from app.schemas.publication import PublicationSchema
 from app.services.container import ServiceContainer
 from app.services.publication_service import (
     COLLECTOR_PROTOCOL_MAX,

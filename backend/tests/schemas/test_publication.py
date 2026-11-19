@@ -5,9 +5,9 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from pilot_collection.publication import PublicationSchema
 from pydantic import ValidationError
 
-from app.schemas.publication import PublicationSchema
 from tests.support.publications import (
     appended,
     builds_on,
