@@ -20,6 +20,10 @@ from app.services.start_gate import JOB_KIND
 STORE_REPO = "/work/PilotProjects"
 """The store repo's root: every brain session's cwd (design 3 §12)."""
 
+GRANTS_FILE = f"{STORE_REPO}/rules/grants.md"
+"""The store's grants, in its checkout: a work item's brief takes the text its
+project's switch selects from it."""
+
 PROJECTS = "/work/Projects"
 """The store's tree, `pilot-sync`'s root, a folder per project under it."""
 

@@ -65,7 +65,13 @@ from app.models.reference import (
 from app.schemas.pilot_store import AddItemRequestSchema
 from app.schemas.timeline import HeldReason
 from app.services.container import ServiceContainer
-from app.services.controller_client import FILE_SIZE_CAP, ControllerClient
+from app.services.controller_client import (
+    FILE_SIZE_CAP,
+    ControllerClient,
+    ControllerProblem,
+    ControllerProblemType,
+    ControllerUnreachable,
+)
 from app.services.controller_outage import ControllerOutage
 from app.services.pilot_server import token_hash
 from app.services.pilot_store_service import (
@@ -74,6 +80,7 @@ from app.services.pilot_store_service import (
     PilotStoreService,
 )
 from app.services.session_record_service import read_records
+from app.services.session_scope import GRANTS_FILE
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
 from app.services.working_on import Reading, holds
@@ -81,6 +88,14 @@ from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.debriefs import placed_notice
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.grants import (
+    GRANTS_OFF,
+    GRANTS_ON,
+    granted,
+    grants_file,
+    put_grants,
+    store_grants,
+)
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise, metric_value
 from tests.support.working_on import Camp
@@ -3502,6 +3517,13 @@ class TestPilotStoreServiceAddProse:
 
 
 class TestPilotStoreServiceAddWork:
+    @pytest.fixture(autouse=True)
+    def grants(
+        self, controller_client: ControllerClient, fake_controller: ServedFakeController
+    ) -> None:
+        """The store's checkout holds its grants file."""
+        store_grants(fake_controller)
+
     def test_a_work_item_is_started_on_add_its_brief_followed_by_pilots_trailer(
         self,
         session: DbSession,
@@ -3555,13 +3577,311 @@ class TestPilotStoreServiceAddWork:
             "From Pilot:\n"
             '- This work item serves plan task badge "The camp": write `step: badge`'
             " into the front matter of every document you register.\n"
-            "- Auto pilot is on: the grants above hold for this session.\n"
+            "- Auto pilot is on, and these grants hold for this session:\n"
+            f"{granted(GRANTS_ON, 'pilot/camp/badge')}\n"
             "- The project's handbook:\n"
             "Badges are round.\n"
         )
         assert added.line.label == "Work · Renaming the badge"
         [effect] = _effects(session)
         assert (effect.kind_code, effect.item_id) == (EffectKind.ADDED, added.item.id)
+
+    def test_one_that_serves_no_task_takes_its_branch_from_its_title(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, _opened(session, project), environment)
+
+        added = _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Renaming the badge",
+                repo=REPO,
+                cwd="/work/Example",
+                brief=BRIEF,
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == added.item.id))
+        assert turn.message == (
+            "Rename the badge.\n\n"
+            "From Pilot:\n"
+            "- Auto pilot is off, and these grants hold for this session:\n"
+            f"{granted(GRANTS_OFF, 'pilot/camp/renaming-the-badge')}"
+        )
+
+    def test_the_grants_are_the_stores_as_its_checkout_holds_them_at_the_add(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, _opened(session, project), environment)
+        service = _starting(container, starts)
+        work = _added(
+            kind="work", title="The badge", repo=REPO, cwd="/work/Example", brief=BRIEF
+        )
+        service.add_item(_admitted(run), work, TOOL_USE_ID)
+        put_grants(
+            fake_controller, grants_file(off="Ask before `pilot/<project>/<task>`.")
+        )
+
+        later = service.add_item(_admitted(run), work, "toolu_02")
+        clear_after_commit_callbacks()
+
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == later.item.id))
+        assert turn.message.endswith(
+            "- Auto pilot is off, and these grants hold for this session:\n"
+            "Ask before `pilot/camp/the-badge`."
+        )
+
+    def test_a_grants_file_the_controller_cannot_read_refuses_the_add(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.remove_file(STORE_ENVIRONMENT_ID, GRANTS_FILE)
+        run = _brain(session, _opened(session, project), environment)
+
+        with pytest.raises(ControllerProblem) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message.startswith(
+            f"Cannot read {GRANTS_FILE} in environment {STORE_ENVIRONMENT_ID} because"
+            " external service failed: the controller answered 404 not-found:"
+        )
+        assert session.scalars(select(Item)).all() == []
+        assert _effects(session) == []
+
+    def test_a_store_the_controller_cannot_read_refuses_the_add(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.unreadable(STORE_ENVIRONMENT_ID)
+        run = _brain(session, _opened(session, project), environment)
+
+        with pytest.raises(ControllerProblem) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert (
+            refused.value.problem_type is ControllerProblemType.ENVIRONMENT_UNREADABLE
+        )
+        assert session.scalars(select(Item)).all() == []
+
+    def test_a_controller_that_does_not_answer_refuses_the_add(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake_controller: ServedFakeController,
+        controller_outage: ControllerOutage,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.outage()
+        run = _brain(session, _opened(session, project), environment)
+
+        with pytest.raises(ControllerUnreachable):
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert controller_outage.holds
+        assert session.scalars(select(Item)).all() == []
+
+    def test_a_grants_file_without_the_workers_section_refuses_the_add(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        put_grants(fake_controller, "# The grants\n\n## The table\n\n- reads\n")
+        run = _brain(session, _opened(session, project), environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            f"Cannot add a work item because the store's {GRANTS_FILE} holds no"
+            " section `## In a worker's brief`, where a work item's grants text is"
+            " read from"
+        )
+        assert session.scalars(select(Item)).all() == []
+        assert _effects(session) == []
+
+    @pytest.mark.parametrize(
+        ("autopilot", "label"), [(True, "Auto pilot on:"), (False, "Auto pilot off:")]
+    )
+    def test_a_section_without_the_switchs_block_refuses_the_add(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+        autopilot: bool,
+        label: str,
+    ) -> None:
+        # The file holds the other position's block alone.
+        put_grants(
+            fake_controller,
+            grants_file(
+                on=None if autopilot else GRANTS_ON,
+                off=GRANTS_OFF if autopilot else None,
+            ),
+        )
+        opened = _opened(session, project)
+        opened.autopilot = autopilot
+        run = _brain(session, opened, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            "Cannot add a work item because the section `## In a worker's brief` of"
+            f" the store's {GRANTS_FILE} holds no text block under `{label}`, the"
+            " grants text the project's switch selects"
+        )
+        assert session.scalars(select(Item)).all() == []
+        assert _effects(session) == []
+
+    def test_a_title_that_names_no_branch_is_refused_where_it_serves_no_task(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        opened = _opened(session, project)
+        session.add(_plan_task(opened, "badge"))
+        run = _brain(session, opened, environment)
+        service = _starting(container, starts)
+        work = {
+            "kind": "work",
+            "title": "?!",
+            "repo": REPO,
+            "cwd": "/w",
+            "brief": BRIEF,
+        }
+
+        with pytest.raises(InvalidOperationException) as refused:
+            service.add_item(_admitted(run), _added(**work), TOOL_USE_ID)
+
+        assert refused.value.message == (
+            "Cannot add a work item because its title holds no letter or digit to"
+            " name its topic branch by, and it serves no task: give it a title in"
+            " words, or its `step`"
+        )
+        assert session.scalars(select(Item)).all() == []
+        served = service.add_item(
+            _admitted(run), _added(**work, step="badge"), TOOL_USE_ID
+        )
+        clear_after_commit_callbacks()
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == served.item.id))
+        assert "`pilot/camp/badge`" in turn.message
+
+    def test_with_no_controller_configured_the_add_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, _opened(session, project), environment)
+        unconfigured = configured_starts(
+            container, supervise, controller_configured=False
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _starting(container, unconfigured).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            "Cannot place a work item because no controller is configured"
+        )
+        assert session.scalars(select(Item)).all() == []
 
     @pytest.mark.parametrize(
         ("paused", "reason"),
@@ -3883,7 +4203,6 @@ class TestPilotStoreServiceAddWork:
         project: Project,
         environment: Environment,
     ) -> None:
-        fake_controller.add_environment(STORE_ENVIRONMENT_ID, name="PilotProjects")
         run = _brain(session, _opened(session, project), environment)
 
         with pytest.raises(InvalidOperationException) as refused:

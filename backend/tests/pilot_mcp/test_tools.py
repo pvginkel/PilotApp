@@ -71,6 +71,7 @@ from tests.support.adoption import FIRST_MENUS
 from tests.support.chats import ChatWriter, close_conversation, open_conversation
 from tests.support.debriefs import DEBRIEF, placed_notice
 from tests.support.fake_controller import ServedFakeController
+from tests.support.grants import store_grants
 from tests.support.pilot_mcp import (
     API_URL,
     BEARER,
@@ -921,6 +922,17 @@ def placing(container: ServiceContainer, supervise: Supervise) -> None:
     )
 
 
+@pytest.fixture
+def granting(
+    placing: None,
+    controller_client: ControllerClient,
+    fake_controller: ServedFakeController,
+) -> None:
+    """The start on a controller whose store's checkout holds its grants
+    file, which a work item's add reads."""
+    store_grants(fake_controller)
+
+
 @pytest.mark.anyio
 class TestAnswer:
     @pytest.mark.usefixtures("placing")
@@ -1606,6 +1618,7 @@ class TestAddItem:
         assert answer.json()["id"] == str(item.id)
         assert answer.json()["effect"] == "Added · Notice · The lake"
 
+    @pytest.mark.usefixtures("granting")
     async def test_a_work_items_claims_reach_its_route_as_given(
         self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
     ) -> None:
@@ -1705,6 +1718,7 @@ class TestAddItem:
         assert added.kind_code == item["kind"]
         assert session.get(models.Wait, added.id) is not None
 
+    @pytest.mark.usefixtures("granting")
     async def test_a_work_items_researches_reach_its_route_as_given(
         self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
     ) -> None:
@@ -1758,7 +1772,7 @@ class TestAddItem:
         routes: ApiRoutes,
         session: DbSession,
         brain: models.Session,
-        placing: None,
+        granting: None,
         week: float,
         five_hour: float,
         held: str,

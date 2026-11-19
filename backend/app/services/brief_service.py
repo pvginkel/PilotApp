@@ -12,13 +12,15 @@ composed, every open plan note whole among it, and the handbook whole
 (`BriefService._state`). A project chat's message that quotes an item or a
 block carries the item as it then stands (`BriefService.quoted`), and its
 opening brief what changed in the record since the project's previous chat
-closed (`BriefService._changed`). A worker's carries the handbook verbatim,
-the worker having no tree (F129.5).
+closed (`BriefService._changed`). A worker's carries the grants text its
+project's switch selects, as the store's grants file holds it at the add
+(`switch_grants`), and the handbook verbatim, the worker having no tree
+(F129.5).
 """
 
 import re
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -28,7 +30,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.engine import claims, researches
 from app.engine.documents import OPENING, REVIEW
-from app.engine.paths import draft_folder
+from app.engine.paths import draft_folder, folder
 from app.engine.plan import PlanService
 from app.engine.record import ANSWERED
 from app.engine.views import caller_named, utc_time
@@ -95,6 +97,24 @@ QUOTED_BLOCK_HEADING = (
 )
 
 TRAILER_HEADING = "From Pilot:"
+
+GRANTS_SECTION = "## In a worker's brief"
+"""The section of the store's grants file that holds a worker's grants text:
+one fenced block per position of the switch, each under its label of
+`SWITCH_LABELS`."""
+SWITCH_LABELS = {True: "Auto pilot on:", False: "Auto pilot off:"}
+TOPIC_BRANCH = "pilot/<project>/<task>"
+"""The work's topic branch as the grants text names it, in whose place the
+trailer writes the work's own."""
+
+_GRANTS_SECTION = re.compile(
+    rf"^{re.escape(GRANTS_SECTION)}[ \t]*$(.*?)(?=^##? |\Z)", re.MULTILINE | re.DOTALL
+)
+_GRANTS_BLOCK = re.compile(
+    rf"^({'|'.join(re.escape(label) for label in SWITCH_LABELS.values())})[ \t]*\n"
+    r"(?:[ \t]*\n)*```[^\n]*\n((?:(?!```)[^\n]*\n)*)```[ \t]*$",
+    re.MULTILINE,
+)
 
 FOLLOW_UP_END = "Fix it and end your turn."
 """The last line of the server's follow-up turn, which marks it as one."""
@@ -1029,11 +1049,20 @@ class BriefService:
         ).one()
         return f"{RESTARTED} {registered} Your brief again, whole:\n\n{brief}"
 
-    def work_item(self, project: Project, brief: str, task: PlanTask | None) -> str:
+    def work_item(
+        self,
+        project: Project,
+        brief: str,
+        task: PlanTask | None,
+        grants: str,
+        branch: str,
+    ) -> str:
         """A work item's first Turn (§5.4): `brief`, the brain's own text, then
         the server's trailer under one heading — the plan's task `task` it
-        serves, the switch it is briefed under (F54.7) and the project's
-        handbook verbatim (F129.5), each line that holds."""
+        serves, the switch it is briefed under (F54.7) with `grants`, the
+        text the store's grants file holds for that position, the work's
+        topic branch `branch` written into it, and the project's handbook
+        verbatim (F129.5), each line that holds."""
         lines = [TRAILER_HEADING]
         if task is not None:
             lines.append(
@@ -1041,11 +1070,12 @@ class BriefService:
                 f" write `step: {task.task_id}` into the front matter of every"
                 " document you register."
             )
-        lines.append(
-            "- Auto pilot is on: the grants above hold for this session."
-            if project.autopilot
-            else "- Auto pilot is off: the grants above ask the operator first for"
-            " this session."
+        lines.extend(
+            [
+                f"- Auto pilot is {'on' if project.autopilot else 'off'}, and these"
+                " grants hold for this session:",
+                grants.replace(TOPIC_BRANCH, branch),
+            ]
         )
         handbook = self._handbook(project)
         if handbook is not None:
@@ -1829,6 +1859,35 @@ def _files(count: int) -> str:
 def _printed(path: str, line: int | None, message: str) -> str:
     """A fault as the hook's check prints it (`pilot-sync`'s `render`)."""
     return f"{path}: {message}" if line is None else f"{path}:{line}: {message}"
+
+
+def switch_grants(source: str) -> Mapping[bool, str] | None:
+    """A worker's grants text by the position of the switch, auto pilot on or
+    off, as `source`, the store's grants file, holds it: under
+    `GRANTS_SECTION`, the fenced block right under each label of
+    `SWITCH_LABELS`, a position with no block or an empty one left out. None
+    where the file has no such section."""
+    section = _GRANTS_SECTION.search(source)
+    if section is None:
+        return None
+    grants: dict[bool, str] = {}
+    for label, text in _GRANTS_BLOCK.findall(section.group(1)):
+        if text.strip():
+            grants.setdefault(label == SWITCH_LABELS[True], text.rstrip("\n"))
+    return grants
+
+
+def topic_branch(project: Project, task: PlanTask | None, title: str) -> str | None:
+    """The topic branch of a work item titled `title`, `TOPIC_BRANCH`: the
+    project's folder, its slug, then the id of the plan's task `task` it
+    serves, or its title in kebab case where it serves none. None where such
+    a title holds no letter or digit."""
+    name = (
+        task.task_id
+        if task is not None
+        else "-".join(re.findall(r"[^\W_]+", title.lower()))
+    )
+    return f"pilot/{folder(project)}/{name}" if name else None
 
 
 def _switch(project: Project) -> str:

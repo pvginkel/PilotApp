@@ -44,10 +44,12 @@ from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.pilot_server import token_hash
 from app.services.session_record_service import read_records
+from app.services.session_scope import GRANTS_FILE
 from app.services.session_start_service import SessionStartService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.grants import grants_file, put_grants, store_grants
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
 
@@ -1442,9 +1444,14 @@ WORK_BY_NAME = {
 
 @pytest.fixture
 def started(
-    container: ServiceContainer, supervise: Supervise
+    container: ServiceContainer,
+    supervise: Supervise,
+    controller_client: ControllerClient,
+    fake_controller: ServedFakeController,
 ) -> Iterator[SessionStartService]:
-    """The routes' start on a controller, its loops never run."""
+    """The routes' start on a controller, its loops never run, the store's
+    checkout holding its grants file."""
+    store_grants(fake_controller)
     starts = configured_starts(container, supervise)
     container.session_start_service.override(providers.Object(starts))
     try:
@@ -1588,7 +1595,6 @@ class TestAddItem:
         project: Project,
         environment: Environment,
     ) -> None:
-        fake_controller.add_environment(STORE_ENVIRONMENT_ID, name="PilotProjects")
         _brain(session, project, environment)
 
         response = client.post(
@@ -1814,9 +1820,39 @@ class TestAddItem:
 
         assert response.status_code == 409
         assert _error(response) == (
-            "Cannot place a work item of example/Example because no controller is"
-            " configured"
+            "Cannot place a work item because no controller is configured"
         )
+
+    def test_a_work_item_whose_grants_text_is_not_read_is_502_and_one_not_held_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        started: SessionStartService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _brain(session, project, environment)
+        # Committed, so that the first refusal's rollback keeps the session.
+        session.commit()
+        fake_controller.remove_file(STORE_ENVIRONMENT_ID, GRANTS_FILE)
+
+        unread = client.post(ITEMS, json=WORK, headers=_bearer())
+        put_grants(fake_controller, grants_file(off=None))
+        not_held = client.post(ITEMS, json=WORK, headers=_bearer())
+
+        assert unread.status_code == 502
+        assert _error(unread).startswith(
+            f"Cannot read {GRANTS_FILE} in environment {STORE_ENVIRONMENT_ID} because"
+            " external service failed: the controller answered 404 not-found:"
+        )
+        assert not_held.status_code == 409
+        assert _error(not_held) == (
+            "Cannot add a work item because the section `## In a worker's brief` of"
+            f" the store's {GRANTS_FILE} holds no text block under `Auto pilot off:`,"
+            " the grants text the project's switch selects"
+        )
+        assert session.scalars(select(Item)).all() == []
 
 
 class TestAttachFile:

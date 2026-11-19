@@ -87,6 +87,7 @@ from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     ControllerProblem,
+    ControllerProblemType,
     EnvironmentStatus,
     HeadlessCreateRequest,
 )
@@ -107,6 +108,7 @@ from app.services.relay_service import (
     RelayService,
 )
 from app.services.session_record_service import StoredRecord, read_records
+from app.services.session_scope import GRANTS_FILE
 from app.services.session_start_service import (
     HARD_STOP_KEY,
     NUDGE,
@@ -138,6 +140,7 @@ from tests.support.fake_controller import (
     raw_turn,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.grants import grants_file, put_grants, store_grants
 from tests.support.locks import in_thread, lock_waits
 from tests.support.store_updates import hold, lift
 from tests.support.supervisor import (
@@ -2077,6 +2080,64 @@ class TestNamedEnvironment:
 
         assert not isinstance(refused.value, RecordNotFoundException)
         assert session.get(Environment, NAMED) is None
+
+
+class TestStoreGrants:
+    """The store's grants file is read off its checkout, through the
+    controller."""
+
+    def test_the_file_is_read_as_the_stores_checkout_holds_it(
+        self, starts: SessionStartService, fake: _Recording
+    ) -> None:
+        store_grants(fake)
+        fake.calls.clear()
+
+        assert starts.store_grants() == grants_file()
+        assert fake.calls == [
+            f"GET /environments/{STORE_ENVIRONMENT_ID}/file"
+            "?path=%2Fwork%2FPilotProjects%2Frules%2Fgrants.md"
+        ]
+
+    def test_a_stopped_stores_file_is_read_and_a_later_read_is_the_file_then(
+        self, starts: SessionStartService, fake: _Recording
+    ) -> None:
+        store_grants(fake)
+        assert fake.environment(STORE_ENVIRONMENT_ID).status == "stopped"
+        starts.store_grants()
+        put_grants(fake, "# The grants, rewritten — in words\n")
+
+        assert starts.store_grants() == "# The grants, rewritten — in words\n"
+
+    def test_a_checkout_without_the_file_is_the_controllers_refusal(
+        self, starts: SessionStartService, fake: _Recording
+    ) -> None:
+        fake.add_environment(STORE_ENVIRONMENT_ID, name="PilotProjects")
+
+        with pytest.raises(ControllerProblem) as refused:
+            starts.store_grants()
+
+        assert refused.value.problem_type is ControllerProblemType.NOT_FOUND
+        assert refused.value.operation == (
+            f"read {GRANTS_FILE} in environment {STORE_ENVIRONMENT_ID}"
+        )
+
+    def test_no_controller_refuses_it(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        store_grants(fake)
+        fake.calls.clear()
+        starts = _services(container, supervise, controller_configured=False)[0]
+
+        with pytest.raises(InvalidOperationException) as refused:
+            starts.store_grants()
+
+        assert refused.value.message == (
+            "Cannot place a work item because no controller is configured"
+        )
+        assert fake.calls == []
 
 
 class TestStartWorkIn:

@@ -68,6 +68,8 @@ from app.services.brief_service import (
     conversation_kind,
     is_follow_up,
     is_restarted,
+    switch_grants,
+    topic_branch,
 )
 from app.services.container import ServiceContainer
 from app.services.pilot_work_service import Worker
@@ -81,6 +83,7 @@ from tests.support.chats import (
     open_conversation,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.grants import GRANTS_OFF, GRANTS_ON, granted, grants_file
 from tests.support.pilot_notes import a_turn, noted
 
 AT = datetime(2026, 10, 26, 9, 30, 15, tzinfo=UTC)
@@ -3623,8 +3626,8 @@ class TestFollowUp:
 
 RUN_BRIEF = (
     "/dev:plan-slice 012\n\nPlan the stock's slice.\n\nFrom Pilot:\n"
-    "- Auto pilot is off: the grants above ask the operator first for this"
-    " session."
+    "- Auto pilot is off, and these grants hold for this session:\n"
+    f"{granted(GRANTS_OFF, 'pilot/soup-club/t3')}"
 )
 """A worker's brief as its first Turn carries it, its stage's command first."""
 SOUP = "5b0e7c2a-9d41-4f36-8a1e-3c7d6f2b9e10"
@@ -3875,26 +3878,49 @@ class TestWorkItem:
         )
 
         assert briefs.work_item(
-            opened, "Plan the stock.\n\n", _task(session, opened)
+            opened,
+            "Plan the stock.\n\n",
+            _task(session, opened),
+            GRANTS_ON,
+            "pilot/soup-club/t3",
         ) == (
             "Plan the stock.\n\n"
             "From Pilot:\n"
             '- This work item serves plan task t3 "Plan slice 003": write `step: t3`'
             " into the front matter of every document you register.\n"
-            "- Auto pilot is on: the grants above hold for this session.\n"
+            "- Auto pilot is on, and these grants hold for this session:\n"
+            "Yours without asking: reads, commits, a push to this work's topic"
+            " branch,\n"
+            "`pilot/soup-club/t3`, and a push that deploys.\n"
+            "Never on your own say: emptying the pantry.\n"
             "- The project's handbook:\n"
             "# Soup club\n\nThe stock is the club's own.\n"
         )
 
-    def test_with_no_task_and_auto_pilot_off_the_switch_stands_alone(
+    def test_with_no_task_and_auto_pilot_off_the_switch_and_its_grants_stand_alone(
         self, briefs: BriefService, opened: Project
     ) -> None:
-        assert briefs.work_item(opened, "Rename the badge.", None) == (
+        assert briefs.work_item(
+            opened, "Rename the badge.", None, GRANTS_OFF, "pilot/soup-club/the-badge"
+        ) == (
             "Rename the badge.\n\n"
             "From Pilot:\n"
-            "- Auto pilot is off: the grants above ask the operator first for this"
-            " session."
+            "- Auto pilot is off, and these grants hold for this session:\n"
+            "Yours without asking: reads, commits, a push to this work's topic"
+            " branch,\n"
+            "`pilot/soup-club/the-badge`.\n"
+            "Asked first: a push that deploys. Never on your own say: emptying the"
+            " pantry."
         )
+
+    def test_the_branch_is_written_wherever_the_text_names_it(
+        self, briefs: BriefService, opened: Project
+    ) -> None:
+        text = "Push to `pilot/<project>/<task>`.\nName pilot/<project>/<task> last."
+
+        assert briefs.work_item(
+            opened, "Rename the badge.", None, text, "pilot/soup-club/t3"
+        ).endswith("\nPush to `pilot/soup-club/t3`.\nName pilot/soup-club/t3 last.")
 
     @pytest.mark.parametrize("handbook", ["", "\n  \n"])
     def test_a_blank_handbook_is_left_out(
@@ -3906,9 +3932,122 @@ class TestWorkItem:
     ) -> None:
         container.document_service().bear_handbook(opened, handbook)
 
-        assert briefs.work_item(opened, "Rename the badge.", None).endswith(
-            "- Auto pilot is off: the grants above ask the operator first for this"
-            " session."
+        assert briefs.work_item(
+            opened, "Rename the badge.", None, GRANTS_OFF, "pilot/soup-club/t3"
+        ).endswith(granted(GRANTS_OFF, "pilot/soup-club/t3"))
+
+
+class TestSwitchGrants:
+    def test_each_positions_block_is_read_from_the_workers_section(self) -> None:
+        assert switch_grants(grants_file()) == {True: GRANTS_ON, False: GRANTS_OFF}
+
+    def test_a_file_without_the_section_has_none(self) -> None:
+        assert switch_grants("# The grants\n\n## The table\n\n- reads\n") is None
+        assert switch_grants("") is None
+
+    def test_a_block_outside_the_section_is_not_the_workers(self) -> None:
+        before = "## The table\n\nAuto pilot on:\n\n```text\nThe table's own.\n```\n\n"
+        after = "\n## After it\n\nAuto pilot off:\n\n```text\nA later one.\n```\n"
+        section = "## In a worker's brief\n\nNothing yet.\n"
+
+        assert switch_grants(f"{before}{section}{after}") == {}
+
+    def test_a_longer_heading_is_not_the_section(self) -> None:
+        assert (
+            switch_grants(
+                "## In a worker's brief, once\n\nAuto pilot on:\n\n```text\nOn.\n```\n"
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        ("on", "off", "held"),
+        [
+            (GRANTS_ON, None, {True: GRANTS_ON}),
+            (None, GRANTS_OFF, {False: GRANTS_OFF}),
+            (None, None, {}),
+        ],
+    )
+    def test_a_position_with_no_block_is_left_out(
+        self, on: str | None, off: str | None, held: dict[bool, str]
+    ) -> None:
+        assert switch_grants(grants_file(on, off)) == held
+
+    def test_an_empty_block_is_no_block_and_takes_nothing_of_the_next(self) -> None:
+        source = (
+            "## In a worker's brief\n\n"
+            "Auto pilot on:\n\n```text\n```\n\n"
+            "Auto pilot off:\n\n```text\nOff.\n```\n"
+        )
+
+        assert switch_grants(source) == {False: "Off."}
+
+    def test_a_label_with_no_block_right_under_it_has_none(self) -> None:
+        source = (
+            "## In a worker's brief\n\n"
+            "Auto pilot on:\n\nAs the table has it.\n\n```text\nOn.\n```\n"
+        )
+
+        assert switch_grants(source) == {}
+
+    def test_the_section_runs_to_the_files_end_and_a_block_keeps_its_lines(
+        self,
+    ) -> None:
+        source = (
+            "## In a worker's brief\n"
+            "Auto pilot on:\n```\nOne.\n\n  Two.\n```\n"
+            "### A part of it\n\n"
+            "Auto pilot off:\n\n\n```text\nOff.\n```"
+        )
+
+        assert switch_grants(source) == {True: "One.\n\n  Two.", False: "Off."}
+
+    def test_the_first_block_of_a_position_is_the_one(self) -> None:
+        source = (
+            "## In a worker's brief\n\n"
+            "Auto pilot on:\n\n```text\nFirst.\n```\n\n"
+            "Auto pilot on:\n\n```text\nSecond.\n```\n"
+        )
+
+        assert switch_grants(source) == {True: "First."}
+
+
+class TestTopicBranch:
+    def test_a_work_item_that_serves_a_task_is_named_by_the_tasks_id(
+        self, session: DbSession, opened: Project
+    ) -> None:
+        assert (
+            topic_branch(opened, _task(session, opened), "Planning the stock")
+            == "pilot/soup-club/t3"
+        )
+
+    @pytest.mark.parametrize(
+        ("title", "name"),
+        [
+            ("Renaming the badge", "renaming-the-badge"),
+            (
+                "  Fix: the CI_token's 2nd rotation (v4)!  ",
+                "fix-the-ci-token-s-2nd-rotation-v4",
+            ),
+            ("Crème brûlée", "crème-brûlée"),
+        ],
+    )
+    def test_one_that_serves_none_is_named_by_its_title_in_kebab_case(
+        self, opened: Project, title: str, name: str
+    ) -> None:
+        assert topic_branch(opened, None, title) == f"pilot/soup-club/{name}"
+
+    @pytest.mark.parametrize("title", ["?!", "— _ —"])
+    def test_a_title_with_no_letter_or_digit_names_no_branch(
+        self, opened: Project, title: str
+    ) -> None:
+        assert topic_branch(opened, None, title) is None
+
+    def test_a_task_names_the_branch_whatever_the_title(
+        self, session: DbSession, opened: Project
+    ) -> None:
+        assert (
+            topic_branch(opened, _task(session, opened), "?!") == "pilot/soup-club/t3"
         )
 
 

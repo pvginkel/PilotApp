@@ -198,7 +198,7 @@ from app.services.session_record_service import (
     read_records,
     stream_position,
 )
-from app.services.session_scope import ScopedCreate, scoped_create
+from app.services.session_scope import GRANTS_FILE, ScopedCreate, scoped_create
 from app.services.session_stream_service import SessionStreamService
 from app.services.start_gate import (
     JOB_KIND,
@@ -553,6 +553,23 @@ class SessionStartService:
             if problem.problem_type is not ControllerProblemType.NOT_FOUND:
                 raise
             raise RecordNotFoundException("Environment", environment_id) from problem
+
+    def store_grants(self) -> str:
+        """The store's grants file, `GRANTS_FILE`, as its checkout holds it now,
+        read off the store's share before a work item's placing takes a lock:
+        its brief takes its grants text from it.
+
+        Raises:
+            InvalidOperationException: No controller is configured
+            ControllerUnreachable: The controller did not answer
+            ExternalServiceException: The controller failed otherwise, or has
+                no such file
+        """
+        if not self._controller_configured:
+            raise InvalidOperationException(
+                "place a work item", "no controller is configured"
+            )
+        return self._client().read_file(self._store, GRANTS_FILE).data.decode()
 
     def start_work_in(
         self,

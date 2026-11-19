@@ -10,12 +10,13 @@ Note and Send Alert (DB decision 84).
 Every write locks the Project's row first and the Session's for its effect
 after, the order Finish takes, which locks the project's Sessions before their
 Documents. `finish` writes its effect before the transition that stops its own
-Session. Outside material is read through the controller before the Project's
-row is locked, so no controller call is made while it is held.
+Session. Outside material and the store's grants are read through the
+controller before the Project's row is locked, so no controller call is made
+while it is held.
 """
 
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -81,7 +82,13 @@ from app.schemas.pilot_store import (
     StandingOutcome,
     source_parts,
 )
-from app.services.brief_service import BriefService
+from app.services.brief_service import (
+    GRANTS_SECTION,
+    SWITCH_LABELS,
+    BriefService,
+    switch_grants,
+    topic_branch,
+)
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
@@ -93,7 +100,7 @@ from app.services.handing import hand_over, sides
 from app.services.pilot_server import bearer_session, no_turn, turn_running
 from app.services.pilot_work_service import ATTACHED, attached_label, material
 from app.services.project_service import ProjectService, project_name
-from app.services.session_scope import project_folder
+from app.services.session_scope import GRANTS_FILE, project_folder
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
 from app.services.timeline_service import writer_asked
@@ -267,7 +274,10 @@ class PilotStoreService:
         where its Markdown gives none of its own, empty without Markdown
         (F29.2, F86.6). A work item is started on add by its repository, as
         every work item's start is, its brief followed by the server's trailer
-        (F66, §5.4), on the brain's placement (F61.1), or in the environment
+        (F66, §5.4), which carries the grants text the project's switch
+        selects, read from the store's checkout at the add, the work's topic
+        branch written in (`BriefService.work_item`), on the brain's
+        placement (F61.1), or in the environment
         it names in place of one, there from its birth, which Pilot never
         makes, takes, names or resets, and starts when it is stopped (F86.9;
         DB 344), its row made on Pilot's first touch of it; its Session `held`
@@ -289,7 +299,11 @@ class PilotStoreService:
             InvalidOperationException: a field the item's kind does not take,
                 or one it needs, missing; a work item that names both a
                 repository and an environment, or the store's environment;
-                a prose text that holds faults, each
+                a work item whose grants text the store's grants file does
+                not hold, its section or the block of the project's switch
+                missing, or whose title, serving no task, holds no letter or
+                digit; no controller configured; a prose text that holds
+                faults, each
                 with its line; a wait's list empty or naming one twice, a card
                 no ticket id, or a due time not ahead;
                 material that cannot be copied or over the caps of one call,
@@ -297,7 +311,8 @@ class PilotStoreService:
                 (`RecordService.claimable`, `RecordService.researchable`);
                 the start a work item takes refused.
             ExternalServiceException: the controller did not answer, or
-                refused for a reason of its own.
+                refused for a reason of its own, the read of the store's
+                grants file included.
         """
         operation = f"add a {item.kind} item"
         given = set(item.model_dump(by_alias=True, exclude_defaults=True))
@@ -307,6 +322,9 @@ class PilotStoreService:
         if item.environment is not None:
             # Before the project's lock: it asks the controller.
             self.session_start_service.named_environment(self.db, item.environment)
+        # Before the project's lock too: the store's grants are the controller's
+        # to read.
+        grants = self._grants(operation) if item.kind == WORK else None
         carried = self._carried(brain, item.attachments, operation)
         project = self._project(brain)
         session = self.db.get_one(AgentSession, brain.session_id)
@@ -319,7 +337,9 @@ class PilotStoreService:
                 project, item.researches, operation
             )
             handing = sides(self.db, project.id) if claimed or researched else None
-            added = self._work(project, item)
+            # A work item's grants were read above.
+            assert grants is not None
+            added = self._work(project, item, grants, operation)
             work = self.db.get_one(Work, added.id)
             self.record_service.give(project, work, claimed)
             self.record_service.research(project, work, researched)
@@ -1139,13 +1159,46 @@ class PilotStoreService:
         assert title is not None
         return self.document_service.bear_item(project, item.kind, title, session, text)
 
-    def _work(self, project: Project, item: AddItemRequestSchema) -> Item:
+    def _grants(self, operation: str) -> Mapping[bool, str]:
+        """A worker's grants text by the switch's position, as the store's
+        checkout holds it now (`switch_grants`), read through the controller."""
+        grants = switch_grants(self.session_start_service.store_grants())
+        if grants is None:
+            raise InvalidOperationException(
+                operation,
+                f"the store's {GRANTS_FILE} holds no section `{GRANTS_SECTION}`,"
+                " where a work item's grants text is read from",
+            )
+        return grants
+
+    def _work(
+        self,
+        project: Project,
+        item: AddItemRequestSchema,
+        grants: Mapping[bool, str],
+        operation: str,
+    ) -> Item:
         # The shape check let no work item through without these.
         assert item.title is not None
         assert item.cwd is not None
         assert item.brief is not None
         task = None if item.step is None else self._task(project, item.step)
-        brief = self.brief_service.work_item(project, item.brief, task)
+        granted = grants.get(project.autopilot)
+        if granted is None:
+            raise InvalidOperationException(
+                operation,
+                f"the section `{GRANTS_SECTION}` of the store's {GRANTS_FILE} holds"
+                f" no text block under `{SWITCH_LABELS[project.autopilot]}`, the"
+                " grants text the project's switch selects",
+            )
+        branch = topic_branch(project, task, item.title)
+        if branch is None:
+            raise InvalidOperationException(
+                operation,
+                "its title holds no letter or digit to name its topic branch by,"
+                " and it serves no task: give it a title in words, or its `step`",
+            )
+        brief = self.brief_service.work_item(project, item.brief, task, granted, branch)
         if item.environment is not None:
             work = self.session_start_service.start_work_in(
                 self.db,
