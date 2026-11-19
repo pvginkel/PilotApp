@@ -19,6 +19,7 @@ moves the folder ([`projects.md`](projects.md)). In a project's folder:
 |---|---|---|
 | `project.md` | the draft, and past Create the project document | is ingested, past Create under the handbook's rules |
 | `handbook.md` | the handbook, born at Create | is ingested |
+| `journal.md` | the journal, Pilot's account of how the project's workflow runs go, born at Create ([`documents.md`](documents.md#the-handbook-the-journal-and-the-project-document)) | is ingested under the handbook's rules |
 | `items/<seq>-<slug>.md` | a prose item's document | is ingested; the opening's is reverted whole |
 | `inbox/<seq>-<slug>.md` | a worker's registered document, once its file was read | is ingested |
 | `plan.json` | the plan, rendered from its rows | is parsed back into the rows |
@@ -141,8 +142,10 @@ The values the agent writes from a closed list:
     controller session, at its start, a fresh Resume and a gone controller session replaced
     ([`sessions.md`](sessions.md)), moves the file's hash, with no `ProjectChanged`
     (`ViewService.run_moved`);
-  - a debrief's notice these fields alone, its `path` null: no debrief is in the tree, neither a work
-    item's nor what a notice carries ([`work.md`](work.md#its-debriefs-notice)).
+  - a debrief's notice these fields, its `path` null, and `notable`, Pilot's lines on the debriefs it
+    carries, one text per work item that has them, in the work items' timeline order, `[]` where
+    none has: no debrief is in the tree, neither a work item's nor what a notice carries
+    ([`work.md`](work.md#its-debriefs-notice)).
 - `attachments`, every attachment of the project by batch and file name, a draft's hung on no item
   among them: `id`, `path` (`attachments/<batch>/<filename>`), `title`, and `source` (`<environment
   id>:<path>`, null for the draft's copy).

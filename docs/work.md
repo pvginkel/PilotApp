@@ -256,7 +256,9 @@ A worker's run may carry a debrief: the stage session's own account of how the r
 account the run's roles gave, an entry each, in the order given, as a workflow's run gives it in
 the turn its loop completes in. Its session hands it over once, before its turn ends, through `pilot-work`'s `register_debrief`
 ([`mcp.md`](mcp.md)), and the record keeps it as given (`work.debrief` and `debrief_entries`,
-[`record.md`](record.md)). A job has none. The work item shows it once it is done, and the
+[`record.md`](record.md)), with the loop's figures where the workflow gives them
+(`work.debrief_figures`), which the pre-ruling pass after the run's turn reads
+([below](#pilots-own-work)) and nothing shows. A job has none. The work item shows it once it is done, and the
 debrief's notice carries it ([below](#its-debriefs-notice)): nothing of it shows while the item is
 open, and a run that gave none shows nothing. Every value in it, a section's
 name, a round, a role, a why, is the workflow's, shown as given; Pilot groups and counts the entries
@@ -308,33 +310,84 @@ true where left out ([`mcp.md`](mcp.md)). The `dev` plugin's stages name the sli
 with the debrief and never changed (`work.debrief_subject`, `work.debrief_completes`,
 [`record.md`](record.md)); a debrief given before Pilot took them has neither.
 
-**Its placing.** A work item whose debrief completes places the debrief's notice at its done, at its
-turn's end or at its close for good ([above](#closed-for-good)), in the same transaction, under its
-project's row (`RecordService._place_debrief_notice`, [`engine.md`](engine.md)): an item of the kind
-`debrief_notice`, a form of its own with no document, created by Pilot and by no session, taking
-the timeline's next place, after every item the turn registered, on the work item's plan task,
-never urgent and for no one. Its title is "Debrief · <subject>", or "Debrief · <the work item's
-title>" for a debrief that names no subject. It carries that debrief and, where it names a subject,
-the debrief of every done work item of the project with the same subject that does not complete and
-that no notice carries yet: a slice's planning and its run in one notice, a slice planned twice
-carrying both plannings. Each Work it carries names it (`work.debrief_notice_id`), so a debrief is
-carried once. A debrief that does not complete places none, nor does one given with no `completes`,
-since nothing is backfilled, nor a done in a project finished or archived; a run that gave no
-debrief, and every job, places none.
+**Its placing.** A work item whose debrief completes has the debrief's notice placed once the
+pre-ruling pass after its turn has ended ([below](#pilots-own-work)), so that Pilot's lines (below)
+are in it when it is first seen; or at its close for good ([above](#closed-for-good)), which no
+pass follows, in the close's transaction. Every end of the pass places it, in the transaction of
+that end or on a loop of its own once it commits, under the project's row held exclusively
+(`RecordService.debrief_notice_after_pass`, [`engine.md`](engine.md)):
+
+- its last turn's end, idle or failed, and a start of it that failed, its first turn's or a
+  continuation's, before the clarification run of a pass that asked its writer
+  (`ClarificationService.pass_ended`, [`round-trip.md`](round-trip.md)); and a reading that decides
+  the quota wall missed ([`usage.md`](usage.md));
+- a person's Stop and take over of what the pass holds
+  ([`round-trip.md`](round-trip.md#stop-and-take-over));
+- a turn of it interrupted from outside Pilot, and a stop made elsewhere ([`sessions.md`](sessions.md));
+- for a pass the store's update stopped, the end of the job the lift retries, or the lift itself
+  for a job whose retry it left to a person ([`store-update.md`](store-update.md)).
+
+A pass that failed or was stopped places it with no lines but those it wrote before; a person's
+Retry of the pass finds it placed and writes its lines into it. Finish and Archive, which stop the
+pass, place none, nor does any end in a project finished or archived by then.
+
+The notice is an item of the kind `debrief_notice`, a form of its own with no document, created by
+Pilot and by no session, taking the timeline's next place, on the work item's plan task, never
+urgent and for no one: placed at a pass's end, it follows the pass's own line, and comes before the
+clarification run of a pass that asked. Its title is "Debrief · <subject>", or "Debrief · <the work item's title>" for a
+debrief that names no subject. It carries that debrief and, where it names a subject, the debrief
+of every done work item of the project with the same subject that does not complete and that no
+notice carries yet: a slice's planning and its run in one notice, a slice planned twice carrying
+both plannings. Each Work it carries names it (`work.debrief_notice_id`), so a debrief is carried
+once, and an end that finds its run carried already places none. A debrief that does not complete
+places none, nor does one given with no `completes`, since nothing is backfilled; a run that gave
+no debrief, and every job, places none.
+
+**The stage's time.** Each work item the notice carries comes with the time its stage took
+(`stage_times`, `backend/app/engine/debriefs.py`), read from the record at every read and stored
+nowhere: the turns that have ended of the work item and of every work item of the project on its
+conversation placed before it, the runs a hand-back continued and the clarification runs among
+them, each from its start to its end, summed in the database and rounded once to whole seconds.
+The time between two turns, waiting on a person's answers, counts nothing, nor does a turn still
+running; a work item whose session has no conversation counts its own turns. A planning and a run
+each have a conversation of their own, so a slice planned twice shows three times, each with its
+work item's title.
+
+**Pilot's lines.** The pass after the run's turn may write Pilot's lines on its debrief, what it
+finds notable in the stage read against the project's journal
+([`documents.md`](documents.md#the-handbook-the-journal-and-the-project-document)), through
+`pilot-store`'s `write_notable` ([`mcp.md`](mcp.md)): Markdown, kept on the work item
+(`work.debrief_notable`), a later call, a Retry's included, replacing them. Lines written before the
+notice is placed show once it is; lines written to a work item a notice carries move the notice's
+row in `timeline.json` and its box at once. What is notable is the pass's to judge, and
+PilotProjects' `pre-rule` skill has a planning's pass write the journal alone, so a notice's lines
+are normally its run's.
 
 **Its read.** On the timeline it has `form` `debrief_notice`, `author` Pilot, and `debriefs`, each
-work item it carries as `{id, title, ended_at, debrief}`, in timeline order, read from the work item
-at every read, `ended_at` the time it was done ([`timeline.md`](timeline.md)). Its row in
-`timeline.json` is an item's row alone, with no file and none of the debriefs' words
-([`projection.md`](projection.md)), and `add_item` makes none.
+work item it carries as `{id, title, ended_at, debrief, stage_time, notable}`, in timeline order,
+read from the work item at every read: `ended_at` the time it was done, `stage_time` its stage's
+time in whole seconds and `notable` Pilot's lines on its debrief, null where there are none
+([`timeline.md`](timeline.md)). Its row in `timeline.json` is an item's row with `notable`, the
+lines of each work item it carries that has them, in timeline order, `[]` where none has, and with
+no file and none of the debriefs' words ([`projection.md`](projection.md)); `add_item` makes none.
 
 **Its box** (`DebriefNotice`, `components/timeline/debrief-notice.tsx`): its head, the Debrief's
-notebook and "Notice" in the kind's place, with the time and Discuss; its title; then per work item
-it carries, in timeline order, a head with the item's title and the time it was done, its debrief
-whole as Markdown, and under it *Full debrief* and *Session log*, which open that item's full
-debrief ([above](#its-debrief)) and its session log ([below](#the-session-log)) at their addresses,
-off a phone in the log's popover and on a phone as views pushed over the tabs; under the whole, its
-Read. It folds as any open item, and Discuss quotes it by its title.
+notebook and "Notice" in the kind's place, with the time and Discuss; its title; then each work
+item it carries, in timeline order, its title and its stage's time in the full debrief's format
+([above](#its-debrief); `took`, `lib/utils/time-format.ts`), the times in a column of their own
+beside titles that wrap; then Pilot's lines as Markdown, with no heading of the box's own, each
+work item's that has them one under the other in timeline order, nothing saying which work item
+they are about, and nothing standing there where the pass wrote none; then *Details*, closed, with
+the confirmation's chevron, *Less* once open. Under it stands, per work item in timeline order, a
+head with the item's title and the time it was done, its debrief whole as Markdown, and under it
+*Full debrief* and *Session log*, which open that item's full debrief ([above](#its-debrief)) and
+its session log ([below](#the-session-log)) at their addresses, off a phone in the log's popover
+and on a phone as views pushed over the tabs; no line stands beside a work item's part, and its
+head is sized halfway between the body's text and the box's title (D246). Under the whole, its
+Read. Whether *Details* is open is the page's own and recorded nowhere: it stays open through a
+live read of the timeline and an overlay opened over it, and the box is drawn closed after a reload
+and after Read and its Undo. It folds as any open item, and Discuss quotes it by its title, the
+brain reading Pilot's lines from its row in `timeline.json`.
 
 **Its Read** is a member's alone: Read in the app (`POST /api/items/<id>/read`), or the brain's
 `mark` `read` with `for` them, on their word ([`mcp.md`](mcp.md)). It is done `marked` by them,
@@ -347,13 +400,15 @@ opens the menu of its Discuss ([`timeline.md`](timeline.md)).
 
 **It waits on nobody.** The badge, the project's status and its notification leave it out, since
 what waits on a person is read by form ([`projects.md`](projects.md)); "N open above" counts it
-until it is read ([`timeline.md`](timeline.md)). It holds nothing up: its Read starts no work, and
-it carries nothing of the pre-ruling pass, whose verdict stays an item of its own
-([below](#pilots-own-work)). The work items' lines and their Debrief stay as they are.
+until it is read ([`timeline.md`](timeline.md)). It holds nothing up: its Read starts no work. What
+the pass makes of a debrief for the operator is its lines in it: PilotProjects' `pre-rule` skill
+writes no note or notice of a debrief and makes no card of it. The work items' lines and their
+Debrief stay as they are.
 
 The plugin's half went out with the slice's run, not after Pilot's promotion (D238): it sends
 `subject` and `completes` only to a Pilot whose `register_debrief` lists both, so that a Pilot
-without them stores the debrief alone, on its work item, and places no notice.
+without them stores the debrief alone, on its work item, and places no notice, and `figures` only
+to a Pilot whose `register_debrief` lists it.
 
 ## Pilot's own work
 
@@ -458,9 +513,19 @@ it the project's state and the handbook whole, as the chat's brief carries them,
   (a blank one `>`), the work item's line then leaving its last line out, so that a finding stated
   only in a silent turn's message reaches the pass whole (P-291); then `Attached on the
   work item: 1 file (timeline.json lists it).` or `<N> files (timeline.json lists them).` where some
-  are; then, where its session gave its debrief, `The stage session's debrief, as given:` and the
-  words on the lines after it, the whitespace they end in left off, none of its entries carried,
-  which the pass reads, an exception the operator ruled to what the brain is given (D219); then,
+  are; then, where its session gave its debrief, the stage's full debrief, which the pass reads, an
+  exception the operator ruled to what the brain is given (D219), each heading a line of its own:
+  `The stage session's debrief, as given:` and its words, the whitespace they end in left off;
+  `The debrief's entries, each whole and as given, in the order given, under its section, round,
+  role and time:` and per entry `- <section> · round <n> · <role> · <time>`, ending ` · passed` or
+  ` · failed` where it has a result, and under it, set in two spaces, `Why this round was needed:
+  <why>` where it opens a round and its words, all left out where the debrief has no entry; `The
+  loop's figures, as given:` and the figures, where it gave them; `The work items the debrief's
+  notice carries, each with the time its stage took, its turns summed:` and `- "<title>" (<id>) —
+  <time>` per work item the notice carries, or takes when it is placed, in timeline order
+  ([above](#its-debriefs-notice)), a time reading as the full debrief's, `<1m`, `17m`, `1h 40m`;
+  and `The project's journal, journal.md, whole:` and its text, or `The project's journal:
+  journal.md, empty.`, this the one brief that carries the journal; then,
   where the work item or another on its conversation was given claimed actions, its
   standing naming theirs, so that a continuation's names those of the run it continues and a retry,
   on a conversation of its own, takes them from it (D100), `The claimed actions given to this work
@@ -485,7 +550,8 @@ it the project's state and the handbook whole, as the chat's brief carries them,
   ended with no text.`. Then the files attached on the run and what it registered, as a worker's
   turn's brief has them, and `This pass asks nothing: what is still unclear is the operator's, the
   clarification beside the ask.`, after `Registered this run: nothing.` where it registered nothing;
-  then the debrief the clarification run's own session gave, as a worker's turn's brief has one.
+  then the full debrief the clarification run's own session gave, with the journal, as a worker's
+  turn's brief has them.
   The pass it briefs asks the writer nothing ([`mcp.md`](mcp.md)).
 - **An item of Pilot's own is done**: `/plan`, kind `an item of yours is done`; `The item: <path>
   (<item id>), <kind> "<title>"[, task <id>] — <close>.`, the close as the record holds it: a
@@ -739,11 +805,21 @@ in `timeline.spec.ts`, `frontend/tests/timeline/line-actions.spec.ts` (it never 
 show) and `phone-items.spec.ts`, and the debrief in the log's popover in `session-log.spec.ts`. The
 debrief's notice, its placing and what it carries, its Read and Undo, is pinned in
 `TestRecordServiceDebriefNotice` and `TestRecordServiceDebriefNoticeRead`
-(`backend/tests/engine/test_record.py`), its read in `TestDebriefNotice` (`test_timeline_service.py`),
-and its box, its links, its Read, Undo and line, its fold and Discuss, the badge and the status
-leaving it out, and its phone views in `frontend/tests/timeline/debrief-notice.spec.ts`. A spec
-that reads the badge or the project's status runs Pilot's job after each worker's turn in the store
-(`chats.passing`), since that job left alone fails to start and waits on a person.
+(`backend/tests/engine/test_record.py`), Pilot's lines in `TestRecordServiceWriteNotable` there, the
+work items it carries and their stages' times in `TestOfNotice` and `TestStageTimes`
+(`backend/tests/engine/test_debriefs.py`), its read in `TestDebriefNotice` (`test_timeline_service.py`),
+and each end of the pass that places it in `TestDebriefNoticeAtThePassEnd`,
+`TestDebriefNoticeAtAStopMadeElsewhere` and `TestDebriefNoticeAfterARestart`
+(`test_relay_service.py`), `TestPassEndsOffItsTurnsEnd`, `TestQuotaWallsPass` and the take-over's
+test (`test_session_start_service.py`), `test_clarification_service.py` and
+`test_store_updater.py`; the pass's brief, the full debrief and the journal, in
+`test_brief_service.py`. Its box, the stages' times, Pilot's lines and Details, its links, its
+Read, Undo and line, its fold and Discuss, the badge and the status leaving it out, and its phone
+views are in `frontend/tests/timeline/debrief-notice.spec.ts`, whose specs run the pass after each
+work item to its end in the store (`chats.passing`), or hold it open (`chats.pass(project)`),
+since the notice waits on it. A spec that reads the badge or the project's status runs Pilot's job
+after each worker's turn in the store too, since that job left alone fails to start and waits on a
+person.
 
 Each Playwright backend's controller is the fake it serves itself
 ([`controller.md`](controller.md)), which the `controller` fixture
@@ -780,7 +856,9 @@ call the routes as the signed-in person; `projects.setProgress(work, steps)` rep
 steps as its session's `set_progress` does while its turn runs, and `projects.debrief(work, words,
 entries?, {subject?, completes?})` gives its debrief as its session's `register_debrief` does, one
 invented entry where none are given (`DebriefEntry` their type), with no subject and completing
-where left out; `projects.register(work, path, toolUseId?)` and
+where left out, and `projects.writeNotable(work, text)` writes Pilot's lines on it as the pass's
+`write_notable` does, with no pass; `projects.seeded(name)` answers the id of a project of the dev
+seed, whose address it then knows as a made project's; `projects.register(work, path, toolUseId?)` and
 `projects.workerAttach(work, path, {to?, toolUseId?})` make its worker's calls, each its effect
 while its turn is in flight, `projects.askWriter(document, [{block, question}])` the pass's
 question, and `projects.clarify(document, reply?)` its clarification run, ended with the reply, or
@@ -790,9 +868,11 @@ a reply's steps in order and `effects` the effects standing on their own. The `t
 object's `item(id).work` reads the open item (`environment`, `running`, `line`, whose `data-state`
 is the Session's state, `cue`, `step`, `sessionLog`, `stop`, `row`, `progress`, with
 `progressRing` and `progressName`, `steps`, its popover, with `whys`, `resume`, `stopConfirm`,
-`retry`), and `item(id).debrief` a done line's Debrief, `item(id).debriefs` the work items an open
-debrief's notice carries and `item(id).carried(workId)` one of them (`title`, `ended`, `text`,
-`full`, `sessionLog`), its
+`retry`), and `item(id).debrief` a done line's Debrief; of an open debrief's notice,
+`item(id).stages` the lines of the work items it carries and `item(id).stage(workId)` one of them
+(`title`, `time`), `item(id).notable` Pilot's lines, `item(id).debriefDetails` its Details, and,
+under it, `item(id).debriefs` the work items' parts and `item(id).carried(workId)` one of them
+(`title`, `ended`, `text`, `full`, `sessionLog`); its
 `item(id).job` Pilot's job on the item (`root`, with `data-form` its form, `pulse`, `retry`), and
 the `sessionLog` fixture the log (`sessionLogAddress()`, `overlay`, the popover or the view), its
 head (`head`, `sub`, `close`, the job after a run's turn `job`, a phone's `debrief` and `discuss`)

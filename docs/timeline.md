@@ -99,8 +99,10 @@ each with:
   through `mark`, null while open and after Finish's close. A wait waits since its `created_at`;
 - `debriefs`, a debrief's notice's own, null for every other kind
   ([`work.md`](work.md#its-debriefs-notice)): the work items whose debriefs it carries, in timeline
-  order, each `{id, title, ended_at, debrief}` as the work item stands at the read, `ended_at` the
-  time it was done and `debrief` its stage session's own words, whole;
+  order, each `{id, title, ended_at, debrief, stage_time, notable}` as the work item stands at the
+  read, `ended_at` the time it was done, `debrief` its stage session's own words, whole,
+  `stage_time` the time its stage took, in whole seconds, and `notable` Pilot's lines on it,
+  Markdown, null where the pass wrote none;
 - `pilots_work`, what Pilot does on the item while it is Pilot's ([`round-trip.md`](round-trip.md)),
   null while it is the person's or done, and on every other item: `{doing, work, pulse, asked_in}`.
   `doing` is `awaiting_run`, it or another document its run registered awaiting its read;
@@ -228,7 +230,7 @@ delivers to it. A work item's status moves on an event of its own, `work_moved`,
 and moves nothing else ([`work.md`](work.md)).
 
 `useProjectEvents` (`frontend/src/hooks/use-project-events.ts`), called by the shell, reads again,
-on the event, the project lists and the named project's head, timeline, handbook, project document,
+on the event, the project lists and the named project's head, timeline, handbook, journal, project document,
 chats ([`chats.md`](chats.md)) and conversations ([`conversations.md`](conversations.md)), and every document read of an item of it
 ([`documents.md`](documents.md)), events that arrive together once after them; and on every rise of
 the stream's `isConnected`, the first included, every one of those reads, which covers an event sent
@@ -305,8 +307,9 @@ timeline's place ([`chats.md`](chats.md)).
   environment, its one line and its Stop or Resume, Close beside a stopped one's Resume, the setup its Retry once it failed or stopped; every
   other job of Pilot's own draws no item of its own, showing on the item it follows from
   ([`work.md`](work.md)). A debrief's notice open is its box (`debrief-notice.tsx`): its head and
-  title, then each work item it carries, its head, its debrief whole, *Full debrief* and *Session
-  log*, and its Read under the whole ([`work.md`](work.md#its-debriefs-notice)).
+  title, then each work item it carries with its stage's time, Pilot's lines where the pass wrote
+  any, and *Details*, closed, holding per work item its head, its debrief whole, *Full debrief* and
+  *Session log*; its Read under the whole ([`work.md`](work.md#its-debriefs-notice)).
 - **A folded item** (`fold.ts`, `item.tsx`). The kind in an open box's head is a button, "Fold, for
   everyone" its tooltip, that folds the item in its place for every member (`POST fold`): folded, the
   box is its head, its title and about one line more, the last fading out (`.item.folded`,
@@ -373,8 +376,8 @@ timeline's place ([`chats.md`](chats.md)).
   head, and beside the kind in a confirmation block's head, inline and opened. A document's
   card carries it as a chip last among its counts, "N auto pilot may take", hovering "Auto pilot
   will handle these for you" (or "this" for one). It goes once the block is answered or auto pilot
-  turns on, and comes back when it turns off; the handbook's, the project document's and a draft's
-  blocks never carry it. Turning auto pilot on while any stands asks first
+  turns on, and comes back when it turns off; the handbook's, the journal's, the project document's
+  and a draft's blocks never carry it. Turning auto pilot on while any stands asks first
   ([`projects.md`](projects.md)).
 - **Pilot writing.** While a session's turn saves an item's text (`writing`), Pilot's avatar and
   three dots, one at a time brightening, end the open item, every kind but the opening. The save
@@ -502,7 +505,8 @@ Undo brings it back with nothing chosen. A block Pilot answered reads Pilot's an
 the person's choice in the opened block alone. A question's Send and an action's Done send as they
 are. While an answer saves, the button pressed shows the spinner once it has waited
 ([`ui.md`](ui.md)). The block's form, `BlockPanel`, is
-the one every ask is drawn with: an item's (`Block`), the handbook's and the project document's,
+the one every ask is drawn with: an item's (`Block`), the handbook's, the journal's and the project
+document's,
 opened, read only (`DocumentBlock`), and a draft's in its Draft tab, answered through the
 draft's routes (`DraftBlock`, `useDraftAnswer`, [`documents.md`](documents.md)). A one-ask item
 becomes its done line once the screens read it back; a document's block stays, answered, until *Send
@@ -580,7 +584,8 @@ Pilot's note (`block.pilots_note`, `pilots-note.tsx`), written through `note`
 its head and its controls, at the top of an open one-ask panel, which draws no head, wherever `Block`
 draws the block: the timeline, an inline document, a document's tab, a phone's view and a one-ask
 item. `Block` passes none for a confirmation, in a document that is Pilot's, on a held block and on
-a block Pilot answered, and the handbook's, the project document's and a draft's blocks have none.
+a block Pilot answered, and the handbook's, the journal's, the project document's and a draft's
+blocks have none.
 Nothing of it shows in the block's head, on its segment or on the document's card, and the writer's
 text, the recommendation and the option's Recommended stay as written.
 
@@ -737,7 +742,8 @@ came, as a chat's quote chip can open it, waits: the timeline is read again, a r
 cancelled for it, and the address goes to its item once a read draws it, or leaves the timeline
 where it stands once that read has landed without it. A block in a collapsed section opens its section first. A block's
 address whose document is a card, done or open, also opens the document at the block, off a
-phone in its tab; a document's own address, an attachment's, the handbook's and the project document's are
+phone in its tab; a document's own address, an attachment's, the handbook's, the journal's and the
+project document's are
 [`documents.md`](documents.md)'s.
 
 **The item alone.** On a phone an item's address opens the item alone (`ItemOverlay`,
@@ -806,7 +812,9 @@ resume, line}`, its Resume's form event `timeline.ready.resume`, pinned in `crea
 a block's Send (`block.answerSend`, `confirm.answerSend` on a confirmation's card), an open item's
 kind and its fold (`timeline.item.kind`, `item.fold`, the box's `data-folded`) and a wait's
 button, what it waits on, its firings, its note and its phone menu (`item(id).wait`), the work
-items a debrief's notice carries (`item(id).debriefs`, `item(id).carried(workId)`), Pilot's note in
+items a debrief's notice carries with their stages' times, Pilot's lines and its Details
+(`item(id).stages`, `item(id).stage(workId)`, `item(id).notable`, `item(id).debriefDetails`) and the
+parts under it (`item(id).debriefs`, `item(id).carried(workId)`), Pilot's note in
 a block (`pilotsNote`: `root`, `mark`, `text`, `answer`, `note`, `line`, `toggle`, `take`, `offer`,
 `start`), on an inline document or a one-ask item (`item(id).pilotsNote`) and its alert
 (`item(id).alert`: `go`, `toggle`), which `projects.note(itemId, {block?, text?, suggested_answer?, suggested_note?,

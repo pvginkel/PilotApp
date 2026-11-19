@@ -252,7 +252,11 @@ and its environment, when it has one, handed to the shutdown timer: armed, so th
 Pilot started for it is stopped, one whose reset was still to make claimed first, so that the timer
 stops it too. The log says `Session <id> failed to start: <error>`. A Turn whose send fails fails
 the Session the same way, with its Turn's `send-failed` record (below) instead of a `start-failed`
-one. Nothing is retried but by a Resume.
+one. Nothing is retried but by a Resume. A job's failed start, its first turn's or a
+continuation's, ends its run once that commits, on the loop `start:start-failed:<session id>`:
+a pre-ruling pass's end, which places the debrief's notice of the run it followed and puts the
+questions it asked to the writer ([`work.md`](work.md#its-debriefs-notice),
+[`round-trip.md`](round-trip.md)).
 
 **A run's continuation.** `continue_run(db, project, run_id, released, message)` places the work
 item that continues the conversation of the work item `run_id`, in the caller's transaction, the
@@ -386,7 +390,10 @@ in order:
   Turn has already ended, through another process's relay, writes nothing.
 
 The Session's state at its turn's end: `stopped` when the turn was interrupted, by no one
-(`stopped_at` the end, `stopped_by_user_id` none), even when the frame also says `isError`; a work
+(`stopped_at` the end, `stopped_by_user_id` none), even when the frame also says `isError`, a
+pre-ruling pass's interrupted so, by no stop of Pilot's or a person's, which write the Session
+`stopped` first, placing the debrief's notice of the run it followed, since nothing retries it
+([`work.md`](work.md#its-debriefs-notice)); a work
 item's Session `failed` when its turn ended in error, the error its Turn's (D036), its nudge owed
 from the turn's end when its stream shows the quota wall (D098), and a pass then asking the writer
 nothing yet (D099); a work item's Session `failed` too when the turn its environment's restart left
@@ -466,7 +473,10 @@ once, then waits for it to settle, `GET ?wait=settled` 10 s at a time, and acts 
   in flight ends with no `result`; a `running` Session is `stopped` as a Stop stops it, by no one,
   with no current line, and one stopped already keeps its stop. The documents it was writing are
   let go, as at a turn's end, the environment's shutdown timer is armed, and a work item's slot is
-  given back. The log says `Session <id> stopped under its turn: <reason>`.
+  given back. The log says `Session <id> stopped under its turn: <reason>`. A pre-ruling pass
+  stopped so, which nothing retries, has the debrief's notice of the run it followed placed once
+  that commits, on the loop `start:pass-stopped:<session id>`, one stopped already keeping what
+  its stop owes ([`work.md`](work.md#its-debriefs-notice)).
 
 Resume starts the environment again (below), which is also KubeCoder's way out of `error`. No
 column holds the cause: the record that ended the turn is the fact, which the work item's line

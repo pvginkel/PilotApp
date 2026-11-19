@@ -7,7 +7,8 @@ copied into the record; `set_progress` and `set_progress_step`, the steps its ru
 shown on its tile; and `register_debrief`, its run's debrief, shown behind the done work item's
 Debrief and in its subject's debrief's notice. The brain's sessions, a project's chat, a conversation and the server's jobs, get
 `pilot-store`, the one door to the record beyond the project's folder: `add_item`, `attach_file`,
-`answer`, `mark`, `cancel_ask`, `stop_work`, `finish`, `ask_writer`, `note` and `alert`. Each tool is one REST call to the backend
+`answer`, `mark`, `cancel_ask`, `stop_work`, `finish`, `ask_writer`, `write_notable`, `note` and
+`alert`. Each tool is one REST call to the backend
 under the session's bearer, which names the session's project, environment and work item, so the
 tools take none of them, and each call that changed the record is its effect, a line in the
 session's records where the call ran, but for the steps and the debrief, which write none. What becomes of a registered document, its read at the run's
@@ -111,7 +112,7 @@ token of its own, and the old one names nothing once the new one's hash is writt
 sends its Turn to the controller session it has creates nothing, so that session keeps the `env`
 of its last create.
 
-`pilot-store`'s ten tools each carry the `_meta` `{"anthropic/alwaysLoad": true}` in `tools/list`
+`pilot-store`'s eleven tools each carry the `_meta` `{"anthropic/alwaysLoad": true}` in `tools/list`
 (`LOADED_UP_FRONT` in `tools.py`), on which Claude Code loads their schemas at the session's start,
 so that a brain session calls them with no ToolSearch first; `pilot-work`'s and `pilot-projects`'
 tools carry none, and stay behind a session's ToolSearch.
@@ -230,7 +231,7 @@ a script's and the agent's, are served one after the other, each answering the l
 left. No call writes an effect. One that changed the steps' codes, labels, whys, states or order
 moves the work item's status ([`work.md`](work.md)); one that changed none of them sends nothing.
 
-### `register_debrief(debrief, entries, subject?, completes?)`
+### `register_debrief(debrief, entries, subject?, completes?, figures?)`
 
 The session's own work item's debrief ([`work.md`](work.md#its-debrief)), handed over once, before
 its turn ends: `debrief`, the stage session's own account of how the run went, and `entries`, every
@@ -242,23 +243,28 @@ stores it as given and shows it as given, and reads nothing of the workflow's sh
 With them go `subject`, what the debrief is an account of, as the workflow names it, at most 120
 characters, compared whole within the project, shown in the debrief's notice's title and read for
 nothing else, and `completes`, true where left out, false where a later debrief of the same subject
-completes it: one subject's debriefs come together in one notice, placed at the done of the work
-item whose debrief completes it ([`work.md`](work.md#its-debriefs-notice)).
+completes it: one subject's debriefs come together in one notice, placed once the pre-ruling pass
+after the turn of the work item whose debrief completes it has ended
+([`work.md`](work.md#its-debriefs-notice)). `figures` is the loop's figures as the workflow gives
+them, at most 8,000 characters, opaque text kept for that pass, whose brief carries it whole
+([`work.md`](work.md#pilots-own-work)), and shown nowhere.
 
-**`POST /tools/pilot-work/debrief`** `{debrief, entries, subject?, completes?}` answers `201` `{entries}`, the number
+**`POST /tools/pilot-work/debrief`** `{debrief, entries, subject?, completes?, figures?}` answers `201` `{entries}`, the number
 stored, the entries numbered from 1 in the call's order (`PilotWorkService.register_debrief`). A
 body outside the limits is a `400` naming each fault, nothing stored: a debrief empty, blank or over
 16,000 characters; no entries or over 500; an empty section, role, words or why; a section or a why
 over 120 characters, a role over 64, words over 4,000; a round under 1 or a duration under 0, or
 either not an integer, or a `passed` that is not a boolean; both words and `passed`; a subject
 empty, blank or over 120 characters; a `completes` that is not a boolean, or false without a
-subject; a field the call or an entry does not have (`MAX_DEBRIEF` to `MAX_DEBRIEF_SUBJECT` in
+subject; figures empty, blank or over 8,000 characters; a field the call or an entry does not have
+(`MAX_DEBRIEF` to `MAX_DEBRIEF_FIGURES` in
 `backend/app/schemas/pilot_work.py`, which `pilot_mcp/api.py` mirrors). A second call is a `409`,
 "it has its debrief already", nothing changed. The call holds the Session's row as the steps' calls
 do and refuses with the gate's `403` unless its turn still runs, so a second call made at once
 waits for the first and is refused. It writes no effect and no line in the session's records, moves
-nothing and sends nothing: the work item shows its debrief once its turn has ended it done, and
-that done places the debrief's notice where the debrief completes ([`work.md`](work.md)), and the store's tree carries none of it ([`projection.md`](projection.md)).
+nothing and sends nothing: the work item shows its debrief once its turn has ended it done, the
+end of the pass after that turn places the debrief's notice where the debrief completes
+([`work.md`](work.md)), and the store's tree carries none of it ([`projection.md`](projection.md)).
 The tool sends no tool-use id, since no effect needs it.
 
 ## The brain's routes
@@ -426,6 +432,19 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   changes no ask, so it writes no effect: the asked block's head says that Pilot asked its writer
   ([`timeline.md`](timeline.md)), `blocks` the local ids it is asked about in the document's order,
   and each question is counted, `pilot_pass_questions_total{project}`.
+- **`write_notable(text)`**, `POST …/notable`, answers `200` `{outcome}`, `written` or `replaced`:
+  Pilot's lines on the debrief of the work item whose turn the calling job follows, `text`,
+  Markdown, what the pass finds notable about the stage, which the debrief's notice shows above
+  the debriefs it carries ([`work.md`](work.md#its-debriefs-notice)). The call names no work item:
+  the job's trigger item is it. A later call replaces the lines standing, a Retry's of the pass
+  included, which is a job for the same trigger item. A call from any session but a job's is a
+  `403`; a job of another trigger ("this job follows no work item's turn") and a work item that
+  gave no debrief ("it gave no debrief") are `409`s, and lines blank or over 16,000 characters
+  (`MAX_NOTABLE` in `backend/app/schemas/pilot_store.py`, which `pilot_mcp/api.py` mirrors) a
+  `400`, nothing written (`PilotStoreService.write_notable`). It holds the project's row before it
+  reads the work item, the row the notice's placing takes, and moves `timeline.json` where a notice
+  carries the work item already (`RecordService.write_notable`). It changes no ask, so it writes no
+  effect, and nothing of it goes back to the worker.
 - **`note(item, block?, text?, suggested_answer?, suggested_note?, offer?)`**, `POST …/notes`,
   answers `200` `{outcome}`, `written`, `replaced` or `withdrawn`: Pilot's note on an ask a person
   answers, the block `<item id>/<local id>` of the open prose item `item`, or without `block` on the
@@ -621,7 +640,7 @@ services that inject; the suite's default settings set no URL, so other creates 
 `TestAScriptsCall` (`tests/pilot_mcp/test_server.py`) pins a script's lone `tools/call` as the
 transport admits it. The routes are `tests/api/test_pilot_work.py`, whose
 `test_the_surface_is_five_routes_outside_the_api` holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
-`tests/api/test_pilot_store.py`, whose `test_the_surface_is_ten_routes_outside_the_api` holds
+`tests/api/test_pilot_store.py`, whose `test_the_surface_is_eleven_routes_outside_the_api` holds
 its blueprint's rules, and `tests/services/test_pilot_store_service.py`, each tool's served schema
 `STORE_SURFACE` in `tests/pilot_mcp/test_server.py`, the scope
 `tests/services/test_session_scope.py`, the effects `tests/services/test_effect_service.py`; the
@@ -629,7 +648,8 @@ copies `tests/engine/test_attachments.py`. The fake controller serves the file r
 ([`controller.md`](controller.md)), and the record's testing routes `POST
 /api/testing/items/<id>/registrations`, `…/worker-attachments`, `…/progress` and `…/debrief`
 register a document, attach a file, replace the list of steps and give the debrief as the worker's
-tools do, `…/writer-questions` asks a document's writer as the pass does, and `…/notes` and
-`…/alerts` write Pilot's note and alert as `note` and `alert` do
+tools do, `…/writer-questions` asks a document's writer as the pass does, `…/notable` writes
+Pilot's lines on a debrief as `write_notable` does, with no pass, and `…/notes` and `…/alerts`
+write Pilot's note and alert as `note` and `alert` do
 ([`projects.md`](projects.md)). `frontend/tests/infrastructure/nginx.spec.ts` pins that the UI's
 nginx forwards no path under `/tools/`, whatever its extension.

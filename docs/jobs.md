@@ -16,6 +16,8 @@ the job, never its work.
 | `relay:<session id>` | a loop of the job `relay` | relays a Session's turn in flight into its records ([`sessions.md`](sessions.md)) |
 | `interrupt:<session id>` | a loop of the job `interrupt` | asks the controller's interrupt of a turn stopped under it ([`sessions.md`](sessions.md)) |
 | `start:<session id>` | a loop of the job `start` | brings a `starting` Session up ([`sessions.md`](sessions.md)) |
+| `start:start-failed:<session id>` | a loop of the job `start` | ends the run of a job whose start failed, a pre-ruling pass's at its end ([`sessions.md`](sessions.md)) |
+| `start:pass-stopped:<session id>` | a loop of the job `start` | places the debrief's notice a pre-ruling pass stopped elsewhere owes ([`work.md`](work.md#its-debriefs-notice)) |
 | `start:held` | a loop of the job `start` | moves the held Sessions on once the gate opens for them ([`sessions.md`](sessions.md)) |
 | `start:hard-stop` | a loop of the job `start` | stops every running work item while a usage halt whose setting is the hard stop holds ([`usage.md`](usage.md)) |
 | `start:nudges` | a loop of the job `start` | sends the nudges owed that nothing holds any more, after settling each quota wall a reading decided missed ([`usage.md`](usage.md)) |

@@ -6,7 +6,7 @@ transitions and its members. The API is `backend/app/api/projects.py` on `Projec
 the tables are [`record.md`](record.md)'s, and the frame the screens sit in is [`ui.md`](ui.md). The
 timeline under a project's head, and its items, are [`timeline.md`](timeline.md)'s; a document's
 tab in its place, the tab line under the head and the side panel beside them, with the project's
-handbook and project document, are [`documents.md`](documents.md)'s.
+handbook, journal and project document, are [`documents.md`](documents.md)'s.
 On a phone a project's screen is its own: the head in one line, the tabs at the bottom and the views
 pushed over them (below).
 
@@ -147,7 +147,7 @@ is a `404`.
 chat's Session, so a message's send under way makes it wait, then decide. It opens the draft, its
 slug the one the draft's front matter names, and in the same transaction:
 
-- the handbook is born empty beside the draft ([`engine.md`](engine.md));
+- the handbook and the journal are born empty beside the draft ([`engine.md`](engine.md));
 - the opening comes first on the timeline, titled "<author's name> started this project": its words
   are the first message to the project's definition chat, verbatim, and its author that message's
   ([`timeline.md`](timeline.md));
@@ -310,7 +310,7 @@ address (`useShownProject()`). The bare address is a phone's home (below); off a
 project the browser remembers while that project is in the list, else the list's first in the order
 shown; with no project the centre reads "No projects yet" and the address stays `/`. Under it are an item's
 address and a block's ([`timeline.md`](timeline.md)), and a document's, an attachment's, the
-handbook's and the project document's ([`documents.md`](documents.md)), at which the project's tab
+handbook's, the journal's and the project document's ([`documents.md`](documents.md)), at which the project's tab
 is current too. Off a phone the project's row in the list brings back the document's tab the
 project was left on, but for the row of the project on screen, which shows its timeline in the
 browser's entry's place, as every move within a project does, from a document's tab and from
@@ -344,8 +344,8 @@ write committed, and whenever the event stream comes up ([`timeline.md`](timelin
 `project-head.tsx` draws the head off a phone in two rows: the name, its chip and the ticket and the
 repo, then the auto pilot switch; below them the step button, the members, the plan's notes button
 and the project's menu. The two rows share one line. Nothing in it opens or closes the side panel,
-which stands open beside it: the chat is the panel's Chat tab, the documents and the handbook its
-Documents tab ([`documents.md`](documents.md)). While a document is open, the tab line stands under
+which stands open beside it: the chat is the panel's Chat tab, the documents, the handbook and the
+journal its Documents tab ([`documents.md`](documents.md)). While a document is open, the tab line stands under
 it as its last row. A phone's head is its own, in one line (below). On both sizes the head, a new
 project's included, stands on the project list's tint (`--side`, D194), the phone's tabs at the bottom
 taking the same, its members' avatars ringed in it, and the tab line under it with it, the tab
@@ -418,7 +418,7 @@ most, the first member's avatar and then the second's, or a "+N", level with it,
 names the rest; the
 plan's notes button while it shows; and the project's menu. As off a phone, it has no Discuss,
 Documents, handbook or Draft button: the tabs stand for them, the Documents tab listing the handbook
-([`documents.md`](documents.md)). The Archived and Finished chips show their icon alone, their word
+and the journal ([`documents.md`](documents.md)). The Archived and Finished chips show their icon alone, their word
 the tooltip's and a screen reader's (D128). Only the name gives way, cut to nothing: an archived or
 finished head with three members and the notes' button holds its line from about 390px
 wide, and on a narrower phone its menu runs past the head's edge. A draft's has its name, the Draft
@@ -484,7 +484,7 @@ past Create, shows the Timeline. What the desktop keeps per project in the brows
 panel's tab and width and the tab line, is neither read nor written on a phone.
 
 **What opens from a tab is a view** pushed over it: a document, an attachment, the project document,
-the handbook, a session log ([`documents.md`](documents.md), [`work.md`](work.md)) and the item
+the handbook, the journal, a session log ([`documents.md`](documents.md), [`work.md`](work.md)) and the item
 alone, which an item's address opens on a phone ([`timeline.md`](timeline.md)). A view is the whole
 screen over the head and the tabs, which take no focus under it. It is an entry of its own, pushed
 over the one it was opened from, whose tab it keeps under it, and a view opened from a view lies on
@@ -553,7 +553,8 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   engine: a project made so is paused only where `paused` says so, never by Create's pause, and a
   finished one has no archive question. A project past the draft is born with its opening first: the
   first member's words, `opening` (by default "An invented project, started for a test."), verbatim,
-  titled by its name or "New project", and with its handbook, empty; its project document is `#
+  titled by its name or "New project", and with its handbook and its journal, empty; its project
+  document is `#
   <name>`. With an `environment_id`, an idle work session of the project there adds `open_items`
   open notices. A finished project with auto pilot on, a paused project that is not open, a member
   named twice, open items without an environment and a plan with a fault are each a `400`; a handle
@@ -585,10 +586,10 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   session, in a Turn of it in flight, opened when it has none, on the tree's current hash, as the
   store's sync does, and answers `200` `{held, faults: [{line, message}]}`. A held save leaves the
   item a concept until a clean one.
-- `POST /api/testing/projects/<id>/draft/saves` and `…/handbook/saves` `{text}` ingest a save of the
-  project document or the handbook by the project's session, as an item's does, with the same
-  answer. An unknown or archived project, and a draft's handbook, are a `404`; a project with no
-  session a `409`.
+- `POST /api/testing/projects/<id>/draft/saves`, `…/handbook/saves` and `…/journal/saves` `{text}`
+  ingest a save of the project document, the handbook or the journal by the project's session, as
+  an item's does, with the same answer. An unknown or archived project, and a draft's handbook or
+  journal, are a `404`; a project with no session a `409`.
 - `POST /api/testing/projects/<id>/turn-ends`, no body, ends the turn of the project's session
   started last as the relay does ([`engine.md`](engine.md)), its Turns in flight with it, and
   answers `204`: Pilot's writing flag cleared on every document the session was saving, each
@@ -632,13 +633,20 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   on every browser through `work_moved` where the list changed. It answers `200` `{steps}`, the list
   as it stands; a session with no turn running is a `403`, an unknown work item a `404`, a session
   with no environment yet or a repeated code a `409`, and a body outside the limits a `400`.
-- `POST /api/testing/items/<id>/debrief` `{debrief, entries, subject?, completes?}` gives the work
-  item `<id>`'s debrief as its worker's `register_debrief` does ([`mcp.md`](mcp.md)), while its
-  session's turn is in flight; its done line carries the Debrief once the turn ends, and that done
-  places the debrief's notice where the debrief completes ([`work.md`](work.md#its-debrief)). It answers
+- `POST /api/testing/items/<id>/debrief` `{debrief, entries, subject?, completes?, figures?}` gives
+  the work item `<id>`'s debrief as its worker's `register_debrief` does ([`mcp.md`](mcp.md)),
+  while its session's turn is in flight; its done line carries the Debrief once the turn ends, and
+  the end of the pass after that turn places the debrief's notice where the debrief completes
+  ([`work.md`](work.md#its-debriefs-notice)). It answers
   `201` `{entries}`, the number stored; a session with no turn running is a `403`, an unknown work
   item a `404`, a session with no environment yet or a debrief given already a `409`, and a body
   outside the limits a `400`.
+- `POST /api/testing/items/<id>/notable` `{text}` writes Pilot's lines on the work item `<id>`'s
+  debrief as the pass's `write_notable` does ([`mcp.md`](mcp.md)), with no pass and no turn
+  running, before its notice is placed or after, replacing lines that stand there; the notice
+  that carries the work item shows them. It answers `200` `{outcome}`, `written` or `replaced`;
+  lines blank or over 16,000 characters are a `400`, an unknown work item a `404`, and one that
+  gave no debrief a `409`.
 - `POST /api/testing/items/<id>/writer-questions` `{questions: [{block, question}]}` asks the writer
   of the registered document `<id>` about its blocks, by their local ids, as the pre-ruling pass's
   `ask_writer` does, in one turn of a job's session of its project placed for it and ended once
@@ -694,12 +702,12 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
 A project past the draft, born with its opening, an item placed, a work item placed, an item's save
 posted, Pilot's Done, a wait's firing and attachments hung each raise `project_changed` through the
 engine, so an
-open screen follows them ([`timeline.md`](timeline.md)), and so do a save of the handbook or the
-project document that changes its text or takes it for the session, and a turn's end, for each
+open screen follows them ([`timeline.md`](timeline.md)), and so do a save of the handbook, the
+journal or the project document that changes its text or takes it for the session, and a turn's end, for each
 document it lets go. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`, `place`, `save`,
 `saveProjectDocument`, `endTurn`, `doneByPilot`, `attach`, `attachToDraft`, `draft`, `register`,
-`workerAttach`, `askWriter`, `clarify`, `note`, `alert`, `list`, `head`, `transition`, `sightings`, `loadScenario`, the item writes of
+`workerAttach`, `askWriter`, `clarify`, `note`, `alert`, `writeNotable`, `list`, `seeded`, `head`, `transition`, `sightings`, `loadScenario`, the item writes of
 [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
 `projectList` and `projectHead` drive the screens, a spec building a project's URLs with
 `projectAddress(id)`, the folder the testing route answered (a draft created since is at its slug,

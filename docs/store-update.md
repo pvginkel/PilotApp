@@ -127,6 +127,10 @@ while the column is unwritten and no lift is asked:
    - a stopped turn still ending, which Retry refuses too, holds the lift to a later run (`lifts
      once <id>'s stopped turn ends`).
 
+   The transaction that writes `lifted_at` takes, after the row, the Project's row of each job left
+   to a person's Retry `FOR UPDATE`, in id order, before any Session's: a pre-ruling pass so left is
+   at its end, and the debrief's notice of the run it followed is placed in that transaction
+   ([`work.md`](work.md#its-debriefs-notice)); a pass the lift retried places it at the retry's end.
    Once `lifted_at` commits (`lifted`), the held starts are released, the nudges sent and the
    conditions told. Under the hold, a retry is held as any job's start is.
 

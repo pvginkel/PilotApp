@@ -55,8 +55,8 @@ Any other key is ignored.
 gives no title or the same words, and the reader reports its line. An item's title is its text's
 alone, none while the text gives none; the draft's is the project's name. Every save Pilot makes of
 an item, of its own or of a registered document, must give a title one of the two ways, whatever
-its shape; the draft, the handbook, the opening, and a registered document as its worker's turn
-left it are outside the rule. Pilot's own item is born with the title it was added with written
+its shape; the draft, the handbook, the journal, the opening, and a registered document as its
+worker's turn left it are outside the rule. Pilot's own item is born with the title it was added with written
 first into its front matter, unless that gives a `title` already (`with_title()`), and with the
 facts it was added with, `step`, `urgent: true`, `for` and `summary`, each written where the front
 matter gives none of its own, in place of a key that gives none, else after its last line
@@ -235,8 +235,8 @@ freezes nothing, and Undo, which takes the answer lines out, unfreezes the block
   included; where it changed, dropped or added one, the block's answer lines in the save are taken
   out and the published ones written at the end of the block's mapping, a fault per key. A block may
   go from the draft, its answers with it. Past Create project, `project.md` is no draft: it is read
-  under the handbook's rules (`DocumentKind.HANDBOOK`), so a person's answer freezes its block and a
-  dropped block is put back.
+  under the handbook's rules (`DocumentKind.HANDBOOK`), as the journal is, so a person's answer
+  freezes its block and a dropped block is put back.
 - **The opening** is the record's whole: a save that differs from it is reverted, with one fault.
 
 Each fault of the merge is reported at its line in the merged text, and the merged text is

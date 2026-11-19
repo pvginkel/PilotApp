@@ -52,7 +52,7 @@ and the quoted thing's title between the two:
 - `<quoted_block id="<item id>/<local id>">…</quoted_block id="…">`, a block, a draft's
   `project.md/<local id>`;
 - `<quoted_path path="<path>">…</quoted_path path="<path>">`, a file of the project's folder by its
-  path there (D070): `handbook.md`, `project.md`, or an attachment's
+  path there (D070): `handbook.md`, `project.md`, `journal.md`, or an attachment's
   `attachments/<batch>/<filename>`, the batch from 1 and the filename keeping the slashes of a
   folder it came in, with no empty, `.` or `..` segment. To the server, as to the UI, a tag naming
   any other path is no quote.
@@ -219,6 +219,10 @@ the brain meets one shape whichever it reads:
   in a new item):` and a line per such deferral, as the store's hooks print it
   ([`sync.md`](sync.md)), which a finished project's brief leaves out, its session reading only;
 - `The project's handbook, handbook.md, whole:` and its published text, left out while it is blank.
+
+The project's journal is no part of the state: the chat reads `journal.md` from the tree when a member
+asks how the project's runs have gone or quotes it (PilotProjects' `chat` skill), and only the brief
+of the pass after a worker's turn carries it ([`work.md`](work.md#pilots-own-work)).
 
 The state serves the turn the brief opens. A later turn of the session, a chat's next message or a
 wait's resumed run ([`waits.md`](waits.md)), carries none of it, and the store's skills read what
@@ -516,13 +520,13 @@ under "The project is archived: bring it back to message Pilot."
 an open item's head, every kind's, a document's block's head, where a one-ask item's is its item's,
 and the head of an ask in a draft's Draft tab, quoting it as `project.md/<local id>`; stands last
 among a done line's actions, off a phone, shown with them ([`timeline.md`](timeline.md));
-and stands in the head of an opened document (the item), an attachment, the handbook, the project
-document (by path), and on a phone a session log's view (its work item), the popover having none. Its
+and stands in the head of an opened document (the item), an attachment, the handbook, the journal,
+the project document (by path), and on a phone a session log's view (its work item), the popover having none. Its
 quote's label is an item's title; a block's "<ask> · <item's title>", a draft's ask's "<ask> ·
 <draft's title>", the ask its own section's heading, else its kind, numbered among its document's
 blocks of that kind where it holds more than one, "Decision 2 · Packing", a kind held once
-unnumbered; "New project" while the draft has none; a file's title as read, else "Handbook" or
-"Project document"; an attachment's title, its path as the timeline gives it. A click puts the quote
+unnumbered; "New project" while the draft has none; a file's title as read, else "Handbook",
+"Journal" or "Project document"; an attachment's title, its path as the timeline gives it. A click puts the quote
 in the project's composer (`hooks/use-discuss.ts`) and shows the panel's Chat tab; in a draft it goes
 to the definition chat, the first tab of the tab line, showing it where a document's tab shows. On a phone it shows the Chat tab, a draft's Chat, every view taken off first. The quote
 stands over the field as a chip, with its remove, the field takes the focus once nothing covers it,

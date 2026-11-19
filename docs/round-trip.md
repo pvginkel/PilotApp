@@ -164,10 +164,13 @@ an alert on a document whose Send must wait on another ask (`note` and `alert`,
 which closes it as a person's Done does, its write-back and its continuation included: an item of
 kind `document`, or a registered document of one block, which has its block's kind, once that block
 is answered, deferred, or claimed and done ([`engine.md`](engine.md)). Where the run's session gave
-its debrief, the brief carries it whole after the documents (D219, [`work.md`](work.md#its-debrief)),
-and the pass leaves it, puts what the operator must know of it in a note on the run's document
-still open, or a notice where none is, or makes a card or a fieldnote of it; the debrief is no document,
-with no block to answer and nothing to mark.
+its debrief, the brief carries the stage's full debrief after the documents, with the stages' times
+and the project's journal (D219, [`work.md`](work.md#pilots-own-work)): the pass keeps the journal
+from it and writes what it finds notable against the journal as Pilot's lines in the debrief's
+notice (`write_notable`, [`mcp.md`](mcp.md)), which is placed once the pass has ended
+([`work.md`](work.md#its-debriefs-notice)); it makes no note, notice or card of a debrief, and may
+post a fieldnote it names nowhere. The debrief is no document, with no block to answer and nothing
+to mark.
 
 **A claimed action** (D085). An action Pilot may run under the grants, the pass claims: it adds the
 work item that does it, the block named in its `claims` ([`mcp.md`](mcp.md)), then answers the
@@ -193,7 +196,8 @@ The pass asks a registered document's writer about a block it cannot read throug
 marked in the asked block's head ([`timeline.md`](timeline.md)). When the pass's job ends, idle
 after its last turn or
 failed, having asked, one **clarification run** is placed in that transaction
-(`ClarificationService.pass_ended`), which puts every question the pass asked to the writer of the
+(`ClarificationService.pass_ended`, which first places the debrief's notice of the run the pass
+followed, [`work.md`](work.md#its-debriefs-notice)), which puts every question the pass asked to the writer of the
 run whose turn it took, whichever run's document a question names; a Stop places none. A pass whose
 turn died at the quota wall is not at its end while its nudge is owed (D099): its run is placed when
 the run its nudge continues ends, when that continuation's start fails, or when a reading decides
@@ -274,7 +278,8 @@ stopped, `stopped` by the person at the take-over's time, its turn as it ended; 
 quota wall stays `failed`. None is owed its nudge afterwards, and the store update's lift retries
 none of them, since it retries Pilot's stops alone. One pass covers every document its worker's
 turn registered, so its take-over hands each of them over, and a pass it ends puts no question to
-the writer. A job stopped so shows as any stopped job does, with Retry, and its project's badge
+the writer; it is at its end, so the debrief's notice of the run it followed is placed then, in the
+take-over's transaction ([`work.md`](work.md#its-debriefs-notice)). A job stopped so shows as any stopped job does, with Retry, and its project's badge
 counts it until it is retried ([`work.md`](work.md)).
 
 It is a `409` "Cannot stop and take over item <id> because …" for a caller with no handle, and:
@@ -420,8 +425,8 @@ documents is open, the continuation's Session holds it as any Session holds its 
   the continuation, the slot's lock and an Environment's.
 - A Resume of a continuation: the Project's row shared, its Session's, the Documents it carries, the
   slot's lock, then an Environment's.
-- A pass's turn end that places its clarification run: the Project's row `FOR UPDATE`, then the
-  pass's Session's, as a worker's turn end takes them; the conversation is read under the slot's
+- A pass's turn end that places the debrief's notice of its run and its clarification run: the
+  Project's row `FOR UPDATE`, then the pass's Session's, as a worker's turn end takes them; the conversation is read under the slot's
   lock. Every other turn end takes the Project's row shared before its Session's
   ([`sessions.md`](sessions.md)).
 - A save of a document, one Pilot's work holds included: the Project's row shared, or `FOR UPDATE`
@@ -430,7 +435,9 @@ documents is open, the continuation's Session holds it as any Session holds its 
 - A tool call's gate that reads its Session with no turn running: the Session's send lock shared,
   then the Project's row `FOR UPDATE`, both let go once read ([`mcp.md`](mcp.md)).
 - A take-over: the Project's row `FOR UPDATE`, then each Session it stops in id order, as the relay
-  takes them. A Cancel: the Project's row `FOR UPDATE`, then the run's Documents in id order. The
+  takes them. The store's update's lift: the update's row, then each Project's row of a job its
+  retry left to a person `FOR UPDATE`, in id order, before any Session's, each a notice's placing
+  ([`store-update.md`](store-update.md)). A Cancel: the Project's row `FOR UPDATE`, then the run's Documents in id order. The
   app's answers, Dones and their refusals read what is Pilot's under the Project's row, which every
   placement of work and every Resume takes too, so no hold begins while they read.
 

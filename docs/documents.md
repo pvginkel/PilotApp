@@ -22,12 +22,14 @@ Chat tab, and Discuss in an opened document's head, are [`chats.md`](chats.md)'s
   Version's. Only Done cuts that Version, so an open item, and one done any other way (an answer, Read, Reviewed, or Finish's
   close, a Done undone before it included), reads as last published. An unknown id, a work item and
   a wait answer `404` "Document of item <id> was not found".
-- **`GET /api/projects/<project_id>/draft`** and **`…/handbook`** answer the project document,
-  `project.md`, and the handbook, `handbook.md`, as last published: `{title, body, writing}`,
-  `title` the text's own, from its front matter or its first heading, else null, and `body` its
-  parts as the timeline gives them, `[]` for a text with nothing past its title, as the handbook is
-  born. An unknown project answers `404`, and a draft's handbook, which a draft does not have,
-  "Handbook of project <id> was not found".
+- **`GET /api/projects/<project_id>/draft`**, **`…/handbook`** and **`…/journal`** answer the
+  project document, `project.md`, the handbook, `handbook.md`, and the journal, `journal.md`, as
+  last published: `{title, body, writing}`, `title` the text's own, from its front matter or its
+  first heading, else null, and `body` its parts as the timeline gives them, `[]` for a text with
+  nothing past its title, as the handbook and the journal are born. An unknown project answers
+  `404`, and so does the handbook or the journal of a project that has none, a draft or an adopted
+  project ([`collection.md`](collection.md)): "Handbook of project <id> was not found", "Journal of
+  project <id> was not found".
 
 Each is behind the API's sign-in and the `editor` role ([`sign-in.md`](sign-in.md)), on any
 project.
@@ -79,19 +81,19 @@ The title and the stored type do not travel on the stream: the timeline's `attac
 ## What opens
 
 `Overlay` (`components/overlay/overlay.tsx`) draws what a project opens: a document, an attachment,
-the handbook and the project document, a work item's session log, its debrief and its full
+the handbook, the journal and the project document, a work item's session log, its debrief and its full
 debrief ([`work.md`](work.md)) and, on a phone, the item alone ([`timeline.md`](timeline.md)). Its head holds the titles and, once what it
 shows is read, its buttons: Pilot's job on it and its Undo where it has them, then Discuss, quoting
 it ([`chats.md`](chats.md)). The head stands at its top however tall it is, its buttons level with
 the title's first line, the title at weight 600. Under it stand the strip where what it shows has
 one (below), the body and the foot. Its body keeps its scroll while what it shows is read again.
 Where a read fails, its body reads "The document did not load." A document's address, a card's
-block's, the handbook's and the project document's read what they open before the router swaps
+block's, the handbook's, the journal's and the project document's read what they open before the router swaps
 it in (`readFirst`, `lib/screen-reads.ts`), the screen kept as it stood until then, the loading
 bar telling of a wait past 200 ms ([`ui.md`](ui.md)), so that a tab or a view opens with its
 document drawn; an open made while another's read is under way replaces it.
 
-**Off a phone, a tab.** A document, an attachment, the handbook and the project document each open
+**Off a phone, a tab.** A document, an attachment, the handbook, the journal and the project document each open
 as a tab in the timeline's place (`.stage`), the side panel beside it, at the timeline's width and on
 the page's own colour, its head's and its foot's text in the timeline's column. A tab has no
 backdrop, maximize or cross: the cross of its tab on the tab line closes it, and so does *Send
@@ -111,8 +113,8 @@ icon, its title cut short and whole in its tooltip, and its cross, the middle bu
 fit, the line scrolls, the tab showing scrolled into it. Closing the tab showing shows the one that
 showed before it.
 
-**The address follows the tab showing.** A document's, an attachment's, the handbook's or the project
-document's address shows its tab, opening it at the line's end where it is not open, and a document
+**The address follows the tab showing.** A document's, an attachment's, the handbook's, the journal's
+or the project document's address shows its tab, opening it at the line's end where it is not open, and a document
 already open shows the tab it has; a document's tab shows again at the document's own address, not
 at a block's or its box's; any other address of the project shows the timeline. Off a phone a move
 between the project's addresses replaces the browser's entry rather than adding one
@@ -257,21 +259,33 @@ body goes by the type it was stored with (`attachment-overlay.tsx`):
 
 An attachment its item does not carry reads "The document did not load."
 
-### The handbook and the project document
+### The handbook, the journal and the project document
 
-The Documents tab's first row opens the project document and its second the handbook (below), each
-as a tab of its own, on a phone a view (`HandbookOverlay`, `ProjectDocumentOverlay`, read by
-`useHandbook` and `useProjectDraft`). Each is read only, with no foot. Its head is the icon
-and the text's title, else "Handbook" or "Project document", over "<project> · Handbook" or
-"<project> · Project document"; its body is its prose as Markdown and its asks, in their order, or
+The Documents tab's first row opens the project document, its second the handbook and its third
+the journal (below), each as a tab of its own, on a phone a view (`HandbookOverlay`,
+`JournalOverlay`, `ProjectDocumentOverlay`, read by `useHandbook`, `useJournal` and
+`useProjectDraft`). Each is read only, with no foot. Its head is the icon, the journal's lucide's
+`BookText`, and the text's title, else "Handbook", "Journal" or "Project document", over
+"<project> · Handbook", "<project> · Journal" or "<project> · Project document", and Discuss,
+quoting it by its path ([`chats.md`](chats.md)); its body is its prose as Markdown and its asks, in their order, or
 *Empty* while it has nothing past its title, then Pilot's dots while a turn saves it. A fenced ask
-in either has no item to answer it, so it reads only (D072), drawn as the timeline draws a settled
+in any of them has no item to answer it, so it reads only (D072), drawn as the timeline draws a settled
 ask (`DocumentBlock`, `components/timeline/block.tsx`). An answered ask is closed, with its answer,
 who gave it and *In the chat* where it was given there, and with no chevron and no Discuss. An ask
-left open at Create stands open, its controls disabled. A failed read, a draft's handbook included,
-reads "The document did not load."
+left open at Create stands open, its controls disabled. A failed read, a draft's handbook or
+journal included, reads "The document did not load."
 
-**A link to the project's attached material.** In either, a link to a path in the project's
+**The journal** is Pilot's running account of how the project's workflow runs go. It is born empty
+at Create project beside the handbook, and a project created before the journal came took an empty
+one then, nothing backfilled ([`record.md`](record.md)). The pre-ruling pass keeps it after every
+stage that gives a debrief, its brief carrying the journal whole beside the stage's full debrief,
+and writes what it finds notable against it into the debrief's notice as Pilot's lines
+([`work.md`](work.md#its-debriefs-notice)); the project's chat reads it from the tree when a member
+asks how the runs have gone or quotes it, and no other brief carries it (PilotProjects' `pre-rule`
+and `chat` skills). The engine checks no writer: any session's save of `journal.md` is ingested
+under the handbook's rules ([`engine.md`](engine.md)).
+
+**A link to the project's attached material.** In any of them, a link to a path in the project's
 `attachments/`, as written, a leading `./` and escapes allowed (`linksMaterial` and `pathOfLink` in
 `hooks/use-timeline.ts`), is `MaterialLink` (`project-document-overlay.tsx`, through `Markdown`'s
 `materialLink`). It opens the attachment where it hangs, at its address under its item's, the
@@ -283,7 +297,7 @@ attachment is its words alone, and every other link opens in a new browser tab.
 
 What a tab or a view shows is read again on its project's `project_changed`, but for the one the
 page's own write committed, on every rise of the event stream, when the window regains focus and
-after the page's own writes ([`timeline.md`](timeline.md)). A save of the handbook or the project document raises one where it
+after the page's own writes ([`timeline.md`](timeline.md)). A save of the handbook, the journal or the project document raises one where it
 changes the published text or makes its session the one writing it, and a turn's end raises one for
 each document it lets go ([`engine.md`](engine.md)), so an open document shows Pilot's new text, and
 its dots come and go, as they happen.
@@ -350,6 +364,8 @@ environment in the draft reads as plain words.
 - **The handbook** under it, on a phone (D125) and off one alike, the project's head having no
   button for it (D149): its title, the text's, else, and until it is read, "Handbook", over
   "Handbook".
+- **The journal** under the handbook: its title, the text's, else, and until it is read, "Journal",
+  over "Journal".
 - **Attachments**, newest batch first, a batch being the files hung in one call. A batch of one is
   its title over "<item> · <stamp>"; a batch of several is a folder row, the last directory their
   sources share, else "N files", over "<item> · <stamp>", with each file under it, its title over
@@ -360,7 +376,7 @@ environment in the draft reads as plain words.
 
 Every row opens at its address, off a phone in its tab, on a phone a view. While either read is under way the
 two headings stand with nothing under them, and while either's latest read failed, "The documents
-did not load." stands in their place, under the project document's row. The tab's count is the
+did not load." stands in their place, under the journal's row. The tab's count is the
 attachments and the documents, the project document left out, and stands only once both are read.
 
 A draft's Documents tab lists the attachments alone, what Pilot attached so far in its definition
@@ -381,6 +397,7 @@ too ([`projects.md`](projects.md)).
 | `/projects/<project>/items/<item>/attachments/<attachment>` | the attachment; on a phone a view over the timeline where it stands |
 | `/projects/<project>/attachments/<attachment>` | the attachment, wherever it hangs: a draft's, on nothing, and the same one once Create hangs it on the opening |
 | `/projects/<project>/handbook` | the handbook |
+| `/projects/<project>/journal` | the journal |
 | `/projects/<project>/project-document` | the project document |
 
 The routes draw nothing of their own: the project's route (`routes/_shell/projects/$address.tsx`)
@@ -407,12 +424,12 @@ and, for the views on a phone, `phone-views.spec.ts`; a document's tab that wait
 in `tests/shell/screen-switch.spec.ts`.
 
 A spec hangs files on an item with `projects.attach(itemId, files)`, or on nothing in a draft with
-`projects.attachToDraft(projectId, files)`, saves the handbook or the project document with
-`projects.saveProjectDocument(projectId, role, text)` and answers an open project's with
+`projects.attachToDraft(projectId, files)`, saves the handbook, the journal or the project document
+with `projects.saveProjectDocument(projectId, role, text)` and answers an open project's with
 `projects.answerProjectDocument(projectId, role, block, answer, handle)`, over the record's testing
 endpoints ([`projects.md`](projects.md)), on a project made with a session. The `overlay` fixture
-(`tests/support/page-objects/overlay-page.ts`) opens a document's address (`open`), the handbook or
-the project document (`openProjectDocument`), and reads what opens, its head, body and foot, the
+(`tests/support/page-objects/overlay-page.ts`) opens a document's address (`open`), the handbook,
+the journal or the project document (`openProjectDocument`), and reads what opens, its head, body and foot, the
 head's Discuss, Pilot's job (`job`: `root`, `pulse`, `retry`) and Undo (`undo`) among them, an
 attachment's link to its document (`documentLink`), a link to attached material (`materialLinks`)
 and on a phone the view's arrow back (`back`), its clarification box and sections
@@ -423,7 +440,8 @@ and on a phone the view's arrow back (`back`), its clarification box and section
 `docTabs` fixture
 (`doc-tabs-page.ts`) the tab line (`first`, `document(id)`, `attachment(id)`, `tab(key)`, `closeAll`,
 `keys()`), a spec closing a document's tab by `docTabs.document(id).close`; the `panel` fixture
-(`panel-page.ts`) reads the panel, its Documents tab with the handbook's row (`handbook`), a draft's
+(`panel-page.ts`) reads the panel, its Documents tab with the handbook's and the journal's rows
+(`handbook`, `journal`), a draft's
 Draft tab (`draft`, `draftBlock(id)`) and the divider (`divider`, `drag(by, along?)`, `width()`),
 and the `chat` fixture its Chat tab ([`chats.md`](chats.md)). On the default 1280px viewport the
 panel stands on the Chat tab, a draft's on the Draft tab. Storage is per Playwright context, so a reload or a `page.goto` of a

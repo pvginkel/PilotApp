@@ -142,7 +142,7 @@ where its call names no group, whole or appended: the label is the call's
   state `adopted`, archived, its `adopted_group` the key, with no slug and no member, created by the
   stage's service user, the first made where there are several, who performs its one transition,
   `adopted` ([`sign-in.md`](sign-in.md#the-service-user)). Its one document is its draft,
-  `project.md`, the group's name its title and its summary its body. It has no handbook, no plan,
+  `project.md`, the group's name its title and its summary its body. It has no handbook, no journal, no plan,
   no chat and no item, and it runs no Session.
 - **Found again.** A later publication finds the project by the key, under the group's advisory
   lock, `(253, <a key drawn from the group's key>)`, taken after the conversation's turn and never

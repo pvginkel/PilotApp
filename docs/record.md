@@ -74,8 +74,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   run's end failed, so it has no text: `ck_documents_read_failed`), `written_back_at` (its closed
   text written to its file) and `write_back_refused_at` (that write refused by the controller, a
   document with a text not written back: `ck_documents_write_back_refused`). The draft
-  (`project.md`) and the handbook (`handbook.md`) are a project's documents instead, with
-  `project_id` and `role_code` (`draft`, `handbook`), one of each per project. A document holds two
+  (`project.md`), the handbook (`handbook.md`) and the journal (`journal.md`) are a project's
+  documents instead, with `project_id` and `role_code` (`draft`, `handbook`, `journal`), one of each
+  per project (`uq_documents_project_role`). A document holds two
   texts, each with its sha256 and time: `published_*`, the truth, and `ingested_*`, the agent's
   latest save with its session; a registered document has no published text until its file is read,
   and none after a failed read.
@@ -150,9 +151,12 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   account of how its run went, set once with its `debrief_entries` and never changed, which only a
   worker's run has (`ck_work_debrief`), that a Work has entries exactly when it has a debrief being
   the server's ([`work.md`](work.md#its-debrief)); `debrief_subject` and `debrief_completes`, the
-  subject the debrief names and whether it completes it, given with it and never changed, neither
-  without a debrief and a debrief that does not complete naming its subject (`ck_work_debrief_fields`),
-  none on a debrief given before they were taken; and `debrief_notice_id`, the debrief's notice that
+  subject the debrief names and whether it completes it, given with it and never changed, none on a
+  debrief given before they were taken; `debrief_figures`, the loop's figures as the workflow gave
+  them with the debrief, never changed; and `debrief_notable`, Pilot's lines on the debrief, which
+  the pass after its turn writes and a later write replaces ([`work.md`](work.md#its-debriefs-notice));
+  none of the four without a debrief, and a debrief that does not complete naming its subject
+  (`ck_work_debrief_fields`); and `debrief_notice_id`, the debrief's notice that
   carries the debrief, set once at the notice's placing, beside `debrief_notice_kind_code`, that
   Item's kind, so that the key to `items (id, kind_code)` reaches a debrief's notice alone, and only
   on a debrief with its `debrief_completes` (`ck_work_debrief_notice`); that the notice is of the
@@ -468,11 +472,14 @@ is a record the engine could have produced, and its times are those of the run:
   `example-recipes-1`: an opening; items a work session added, with asks open, answered by a person
   and by Pilot, deferred to a task and to the plan, and done; an attachment; a planning and a run
   on the task `build`, done, their debriefs naming one subject, "Slice 3 · The recipe card page",
-  and the debrief's notice that carries both; and a plan whose notes point at blocks, one of its
+  each with one turn, 23 minutes and 1 hour 40, the run's debrief with Pilot's lines, and the
+  debrief's notice that carries both; and a plan whose notes point at blocks, one of its
   tasks removed;
 - the finished project `bike-log`, `Bike repair log`, ben's and ada's, both its steps done, auto
   pilot turned off as it finished, its archive question open under the end;
 - the archived project `photo-album`, `Photo album`, ada's, one step in progress and one not
   started.
+
+Each project past the draft has its handbook and an empty journal.
 
 Tests find its rows by slug, handle and item title.

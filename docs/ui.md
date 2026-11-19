@@ -320,12 +320,12 @@ In `src/components/shared/`:
   (`singleTilde: false`, here, in `HeadingWords` and in `quotes.ts`'s parser alike), its text linked as the record's words are except in code and inside a link, every
   link opening in a new tab. Given `documentLink`, as the Draft tab gives it
   ([`documents.md`](documents.md)), it draws every link through that component and links nothing
-  else; given `materialLink`, as the project document and the handbook give it, it draws a link to a
+  else; given `materialLink`, as the project document, the handbook and the journal give it, it draws a link to a
   path in the project's `attachments/` through that component, and every other link as without it. A quote tag ([`chats.md`](chats.md) has its forms) is a chip (`QuoteChip`) that goes to what
   it quotes, from any screen under a project's address (`useOpenQuote`): an item to its address, a
   block to its own, which opens its document where it is a card, a draft's ask,
   `project.md/<local id>`, to the ask in the Draft tab, past Create to the project document, the
-  handbook and the project document to their addresses, and an attachment to its address, under its item's where it hangs on one, found in the timeline's read by its batch and its
+  handbook, the journal and the project document to their addresses, and an attachment to its address, under its item's where it hangs on one, found in the timeline's read by its batch and its
   filename, a folder's keeping its slashes; a path naming no attachment there goes nowhere. Inside a
   code span or fence, or raw HTML, as the text's own Markdown parse reads it, or behind a backslash
   escape, the tag shows as written (`quotesToLinks`, `lib/chat/quotes.ts`).
@@ -334,7 +334,8 @@ In `src/components/shared/`:
   `div.code-block`) has a copy button at its top right, "Copy the code", which copies its source
   without the newline that ends it: above 900px with a mouse it shows under the mouse or with the
   keyboard's focus, at 900px and below always, the code keeping 36px clear of it. It is every prose
-  surface's, a document's, an action's, a chat's reply, the project document and the handbook,
+  surface's, a document's, an action's, a chat's reply, the project document, the handbook and the
+  journal,
   and not a tool call's detail or a text attachment's. A prose heading is bold and sized by the
   type scale (above), h1 2xl, h2 xl, h3 lg and h4 to h6 the body's size, with its space above,
   1.4em for h1 and h2 and 1.2em for the rest, wherever it falls: a heading that opens a later prose

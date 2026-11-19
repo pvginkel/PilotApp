@@ -22,11 +22,13 @@ session Pilot runs, live on the timeline with its one current line, the steps it
 a donut, a repeat round's why under its step, Stop, Resume and Close, its session log, which shows
 what each turn was sent, and, once done, the debrief its stage session gave, behind the Debrief on
 its line, every role's account in the full debrief behind that, and one notice per slice at its
-run's end carrying its planning's and its run's debriefs, open until a member reads it, and Pilot's own
+run's end, placed once Pilot's pass over it has ended, opening with each stage's time and what Pilot
+found notable, its planning's and its run's debriefs under Details, open until a member reads it, and Pilot's own
 background jobs, each shown on the item it follows from, one at a time per project, each a session of
 the brain's, fresh but for a wait's run, briefed with the project's state and its handbook: the
 setup, the pre-ruling pass after every worker's turn that left it something to rule, which reads
-the stage session's debrief where the run gave one and may ask the worker's writer, or claim an
+the stage's full debrief where the run gave one against the project's journal, keeps that journal
+and writes the operator only what is notable, and may ask the worker's writer, or claim an
 action or research a fact for a work item of Pilot's, the blocks held through its run, the plan's
 next step after a worker's turn that left the pass nothing and after every item of Pilot's a person
 closes in the app, the work Pilot offered on an action
@@ -35,7 +37,8 @@ records itself, and a wait's run, with Retry on one that failed
 ([`docs/work.md`](docs/work.md)); each
 project's status as one icon on its tab, which pauses it, and the gold bar, a badge in the top bar
 or a line on a phone, while the controller does not answer, Pilot updates its store or a usage
-halt holds; and on the desktop the tabs that open a document, an attachment or the handbook in the
+halt holds; and on the desktop the tabs that open a document, an attachment, the handbook or the
+journal in the
 timeline's place, each project's kept in the browser, beside the side panel, always open, its width
 dragged, with the project's chat and its documents ([`docs/documents.md`](docs/documents.md)); and on a phone no top bar, a home listing the
 projects, a project's head in one line over the tabs at the bottom and what opens from them a view

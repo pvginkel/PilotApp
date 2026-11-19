@@ -12,7 +12,8 @@ commits.
 |---|---|
 | `DocumentService` (`documents.py`) | the births, a worker's registration and its read, `publish()`, the document's row lock, versions, the turn's end |
 | `IngestService` (`ingest.py`) | an agent's save of a path of the tree, an item of Pilot's own closed by the save that writes its last open block's `done`; the faults of a text Pilot's own item is to be born with |
-| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close and the archive question's; the switch's Yes; a work item placed and done, and named for the claimed actions it does; a run's continuation released; the job after a close of an item of Pilot's own placed, and withdrawn by its Undo |
+| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close and the archive question's; the switch's Yes; a work item placed and done, and named for the claimed actions it does; a run's continuation released; the job after a close of an item of Pilot's own placed, and withdrawn by its Undo; a debrief's notice placed, and Pilot's lines on a debrief |
+| `of_notice`, `stage_times` (`debriefs.py`) | the work items a debrief's notice carries or takes, and the time each one's stage took ([`work.md`](work.md#its-debriefs-notice)) |
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json`, `timeline.json` and `chat.md` ([`chats.md`](chats.md)) |
@@ -34,6 +35,8 @@ version 1 cut, cause `born`; a worker's is registered (below):
 - `bear_draft(project, text="")`: the draft, `project.md`, at the plus
   ([`projects.md`](projects.md)).
 - `bear_handbook(project, text="")`: the handbook, `handbook.md`, at Create project.
+- `bear_journal(project, text="")`: the journal, `journal.md`, beside the handbook at Create
+  project ([`documents.md`](documents.md#the-handbook-the-journal-and-the-project-document)).
 - `bear_item(project, kind, title, session, text="")`: a prose item of Pilot's own, of any prose
   kind but the opening, which `session` added; its version is of that session. It takes the next
   `seq` under the project's row lock, and its path from the title. The title is written first into
@@ -66,11 +69,19 @@ for one placed in an environment by name ([`sessions.md`](sessions.md)) and for 
 `trigger_item_id`, where it has one ([`work.md`](work.md));
 `work_done(work_id, at)`, at its turn's end, a job's at its last, marks the Item done at `at`, by no
 one, cause `turn_ended`, under the Item's row lock, and leaves one done already, as Finish's close
-leaves it ([`sessions.md`](sessions.md)). Its done, and `close_work`'s, places the debrief's notice
-where the Work's debrief completes (`_place_debrief_notice`): an Item of the kind `debrief_notice`,
-created by Pilot, at the next `seq`, carrying that debrief and the debriefs of its subject that do
-not complete and no notice carries, each Work naming it; none in a finished or an archived project
-([`work.md`](work.md#its-debriefs-notice)). Each moves `timeline.json`.
+leaves it ([`sessions.md`](sessions.md)); it places no debrief's notice. A worker's run's notice is
+placed at the end of the pass after its turn, `debrief_notice_after_pass(project, job)`, in the
+caller's transaction, which holds the project's row exclusively: for the job after a worker's turn,
+the notice of the run whose turn it followed, through `place_debrief_notice(project, work_item)`,
+which the dev seed calls itself; `close_work`'s close for good places it too
+(`_place_debrief_notice`). It is placed where the Work's debrief completes and no notice carries the
+Work yet: an Item of the kind `debrief_notice`, created by Pilot, at the next `seq`, carrying that
+debrief and the debriefs of its subject that do not complete and no notice carries, each Work naming
+it; none in a finished or an archived project ([`work.md`](work.md#its-debriefs-notice)). Each moves
+`timeline.json`. `write_notable(work_id, text)` writes Pilot's lines on a Work's debrief, a later
+write replacing them, under the project's row held exclusively, the row a notice's placing takes,
+and moves `timeline.json` where a notice carries the Work; one with no debrief is refused, "it gave
+no debrief".
 
 A birth but the opening's refuses a text with a fault of its own (an unclosed fence, a body that is
 no mapping, and the like) and then writes nothing. The opening's is never refused, whatever it
@@ -179,7 +190,8 @@ which may write its title to the project's row:
 
 `project.md` is read as a draft while its project is one, and past Create project under the
 handbook's rules ([`block-dsl.md`](block-dsl.md)): a person's answered block frozen, a dropped one
-restored, and its `slug` read by nothing.
+restored, and its `slug` read by nothing. The journal is read under the same rules, and no check is
+made of which session saves it.
 
 A save of the opening is never read: steps 4 and 5 pass it by, and the decoding's fault with them,
 so it is never held. A save that differs from the published text, an undecodable one included, is
@@ -268,7 +280,7 @@ merge carries the write to the file.
   good, a person's Close or Pilot's `stop_work` with its reason ([`work.md`](work.md)), in the
   caller's transaction, which holds the project's row exclusively and the work item's Session: the
   item done at once by `user`, cause `cancelled`, which offers no undo, and `note`, Pilot's reason,
-  its Work's `done_note`, and the debrief's notice its done places, as `work_done`'s does. No
+  its Work's `done_note`, and the debrief's notice its close places, no pass following it. No
   document is closed, no job is placed and nothing continues its conversation. It refuses an archived project and a done item, "it is closed for good" for one
   closed so (`done_refusal`, which a Resume reads too).
 - `fold(project, item, folded)`: a person's fold of an open item on the timeline, or its unfold
