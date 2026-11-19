@@ -360,6 +360,26 @@ class TestWhatClaudeCodeAdded:
             "commandMode": "prompt",
         }
 
+    def test_an_image_file_an_attachment_holds_is_said_with_its_size_and_not_its_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        """A file a person named with `@`, held as the Read tool records an
+        image it read."""
+        data = image(3_000)["source"]["data"]
+        read = {"base64": data, "type": "image/png", "originalSize": 4_100}
+        named = {
+            "type": "file",
+            "filename": "/work/Loom/swatch.png",
+            "content": {"type": "image", "file": read},
+        }
+        got = _reading(tmp_path, [chained("attachment", 2, attachment=named)])
+
+        (attached,) = got["after"]
+        assert json.loads(attached["text"]) == {
+            "filename": "/work/Loom/swatch.png",
+            "content": {"type": "image", "media_type": "image/png", "size": 3_000},
+        }
+
     def test_the_instruction_files_are_an_attachment_on_a_sub_agents_thread_too(
         self, tmp_path: Path
     ) -> None:

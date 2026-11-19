@@ -36,8 +36,8 @@ size the open file has; a line with no time is no block's; and
 - **An `attachment` line** is a block among what came in, with Claude
   Code's word for what it is and its text: its `text`, `content` or
   `prompt`, the first that is words, else what it holds beside its type,
-  as JSON, an image block in it said as an image is: by its media type and
-  size.
+  as JSON, an image in it, a block's or a file's as the Read tool records
+  one, said as an image is: by its media type and size.
 - **A `system` line** is a block among what came in, with its subtype and
   its `content` where that is words.
 
@@ -98,15 +98,15 @@ def _writer(line: dict[str, Any], said: str, main: bool) -> str | None:
     return None if main else "parent"
 
 
+def _size(data: str) -> int:
+    """The bytes a base64 text stands for."""
+    return len(data) * 3 // 4 - data.count("=", -2)
+
+
 def _image(block: dict[str, Any]) -> dict[str, Any]:
-    """An image block as the reading says it: the bytes are those its
-    base64 text stands for."""
+    """An image block as the reading says it."""
     source = block["source"]
-    data: str = source["data"]
-    return {
-        "media_type": source["media_type"],
-        "size": len(data) * 3 // 4 - data.count("=", -2),
-    }
+    return {"media_type": source["media_type"], "size": _size(source["data"])}
 
 
 def _images(content: Any) -> list[dict[str, Any]]:
@@ -117,14 +117,23 @@ def _images(content: Any) -> list[dict[str, Any]]:
 
 
 def _without_bytes(held: Any) -> Any:
-    """What an attachment holds, each image block in it said by its media
-    type and size."""
+    """What an attachment holds, each image in it said by its media type
+    and size: an image block, and the Read tool's record of an image file,
+    `{type: "image", file: {base64, type, ...}}`."""
     if isinstance(held, list):
         return [_without_bytes(each) for each in held]
     if not isinstance(held, dict):
         return held
-    if held.get("type") == "image" and isinstance(held.get("source"), dict):
-        return {"type": "image"} | _image(held)
+    if held.get("type") == "image":
+        if isinstance(held.get("source"), dict):
+            return {"type": "image"} | _image(held)
+        read = held.get("file")
+        if isinstance(read, dict) and isinstance(read.get("base64"), str):
+            return {
+                "type": "image",
+                "media_type": read["type"],
+                "size": _size(read["base64"]),
+            }
     return {name: _without_bytes(value) for name, value in held.items()}
 
 
