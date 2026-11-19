@@ -633,7 +633,25 @@ class TestWorkEstimatesRepeatsOwed:
     def test_an_unlisted_step_of_its_kind_begun_after_it_releases_it(
         self, session: DbSession, run: uuid.UUID
     ) -> None:
-        """The plan's second write releases the first, not the review."""
+        """The next listed step, the `ship`, has not begun: the second
+        `write` alone releases the first."""
+        left = self._left(
+            session,
+            run,
+            [
+                _done("write", 60),
+                _active("write", 10, listed=False),
+                _pending("ship"),
+            ],
+        )
+
+        assert left == pytest.approx(5 + 10)
+
+    def test_an_unlisted_step_of_another_kind_releases_nothing(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """The second `write` began after the `review`, which owes until the
+        `ship` is done."""
         left = self._left(
             session,
             run,
