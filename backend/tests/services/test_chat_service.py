@@ -399,6 +399,31 @@ class TestSendStartsTheChat:
             f"{_badge(item)}\n\nThe message, from ada (not a member):\n{words}"
         )
 
+    def test_a_block_quote_in_its_opening_message_rides_in_its_brief(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """A block's quote rides in as the item that holds it, the block named
+        (V02)."""
+        decision, block = _stock(session, container, opened, project_session)
+        words = f"{_quoting('block', f'{decision.id}/D1')} Leek."
+
+        turn = _send(chats, opened, person, words)
+
+        assert turn.message == container.brief_service().project_chat(
+            opened, person, words, turn.started_at, quote_block_id=block.id
+        )
+        assert turn.message.endswith(
+            "\n".join(_stock_quote(session, decision))
+            + f"\n\nThe message, from ada (not a member):\n{words}"
+        )
+
     def test_a_calls_brief_starts_its_drafts_definition_chat_as_the_service_users_turn(
         self,
         session: DbSession,
@@ -786,6 +811,33 @@ class TestSendToTheOpenChat:
         assert turn.message == f"{_badge(item)}\n\n{words}"
         assert fake.sent == [turn.message]
 
+    def test_a_block_quote_travels_into_its_turn(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """The item whose block it quotes rides before its words, the block
+        named, as it stands now (V02)."""
+        decision, block = _stock(session, container, opened, project_session)
+        _idle_chat(services, chats, session, fake, opened, person)
+        words = f"{_quoting('block', f'{decision.id}/D1')} Leek."
+
+        turn = _send(chats, opened, person, words)
+
+        assert (turn.quote_item_id, turn.quote_block_id, turn.words) == (
+            None,
+            block.id,
+            words,
+        )
+        assert turn.message == "\n".join([*_stock_quote(session, decision), "", words])
+        assert fake.sent == [turn.message]
+
 
 def _stopped_turn_ends(
     services: tuple[SessionStartService, RelayService],
@@ -1002,6 +1054,29 @@ def _badge(item: Item) -> str:
         f"{QUOTED_HEADING}\n"
         f"1 · decision · Which colour for the badge? · open · no document · {item.id}"
     )
+
+
+def _stock(
+    db: DbSession, container: ServiceContainer, project: Project, run: models.Session
+) -> tuple[Item, Block]:
+    """`DECISION` borne as an item of `project`, and its block D1."""
+    decision = container.document_service().bear_item(
+        project, "decision", "Which stock?", run, DECISION
+    )
+    block = db.scalars(
+        select(Block).where(Block.document_id == decision.id, Block.local_id == "D1")
+    ).one()
+    return decision, block
+
+
+def _stock_quote(db: DbSession, decision: Item) -> list[str]:
+    """The quote of `_stock`'s block D1, as it stands: open, unanswered."""
+    path = db.get_one(models.Document, decision.id).path
+    return [
+        "The item whose block D1 the message quotes, as it stands now:",
+        f"{decision.seq} · decision · Which stock? · open · {path} · {decision.id}",
+        "D1 · decision · no answer",
+    ]
 
 
 def _quoting(kind: str, ref: str, text: str = "Which stock?") -> str:
