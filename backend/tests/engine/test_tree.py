@@ -383,6 +383,7 @@ class TestTreeServiceManifest:
         opened.slug = "recipe-box"
         opened.state_code = ProjectState.OPEN
         documents.bear_handbook(opened, "Keep it short.\n")
+        documents.bear_journal(opened)
         documents.bear_draft(archived, "# Old\n")
         archived.archived = True
         session.flush()
@@ -399,6 +400,7 @@ class TestTreeServiceManifest:
             f"{folder}/timeline.json",
             "recipe-box/chat.md",
             "recipe-box/handbook.md",
+            "recipe-box/journal.md",
             "recipe-box/plan.json",
             "recipe-box/project.md",
             "recipe-box/timeline.json",

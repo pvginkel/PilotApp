@@ -19,7 +19,8 @@ class ChatMessageRequestSchema(BaseModel):
             '`<quoted_block id="<item id>/<local id>">…</quoted_block id="…">` '
             'or `<quoted_path path="<path>">…</quoted_path path="…">`, the path '
             "the handbook's, `handbook.md`, the project document's, `project.md`, "
-            "or an attachment's, `attachments/<batch>/<filename>`, in the "
+            "the journal's, `journal.md`, or an attachment's, "
+            "`attachments/<batch>/<filename>`, in the "
             "project's folder; the title between the tags (F38.3)"
         )
     )

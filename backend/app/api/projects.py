@@ -1,7 +1,7 @@
 """The projects as the signed-in person reads them, the project list, the
 archived projects, the project an address names, a project's head, its
-timeline, the index of its items (F150.8), its draft and its handbook (F1, F2,
-F3, F8, F37.4, F129.4, D012); a
+timeline, the index of its items (F150.8), its draft, its handbook and its
+journal (F1, F2, F3, F8, F37.4, F129.4, F169.4, D012); a
 draft made with its first message (F46.1), or by a call with its brief
 (F150.9), and their answers to its asks in
 place (F47.4); and what they change of a project's standing: its transitions,
@@ -516,6 +516,36 @@ def get_handbook(
     """
     return timeline_service.project_document(
         project_id, DocumentRole.HANDBOOK
+    ).model_dump(mode="json")
+
+
+@projects_bp.route("/<uuid:project_id>/journal", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ProjectDocumentSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    )
+)
+@inject
+def get_journal(
+    project_id: uuid.UUID,
+    timeline_service: TimelineService = Provide[ServiceContainer.timeline_service],
+) -> Any:
+    """Read the project's journal, `journal.md`, Pilot's account of how the
+    project's workflow runs go, read only (F169.4); born empty at Create
+    project (F169.1).
+
+    Returns:
+        200: The journal as last published
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id, or it has no journal: a draft has none,
+            and an adopted project none
+    """
+    return timeline_service.project_document(
+        project_id, DocumentRole.JOURNAL
     ).model_dump(mode="json")
 
 

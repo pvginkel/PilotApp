@@ -2735,11 +2735,12 @@ class TestListFiles:
                 {"path": f"{recipes.slug}/items/", "isDirectory": True},
                 {"path": f"{recipes.slug}/chat.md", "isDirectory": False},
                 {"path": f"{recipes.slug}/handbook.md", "isDirectory": False},
+                {"path": f"{recipes.slug}/journal.md", "isDirectory": False},
                 {"path": f"{recipes.slug}/plan.json", "isDirectory": False},
                 {"path": f"{recipes.slug}/project.md", "isDirectory": False},
                 {"path": f"{recipes.slug}/timeline.json", "isDirectory": False},
             ],
-            "totalCount": 7,
+            "totalCount": 8,
             "limitHit": False,
         }
 
@@ -2748,8 +2749,8 @@ class TestListFiles:
         [
             ({"limit": 3}, ["attachments/", "items/", "chat.md"], True),
             ({"offset": 2, "limit": 2}, ["chat.md", "handbook.md"], True),
-            ({"offset": 5, "limit": 2}, ["project.md", "timeline.json"], False),
-            ({"offset": 7}, [], False),
+            ({"offset": 6, "limit": 2}, ["project.md", "timeline.json"], False),
+            ({"offset": 8}, [], False),
         ],
     )
     async def test_a_listing_is_paged_by_offset_and_limit(
@@ -2766,7 +2767,7 @@ class TestListFiles:
         assert [entry["path"] for entry in listed["files"]] == [
             f"{recipes.slug}/{name}" for name in names
         ]
-        assert (listed["totalCount"], listed["limitHit"]) == (7, more)
+        assert (listed["totalCount"], listed["limitHit"]) == (8, more)
 
     async def test_a_page_is_a_hundred_entries_and_a_thousand_at_most(
         self, token_endpoint: TokenEndpoint
@@ -2882,19 +2883,19 @@ class TestFindFiles:
             projects_app,
             "find_files",
             {"path_pattern": pattern, "limit": 2},
-            {"path_pattern": pattern, "offset": 3, "limit": 2},
+            {"path_pattern": pattern, "offset": 4, "limit": 2},
         )
 
         assert first.structuredContent == {
             "pattern": pattern,
             "files": [f"{recipes.slug}/chat.md", f"{recipes.slug}/handbook.md"],
-            "totalCount": 5,
+            "totalCount": 6,
             "limitHit": True,
         }
         assert last.structuredContent == {
             "pattern": pattern,
             "files": [f"{recipes.slug}/project.md", f"{recipes.slug}/timeline.json"],
-            "totalCount": 5,
+            "totalCount": 6,
             "limitHit": False,
         }
 

@@ -8,6 +8,7 @@ from app.models import Attachment, Project
 
 DRAFT = "project.md"
 HANDBOOK = "handbook.md"
+JOURNAL = "journal.md"
 PLAN = "plan.json"
 TIMELINE = "timeline.json"
 CHAT = "chat.md"

@@ -686,8 +686,9 @@ class ProjectService:
         draft opened, `opened`, its slug the one its front matter names (DB
         decision 1), then paused by Pilot (`paused`, DB Project Transition;
         D083), so that its work waits for a person's resume once its plan is
-        ready, its setup let through (`setups`); the handbook born empty
-        beside the draft (F129.2); the opening first on the timeline, the
+        ready, its setup let through (`setups`); the handbook and the
+        journal born empty beside the draft (F129.2, F169.1); the opening
+        first on the timeline, the
         first message to the definition chat verbatim by its author (F18),
         the draft as it stands copied onto it, then every attachment hung on
         nothing (F18.1, F36.6); the setup
@@ -718,6 +719,7 @@ class ProjectService:
         self.db.flush()
         self._write(project, self._pilot(), at, TransitionKind.PAUSED)
         self.document_service.bear_handbook(project)
+        self.document_service.bear_journal(project)
         opening = self.document_service.bear_opening(
             project,
             f"{creation.author.name} started this project",

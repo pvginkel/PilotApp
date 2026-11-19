@@ -163,9 +163,12 @@ class TestBorn:
     def test_its_one_document_is_its_draft_with_the_name_and_the_summary(
         self, session: DbSession, adoption: AdoptionService, service_user: User
     ) -> None:
-        """DB 150."""
+        """DB 150: no handbook and no journal."""
         draft = _draft(session, adoption.adopt(FIRST_MENUS, NAME, SUMMARY))
 
+        assert session.scalars(
+            select(Document.role_code).where(Document.project_id == draft.project_id)
+        ).all() == [DocumentRole.DRAFT]
         assert (draft.role_code, draft.path) == (DocumentRole.DRAFT, "project.md")
         assert draft.published_text == TEXT
         (version,) = session.scalars(

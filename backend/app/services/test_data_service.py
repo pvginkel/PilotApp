@@ -456,6 +456,7 @@ class TestDataService:
         self._transitions(recipes, ada, now, TransitionKind.OPENED)
         self.document_service.bear_draft(recipes, RECIPE_DRAFT)
         self.document_service.bear_handbook(recipes, HANDBOOK)
+        self.document_service.bear_journal(recipes)
         environment = Environment(id=ENVIRONMENT_ID, name="Recipes-1", exempt=False)
         self.db.add(environment)
         self.db.flush()
@@ -563,6 +564,7 @@ class TestDataService:
         self.db.add(ProjectMember(project_id=bikes.id, user_id=ada.id, joined_at=now))
         self.document_service.bear_draft(bikes, BIKES_DRAFT)
         self.document_service.bear_handbook(bikes, BIKES_HANDBOOK)
+        self.document_service.bear_journal(bikes)
         self.document_service.bear_opening(bikes, "Bike repair log", ben, BIKES_OPENING)
         self._save_plan(bikes, "BL-3", "bike-log", BIKES_TASKS, {})
         # Finish turns auto pilot off at its instant, by its person (DB 171).
@@ -582,6 +584,7 @@ class TestDataService:
         album = self._project(ada, ARCHIVED_SLUG, now)
         self.document_service.bear_draft(album, ALBUM_DRAFT)
         self.document_service.bear_handbook(album, ALBUM_HANDBOOK)
+        self.document_service.bear_journal(album)
         self.document_service.bear_opening(album, "Photo album", ada, ALBUM_OPENING)
         self._save_plan(album, "PA-1", "photo-album", ALBUM_TASKS, {})
         self._transitions(
@@ -732,6 +735,7 @@ class TestDataService:
             )
         if not draft:
             self.document_service.bear_handbook(project)
+            self.document_service.bear_journal(project)
             self.document_service.bear_opening(
                 project,
                 "New project" if spec.name is None else spec.name,
@@ -825,14 +829,14 @@ class TestDataService:
     def save_project_document(
         self, project_id: uuid.UUID, role: DocumentRole, text: str
     ) -> Ingested:
-        """An agent's save of the project's draft or handbook by the project's
-        session in its turn, on the tree's current hash, through the ingest
+        """An agent's save of the project's draft, handbook or journal by the
+        project's session in its turn, on the tree's current hash, through the ingest
         the store's sync calls: held on a fault, else merged and published.
 
         Raises:
             RecordNotFoundException: no project has the id, it has no
-                document of the role, as a draft has no handbook, or it is
-                archived, so the store does not sync its file.
+                document of the role, as a draft has no handbook and no
+                journal, or it is archived, so the store does not sync its file.
             InvalidOperationException: the project has no session.
         """
         project = self.db.get(Project, project_id)

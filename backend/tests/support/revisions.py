@@ -13,8 +13,9 @@ _BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 def run_revision(db: Session, revision_id: str, step: str) -> None:
-    """The revision's `step`, `upgrade` or `downgrade`, on the test's
-    transaction; what the session holds is read again after an upgrade."""
+    """The revision's `step`, `upgrade`, `downgrade` or a function of its
+    module that one of them calls, on the test's transaction; what the
+    session holds is read again after an upgrade."""
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
     revision = ScriptDirectory.from_config(config).get_revision(revision_id)

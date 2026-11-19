@@ -1151,18 +1151,37 @@ class TestDebriefNotice:
         [
             {"debrief_subject": "Slice 058 · The search page"},
             {"debrief_completes": True},
+            {"debrief_figures": "Phases: 3. Rounds: 4."},
+            {"debrief_notable": "Its first stop."},
         ],
-        ids=["subject", "completes"],
+        ids=["subject", "completes", "figures", "notable"],
     )
-    def test_a_work_with_no_debrief_has_neither(
+    def test_a_work_with_no_debrief_has_none_of_them(
         self, session: DbSession, run: Work, fields: dict[str, object]
     ) -> None:
-        """DB 608: a Work with no debrief has neither."""
+        """DB 608, 635, 636: a Work with no debrief has no subject, no
+        completion, no figures and none of Pilot's lines."""
         run.debrief = None
         for name, value in fields.items():
             setattr(run, name, value)
 
         assert violated_constraint(session) == "ck_work_debrief_fields"
+
+    def test_a_debrief_holds_its_figures_and_pilots_lines(
+        self, session: DbSession, run: Work
+    ) -> None:
+        """DB 635, 636."""
+        run.debrief_figures = "Phases: 3. Rounds: 4."
+        run.debrief_notable = "Its first stop."
+        session.flush()
+        session.expire_all()
+
+        work = session.get_one(Work, run.id)
+
+        assert (work.debrief_figures, work.debrief_notable) == (
+            "Phases: 3. Rounds: 4.",
+            "Its first stop.",
+        )
 
     def test_a_debrief_left_to_a_later_one_names_its_subject(
         self, session: DbSession, run: Work

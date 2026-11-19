@@ -67,6 +67,11 @@ class Work(db.Model):  # type: ignore[name-defined]
     `debrief_notice_kind_code` is that Item's kind, carried so that the key
     reaches a Debrief Notice. That the notice is of the Work's Project and
     carries one subject (DB 610) is the server's.
+
+    `debrief_figures` is the loop's figures as the workflow gives them, given
+    with the debrief and never changed (DB 635). `debrief_notable` is Pilot's
+    lines on the debrief, written by the pass after the Work's turn, a later
+    pass replacing them (DB 636).
     """
 
     __tablename__ = "work"
@@ -120,11 +125,13 @@ class Work(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             "session_kind_code = 'work' OR debrief IS NULL", name="ck_work_debrief"
         ),
-        # A subject and a completion only with a debrief, and a debrief that
-        # leaves its subject to a later one names it (DB 608).
+        # A subject, a completion, figures and Pilot's lines only with a
+        # debrief, and a debrief that leaves its subject to a later one names
+        # it (DB 608, 635, 636).
         CheckConstraint(
             "(debrief IS NOT NULL"
-            " OR (debrief_subject IS NULL AND debrief_completes IS NULL))"
+            " OR (debrief_subject IS NULL AND debrief_completes IS NULL"
+            " AND debrief_figures IS NULL AND debrief_notable IS NULL))"
             " AND (debrief_completes IS NOT FALSE OR debrief_subject IS NOT NULL)",
             name="ck_work_debrief_fields",
         ),
@@ -170,6 +177,8 @@ class Work(db.Model):  # type: ignore[name-defined]
     debrief_completes: Mapped[bool | None] = mapped_column(Boolean)
     debrief_notice_id: Mapped[uuid.UUID | None]
     debrief_notice_kind_code: Mapped[str | None] = mapped_column(Text)
+    debrief_figures: Mapped[str | None] = mapped_column(Text)
+    debrief_notable: Mapped[str | None] = mapped_column(Text)
 
 
 class ClaimAssignment(db.Model):  # type: ignore[name-defined]

@@ -562,22 +562,26 @@ class TestCreateProject:
         assert _count(session, Item) == 0
 
     @pytest.mark.parametrize("state", ["open", "finished"])
-    def test_past_the_draft_it_is_born_with_its_handbook_empty(
-        self, client: FlaskClient, state: str
+    @pytest.mark.parametrize("document", ["handbook", "journal"])
+    def test_past_the_draft_it_is_born_with_its_handbook_and_its_journal_empty(
+        self, client: FlaskClient, state: str, document: str
     ) -> None:
         project_id = _make(client, name="Camp", state=state)
 
-        response = client.get(f"/api/projects/{project_id}/handbook")
+        response = client.get(f"/api/projects/{project_id}/{document}")
 
         assert (response.status_code, response.get_json()) == (
             200,
             {"title": None, "body": [], "writing": False},
         )
 
-    def test_a_draft_has_no_handbook(self, client: FlaskClient) -> None:
+    @pytest.mark.parametrize("document", ["handbook", "journal"])
+    def test_a_draft_has_no_handbook_and_no_journal(
+        self, client: FlaskClient, document: str
+    ) -> None:
         project_id = _make(client, name="Camp", state="draft")
 
-        assert client.get(f"/api/projects/{project_id}/handbook").status_code == 404
+        assert client.get(f"/api/projects/{project_id}/{document}").status_code == 404
 
     def test_a_name_whose_draft_has_a_fault_is_refused(
         self, client: FlaskClient
@@ -1280,7 +1284,7 @@ class TestCreateTurnEnd:
 
 
 @pytest.mark.usefixtures("person")
-@pytest.mark.parametrize("document", ["draft", "handbook"])
+@pytest.mark.parametrize("document", ["draft", "handbook", "journal"])
 class TestCreateProjectDocumentSave:
     def test_a_clean_save_is_published_and_pilot_writes_it(
         self, client: FlaskClient, environment: Environment, document: str
@@ -1371,18 +1375,19 @@ class TestCreateProjectDocumentSave:
 
 
 @pytest.mark.usefixtures("person")
-def test_a_drafts_handbook_save_is_not_found(
-    client: FlaskClient, environment: Environment
+@pytest.mark.parametrize("document", ["handbook", "journal"])
+def test_a_drafts_handbook_or_journal_save_is_not_found(
+    client: FlaskClient, environment: Environment, document: str
 ) -> None:
     project_id = _make(client, state="draft", environment_id=environment.id)
 
     response = client.post(
-        _document_saves_path(project_id, "handbook"), json={"text": "# Camp\n"}
+        _document_saves_path(project_id, document), json={"text": "# Camp\n"}
     )
 
     assert response.status_code == 404
     assert response.get_json()["error"] == (
-        f"Handbook of project {project_id} was not found"
+        f"{document.capitalize()} of project {project_id} was not found"
     )
 
 

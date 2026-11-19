@@ -1013,7 +1013,7 @@
         "description": "A person's message to the project's brain.",
         "properties": {
           "words": {
-            "description": "The person's words, sent verbatim, a quote travelling inside them as a tag: `<quoted_item id=\"<item id>\">…</quoted_item id=\"…\">`, `<quoted_block id=\"<item id>/<local id>\">…</quoted_block id=\"…\">` or `<quoted_path path=\"<path>\">…</quoted_path path=\"…\">`, the path the handbook's, `handbook.md`, the project document's, `project.md`, or an attachment's, `attachments/<batch>/<filename>`, in the project's folder; the title between the tags (F38.3)",
+            "description": "The person's words, sent verbatim, a quote travelling inside them as a tag: `<quoted_item id=\"<item id>\">…</quoted_item id=\"…\">`, `<quoted_block id=\"<item id>/<local id>\">…</quoted_block id=\"…\">` or `<quoted_path path=\"<path>\">…</quoted_path path=\"…\">`, the path the handbook's, `handbook.md`, the project document's, `project.md`, the journal's, `journal.md`, or an attachment's, `attachments/<batch>/<filename>`, in the project's folder; the title between the tags (F38.3)",
             "title": "Words",
             "type": "string"
           }
@@ -7211,7 +7211,7 @@
             "title": "Title"
           },
           "words": {
-            "description": "The person's words, sent verbatim, a quote travelling inside them as a tag: `<quoted_item id=\"<item id>\">…</quoted_item id=\"…\">`, `<quoted_block id=\"<item id>/<local id>\">…</quoted_block id=\"…\">` or `<quoted_path path=\"<path>\">…</quoted_path path=\"…\">`, the path the handbook's, `handbook.md`, the project document's, `project.md`, or an attachment's, `attachments/<batch>/<filename>`, in the project's folder; the title between the tags (F38.3)",
+            "description": "The person's words, sent verbatim, a quote travelling inside them as a tag: `<quoted_item id=\"<item id>\">…</quoted_item id=\"…\">`, `<quoted_block id=\"<item id>/<local id>\">…</quoted_block id=\"…\">` or `<quoted_path path=\"<path>\">…</quoted_path path=\"…\">`, the path the handbook's, `handbook.md`, the project document's, `project.md`, the journal's, `journal.md`, or an attachment's, `attachments/<batch>/<filename>`, in the project's folder; the title between the tags (F38.3)",
             "title": "Words",
             "type": "string"
           }
@@ -7223,10 +7223,10 @@
         "type": "object"
       },
       "ProjectDocumentSchema.1fdd8ae": {
-        "description": "The project's draft, `project.md`, or its handbook, `handbook.md`,\nread only, as the overlay draws it (F37.4, F129.4).",
+        "description": "The project's draft, `project.md`, its handbook, `handbook.md`, or its\njournal, `journal.md`, read only, as the overlay draws it (F37.4, F129.4,\nF169.4).",
         "properties": {
           "body": {
-            "description": "Its text as drawn: its prose parts and blocks in order, without the front matter and a first heading that is its title; empty for a text with nothing more, as the handbook is born (F129.2), which the screens show as *Empty*",
+            "description": "Its text as drawn: its prose parts and blocks in order, without the front matter and a first heading that is its title; empty for a text with nothing more, as the handbook and the journal are born (F129.2, F169.1), which the screens show as *Empty*",
             "items": {
               "discriminator": {
                 "mapping": {
@@ -19608,6 +19608,84 @@
         "x-required-role": "editor"
       }
     },
+    "/api/projects/{project_id}/journal": {
+      "get": {
+        "description": "Returns:     200: The journal as last published     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id, or it has no journal: a draft has none,         and an adopted project none",
+        "operationId": "get__api_projects_{project_id}_journal",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the project's journal, `journal.md`, Pilot's account of how the project's workflow runs go, read only (F169.4); born empty at Create project (F169.1).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/projects/{project_id}/membership": {
       "delete": {
         "description": "Returns:     200: The project's head, the caller no member     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle or is no member, or the         project is archived",
@@ -23270,6 +23348,84 @@
           }
         ],
         "summary": "Add a prose item to the project's timeline, by the project's session, or by a job of Pilot's own, as Pilot adds one: its kind, urgency, person, step and blocks, Pilot's answers and deferrals among them, are what its text says.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/journal/saves": {
+      "post": {
+        "description": "Returns:     200: Whether the save is held, and its faults     400: The text is missing     404: No project has the id, it is a draft, which has no journal, or         it is archived     409: The project has no session",
+        "operationId": "post__api_testing_projects_{project_id}_journal_saves",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedSaveCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedSaveSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Ingest an agent's save of the project's journal, `journal.md`, by the project's session, as the store's sync does: held on a fault, else merged and published.",
         "tags": [],
         "x-required-role": "editor"
       }

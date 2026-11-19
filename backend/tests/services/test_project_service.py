@@ -1551,7 +1551,7 @@ class TestCreateProject:
             "Camp site",
         )
 
-    def test_the_handbook_is_born_empty_beside_the_draft(
+    def test_the_handbook_and_the_journal_are_born_empty_beside_the_draft(
         self, container: ServiceContainer, session: DbSession, person: User
     ) -> None:
         draft = _drafted(container, session, person)
@@ -1567,6 +1567,7 @@ class TestCreateProject:
             )
         ] == [
             (DocumentRole.HANDBOOK, "handbook.md", ""),
+            (DocumentRole.JOURNAL, "journal.md", ""),
             (DocumentRole.DRAFT, "project.md", DRAFTED),
         ]
 
@@ -1694,6 +1695,7 @@ class TestCreateProject:
             paths = [entry.path for entry in container.tree_service().manifest()]
         assert "camp-site/project.md" in paths
         assert "camp-site/handbook.md" in paths
+        assert "camp-site/journal.md" in paths
         assert not any(path.startswith(f"{folder}/") for path in paths)
 
 

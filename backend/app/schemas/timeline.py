@@ -1,7 +1,7 @@
 """Schemas for a project's timeline, read whole: its items in order, with what
 their lines and open forms show (F8, F12, F13, F18, F31); and for a document
-read on its own, an item's, the project's draft or its handbook (F28, F13.3,
-F37.4, F129.4)."""
+read on its own, an item's, the project's draft, its handbook or its journal
+(F28, F13.3, F37.4, F129.4, F169.4)."""
 
 import uuid
 from datetime import datetime
@@ -1354,8 +1354,9 @@ class DebriefSchema(BaseModel):
 
 
 class ProjectDocumentSchema(BaseModel):
-    """The project's draft, `project.md`, or its handbook, `handbook.md`,
-    read only, as the overlay draws it (F37.4, F129.4)."""
+    """The project's draft, `project.md`, its handbook, `handbook.md`, or its
+    journal, `journal.md`, read only, as the overlay draws it (F37.4, F129.4,
+    F169.4)."""
 
     title: str | None = Field(
         description=(
@@ -1368,7 +1369,8 @@ class ProjectDocumentSchema(BaseModel):
         description=(
             "Its text as drawn: its prose parts and blocks in order, without the "
             "front matter and a first heading that is its title; empty for a text "
-            "with nothing more, as the handbook is born (F129.2), which the "
+            "with nothing more, as the handbook and the journal are born (F129.2, "
+            "F169.1), which the "
             "screens show as *Empty*"
         )
     )

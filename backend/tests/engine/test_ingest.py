@@ -1204,19 +1204,24 @@ class TestIngestServiceMerge:
         assert document.published_text == published
         assert item.title == "Which tent?"
 
+    @pytest.mark.parametrize("name", ["handbook", "journal"])
     def test_a_block_a_non_draft_drops_is_restored(
         self,
         session: DbSession,
         container: ServiceContainer,
         project: Project,
         environment: Environment,
+        name: str,
     ) -> None:
+        """The journal is ingested under the handbook's rules (DB 634)."""
+        documents = container.document_service()
+        bear = documents.bear_handbook if name == "handbook" else documents.bear_journal
         with scoped_session(container):
-            handbook = container.document_service().bear_handbook(project, HANDBOOK)
+            handbook = bear(project, HANDBOOK)
 
         answer = _ingest(
             container,
-            f"draft-{project.number}/handbook.md",
+            f"draft-{project.number}/{name}.md",
             "Keep it shorter.\n",
             environment,
         )

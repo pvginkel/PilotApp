@@ -159,7 +159,7 @@ class TestTestDataService:
             "users": 2,
             "projects": 4,
             "items": 15,
-            "documents": 19,
+            "documents": 22,
             "blocks": 14,
             "plan tasks": 10,
             "plan notes": 3,
@@ -208,7 +208,7 @@ class TestTestDataService:
             )
         ] == [(ada.id, garden.created_at)]
 
-    def test_an_open_project_with_its_draft_handbook_and_members(
+    def test_an_open_project_with_its_draft_handbook_journal_and_members(
         self, counts: dict[str, int], session: DbSession
     ) -> None:
         recipes = _project(session, test_data_service.SLUG)
@@ -222,7 +222,11 @@ class TestTestDataService:
             for document in session.scalars(
                 select(Document).where(Document.project_id == recipes.id)
             )
-        } == {DocumentRole.DRAFT: "project.md", DocumentRole.HANDBOOK: "handbook.md"}
+        } == {
+            DocumentRole.DRAFT: "project.md",
+            DocumentRole.HANDBOOK: "handbook.md",
+            DocumentRole.JOURNAL: "journal.md",
+        }
         assert [
             (transition.kind_code, transition.by_user_id)
             for transition in session.scalars(
@@ -589,7 +593,7 @@ class TestTestDataService:
                 ), path
                 saved.append(path)
 
-        assert len(saved) == 19
+        assert len(saved) == 21
 
     def test_a_plan_with_a_fault_seeds_nothing(
         self,
@@ -865,11 +869,17 @@ class TestProject:
         ("state", "roles"),
         [
             ("draft", [DocumentRole.DRAFT]),
-            ("open", [DocumentRole.DRAFT, DocumentRole.HANDBOOK]),
-            ("finished", [DocumentRole.DRAFT, DocumentRole.HANDBOOK]),
+            (
+                "open",
+                [DocumentRole.DRAFT, DocumentRole.HANDBOOK, DocumentRole.JOURNAL],
+            ),
+            (
+                "finished",
+                [DocumentRole.DRAFT, DocumentRole.HANDBOOK, DocumentRole.JOURNAL],
+            ),
         ],
     )
-    def test_past_the_draft_its_handbook_is_born_empty(
+    def test_past_the_draft_its_handbook_and_its_journal_are_born_empty(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -887,8 +897,8 @@ class TestProject:
         assert [
             (document.path, document.published_text)
             for document in documents
-            if document.role_code is DocumentRole.HANDBOOK
-        ] == ([("handbook.md", "")] if state != "draft" else [])
+            if document.role_code is not DocumentRole.DRAFT
+        ] == ([("handbook.md", ""), ("journal.md", "")] if state != "draft" else [])
 
     def test_a_draft_has_no_opening(
         self, container: ServiceContainer, session: DbSession
@@ -1369,8 +1379,12 @@ class TestSaveProjectDocument:
         )
 
 
-def test_a_drafts_handbook_is_not_found(
-    container: ServiceContainer, person: User, environment: Environment
+@pytest.mark.parametrize("role", [DocumentRole.HANDBOOK, DocumentRole.JOURNAL])
+def test_a_drafts_handbook_and_journal_are_not_found(
+    container: ServiceContainer,
+    person: User,
+    environment: Environment,
+    role: DocumentRole,
 ) -> None:
     project = container.test_data_service().project(
         _spec(state="draft", environment_id=environment.id)
@@ -1378,10 +1392,12 @@ def test_a_drafts_handbook_is_not_found(
 
     with pytest.raises(RecordNotFoundException) as raised:
         container.test_data_service().save_project_document(
-            project.id, DocumentRole.HANDBOOK, "# Camp\n"
+            project.id, role, "# Camp\n"
         )
 
-    assert raised.value.message == f"Handbook of project {project.id} was not found"
+    assert raised.value.message == (
+        f"{role.value.capitalize()} of project {project.id} was not found"
+    )
 
 
 SETTLED_WHOLE = """```decision id=D1

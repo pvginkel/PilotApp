@@ -2,8 +2,8 @@
 (TEST-6): people who never signed in, a service user's row as
 `create-service-user` makes it (DB 338), environments, projects in every
 standing, with members, a plan, their opening and open items, the items a
-project's session adds, an agent's saves of them and of the project's draft
-and handbook, the files it attaches, a draft's on no item, Pilot's Done, and
+project's session adds, an agent's saves of them and of the project's draft,
+handbook and journal, the files it attaches, a draft's on no item, Pilot's Done, and
 the end of its turn; a read of what a member was shown, which the
 notification's reconcile writes off the request; and a work item placed by
 repository, started in an
@@ -481,6 +481,40 @@ def create_handbook_save(
     return _saved(
         test_data_service.save_project_document(
             project_id, DocumentRole.HANDBOOK, data.text
+        )
+    ), 200
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/journal/saves", methods=["POST"])
+@api.validate(
+    json=InventedSaveCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_200=InventedSaveSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_journal_save(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Ingest an agent's save of the project's journal, `journal.md`, by the
+    project's session, as the store's sync does: held on a fault, else merged
+    and published.
+
+    Returns:
+        200: Whether the save is held, and its faults
+        400: The text is missing
+        404: No project has the id, it is a draft, which has no journal, or
+            it is archived
+        409: The project has no session
+    """
+    data = InventedSaveCreateSchema.model_validate(request.get_json())
+    return _saved(
+        test_data_service.save_project_document(
+            project_id, DocumentRole.JOURNAL, data.text
         )
     ), 200
 

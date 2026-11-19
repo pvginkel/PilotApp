@@ -57,6 +57,7 @@ class TransitionKind(StrEnum):
 class DocumentRole(StrEnum):
     DRAFT = "draft"
     HANDBOOK = "handbook"
+    JOURNAL = "journal"
 
 
 class VersionCause(StrEnum):

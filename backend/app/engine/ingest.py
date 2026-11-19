@@ -481,9 +481,10 @@ def _kind(project: Project, document: Document, item: Item | None) -> dsl.Docume
             and project.state_code is ProjectState.DRAFT
         ):
             return dsl.DocumentKind.DRAFT
-        # Past Create project `project.md` is no draft (F47.4): it takes the
-        # handbook's rules, an answered block frozen, a dropped one restored
-        # and its slug read by nothing (DB decision 1).
+        # The handbook's rules, an answered block frozen and a dropped one
+        # restored: the journal's too (DB 634), and `project.md`'s past
+        # Create project, which is no draft (F47.4), its slug read by nothing
+        # (DB decision 1).
         return dsl.DocumentKind.HANDBOOK
     if item.kind_code == OPENING:
         return dsl.DocumentKind.OPENING

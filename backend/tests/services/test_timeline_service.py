@@ -4880,29 +4880,31 @@ class TestProjectDocument:
 
         assert raised.value.message == f"Project {project_id} was not found"
 
-    def test_a_draft_has_its_draft_and_no_handbook(
-        self, container: ServiceContainer
+    @pytest.mark.parametrize("role", [DocumentRole.HANDBOOK, DocumentRole.JOURNAL])
+    def test_a_draft_has_its_draft_and_no_handbook_or_journal(
+        self, container: ServiceContainer, role: DocumentRole
     ) -> None:
         project = _make(container, state="draft", name="Camp")
         timelines = container.timeline_service()
 
         draft = timelines.project_document(project.id, DocumentRole.DRAFT)
         with pytest.raises(RecordNotFoundException) as raised:
-            timelines.project_document(project.id, DocumentRole.HANDBOOK)
+            timelines.project_document(project.id, role)
 
         assert draft.model_dump() == {"title": "Camp", "body": [], "writing": False}
-        assert raised.value.message == f"Handbook of project {project.id} was not found"
+        assert raised.value.message == (
+            f"{role.value.capitalize()} of project {project.id} was not found"
+        )
 
-    def test_the_handbook_born_at_create_reads_empty(
-        self, container: ServiceContainer
+    @pytest.mark.parametrize("role", [DocumentRole.HANDBOOK, DocumentRole.JOURNAL])
+    def test_the_handbook_and_the_journal_born_at_create_read_empty(
+        self, container: ServiceContainer, role: DocumentRole
     ) -> None:
         project = _make(container)
 
-        handbook = container.timeline_service().project_document(
-            project.id, DocumentRole.HANDBOOK
-        )
+        document = container.timeline_service().project_document(project.id, role)
 
-        assert handbook.model_dump() == {"title": None, "body": [], "writing": False}
+        assert document.model_dump() == {"title": None, "body": [], "writing": False}
 
     @pytest.mark.parametrize("role", list(DocumentRole))
     def test_a_save_reads_as_drawn_written_by_pilot_until_its_turn_ends(

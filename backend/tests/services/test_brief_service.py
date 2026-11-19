@@ -4008,6 +4008,89 @@ class TestRestarted:
         assert not is_restarted(turn(RESTARTED, person))
 
 
+JOURNALLED = "# Journal\n\nWatching: the stock boils over (slices 003, 007).\n"
+
+
+class TestTheJournal:
+    """No brief carries the project's journal (F169.3; DB 634): the state
+    block names the handbook alone, and a worker's trailer too."""
+
+    @pytest.fixture
+    def journalled(self, container: ServiceContainer, opened: Project) -> Project:
+        documents = container.document_service()
+        documents.bear_handbook(opened, "# Handbook\n\n- Taste.\n")
+        documents.bear_journal(opened, JOURNALLED)
+        return opened
+
+    def test_a_chats_and_a_conversations_brief_carry_none_of_it(
+        self,
+        briefs: BriefService,
+        journalled: Project,
+        person: User,
+        caller: Environment,
+    ) -> None:
+        chat = briefs.project_chat(journalled, person, "How do the runs go?", AT)
+        conversation = briefs.conversation(
+            journalled, caller, "ui-sweep-triage", "How do the runs go?", AT
+        )
+
+        for brief in (chat, conversation):
+            assert brief.endswith("How do the runs go?")
+            assert f"{HANDBOOK}\n# Handbook\n\n- Taste." in brief
+            assert "Watching" not in brief
+            assert "journal" not in brief.lower()
+
+    def test_a_jobs_brief_carries_none_of_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        journalled: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        """The setup's, the job's after a worker's turn that gave no debrief,
+        and the job's after an item's close."""
+        container.document_service().bear_opening(
+            journalled, "Ada Example started this project", person, "Soup?"
+        )
+        item = container.document_service().bear_item(
+            journalled, "question", "When to taste", project_session, ASK
+        )
+        container.record_service().answer(
+            session.get_one(Document, item.id), "Q1", person, "Now"
+        )
+        run = _worker_run(session, container, journalled, None)
+        _turn_ended(session, container, run, "The stock is fixed.")
+
+        jobs = [
+            _setup(session, container, journalled),
+            _after(session, container, run),
+            _closing(session, container, item),
+        ]
+
+        for job in jobs:
+            brief = briefs.job(journalled, job, AT, LATER)
+            assert brief.endswith(f"\n\n{HANDBOOK}\n# Handbook\n\n- Taste.")
+            assert "Watching" not in brief
+            assert "journal" not in brief.lower()
+
+    def test_a_workers_brief_carries_none_of_it(
+        self, session: DbSession, briefs: BriefService, journalled: Project
+    ) -> None:
+        brief = briefs.work_item(
+            journalled,
+            "Plan the stock.",
+            _task(session, journalled),
+            GRANTS_OFF,
+            "pilot/soup-club/t3",
+        )
+
+        assert brief.endswith("- The project's handbook:\n# Handbook\n\n- Taste.\n")
+        assert "Watching" not in brief
+        assert "journal" not in brief.lower()
+
+
 def _task(db: DbSession, project: Project) -> PlanTask:
     task = PlanTask(
         project_id=project.id,

@@ -91,14 +91,14 @@ from app.services.store_update_service import unlifted
 
 QUOTE_TAG = re.compile(
     r'<quoted_(item|block) id="([^"]+)">[\s\S]*?</quoted_\1 id="\2">'
-    r'|<quoted_path path="(handbook\.md|project\.md'
+    r'|<quoted_path path="(handbook\.md|project\.md|journal\.md'
     r'|attachments/[1-9][0-9]*(?:/(?!\.{1,2}(?:/|"))[^"/]+)+)'
     r'">[\s\S]*?</quoted_path path="\3">'
 )
 """A quote tag (F38.3; DB decisions 29, 62), the closing tag repeating the
 attribute: an item's or a block's by id, or a file's by its path in the
-project's folder, the handbook's, the project document's or an attachment's,
-whose filename keeps the slashes of a folder it came in, no segment empty,
+project's folder, the handbook's, the project document's, the journal's or an
+attachment's, whose filename keeps the slashes of a folder it came in, no segment empty,
 `.` or `..` (the frontend's `quotes.ts` reads it alike); a path tag naming any
 other path is no quote."""
 

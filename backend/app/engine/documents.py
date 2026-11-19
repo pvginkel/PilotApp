@@ -18,7 +18,7 @@ from sqlalchemy import ColumnElement, and_, delete, func, select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, ProjectChanged, TreeHashMoved
-from app.engine.paths import DRAFT, HANDBOOK, sha256_hex, tree_path
+from app.engine.paths import DRAFT, HANDBOOK, JOURNAL, sha256_hex, tree_path
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException
@@ -94,6 +94,11 @@ class DocumentService:
         return self._bear_project_document(
             project, DocumentRole.HANDBOOK, HANDBOOK, text
         )
+
+    def bear_journal(self, project: Project, text: str = "") -> Document:
+        """The project's journal, `journal.md`, born at Create project beside
+        the handbook (DB 150, 634)."""
+        return self._bear_project_document(project, DocumentRole.JOURNAL, JOURNAL, text)
 
     def bear_item(
         self,
@@ -207,7 +212,7 @@ class DocumentService:
     def publish(self, document: Document, text: str) -> None:
         """Publish `text` as the document's truth and rebuild every cache read
         from it, in the transaction, a text that changed told to the browsers,
-        an item's, the handbook's or the project document's. Refused for a
+        an item's or a project document's. Refused for a
         text with a fault: only a parseable text is published (F78). The
         opening's is never parsed. A registered document's first text gives it
         its file in the tree. An item it turns urgent loses its Item

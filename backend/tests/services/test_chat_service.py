@@ -1183,6 +1183,7 @@ class TestQuote:
         [
             "handbook.md",
             "project.md",
+            "journal.md",
             "attachments/2/menu.pdf",
             "attachments/2/menus/menu.pdf",
         ],
@@ -1216,6 +1217,8 @@ class TestQuote:
             "notes.md",
             "items/1-which-stock.md",
             "../handbook.md",
+            "journal.mdx",
+            "items/journal.md",
             "attachments/0/menu.pdf",
             "attachments/2/menus/../menu.pdf",
             "attachments/2/./menu.pdf",

@@ -60,6 +60,7 @@ class TestListEntries:
                 {"path": f"{recipes.slug}/items/", "is_directory": True},
                 {"path": f"{recipes.slug}/chat.md", "is_directory": False},
                 {"path": f"{recipes.slug}/handbook.md", "is_directory": False},
+                {"path": f"{recipes.slug}/journal.md", "is_directory": False},
                 {"path": f"{recipes.slug}/plan.json", "is_directory": False},
                 {"path": f"{recipes.slug}/project.md", "is_directory": False},
                 {"path": f"{recipes.slug}/timeline.json", "is_directory": False},

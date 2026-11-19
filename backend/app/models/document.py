@@ -90,7 +90,7 @@ class Document(db.Model):  # type: ignore[name-defined]
             unique=True,
             postgresql_where=text("project_id IS NOT NULL"),
         ),
-        # One draft and one handbook per Project (DB assertion 150).
+        # One Project Document per Document Role (DB assertion 150).
         Index(
             "uq_documents_project_role",
             "project_id",

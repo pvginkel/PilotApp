@@ -1447,18 +1447,24 @@ class TestGetTimeline:
 
 @pytest.mark.usefixtures("person")
 class TestGetProjectDocuments:
-    """The project's draft, `project.md`, and its handbook, read only."""
+    """The project's draft, `project.md`, its handbook and its journal, read
+    only."""
 
-    def test_the_handbook_born_at_create_reads_empty_the_draft_its_name(
+    def test_the_handbook_and_the_journal_born_at_create_read_empty_the_draft_its_name(
         self, client: FlaskClient, container: ServiceContainer
     ) -> None:
         camp = _make(container, name="Camp")
         _sign_in(client)
 
         handbook = client.get(f"{PROJECTS}/{camp}/handbook")
+        journal = client.get(f"{PROJECTS}/{camp}/journal")
         draft = client.get(f"{PROJECTS}/{camp}/draft")
 
         assert (handbook.status_code, handbook.get_json()) == (
+            200,
+            {"title": None, "body": [], "writing": False},
+        )
+        assert (journal.status_code, journal.get_json()) == (
             200,
             {"title": None, "body": [], "writing": False},
         )
@@ -1467,7 +1473,7 @@ class TestGetProjectDocuments:
             {"title": "Camp", "body": [], "writing": False},
         )
 
-    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    @pytest.mark.parametrize("document", ["draft", "handbook", "journal"])
     def test_a_save_reads_as_drawn_while_pilot_writes_it(
         self,
         client: FlaskClient,
@@ -1490,20 +1496,21 @@ class TestGetProjectDocuments:
             "writing": True,
         }
 
-    def test_a_drafts_handbook_is_not_found(
-        self, client: FlaskClient, container: ServiceContainer
+    @pytest.mark.parametrize("document", ["handbook", "journal"])
+    def test_a_drafts_handbook_and_journal_are_not_found(
+        self, client: FlaskClient, container: ServiceContainer, document: str
     ) -> None:
         draft = _make(container, state="draft")
         _sign_in(client)
 
-        response = client.get(f"{PROJECTS}/{draft}/handbook")
+        response = client.get(f"{PROJECTS}/{draft}/{document}")
 
         assert response.status_code == 404
         assert response.get_json()["error"] == (
-            f"Handbook of project {draft} was not found"
+            f"{document.capitalize()} of project {draft} was not found"
         )
 
-    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    @pytest.mark.parametrize("document", ["draft", "handbook", "journal"])
     def test_an_unknown_project_is_not_found(
         self, client: FlaskClient, document: str
     ) -> None:
@@ -1515,7 +1522,7 @@ class TestGetProjectDocuments:
         assert response.status_code == 404
         assert response.get_json()["error"] == f"Project {unknown} was not found"
 
-    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    @pytest.mark.parametrize("document", ["draft", "handbook", "journal"])
     def test_an_id_that_is_no_uuid_is_not_found(
         self, client: FlaskClient, document: str
     ) -> None:
@@ -1523,7 +1530,7 @@ class TestGetProjectDocuments:
 
         assert client.get(f"{PROJECTS}/camp/{document}").status_code == 404
 
-    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    @pytest.mark.parametrize("document", ["draft", "handbook", "journal"])
     def test_without_editor_it_is_refused(
         self, client: FlaskClient, container: ServiceContainer, document: str
     ) -> None:
@@ -1532,7 +1539,7 @@ class TestGetProjectDocuments:
 
         assert client.get(f"{PROJECTS}/{camp}/{document}").status_code == 403
 
-    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    @pytest.mark.parametrize("document", ["draft", "handbook", "journal"])
     def test_without_a_token_it_is_unauthenticated(
         self, oidc_client: FlaskClient, document: str
     ) -> None:
@@ -2101,6 +2108,7 @@ class TestAddTransition:
             "camp-site/chat.md",
             "camp-site/handbook.md",
             "camp-site/items/1-ada-example-started-this-project.md",
+            "camp-site/journal.md",
             "camp-site/plan.json",
             "camp-site/project.md",
             "camp-site/timeline.json",

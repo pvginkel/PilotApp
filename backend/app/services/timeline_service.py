@@ -1,6 +1,6 @@
 """A project's timeline as a screen draws it (F8, F12, F13, F18, F31, F78); a
 document read on its own, an item's, as it was done (F13.3), the project's
-draft or its handbook (F37.4, F129.4); a done work item's debrief (F26.9,
+draft, its handbook or its journal (F37.4, F129.4, F169.4); a done work item's debrief (F26.9,
 F26.10); and the items waiting on a person, which a tab's badge counts (F1.4,
 F94.5)."""
 
@@ -745,11 +745,13 @@ class TimelineService:
     def project_document(
         self, project_id: uuid.UUID, role: DocumentRole
     ) -> ProjectDocumentSchema:
-        """The project's draft or its handbook as last published, read only.
+        """The project's draft, its handbook or its journal as last published,
+        read only.
 
         Raises:
             RecordNotFoundException: no project has the id, or it has no
-                document of the role: a draft has no handbook (F129.2).
+                document of the role: a draft has no handbook and no journal
+                (F129.2, F169.1).
         """
         project = self._project(project_id)
         document = self.db.scalars(
@@ -1736,6 +1738,6 @@ def _read_minutes(words: int) -> int:
 
 def _published(document: Document) -> str:
     # Every document but a registered one is born published: the opening and
-    # a project's draft and handbook are.
+    # a project's draft, handbook and journal are.
     assert document.published_text is not None
     return document.published_text

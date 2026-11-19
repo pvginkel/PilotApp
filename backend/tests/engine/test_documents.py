@@ -239,6 +239,40 @@ class TestDocumentServiceBirth:
         ]
         assert project.name is None
 
+    def test_the_journal_is_born_empty_beside_the_handbook_and_names_nothing(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        """DB 150, 634: a third Project Document, of its own role and path."""
+        documents = container.document_service()
+        documents.bear_handbook(project)
+
+        journal = documents.bear_journal(project)
+
+        assert journal.path == "journal.md"
+        assert journal.role_code is DocumentRole.JOURNAL
+        assert journal.published_text == ""
+        assert [v.cause_code for v in _versions(session, journal)] == [
+            VersionCause.BORN
+        ]
+        assert project.name is None
+        assert container.tree_service().hashes(project)[
+            f"draft-{project.number}/journal.md"
+        ] == sha256_hex("")
+
+    def test_a_second_journal_is_refused(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        documents = container.document_service()
+        documents.bear_journal(project)
+
+        with pytest.raises(IntegrityError) as raised:
+            documents.bear_journal(project)
+
+        assert raised.value.orig.diag.constraint_name in {
+            "uq_documents_project_path",
+            "uq_documents_project_role",
+        }
+
     def test_a_prose_item_is_born_with_the_next_seq(
         self,
         session: DbSession,

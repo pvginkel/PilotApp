@@ -55,8 +55,8 @@ class ErrorsResolved(EngineEvent):
 @dataclass(frozen=True)
 class ProjectChanged(EngineEvent):
     """What the project's timeline, head or tab shows moved: an item born,
-    marked, undone or closed, a changed text of an item, the handbook or the
-    project document published, an item's save held or no longer held, a
+    marked, undone or closed, a changed text of an item, the handbook, the
+    journal or the project document published, an item's save held or no longer held, a
     document taken or let go by the session writing it, its plan or its
     standing changed, a chat of it opened or closed."""
 
