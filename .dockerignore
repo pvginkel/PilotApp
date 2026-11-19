@@ -1,7 +1,7 @@
 # The one image built with the repository's root as its context is the
 # collector's (collector/Dockerfile): everything is left out but what that file
-# copies. The other images' contexts are their own directories, each with a
-# .dockerignore of its own.
+# copies. The other images' contexts are their own directories: backend/ and
+# frontend/, each with a .dockerignore of its own, and sidecar/, with none.
 *
 !collector/pyproject.toml
 !collector/uv.lock
