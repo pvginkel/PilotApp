@@ -11,7 +11,7 @@
 import { useLayoutEffect, useRef, type MouseEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
-import { BookOpen, CopyX, FileText, List, MessageSquare, NotebookText, Paperclip, X, type LucideIcon } from 'lucide-react';
+import { BookOpen, BookText, CopyX, FileText, List, MessageSquare, NotebookText, Paperclip, X, type LucideIcon } from 'lucide-react';
 import { attachmentTextQuery } from '@/hooks/use-attachment';
 import { TIMELINE, type TabLine } from '@/hooks/use-doc-tabs';
 import { hungById, titleOf } from '@/hooks/use-timeline';
@@ -19,6 +19,7 @@ import {
   useGetItemsDocumentByItemId,
   useGetProjectsDraftByProjectId,
   useGetProjectsHandbookByProjectId,
+  useGetProjectsJournalByProjectId,
   useGetProjectsTimelineByProjectId,
 } from '@/lib/api/generated/hooks';
 import type { DocTab } from '@/lib/browser-state';
@@ -106,6 +107,8 @@ function Tab(props: TabProps) {
       return <AttachmentTab {...props} />;
     case 'handbook':
       return <HandbookTab {...props} />;
+    case 'journal':
+      return <JournalTab {...props} />;
     case 'project-document':
       return <ProjectDocumentTab {...props} />;
     default: {
@@ -145,6 +148,11 @@ function KeptDocument({ id }: { id: string }) {
 function HandbookTab(props: TabProps) {
   const { data } = useGetProjectsHandbookByProjectId({ path: { project_id: props.projectId } });
   return <TabFace {...props} title={data?.title ?? 'Handbook'} icon={NotebookText} />;
+}
+
+function JournalTab(props: TabProps) {
+  const { data } = useGetProjectsJournalByProjectId({ path: { project_id: props.projectId } });
+  return <TabFace {...props} title={data?.title ?? 'Journal'} icon={BookText} />;
 }
 
 function ProjectDocumentTab(props: TabProps) {

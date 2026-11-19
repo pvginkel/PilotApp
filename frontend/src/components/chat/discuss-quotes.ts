@@ -31,8 +31,10 @@ export const quoteOfDraftBlock = (block: Block, blocks: readonly Block[], title:
   label: `${nameOf(block, blocks)} · ${title ?? 'New project'}`,
 });
 
-/** A file of the project's folder by its path there: the handbook, the project document. */
-export const quoteOfFile = (path: 'handbook.md' | 'project.md', title: string): QuoteRef => ({ kind: 'path', id: path, label: title });
+/** A file of the project's folder by its path there: the handbook, the journal, the project document. */
+export type ProjectFile = 'handbook.md' | 'journal.md' | 'project.md';
+
+export const quoteOfFile = (path: ProjectFile, title: string): QuoteRef => ({ kind: 'path', id: path, label: title });
 
 export const quoteOfAttachment = (attachment: Attachment): QuoteRef => ({
   kind: 'path',

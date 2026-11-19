@@ -3,7 +3,7 @@ import type { Locator, Page } from '@playwright/test';
 /**
  * The desktop's tab line (F28.8), the project head's last row while a document is open: its first
  * tab, the timeline or a draft's chat; a tab per open document, by its key in `data-tab` —
- * `document <item>`, `attachment <attachment>`, `handbook`, `project-document` — with its title,
+ * `document <item>`, `attachment <attachment>`, `handbook`, `journal`, `project-document` — with its title,
  * the button that shows it and its cross; and *Close all*. The tab showing is `aria-selected`.
  */
 export class DocTabsPage {

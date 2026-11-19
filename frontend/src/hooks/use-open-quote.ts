@@ -2,7 +2,7 @@
  * Going to what a quote names (F39.3), from wherever its chip stands in a project: an item to its
  * address, a block to its own, which opens its document where it is a card, an ask of
  * `project.md` to the project's route's place for it (use-draft-place.ts), and a path to its file —
- * the handbook, the project document, or an attachment at its address, under its
+ * the handbook, the journal, the project document, or an attachment at its address, under its
  * item's where it hangs on one, found in the timeline's read by its batch and file name. A path
  * naming no attachment of the read goes nowhere.
  */
@@ -35,6 +35,8 @@ export function useOpenQuote(): (quote: QuoteRef) => void {
         void navigate({ to: '/projects/$address/items/$itemId/blocks/$blockId', params: { address, itemId: itemId!, blockId: blockId! }, replace });
       } else if (id === 'handbook.md') {
         void navigate({ to: '/projects/$address/handbook', params: { address }, replace });
+      } else if (id === 'journal.md') {
+        void navigate({ to: '/projects/$address/journal', params: { address }, replace });
       } else if (id === 'project.md') {
         void navigate({ to: '/projects/$address/project-document', params: { address }, replace });
       } else {

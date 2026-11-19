@@ -1,5 +1,5 @@
 /**
- * The project's handbook (F129.4) and its project document, `project.md` (F37.4), each at its own
+ * The project's handbook (F129.4), its journal (F169.4) and its project document, `project.md` (F37.4), each at its own
  * address in its tab in the project's timeline's place (F97), as an attachment opens: rendered,
  * read only, no foot; *Empty* before the first save, Pilot's dots while a turn saves it (F35), and
  * "The document did not load" for a read that fails (F113). Its asks stand in their places, read
@@ -7,7 +7,9 @@
  * nothing in either to press; a text of asks alone is no longer *Empty*. The side panel's Documents
  * lists the handbook by its title right under the project document, opening it in its tab, and
  * the head has no button for it (F2.3); a draft's Documents has no row for it, nor a draft a
- * handbook (F129.2). A save shows live as it lands, Pilot's dots with
+ * handbook (F129.2). The journal's row is the third, right under the handbook's, and opens it as
+ * the handbook opens, on a phone a view whose Discuss shows the Chat tab with `journal.md` quoted;
+ * a draft has neither the row nor a journal (F169.1). A save shows live as it lands, Pilot's dots with
  * it until the turn ends, the project document's renaming the project, and once a stream that went
  * down comes back up. On a phone the Documents tab lists the handbook under the project document,
  * by its title, and neither the head nor the project's menu has it; it opens as a view, the whole
@@ -23,11 +25,21 @@
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
-import { handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
+import { handbookAddress, journalAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { attachmentAddress } from '../support/page-objects/timeline-page';
 import { projectAddress, type AttachedFile, type Projects } from '../support/projects';
 
 const HANDBOOK = '# Handbook\n\nHow the trip is planned.\n\n- We **always** pack light.\n- The van is booked a week ahead.\n';
+const JOURNAL =
+  '# How the runs go\n\nWhat Pilot is watching.\n\n- Reviews take **two** rounds: slices 12 and 14.\n- The suite ran red once.\n\n## 19 November, slice 14, the run\n\nThe run took 1h 40m.\n';
+/** The project's own documents a save shows live in: what each is called, and words of the text saved. */
+const SAVED = [
+  { role: 'handbook', named: 'handbook', shows: 'How the trip is planned.' },
+  { role: 'journal', named: 'journal', shows: 'What Pilot is watching.' },
+  { role: 'draft', named: 'project document', shows: 'How the trip is planned.' },
+] as const;
+const textOf = (role: (typeof SAVED)[number]['role'], name: string) =>
+  role === 'handbook' ? HANDBOOK : role === 'journal' ? JOURNAL : `# ${name}\n\nHow the trip is planned.\n`;
 const NOTE = { id: 'one', summary: 'Summary one', content: 'Content one' };
 const MAP: AttachedFile = { title: 'Camp map', filename: 'camp-map.md', content_type: 'text/markdown', content: '# The camp\n\nBy the lake.\n' };
 const LIST: AttachedFile = { title: 'Packing list', filename: 'packing-list.md', content_type: 'text/markdown', content: '# Packing list\n\nThe stove.\n' };
@@ -144,6 +156,104 @@ test.describe('The handbook', () => {
     await expect(overlay.title).toHaveCount(0);
     await expect(overlay.foot).toHaveCount(0);
     await docTabs.tab('handbook').close.click();
+    await expect(page).toHaveURL(projectAddress(draft));
+  });
+});
+
+test.describe('The journal', () => {
+  test('its row in the side panel’s Documents, the third, by its title right under the handbook, opens it at its address in its tab: rendered, read only, no foot', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    docTabs,
+    panel,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Journal');
+    const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'notice', title: 'We leave on Friday', text: '# We leave on Friday\n' });
+    await projects.saveProjectDocument(id, 'journal', JOURNAL);
+    await projects.endTurn(id);
+    await timeline.open(id);
+
+    await panel.documentsTab.click();
+    await expect(panel.journal.title).toHaveText('How the runs go');
+    await expect(panel.journal.sub).toHaveText('Journal');
+    const rows = panel.body.locator('.doc-row');
+    await expect(rows.nth(1)).toHaveAttribute('data-testid', 'panel.handbook');
+    await expect(rows.nth(2)).toHaveAttribute('data-testid', 'panel.journal');
+    const [handbook, journal] = [await panel.handbook.root.boundingBox(), await panel.journal.root.boundingBox()];
+    expect(journal!.y).toBeCloseTo(handbook!.y + handbook!.height, 0);
+
+    await panel.journal.root.click();
+    await expect(page).toHaveURL(journalAddress(id));
+    await expect(overlay.root).toBeVisible();
+    await expect(timeline.item(trip).root).toBeAttached();
+    await expect(overlay.title).toHaveText('How the runs go');
+    await expect(overlay.project).toHaveText(name);
+    await expect(overlay.role).toHaveText('Journal');
+    await expect(docTabs.tab('journal').title).toHaveText('How the runs go');
+    await expect(overlay.document).toContainText('What Pilot is watching.');
+    await expect(overlay.document.locator('li')).toHaveText(['Reviews take two rounds: slices 12 and 14.', 'The suite ran red once.']);
+    await expect(overlay.document.locator('strong')).toHaveText('two');
+    await expect(overlay.document.locator('h1')).toHaveCount(0);
+    await expect(overlay.document.locator('h2')).toHaveText('19 November, slice 14, the run');
+    await expect(overlay.body.locator('input, textarea, select, button, [contenteditable]')).toHaveCount(0);
+    await expect(overlay.foot).toHaveCount(0);
+    await expect(overlay.empty).toHaveCount(0);
+    await expect(overlay.writing).toHaveCount(0);
+
+    await docTabs.tab('journal').close.click();
+    await expect(overlay.root).toHaveCount(0);
+    await expect(page).toHaveURL(projectAddress(id));
+  });
+
+  test('reads Empty before its first save, its row and its head named Journal; a save shows on its next read', async ({ page, people, projects, overlay, panel }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Born'), members: [me.handle!] });
+    await overlay.openProjectDocument(id, 'journal');
+
+    await expect(overlay.title).toHaveText('Journal');
+    await expect(overlay.role).toHaveText('Journal');
+    await expect(overlay.empty).toHaveText('Empty');
+    await expect(overlay.document).toHaveCount(0);
+    await expect(overlay.writing).toHaveCount(0);
+    await panel.documentsTab.click();
+    await expect(panel.journal.title).toHaveText('Journal');
+
+    await projects.saveProjectDocument(id, 'journal', JOURNAL);
+    await projects.endTurn(id);
+    await overlay.openProjectDocument(id, 'journal');
+    await expect(overlay.title).toHaveText('How the runs go');
+    await expect(overlay.document).toContainText('The run took 1h 40m.');
+    await expect(overlay.empty).toHaveCount(0);
+    await expect(page).toHaveURL(journalAddress(id));
+  });
+
+  test('a draft has none: no row in its Documents, and the journal’s address reads “The document did not load”', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    overlay,
+    docTabs,
+    panel,
+  }) => {
+    const me = await people.signIn();
+    const draft = await projects.make({ name: makeUnique('Draft'), state: 'draft', members: [me.handle!], notes: [NOTE] });
+    await projectHead.open(draft);
+    await expect(projectHead.draft).toBeVisible();
+    await panel.documentsTab.click();
+    await expect(panel.headings).toHaveText(['Attachments']);
+    await expect(panel.journal.root).toHaveCount(0);
+
+    await page.goto(journalAddress(draft));
+    await expect(overlay.failed).toHaveText('The document did not load.');
+    await expect(overlay.title).toHaveCount(0);
+    await expect(overlay.foot).toHaveCount(0);
+    await docTabs.tab('journal').close.click();
     await expect(page).toHaveURL(projectAddress(draft));
   });
 });
@@ -407,8 +517,8 @@ test.describe('Its asks', () => {
 });
 
 test.describe('Live', () => {
-  for (const role of ['handbook', 'draft'] as const) {
-    test(`the ${role === 'handbook' ? 'handbook' : 'project document'} open in the overlay shows a save as it lands, Pilot’s dots with it, gone when the turn ends`, async ({
+  for (const { role, named, shows } of SAVED) {
+    test(`the ${named} open in the overlay shows a save as it lands, Pilot’s dots with it, gone when the turn ends`, async ({
       people,
       projects,
       overlay,
@@ -422,21 +532,21 @@ test.describe('Live', () => {
       await expect(overlay.empty).toBeVisible();
       await expect(overlay.writing).toHaveCount(0);
 
-      await projects.saveProjectDocument(id, role, role === 'handbook' ? HANDBOOK : `# ${name}\n\nHow the trip is planned.\n`);
-      await expect(overlay.document).toContainText('How the trip is planned.');
+      await projects.saveProjectDocument(id, role, textOf(role, name));
+      await expect(overlay.document).toContainText(shows);
       await expect(overlay.empty).toHaveCount(0);
       await expect(overlay.writing).toBeVisible();
 
       await projects.endTurn(id);
       await expect(overlay.writing).toHaveCount(0);
-      await expect(overlay.document).toContainText('How the trip is planned.');
+      await expect(overlay.document).toContainText(shows);
     });
   }
 });
 
 test.describe('A stream that comes back up', () => {
-  for (const role of ['handbook', 'draft'] as const) {
-    test(`reads again the ${role === 'handbook' ? 'handbook' : 'project document'} open in the overlay, saved while the stream was down`, async ({
+  for (const { role, named, shows } of SAVED) {
+    test(`reads again the ${named} open in the overlay, saved while the stream was down`, async ({
       people,
       projects,
       overlay,
@@ -458,10 +568,10 @@ test.describe('A stream that comes back up', () => {
       expect((await deploymentSse.getStatus()).isConnected).toBe(false);
 
       // The save's event reaches no one: the stream is down.
-      await projects.saveProjectDocument(id, role, role === 'handbook' ? HANDBOOK : `# ${name}\n\nHow the trip is planned.\n`);
+      await projects.saveProjectDocument(id, role, textOf(role, name));
       await outage.end();
       await deploymentSse.connect();
-      await expect(overlay.document).toContainText('How the trip is planned.');
+      await expect(overlay.document).toContainText(shows);
       await expect(overlay.empty).toHaveCount(0);
     });
   }
@@ -677,6 +787,55 @@ test.describe('On a phone', () => {
     await expect(panel.noAttachments).toBeVisible();
     await expect(panel.projectDocument.root).toHaveCount(0);
     await expect(panel.handbook.root).toHaveCount(0);
+    await expect(panel.journal.root).toHaveCount(0);
+  });
+
+  test('the Documents tab lists the journal by its title right under the handbook, opening it as a view, the whole screen with no maximize or cross; Discuss in it takes the view off and shows the Chat tab, `journal.md` quoted', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    shell,
+    overlay,
+    panel,
+    phoneTabs,
+    chat,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Phone'), members: [me.handle!] });
+    await projects.saveProjectDocument(id, 'journal', JOURNAL);
+    await projects.endTurn(id);
+    await projectHead.open(id);
+
+    await phoneTabs.tab('documents').tap();
+    await expect(panel.journal.title).toHaveText('How the runs go');
+    await expect(panel.journal.sub).toHaveText('Journal');
+    const rows = panel.body.locator('.doc-row');
+    await expect(rows.nth(1)).toHaveAttribute('data-testid', 'panel.handbook');
+    await expect(rows.nth(2)).toHaveAttribute('data-testid', 'panel.journal');
+    const [handbook, journal] = [await panel.handbook.root.boundingBox(), await panel.journal.root.boundingBox()];
+    expect(journal!.y).toBeCloseTo(handbook!.y + handbook!.height, 0);
+
+    await panel.journal.root.tap();
+    await expect(page).toHaveURL(journalAddress(id));
+    await expect(overlay.title).toHaveText('How the runs go');
+    await expect(overlay.role).toHaveText('Journal');
+    await expect(overlay.document).toContainText('What Pilot is watching.');
+    const box = (await overlay.root.boundingBox())!;
+    const app = (await shell.app.boundingBox())!;
+    expect(box.x).toBe(0);
+    expect(box.width).toBe(390);
+    expect(box.y).toBe(app.y);
+    expect(box.y + box.height).toBe(app.y + app.height);
+    await expect(overlay.maximize).toHaveCount(0);
+    await expect(overlay.close).toHaveCount(0);
+    await expect(overlay.back).toBeVisible();
+
+    await overlay.discuss.tap();
+    await expect(overlay.root).toHaveCount(0);
+    await expect(phoneTabs.tab('chat')).toHaveAttribute('aria-selected', 'true');
+    await expect(chat.quote).toHaveAttribute('data-quote', 'path journal.md');
+    await expect(chat.quoteLabel).toHaveText('How the runs go');
   });
 
   test('lies over the head and its arrow to the home, which its arrow back gives back to go to another project', async ({

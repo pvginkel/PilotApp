@@ -2,7 +2,7 @@
  * The side panel (F38.1) and its Documents tab (F37). It has the Chat tab, first and the one it
  * opens on until the person picks another (tests/chat/chat-tab.spec.ts), and the Documents tab with
  * its count; the Documents tab lists the project document first, 10px under the tab bar, and the
- * handbook under it, then the attachments newest first, the files of one call under their folder,
+ * handbook under it and the journal under that, then the attachments newest first, the files of one call under their folder,
  * then the timeline's documents and reviews newest first with Open, *Unsent* or Done and their
  * stamp, each opening in its tab at its address. Off a phone it is always open, with no cross and
  * nothing in the head toggling it (F2.3), each project's on the tab it was left on, kept in the
@@ -117,14 +117,19 @@ test.describe('The side panel on a wide window', () => {
     await expect(panel.projectDocument.sub).toHaveText('Project document');
     await expect(panel.handbook.title).toHaveText('Handbook');
     await expect(panel.handbook.sub).toHaveText('Handbook');
+    await expect(panel.journal.title).toHaveText('Journal');
+    await expect(panel.journal.sub).toHaveText('Journal');
     await expect(panel.headings).toHaveText(['Attachments', 'In the timeline']);
-    // The project document 10px under the tab bar, the handbook right under it, the first heading 14px under that.
-    const [body, first, handbook, heading] = await Promise.all(
-      [panel.body, panel.projectDocument.root, panel.handbook.root, panel.headings.first()].map(async (locator) => (await locator.boundingBox())!),
+    // The project document 10px under the tab bar, the handbook right under it, the journal right under that, the first heading 14px under it.
+    const [body, first, handbook, journal, heading] = await Promise.all(
+      [panel.body, panel.projectDocument.root, panel.handbook.root, panel.journal.root, panel.headings.first()].map(
+        async (locator) => (await locator.boundingBox())!,
+      ),
     );
     expect(first.y - body.y).toBeCloseTo(10, 0);
     expect(handbook.y).toBeCloseTo(first.y + first.height, 0);
-    expect(heading.y - (handbook.y + handbook.height)).toBeCloseTo(14, 0);
+    expect(journal.y).toBeCloseTo(handbook.y + handbook.height, 0);
+    expect(heading.y - (journal.y + journal.height)).toBeCloseTo(14, 0);
 
     await expect(panel.attachments.getByTestId('panel.row.title')).toHaveText(['Site notes', 'Kit list', 'Weights', 'The map']);
     await expect(panel.attachment(p.photos).sub).toHaveText(`Campsites · ${stamp(attachmentOf(p.survey, p.photos).copied_at)}`);

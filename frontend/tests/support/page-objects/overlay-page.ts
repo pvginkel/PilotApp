@@ -15,7 +15,7 @@ import { projectAddress } from '../projects';
  * one awaiting its read says that its text comes once it is read; one a run of Pilot's put to the
  * person while it holds a block of another document has the Cancel in its foot. Showing an attachment (F28.5), its head is its title
  * over "Attachment of “<item>”", its document a link there; its body the attachment by its type.
- * On a phone it is a view (F98.4): Back is its arrow, with no maximize, cross or backdrop. Showing the handbook or the project document (F129.4, F37.4), its head is the title over
+ * On a phone it is a view (F98.4): Back is its arrow, with no maximize, cross or backdrop. Showing the handbook, the journal or the project document (F129.4, F169.4, F37.4), its head is the title over
  * the project and what it is; its body the prose, its links to the project's attached material
  * among it, and Pilot's dots, or *Empty*. Showing the item
  * alone on a phone (F99), its head is the project's name over the item's step; its body the item as
@@ -34,7 +34,7 @@ export class OverlayPage {
   /** The project document's or the handbook's links to the project's attached material (F29.3). */
   readonly materialLinks: Locator;
   readonly project: Locator;
-  /** What a read-only document of the project is: Handbook, Project document. */
+  /** What a read-only document of the project is: Handbook, Journal, Project document. */
   readonly role: Locator;
   readonly step: Locator;
   readonly segments: Locator;
@@ -210,10 +210,10 @@ export class OverlayPage {
     );
   }
 
-  /** Opens the project's handbook, or its project document, at its address, once its project's timeline and it are read. */
-  async openProjectDocument(projectId: string, role: 'handbook' | 'draft'): Promise<void> {
+  /** Opens the project's handbook, its journal or its project document at its address, once its project's timeline and it are read. */
+  async openProjectDocument(projectId: string, role: 'handbook' | 'journal' | 'draft'): Promise<void> {
     const reads = Promise.all([this.read('project.timeline'), this.read(`overlay.${role}`)]);
-    await this.page.goto(role === 'handbook' ? handbookAddress(projectId) : projectDocumentAddress(projectId));
+    await this.page.goto({ handbook: handbookAddress, journal: journalAddress, draft: projectDocumentAddress }[role](projectId));
     await reads;
   }
 
@@ -291,6 +291,11 @@ export function clarificationAddress(projectId: string, documentId: string): str
 /** The project's handbook's address under its project's (F129.4). */
 export function handbookAddress(projectId: string): string {
   return `${projectAddress(projectId)}/handbook`;
+}
+
+/** The project's journal's address under its project's (F169.4). */
+export function journalAddress(projectId: string): string {
+  return `${projectAddress(projectId)}/journal`;
 }
 
 /** The project document's address under its project's (F37.4). */

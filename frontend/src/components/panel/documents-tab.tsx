@@ -1,6 +1,7 @@
 /**
  * The panel's Documents tab (F37): the project document first, read only (F37.4), the handbook
- * under it (F129.4), named by its title once read, as the project document is; then the
+ * under it (F129.4) and the journal under that (F169.4), each named by its title once read, as the
+ * project document is; then the
  * attachments, newest first, each with its title and its item and stamp, the files attached in one
  * call together under their folder (F37.1); then the timeline's documents and reviews, newest
  * first, each with its state, Open, *Unsent* (D026) or Done, and its stamp (F37.2). Each opens at
@@ -13,14 +14,14 @@
 
 import type { ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { BookOpen, FileText, Folder, NotebookText, Paperclip } from 'lucide-react';
+import { BookOpen, BookText, FileText, Folder, NotebookText, Paperclip } from 'lucide-react';
 import { Time } from '@/components/shared/time';
 import { isUnsent } from '@/components/timeline/document-state';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
 import type { Batch, PanelRead } from '@/hooks/use-panel';
 import { useShownProject } from '@/hooks/use-project-address';
 import { titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
-import { useGetProjectsHandbookByProjectId } from '@/lib/api/generated/hooks';
+import { useGetProjectsHandbookByProjectId, useGetProjectsJournalByProjectId } from '@/lib/api/generated/hooks';
 
 interface DocumentsTabProps {
   projectId: string;
@@ -52,6 +53,9 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
           <li>
             <HandbookRow projectId={projectId} address={address} />
           </li>
+          <li>
+            <JournalRow projectId={projectId} address={address} />
+          </li>
         </ul>
       )}
       {lists === 'failed' ? (
@@ -78,6 +82,19 @@ function HandbookRow({ projectId, address }: { projectId: string; address: strin
     <Link to="/projects/$address/handbook" params={{ address }} replace={replace} className="doc-row" data-testid="panel.handbook">
       <Row icon={<NotebookText className="icon" aria-hidden="true" />} title={data?.title ?? 'Handbook'}>
         Handbook
+      </Row>
+    </Link>
+  );
+}
+
+/** The journal, opening at its address as the handbook does. */
+function JournalRow({ projectId, address }: { projectId: string; address: string }) {
+  const { data } = useGetProjectsJournalByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
+  const replace = useTabReplace();
+  return (
+    <Link to="/projects/$address/journal" params={{ address }} replace={replace} className="doc-row" data-testid="panel.journal">
+      <Row icon={<BookText className="icon" aria-hidden="true" />} title={data?.title ?? 'Journal'}>
+        Journal
       </Row>
     </Link>
   );

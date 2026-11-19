@@ -41,15 +41,15 @@ interface PanelWidths {
 const PANEL_WIDTHS: PanelWidths = { project: 420, draft: 0.5 };
 
 /** What a tab of the desktop's tab line shows (F28.8). */
-const DOC_TAB_KINDS = ['document', 'attachment', 'handbook', 'project-document'] as const;
+const DOC_TAB_KINDS = ['document', 'attachment', 'handbook', 'journal', 'project-document'] as const;
 type DocTabKind = (typeof DOC_TAB_KINDS)[number];
 
 /** A tab of the line: what it shows, and the path within its project that shows it again. */
 export interface DocTab {
-  /** One per thing shown: `document <item>`, `attachment <attachment>`, `handbook`, `project-document`. */
+  /** One per thing shown: `document <item>`, `attachment <attachment>`, `handbook`, `journal`, `project-document`. */
   key: string;
   kind: DocTabKind;
-  /** The item's or the attachment's id; none for the handbook and the project document. */
+  /** The item's or the attachment's id; none for the handbook, the journal and the project document. */
   id: string | null;
   /** An attachment's at its document's address: the document, whose read its body waits on. */
   documentId?: string;

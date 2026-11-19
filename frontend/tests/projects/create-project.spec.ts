@@ -306,6 +306,7 @@ test.describe('Create project', () => {
     await expect(panel.projectDocument.root).toBeVisible();
     await expect(panel.projectDocument.title).toHaveText(title);
     await expect(panel.handbook.root).toBeVisible();
+    await expect(panel.journal.root).toBeVisible();
     await panel.projectDocument.root.click();
     await expect(page).toHaveURL(`/projects/${slug}/project-document`);
   });

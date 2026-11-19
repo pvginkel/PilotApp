@@ -2,7 +2,7 @@
  * Quote tags (F38.3; `database.md` decision 62): `<quoted_item id="…">…</quoted_item id="…">`,
  * `<quoted_block id="…/…">…</quoted_block id="…">` and `<quoted_path path="…">…</quoted_path
  * path="…">`, the closing tag repeating the attribute. A path is the handbook's, `handbook.md`, the
- * project document's, `project.md`, or an attachment's, `attachments/<batch>/<filename>`, whose
+ * project document's, `project.md`, the journal's, `journal.md`, or an attachment's, `attachments/<batch>/<filename>`, whose
  * filename keeps the slashes of a folder it came in; a tag naming any other path is no quote. Every
  * screen that renders Markdown draws a quote as a chip wherever it stands (F39.3), except inside
  * code, or behind a backslash escape, where it shows as written.
@@ -20,7 +20,7 @@ export interface QuoteRef {
 }
 
 const TAG =
-  /<quoted_(item|block) id="([^"]+)">([\s\S]*?)<\/quoted_\1 id="\2">|<quoted_path path="(handbook\.md|project\.md|attachments\/[1-9][0-9]*(?:\/(?!\.{1,2}(?:\/|"))[^"/]+)+)">([\s\S]*?)<\/quoted_path path="\4">/g;
+  /<quoted_(item|block) id="([^"]+)">([\s\S]*?)<\/quoted_\1 id="\2">|<quoted_path path="(handbook\.md|project\.md|journal\.md|attachments\/[1-9][0-9]*(?:\/(?!\.{1,2}(?:\/|"))[^"/]+)+)">([\s\S]*?)<\/quoted_path path="\4">/g;
 
 const labelOf = (body: string) => body.trim().split('\n')[0]!.slice(0, 120);
 

@@ -7,8 +7,8 @@
  * the document (F97), as a block's does where its document is a card, at the block (F33), and the
  * address under a document's of the box of Pilot's questions to its writer at the box (F52.2). An
  * attachment's address under an item's or a document's opens it (F28.5), and under the project's,
- * wherever it hangs, a draft's material hung on nothing (F36.6). The handbook's address, and the
- * project document's, open it (F129.4, F37.4), and a work item's session log's opens it (F69):
+ * wherever it hangs, a draft's material hung on nothing (F36.6). The handbook's address, the
+ * journal's and the project document's open it (F129.4, F169.4, F37.4), and a work item's session log's opens it (F69):
  * off a phone a popover over the tab showing, the one the line showed last, as its own address
  * draws it (F69.1); a done work item's debrief's, under it, opens the debrief there (F26.9), and
  * its full debrief's, under that, the full debrief in the debrief's place (F26.10).
@@ -42,7 +42,7 @@ import { ItemAttachmentOverlay, ProjectAttachmentOverlay } from '@/components/ov
 import { DebriefOverlay } from '@/components/overlay/debrief-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
 import { ItemOverlay } from '@/components/overlay/item-overlay';
-import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
+import { HandbookOverlay, JournalOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
 import { SessionLogOverlay } from '@/components/overlay/session-log-overlay';
 import { Panel } from '@/components/panel/panel';
 import { PanelDivider } from '@/components/panel/panel-divider';
@@ -127,6 +127,7 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
       ? { itemId, block: blockId ?? null }
       : null;
   const handbook = route === '/_shell/projects/$address/handbook';
+  const journal = route === '/_shell/projects/$address/journal';
   const projectDocument = route === '/_shell/projects/$address/project-document';
   const documents = (
     <>
@@ -134,6 +135,7 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
       {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
       {loose !== null && <ProjectAttachmentOverlay projectId={projectId} attachmentId={loose} />}
       {handbook && <HandbookOverlay projectId={projectId} project={data} />}
+      {journal && <JournalOverlay projectId={projectId} project={data} />}
       {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
     </>
   );
@@ -145,7 +147,8 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
       <SessionLogOverlay projectId={projectId} sessionId={sessionId} />
     );
   if (phone) {
-    const overlaid = opened !== null || attached !== null || loose !== null || alone !== null || handbook || projectDocument || sessionId !== undefined;
+    const overlaid =
+      opened !== null || attached !== null || loose !== null || alone !== null || handbook || journal || projectDocument || sessionId !== undefined;
     return (
       <ShownProjectContext.Provider value={shown}>
         <PhoneProject projectId={projectId} project={data} overlaid={overlaid}>
@@ -171,9 +174,11 @@ function ProjectAt({ projectId, address }: { projectId: string; address: string 
         ? { key: `attachment ${attachmentId}`, kind: 'attachment', id: attachmentId, documentId, path }
         : handbook
           ? { key: 'handbook', kind: 'handbook', id: null, path }
-          : projectDocument
-            ? { key: 'project-document', kind: 'project-document', id: null, path }
-            : null;
+          : journal
+            ? { key: 'journal', kind: 'journal', id: null, path }
+            : projectDocument
+              ? { key: 'project-document', kind: 'project-document', id: null, path }
+              : null;
   return (
     <ShownProjectContext.Provider value={shown}>
       <DeskProject projectId={projectId} project={data} tab={tab} goneTo={goneTo} log={log}>

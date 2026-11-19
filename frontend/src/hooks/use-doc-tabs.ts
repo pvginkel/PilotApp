@@ -1,8 +1,8 @@
 /**
  * The desktop's tab line (F28.8): each project's own, its documents in the order they opened and
  * the order the tabs showed in, the timeline's among them, which closing the tab showing goes back
- * by. The tab showing is the address's (F97): a document's, an attachment's, the handbook's or the
- * project document's shows its tab, opening it at the line's end where it is not open, in the
+ * by. The tab showing is the address's (F97): a document's, an attachment's, the handbook's, the journal's
+ * or the project document's shows its tab, opening it at the line's end where it is not open, in the
  * frame the address is first drawn in; any other address of the project shows the timeline. A
  * tab's change replaces the browser's entry, so that Back does not move between tabs. The line and
  * the order the tabs showed in are kept in the browser (F133), so that after a reload the line is

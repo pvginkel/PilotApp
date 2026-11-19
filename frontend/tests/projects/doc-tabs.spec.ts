@@ -21,7 +21,7 @@
 import { cssColour } from '../support/contrast';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
-import { documentAddress, documentAttachmentAddress, handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
+import { documentAddress, documentAttachmentAddress, handbookAddress, journalAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
 import { projectAddress, type AttachedFile } from '../support/projects';
 
@@ -405,7 +405,7 @@ test.describe('Documents in tabs', () => {
     await expect(overlay.documentLink).toHaveCount(0);
   });
 
-  test('the handbook and the project document each open as a tab of their own from the Documents tab', async ({
+  test('the handbook, the journal and the project document each open as a tab of their own from the Documents tab', async ({
     page,
     people,
     projects,
@@ -417,6 +417,7 @@ test.describe('Documents in tabs', () => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Handbook'), members: [me.handle!] });
     await projects.saveProjectDocument(id, 'handbook', '---\ntitle: How we camp\n---\n\nWe leave no trace.\n');
+    await projects.saveProjectDocument(id, 'journal', '---\ntitle: How the runs go\n---\n\nReviews take two rounds.\n');
     await timeline.open(id);
 
     await panel.documentsTab.click();
@@ -426,9 +427,15 @@ test.describe('Documents in tabs', () => {
     await expect(docTabs.tab('handbook').title).toHaveText('How we camp');
     await expect(overlay.role).toHaveText('Handbook');
 
+    await expect(panel.journal.title).toHaveText('How the runs go');
+    await panel.journal.root.click();
+    await expect(page).toHaveURL(journalAddress(id));
+    await expect(docTabs.tab('journal').title).toHaveText('How the runs go');
+    await expect(overlay.role).toHaveText('Journal');
+
     await panel.projectDocument.root.click();
     await expect(page).toHaveURL(projectDocumentAddress(id));
-    expect(await docTabs.keys()).toEqual(['handbook', 'project-document']);
+    expect(await docTabs.keys()).toEqual(['handbook', 'journal', 'project-document']);
     await expect(overlay.role).toHaveText('Project document');
   });
 

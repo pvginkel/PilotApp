@@ -1,10 +1,10 @@
 /**
- * The project's handbook (F129.4) and its project document, `project.md` (F37.4), in the overlay,
+ * The project's handbook (F129.4), its journal (F169.4) and its project document, `project.md` (F37.4), in the overlay,
  * each at its own address over the project's timeline, opening as an attachment opens: rendered,
  * read only, no foot. Its head is its title over the project and what it is, and Discuss, quoting
  * it by its path in the project's folder (F39.1); its body its prose and its asks in their order,
  * each ask read only (D1), then Pilot's dots while a turn saves it (F35), or *Empty* while it has
- * no text past its title, as the handbook is born (F129.2). A link in its prose to the project's
+ * no text past its title, as the handbook and the journal are born (F129.2, F169.1). A link in its prose to the project's
  * attached material, by its path in the project's folder, opens the attachment where it hangs, the
  * draft's material on the opening after Create (F29.3, F18.1): off a phone in a tab of its own, on a
  * phone a view pushed over this one; one naming no attachment is its words alone, and any other
@@ -13,16 +13,16 @@
  */
 
 import { Link } from '@tanstack/react-router';
-import { FileText, NotebookText, type LucideIcon } from 'lucide-react';
+import { BookText, FileText, NotebookText, type LucideIcon } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
-import { quoteOfFile } from '@/components/chat/discuss-quotes';
+import { quoteOfFile, type ProjectFile } from '@/components/chat/discuss-quotes';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown, type DocumentLinkProps } from '@/components/shared/markdown';
 import { DocumentBlock } from '@/components/timeline/block';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useTabReplace } from '@/hooks/use-doc-tabs';
-import { useHandbook, useProjectDraft, type ProjectDocument } from '@/hooks/use-document';
+import { useHandbook, useJournal, useProjectDraft, type ProjectDocument } from '@/hooks/use-document';
 import { useOverlayClose } from '@/hooks/use-overlay-close';
 import { useShownProject } from '@/hooks/use-project-address';
 import type { ProjectHead } from '@/hooks/use-projects';
@@ -50,6 +50,13 @@ export function HandbookOverlay({ projectId, project }: ProjectDocumentOverlayPr
   );
 }
 
+export function JournalOverlay({ projectId, project }: ProjectDocumentOverlayProps) {
+  const read = useJournal(projectId);
+  return (
+    <ReadOnlyOverlay projectId={projectId} project={project} read={read} showing="journal" path="journal.md" role="Journal" icon={BookText} />
+  );
+}
+
 export function ProjectDocumentOverlay({ projectId, project }: ProjectDocumentOverlayProps) {
   const read = useProjectDraft(projectId, 'overlay.draft');
   return (
@@ -69,7 +76,7 @@ interface ReadOnlyOverlayProps extends ProjectDocumentOverlayProps {
   read: { data: ProjectDocument | undefined; error: unknown };
   showing: string;
   /** Its path in the project's folder. */
-  path: 'handbook.md' | 'project.md';
+  path: ProjectFile;
   /** What it is, which titles it where its text gives no title. */
   role: string;
   icon: LucideIcon;

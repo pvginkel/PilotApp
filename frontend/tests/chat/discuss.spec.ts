@@ -2,7 +2,7 @@
  * Discuss (F39): on every item head, done line, block of a document, confirmation card, overlay
  * head and session log it shows the side panel's Chat tab and puts what it stands on in the
  * composer as a chip that can be dropped, which the sent message carries as its tag before the
- * words (F38.3, F39.3); the handbook's, the project document's and an attachment's overlay quote
+ * words (F38.3, F39.3); the handbook's, the journal's, the project document's and an attachment's overlay quote
  * the file by its path in the project's folder. A block with no section of its own is named by its
  * kind, numbered among its document's blocks of that kind where it holds more than one (C14). The
  * quote is kept beside the composer's words in the browser until sent (C12). It puts the focus in
@@ -222,7 +222,7 @@ test.describe('Discuss', () => {
     await controller.finish(chats.store, session, 'success', 'The dome.');
   });
 
-  test('on an overlay’s head quotes what it shows: a document the item, the handbook, the project document and an attachment by their paths; the session log’s popover has none', async ({
+  test('on an overlay’s head quotes what it shows: a document the item, the handbook, the journal, the project document and an attachment by their paths; the session log’s popover has none', async ({
     people,
     projects,
     timeline,
@@ -235,6 +235,7 @@ test.describe('Discuss', () => {
     const project = await projects.makeWithSession({ name: makeUnique('Overlays'), members: [me.handle!] });
     const packing = await projects.place(project, { kind: 'document', title: 'Packing', text: PACKING });
     await projects.saveProjectDocument(project, 'handbook', '# Camping handbook\n\nHow the trip is planned.\n');
+    await projects.saveProjectDocument(project, 'journal', '# How the runs go\n\nReviews take two rounds.\n');
     await projects.saveProjectDocument(project, 'draft', '# The trip plan\n\nWhere we go.\n');
     await projects.endTurn(project);
     const [notes] = await projects.attach(packing, [NOTES]);
@@ -256,6 +257,11 @@ test.describe('Discuss', () => {
     await overlay.discuss.click();
     await expect(chat.quote).toHaveAttribute('data-quote', 'path handbook.md');
     await expect(chat.quoteLabel).toHaveText('Camping handbook');
+
+    await overlay.openProjectDocument(project, 'journal');
+    await overlay.discuss.click();
+    await expect(chat.quote).toHaveAttribute('data-quote', 'path journal.md');
+    await expect(chat.quoteLabel).toHaveText('How the runs go');
 
     await overlay.openProjectDocument(project, 'draft');
     await overlay.discuss.click();
@@ -299,6 +305,33 @@ test.describe('Discuss', () => {
     const [started] = (await chats.list(project)).chats;
     const send = (await projects.records(started!.id)).records.find((record) => record.kind === 'send')!;
     expect(send).toMatchObject({ message: `${pathTag(path, 'Tent notes')} Is this current?` });
+    await controller.finish(chats.store, session, 'success', 'It is.');
+  });
+
+  test('sends the journal quoted by its path, `journal.md`, as its path tag, the message opening with its line', async ({
+    people,
+    projects,
+    controller,
+    overlay,
+    chat,
+    chats,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Journal'), members: [me.handle!] });
+    await projects.saveProjectDocument(project, 'journal', '# How the runs go\n\nReviews take two rounds.\n');
+    await projects.endTurn(project);
+    await overlay.openProjectDocument(project, 'journal');
+    await overlay.discuss.click();
+    await chat.field.fill('Is that still so?');
+    const opened = await chats.opening(project);
+    await chat.send.click();
+    const session = await opened();
+    const quote = chat.messages.getByTestId('chat.quote');
+    await expect(quote).toHaveAttribute('data-quote', 'path journal.md');
+    await expect(quote).toHaveText('How the runs go');
+    const [started] = (await chats.list(project)).chats;
+    const send = (await projects.records(started!.id)).records.find((record) => record.kind === 'send')!;
+    expect(send).toMatchObject({ message: `${pathTag('journal.md', 'How the runs go')} Is that still so?` });
     await controller.finish(chats.store, session, 'success', 'It is.');
   });
 });

@@ -1,11 +1,11 @@
 /**
  * The screens kept live (F80.2). The server's `project_changed` names a project whose timeline,
  * head or tab moved, and what the screens show of it is read again: its timeline, its head, a
- * document of it in the overlay, its handbook and its project document, its chats, its
+ * document of it in the overlay, its handbook, its journal and its project document, its chats, its
  * conversations, and the project lists' tabs. A chat's open and close, and each move of its
  * session's state, send one: the Chat tab shows a chat that opens, its close, and whether Pilot is
  * answering (F40.3); a conversation's do too, and the Conversations tab shows them (F150.12). A save of any of
- * the project's documents, the handbook and the project document included, sends one where it
+ * the project's documents, the handbook, the journal and the project document included, sends one where it
  * changes the text or makes its turn the document's writer, and a turn's end sends one for each
  * document it lets go: Pilot's dots come and go live (F35). An event reaches only the browsers
  * whose stream the sending process holds, so each time the stream comes up everything they show is
@@ -56,6 +56,7 @@ const HEAD = 'getProjectsByProjectId';
 const TIMELINE = 'getProjectsTimelineByProjectId';
 const DOCUMENT = 'getItemsDocumentByItemId';
 const HANDBOOK = 'getProjectsHandbookByProjectId';
+const JOURNAL = 'getProjectsJournalByProjectId';
 const DRAFT = 'getProjectsDraftByProjectId';
 const CHATS = 'getProjectsChatsByProjectId';
 const CONVERSATIONS = 'getProjectsConversationsByProjectId';
@@ -107,7 +108,7 @@ function reader(queryClient: QueryClient): { read: (filters: QueryFilters) => vo
 function readAgain(read: (filters: QueryFilters) => void, projects: ReadonlySet<string>): void {
   read({ queryKey: LISTS });
   for (const project_id of projects) {
-    for (const key of [HEAD, TIMELINE, HANDBOOK, DRAFT, CHATS, CONVERSATIONS]) {
+    for (const key of [HEAD, TIMELINE, HANDBOOK, JOURNAL, DRAFT, CHATS, CONVERSATIONS]) {
       read({ queryKey: [key, { path: { project_id } }] });
     }
   }
@@ -208,6 +209,6 @@ export function useProjectEvents(): void {
     void queryClient.invalidateQueries({ queryKey: LISTS });
     void queryClient.invalidateQueries({ queryKey: [HEAD] });
     void queryClient.invalidateQueries({ queryKey: [TIMELINE] });
-    for (const key of [DOCUMENT, HANDBOOK, DRAFT, CHATS, CONVERSATIONS]) void queryClient.invalidateQueries({ queryKey: [key] });
+    for (const key of [DOCUMENT, HANDBOOK, JOURNAL, DRAFT, CHATS, CONVERSATIONS]) void queryClient.invalidateQueries({ queryKey: [key] });
   }, [isConnected, queryClient]);
 }

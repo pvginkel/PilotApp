@@ -1,14 +1,20 @@
 /**
  * The documents the overlay reads on its own. An item's, as GET /api/items/<id>/document reads it
  * (F28): its timeline entry and its project, with its text as Done fixed it where Done did
- * (F13.3). The project's handbook (F129.4) and its project document, `project.md` (F37.4), as
- * GET /api/projects/<id>/handbook and …/draft read them, as last published, the latter by the
- * overlay and by a draft's Draft tab (F46.3), each reporting its own read. Each refetches when
+ * (F13.3). The project's handbook (F129.4), its journal (F169.4) and its project document,
+ * `project.md` (F37.4), as GET /api/projects/<id>/handbook, …/journal and …/draft read them, as
+ * last published, the last by the overlay and by a draft's Draft tab (F46.3), each reporting its
+ * own read. Each refetches when
  * the window comes back into focus, after the person's own writes, which invalidate every query,
  * and on its project's live event (F80.2; use-project-events.ts).
  */
 
-import { useGetItemsDocumentByItemId, useGetProjectsDraftByProjectId, useGetProjectsHandbookByProjectId } from '@/lib/api/generated/hooks';
+import {
+  useGetItemsDocumentByItemId,
+  useGetProjectsDraftByProjectId,
+  useGetProjectsHandbookByProjectId,
+  useGetProjectsJournalByProjectId,
+} from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
@@ -24,6 +30,12 @@ export function useItemDocument(id: string) {
 export function useHandbook(projectId: string) {
   const query = useGetProjectsHandbookByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
   useUiStateInstrumentation('overlay.handbook', { isLoading: query.isLoading, error: query.error });
+  return query;
+}
+
+export function useJournal(projectId: string) {
+  const query = useGetProjectsJournalByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
+  useUiStateInstrumentation('overlay.journal', { isLoading: query.isLoading, error: query.error });
   return query;
 }
 

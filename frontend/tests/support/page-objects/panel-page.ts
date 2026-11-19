@@ -12,7 +12,7 @@ interface PanelRow {
 
 /**
  * The side panel (F38.1): the divider at its left, its head with the Documents tab and the tab's
- * count; the Documents tab (F37) with the project document, the handbook, the attachments, a batch
+ * count; the Documents tab (F37) with the project document, the handbook, the journal, the attachments, a batch
  * of several under its folder, and the timeline's documents and reviews, each a row with its title
  * and the line under it, "None yet" where a list is empty, and the line in the lists' place where
  * the tab's read failed.
@@ -35,6 +35,8 @@ export class PanelPage {
   readonly projectDocument: PanelRow;
   /** The handbook under the project document. */
   readonly handbook: PanelRow;
+  /** The journal under the handbook. */
+  readonly journal: PanelRow;
   /** Every attachment's row, a batch's files included, in their order. */
   readonly attachments: Locator;
   readonly noAttachments: Locator;
@@ -71,6 +73,7 @@ export class PanelPage {
     this.headings = this.body.locator('h3');
     this.projectDocument = rowOf(this.body.getByTestId('panel.project-document'));
     this.handbook = rowOf(this.body.getByTestId('panel.handbook'));
+    this.journal = rowOf(this.body.getByTestId('panel.journal'));
     this.attachments = this.body.getByTestId('panel.attachment');
     this.noAttachments = this.body.getByTestId('panel.attachments.none');
     this.batches = this.body.getByTestId('panel.batch');

@@ -1,11 +1,11 @@
 /**
  * A quote (F39.3), as a line over a person's message it opens, as a chip inside a text, or over the
- * composer's field with its remove: its icon — an item's, a block's, the handbook's, the project
- * document's or an attachment's — and its label. Clicking the line or the chip goes to what it
+ * composer's field with its remove: its icon — an item's, a block's, the handbook's, the journal's,
+ * the project document's or an attachment's — and its label. Clicking the line or the chip goes to what it
  * quotes.
  */
 
-import { FileText, MessageSquareQuote, NotebookText, Paperclip, SquareCheckBig, X } from 'lucide-react';
+import { BookText, FileText, MessageSquareQuote, NotebookText, Paperclip, SquareCheckBig, X } from 'lucide-react';
 import { useOpenQuote } from '@/hooks/use-open-quote';
 import type { QuoteRef } from '@/lib/chat/quotes';
 
@@ -17,9 +17,11 @@ function QuoteIcon({ quote }: { quote: QuoteRef }) {
         ? SquareCheckBig
         : quote.id === 'handbook.md'
           ? NotebookText
-          : quote.id === 'project.md'
-            ? FileText
-            : Paperclip;
+          : quote.id === 'journal.md'
+            ? BookText
+            : quote.id === 'project.md'
+              ? FileText
+              : Paperclip;
   return <Icon className="icon-cap" aria-hidden />;
 }
 

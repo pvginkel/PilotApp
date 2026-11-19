@@ -1,6 +1,6 @@
 /**
  * The overlay (F28.1): what opens as a document. Off a phone a document, an attachment, the
- * handbook and the project document are each a tab (`use-doc-tabs.ts`): in the timeline's place,
+ * handbook, the journal and the project document are each a tab (`use-doc-tabs.ts`): in the timeline's place,
  * the side panel beside it, at the timeline's width, on the page's own colour, its head's and its
  * foot's text in the timeline's column; no maximize, backdrop or cross, closed by its tab's cross
  * or Done and never by Esc; its body's scroll kept while another tab shows, set back once its read

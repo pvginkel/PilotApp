@@ -1,6 +1,6 @@
 /**
  * The views on a phone (F98.4, F98.5): what opens from a tab — a document, an attachment, a
- * draft's material hung on nothing, the project document, the handbook, a work item's session log —
+ * draft's material hung on nothing, the project document, the handbook, the journal, a work item's session log —
  * is a view pushed over it, the whole screen over the head and the tabs, with no animation; an
  * arrow back at the left of its head, where the head's arrow to the home stands, at the top however
  * tall its head, and no cross, maximize or backdrop. A view opened from a view lies on top of it,
@@ -21,7 +21,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
-import { documentAddress, documentAttachmentAddress, handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
+import { documentAddress, documentAttachmentAddress, handbookAddress, journalAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { addressOf } from '../support/page-objects/timeline-page';
 import { projectAddress, type AttachedFile } from '../support/projects';
@@ -475,7 +475,7 @@ test.describe('Views on a phone', () => {
     await expect(chat.quote).toHaveAttribute('data-quote', `item ${work}`);
   });
 
-  test('the Documents tab’s project document and handbook rows open as views over it, the arrow back showing the tab', async ({
+  test('the Documents tab’s project document, handbook and journal rows open as views over it, the arrow back showing the tab', async ({
     page,
     people,
     projects,
@@ -487,6 +487,7 @@ test.describe('Views on a phone', () => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Rows'), members: [me.handle!] });
     await projects.saveProjectDocument(id, 'handbook', '# How we travel\n\nHow the trip is planned.\n');
+    await projects.saveProjectDocument(id, 'journal', '# How the runs go\n\nReviews take two rounds.\n');
     await projectHead.open(id);
 
     await phoneTabs.tab('documents').tap();
@@ -499,6 +500,13 @@ test.describe('Views on a phone', () => {
     await panel.handbook.root.tap();
     await expect(page).toHaveURL(handbookAddress(id));
     await expect(overlay.title).toHaveText('How we travel');
+    await overlay.back.tap();
+    await expect(overlay.root).toHaveCount(0);
+    await expect(phoneTabs.tab('documents')).toHaveAttribute('aria-selected', 'true');
+
+    await panel.journal.root.tap();
+    await expect(page).toHaveURL(journalAddress(id));
+    await expect(overlay.title).toHaveText('How the runs go');
     await overlay.back.tap();
     await expect(overlay.root).toHaveCount(0);
     await expect(phoneTabs.tab('documents')).toHaveAttribute('aria-selected', 'true');

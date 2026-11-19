@@ -3,14 +3,14 @@
  * Markdown — an item on the timeline, a confirmation's details, a document's overlay, the handbook,
  * the project document, a Markdown attachment — each going to what it quotes: an item to its
  * address, a block to its own, opening the overlay where its document is a card, and a path to its
- * file's overlay, the handbook's, the project document's or an attachment's. Inside a code span or
+ * file's overlay, the handbook's, the journal's, the project document's or an attachment's. Inside a code span or
  * a fence, or behind a backslash escape, a tag shows as written, as does a tag naming a path that is
  * no quote.
  */
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
-import { handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
+import { handbookAddress, journalAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
 
 const WORDS = (count: number) => Array.from({ length: count }, (_, index) => `word${index}`).join(' ');
@@ -62,7 +62,7 @@ test.describe('A quote', () => {
     await expect(overlay.blockAt('D1').root).toBeVisible();
   });
 
-  test('by a path is a chip opening the handbook’s, the project document’s or an attachment’s tab; a path naming any other file shows as written', async ({
+  test('by a path is a chip opening the handbook’s, the journal’s, the project document’s or an attachment’s tab; a path naming any other file shows as written', async ({
     page,
     people,
     projects,
@@ -73,6 +73,7 @@ test.describe('A quote', () => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Paths'), members: [me.handle!] });
     await projects.saveProjectDocument(id, 'handbook', '# Handbook\n\nHow the trip is planned.\n');
+    await projects.saveProjectDocument(id, 'journal', '# Journal\n\nReviews take two rounds.\n');
     await projects.saveProjectDocument(id, 'draft', '# The trip plan\n\nWhere we go.\n');
     await projects.endTurn(id);
     const sketches = await projects.place(id, { kind: 'notice', title: 'Sketches', text: 'The sketches are attached.\n' });
@@ -80,12 +81,13 @@ test.describe('A quote', () => {
       { title: 'Tent notes', filename: 'tent-notes.md', content_type: 'text/markdown', content: '# Tent notes\n\nThe dome is lighter.\n' },
     ]);
     const { batch } = (await projects.item(id, sketches)).attachments[0]!;
-    const unknown = [pathTag('notes.md', 'Notes'), pathTag('../handbook.md', 'Up')];
+    const unknown = [pathTag('notes.md', 'Notes'), pathTag('../handbook.md', 'Up'), pathTag('journals.md', 'Journals')];
     const notice = await projects.place(id, {
       kind: 'notice',
       title: 'Read these',
       text: [
         pathTag('handbook.md', 'Handbook'),
+        pathTag('journal.md', 'Journal'),
         pathTag('project.md', 'The trip plan'),
         pathTag(`attachments/${batch}/tent-notes.md`, 'Tent notes'),
         ...unknown,
@@ -95,8 +97,9 @@ test.describe('A quote', () => {
 
     const text = timeline.item(notice).text;
     const chips = text.getByTestId('chat.quote');
-    await expect(chips).toHaveText(['Handbook', 'The trip plan', 'Tent notes']);
-    await expect(chips.nth(2)).toHaveAttribute('data-quote', `path attachments/${batch}/tent-notes.md`);
+    await expect(chips).toHaveText(['Handbook', 'Journal', 'The trip plan', 'Tent notes']);
+    await expect(chips.nth(1)).toHaveAttribute('data-quote', 'path journal.md');
+    await expect(chips.nth(3)).toHaveAttribute('data-quote', `path attachments/${batch}/tent-notes.md`);
     for (const written of unknown) await expect(text).toContainText(written);
 
     await chips.nth(0).click();
@@ -106,12 +109,18 @@ test.describe('A quote', () => {
     await expect(overlay.root).toHaveCount(0);
 
     await chips.nth(1).click();
+    await expect(page).toHaveURL(journalAddress(id));
+    await expect(overlay.role).toHaveText('Journal');
+    await docTabs.first.click();
+    await expect(overlay.root).toHaveCount(0);
+
+    await chips.nth(2).click();
     await expect(page).toHaveURL(projectDocumentAddress(id));
     await expect(overlay.role).toHaveText('Project document');
     await docTabs.first.click();
     await expect(overlay.root).toHaveCount(0);
 
-    await chips.nth(2).click();
+    await chips.nth(3).click();
     await expect(page).toHaveURL(attachmentAddress(id, sketches, notes!));
     await expect(overlay.attachment.prose).toContainText('The dome is lighter.');
   });

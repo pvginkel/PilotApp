@@ -5,8 +5,8 @@
  * worker made; a draft made with a session (`makeDraft`) answers its folder in the store's tree as
  * well, where its definition chat's session runs. A project made with a session has items placed
  * on its timeline as Pilot places them, and saves of them as Pilot's (POST /api/testing/projects/<id>/items and
- * /api/testing/items/<id>/saves), its handbook and its project document saved
- * (/api/testing/projects/<id>/{handbook,draft}/saves), its session's turn ended, a document it settled whole marked
+ * /api/testing/items/<id>/saves), its handbook, its journal and its project document saved
+ * (/api/testing/projects/<id>/{handbook,journal,draft}/saves), its session's turn ended, a document it settled whole marked
  * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments), or a
  * draft's hung on nothing, as its definition chat attaches them (/api/testing/projects/<id>/attachments); they
  * are answered through the items API, and a block of the handbook or of the project document by its
@@ -154,8 +154,8 @@ export class Projects {
     return (await response.json()) as Save;
   }
 
-  /** A save of the project's handbook, or of its project document (`draft`), by the project's session. */
-  async saveProjectDocument(projectId: string, role: 'handbook' | 'draft', text: string): Promise<Save> {
+  /** A save of the project's handbook, of its journal, or of its project document (`draft`), by the project's session. */
+  async saveProjectDocument(projectId: string, role: 'handbook' | 'journal' | 'draft', text: string): Promise<Save> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/${role}/saves`, {
       data: { text },
     });

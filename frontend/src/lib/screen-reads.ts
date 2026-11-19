@@ -1,7 +1,7 @@
 /**
  * What a project's screens read before the router swaps one in: a project's head and its
  * timeline, or a draft's chats in the timeline's place; a document's tab its document, a card's
- * block its card's, the handbook's and the project document's their own. A route's loader reads
+ * block its card's, the handbook's, the journal's and the project document's their own. A route's loader reads
  * them into the page's cache, each under its generated hook's key, so that the router keeps the
  * screen showing until they are in, and the loading bar tells of a wait past 200 ms
  * (`loading-bar.tsx`); a project's tab reads its project's as the router preloads its route, on
@@ -108,6 +108,12 @@ export async function readBlock(address: string, itemId: string): Promise<void> 
 export async function readHandbook(address: string): Promise<unknown> {
   const id = await idAt(address);
   return cached('getProjectsHandbookByProjectId', projectParams(id), () => api.GET('/api/projects/{project_id}/handbook', { params: projectParams(id) }));
+}
+
+/** The journal's tab. */
+export async function readJournal(address: string): Promise<unknown> {
+  const id = await idAt(address);
+  return cached('getProjectsJournalByProjectId', projectParams(id), () => api.GET('/api/projects/{project_id}/journal', { params: projectParams(id) }));
 }
 
 /** The project document's tab. */
