@@ -94,6 +94,18 @@ def metric_value(metric: MetricWrapperBase, **labels: str) -> float:
     )
 
 
+def reconciled(supervisor: Supervisor) -> None:
+    """Wait until the reconciles of a fired STARTUP have run. They run on a
+    thread of the supervisor's own, so a row a test commits before this
+    returns is one they may read: a turn in flight gets its relay started,
+    and its interrupt where its Session is stopped."""
+    startup = next(
+        thread for thread in supervisor._threads if thread.name == "supervisor-startup"
+    )
+    startup.join(WAIT_SECONDS)
+    assert not startup.is_alive(), f"the reconciles not run in {WAIT_SECONDS} s"
+
+
 def wait_until(condition: Callable[[], bool], what: str) -> None:
     """Wait until `condition()` holds, which another thread brings about."""
     deadline = time.perf_counter() + WAIT_SECONDS

@@ -116,6 +116,7 @@ from tests.support.supervisor import (
     Supervise,
     listening,
     metric_value,
+    reconciled,
     wait_until,
 )
 
@@ -4583,14 +4584,15 @@ class TestRelayLoop:
         fake_controller: ServedFakeController,
         supervise: Supervise,
     ) -> tuple[RelayService, str, uuid.UUID, uuid.UUID, uuid.UUID]:
-        """The relays after STARTUP and an idle wait's run: the service, the
-        controller session's name, the run's id, its wait's and its
-        person's."""
+        """The relays after STARTUP, its reconciles run, and an idle wait's
+        run, which they read idle: the service, the controller session's
+        name, the run's id, its wait's and its person's."""
         container = committed_app.container
         relays, coordinator = _relay_service(container, supervise)
         name = _headless(fake_controller, committed_controller_client)
         run_id, wait_id, person_id = _committed_wait_run(container, name)
         coordinator.fire_startup()
+        reconciled(relays._supervisor)
         return relays, name, run_id, wait_id, person_id
 
     @pytest.mark.parametrize(
