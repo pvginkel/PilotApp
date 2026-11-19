@@ -475,8 +475,9 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
         stores them as you give them and shows them behind the work item's
         Debrief once your turn ends, the figures nowhere; a subject's
         debriefs come together in one notice on the project's timeline once
-        the work item whose debrief completes it is done. A second call is
-        refused with the reason, and nothing changes. A call outside the limits — an
+        Pilot's pass after the turn of the work item whose debrief completes
+        it has ended. A second call is refused with the reason, and nothing
+        changes. A call outside the limits — an
         empty debrief or one over 16,000 characters, no entries or over 500,
         an empty section, role, words or why, a section or a why over 120
         characters, a role over 64, words over 4,000, a round under 1, a
