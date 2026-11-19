@@ -1,6 +1,6 @@
-"""Revision 0047: a step's kind, its conversations and its timing (DB
-decision 79), over a record as revision 0046 leaves it: the downgrades of
-revision 0048 and of this one build 0046's schema in the test's transaction."""
+"""Revision 0048: a step's kind, its conversations and its timing (DB
+decision 79), over a record as revision 0047 leaves it: the downgrades of
+revision 0049 and of this one build 0047's schema in the test's transaction."""
 
 import uuid
 
@@ -31,7 +31,7 @@ def _step_columns(db: DbSession) -> set[str]:
     return {column["name"] for column in columns} & COLUMNS
 
 
-class TestRevision0047:
+class TestRevision0048:
     def test_its_downgrade_takes_what_it_built_and_its_upgrade_builds_it_over_a_list(
         self, session: DbSession, project: Project, project_session: models.Session
     ) -> None:
@@ -81,8 +81,8 @@ class TestRevision0047:
         session.flush()
         session.expunge_all()
 
+        run_revision(session, "0049", "downgrade")
         run_revision(session, "0048", "downgrade")
-        run_revision(session, "0047", "downgrade")
 
         assert _tables(session) == []
         assert _step_columns(session) == set()
@@ -90,8 +90,8 @@ class TestRevision0047:
             "P1.code"
         ]
 
-        run_revision(session, "0047", "upgrade")
         run_revision(session, "0048", "upgrade")
+        run_revision(session, "0049", "upgrade")
 
         assert _tables(session) == list(TABLES)
         step = session.get_one(ProgressStep, (work_id, "P1.code"))

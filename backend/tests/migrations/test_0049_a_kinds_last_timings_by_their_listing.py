@@ -1,5 +1,5 @@
-"""Revision 0048: the indexes the estimate reads a kind's last Step Timings
-through, in place of revision 0047's one."""
+"""Revision 0049: the indexes the estimate reads a kind's last Step Timings
+through, in place of revision 0048's one."""
 
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
@@ -37,17 +37,17 @@ def _indexes(db: DbSession) -> dict[str | None, list[str | None]]:
     }
 
 
-class TestRevision0048:
+class TestRevision0049:
     def test_its_downgrade_restores_the_one_index_and_its_upgrade_builds_the_two(
         self, session: DbSession
     ) -> None:
         assert _indexes(session) == BY_LISTING
 
-        run_revision(session, "0048", "downgrade")
+        run_revision(session, "0049", "downgrade")
 
         assert _indexes(session) == BY_END
 
-        run_revision(session, "0048", "upgrade")
+        run_revision(session, "0049", "upgrade")
 
         assert _indexes(session) == BY_LISTING
         context = MigrationContext.configure(session.connection())

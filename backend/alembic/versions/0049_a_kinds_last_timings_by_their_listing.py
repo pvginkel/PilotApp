@@ -6,8 +6,8 @@ repo's own. Each of those reads is a range of an index here, ended at its
 limit: the index on `(kind_code, ended_at)` it replaces walked a kind's whole
 history for a repo's or one listing's few.
 
-Revision ID: 0048
-Revises: 0047
+Revision ID: 0049
+Revises: 0048
 Create Date: 2026-11-19
 
 """
@@ -16,8 +16,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0048"
-down_revision: str | None = "0047"
+revision: str = "0049"
+down_revision: str | None = "0048"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
