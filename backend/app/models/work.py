@@ -215,6 +215,12 @@ class ProgressStep(db.Model):  # type: ignore[name-defined]
     last went `done` (DB 287). `why` is the short line the run gives with
     the step, standing as the last list gave it (DB 327).
 
+    `kind_code` is the kind the workflow gives the step and `marked` its
+    word that the step is in trouble, each as the step's last publication
+    had it, none where it gave none. `listed_ahead` is the server's: whether
+    the step stood on its Work's list as pending before it began, none where
+    that is unknown (DB decision 79).
+
     That the Work is a worker's run whose own Session writes it (DB 286) is
     the server's check at the call: no key reaches the Session Kind from this
     row.
@@ -251,6 +257,9 @@ class ProgressStep(db.Model):  # type: ignore[name-defined]
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     why: Mapped[str | None] = mapped_column(Text)
+    kind_code: Mapped[str | None] = mapped_column(ForeignKey("step_kinds.code"))
+    listed_ahead: Mapped[bool | None] = mapped_column(Boolean)
+    marked: Mapped[bool | None] = mapped_column(Boolean)
 
 
 class DebriefEntry(db.Model):  # type: ignore[name-defined]

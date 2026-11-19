@@ -47,6 +47,7 @@ from app.models.session import (
     Turn,
     WriterQuestion,
 )
+from app.models.step import StepKind, StepTiming, StepTranscript
 from app.models.store_update import StoreUpdate
 from app.models.transcript import (
     Compaction,

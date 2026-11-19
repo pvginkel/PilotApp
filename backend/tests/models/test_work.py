@@ -18,6 +18,7 @@ from app.models import (
     ProgressStep,
     Project,
     Session,
+    StepKind,
     User,
     Work,
 )
@@ -946,6 +947,60 @@ class TestProgressStep:
             session.get_one(ProgressStep, (run, code)).why
             for code in ("P1.code-2", "P1.review-2")
         ] == ["The reviewer found the gap", None]
+
+    def test_a_step_holds_its_kind_its_listing_and_its_mark(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """DB decision 79: listed ahead, or first seen running; marked by the
+        workflow, or not."""
+        session.add(StepKind(code="code-writer", name="code-writer"))
+        session.flush()
+        session.add_all(
+            [
+                _step(
+                    run,
+                    "P1.code-writer-1",
+                    1,
+                    kind_code="code-writer",
+                    listed_ahead=True,
+                    marked=False,
+                ),
+                _step(
+                    run,
+                    "P1.code-writer-2",
+                    2,
+                    kind_code="code-writer",
+                    listed_ahead=False,
+                    marked=True,
+                ),
+            ]
+        )
+        session.flush()
+        session.expire_all()
+
+        assert [
+            (step.kind_code, step.listed_ahead, step.marked)
+            for step in session.scalars(
+                select(ProgressStep).order_by(ProgressStep.position)
+            )
+        ] == [("code-writer", True, False), ("code-writer", False, True)]
+
+    def test_a_step_published_with_none_of_them_holds_none(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """No kind and no mark where the publication gave none, and a listing
+        unknown."""
+        session.add(_step(run, "read", 1))
+        session.flush()
+        session.expire_all()
+
+        step = session.get_one(ProgressStep, (run, "read"))
+        assert (step.kind_code, step.listed_ahead, step.marked) == (None, None, None)
+
+    def test_its_kind_is_a_step_kind(self, session: DbSession, run: uuid.UUID) -> None:
+        session.add(_step(run, "P1.review-1", 1, kind_code="review"))
+
+        assert violated_constraint(session) == "progress_steps_kind_code_fkey"
 
 
 def _account(work_id: uuid.UUID, position: int, **overrides: object) -> DebriefEntry:
