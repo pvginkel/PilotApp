@@ -99,7 +99,7 @@ class ScenarioService:
         since the Turn's end, with that Turn its one: written where Pilot
         holds none of the conversation, else the one it holds, as the Turn
         now has it. Its environment is written where Pilot has none, as a
-        publication writes one."""
+        publication writes one the fleet stream has not given."""
         conversation_turn(self.db, turn.conversation)
         if turn.environment is not None:
             self.db.execute(
