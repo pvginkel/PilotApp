@@ -1,8 +1,9 @@
-// Tests PilotApp's backend and frontend in a Kubernetes Job and its pilot-sync sidecar in the pod,
-// then builds the pilot, pilot-ui and pilot-sync images, each tagged dev-<n> and dev-latest, and
-// pins the first two into PilotDeploy's main, which Argo CD syncs to pilot-dev. The prd pins it
-// writes there take effect when PilotApp/Promote-PRD retags the three images prd-<n> and advances
-// prd. pilot-sync, the store environment's sync sidecar, runs in no pod of PilotDeploy's.
+// Tests PilotApp's backend and frontend in a Kubernetes Job and its pilot-sync sidecar and its
+// collector in the pod, then builds the pilot, pilot-ui, pilot-sync and pilot-collector images, each
+// tagged dev-<n> and dev-latest, and pins pilot, pilot-ui and pilot-collector into PilotDeploy's
+// main, which Argo CD syncs to pilot-dev. The prd pins it writes there take effect when
+// PilotApp/Promote-PRD retags the four images prd-<n> and advances prd. pilot-sync, the store
+// environment's sync sidecar, runs in no pod of PilotDeploy's.
 //
 // Controller config:
 //   - Job: PilotApp/Build-Main
@@ -17,8 +18,9 @@ pipeline {
             inheritFrom 'jenkins-agent kaniko'
             yamlMergeStrategy merge()
             // golang runs the image this environment's `go` tool runs (.kubecoder/config.yaml), so a
-            // failure of the sidecar's tests here is one there too.
-            yaml podYaml(templates: ['k8s'], images: [
+            // failure of the sidecar's tests here is one there too. modern-app-toolchain, the
+            // validation Job's image, runs the collector's.
+            yaml podYaml(templates: ['k8s', 'modern-app-toolchain'], images: [
                 [image: 'registry:5000/kube-coder-go-toolchain:latest', name: 'golang'],
             ])
         }
@@ -95,6 +97,20 @@ pipeline {
             }
         }
 
+        // The collector's tests are no suite of the validation Job either: its run-suite runs the
+        // backend's and the frontend's alone. They need no service. The walk's proof against
+        // Pilot's routes is the backend suite's (backend/tests/collector).
+        stage('Test collector') {
+            steps {
+                container('modern-app-toolchain') {
+                    dir('collector') {
+                        sh 'uv sync --locked'
+                        sh 'uv run --no-sync pytest'
+                    }
+                }
+            }
+        }
+
         stage('Build pilot image') {
             steps {
                 container('kaniko') {
@@ -153,6 +169,26 @@ pipeline {
             }
         }
 
+        // The context is the repository's root: the collector takes packages by path from
+        // backend/packages, and the root's .dockerignore keeps the context to what the image
+        // copies, so the environment the tests left in collector/ stays out.
+        stage('Build pilot-collector image') {
+            steps {
+                container('kaniko') {
+                    script {
+                        helmCharts.kaniko2(
+                            dockerfile: 'collector/Dockerfile',
+                            context: '.',
+                            destinations: [
+                                "registry:5000/pilot-collector:dev-${currentBuild.number}",
+                                'registry:5000/pilot-collector:dev-latest',
+                            ]
+                        )
+                    }
+                }
+            }
+        }
+
         // One commit on PilotDeploy's main pins both stages: Argo CD syncs pilot-dev from main, so
         // the commit rolls dev, and pilot-prd follows prd, which only PilotApp/Promote-PRD moves to a
         // commit of main, so the prd pins are written now for the promotion to release.
@@ -165,10 +201,12 @@ pipeline {
                             'config/dev/values.yaml': [
                                 'images.pilot': ":dev-${n}",
                                 'images.pilotUI': ":dev-${n}",
+                                'images.collector': ":dev-${n}",
                             ],
                             'config/prd/values.yaml': [
                                 'images.pilot': ":prd-${n}",
                                 'images.pilotUI': ":prd-${n}",
+                                'images.collector': ":prd-${n}",
                             ],
                         ])
                     }

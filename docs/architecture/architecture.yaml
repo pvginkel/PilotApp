@@ -1,11 +1,12 @@
-# Architecture artifact of producer `pilot-app`: Pilot's logical architecture. The two products,
+# Architecture artifact of producer `pilot-app`: Pilot's logical architecture. The three products,
 # the surfaces they expose and what they consume. Hand-authored: this file is the source of truth
 # and its ids are minted once. The running instances, their hosts and the Specialization edges to
 # the products below are `pilot-deploy`'s (pvginkel/PilotDeploy).
 #
 # The UI is the product a person opens, so it carries the app's own name: the launcher titles a
-# tile with the label of the product behind the host. Both products carry the Pilot mark, which the
-# model stamps onto every instance, service and interface behind them, the launcher's tiles too.
+# tile with the label of the product behind the host. Every product carries the Pilot mark, which
+# the model stamps onto every instance, service and interface behind them, the launcher's tiles
+# too.
 schemaVersion: "0.1"
 producer: pilot-app
 
@@ -31,6 +32,17 @@ applicationComponents:
     logo: pilot
     stats:
       image: registry:5000/pilot-ui
+
+  - id: app:pilot-collector,a628c685-a17d-477e-9b4a-187c891319b5
+    label: Pilot Collector
+    summary: Collector of Pilot — a Python process beside a KubeCoder fleet's home that walks the Claude Code transcripts there, publishes their facts into Pilot's record through the backend's API and serves a conversation's reading to the backend.
+    introduced: 2026-11-19
+    lifecycle: active
+    stereotype: SoftwareProduct
+    sourceRepository: git:pvginkel/PilotApp
+    logo: pilot
+    stats:
+      image: registry:5000/pilot-collector
 
 applicationServices:
   - id: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
@@ -85,6 +97,14 @@ relations:
   # included; the UI's NGINX proxies /api/ to the backend.
   - id: rel:pilot-ui-consumes-api
     source: app:pilot-ui,7059ff8a-e581-4466-99e1-3a63a1b9f38c
+    target: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
+    type: Association
+
+  # --- What the collector consumes ---
+  # It takes Pilot's inventory, publishes each transcript and tells a walk's end through the
+  # API's collector routes (/api/collector), under a bearer of its own.
+  - id: rel:pilot-collector-consumes-api
+    source: app:pilot-collector,a628c685-a17d-477e-9b4a-187c891319b5
     target: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
     type: Association
 

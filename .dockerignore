@@ -1,0 +1,12 @@
+# The one image built with the repository's root as its context is the
+# collector's (collector/Dockerfile): everything is left out but what that file
+# copies. The other images' contexts are their own directories, each with a
+# .dockerignore of its own.
+*
+!collector/pyproject.toml
+!collector/uv.lock
+!collector/src
+!backend/packages/pilot-collection
+!backend/packages/pilot-scenario/pyproject.toml
+backend/packages/*/tests
+**/__pycache__
