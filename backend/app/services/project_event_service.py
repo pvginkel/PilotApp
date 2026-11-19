@@ -71,6 +71,7 @@ class ProjectEventService:
                     unreachable=self._container.controller_outage().holds,
                     halts=self._container.usage_halts(),
                     slots=self._container.work_slots(),
+                    estimates=self._container.step_estimates(),
                 ).get(event.work_id)
                 if work is None:
                     return

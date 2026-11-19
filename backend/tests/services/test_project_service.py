@@ -67,7 +67,7 @@ from app.models.reference import (
 )
 from app.schemas.projects import ProjectStatus
 from app.schemas.testing_record import InventedProjectCreateSchema
-from app.schemas.timeline import HeldReason
+from app.schemas.timeline import HeldReason, LongerThanUsual
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import CLOSED
 from app.services.container import ServiceContainer
@@ -95,7 +95,9 @@ from app.services.working_on import Reading
 from app.utils import after_commit as after_commit_module
 from tests.support.adoption import FIRST_MENUS
 from tests.support.chats import open_conversation
+from tests.support.estimates import listed, timed
 from tests.support.starts import configured_starts
+from tests.support.statements import sent
 from tests.support.supervisor import Supervise
 from tests.support.working_on import Camp
 
@@ -1068,6 +1070,157 @@ class TestHead:
             container.project_service().head(ADA, unknown)
 
         assert raised.value.message == f"Project {unknown} was not found"
+
+
+@pytest.mark.usefixtures("person")
+class TestHeadEstimate:
+    """The head's badge (F156.8): of its running work items', the one with
+    the most time left, one longer than usual before any."""
+
+    def test_it_is_the_running_work_item_with_the_most_time_left(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        short = _run(container, session, made, environment, SessionState.RUNNING)
+        long = _run(container, session, made, environment, SessionState.RUNNING)
+        held = _run(container, session, made, environment, SessionState.HELD)
+        timed(session, short.id, "code-writer", 20)
+        listed(session, short.id, "code-writer", pending=1)
+        listed(session, long.id, "code-writer", pending=3)
+        listed(session, held.id, "code-writer", pending=5)
+
+        head = container.project_service().head(ADA, made.id)
+
+        assert [work.id for work in head.running_work] == [short.id, long.id, held.id]
+        assert head.estimate is not None
+        assert (head.estimate.work_id, head.estimate.minutes) == (long.id, 60)
+        assert head.estimate.longer_than_usual is None
+
+    def test_one_longer_than_usual_stands_before_any_time_left(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        outrun = _run(container, session, made, environment, SessionState.RUNNING)
+        long = _run(container, session, made, environment, SessionState.RUNNING)
+        timed(session, long.id, "code-writer", 20)
+        listed(session, outrun.id, "code-writer", running=30)
+        listed(session, long.id, "code-writer", pending=3)
+
+        head = container.project_service().head(ADA, made.id)
+
+        assert head.estimate is not None
+        assert (
+            head.estimate.work_id,
+            head.estimate.minutes,
+            head.estimate.longer_than_usual,
+        ) == (outrun.id, None, LongerThanUsual.OUTRUN)
+
+    def test_a_head_none_of_whose_running_work_shows_a_badge_has_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        run = _run(container, session, made, environment, SessionState.RUNNING)
+        listed(session, run.id, "code-writer", pending=1)
+
+        assert container.project_service().head(ADA, made.id).estimate is None
+
+    def test_a_head_with_no_running_work_reads_no_estimate(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp")
+
+        with sent(session) as each:
+            head = container.project_service().head(ADA, made.id)
+
+        assert head.estimate is None
+        assert [text for text in each.texts if "progress_steps" in text] == []
+
+
+@pytest.mark.usefixtures("person")
+class TestEstimates:
+    """The read a page makes each minute while a badge shows (F156.8)."""
+
+    def test_the_projects_running_work_items_in_timeline_order_and_its_heads(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        other = _make(container, name="Soup club")
+        first = _run(container, session, made, environment, SessionState.RUNNING)
+        second = _run(container, session, made, environment, SessionState.RUNNING)
+        bare = _run(container, session, made, environment, SessionState.RUNNING)
+        held = _run(container, session, made, environment, SessionState.HELD)
+        done = _run(container, session, made, environment, SessionState.RUNNING)
+        elsewhere = _run(container, session, other, environment, SessionState.RUNNING)
+        timed(session, first.id, "code-writer", 20)
+        listed(session, first.id, "code-writer", pending=1)
+        listed(session, second.id, "code-writer", running=5, pending=1)
+        listed(session, bare.id, "plan-writer", pending=1)
+        listed(session, held.id, "code-writer", pending=4)
+        listed(session, done.id, "code-writer", pending=5)
+        listed(session, elsewhere.id, "code-writer", pending=6)
+        item = session.get_one(Item, done.id)
+        item.done_at, item.done_cause_code = datetime.now(UTC), "turn_ended"
+        session.flush()
+
+        estimates = container.project_service().estimates(made.id)
+
+        assert [
+            (estimate.work_id, estimate.minutes, estimate.kind)
+            for estimate in estimates.work_items
+        ] == [(first.id, 20, None), (second.id, 35, "code-writer")]
+        assert estimates.project is estimates.work_items[1]
+        head = container.project_service().head(ADA, made.id).estimate
+        assert head is not None
+        assert (head.work_id, head.minutes) == (second.id, 35)
+
+    def test_a_project_with_no_running_work_has_none(
+        self, container: ServiceContainer
+    ) -> None:
+        made = _make(container, name="Camp")
+
+        estimates = container.project_service().estimates(made.id)
+
+        assert (estimates.project, estimates.work_items) == (None, ())
+
+    def test_it_reads_the_running_work_and_the_estimate_alone(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """The project, its running work items and the estimate's four
+        statements, whatever stands on its timeline, on its work item's list
+        and in its kind's history."""
+        made = _make(
+            container, name="Camp", open_items=3, environment_id=environment.id
+        )
+        run = _run(container, session, made, environment, SessionState.RUNNING)
+        session.get_one(Work, run.id).repo = "example/Camp"
+        timed(session, run.id, "code-writer", 20, count=300)
+        listed(session, run.id, "code-writer", running=5, pending=99)
+        session.expire_all()
+
+        with sent(session) as each:
+            estimates = container.project_service().estimates(made.id)
+
+        assert len(estimates.work_items) == 1
+        assert len(each.texts) == 6
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.project_service().estimates(uuid.uuid4())
 
 
 @pytest.mark.usefixtures("person", "starts")

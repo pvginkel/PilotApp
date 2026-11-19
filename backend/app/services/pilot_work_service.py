@@ -646,9 +646,20 @@ def _left_in(
 
 def _shown(
     steps: Sequence[ProgressStep],
-) -> list[tuple[str, str, ProgressState, str | None]]:
-    """What the work item's status shows of its steps, in order."""
-    return [(step.code, step.label, step.state_code, step.why) for step in steps]
+) -> list[tuple[str, str, ProgressState, str | None, str | None, bool | None]]:
+    """What the work item's status shows of its steps, in order, and what
+    its estimate reads of them beside: a step's kind and its mark."""
+    return [
+        (
+            step.code,
+            step.label,
+            step.state_code,
+            step.why,
+            step.kind_code,
+            step.marked,
+        )
+        for step in steps
+    ]
 
 
 def material(

@@ -1,7 +1,8 @@
 """The projects as the signed-in person reads them, the project list, the
 archived projects, the project an address names, a project's head, its
-timeline, the index of its items (F150.8), its draft, its handbook and its
-journal (F1, F2, F3, F8, F37.4, F129.4, F169.4, D012); a
+timeline, the time its running work still takes (F156.8), the index of its
+items (F150.8), its draft, its handbook and its journal (F1, F2, F3, F8,
+F37.4, F129.4, F169.4, D012); a
 draft made with its first message (F46.1), or by a call with its brief
 (F150.9), and their answers to its asks in
 place (F47.4); and what they change of a project's standing: its transitions,
@@ -30,6 +31,8 @@ from app.schemas.projects import (
     PlanTaskSchema,
     ProjectAddressSchema,
     ProjectCreateRequestSchema,
+    ProjectEstimateSchema,
+    ProjectEstimatesSchema,
     ProjectHeadSchema,
     ProjectListQuerySchema,
     ProjectListResponseSchema,
@@ -37,8 +40,10 @@ from app.schemas.projects import (
     ProjectTabSchema,
     RunningWorkSchema,
     TransitionRequestSchema,
+    WorkItemEstimateSchema,
 )
 from app.schemas.timeline import (
+    EstimateSchema,
     IndexedItemSchema,
     ItemIndexQuerySchema,
     ItemIndexSchema,
@@ -55,6 +60,7 @@ from app.services.container import ServiceContainer
 from app.services.draft_service import DraftService
 from app.services.people_service import PeopleService, initials
 from app.services.project_service import PlanProgress, ProjectHead, ProjectService
+from app.services.step_estimate import WorkEstimate
 from app.services.timeline_service import TimelineService
 from app.services.tree_read_service import TreeReadService
 from app.utils.spectree_config import api
@@ -83,6 +89,18 @@ def _member(person: User) -> MemberSchema:
         name=person.name,
         initials=initials(person.name),
         avatar_slot=person.avatar_slot,
+    )
+
+
+def _estimate(estimate: WorkEstimate) -> EstimateSchema:
+    return EstimateSchema.model_validate(estimate, from_attributes=True)
+
+
+def _project_estimate(estimate: WorkEstimate | None) -> ProjectEstimateSchema | None:
+    if estimate is None:
+        return None
+    return ProjectEstimateSchema(
+        item_id=estimate.work_id, **_estimate(estimate).model_dump()
     )
 
 
@@ -120,6 +138,7 @@ def _head(head: ProjectHead) -> dict[str, Any]:
             )
             for work in head.running_work
         ],
+        estimate=_project_estimate(head.estimate),
         open_items=head.open_items,
         autopilot_may_take=head.autopilot_may_take,
         create_refusal=head.create_refusal,
@@ -389,6 +408,41 @@ def get_timeline(
         404: No project has the id
     """
     return timeline_service.timeline(project_id)
+
+
+@projects_bp.route("/<uuid:project_id>/estimates", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ProjectEstimatesSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    )
+)
+@inject
+def get_estimates(
+    project_id: uuid.UUID,
+    project_service: ProjectService = Provide[ServiceContainer.project_service],
+) -> Any:
+    """Read the time a project's running work still takes, as it reads now:
+    its head's badge and its running work items', computed by the server at
+    each read, which a page that shows a badge makes each minute (F156.8,
+    F156.12).
+
+    Returns:
+        200: The project's estimate and its running work items'
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id
+    """
+    estimates = project_service.estimates(project_id)
+    return ProjectEstimatesSchema(
+        estimate=_project_estimate(estimates.project),
+        work_items=[
+            WorkItemEstimateSchema(id=estimate.work_id, estimate=_estimate(estimate))
+            for estimate in estimates.work_items
+        ],
+    ).model_dump(mode="json")
 
 
 @projects_bp.route("/<uuid:project_id>/draft", methods=["GET"])

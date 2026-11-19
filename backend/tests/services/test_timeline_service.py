@@ -72,8 +72,10 @@ from app.schemas.timeline import (
     DebriefSchema,
     DebriefSectionSchema,
     DoneCauseCode,
+    EstimateSchema,
     HeldReason,
     ItemKindCode,
+    LongerThanUsual,
     PilotNoteSchema,
     RetriedSchema,
     SendAlertSchema,
@@ -87,12 +89,14 @@ from app.services.pilot_work_service import Worker
 from app.services.relay_service import ENVIRONMENT_STOPPED
 from app.services.session_record_service import SessionRecordService
 from app.services.start_gate import WorkSlots
+from app.services.step_estimate import StepEstimates, WorkEstimate
 from app.services.timeline_service import Badge, waiting_on_a_member, work_status
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import ReportedTransition
 from app.services.working_on import Reading
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.debriefs import pass_ended
+from tests.support.estimates import ESTIMATES, listed, timed
 from tests.support.parses import parses
 from tests.support.pilot_notes import a_turn, alerted, block_of, noted
 from tests.support.statements import sent
@@ -2247,6 +2251,7 @@ class TestTimeline:
             "retried": None,
             "progress": [],
             "debriefed": False,
+            "estimate": None,
         }
 
     def test_a_job_is_pilots_own_work(
@@ -2668,6 +2673,7 @@ class TestWorkStatus:
             unreachable=False,
             halts=HALTS,
             slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert list(found) == [work.id]
@@ -2676,7 +2682,14 @@ class TestWorkStatus:
     def test_no_ids_read_nothing(self, session: DbSession) -> None:
         with sent(session) as each:
             assert (
-                work_status(session, [], unreachable=False, halts=HALTS, slots=SLOTS)
+                work_status(
+                    session,
+                    [],
+                    unreachable=False,
+                    halts=HALTS,
+                    slots=SLOTS,
+                    estimates=ESTIMATES,
+                )
                 == {}
             )
 
@@ -2711,6 +2724,7 @@ class TestWorkStatus:
             unreachable=False,
             halts=HALTS,
             slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert found[first.id].progress == [
@@ -2792,6 +2806,7 @@ class TestWorkStatus:
             unreachable=False,
             halts=HALTS,
             slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert {item_id: each.debriefed for item_id, each in found.items()} == {
@@ -2831,7 +2846,12 @@ class TestWorkStatus:
         _retried(session, failed, retry)
 
         found = work_status(
-            session, [failed.id, retry.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [failed.id, retry.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert found[failed.id].retried == RetriedSchema(id=retry.id, at=pressed)
@@ -2866,6 +2886,7 @@ class TestWorkStatus:
             unreachable=False,
             halts=HALTS,
             slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert [found[each.id].setup for each in (failed, retry, after, worker)] == [
@@ -2897,6 +2918,7 @@ class TestWorkStatus:
             unreachable=False,
             halts=HALTS,
             slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert found[placed.id].state == state
@@ -2915,7 +2937,12 @@ class TestWorkStatus:
         session.flush()
 
         found = work_status(
-            session, [idle.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [idle.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[idle.id]
 
         assert found.environment is not None
@@ -2955,6 +2982,7 @@ class TestWorkStatus:
             unreachable=False,
             halts=HALTS,
             slots=WorkSlots(work_max=work_max, project_max=project_max),
+            estimates=ESTIMATES,
         )[held.id]
 
         assert (found.held_reason, found.held_running) == (HeldReason.SLOT, running)
@@ -2989,6 +3017,7 @@ class TestWorkStatus:
             unreachable=unreachable,
             halts=HALTS,
             slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert found[held.id].held_reason == reason
@@ -3012,7 +3041,12 @@ class TestWorkStatus:
         session.flush()
 
         work = work_status(
-            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [stopped.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[stopped.id]
 
         assert work.stopped_at == datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
@@ -3036,7 +3070,12 @@ class TestWorkStatus:
         session.flush()
 
         work = work_status(
-            session, [held.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [held.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[held.id]
 
         assert (work.stopped_at, work.stopped_by) == (None, None)
@@ -3056,7 +3095,12 @@ class TestWorkStatus:
         _stop_record(container, session, run, cause)
 
         work = work_status(
-            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [stopped.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[stopped.id]
 
         assert (work.stopped_cause, work.stopped_by) == (cause, None)
@@ -3076,7 +3120,12 @@ class TestWorkStatus:
         _stop_record(container, session, run, StopCause.ENVIRONMENT_STOPPED)
 
         work = work_status(
-            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [stopped.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[stopped.id]
 
         assert work.stopped_cause is None
@@ -3105,7 +3154,12 @@ class TestWorkStatus:
         )
 
         work = work_status(
-            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [stopped.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[stopped.id]
 
         assert work.stopped_cause is None
@@ -3122,7 +3176,12 @@ class TestWorkStatus:
         _stop_record(container, session, run, StopCause.ENVIRONMENT_STOPPED)
 
         work = work_status(
-            session, [held.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [held.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[held.id]
 
         assert work.stopped_cause is None
@@ -3152,7 +3211,12 @@ class TestWorkStatus:
         _usage(session, week=week, five_hour=five_hour)
 
         work = work_status(
-            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [stopped.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[stopped.id]
 
         assert work.stopped_cause == cause
@@ -3173,7 +3237,12 @@ class TestWorkStatus:
         _usage(session, week=0.95, five_hour=0.1)
 
         work = work_status(
-            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [stopped.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[stopped.id]
 
         assert work.stopped_cause is None
@@ -3208,7 +3277,12 @@ class TestWorkStatus:
         session.flush()
 
         work = work_status(
-            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [stopped.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[stopped.id]
         assert (work.state, work.note) == (SessionState.STOPPED, reason)
         assert project.id not in badges(person, [project.id], Reading(session))
@@ -3243,7 +3317,12 @@ class TestWorkStatus:
             lift(session, update)
 
         work = work_status(
-            session, [job.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [job.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[job.id]
 
         assert work.stopped_cause == StopCause.STORE_UPDATE
@@ -3269,6 +3348,7 @@ class TestWorkStatus:
             unreachable=False,
             halts=HALTS,
             slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert [found[job.id].stopped_cause for job in (before, finished, after)] == [
@@ -3307,7 +3387,12 @@ class TestWorkStatus:
         _usage(session, week=week, five_hour=five_hour)
 
         work = work_status(
-            session, [halted.id], unreachable=True, halts=HALTS, slots=SLOTS
+            session,
+            [halted.id],
+            unreachable=True,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[halted.id]
 
         assert (work.state, work.nudge_owed) == (SessionState.IDLE, True)
@@ -3342,6 +3427,7 @@ class TestWorkStatus:
             unreachable=False,
             halts=HALTS,
             slots=SLOTS,
+            estimates=ESTIMATES,
         )
 
         assert (found[done.id].nudge_owed, found[done.id].held_reason) == (
@@ -3371,7 +3457,12 @@ class TestWorkStatus:
         _usage(session, week=0.95, five_hour=0.1)
 
         work = work_status(
-            session, [halted.id], unreachable=False, halts=HALTS, slots=SLOTS
+            session,
+            [halted.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
         )[halted.id]
 
         assert (work.state, work.nudge_owed, work.held_reason) == (
@@ -3540,6 +3631,247 @@ def _blocks(entry: dict[str, Any]) -> dict[str, dict[str, Any]]:
         for part in entry["body"]
         if part["type"] == "block"
     }
+
+
+def _began(session: DbSession, work: Item, minutes: float) -> None:
+    """The work item's run began `minutes` ago."""
+    run = session.get_one(models.Session, work.id)
+    run.started_at = datetime.now(UTC) - timedelta(minutes=minutes)
+    session.flush()
+
+
+class _Asked(StepEstimates):
+    """The estimate under the settings' defaults, which keeps the work items
+    each read asks it for."""
+
+    def __init__(self) -> None:
+        super().__init__(window=20, running=60)
+        self.asked: list[list[uuid.UUID]] = []
+
+    def of(
+        self, db: DbSession, work_ids: Any, now: datetime
+    ) -> dict[uuid.UUID, WorkEstimate]:
+        self.asked.append(list(work_ids))
+        return super().of(db, work_ids, now)
+
+
+@pytest.mark.usefixtures("person")
+class TestWorkStatusEstimate:
+    """A work item's status carries the time it still takes (F156.8), as the
+    server computes it at the read (F156.12)."""
+
+    def test_one_that_runs_has_the_time_it_still_takes(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """A step that has run 5 of its kind's 20 minutes, and one not begun:
+        15 and 20."""
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        _began(session, work, 73)
+        timed(session, work.id, "code-writer", 20)
+        listed(session, work.id, "code-writer", running=5, pending=1)
+
+        estimate = work_status(
+            session,
+            [work.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
+        )[work.id].estimate
+
+        assert estimate is not None
+        assert (estimate.minutes, estimate.longer_than_usual, estimate.kind) == (
+            35,
+            None,
+            "code-writer",
+        )
+        assert estimate.ran_seconds is not None
+        assert 73 * 60 <= estimate.ran_seconds < 74 * 60
+
+    @pytest.mark.parametrize(
+        ("ran", "marked", "priced", "shown"),
+        [
+            (5, True, True, (15, LongerThanUsual.MARKED)),
+            (30, None, True, (None, LongerThanUsual.OUTRUN)),
+            (30, True, True, (None, LongerThanUsual.OUTRUN)),
+            (5, True, False, (None, LongerThanUsual.MARKED)),
+        ],
+    )
+    def test_the_alerts_three_forms(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        ran: int,
+        marked: bool | None,
+        priced: bool,
+        shown: tuple[int | None, LongerThanUsual],
+    ) -> None:
+        """F156.7: a marked step keeps its time left; one that has outrun its
+        kind's every timing has none, marked or not; a marked one with no
+        estimate stands alone."""
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        if priced:
+            timed(session, work.id, "code-writer", 20)
+        listed(session, work.id, "code-writer", running=ran, marked=marked)
+
+        estimate = work_status(
+            session,
+            [work.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
+        )[work.id].estimate
+
+        assert estimate is not None
+        assert (estimate.minutes, estimate.longer_than_usual) == shown
+
+    def test_one_with_no_estimate_has_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """F156.6: its kind has no timing yet, and nothing stands in the
+        estimate's place."""
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        listed(session, work.id, "code-writer", running=5, pending=1)
+
+        found = work_status(
+            session,
+            [work.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=ESTIMATES,
+        )
+
+        assert found[work.id].estimate is None
+
+    def test_the_estimate_is_read_for_those_that_run_alone(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        works = {
+            state: _work(session, project, environment, state)
+            for state in (
+                SessionState.HELD,
+                SessionState.RUNNING,
+                SessionState.IDLE,
+                SessionState.STOPPED,
+                SessionState.ENDED,
+            )
+        }
+        timed(session, works[SessionState.ENDED].id, "code-writer", 20)
+        for work in works.values():
+            listed(session, work.id, "code-writer", pending=1)
+        asked = _Asked()
+
+        found = work_status(
+            session,
+            [work.id for work in works.values()],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+            estimates=asked,
+        )
+
+        assert asked.asked == [[works[SessionState.RUNNING].id]]
+        assert {
+            state: found[work.id].estimate is not None for state, work in works.items()
+        } == {state: state is SessionState.RUNNING for state in works}
+
+    def test_no_work_item_that_runs_reads_no_estimate(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        idle = _work(session, project, environment, SessionState.IDLE)
+        timed(session, idle.id, "code-writer", 20)
+        listed(session, idle.id, "code-writer", pending=1)
+
+        with sent(session) as each:
+            work_status(
+                session,
+                [idle.id],
+                unreachable=False,
+                halts=HALTS,
+                slots=SLOTS,
+                estimates=ESTIMATES,
+            )
+
+        assert [text for text in each.texts if "step_timings" in text] == []
+
+    def test_a_long_list_and_a_long_history_cost_a_read_no_more_statements(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """The status rides `work_moved`, which the relay sends on most
+        records it writes: a work item placed in a repo adds the estimate's
+        four statements, whatever its list and its kind's history."""
+        project = _make(container)
+        short = _work(session, project, environment, SessionState.RUNNING)
+        timed(session, short.id, "code-writer", 20, count=5)
+        listed(session, short.id, "code-writer", running=5)
+        long = _work(session, project, environment, SessionState.RUNNING)
+        timed(session, long.id, "code-reviewer", 20, count=300)
+        listed(session, long.id, "code-reviewer", running=5, pending=99)
+        idle = _work(session, project, environment, SessionState.IDLE)
+        for work in (short, long, idle):
+            session.get_one(Work, work.id).repo = "example/Camp"
+        session.flush()
+
+        def statements(work: Item) -> int:
+            with sent(session) as each:
+                found = work_status(
+                    session,
+                    [work.id],
+                    unreachable=False,
+                    halts=HALTS,
+                    slots=SLOTS,
+                    estimates=ESTIMATES,
+                )
+            assert (found[work.id].estimate is None) == (work is idle)
+            return len(each.texts)
+
+        assert statements(short) == statements(long) == statements(idle) + 4
+
+    def test_a_timelines_work_item_carries_it_under_the_settings(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        timed(session, work.id, "code-writer", 20)
+        listed(session, work.id, "code-writer", pending=2)
+
+        _opening, entry = _items(container, project)
+
+        assert entry["work"]["estimate"] == {
+            "minutes": 40,
+            "longer_than_usual": None,
+            "kind": None,
+            "ran_seconds": None,
+        }
+        assert container.timeline_service().work(work.id).estimate == EstimateSchema(
+            minutes=40, longer_than_usual=None, kind=None, ran_seconds=None
+        )
 
 
 @pytest.mark.usefixtures("person")
@@ -5334,6 +5666,7 @@ class TestBadges:
                 unreachable=False,
                 halts=HALTS,
                 slots=SLOTS,
+                estimates=ESTIMATES,
             ).values()
         ] == [True, True]
 

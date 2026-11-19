@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.reference import ProjectState, TaskStatus
 from app.schemas.chats import ChatMessageRequestSchema
+from app.schemas.timeline import EstimateSchema
 
 
 class ProjectStatus(StrEnum):
@@ -220,6 +221,20 @@ class RunningWorkSchema(BaseModel):
     )
 
 
+class ProjectEstimateSchema(EstimateSchema):
+    """The badge a project's head shows, of the time its running work still
+    takes (F156.8): one of its running work items', the first of those a
+    running step has outrun, else the workflow-marked one with the most time
+    left, else the one with the most time left."""
+
+    item_id: uuid.UUID = Field(
+        description=(
+            "The work item it is of, one of `running_work`, which the alert's "
+            "sentence names"
+        )
+    )
+
+
 class ProjectHeadSchema(BaseModel):
     """What a project's head, its popovers and its menu read."""
 
@@ -254,6 +269,13 @@ class ProjectHeadSchema(BaseModel):
         description=(
             "The work items whose session runs, starts or waits at the gate, in "
             "timeline order: those whose sessions Finish and Archive stop (F5.1)"
+        )
+    )
+    estimate: ProjectEstimateSchema | None = Field(
+        description=(
+            "The time its running work still takes, its head's badge, as it "
+            "read when this was built; null while none of `running_work` "
+            "shows a badge (F156.6, F156.8)"
         )
     )
     open_items: int = Field(
@@ -328,3 +350,29 @@ class TransitionRequestSchema(BaseModel):
         if self.answer_confirmations and self.kind != "autopilot_on":
             raise ValueError("`answer_confirmations` goes with `autopilot_on` alone")
         return self
+
+
+class WorkItemEstimateSchema(BaseModel):
+    """A running work item's badge."""
+
+    id: uuid.UUID = Field(description="The work item's id")
+    estimate: EstimateSchema = Field(description="What its badge shows")
+
+
+class ProjectEstimatesSchema(BaseModel):
+    """The time a project's running work still takes, as it reads now: what a
+    page that shows a badge reads again each minute (F156.8)."""
+
+    estimate: ProjectEstimateSchema | None = Field(
+        description=(
+            "The project's head's badge, a head's `estimate`; null while none "
+            "of its running work items shows one"
+        )
+    )
+    work_items: list[WorkItemEstimateSchema] = Field(
+        description=(
+            "Each open work item whose session runs and whose badge shows, in "
+            "timeline order, with its timeline item's `work.estimate` as it "
+            "reads now; a work item not listed shows no badge"
+        )
+    )

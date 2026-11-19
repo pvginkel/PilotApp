@@ -7,7 +7,7 @@ F94.5)."""
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import cache, partial
 from itertools import groupby
 from operator import attrgetter
@@ -106,6 +106,7 @@ from app.schemas.timeline import (
     DocumentLinkSchema,
     DoneCauseCode,
     DoneSchema,
+    EstimateSchema,
     HoldSchema,
     ItemDocumentSchema,
     ItemForm,
@@ -146,6 +147,7 @@ from app.services.start_gate import (
     held_reason,
     queued,
 )
+from app.services.step_estimate import StepEstimates
 from app.services.store_update_service import stopped_for_update, unlifted
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import REQUESTS, ShownFiring, WaitService
@@ -309,6 +311,7 @@ def work_status(
     unreachable: bool,
     halts: UsageHalts,
     slots: WorkSlots,
+    estimates: StepEstimates,
 ) -> dict[uuid.UUID, WorkSchema]:
     """The work status of each work item among `item_ids`, as its line and
     head show it, the controller `unreachable` or not; an item of another kind
@@ -333,7 +336,9 @@ def work_status(
     placed, created at the press. Its progress is its list of
     steps, in order, each with its why (F145.1). One Pilot closed for good has
     its reason as its note (DB 346). One done whose session gave its debrief
-    says so, and one still open never does (DB 329)."""
+    says so, and one still open never does (DB 329). One that runs has the
+    time it still takes as it reads now (`estimates`), read for those that
+    run alone (F156.8)."""
     if not item_ids:
         return {}
     rows = db.execute(_work_rows(), {"ids": list(item_ids)}).all()
@@ -419,6 +424,15 @@ def work_status(
         )
     )
     filled = slots.filled(db, waiting) if waiting else {}
+    left = estimates.of(
+        db,
+        [
+            session.id
+            for session, *_ in rows
+            if session.state_code is SessionState.RUNNING
+        ],
+        datetime.now(UTC),
+    )
     behind = queued(
         db,
         [
@@ -506,6 +520,11 @@ def work_status(
             ),
             progress=progress.get(session.id, []),
             debriefed=debriefed,
+            estimate=(
+                EstimateSchema.model_validate(left[session.id], from_attributes=True)
+                if session.id in left
+                else None
+            ),
         )
         for (
             session,
@@ -595,6 +614,7 @@ class TimelineService:
         usage_halts: UsageHalts,
         wait_service: WaitService,
         references: References,
+        step_estimates: StepEstimates,
     ) -> None:
         self.db = db
         self.record_service = record_service
@@ -603,6 +623,7 @@ class TimelineService:
         self.usage_halts = usage_halts
         self.wait_service = wait_service
         self.references = references
+        self.step_estimates = step_estimates
 
     def badges(
         self, person: User | None, project_ids: Iterable[uuid.UUID], reading: Reading
@@ -632,6 +653,7 @@ class TimelineService:
             unreachable=self.controller_outage.holds,
             halts=self.usage_halts,
             slots=self.work_slots,
+            estimates=self.step_estimates,
         ).get(item_id)
         if work is None:
             raise RecordNotFoundException("Work item", str(item_id))
@@ -821,6 +843,7 @@ class TimelineService:
             unreachable=self.controller_outage.holds,
             halts=self.usage_halts,
             slots=self.work_slots,
+            estimates=self.step_estimates,
         )
         job_titles = self._titles(job_ids)
         starts = close_starts_work(

@@ -57,6 +57,19 @@ class HeldReason(StrEnum):
     CONVERSATION = "conversation"
 
 
+class LongerThanUsual(StrEnum):
+    """Why a running work item's badge is the alert's (F156.7). Read at
+    display, never stored (F156.10)."""
+
+    OUTRUN = "outrun"
+    """A running step has run longer than every one of the last timings it
+    is read against: no time left is given."""
+    MARKED = "marked"
+    """The workflow marked a running step, which has outrun nothing: the
+    time left stands as the estimate gives it, none where there is no
+    estimate."""
+
+
 class Doing(StrEnum):
     """What Pilot does on an item that is Pilot's, or on a held block (F13.7,
     F31.7; DB 295, 296). Read at display, never stored."""
@@ -710,6 +723,47 @@ class RetriedSchema(BaseModel):
     at: datetime = Field(description="When Retry was pressed, the new job placed")
 
 
+class EstimateSchema(BaseModel):
+    """What the badge of a running work item shows of the time it still
+    takes (F156.8): computed as it is read, by the server, and never stored
+    (F156.10, F156.12)."""
+
+    minutes: int | None = Field(
+        description=(
+            "The time left as the badge words it, in minutes: 5 to 55 by "
+            "fives, 60, then whole hours, 120, 180; null where the badge "
+            "shows no time, `longer_than_usual` saying which"
+        ),
+        examples=[25],
+    )
+    longer_than_usual: LongerThanUsual | None = Field(
+        description=(
+            "Why the badge is the alert's: `outrun`, a running step has run "
+            "longer than every past step it is read against, and `minutes` "
+            "is null, the badge's em dash; `marked`, the workflow marked a "
+            "running step, and `minutes` is the time left, or null where the "
+            "work item has no estimate, the alert alone; null on a badge at "
+            "rest, where `minutes` is set (F156.7)"
+        )
+    )
+    kind: str | None = Field(
+        description=(
+            "The kind of the running step, as its run published it, the "
+            "first on the list of several; null where no step runs or it "
+            "has none"
+        ),
+        examples=["code-writer"],
+    )
+    ran_seconds: int | None = Field(
+        description=(
+            "The seconds since the work item's run began, by the server's "
+            "clock, which the alert's sentence says; null while its session "
+            "has no start"
+        ),
+        examples=[4380],
+    )
+
+
 class WorkSchema(BaseModel):
     """A work item's Session, as its line and its head show it (F26, F12)."""
 
@@ -847,6 +901,14 @@ class WorkSchema(BaseModel):
             "Whether it is done and its session gave its debrief (F85.5), which "
             "the Debrief on its done line opens (F26.6, F26.9); false while it "
             "is open, for a run that gave none and for a job"
+        )
+    )
+    estimate: EstimateSchema | None = Field(
+        description=(
+            "The time it still takes, its badge, as it read when this was "
+            "built; null unless `state` is `running`, once it is done, with "
+            "no step left to do, and where it has no estimate and the "
+            "workflow marked no running step (F156.6, F156.8)"
         )
     )
 

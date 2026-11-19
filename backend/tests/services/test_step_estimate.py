@@ -22,8 +22,9 @@ from app.models import (
     Work,
 )
 from app.models.reference import ProgressState, SessionState
+from app.schemas.timeline import LongerThanUsual
 from app.services.step_estimate import (
-    LongerThanUsual,
+    StepEstimates,
     WorkEstimate,
     project_estimate,
     work_estimates,
@@ -280,6 +281,20 @@ class TestWorkEstimates:
         _list(session, work_id, [_active("write", 5, marked=True)])
 
         assert _estimates(session, [work_id]) == {}
+
+    def test_a_done_work_item_has_none(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """A done line shows nothing, its marked step neither, though its
+        Session runs on."""
+        _timed(session, past, "write", [20] * 10)
+        _list(session, run, [_active("write", 5, marked=True)])
+        assert list(_estimates(session, [run])) == [run]
+        item = session.get_one(Item, run)
+        item.done_at, item.done_cause_code = NOW, "turn_ended"
+        session.flush()
+
+        assert _estimates(session, [run]) == {}
 
     def test_a_list_with_no_step_or_every_step_done_has_none(
         self,
@@ -936,6 +951,22 @@ class TestWorkEstimatesRead:
         )
         assert "Sort" not in own + every
         assert "Filter" not in own + every
+
+
+class TestStepEstimates:
+    def test_it_reads_under_its_two_settings(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """The window of 2 prices the step not begun at 40 minutes, where 5
+        would at 22; the running step's 5 leave it 5 more, where 2 would
+        35."""
+        _timed(session, past, "write", [40] * 2 + [10] * 8)
+        _list(session, run, [_active("write", 5), _pending("write")])
+
+        estimates = StepEstimates(window=2, running=5).of(session, [run], NOW)
+
+        assert _minutes(estimates[run]) == pytest.approx(40 + 5)
+        assert estimates == _estimates(session, [run], window=2, running=5)
 
 
 def _shown(

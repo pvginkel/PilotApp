@@ -27,7 +27,6 @@ import uuid
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from enum import StrEnum
 from functools import cached_property
 from statistics import fmean, median
 
@@ -35,10 +34,11 @@ from sqlalchemy import Boolean, Text, column, func, literal, select, true, value
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session, aliased
 
-from app.models import ProgressStep, StepTiming
+from app.models import Item, ProgressStep, StepTiming
 from app.models import Session as AgentSession
 from app.models.reference import ProgressState, SessionState
 from app.models.step import repo_of_work
+from app.schemas.timeline import LongerThanUsual
 
 FEW = 5
 """The timings below which a kind gives no estimate, counted in all repos,
@@ -48,18 +48,6 @@ the kind's last ones whole."""
 OWN = 10
 """The timings of a kind at which a repo's own are read in all repos'
 place."""
-
-
-class LongerThanUsual(StrEnum):
-    """Why a running work item's badge is the alert's."""
-
-    OUTRUN = "outrun"
-    """A running step has run longer than every one of the last timings it
-    is read against: no time left is given."""
-    MARKED = "marked"
-    """The workflow marked a running step, which has outrun nothing: the
-    time left stands as the estimate gives it, none where there is no
-    estimate."""
 
 
 @dataclass(frozen=True)
@@ -125,10 +113,10 @@ def work_estimates(
 ) -> dict[uuid.UUID, WorkEstimate]:
     """What the badge of each work item among `work_ids` shows at `now`, in
     their order; one that shows nothing is left out: one whose Session is
-    not `running`, one with no step left to do, and one with no estimate
-    whose running steps the workflow has not marked. `window` is the number
-    of a kind's last timings its price reads, `running` the number a running
-    step is read against."""
+    not `running`, one that is done, one with no step left to do, and one
+    with no estimate whose running steps the workflow has not marked.
+    `window` is the number of a kind's last timings its price reads,
+    `running` the number a running step is read against."""
     runs = {run.id: run for run in _runs(db, work_ids)}
     figures = _figures(db, list(runs.values()), max(window, running))
     estimates = {}
@@ -143,9 +131,27 @@ def work_estimates(
     return estimates
 
 
+class StepEstimates:
+    """The estimate under its two settings, both counted in steps
+    (F156.10): `window`, the number of a kind's last timings its price
+    reads, and `running`, the number a running step is read against."""
+
+    def __init__(self, window: int, running: int) -> None:
+        self._window = window
+        self._running = running
+
+    def of(
+        self, db: Session, work_ids: Collection[uuid.UUID], now: datetime
+    ) -> dict[uuid.UUID, WorkEstimate]:
+        """`work_estimates` of `work_ids` at `now`."""
+        return work_estimates(
+            db, work_ids, now=now, window=self._window, running=self._running
+        )
+
+
 @dataclass(frozen=True)
 class _Run:
-    """A work item whose Session runs, with its list in order."""
+    """An open work item whose Session runs, with its list in order."""
 
     id: uuid.UUID
     started_at: datetime | None
@@ -217,8 +223,8 @@ class _Run:
 
 
 def _runs(db: Session, work_ids: Collection[uuid.UUID]) -> list[_Run]:
-    """Those of `work_ids` whose Session is `running` and has a step left to
-    do, each with its whole list."""
+    """Those of `work_ids` that are open, whose Session is `running` and has
+    a step left to do, each with its whole list."""
     if not work_ids:
         return []
     run = aliased(AgentSession)
@@ -228,7 +234,13 @@ def _runs(db: Session, work_ids: Collection[uuid.UUID]) -> list[_Run]:
             run.started_at,
             run.turn_started_at,
             repo_of_work(run.id).scalar_subquery().label("repo"),
-        ).where(run.id.in_(list(work_ids)), run.state_code == SessionState.RUNNING)
+        )
+        .join(Item, Item.id == run.id)
+        .where(
+            run.id.in_(list(work_ids)),
+            run.state_code == SessionState.RUNNING,
+            Item.done_at.is_(None),
+        )
     ).all()
     if not rows:
         return []

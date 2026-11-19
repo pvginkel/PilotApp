@@ -57,6 +57,7 @@ from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.services.wait_service import ReportedTransition
 from app.services.working_on import jobs_on
+from tests.support.estimates import ESTIMATES
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.pilot_notes import a_turn, noted
@@ -282,6 +283,7 @@ class TestSetup:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )
         assert status[job.id].held_reason is None
 
@@ -313,6 +315,7 @@ class TestSetup:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[second.id]
         assert status.held_reason is HeldReason.QUEUE
         _in(session, first, SessionState.IDLE)
@@ -504,6 +507,7 @@ class TestQueue:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[second.id]
         assert (status.held_reason, status.held_running) == (HeldReason.QUEUE, None)
 
@@ -1281,6 +1285,7 @@ class TestItemDone:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[withdrawn.id]
         assert (status.state, status.stopped_by, status.held_reason) == (
             SessionState.STOPPED,
@@ -1613,6 +1618,7 @@ class TestUnderTheStoresUpdate:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[job.id]
         assert status.held_reason is HeldReason.STORE_UPDATE
         _release(starts)

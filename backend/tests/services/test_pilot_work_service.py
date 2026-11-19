@@ -2194,6 +2194,72 @@ class TestPilotWorkServiceProgressMovesTheWork:
 
         assert engine_events == []
 
+    def test_a_kind_or_a_mark_changed_alone_moves_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        """The status carries the estimate, which reads both: a kind prices
+        its step and a mark turns the badge red (F156.7)."""
+        run = _session(session, container, project, environment)
+        clear_after_commit_callbacks()
+        pilot_work = container.pilot_work_service()
+        with scoped_session(container):
+            pilot_work.set_progress(_worker(run), [_step("test", state=ACTIVE)])
+        lists = [
+            [_step("test", state=ACTIVE, kind="code-writer")],
+            [_step("test", state=ACTIVE, kind="code-reviewer")],
+            [_step("test", state=ACTIVE, kind="code-reviewer", marked=True)],
+            [_step("test", state=ACTIVE, kind="code-reviewer")],
+            [_step("test", state=ACTIVE)],
+        ]
+        moved = []
+
+        for steps in lists:
+            engine_events.clear()
+            with scoped_session(container):
+                pilot_work.set_progress(_worker(run), steps)
+            moved.append(list(engine_events))
+
+        assert moved == [[WorkMoved(project.id, run.id)]] * len(lists)
+
+    def test_the_same_kind_and_mark_or_other_conversations_move_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _session(session, container, project, environment)
+        clear_after_commit_callbacks()
+        pilot_work = container.pilot_work_service()
+        with scoped_session(container):
+            pilot_work.set_progress(
+                _worker(run),
+                [_step("test", state=ACTIVE, kind="code-writer", marked=True)],
+            )
+        engine_events.clear()
+
+        with scoped_session(container):
+            pilot_work.set_progress(
+                _worker(run),
+                [
+                    _step(
+                        "test",
+                        state=ACTIVE,
+                        kind="code-writer",
+                        marked=True,
+                        conversations=[THREAD],
+                    )
+                ],
+            )
+
+        assert engine_events == []
+
     def test_a_refused_call_moves_nothing(
         self,
         session: DbSession,

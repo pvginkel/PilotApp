@@ -26,6 +26,7 @@ from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.sender import SENDER_HEADER
+from tests.support.estimates import listed, timed
 from tests.support.working_on import Camp
 
 DECISION = """---
@@ -326,10 +327,39 @@ class TestProjectEventService:
                     "retried": None,
                     "progress": [],
                     "debriefed": False,
+                    "estimate": None,
                 },
             },
         }
         assert (frames(ada_tab), frames(ben_tab)) == ([moved], [moved])
+
+    def test_a_work_items_move_carries_the_time_it_still_takes(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        connect: Connect,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        """F156.8: the estimate reaches the line with the step's move, under
+        the settings' 20 and 60."""
+        container.record_service().place_work(project, project_session, "Camp")
+        timed(session, project_session.id, "code-writer", 20)
+        listed(session, project_session.id, "code-writer", pending=2)
+        clear_after_commit_callbacks()
+        tab = connect("ada-1", person.subject)
+
+        with scoped_session(container):
+            container.engine_bus().emit(WorkMoved(project.id, project_session.id))
+
+        [moved] = frames(tab)
+        assert moved["payload"]["work"]["estimate"] == {
+            "minutes": 40,
+            "longer_than_usual": None,
+            "kind": None,
+            "ran_seconds": None,
+        }
 
     def test_a_jobs_move_carries_its_status_as_the_items_it_shows_on_hold_it(
         self,

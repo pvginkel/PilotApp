@@ -136,6 +136,7 @@ from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.debriefs import give_debrief
+from tests.support.estimates import ESTIMATES
 from tests.support.fake_controller import (
     FAKE_CONTROLLER_TOKEN,
     ServedFakeController,
@@ -855,6 +856,7 @@ class TestRun:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[run.id]
         assert status.environment is not None
         assert (status.environment.id, status.environment.name) == (
@@ -1687,6 +1689,7 @@ class TestRunTakes:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[first.id]
         assert chip.environment is not None and chip.environment.name == env_id
 
@@ -1713,6 +1716,7 @@ class TestRunTakes:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[first.id]
         assert chip.environment is not None and chip.environment.name == "dune"
 
@@ -2930,6 +2934,7 @@ class TestStartThroughTheGate:
             unreachable=controller_outage.holds,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[work.id]
         assert (status.state, status.held_reason) == (SessionState.HELD, reason)
         assert status.current_line is None
@@ -3049,6 +3054,7 @@ class TestUsageHalt:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[work.id]
         assert status.held_reason == reason
         assert fake.calls == []
@@ -5075,6 +5081,7 @@ class TestResume:
                 unreachable=False,
                 halts=starts._halts,
                 slots=starts._slots,
+                estimates=ESTIMATES,
             )[run.id].error
             is None
         )
@@ -5107,6 +5114,7 @@ class TestResume:
             unreachable=True,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[run.id]
         assert status.held_reason == HeldReason.CONTROLLER_UNREACHABLE
         # Held in the environment it is bound to, its chip as the row stands.
@@ -5143,6 +5151,7 @@ class TestResume:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[run.id].held_reason == (HeldReason.PAUSED)
 
     def test_a_controller_session_gone_is_created_anew_with_its_conversation(
@@ -6231,6 +6240,7 @@ class TestHardStop:
             unreachable=False,
             halts=hard_starts._halts,
             slots=hard_starts._slots,
+            estimates=ESTIMATES,
         )[halted.id]
         assert status.stopped_cause == StopCause.FIVE_HOUR_HALT
 
@@ -6657,6 +6667,7 @@ class TestNudge:
             unreachable=False,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[run.id]
         assert status.held_reason == HeldReason.SLOT
 
@@ -7259,7 +7270,12 @@ def _held_for(
     starts: SessionStartService, db: DbSession, work_id: uuid.UUID
 ) -> tuple[HeldReason | None, int | None]:
     status = work_status(
-        db, [work_id], unreachable=False, halts=starts._halts, slots=starts._slots
+        db,
+        [work_id],
+        unreachable=False,
+        halts=starts._halts,
+        slots=starts._slots,
+        estimates=ESTIMATES,
     )[work_id]
     return status.held_reason, status.held_running
 
@@ -7352,6 +7368,7 @@ class TestSlot:
             unreachable=True,
             halts=slotted._halts,
             slots=slotted._slots,
+            estimates=ESTIMATES,
         )[work.id]
         assert (status.held_reason, status.held_running) == (
             HeldReason.CONTROLLER_UNREACHABLE,
@@ -7616,6 +7633,7 @@ class TestHeldLines:
             unreachable=True,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )
         assert status[held.id].held_reason == HeldReason.CONTROLLER_UNREACHABLE
         assert _moves(engine_events[heard:]) == [WorkMoved(project.id, held.id)]
@@ -8379,6 +8397,7 @@ class TestContinueRun:
             unreachable=controller_outage.holds,
             halts=starts._halts,
             slots=starts._slots,
+            estimates=ESTIMATES,
         )[continuation.id]
         assert status.held_reason == reason
         # Bound by the held continuation from the close on (DB 240).
@@ -9223,7 +9242,12 @@ def _held_reason(
 ) -> HeldReason | None:
     """Why the held Session's line says the gate holds it."""
     return work_status(
-        db, [run.id], unreachable=False, halts=starts._halts, slots=starts._slots
+        db,
+        [run.id],
+        unreachable=False,
+        halts=starts._halts,
+        slots=starts._slots,
+        estimates=ESTIMATES,
     )[run.id].held_reason
 
 

@@ -51,6 +51,7 @@ from app.services.controller_client import ControllerClient
 from app.services.job_service import SETUP_TITLE
 from app.services.session_scope import STORE_REPO
 from tests.support.adoption import FIRST_MENUS
+from tests.support.estimates import listed, timed
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
 from tests.support.starts import configured_starts
@@ -539,6 +540,7 @@ class TestGetProject:
                 }
             ],
             "running_work": [],
+            "estimate": None,
             "open_items": 2,
             "autopilot_may_take": 0,
             "create_refusal": "it is no draft",
@@ -1267,6 +1269,7 @@ class TestGetTimeline:
             "retried": None,
             "progress": [],
             "debriefed": False,
+            "estimate": None,
         }
 
     def test_a_block_s_own_section_rides_with_its_text(
@@ -1443,6 +1446,121 @@ class TestGetTimeline:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}/timeline").status_code == 401
+
+
+def _running(
+    container: ServiceContainer,
+    session: Session,
+    project_id: uuid.UUID,
+    environment: Environment,
+    title: str,
+) -> models.Session:
+    """A running work session of the project, with its work item."""
+    project = session.get_one(Project, project_id)
+    run = _run(session, project, environment)
+    run.state_code = SessionState.RUNNING
+    container.record_service().place_work(project, run, title)
+    return run
+
+
+@pytest.mark.usefixtures("person")
+class TestGetEstimates:
+    def test_the_projects_estimate_and_its_running_work_items(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        """F156.8, F156.12: what the page reads each minute is what its head
+        and its timeline's work items carry, computed again."""
+        camp = _make(container, name="Camp", environment_id=environment.id)
+        tents = _running(container, session, camp, environment, "Pitching the tents")
+        fire = _running(container, session, camp, environment, "Laying the fire")
+        _running(container, session, camp, environment, "Fetching water")
+        timed(session, tents.id, "code-writer", 20)
+        listed(session, tents.id, "code-writer", pending=3)
+        listed(session, fire.id, "code-writer", running=30, marked=True)
+        _sign_in(client)
+
+        response = client.get(f"{PROJECTS}/{camp}/estimates")
+
+        assert response.status_code == 200
+        body = response.get_json()
+        outrun = {
+            "minutes": None,
+            "longer_than_usual": "outrun",
+            "kind": "code-writer",
+            "ran_seconds": None,
+        }
+        assert body == {
+            "estimate": {**outrun, "item_id": str(fire.id)},
+            "work_items": [
+                {
+                    "id": str(tents.id),
+                    "estimate": {
+                        "minutes": 60,
+                        "longer_than_usual": None,
+                        "kind": None,
+                        "ran_seconds": None,
+                    },
+                },
+                {"id": str(fire.id), "estimate": outrun},
+            ],
+        }
+        assert (
+            client.get(f"{PROJECTS}/{camp}").get_json()["estimate"] == body["estimate"]
+        )
+        works = {
+            item["id"]: item["work"]["estimate"]
+            for item in client.get(f"{PROJECTS}/{camp}/timeline").get_json()["items"]
+            if item["work"] is not None
+        }
+        assert [works[each["id"]] for each in body["work_items"]] == [
+            each["estimate"] for each in body["work_items"]
+        ]
+
+    def test_a_project_with_no_badge_to_show(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client)
+
+        response = client.get(f"{PROJECTS}/{camp}/estimates")
+
+        assert (response.status_code, response.get_json()) == (
+            200,
+            {"estimate": None, "work_items": []},
+        )
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+        unknown = uuid.uuid4()
+
+        response = client.get(f"{PROJECTS}/{unknown}/estimates")
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Project {unknown} was not found"
+
+    def test_an_id_that_is_no_uuid_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        assert client.get(f"{PROJECTS}/camp/estimates").status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client, roles=())
+
+        assert client.get(f"{PROJECTS}/{camp}/estimates").status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}/estimates")
+
+        assert response.status_code == 401
 
 
 @pytest.mark.usefixtures("person")
@@ -2282,6 +2400,7 @@ class TestCreateProject:
             "tasks": [],
             "notes": [],
             "running_work": [],
+            "estimate": None,
             "open_items": 0,
             "autopilot_may_take": 0,
             "create_refusal": "Pilot is writing",
@@ -2479,6 +2598,7 @@ class TestCreateProjectByCall:
             "tasks": [],
             "notes": [],
             "running_work": [],
+            "estimate": None,
             "open_items": 0,
             "autopilot_may_take": 0,
             "create_refusal": "Pilot is writing",

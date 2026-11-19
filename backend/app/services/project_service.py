@@ -61,6 +61,11 @@ from app.services.handing import hand_over, sides
 from app.services.job_service import JobService
 from app.services.people_service import PeopleService
 from app.services.session_start_service import STOPPABLE, SessionStartService
+from app.services.step_estimate import (
+    StepEstimates,
+    WorkEstimate,
+    project_estimate,
+)
 from app.services.timeline_service import (
     WAIT,
     Badge,
@@ -118,6 +123,9 @@ class ProjectHead:
     steps: tuple[PlanStep, ...]
     notes: tuple[PlanNote, ...]
     running_work: tuple[RunningWork, ...]
+    estimate: WorkEstimate | None
+    """The time its running work still takes, as its head shows it: one of
+    `running_work`'s (F156.8)."""
     open_items: int
     autopilot_may_take: int
     """The open confirmations the switch answers (F4.2; DB decision 58)."""
@@ -125,6 +133,16 @@ class ProjectHead:
     """Why Create project cannot be pressed now; none when it can (F48.1)."""
     url: str
     """The project's page in the app."""
+
+
+@dataclass(frozen=True)
+class ProjectEstimates:
+    """A project's estimates as they read now."""
+
+    project: WorkEstimate | None
+    """The one its head shows."""
+    work_items: tuple[WorkEstimate, ...]
+    """Its running work items' that show a badge, in timeline order."""
 
 
 @dataclass(frozen=True)
@@ -256,6 +274,7 @@ class ProjectService:
         attach_service: AttachService,
         job_service: JobService,
         halt_file_service: HaltFileService,
+        step_estimates: StepEstimates,
         base_url: str,
     ) -> None:
         """
@@ -275,6 +294,7 @@ class ProjectService:
         self.attach_service = attach_service
         self.job_service = job_service
         self.halt_file_service = halt_file_service
+        self.step_estimates = step_estimates
         self.base_url = base_url
 
     def tabs(self, auth: AuthContext, archived: bool) -> list[ProjectTab]:
@@ -420,6 +440,9 @@ class ProjectService:
         )
         progress = plan_progress(tasks)
         creation = self._creation(project)
+        estimates = self.step_estimates.of(
+            self.db, [work.id for work in running_work], datetime.now(UTC)
+        )
         return ProjectHead(
             project=project,
             status=project_status(
@@ -435,10 +458,37 @@ class ProjectService:
             ),
             notes=tuple(notes.get(None, [])),
             running_work=running_work,
+            estimate=project_estimate(estimates.values()),
             open_items=open_items or 0,
             autopilot_may_take=may_take or 0,
             create_refusal=creation if isinstance(creation, str) else None,
             url=f"{self.base_url}/projects/{folder(project)}",
+        )
+
+    def estimates(self, project_id: uuid.UUID) -> ProjectEstimates:
+        """The time the project's running work still takes, as it reads now
+        (F156.8): its open work items' whose Session runs, and of those the
+        one its head shows. It reads no item's body and no plan.
+
+        Raises:
+            RecordNotFoundException: no project has the id.
+        """
+        if self.db.get(Project, project_id) is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        running = self.db.scalars(
+            select(Item.id)
+            .join(AgentSession, AgentSession.id == Item.id)
+            .where(
+                Item.project_id == project_id,
+                Item.done_at.is_(None),
+                AgentSession.state_code == SessionState.RUNNING,
+            )
+            .order_by(Item.seq)
+        ).all()
+        estimates = self.step_estimates.of(self.db, running, datetime.now(UTC))
+        return ProjectEstimates(
+            project=project_estimate(estimates.values()),
+            work_items=tuple(estimates.values()),
         )
 
     def create(self, auth: AuthContext) -> Project:

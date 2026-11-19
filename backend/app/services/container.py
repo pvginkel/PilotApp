@@ -75,6 +75,7 @@ from app.services.standing_notification_service import (
     StandingNotificationService,
 )
 from app.services.start_gate import WorkSlots
+from app.services.step_estimate import StepEstimates
 from app.services.store_update_service import StoreUpdateService
 from app.services.store_updater import StoreUpdater
 from app.services.supervisor import Supervisor
@@ -248,6 +249,14 @@ class ServiceContainer(containers.DeclarativeContainer):
         WorkSlots,
         work_max=app_config.provided.work_parallelism_max,
         project_max=app_config.provided.project_parallelism_max,
+    )
+
+    # The time a running work item still takes, under its two settings
+    # (F156.10)
+    step_estimates = providers.Singleton(
+        StepEstimates,
+        window=app_config.provided.estimate_window_steps,
+        running=app_config.provided.estimate_running_steps,
     )
 
     # The KubeCoder controller's client (design 2 §14). Its starter is
@@ -688,6 +697,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         usage_halts=usage_halts,
         wait_service=wait_service,
         references=references,
+        step_estimates=step_estimates,
     )
     # The notification each member of a project should see (F94.1, F94.2),
     # its link on the stage's public address
@@ -790,6 +800,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         attach_service=attach_service,
         job_service=job_service,
         halt_file_service=halt_file_service,
+        step_estimates=step_estimates,
         base_url=config.provided.baseurl,
     )
     # What a person does to an item: its answers and marks (F14, F32.4)

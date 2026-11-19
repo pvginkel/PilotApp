@@ -5131,6 +5131,75 @@
         "title": "EnvironmentNameSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae.EstimateSchema": {
+        "description": "What the badge of a running work item shows of the time it still\ntakes (F156.8): computed as it is read, by the server, and never stored\n(F156.10, F156.12).",
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The kind of the running step, as its run published it, the first on the list of several; null where no step runs or it has none",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind"
+          },
+          "longer_than_usual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.LongerThanUsual"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time left as the badge words it, in minutes: 5 to 55 by fives, 60, then whole hours, 120, 180; null where the badge shows no time, `longer_than_usual` saying which",
+            "examples": [
+              25
+            ],
+            "title": "Minutes"
+          },
+          "ran_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds"
+          }
+        },
+        "required": [
+          "minutes",
+          "longer_than_usual",
+          "kind",
+          "ran_seconds"
+        ],
+        "title": "EstimateSchema",
+        "type": "object"
+      },
       "ItemDocumentSchema.1fdd8ae.FiringCause": {
         "enum": [
           "transition",
@@ -5348,6 +5417,15 @@
         ],
         "title": "LineTaskSchema",
         "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.LongerThanUsual": {
+        "description": "Why a running work item's badge is the alert's (F156.7). Read at\ndisplay, never stored (F156.10).",
+        "enum": [
+          "outrun",
+          "marked"
+        ],
+        "title": "LongerThanUsual",
+        "type": "string"
       },
       "ItemDocumentSchema.1fdd8ae.OptionSchema": {
         "description": "A choice a block offers.",
@@ -6142,6 +6220,17 @@
             "description": "Why it failed: a failed start's error, or the error its latest turn ended in; null unless `state` is `failed` (F125)",
             "title": "Error"
           },
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.EstimateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time it still takes, its badge, as it read when this was built; null unless `state` is `running`, once it is done, with no step left to do, and where it has no estimate and the workflow marked no running step (F156.6, F156.8)"
+          },
           "held_reason": {
             "anyOf": [
               {
@@ -6285,7 +6374,8 @@
           "nudge_owed",
           "retried",
           "progress",
-          "debriefed"
+          "debriefed",
+          "estimate"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -8115,6 +8205,211 @@
         "title": "WorkLinkSchema",
         "type": "object"
       },
+      "ProjectEstimatesSchema.e86ccd6": {
+        "description": "The time a project's running work still takes, as it reads now: what a\npage that shows a badge reads again each minute (F156.8).",
+        "properties": {
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.ProjectEstimateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The project's head's badge, a head's `estimate`; null while none of its running work items shows one"
+          },
+          "work_items": {
+            "description": "Each open work item whose session runs and whose badge shows, in timeline order, with its timeline item's `work.estimate` as it reads now; a work item not listed shows no badge",
+            "items": {
+              "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.WorkItemEstimateSchema"
+            },
+            "title": "Work Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "estimate",
+          "work_items"
+        ],
+        "title": "ProjectEstimatesSchema",
+        "type": "object"
+      },
+      "ProjectEstimatesSchema.e86ccd6.EstimateSchema": {
+        "description": "What the badge of a running work item shows of the time it still\ntakes (F156.8): computed as it is read, by the server, and never stored\n(F156.10, F156.12).",
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The kind of the running step, as its run published it, the first on the list of several; null where no step runs or it has none",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind"
+          },
+          "longer_than_usual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.LongerThanUsual"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time left as the badge words it, in minutes: 5 to 55 by fives, 60, then whole hours, 120, 180; null where the badge shows no time, `longer_than_usual` saying which",
+            "examples": [
+              25
+            ],
+            "title": "Minutes"
+          },
+          "ran_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds"
+          }
+        },
+        "required": [
+          "minutes",
+          "longer_than_usual",
+          "kind",
+          "ran_seconds"
+        ],
+        "title": "EstimateSchema",
+        "type": "object"
+      },
+      "ProjectEstimatesSchema.e86ccd6.LongerThanUsual": {
+        "description": "Why a running work item's badge is the alert's (F156.7). Read at\ndisplay, never stored (F156.10).",
+        "enum": [
+          "outrun",
+          "marked"
+        ],
+        "title": "LongerThanUsual",
+        "type": "string"
+      },
+      "ProjectEstimatesSchema.e86ccd6.ProjectEstimateSchema": {
+        "description": "The badge a project's head shows, of the time its running work still\ntakes (F156.8): one of its running work items', the first of those a\nrunning step has outrun, else the workflow-marked one with the most time\nleft, else the one with the most time left.",
+        "properties": {
+          "item_id": {
+            "description": "The work item it is of, one of `running_work`, which the alert's sentence names",
+            "format": "uuid",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The kind of the running step, as its run published it, the first on the list of several; null where no step runs or it has none",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind"
+          },
+          "longer_than_usual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.LongerThanUsual"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time left as the badge words it, in minutes: 5 to 55 by fives, 60, then whole hours, 120, 180; null where the badge shows no time, `longer_than_usual` saying which",
+            "examples": [
+              25
+            ],
+            "title": "Minutes"
+          },
+          "ran_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds"
+          }
+        },
+        "required": [
+          "minutes",
+          "longer_than_usual",
+          "kind",
+          "ran_seconds",
+          "item_id"
+        ],
+        "title": "ProjectEstimateSchema",
+        "type": "object"
+      },
+      "ProjectEstimatesSchema.e86ccd6.WorkItemEstimateSchema": {
+        "description": "A running work item's badge.",
+        "properties": {
+          "estimate": {
+            "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.EstimateSchema",
+            "description": "What its badge shows"
+          },
+          "id": {
+            "description": "The work item's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "estimate"
+        ],
+        "title": "WorkItemEstimateSchema",
+        "type": "object"
+      },
       "ProjectHeadSchema.e86ccd6": {
         "description": "What a project's head, its popovers and its menu read.",
         "properties": {
@@ -8158,6 +8453,17 @@
               "Pilot is writing"
             ],
             "title": "Create Refusal"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.ProjectEstimateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time its running work still takes, its head's badge, as it read when this was built; null while none of `running_work` shows a badge (F156.6, F156.8)"
           },
           "id": {
             "description": "The project's id",
@@ -8298,6 +8604,7 @@
           "tasks",
           "notes",
           "running_work",
+          "estimate",
           "open_items",
           "autopilot_may_take",
           "create_refusal",
@@ -8305,6 +8612,15 @@
         ],
         "title": "ProjectHeadSchema",
         "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6.LongerThanUsual": {
+        "description": "Why a running work item's badge is the alert's (F156.7). Read at\ndisplay, never stored (F156.10).",
+        "enum": [
+          "outrun",
+          "marked"
+        ],
+        "title": "LongerThanUsual",
+        "type": "string"
       },
       "ProjectHeadSchema.e86ccd6.MemberSchema": {
         "description": "A member, as an avatar draws them (F106, F132).",
@@ -8464,6 +8780,82 @@
           "notes"
         ],
         "title": "PlanTaskSchema",
+        "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6.ProjectEstimateSchema": {
+        "description": "The badge a project's head shows, of the time its running work still\ntakes (F156.8): one of its running work items', the first of those a\nrunning step has outrun, else the workflow-marked one with the most time\nleft, else the one with the most time left.",
+        "properties": {
+          "item_id": {
+            "description": "The work item it is of, one of `running_work`, which the alert's sentence names",
+            "format": "uuid",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The kind of the running step, as its run published it, the first on the list of several; null where no step runs or it has none",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind"
+          },
+          "longer_than_usual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.LongerThanUsual"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time left as the badge words it, in minutes: 5 to 55 by fives, 60, then whole hours, 120, 180; null where the badge shows no time, `longer_than_usual` saying which",
+            "examples": [
+              25
+            ],
+            "title": "Minutes"
+          },
+          "ran_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds"
+          }
+        },
+        "required": [
+          "minutes",
+          "longer_than_usual",
+          "kind",
+          "ran_seconds",
+          "item_id"
+        ],
+        "title": "ProjectEstimateSchema",
         "type": "object"
       },
       "ProjectHeadSchema.e86ccd6.ProjectState": {
@@ -12945,6 +13337,75 @@
         "title": "EnvironmentNameSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae.EstimateSchema": {
+        "description": "What the badge of a running work item shows of the time it still\ntakes (F156.8): computed as it is read, by the server, and never stored\n(F156.10, F156.12).",
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The kind of the running step, as its run published it, the first on the list of several; null where no step runs or it has none",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind"
+          },
+          "longer_than_usual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.LongerThanUsual"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time left as the badge words it, in minutes: 5 to 55 by fives, 60, then whole hours, 120, 180; null where the badge shows no time, `longer_than_usual` saying which",
+            "examples": [
+              25
+            ],
+            "title": "Minutes"
+          },
+          "ran_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds"
+          }
+        },
+        "required": [
+          "minutes",
+          "longer_than_usual",
+          "kind",
+          "ran_seconds"
+        ],
+        "title": "EstimateSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.FiringCause": {
         "enum": [
           "transition",
@@ -13162,6 +13623,15 @@
         ],
         "title": "LineTaskSchema",
         "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.LongerThanUsual": {
+        "description": "Why a running work item's badge is the alert's (F156.7). Read at\ndisplay, never stored (F156.10).",
+        "enum": [
+          "outrun",
+          "marked"
+        ],
+        "title": "LongerThanUsual",
+        "type": "string"
       },
       "TimelineSchema.1fdd8ae.OptionSchema": {
         "description": "A choice a block offers.",
@@ -14372,6 +14842,17 @@
             "description": "Why it failed: a failed start's error, or the error its latest turn ended in; null unless `state` is `failed` (F125)",
             "title": "Error"
           },
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.EstimateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time it still takes, its badge, as it read when this was built; null unless `state` is `running`, once it is done, with no step left to do, and where it has no estimate and the workflow marked no running step (F156.6, F156.8)"
+          },
           "held_reason": {
             "anyOf": [
               {
@@ -14515,7 +14996,8 @@
           "nudge_owed",
           "retried",
           "progress",
-          "debriefed"
+          "debriefed",
+          "estimate"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -15029,6 +15511,17 @@
             "description": "Why it failed: a failed start's error, or the error its latest turn ended in; null unless `state` is `failed` (F125)",
             "title": "Error"
           },
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.EstimateSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time it still takes, its badge, as it read when this was built; null unless `state` is `running`, once it is done, with no step left to do, and where it has no estimate and the workflow marked no running step (F156.6, F156.8)"
+          },
           "held_reason": {
             "anyOf": [
               {
@@ -15172,7 +15665,8 @@
           "nudge_owed",
           "retried",
           "progress",
-          "debriefed"
+          "debriefed",
+          "estimate"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -15285,6 +15779,75 @@
           "name"
         ],
         "title": "EnvironmentNameSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.EstimateSchema": {
+        "description": "What the badge of a running work item shows of the time it still\ntakes (F156.8): computed as it is read, by the server, and never stored\n(F156.10, F156.12).",
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The kind of the running step, as its run published it, the first on the list of several; null where no step runs or it has none",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind"
+          },
+          "longer_than_usual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.LongerThanUsual"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time left as the badge words it, in minutes: 5 to 55 by fives, 60, then whole hours, 120, 180; null where the badge shows no time, `longer_than_usual` saying which",
+            "examples": [
+              25
+            ],
+            "title": "Minutes"
+          },
+          "ran_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds"
+          }
+        },
+        "required": [
+          "minutes",
+          "longer_than_usual",
+          "kind",
+          "ran_seconds"
+        ],
+        "title": "EstimateSchema",
         "type": "object"
       },
       "WorkSchema.1fdd8ae.HeldReason": {
@@ -15418,6 +15981,15 @@
         ],
         "title": "LineTaskSchema",
         "type": "object"
+      },
+      "WorkSchema.1fdd8ae.LongerThanUsual": {
+        "description": "Why a running work item's badge is the alert's (F156.7). Read at\ndisplay, never stored (F156.10).",
+        "enum": [
+          "outrun",
+          "marked"
+        ],
+        "title": "LongerThanUsual",
+        "type": "string"
       },
       "WorkSchema.1fdd8ae.ProgressState": {
         "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
@@ -19821,6 +20393,84 @@
           }
         ],
         "summary": "Mark an action of the draft without options Done in place, as the signed-in person, now, with the paste-back as its note (F47.4).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/estimates": {
+      "get": {
+        "description": "Returns:     200: The project's estimate and its running work items'     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id",
+        "operationId": "get__api_projects_{project_id}_estimates",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the time a project's running work still takes, as it reads now: its head's badge and its running work items', computed by the server at each read, which a page that shows a badge makes each minute (F156.8, F156.12).",
         "tags": [],
         "x-required-role": "editor"
       }
