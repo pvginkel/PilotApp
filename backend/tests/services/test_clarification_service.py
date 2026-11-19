@@ -376,7 +376,6 @@ class TestTitle:
         assert title([_asked(path, "D1", n) for n, path in enumerate(paths)]) == named
 
 
-@pytest.mark.usefixtures("starts")
 def _notices(db: DbSession, project: Project) -> list[Item]:
     """The project's debrief's notices."""
     return list(
@@ -388,6 +387,7 @@ def _notices(db: DbSession, project: Project) -> list[Item]:
     )
 
 
+@pytest.mark.usefixtures("starts")
 class TestPassEnded:
     def test_a_passs_end_places_the_debriefs_notice_of_the_run_whose_turn_it_took(
         self,
