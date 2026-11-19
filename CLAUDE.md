@@ -318,8 +318,9 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   service user; a registered document's read at the run's end, what of it is
   Pilot's, a claimed or researched block held through its run, Stop and take over and the Cancel,
   the clarification run, its write-back and the run's continuation; a project's chat and a draft's
-  definition chat, its start in the store, its brief, its Stop, its close, `chat.md`, and its Chat
-  tab, composer, Discuss and *In the chat*.
+  definition chat, its start in the store, its brief, the project's state every brief of the
+  brain's carries, its Stop, its close, `chat.md`, and its Chat tab, composer, Discuss and *In the
+  chat*.
 - [`docs/conversations.md`](docs/conversations.md): a conversation with Pilot, a session outside
   Pilot's: whose it is, its routes, its opening, messages and reply, its interrupt, end and close,
   its brief, and the Conversations tab.

@@ -165,8 +165,11 @@ wait has none. Then `Firings pending, oldest first:` and a line per firing:
 - `- <stamp> · due <stamp> — fired at its due time`;
 - `- <stamp> · the operator's request (Check now|Skip wait), by <handle>`.
 
-The brief ends with the open notes of the wait's task and of the plan, and the deferrals without a
-home.
+The brief ends with the project's state and the handbook whole
+([`chats.md`](chats.md#the-projects-state)), its return list naming the open notes of the wait's
+task and the plan's own. A firing's line is the move the tracker posted, and the brief carries no
+watched card's current state, as nothing reads YouTrack
+([above](#a-cards-change-of-state); D245).
 
 **A resumed run.** A run can resume the conversation of the wait's previous run, the latest other
 run of the wait that was briefed. It does so when that run's turn ended neither failed nor stopped

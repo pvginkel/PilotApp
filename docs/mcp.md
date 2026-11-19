@@ -111,6 +111,11 @@ token of its own, and the old one names nothing once the new one's hash is writt
 sends its Turn to the controller session it has creates nothing, so that session keeps the `env`
 of its last create.
 
+`pilot-store`'s ten tools each carry the `_meta` `{"anthropic/alwaysLoad": true}` in `tools/list`
+(`LOADED_UP_FRONT` in `tools.py`), on which Claude Code loads their schemas at the session's start,
+so that a brain session calls them with no ToolSearch first; `pilot-work`'s and `pilot-projects`'
+tools carry none, and stay behind a session's ToolSearch.
+
 **A tool called with no MCP client.** A process the session runs, a script, calls a tool with one
 JSON-RPC `tools/call` POSTed to `$PILOT_MCP_URL`, no `initialize` before it, since the server is
 stateless, under `Authorization: Bearer $PILOT_TOKEN`, `Accept: application/json,
@@ -301,9 +306,24 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   the brain gives, on its `agent`, `model` and `reasoning_effort`; its first turn is the brain's `brief`, a
   blank line, then the server's lines under `From Pilot:`: ``- This work item serves plan task <id>
   "<title>": write `step: <id>` into the front matter of every document you register.``, `- Auto
-  pilot is on: the grants above hold for this session.` or `- Auto pilot is off: the grants above
-  ask the operator first for this session.`, then `- The project's handbook:` and the handbook
-  verbatim, each line that holds. `state` is its Session's, `starting` or `held`, and `held` why the
+  pilot is on, and these grants hold for this session:` or `- Auto pilot is off, and these grants
+  hold for this session:` and the grants text the switch selects, then `- The project's handbook:`
+  and the handbook verbatim, each line that holds. The brain's `brief` is the work's own part
+  alone: the server appends the grants text, the store's own, so that the brain copies none of it
+  (D243). The server reads it at every add, before the project's lock, from the store's checkout,
+  `/work/PilotProjects/rules/grants.md` read through the controller off the store environment's
+  share, and keeps nothing of it (`SessionStartService.store_grants`, `switch_grants`): under the
+  heading line `## In a worker's brief`, up to the next `# ` or `## ` heading, the fenced block
+  right under the label line `Auto pilot on:` or `Auto pilot off:`, blank lines alone between, an
+  empty block counting as none. In the block it writes the work's topic branch in place of every
+  `pilot/<project>/<task>`: `pilot/<folder>/<task id>`, the project's folder, its slug or a draft's
+  `draft-<number>`, and the plan task the item's `step` names, or, where it names none, the item's
+  title in kebab case, lowercased, each run of characters other than letters and digits a `-`.
+  A work item is refused `409` where no controller is configured ("Cannot place a work item because
+  no controller is configured"), where the file has no such section or no block for the project's
+  switch, and where its title holds no letter or digit and it gives no `step`; a controller that
+  does not answer or cannot read the file is a `502`, so a work item added while the controller is
+  out is refused, not held. `state` is its Session's, `starting` or `held`, and `held` why the
   gate holds it, `week_halt` or `five_hour_halt` ([`usage.md`](usage.md)), `paused`,
   `controller_unreachable` or `slot`, for the brain to say so. Each of
   `claims` names the work item for a claimed action, an open action of a registered document of the

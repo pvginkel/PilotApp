@@ -24,10 +24,12 @@ what each turn was sent, and, once done, the debrief its stage session gave, beh
 its line, every role's account in the full debrief behind that, and one notice per slice at its
 run's end carrying its planning's and its run's debriefs, open until a member reads it, and Pilot's own
 background jobs, each shown on the item it follows from, one at a time per project, each a session of
-the brain's, fresh but for a wait's run: the setup, the pre-ruling pass after every worker's turn,
-which reads the stage session's debrief where the run gave one and may ask the worker's writer, or claim an action or research a fact for a work item of
-Pilot's, the blocks held through its run, the plan's next
-step after every item of Pilot's a person closes in the app, the work Pilot offered on an action
+the brain's, fresh but for a wait's run, briefed with the project's state and its handbook: the
+setup, the pre-ruling pass after every worker's turn that left it something to rule, which reads
+the stage session's debrief where the run gave one and may ask the worker's writer, or claim an
+action or research a fact for a work item of Pilot's, the blocks held through its run, the plan's
+next step after a worker's turn that left the pass nothing and after every item of Pilot's a person
+closes in the app, the work Pilot offered on an action
 started once a member takes the offer, the chat carrying out a ruling it
 records itself, and a wait's run, with Retry on one that failed
 ([`docs/work.md`](docs/work.md)); each

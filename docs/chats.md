@@ -60,8 +60,10 @@ and the quoted thing's title between the two:
 The Turn's quote is what the first quote tag in the words names: the Item or the Block of the
 project, a block of its draft among them, and none for a path's tag, nor for a tag that names
 neither, an unknown or malformed id or another project's. A path's quote lives in the `words` alone.
-The brain resolves a quote itself, from the tree, a path's from the project's folder; the server
-inlines nothing.
+A project's chat carries the item the Turn's quote names, as it stands, before the words, on the
+brief and on a later message alike ([below](#before-the-words)); the brain resolves the rest itself,
+from the tree: a path's quote from the project's folder, a draft's block, and the item of any
+further tag.
 
 Which way a message goes is the project's open chat's to say, read with its Session:
 
@@ -142,19 +144,25 @@ a blank line apart; a line that does not hold is left out, never written as "non
   one, `This project is finished (<stamp>): you read only — no `pilot-store`, nothing under `/work`
   you can write. Answer from the tree, the records and the fleet tools; what you would change, say
   so and name who can.`, the stamp its latest `finished` transition's;
-- in an open project, ``Open plan notes, by summary (the content and the blocks a read away in
-  plan.json; `pilot.py plan note list`):``, then a line per open note, `- <task id> "<title>" ·
-  <note id>: <summary>` or `- the plan · <note id>: <summary>`, the tasks' in the plan's order
-  and then the plan's own; then `Deferrals without a home (a note names none of these blocks —
-  write one, or answer the block anew in a new item):` and a line per such deferral, as the store's
-  hooks print it ([`sync.md`](sync.md));
+- the project's state and its handbook, open or finished ([below](#the-projects-state));
 - once a chat of the project has closed, `Earlier chats of this project are in chat.md; the latest
-  closed <stamp>.`;
+  closed <stamp>.`, and then, where the record changed since, `What changed in the record since it
+  closed, oldest first:` and a line per change, `<stamp> · ` and one of `item <seq> added · <kind> ·
+  <title>`, `item <seq> closed (<cause> by <handle>) · <kind> · <title>`, `item <seq>'s <local id>
+  answered by <handle> · <kind> · <title>` or `done by`, `note <note id> added on task <task
+  id> · <summary>` or `on the plan`, or `struck`, and `the project paused by <handle>` or `resumed`,
+  a `by` left out where the record names no one (`BriefService._changed`). The close is the latest
+  of every chat of the project, a definition chat's included, and each change is dated by the time
+  the record keeps for it, as no log of them is kept: a change at the close itself is before it,
+  and a task's status move, which no time dates, is not among them. Changes at one instant go
+  added, answered or done, closed, note added, struck, then paused or resumed;
+- where the words quote an item or a block of one, the item as it stands
+  ([below](#before-the-words));
 - `The message, from <handle> (member):`, or `(not a member):`, then the words verbatim, which the
   brief ends with.
 
-**A definition chat's brief** (`BriefService.definition_chat`) has no switch, pause or notes line,
-none of which a draft has:
+**A definition chat's brief** (`BriefService.definition_chat`) has no switch, no pause line, no
+state and no handbook, none of which a draft has:
 
 - `/create`, which loads PilotProjects' create skill;
 - `Pilot's brief · the definition chat · /work/Projects/draft-<number> · <UTC stamp>`, with
@@ -175,12 +183,51 @@ none of which a draft has:
 - `The message:` and the words verbatim, or `The message, from <handle> (member):` or `(not a
   member):` where someone other than the draft's starter sends the message that starts the chat.
 
-No brief carries the handbook: the chat skill reads `handbook.md` before it acts (D058), and a draft
-has none.
+### The project's state
+
+Every brief of the brain's but the definition chat's carries the project's state as the record
+holds it when the brief is composed, and the handbook whole, so that its skill acts on the turn the
+brief opens with no read before it (D241): a project's chat's, open or finished, a conversation's
+([`conversations.md`](conversations.md)) and each job's, the setup's included
+([`work.md`](work.md)). It comes after the switch, or the finish line, in a chat's or a
+conversation's brief and after the trigger's payload in a job's, each part a block of its own, and a part with nothing in it is left out, its heading
+too (`BriefService._state`). Each line is the one the matching `pilot.py` listing prints, so that
+the brain meets one shape whichever it reads:
+
+- a job's seqs, `This job is seq <n> on the timeline; the item its trigger names, seq <m>.`, an
+  offer's naming the item its Pilot Note is on and the setup's the first clause alone; a chat and
+  a conversation have none;
+- ``The plan's tasks not done, in its order, as `pilot.py plan task list` prints them:`` and a line
+  per task, `<task id> · <status> · <title>`, then ` · notes <note id>, <note id>` where it has open
+  notes;
+- ``The open items, as `pilot.py items list --open` prints them:`` and a line per open item in
+  `seq` order, a job's own among them: `<seq> · <kind> · <title> · open`, then, where they hold,
+  `for <handle>`, `step <task id>`, `urgent`, a wait's `due <stamp>` or `on <cards> for <states>`
+  and its firings, `no firings` or `<n> firings` with `, <n> pending` for those no run has taken,
+  then its document's path, or `no document` where none is published, and its id;
+- ``The open plan notes, whole, as `pilot.py plan note list` prints them:`` and each open note,
+  `<note id> · <task id> · <summary>` or `<note id> · plan · <summary>`, then, indented four spaces,
+  its content and a line per block it names, `<item id>/<local id> · <item title> · <answer>`, the
+  answer as it stands: `answer: <answer>`, with ` → <to>` for a deferral, `done: <stamp>`, then
+  ` by <handle>` and ` via <channel>` where given, or `no answer`. The tasks' notes come in the
+  plan's order, then the plan's own, each in the order made. Every brief carries every open note
+  whole, never by summary (D242). In the same block, the job after an item of Pilot's own is done,
+  after an offer taken and after a wait's firings has its return list, `Your return list, the open
+  notes of task <task id> and the plan's own: <note id>, <note id>.`, or `Your return list, the
+  plan's own open notes: …` where its item names no task, left out where it would name none; then
+  `Deferrals without a home (a note names none of these blocks — write one, or answer the block anew
+  in a new item):` and a line per such deferral, as the store's hooks print it
+  ([`sync.md`](sync.md)), which a finished project's brief leaves out, its session reading only;
+- `The project's handbook, handbook.md, whole:` and its published text, left out while it is blank.
+
+The state serves the turn the brief opens. A later turn of the session, a chat's next message or a
+wait's resumed run ([`waits.md`](waits.md)), carries none of it, and the store's skills read what
+such a turn acts on fresh; a chat's later turn is told of a changed handbook by the server's notice
+([below](#before-the-words)).
 
 ## Before the words
 
-A message sent to the open chat goes as the person's words, with up to two things before them.
+A message sent to the open chat goes as the person's words, with up to three things before them.
 
 **The author's name.** Where the chat's previous Turn with an author is another person's, the line
 the brief ends with names this one, `The message, from <handle> (member):` or `(not a member):`,
@@ -189,6 +236,18 @@ chat's latest Turn with one that reached the brain: a server's Turn has no autho
 send failed never went out, so a message retried after a failed send is named again. A message
 without the line is from the person the latest such line named, the brief's included, and the chat
 skill records a ruling for that person.
+
+**The quoted item.** In a project's chat, where the Turn's quote is an
+item of the project or a block of one, the item as it stands when the message is sent goes before
+the name and the words, a blank line after it, as the brief carries the first message's
+(`BriefService.quoted`): `The item the message quotes, as it stands now:`, or `The item whose block
+<local id> the message quotes, as it stands now:`, then the item's line as `pilot.py items list`
+prints it, its open items' shape ([above](#the-projects-state)) with `open` or, closed, `done
+<stamp> (<cause> by <handle>)` and a closed wait's or work item's note, `note: <note>`, then a line
+per block of its published text, `<local id> · <kind> · <its section's heading> · <answer>`, the
+heading left out where the block has no section of its own and the answer as a note's block has
+it. A path's quote and a draft's block carry nothing, nor does a definition chat's message or a
+conversation's.
 
 **The handbook's notice.** Where the project's handbook was published later than the chat's latest
 Turn that reached the brain was sent, by anyone but the chat itself, the server's notice goes first,
@@ -202,8 +261,8 @@ The handbook (handbook.md) changed since your last turn.
 ```
 
 The notice is counted once the send went out, `pilot_chat_handbook_changed_total{project}`, by the
-project's id, a conversation's with the chat's. A start's Turn carries the brief instead, and the skill reads the handbook then
-anyway. A publication since that Turn is the chat's own, and brings no notice, when every Version
+project's id, a conversation's with the chat's. A start's Turn carries the brief instead, the
+handbook whole in it. A publication since that Turn is the chat's own, and brings no notice, when every Version
 of the handbook cut since is the chat's Session's and the published text is the latest Version's
 (`ChatService._handbook_changed`); a Version of no Session, a save made with no write lock held
 ([`sync.md`](sync.md)), counts as a change.

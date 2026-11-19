@@ -187,11 +187,12 @@ The message, from the session in RecipeBox-2:
 How is the fix going?
 ```
 
-In an open project it has the chat's switch, its pause line while the project is paused, and its
-open plan notes and deferrals without a home; in a finished one, the chat's finish line in place of
-them ([`chats.md`](chats.md#the-brief)). It has no earlier-chats line: a caller reads its own
-conversations alone. The caller's words close it under `The message, from the session in
-<environment name>:`.
+In an open project it has the chat's switch and its pause line while the project is paused; in a
+finished one, the chat's finish line in place of them ([`chats.md`](chats.md#the-brief)). Then
+the project's state and the handbook whole, as the chat's brief carries them
+([`chats.md`](chats.md#the-projects-state)), left out of the example above. It has no
+earlier-chats line and no record of what changed since: a caller reads its own conversations
+alone. The caller's words close it under `The message, from the session in <environment name>:`.
 
 ## The Conversations tab
 

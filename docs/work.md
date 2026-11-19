@@ -436,13 +436,18 @@ job's trigger happened while the project was paused; the record moved on meanwhi
 from its start to the resume that let the job go on, which the setup's never carries, since the
 pause holds no setup. The setup's carries instead, while Create's pause stands, the project paused
 and its latest pause Pilot's (D083), never a person's, `Create project paused the project: every
-work item you add is held until a person resumes it.` Then by trigger:
+work item you add is held until a person resumes it.` Then the trigger's payload, below, and after
+it the project's state and the handbook whole, as the chat's brief carries them, a job's seqs first
+([`chats.md`](chats.md#the-projects-state)). By trigger:
 
 - **The setup**: `/plan`, kind `the setup`; `The project was created <stamp> from draft-<number>;
   its folder is now /work/Projects/<slug>.`, `The draft: project.md (the opening item <id> holds
   the words that started it; the draft's copy and what the chat attached hang on it).` and `The
-  plan: plan.json, empty.`. No notes.
-- **A worker's turn ended**: `/pre-rule`, kind `a worker's turn ended`; the work item's line, `The
+  plan: plan.json, empty.`; its seqs line names the job alone.
+- **A worker's turn ended**: `/pre-rule`, kind `a worker's turn ended`, where the run left the pass
+  something: a document it registered, one whose read failed included, a debrief its session gave,
+  or a block it researched; else `/plan`, under the same kind line and with the same lines, its
+  What is next taking them with no pass before it (D244). The work item's line, `The
   work item: "<title>" (<id>)`, its plan task, repository, environment by its id and controller
   session by its name, each that it has, `; its turn ended <stamp>` and ` — the item's last line:
   "<line>"`, the last non-blank line of the text its turn ended with, where there is one and the run
@@ -466,9 +471,7 @@ work item you add is held until a person resumes it.` Then by trigger:
   research, its standing naming theirs as a claim's is, `The blocks this work item researched, as
   they stand:` and a line per block in timeline order, `- <path> (<item id>) <local id> open`, `…
   open, handed back to the operator: leave it to them`, `… open, claimed` where it was claimed
-  since, or its answer as the record holds it, `Q1 "Two hosts" (by ada)`; then every open plan note
-  by summary and the deferrals without a home, as the chat's brief has them
-  ([`chats.md`](chats.md)).
+  since, or its answer as the record holds it, `Q1 "Two hosts" (by ada)`.
 - **The writer answered**, the job after a clarification run's turn, trigger `worker_turn_ended`,
   its trigger item the run ([`round-trip.md`](round-trip.md)): `/pre-rule`, kind `the writer
   answered`; `The clarification run: "<title>" (<id>), of the work item "<title>" (<id>)[, task
@@ -482,28 +485,26 @@ work item you add is held until a person resumes it.` Then by trigger:
   ended with no text.`. Then the files attached on the run and what it registered, as a worker's
   turn's brief has them, and `This pass asks nothing: what is still unclear is the operator's, the
   clarification beside the ask.`, after `Registered this run: nothing.` where it registered nothing;
-  then the debrief the clarification run's own session gave, as a worker's turn's brief has one;
-  then the open notes and the deferrals without a home. The pass it briefs asks the writer nothing
-  ([`mcp.md`](mcp.md)).
+  then the debrief the clarification run's own session gave, as a worker's turn's brief has one.
+  The pass it briefs asks the writer nothing ([`mcp.md`](mcp.md)).
 - **An item of Pilot's own is done**: `/plan`, kind `an item of yours is done`; `The item: <path>
   (<item id>), <kind> "<title>"[, task <id>] — <close>.`, the close as the record holds it: a
   one-ask item's block answered or done, by whom and when, its channel and its note as given (a
   confirmation `answered Yes|No by <handle> at <stamp>`, an action `<id> done by …`, an answer an
   option's label, `Agree`, `deferred to <to>`, a question's words quoted, other words quoted with
   `(Other)`); a document's `Done by <handle> at <stamp>; its blocks:` and a line per block; a
-  review's `Reviewed by <handle> at <stamp>`; then the open notes of the item's plan task and the
-  plan's own, and the deferrals without a home.
+  review's `Reviewed by <handle> at <stamp>`. Its return list names the open notes of the item's
+  plan task and the plan's own.
 - **An offer taken**: `/plan`, kind `an offer of yours was taken`; `The offer, on action <local id>
   of <path> (<item id>), <kind> "<title>"[, task <id>]:`, the action's own section quoted, `> ` a
   line, then `Your note: "<text>"`, `Your suggested answer: "…"` and `Your suggested note: "…"` where
-  the note holds them, `Your offer: "…"` and `Taken by <handle> at <stamp>.`; then the open notes of
-  the item's plan task and the plan's own, and the deferrals without a home, as after an item's
-  close. The plan skill starts the offered work as any work item and writes nothing on the block
-  (PilotProjects).
+  the note holds them, `Your offer: "…"` and `Taken by <handle> at <stamp>.`; its return list as
+  after an item's close, its seqs naming the item the note is on. The plan skill starts the offered
+  work as any work item and writes nothing on the block (PilotProjects).
 - **A wait's firings**: `/plan`, kind `a wait fired`; the wait's line, what it waits on, since when
   and its task, then `Firings pending, oldest first:` and a line per firing it took
-  (their words in [`waits.md`](waits.md)); then the open notes of the wait's task and the plan's own,
-  and the deferrals without a home.
+  (their words in [`waits.md`](waits.md)); its return list names the open notes of the wait's task
+  and the plan's own.
 
 The brief is the job's first Turn, written as it moves to `starting` ([`sessions.md`](sessions.md)):
 at its placement, at its trigger's instant, when the gate lets it through then; else by the release

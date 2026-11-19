@@ -152,8 +152,10 @@ a failed read settling as a published one does, places Pilot's job after the run
 transaction, under the Project's row it holds (`JobService.worker_turn_ended`,
 [`work.md`](work.md)); a run that registered nothing gets it in the transaction of its turn end. It
 is placed once per run: the reads the startup reconcile resumes after a restart place it when they
-settle, and none places a second; none is placed in a finished or an archived project. Its
-pre-ruling pass, PilotProjects' `pre-rule` skill, may answer blocks as Pilot, defer them to a plan
+settle, and none places a second; none is placed in a finished or an archived project. It opens
+on its pre-ruling pass where the run registered a document, gave a debrief or researched a block,
+and on the plan's What is next where it left the pass nothing (D244). The pass, PilotProjects'
+`pre-rule` skill, may answer blocks as Pilot, defer them to a plan
 task, claim an action a work item of Pilot's does (below), leave a block open for a work item of
 Pilot's that checks a fact its answer rests on (below), ask the writer about a block it cannot read
 (below), put what only Pilot knows of a block it leaves to a person in its note on the block, and
