@@ -118,7 +118,9 @@ def work_estimates(
     `window` is the number of a kind's last timings its price reads,
     `running` the number a running step is read against."""
     runs = {run.id: run for run in _runs(db, work_ids)}
-    figures = _figures(db, list(runs.values()), max(window, running))
+    # At least `OWN` of each listing, so that the ten and the five are counted
+    # off rows the settings do not cut.
+    figures = _figures(db, list(runs.values()), max(window, running, OWN))
     estimates = {}
     for work_id in work_ids:
         if work_id not in runs:

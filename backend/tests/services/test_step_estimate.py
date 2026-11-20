@@ -423,6 +423,26 @@ class TestWorkEstimates:
 
         assert _minutes(_estimates(session, [run])[run]) == pytest.approx(10)
 
+    def test_the_repos_ten_and_the_five_are_counted_whatever_the_settings(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """Settings under ten cut neither count: the repo's ten listed ahead
+        give an estimate under settings of 4, and price the step under
+        settings of 5 though another repo's are newer."""
+        _timed(session, past, "write", [10] * 10, age=20)
+        _list(session, run, [_pending("write")])
+
+        assert _minutes(
+            _estimates(session, [run], window=4, running=4)[run]
+        ) == pytest.approx(10)
+
+        _timed(session, past, "write", [10] * 2, age=30)
+        _timed(session, past, "write", [40] * 12, repo=OTHER_REPO)
+
+        assert _minutes(
+            _estimates(session, [run], window=5, running=5)[run]
+        ) == pytest.approx(10)
+
     def test_the_repos_ten_count_no_timing_of_an_unknown_listing(
         self, session: DbSession, run: uuid.UUID, past: uuid.UUID
     ) -> None:
