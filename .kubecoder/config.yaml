@@ -132,6 +132,12 @@ ports:
   - name: schemabrowser
     port: 8083
     sslOffload: true
+  # The beginner's tutorial (PilotAppSpecs tutorial/), static, started from
+  # PilotAppSpecs' VS Code task. `sslOffload` gives it
+  # https://tutorial.<env-id>.home, as the schema browser has its own.
+  - name: tutorial
+    port: 8084
+    sslOffload: true
 
 preamble:
   instructions: |
