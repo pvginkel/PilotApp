@@ -64,7 +64,7 @@ from app.models.transcript import (
     Transcript,
     Walk,
 )
-from app.models.usage import UsageReading, WindowShare
+from app.models.usage import QuotaWeek, UsageReading, WindowShare
 from app.models.user import User
 from app.models.wait import CardTransition, Wait, WaitFiring
 from app.models.work import (
