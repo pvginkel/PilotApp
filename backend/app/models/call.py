@@ -17,6 +17,7 @@ from sqlalchemy import (
     CheckConstraint,
     Computed,
     DateTime,
+    Double,
     ForeignKey,
     ForeignKeyConstraint,
     Identity,
@@ -89,6 +90,18 @@ class Call(db.Model):  # type: ignore[name-defined]
     in force for its Model, in US dollars (DB 548), none where a kind it
     counts has no Price; the publication derives it, and a load of the price
     file again (`price_service`).
+
+    `waited_seconds`, `rewind`, `cache_miss`, `past_ttl` and `launch_id` are
+    derived too (`call_caches`): the seconds from its predecessor's
+    `completed_at` to its own `sent_at`, or to its `completed_at` where it
+    has no `sent_at`, none on a chain's first; whether its predecessor is
+    another Call than the one before it by `position`; whether it is a cache
+    miss (DB 546); whether it waited longer than the cache its predecessor
+    wrote lives; and the Launch it was made in (DB 543), none where Pilot
+    holds none. The three flags are none together, on a Call a server from
+    before them wrote, until the step after a deploy's revisions derives
+    them. That its Launch is of its Transcript, or of its Transcript's main
+    thread, is the publication's to keep.
     """
 
     __tablename__ = "calls"
@@ -128,6 +141,15 @@ class Call(db.Model):  # type: ignore[name-defined]
         ),
         # The Calls a load of the price file prices at every deploy.
         Index("ix_calls_unpriced", "id", postgresql_where=text("cost IS NULL")),
+        CheckConstraint(
+            "(rewind IS NULL) = (cache_miss IS NULL)"
+            " AND (rewind IS NULL) = (past_ttl IS NULL)",
+            name="ck_calls_derived",
+        ),
+        # The Calls the step after a deploy's revisions derives the caches of.
+        Index("ix_calls_underived", "id", postgresql_where=text("rewind IS NULL")),
+        # Read when a Launch goes, to clear the Calls made in it.
+        Index("ix_calls_launch_id", "launch_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -158,6 +180,13 @@ class Call(db.Model):  # type: ignore[name-defined]
         Integer, Computed(CONTEXT_TOKENS, persisted=True)
     )
     cost: Mapped[Decimal | None] = mapped_column(Numeric)
+    waited_seconds: Mapped[float | None] = mapped_column(Double)
+    rewind: Mapped[bool | None] = mapped_column(Boolean)
+    cache_miss: Mapped[bool | None] = mapped_column(Boolean)
+    past_ttl: Mapped[bool | None] = mapped_column(Boolean)
+    launch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("launches.id", ondelete="SET NULL")
+    )
 
 
 PRICED_KINDS = (

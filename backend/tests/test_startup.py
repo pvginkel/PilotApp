@@ -21,6 +21,7 @@ from app.startup import (
     register_cli_commands,
 )
 from app.store_update_cli import update_store
+from tests.support import transcripts
 
 
 class TestConfigureEngine:
@@ -72,6 +73,26 @@ class TestPostMigrationHook:
         assert capsys.readouterr().out == (
             "Prices loaded: 5 added, 0 models priced as another or no longer,"
             " 0 calls priced\n"
+            "Call caches derived: 0 calls of 0 transcripts\n"
+        )
+
+    def test_it_gives_a_stored_call_with_no_caches_its_caches(
+        self,
+        app: Flask,
+        container: ServiceContainer,
+        session: DbSession,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert isinstance(app, App)
+        thread = transcripts.transcript(session, transcripts.component_version(session))
+        call = transcripts.call(session, thread, 1)
+
+        post_migration_hook(app)
+
+        session.refresh(call)
+        assert (call.rewind, call.cache_miss, call.past_ttl) == (False, False, False)
+        assert capsys.readouterr().out.endswith(
+            "Call caches derived: 1 calls of 1 transcripts\n"
         )
 
 

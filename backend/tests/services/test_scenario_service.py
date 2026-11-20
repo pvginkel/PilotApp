@@ -226,6 +226,38 @@ class TestLoad:
             "529",
         )
 
+    def test_its_calls_hold_their_caches(
+        self, session: DbSession, loaded: list[Transcript]
+    ) -> None:
+        """DB §7.4: Ada's fourth Call went back to her second, and her fifth
+        waited past the cache's lifetime and missed it; each Call is in the
+        Launch it was made in, a sub-agent's in its main thread's. A miss is
+        read from the tokens (DB 546): the Call after the compaction and
+        the rewind read what their predecessors left, whatever cause the
+        scenario names for them."""
+        halving, counting, gears = loaded
+        pilots = _calls(session, halving)
+        adas = _calls(session, gears)
+        launch = session.scalars(
+            select(Launch).where(Launch.transcript_id == halving.id)
+        ).one()
+
+        assert [call.rewind for call in adas] == [False, False, False, True, False]
+        assert [call.past_ttl for call in adas] == [False, False, False, False, True]
+        assert [call.cache_miss for call in adas] == [False, False, False, False, True]
+        assert [call.cache_miss for call in pilots] == [False] * 6
+        assert adas[0].waited_seconds is None
+        assert (
+            adas[4].waited_seconds
+            == (adas[4].completed_at - adas[3].completed_at).total_seconds()
+        )
+        assert {call.launch_id for call in pilots} == {launch.id}
+        assert {call.launch_id for call in _calls(session, counting)} == {launch.id}
+        assert (halving.first_call_at, halving.last_call_at) == (
+            pilots[0].completed_at,
+            pilots[-1].completed_at,
+        )
+
     def test_its_last_moment_is_now(
         self, session: DbSession, loaded: list[Transcript]
     ) -> None:

@@ -140,9 +140,15 @@ def register_cli_commands(cli: click.Group) -> None:
 def post_migration_hook(app: App) -> None:
     """Load the price file after the database's revisions, at every deploy:
     the Prices it gained, and the cost of each Call they change
-    (`PriceService.load`)."""
+    (`PriceService.load`); then give each stored Call with none its other
+    caches (`CallCacheService.derive`)."""
     with scoped_session(app.container):
         _load_prices(app)
+        derived = app.container.call_cache_service().derive()
+    print(
+        f"Call caches derived: {derived.calls} calls of {derived.transcripts}"
+        " transcripts"
+    )
 
 
 def _load_prices(app: App) -> None:

@@ -60,6 +60,7 @@ from app.services.controller_client import (
     ControllerProblemType,
 )
 from app.services.effect_service import Change, EffectLine, EffectService
+from app.services.launch_placement import conversation_named
 from app.services.pilot_server import bearer_session, no_turn, turn_running
 from app.services.work_status import work_moved
 
@@ -260,7 +261,9 @@ class PilotWorkService:
         starts `pending`, or in the state its step gives; a code left out
         goes, and no steps remove the list. Each step's label, why, kind,
         mark and conversations are as its step gives them, a step given
-        without one having none (DB 327, 354, 355). Each change of a state is
+        without one having none (DB 327, 354, 355), and the Launches Pilot
+        holds of a conversation a step newly names are placed under the
+        Session that waited on them (DB 538). Each change of a state is
         stamped by the server's clock (DB 287), and a step's first start
         notes whether it was listed ahead: yes for one that stood pending on
         the list, no for one the call brings begun, none for one the Work's
@@ -541,7 +544,10 @@ class PilotWorkService:
         """The Step Transcripts of the worker's own work item's steps, each
         step naming the conversations `steps` gives it and no other (DB 355).
         Run once the steps are flushed: a Step Transcript's key references
-        its step, and a step deleted takes its own with it."""
+        its step, and a step deleted takes its own with it. The Launches
+        Pilot holds of a conversation a step newly names are placed (DB
+        538), the conversations in their ids' order, so that two calls
+        naming the same ones wait on each other one way."""
         given = {
             (step.code, conversation)
             for step in steps
@@ -576,6 +582,8 @@ class PilotWorkService:
                     for code, conversation in sorted(given - named)
                 ],
             )
+        for conversation in sorted({name for _, name in given - named}):
+            conversation_named(self.db, conversation)
 
     def _time(
         self, worker: Worker, timings: Sequence[dict[str, object]], at: datetime

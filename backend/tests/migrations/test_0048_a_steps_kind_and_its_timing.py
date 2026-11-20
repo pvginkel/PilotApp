@@ -13,7 +13,10 @@ from app import models
 from app.extensions import db as app_db
 from app.models import Item, ProgressStep, Project, Work
 from app.models.reference import ProgressState
-from tests.support.revisions import run_revision
+from tests.support.revisions import (
+    restore_later_index_on_step_transcripts,
+    run_revision,
+)
 
 TABLES = ("step_kinds", "step_transcripts", "step_timings")
 COLUMNS = {"kind_code", "listed_ahead", "marked"}
@@ -92,6 +95,7 @@ class TestRevision0048:
 
         run_revision(session, "0048", "upgrade")
         run_revision(session, "0049", "upgrade")
+        restore_later_index_on_step_transcripts(session)
 
         assert _tables(session) == list(TABLES)
         step = session.get_one(ProgressStep, (work_id, "P1.code"))

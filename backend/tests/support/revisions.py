@@ -27,6 +27,18 @@ def run_revision(db: Session, revision_id: str, step: str) -> None:
         db.expire_all()
 
 
+def restore_later_index_on_step_transcripts(db: Session) -> None:
+    """Make again, on the test's transaction, the index on `step_transcripts`
+    that a revision after 0048 made, which revision 0048's downgrade drops
+    with the table."""
+    db.execute(
+        text(
+            "CREATE INDEX ix_step_transcripts_session_id"
+            " ON step_transcripts (session_id)"
+        )
+    )
+
+
 def drop_later_keys_to_token_kinds(db: Session) -> None:
     """Drop, on the test's transaction, the keys to `token_kinds` that the
     revisions after 0038 made, the Prices' among them, which revision 0038's

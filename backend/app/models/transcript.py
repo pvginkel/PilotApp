@@ -76,7 +76,9 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     of that name once a thread of its conversation holds it (DB decision
     79.16). `adopted_project_id` is a label of a main thread's: the adopted
     Project of the group its last publication named for it, none where it
-    named none. That a thread's main has no `agent_id` (DB 534), that its
+    named none. `first_call_at` and `last_call_at` are the `completed_at` of
+    its first and of its last Call by `position`, none while it has no Call
+    (DB §7.4). That a thread's main has no `agent_id` (DB 534), that its
     spawning call lies under that main (DB 535), and that an adopted
     Transcript's Project is `adopted` and no Launch of it is run by a Session
     (DB 539) are the publication's and the placement's to keep: no key
@@ -121,6 +123,10 @@ class Transcript(db.Model):  # type: ignore[name-defined]
             "agent_id IS NULL OR adopted_project_id IS NULL",
             name="ck_transcripts_adopted_project",
         ),
+        CheckConstraint(
+            "(first_call_at IS NULL) = (last_call_at IS NULL)",
+            name="ck_transcripts_call_times",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -151,6 +157,8 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     replayed_size: Mapped[int] = mapped_column(BigInteger)
     read_under_id: Mapped[int] = mapped_column(ForeignKey("component_versions.id"))
+    first_call_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_call_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Launch(db.Model):  # type: ignore[name-defined]
@@ -160,13 +168,14 @@ class Launch(db.Model):  # type: ignore[name-defined]
     so far (DB 586).
 
     `session_id` and `turn_seq` are Pilot's: the Session that ran it and,
-    of that Session, the Turn that started it, none for a Launch started
-    between two Turns (DB decision 79 point 7). `launch_placement` sets
-    them, once.
+    of that Session, the Turn that started it or during which its driver
+    did, none for a Launch started between two Turns (DB decision 79 point
+    7). `launch_placement` sets them, once.
 
     That its Transcript is a main thread (DB 536), that it runs with a
     Component Version (DB 389) and that its Session's `conversation_id` is
-    its Transcript's `session_id` (DB 538) are the writers' to keep.
+    its Transcript's `session_id`, or a step of its Session's names its
+    Transcript (DB 538), are the writers' to keep.
     """
 
     __tablename__ = "launches"

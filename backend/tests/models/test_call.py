@@ -175,6 +175,76 @@ class TestCall:
 
         assert request_.cost is None
 
+    def test_it_holds_no_other_cache_until_they_are_derived(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        session.expire(request_)
+
+        assert (
+            request_.waited_seconds,
+            request_.rewind,
+            request_.cache_miss,
+            request_.past_ttl,
+            request_.launch_id,
+        ) == (None, None, None, None, None)
+
+    def test_it_holds_its_derived_caches(
+        self, session: DbSession, thread: Transcript, request_: Call
+    ) -> None:
+        launch = transcripts.launch(session, thread)
+        derived = transcripts.call(
+            session,
+            thread,
+            2,
+            predecessor_id=request_.id,
+            waited_seconds=593.25,
+            rewind=False,
+            cache_miss=True,
+            past_ttl=True,
+            launch_id=launch.id,
+        )
+        session.expire(derived)
+
+        assert (
+            derived.waited_seconds,
+            derived.rewind,
+            derived.cache_miss,
+            derived.past_ttl,
+            derived.launch_id,
+        ) == (593.25, False, True, True, launch.id)
+
+    @pytest.mark.parametrize("flag", ["rewind", "cache_miss", "past_ttl"])
+    def test_its_three_flags_are_derived_together(
+        self, session: DbSession, thread: Transcript, flag: str
+    ) -> None:
+        session.add(_call(thread, 1, **{flag: False}))
+
+        assert violated_constraint(session) == "ck_calls_derived"
+
+    def test_the_launch_it_was_made_in_is_held(
+        self, session: DbSession, thread: Transcript
+    ) -> None:
+        session.add(_call(thread, 1, launch_id=404))
+
+        assert violated_constraint(session) == "calls_launch_id_fkey"
+
+    def test_a_launch_that_goes_leaves_its_calls_in_none(
+        self, session: DbSession, thread: Transcript, collector: ComponentVersion
+    ) -> None:
+        """A sub-agent's Call is made in its main thread's Launch (DB 543),
+        which a publication of the main thread may no longer name."""
+        launch = transcripts.launch(session, thread)
+        sub_agent = transcripts.transcript(
+            session, collector, agent_id=SUB_AGENT, main_id=thread.id
+        )
+        made = transcripts.call(session, sub_agent, 1, launch_id=launch.id)
+
+        session.delete(launch)
+        session.flush()
+        session.expire(made)
+
+        assert made.launch_id is None
+
     def test_a_sub_agents_call_follows_no_prompt(
         self, session: DbSession, collector: ComponentVersion
     ) -> None:
