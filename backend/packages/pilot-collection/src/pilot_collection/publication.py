@@ -87,7 +87,7 @@ class PublishedPromptSchema(_Published):
 
     received_at: AwareDatetime = Field(description="When it was queued")
     source: Name = Field(
-        description="The Prompt Source's code", examples=["person", "hook"]
+        description="The Prompt Source's code", examples=["typed", "sdk"]
     )
     characters: Count = Field(description="Its length")
     hook_runs: list[PublishedHookRunSchema] = Field(
