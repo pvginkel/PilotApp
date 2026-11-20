@@ -589,6 +589,9 @@ class TestWhoWroteALine:
             ({"isMeta": True}, "notice"),
             ({"isMeta": True, "origin": {"kind": "human"}}, "notice"),
             ({"isCompactSummary": True}, "notice"),
+            ({"permissionMode": "default", "entrypoint": "cli"}, "person"),
+            ({"permissionMode": "bypassPermissions", "entrypoint": "sdk-cli"}, "brief"),
+            ({"permissionMode": "default"}, None),
             ({}, None),
         ],
     )

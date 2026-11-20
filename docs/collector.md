@@ -143,13 +143,17 @@ each rule in full. The facts are read off the lines in the file's order:
   Code's own word: `promptSource`, `typed`, `sdk`, `system`, `queued` or `suggestion_accepted`.
   Older files name it in other fields. On a line with no `promptSource` that is no `isMeta` one, the
   word is `turnOrigin`'s, else `origin.kind`'s, `human` read as `typed` and `task_notification` or
-  `task-notification` as `system`; any other older word is kept as it is.
+  `task-notification` as `system`; any other older word is kept as it is. Before Claude Code
+  2.1.161 a prompt a person typed or a caller sent names none, and its line alone among those that
+  name none carries `permissionMode`: its word is read off the session's `entrypoint`, `sdk` in a
+  headless session, `sdk-cli` or another that opens with `sdk`, and `typed` in an interactive one,
+  `cli`; any other entry point gives none.
   - Its time is that of the `enqueue` line that holds its text, the queue's first of that text,
     else its own. A `remove` that names a text takes it out of the queue, and a `popAll` and a cost
     line empty it.
-  - Not a Prompt: a line that names no source, a person's interruption, a skill's `isMeta` words, a
-    compaction's summary, a tool's result, a `queued_command` attachment, and the context a hook
-    added, which arrives as an attachment.
+  - Not a Prompt: a line that names no source and is no older prompt, a person's interruption, a
+    skill's `isMeta` words, a compaction's summary, a tool's result, a `queued_command` attachment,
+    and the context a hook added, which arrives as an attachment.
 - **A Call** is the `assistant` lines under one `message.id` whose model is no `<synthetic>` one,
   placed by the first of them, and follows the Prompt last received before it, where there is one.
   Its model, its `completed_at` and its usage are the last line's, its five token counts read there.
@@ -260,7 +264,8 @@ same rules, with each block's kind, the time of the line it stood in and its ful
 bytes are carried:
 
 - **What came in**, in `received` and `after`:
-  - `user`, a line that arrived as the person's and is no tool's result, with its `writer`:
+  - `user`, a line that arrived as the person's and is no tool's result, with its `writer`, by its
+    source as the facts read it, an older prompt's by its session's entry point:
     - `person` for a source `typed`, `queued` or `suggestion_accepted`;
     - `brief` for `sdk`;
     - `notice` for any other word, and for a line that names none and is Claude Code's own: an

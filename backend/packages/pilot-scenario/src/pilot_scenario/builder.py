@@ -40,7 +40,7 @@ from pilot_scenario.script import (
 )
 from pilot_scenario.transcript import HomeFile, Lines, Spawned, request, text
 
-COLLECTOR = "1.0.0"
+COLLECTOR = "1.1.0"
 """The version of the collector the publications say read the files."""
 
 CLAUDE_CODE = "claude-code"

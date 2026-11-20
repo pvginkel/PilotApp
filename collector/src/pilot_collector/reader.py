@@ -21,8 +21,11 @@ its newline is written. The facts are read off the lines in the file's order:
 - **A Prompt** is a main thread's `user` line whose source Claude Code names:
   `promptSource`, or on a line with none that is no `isMeta` one, the older
   `turnOrigin` or `origin.kind`, read in the newer word where it means the
-  same. It was received when its `enqueue` line was written, where the queue
-  holds one with its text, else at its own time.
+  same. An older prompt that names none, its line carrying the permission
+  mode a prompt's line does, is read by its session's entry point: `sdk` in
+  a headless one, `typed` in an interactive one. It was received when its
+  `enqueue` line was written, where the queue holds one with its text, else
+  at its own time.
 - **A Call** is the `assistant` lines under one `message.id`, placed by the
   first of them; its usage, model and completion time are the last one's.
 - **A Tool Call** is a `tool_use` block of a Call's lines, requested at its
@@ -131,6 +134,13 @@ _NEWER = {
 """An older field's word for a prompt's source, by the word `promptSource`
 has for the same."""
 
+_INTERACTIVE = "cli"
+"""The entry point of a session a person types in."""
+
+_HEADLESS = "sdk"
+"""What the entry point of a headless session opens with: `sdk-cli`, Claude
+Code run with `--print`, and an SDK's."""
+
 _USAGE: dict[CallTokenKind, tuple[str, ...]] = {
     "input": ("input_tokens",),
     "cache_write_5m": ("cache_creation", "ephemeral_5m_input_tokens"),
@@ -220,7 +230,7 @@ def _words(text: str) -> bytes:
 
 def source_of(line: dict[str, Any]) -> str | None:
     """A `user` line's source in Claude Code's word, none where it names
-    none."""
+    none and is no older prompt."""
     named: str | None = line.get("promptSource")
     if named is not None:
         return named
@@ -230,8 +240,23 @@ def source_of(line: dict[str, Any]) -> str | None:
     if older is None:
         older = (line.get("origin") or {}).get("kind")
     if older is None:
-        return None
+        return _entered(line)
     return _NEWER.get(older, older)
+
+
+def _entered(line: dict[str, Any]) -> str | None:
+    """The source of an older prompt that names none, by its session's entry
+    point: `sdk` in a headless session, `typed` in an interactive one. Before
+    Claude Code 2.1.161 a prompt a person typed or a caller sent names no
+    source, and its line alone among a `user` line's that name none carries
+    the permission mode; none for any other line, and for an entry point
+    that is neither."""
+    entered = line.get("entrypoint")
+    if line.get("permissionMode") is None or not isinstance(entered, str):
+        return None
+    if entered == _INTERACTIVE:
+        return "typed"
+    return "sdk" if entered.startswith(_HEADLESS) else None
 
 
 def _argument(given: dict[str, Any]) -> str | None:

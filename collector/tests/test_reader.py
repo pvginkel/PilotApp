@@ -580,6 +580,14 @@ class TestPrompts:
                 {"promptSource": "system", "origin": {"kind": "peer"}, "isMeta": True},
                 "system",
             ),
+            (
+                {
+                    "turnOrigin": "task_notification",
+                    "permissionMode": "default",
+                    "entrypoint": "cli",
+                },
+                "system",
+            ),
         ],
     )
     def test_an_older_fields_word_is_read_in_the_newer_where_it_means_the_same(
@@ -590,12 +598,43 @@ class TestPrompts:
         assert _sources(publication) == [source]
 
     @pytest.mark.parametrize(
+        ("entrypoint", "mode", "source"),
+        [
+            ("cli", "default", "typed"),
+            ("cli", "acceptEdits", "typed"),
+            ("sdk-cli", "bypassPermissions", "sdk"),
+            ("sdk-ts", "default", "sdk"),
+        ],
+    )
+    def test_an_older_prompt_that_names_no_source_is_read_by_its_entry_point(
+        self, entrypoint: str, mode: str, source: str, tmp_path: Path
+    ) -> None:
+        """Before Claude Code 2.1.161 a prompt a person typed or a caller
+        sent names no source: `sdk` in a headless session, `typed` in an
+        interactive one."""
+        older = user(0, "Warp the loom.", permissionMode=mode, entrypoint=entrypoint)
+
+        publication = _read(tmp_path, [older, assistant(4, output=3)])
+
+        assert _sources(publication) == [source]
+        assert [call.prompt for call in publication.calls] == [1]
+
+    @pytest.mark.parametrize(
         "line",
         [
             user(5, "Warp the loom."),
             user(5, "Warp the loom.", permissionMode="default"),
+            user(5, "Warp the loom.", entrypoint="cli"),
+            user(5, "Warp the loom.", permissionMode="default", entrypoint="desktop"),
             user(5, [{"type": "text", "text": "[Request interrupted by user]"}]),
             user(5, "The skill's words.", isMeta=True, origin={"kind": "human"}),
+            user(
+                5,
+                "The skill's words.",
+                isMeta=True,
+                permissionMode="default",
+                entrypoint="cli",
+            ),
             user(5, "What came before.", isCompactSummary=True),
             result(5),
             chained(
@@ -619,9 +658,12 @@ class TestPrompts:
         ],
         ids=[
             "no word",
-            "no word, an older prompt",
+            "no word, a permission mode and no entry point",
+            "no word, an entry point and no permission mode",
+            "no word, an entry point neither headless nor interactive",
             "an interruption",
             "a skill's words",
+            "a skill's words, in an older session",
             "a compaction's summary",
             "a tool's result",
             "a message taken in the middle of a run",

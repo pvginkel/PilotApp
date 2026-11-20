@@ -18,7 +18,8 @@ size the open file has; a line with no time is no block's; and
 - **What came in** before a Call is every other block since the first line
   of the Call before; what follows the last Call's first line is what
   follows the last Call. A `user` line that is no tool's result is a block
-  with who wrote it:
+  with who wrote it, by its source as the facts read it, an older prompt's
+  by its session's entry point:
   - a person, where its source is `typed`, `queued` or
     `suggestion_accepted`;
   - a brief, where it is `sdk`;
