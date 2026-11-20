@@ -18,8 +18,11 @@ work item that was running when its process started. Its Turn is that
 Session's Turn in flight at the Launch's start, none between two of them. A
 Launch started before every such Session was created has neither.
 
-A Launch is placed once, and what it was placed under stands: a step that
-goes, or a later Session that names its Transcript, moves none.
+A Launch a Turn started is placed once, and what it was placed under stands.
+A Launch a driver started moves only to a Session created later than the one
+it stands under, and before its own start, whose step names its Transcript:
+its Session is the same whichever Pilot held first, the Launch or that
+naming. A step that goes moves none.
 
 A Transcript an adopted Project has adopted has no Launch run by a Session
 (DB 539): where a Session's `conversation_id` or a step names one, its
@@ -86,11 +89,12 @@ def conversation_named(db: Session, conversation: str) -> None:
 
 
 def place_launches(db: Session, conversation: str) -> None:
-    """Place each Launch of the conversation's main thread that has no
-    Session under the Session and the Turn that started it, or during which
-    its driver did, where Pilot holds them; none while an adopted Project
-    has adopted that thread, which is logged. The caller holds the
-    conversation's turn."""
+    """Place each Launch of the conversation's main thread under the Session
+    and the Turn that started it, or during which its driver did, where
+    Pilot holds them: one a Turn started while it has no Session, one a
+    driver started while a Session created later than its own names its
+    thread. None while an adopted Project has adopted that thread, which is
+    logged. The caller holds the conversation's turn."""
     turns = _turns(db, AgentSession.conversation_id == conversation)
     waited: Sequence[_Run] = []
     if not turns:
@@ -121,36 +125,50 @@ def place_launches(db: Session, conversation: str) -> None:
             "a Session" if turns else "a step of a Session",
         )
         return
-    unplaced = db.scalars(
+    launches = db.scalars(
         select(Launch)
         .join(Transcript, Transcript.id == Launch.transcript_id)
         .where(
             Transcript.session_id == conversation,
             Transcript.agent_id.is_(None),
-            Launch.session_id.is_(None),
+            *([] if waited else [Launch.session_id.is_(None)]),
         )
     ).all()
-    if not unplaced:
-        return
     if waited:
-        turns = _turns(db, Turn.session_id.in_([run.id for run in waited]))
-    for launch in unplaced:
-        if waited:
-            created = [run for run in waited if run.created_at <= launch.started_at]
-            if not created:
-                continue
-            launch.session_id = created[-1].id
-            sent = _sent(turns, launch.started_at, created[-1].id)
-        else:
+        _place_rounds(db, launches, waited)
+    else:
+        for launch in launches:
             sent = _sent(turns, launch.started_at)
-            if sent is None:
-                continue
-            launch.session_id = sent.session_id
-        if sent is not None and (
-            sent.ended_at is None or launch.started_at <= sent.ended_at
-        ):
-            launch.turn_seq = sent.seq
+            if sent is not None:
+                launch.session_id = sent.session_id
+                launch.turn_seq = _in_flight(sent, launch.started_at)
     db.flush()
+
+
+def _place_rounds(
+    db: Session, launches: Sequence[Launch], waited: Sequence[_Run]
+) -> None:
+    """Each of `launches`, which a driver started, under the Session created
+    last before its start among `waited`, in the order they were created,
+    where it has no Session or one created before that one."""
+    moved: list[tuple[Launch, uuid.UUID]] = []
+    for launch in launches:
+        created = [run for run in waited if run.created_at <= launch.started_at]
+        if not created or created[-1].id == launch.session_id:
+            continue
+        run = created[-1]
+        if launch.session_id is not None:
+            under = db.get_one(AgentSession, launch.session_id)
+            if (under.created_at, under.id) > (run.created_at, run.id):
+                continue
+        moved.append((launch, run.id))
+    if not moved:
+        return
+    turns = _turns(db, Turn.session_id.in_(sorted({run for _, run in moved})))
+    for launch, run_id in moved:
+        sent = _sent(turns, launch.started_at, run_id)
+        launch.session_id = run_id
+        launch.turn_seq = None if sent is None else _in_flight(sent, launch.started_at)
 
 
 def _turns(db: Session, of: ColumnElement[bool]) -> Sequence[_Turn]:
@@ -175,3 +193,9 @@ def _sent(
         if turn.started_at <= at and session_id in (None, turn.session_id)
     ]
     return sent[-1] if sent else None
+
+
+def _in_flight(turn: _Turn, at: datetime) -> int | None:
+    """The Turn's `seq` where it had not ended before `at`, none where it
+    had."""
+    return turn.seq if turn.ended_at is None or at <= turn.ended_at else None
