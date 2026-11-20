@@ -497,6 +497,30 @@ class TestLaunches:
             ).launches
         ] == [moment(1), moment(60)]
 
+    def test_a_launch_that_received_a_prompt_and_names_no_version_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """Dropped with its Prompts, it would leave every later Call's
+        prompt a place too high."""
+        unnamed = user(62, "Thread the heddles.", promptSource="queued")
+        del unnamed["version"]
+
+        with pytest.raises(
+            UnreadableError,
+            match="a launch received a prompt and none of its lines names"
+            " Claude Code's version",
+        ):
+            _read(
+                tmp_path,
+                [
+                    typed(1),
+                    assistant(4, "msg_01", output=3),
+                    cost(),
+                    queue("enqueue", 60, "Thread the heddles."),
+                    unnamed,
+                ],
+            )
+
     def test_a_file_with_no_timed_line_has_no_launch(self, tmp_path: Path) -> None:
         publication = _read(
             tmp_path, [beside("ai-title", aiTitle="Looms", cwd=DIRECTORY), cost()]
