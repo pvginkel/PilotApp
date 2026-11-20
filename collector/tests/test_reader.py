@@ -954,6 +954,7 @@ class TestToolCalls:
             ("mcp__plugin_dye_vat__mix", "plugin_dye_vat"),
             ("Bash", None),
             ("mcp_tools", None),
+            ("mcp__loomhouse", None),
             ("Weave__mcp__twill", None),
         ],
     )
