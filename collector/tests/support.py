@@ -208,6 +208,24 @@ def over_the_tokens(path: str, stated: str) -> str:
     )
 
 
+def boundary(
+    seconds: float, trigger: str = "auto", before: int = 90_000, **made: int
+) -> Line:
+    """A compaction's boundary: `made` is what a newer version adds to its
+    record, `postTokens` and `durationMs`."""
+    record = {"trigger": trigger, "preTokens": before} | made
+    return chained(
+        "system", seconds, subtype="compact_boundary", compactMetadata=record
+    )
+
+
+def summary(seconds: float) -> Line:
+    """The summary a compaction leaves, which follows its boundary."""
+    return user(seconds, "The loom so far: warped, not yet threaded.") | {
+        "isCompactSummary": True
+    }
+
+
 def loaded(kind: str, content: str, path: str = MANAGED) -> dict[str, str]:
     """An instruction file a process loaded."""
     return {"type": kind, "path": path, "content": content}
@@ -222,7 +240,9 @@ def instructions(seconds: float, *files: dict[str, str]) -> Line:
 def linked(lines: list[Line], name: str = "line") -> list[Line]:
     """The lines as a chain: each that has a time and is no operation of the
     queue's is named by a `uuid`, `name` and its place among them, and
-    follows the one before; the first follows none."""
+    follows the one before; the first follows none, and neither does a
+    compaction's boundary, which names the one before as its
+    `logicalParentUuid`."""
     chain: list[Line] = []
     last: str | None = None
     for line in lines:
@@ -230,7 +250,11 @@ def linked(lines: list[Line], name: str = "line") -> list[Line]:
             chain.append(line)
             continue
         named = f"{name}-{sum('uuid' in each for each in chain) + 1}"
-        chain.append(line | {"uuid": named, "parentUuid": last})
+        if line.get("subtype") == "compact_boundary":
+            follows = {"parentUuid": None, "logicalParentUuid": last}
+        else:
+            follows = {"parentUuid": last}
+        chain.append(line | {"uuid": named} | follows)
         last = named
     return chain
 

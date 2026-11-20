@@ -11,12 +11,13 @@ it, or wherever it does not fit, the file is read and published whole.
 Call's facts are settled once the next Call has begun, so the boundary is
 the file's last Call, and the place its next would take in a file with none.
 The carry holds the byte the boundary's first line starts at and what the
-lines from there on continue: how many Calls, published Launches and Prompts
-lie before it, the last line before it that lines link to, the directory and
-the environment the file named first, the Launch open there, the prompts
-waiting in the queue, and those a `remove` took out of it that no message
-taken in the middle of a run has claimed. No id of any other line before the
-boundary is held.
+lines from there on continue: how many Calls, published Launches, Prompts and
+Compactions lie before it, the last line before it that lines link to and
+where the chain leads from that line, the directory and the environment the
+file named first, the Launch open there, the prompts waiting in the queue,
+and those a `remove` took out of it that no message taken in the middle of a
+run has claimed. No id of any other line before the boundary is held, and of
+no Call but the one the chain leads to.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
@@ -31,7 +32,7 @@ from pathlib import Path
 _DIGEST = 16
 """The bytes of a digest."""
 
-_HELD = 1_024
+_HELD = 1_280
 """The bytes a carry is counted at beside its words and its queue."""
 
 _QUEUED = 176
@@ -58,6 +59,23 @@ class Open:
 
 
 @dataclass(frozen=True)
+class Lead:
+    """Where the chain leads from one line, up its `parentUuid`s and, at a
+    compaction's boundary, its `logicalParentUuid`."""
+
+    call: str | None = None
+    """The `message_id` of the nearest Call at or above the line, none
+    where the chain reaches none."""
+    compaction: int | None = None
+    """The Compaction crossed on the way there, the nearest to the line, by
+    its place among the transcript's; none where the chain crosses none."""
+
+
+ROOT = Lead()
+"""Where the chain leads from no line: a chain's first line follows none."""
+
+
+@dataclass(frozen=True)
 class Standing:
     """Where a reading stands before one line of the file: what the lines
     from that line on continue. A file's first line continues nothing."""
@@ -70,8 +88,12 @@ class Standing:
     """The Launches that exited before it and are published."""
     prompts: int = 0
     """The Prompts before it."""
+    compactions: int = 0
+    """The Compactions before it."""
     link: str | None = None
     """The `uuid` of the last line before it that carries one."""
+    leads: Lead = ROOT
+    """Where the chain leads from the line `link` names."""
     directory: str | None = None
     environment: str | None = None
     launch: Open | None = None
@@ -105,7 +127,13 @@ class Carry:
     def size(self) -> int:
         """The bytes of memory the carry is counted at."""
         stands = self.stands
-        words = (stands.link, stands.directory, stands.environment, self.collector)
+        words = (
+            stands.link,
+            stands.leads.call,
+            stands.directory,
+            stands.environment,
+            self.collector,
+        )
         return (
             _HELD
             + sum(len(word) for word in words if word is not None)

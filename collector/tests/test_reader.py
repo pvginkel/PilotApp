@@ -25,10 +25,12 @@ from tests.support import (
     Line,
     assistant,
     beside,
+    boundary,
     chained,
     cost,
     filed,
     instructions,
+    linked,
     loaded,
     moment,
     over_the_tokens,
@@ -36,6 +38,8 @@ from tests.support import (
     requesting,
     result,
     saved,
+    summary,
+    synthetic,
     taken,
     too_large,
     typed,
@@ -66,7 +70,16 @@ THREAD = (
     "environment",
 )
 PROMPT = ("received_at", "source", "characters")
-CALL = ("message_id", "prompt", "completed_at", "model", "tokens", "tool_calls")
+CALL = (
+    "message_id",
+    "prompt",
+    "predecessor",
+    "compaction",
+    "completed_at",
+    "model",
+    "tokens",
+    "tool_calls",
+)
 
 
 def _resumed() -> Scenario:
@@ -127,6 +140,7 @@ def _cut(publication: dict[str, Any]) -> dict[str, Any]:
             }
             for launch in publication["launches"]
         ]
+    cut["compactions"] = publication.get("compactions", [])
     cut["calls"] = [
         {name: call[name] for name in CALL if name in call}
         for call in publication["calls"]
@@ -154,6 +168,11 @@ def _sources(publication: PublicationSchema) -> list[str]:
     return [
         prompt.source for launch in publication.launches for prompt in launch.prompts
     ]
+
+
+def _chains(publication: PublicationSchema) -> list[tuple[str | None, int | None]]:
+    """Each Call's predecessor and the compaction its chain crossed."""
+    return [(call.predecessor, call.compaction) for call in publication.calls]
 
 
 class TestTheScenario:
@@ -222,6 +241,26 @@ class TestTheScenario:
         )
         assert len(resumed[0]["launches"]) == 2
         assert "environment" not in resumed[0] and "repository" not in resumed[0]
+        (compaction,) = [
+            compaction
+            for publication in publications
+            for compaction in publication.get("compactions", [])
+        ]
+        assert {"tokens_after", "duration_ms"} <= set(compaction)
+        for threads in (publications, resumed):
+            calls = [thread["calls"] for thread in threads]
+            assert any("predecessor" not in thread[0] for thread in calls)
+            assert any(
+                later["predecessor"] != earlier["message_id"]
+                for thread in calls
+                for earlier, later in zip(thread, thread[1:], strict=False)
+            )
+        assert [
+            call["predecessor"]
+            for publication in publications
+            for call in publication["calls"]
+            if "compaction" in call
+        ] == ["msg_0004"]
 
     def test_a_reading_is_a_call_pilot_takes_by_its_shape(self, tmp_path: Path) -> None:
         builder = Builder(SCENARIO, UNTIL)
@@ -1011,6 +1050,255 @@ class TestCalls:
 
         assert (call.message_id, call.completed_at) == ("msg_07", moment(4))
         assert call.tokens == {"input": 5, "output": 22}
+
+
+class TestCompactions:
+    def test_a_compaction_is_a_boundary_with_what_its_record_gives(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            typed(0),
+            assistant(4, "msg_01"),
+            boundary(30, "manual", 160_400, postTokens=21_300, durationMs=38_000),
+            summary(29.7),
+            assistant(40, "msg_02"),
+            boundary(90, "auto", 171_000, postTokens=19_800, durationMs=41_500),
+        ]
+
+        publication = _read(tmp_path, linked(lines))
+
+        assert [made.model_dump() for made in publication.compactions] == [
+            {
+                "at": moment(30),
+                "trigger": "manual",
+                "tokens_before": 160_400,
+                "tokens_after": 21_300,
+                "duration_ms": 38_000,
+            },
+            {
+                "at": moment(90),
+                "trigger": "auto",
+                "tokens_before": 171_000,
+                "tokens_after": 19_800,
+                "duration_ms": 41_500,
+            },
+        ]
+
+    def test_a_version_that_records_neither_gives_no_tokens_after_and_no_duration(
+        self, tmp_path: Path
+    ) -> None:
+        """Before Claude Code 2.1.126 a boundary's record holds its trigger
+        and the tokens before it alone."""
+        lines = [user(0), assistant(4, "msg_01"), boundary(30, before=88_000)]
+
+        (made,) = read(filed(tmp_path, lines, AGENT), SETTINGS).publication.compactions
+
+        assert (made.trigger, made.tokens_before) == ("auto", 88_000)
+        assert (made.tokens_after, made.duration_ms) == (None, None)
+
+    def test_its_summary_is_no_prompt(self, tmp_path: Path) -> None:
+        lines = [typed(0), assistant(4, "msg_01"), boundary(30), summary(29.7)]
+
+        assert _sources(_read(tmp_path, linked(lines))) == ["typed"]
+
+    def test_a_system_line_of_another_subtype_is_none(self, tmp_path: Path) -> None:
+        lines = [
+            typed(0),
+            assistant(4, "msg_01"),
+            chained("system", 6, subtype="turn_duration", durationMs=6_000),
+        ]
+
+        assert _read(tmp_path, linked(lines)).compactions == []
+
+    def test_a_boundary_that_carries_no_record_is_named(self, tmp_path: Path) -> None:
+        unrecorded = boundary(30)
+        del unrecorded["compactMetadata"]
+
+        with pytest.raises(UnreadableError, match="line 2 is not a line .* KeyError"):
+            _read(tmp_path, [typed(0), unrecorded])
+
+
+class TestACallsChain:
+    def test_its_predecessor_is_the_nearest_call_up_its_chain(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            typed(0),
+            requesting(4, "toolu_01", message_id="msg_01"),
+            result(6, "toolu_01"),
+            typed(8),
+            assistant(10, "msg_02", output=1),
+            assistant(11, "msg_02", output=5),
+            assistant(14, "msg_03"),
+        ]
+
+        assert _chains(_read(tmp_path, linked(lines))) == [
+            (None, None),
+            ("msg_01", None),
+            ("msg_02", None),
+        ]
+
+    def test_a_chain_from_a_parallel_tool_call_lands_on_the_call_before(
+        self, tmp_path: Path
+    ) -> None:
+        """Each result follows its own request's line, so the next Call's
+        chain reaches a line of the Call before that is not its last."""
+        lines = linked(
+            [
+                typed(0),
+                requesting(4, "toolu_01", message_id="msg_01"),
+                requesting(4.1, "toolu_02", message_id="msg_01"),
+                result(7, "toolu_02"),
+                result(6, "toolu_01"),
+                assistant(9, "msg_02"),
+            ]
+        )
+        lines[4]["parentUuid"] = "line-2"
+
+        assert _chains(_read(tmp_path, lines)) == [(None, None), ("msg_01", None)]
+
+    def test_a_rewind_follows_the_call_it_went_back_to(self, tmp_path: Path) -> None:
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                typed(8),
+                assistant(10, "msg_02"),
+                typed(20),
+                assistant(24, "msg_03"),
+            ]
+        )
+        lines[4]["parentUuid"] = "line-2"
+
+        assert _chains(_read(tmp_path, lines)) == [
+            (None, None),
+            ("msg_01", None),
+            ("msg_01", None),
+        ]
+
+    def test_a_line_claude_code_wrote_itself_is_no_predecessor(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            typed(0),
+            assistant(4, "msg_01"),
+            synthetic(6, "No response requested."),
+            assistant(9, "msg_02"),
+        ]
+
+        assert _chains(_read(tmp_path, linked(lines)))[1] == ("msg_01", None)
+
+    def test_a_chain_that_crosses_a_compaction_names_it_and_goes_on_past_it(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            typed(0),
+            assistant(4, "msg_01"),
+            boundary(30),
+            summary(29.7),
+            assistant(40, "msg_02"),
+            assistant(44, "msg_03"),
+            boundary(70),
+            summary(69.7),
+            typed(80),
+            assistant(84, "msg_04"),
+        ]
+
+        assert _chains(_read(tmp_path, linked(lines))) == [
+            (None, None),
+            ("msg_01", 1),
+            ("msg_02", None),
+            ("msg_03", 2),
+        ]
+
+    def test_a_boundary_continues_the_line_it_names_whichever_lies_before_it(
+        self, tmp_path: Path
+    ) -> None:
+        """A compaction the person asked for names the last line of the
+        turn before the request."""
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                typed(8, "/compact"),
+                assistant(9, "msg_02"),
+                boundary(30, "manual"),
+                summary(29.7),
+                assistant(40, "msg_03"),
+            ]
+        )
+        assert lines[4]["logicalParentUuid"] == "line-4"
+        lines[4]["logicalParentUuid"] = "line-2"
+
+        assert _chains(_read(tmp_path, lines))[2] == ("msg_01", 1)
+
+    def test_a_boundary_that_names_no_line_of_the_file_leaves_its_compaction_alone(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                boundary(30),
+                summary(29.7),
+                assistant(40, "msg_02"),
+            ]
+        )
+        lines[2]["logicalParentUuid"] = "a-line-of-another-file"
+
+        assert _chains(_read(tmp_path, lines)) == [(None, None), (None, 1)]
+
+    def test_the_nearest_of_the_compactions_a_chain_crosses_is_the_calls(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            typed(0),
+            assistant(4, "msg_01"),
+            boundary(30),
+            summary(29.7),
+            boundary(50),
+            summary(49.7),
+            assistant(60, "msg_02"),
+        ]
+
+        publication = _read(tmp_path, linked(lines))
+
+        assert len(publication.compactions) == 2
+        assert _chains(publication)[1] == ("msg_01", 2)
+
+    @pytest.mark.parametrize(
+        "follows",
+        [None, "a-line-of-another-file", "line-4"],
+        ids=["no line", "a line the file does not hold", "a line after it"],
+    )
+    def test_a_chain_that_reaches_no_call_has_no_predecessor(
+        self, follows: str | None, tmp_path: Path
+    ) -> None:
+        """A chain's first Call, one after a line in the middle of the file
+        that follows none, and one whose chain leaves the file or turns back
+        on itself."""
+        lines = linked(
+            [typed(0), assistant(4, "msg_01"), typed(10), assistant(14, "msg_02")]
+        )
+        lines[2]["parentUuid"] = follows
+
+        assert _chains(_read(tmp_path, lines)) == [(None, None), (None, None)]
+
+    def test_a_sub_agents_chain_is_read_as_a_main_threads(self, tmp_path: Path) -> None:
+        lines = linked(
+            [
+                user(0),
+                assistant(4, "msg_01"),
+                boundary(30),
+                summary(29.7),
+                assistant(40, "msg_02"),
+            ]
+        )
+
+        publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
+
+        assert len(publication.compactions) == 1
+        assert _chains(publication) == [(None, None), ("msg_01", 1)]
 
 
 class TestToolCalls:
