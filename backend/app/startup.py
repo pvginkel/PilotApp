@@ -22,6 +22,7 @@ from sqlalchemy import Connection, Engine, event
 from app.app import App
 from app.database import scoped_session
 from app.services.container import ServiceContainer
+from app.services.price_service import read_price_file
 
 
 def configure_engine(engine: Engine) -> None:
@@ -136,15 +137,28 @@ def register_cli_commands(cli: click.Group) -> None:
     cli.add_command(create_service_user)
 
 
-def post_migration_hook(app: Flask) -> None:
-    """Run after database migrations (e.g., sync master data)."""
-    pass
+def post_migration_hook(app: App) -> None:
+    """Load the price file after the database's revisions, at every deploy:
+    the Prices it gained, and the cost of each Call they change
+    (`PriceService.load`)."""
+    with scoped_session(app.container):
+        _load_prices(app)
+
+
+def _load_prices(app: App) -> None:
+    loaded = app.container.price_service().load(read_price_file())
+    print(
+        f"Prices loaded: {loaded.prices} added, {loaded.models} models priced as"
+        f" another or no longer, {loaded.calls} calls priced"
+    )
 
 
 def load_test_data_hook(app: App) -> None:
-    """Load the invented record (`TestDataService`) after database recreation."""
+    """Load the price file and the invented record (`TestDataService`) after
+    database recreation."""
     print("Loading the invented record...")
     with scoped_session(app.container):
+        _load_prices(app)
         counts = app.container.test_data_service().load_all()
     print("Test data loaded:")
     for entity, count in counts.items():

@@ -9,32 +9,50 @@ publication first names its code, and no revision writes one (DB §7.2).
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Computed,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
+    Numeric,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
 
+CONTEXT_TOKENS = (
+    "input_tokens + cache_write_5m_tokens + cache_write_1h_tokens + cache_read_tokens"
+)
+"""A Call's `context_tokens`, in its columns."""
+
 
 class Model(db.Model):  # type: ignore[name-defined]
-    """A kind of model a Call is answered by, by Claude's id."""
+    """A kind of model a Call is answered by, by Claude's id.
+
+    `priced_as_code` is the Model whose Prices it takes where it has none of
+    its own (DB 548): set when the Model is first met, and dropped once the
+    price file names it (`price_service`).
+    """
 
     __tablename__ = "models"
+    __table_args__ = (
+        CheckConstraint("priced_as_code <> code", name="ck_models_priced_as"),
+    )
 
     code: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text)
+    priced_as_code: Mapped[str | None] = mapped_column(ForeignKey("models.code"))
 
 
 class StopReason(db.Model):  # type: ignore[name-defined]
@@ -65,6 +83,12 @@ class Call(db.Model):  # type: ignore[name-defined]
     Prompt, its predecessor and its Compaction are its own Transcript's (DB
     542, 545); that its predecessor has a lower `position` is the
     publication's to keep.
+
+    `context_tokens` is the sum of its tokens of the input and cache kinds,
+    which PostgreSQL derives. `cost` is its tokens of each kind at the Price
+    in force for its Model, in US dollars (DB 548), none where a kind it
+    counts has no Price; the publication derives it, and a load of the price
+    file again (`price_service`).
     """
 
     __tablename__ = "calls"
@@ -102,6 +126,8 @@ class Call(db.Model):  # type: ignore[name-defined]
             " AND output_tokens >= 0 AND thinking_tokens >= 0",
             name="ck_calls_tokens",
         ),
+        # The Calls a load of the price file prices at every deploy.
+        Index("ix_calls_unpriced", "id", postgresql_where=text("cost IS NULL")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -128,6 +154,58 @@ class Call(db.Model):  # type: ignore[name-defined]
     cache_write_1h_tokens: Mapped[int] = mapped_column(Integer)
     cache_read_tokens: Mapped[int] = mapped_column(Integer)
     output_tokens: Mapped[int] = mapped_column(Integer)
+    context_tokens: Mapped[int] = mapped_column(
+        Integer, Computed(CONTEXT_TOKENS, persisted=True)
+    )
+    cost: Mapped[Decimal | None] = mapped_column(Numeric)
+
+
+PRICED_KINDS = (
+    "input",
+    "cache_write_5m",
+    "cache_write_1h",
+    "cache_read",
+    "output",
+)
+"""The Token Kinds a Price is of, those nothing is within (DB 547), each a
+`_tokens` column of a Call."""
+
+
+class Price(db.Model):  # type: ignore[name-defined]
+    """A rate for one Token Kind of one Model from `effective_at` on, in US
+    dollars per million tokens, until the next Price of its Model, Token
+    Kind and `above_context` applies.
+
+    `above_context` is the context size in tokens from which the rate
+    applies, none for the base rate. Its rows are the price file's
+    (`price_service`): a row is added and none is changed or removed.
+    """
+
+    __tablename__ = "prices"
+    __table_args__ = (
+        UniqueConstraint(
+            "model_code",
+            "token_kind_code",
+            "above_context",
+            "effective_at",
+            postgresql_nulls_not_distinct=True,
+        ),
+        CheckConstraint(
+            "token_kind_code IN ("
+            + ", ".join(f"'{kind}'" for kind in PRICED_KINDS)
+            + ")",
+            name="ck_prices_kind",
+        ),
+        CheckConstraint("above_context > 0", name="ck_prices_above_context"),
+        CheckConstraint("rate >= 0", name="ck_prices_rate"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    model_code: Mapped[str] = mapped_column(ForeignKey("models.code"))
+    token_kind_code: Mapped[str] = mapped_column(ForeignKey("token_kinds.code"))
+    above_context: Mapped[int | None] = mapped_column(Integer)
+    rate: Mapped[Decimal] = mapped_column(Numeric)
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Tool(db.Model):  # type: ignore[name-defined]

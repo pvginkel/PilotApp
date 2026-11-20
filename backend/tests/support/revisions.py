@@ -7,6 +7,7 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -24,3 +25,10 @@ def run_revision(db: Session, revision_id: str, step: str) -> None:
         getattr(revision.module, step)()
     if step == "upgrade":
         db.expire_all()
+
+
+def drop_later_keys_to_token_kinds(db: Session) -> None:
+    """Drop, on the test's transaction, the keys to `token_kinds` that the
+    revisions after 0038 made, the Prices' among them, which revision 0038's
+    downgrade, dropping the table, cannot run under."""
+    db.execute(text("ALTER TABLE prices DROP CONSTRAINT prices_token_kind_code_fkey"))

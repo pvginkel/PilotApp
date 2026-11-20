@@ -32,6 +32,7 @@ from app.services.token_counts import (
 )
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import raw_turn
+from tests.support.revisions import drop_later_keys_to_token_kinds
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -74,7 +75,9 @@ OTHER = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 
 def _upgrade(db: DbSession) -> None:
     """Revision 0027's upgrade, on the test's transaction, with Token Kind
-    the enum type it casts to, which revision 0038's downgrade brings back."""
+    the enum type it casts to, which revision 0038's downgrade brings back
+    once no later revision's key names the table it drops."""
+    drop_later_keys_to_token_kinds(db)
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
     scripts = ScriptDirectory.from_config(config)

@@ -17,12 +17,13 @@ Turn (`TestRan`). What Pilot holds is handed to a walk as its inventory
 
 import logging
 from datetime import UTC, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 import pytest
 from flask import Flask
 from pilot_collection.publication import PublicationSchema
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -67,6 +68,7 @@ from app.models import (
 from app.models.reference import ProjectState, UserKind
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerEnvironment
+from app.services.price_service import FilePrice, PriceLoad
 from app.services.publication_service import (
     COLLECTOR_PROTOCOL_MAX,
     COLLECTOR_PROTOCOL_MIN,
@@ -112,6 +114,12 @@ DEEPER = "c81d5e02f7a9b3d64"
 """Claude Code's id of a second invented sub-agent."""
 RECIPES = "Find where the recipes are scaled"
 LOGGER = "app.services.publication_service"
+PANTRY = "claude-pantry-2"
+"""An invented model, of a family the price file knows nothing of."""
+PANTRY_INPUT = FilePrice(
+    PANTRY, "input", None, Decimal("3"), datetime(2026, 1, 1, tzinfo=UTC)
+)
+"""A row of an invented price file: its input rate."""
 PLACEMENT_LOGGER = "app.services.launch_placement"
 
 
@@ -572,6 +580,57 @@ class TestPublished:
             (90, 12_000, 0, 0, 4_096, None),
         ]
 
+    def test_a_call_holds_its_context_and_its_cost_at_the_prices_in_force(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        # The second at claude-opus-4-5's rates, the third at
+        # claude-haiku-4-5-20251001's.
+        assert session.execute(
+            select(Call.context_tokens, Call.cost)
+            .where(Call.position.in_([2, 3]))
+            .order_by(Call.position)
+        ).all() == [(52_626, Decimal("0.134926")), (12_090, Decimal("0.03557"))]
+
+    def test_a_model_first_met_is_priced_as_the_newest_of_its_family(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        tokens = {"input": 1_000_000, "output": 100_000}
+        calls = [call(1, model="claude-opus-9", tokens=tokens)]
+
+        publications.publish(_camp(calls=calls, compactions=[]))
+
+        assert session.execute(
+            select(Model.code, Model.priced_as_code)
+            .where(Model.code.in_(["claude-opus-9", OPUS]))
+            .order_by(Model.code)
+        ).all() == [(OPUS, None), ("claude-opus-9", "claude-opus-5-5")]
+        # At claude-opus-5-5's rates: $4 and $20 a million.
+        assert session.scalars(select(Call.cost)).all() == [Decimal("6")]
+
+    def test_a_model_asked_for_and_first_met_is_priced_as_its_familys_newest(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        assert session.scalars(
+            select(Model.priced_as_code).where(Model.code == SONNET)
+        ).all() == ["claude-sonnet-5-5"]
+
+    def test_a_call_of_a_model_no_price_covers_has_no_cost(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        calls = [call(1, model="pantry-1")]
+
+        publications.publish(_camp(calls=calls, compactions=[]))
+
+        assert session.execute(
+            select(Call.cost, Model.priced_as_code).join(
+                Model, Model.code == Call.model_code
+            )
+        ).all() == [(None, None)]
+
     def test_a_call_holds_what_was_asked_and_how_it_ended(
         self, session: DbSession, publications: PublicationService
     ) -> None:
@@ -746,7 +805,7 @@ class TestPublished:
             (DenialKind, ["hook"]),
             (EventKind, ["api_error", "api_retry", "interrupt"]),
             (MissCause, ["compaction"]),
-            (Model, [HAIKU, OPUS, SONNET]),
+            (Model, [SONNET]),
             (PromptSource, ["person", "task_notification"]),
             (StopReason, ["max_tokens"]),
             (Tool, ["Agent", "Bash", "mcp__pantry__find_items"]),
@@ -759,22 +818,27 @@ class TestPublished:
         entity: Any,
         codes: list[str],
     ) -> None:
+        # The Models the price file names are held before any publication.
+        rows = select(entity.code, entity.name).order_by(entity.code)
+        held = session.execute(rows).all()
+
         publications.publish(_camp())
 
-        assert session.execute(
-            select(entity.code, entity.name).order_by(entity.code)
-        ).all() == [(code, code) for code in codes]
+        assert session.execute(rows).all() == sorted(
+            [*map(tuple, held), *((code, code) for code in codes)]
+        )
 
     def test_a_reference_code_pilot_has_met_is_left_as_it_stands(
         self, session: DbSession, publications: PublicationService
     ) -> None:
-        session.add(Model(code=OPUS, name="Opus 4.5"))
-        session.flush()
+        session.execute(update(Model).where(Model.code == OPUS).values(name="Opus 4.5"))
 
         publications.publish(_camp())
 
         assert session.execute(
-            select(Model.code, Model.name).order_by(Model.code)
+            select(Model.code, Model.name)
+            .where(Model.code.in_([HAIKU, OPUS, SONNET]))
+            .order_by(Model.code)
         ).all() == [
             (HAIKU, HAIKU),
             (OPUS, "Opus 4.5"),
@@ -1213,6 +1277,24 @@ class TestRepublished:
 
         assert wrote == {"transcripts": Written(updated=1)}
         assert _ids(session) == ids
+
+    def test_a_call_whose_tokens_differ_is_priced_again(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        calls = _calls()
+        calls[3]["tokens"] = {"input": 2_000, "output": 400}
+
+        with writes(session) as wrote:
+            publications.publish(_camp(calls=calls))
+
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(updated=1),
+        }
+        assert session.execute(
+            select(Call.context_tokens, Call.cost).where(Call.position == 4)
+        ).all() == [(2_000, Decimal("0.02"))]
 
     def test_new_calls_are_the_rows_written(
         self, session: DbSession, publications: PublicationService
@@ -2080,6 +2162,17 @@ class TestAppended:
                 Call.message_id, Call.position, Call.predecessor_id, Call.prompt_id
             ).where(Call.id == after["calls"][4])
         ).one() == ("msg_0005", 5, ids["calls"][3], ids["prompts"][2])
+
+    def test_a_call_made_since_holds_its_cost(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+
+        publications.publish(_grown())
+
+        assert session.execute(
+            select(Call.context_tokens, Call.cost).where(Call.position == 5)
+        ).all() == [(52_626, Decimal("0.134926"))]
 
     def test_a_call_names_one_before_the_boundary_as_its_predecessor(
         self, session: DbSession, publications: PublicationService
@@ -3533,6 +3626,46 @@ class TestTurns:
                 4,
                 5,
             ]
+
+    def test_a_call_published_beside_a_load_of_the_prices_is_priced_at_what_it_loaded(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        calls = [call(1, model=PANTRY, tokens={"input": 1_000_000})]
+
+        def published() -> Any:
+            with scoped_session(container) as db:
+                container.publication_service().publish(
+                    _camp(calls=calls, compactions=[])
+                )
+                return db.scalars(select(Call.cost)).one()
+
+        with scoped_session(container):
+            container.price_service().load([PANTRY_INPUT])
+            second = in_thread(published)
+            wait_until(lambda: lock_waits(container) == 1, "the publication waiting")
+
+        assert second.result() == Decimal("3")
+
+    def test_a_load_of_the_prices_beside_a_publication_prices_the_calls_it_wrote(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        # Of a Model first met, which the load prices as the one it names.
+        calls = [call(1, model="claude-pantry-3", tokens={"input": 1_000_000})]
+
+        def loaded() -> Any:
+            with scoped_session(container):
+                return container.price_service().load([PANTRY_INPUT])
+
+        with scoped_session(container):
+            container.publication_service().publish(_camp(calls=calls, compactions=[]))
+            second = in_thread(loaded)
+            wait_until(lambda: lock_waits(container) == 1, "the load waiting")
+
+        assert second.result() == PriceLoad(prices=1, models=1, calls=1)
+        with scoped_session(container) as db:
+            assert db.scalars(select(Call.cost)).all() == [Decimal("3")]
 
 
 class TestAdmitted:

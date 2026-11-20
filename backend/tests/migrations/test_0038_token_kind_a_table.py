@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.models import TokenCount, Turn
 from app.models.reference import TurnCause
+from tests.support.revisions import drop_later_keys_to_token_kinds
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -24,7 +25,10 @@ COUNTS = {"input": 6, "cache_write": 31_400, "cache_read": 0, "output": 820}
 
 def _run(db: DbSession, step: str) -> None:
     """Revision 0038's `step`, its upgrade or its downgrade, on the test's
-    transaction."""
+    transaction, its downgrade once no later revision's key names the table
+    it drops."""
+    if step == "downgrade":
+        drop_later_keys_to_token_kinds(db)
     config = Config(str(_BACKEND_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
     revision = ScriptDirectory.from_config(config).get_revision("0038")

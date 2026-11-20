@@ -1,20 +1,25 @@
 """The app's startup hooks: the engine's listener that turns PostgreSQL's JIT
-off, the seed `cli load-test-data` loads (slice 002 P9), and the app's CLI
-commands."""
+off, the price file a deploy loads after the revisions, the seed `cli
+load-test-data` loads (slice 002 P9), and the app's CLI commands."""
 
 import click
 import pytest
 from flask import Flask
-from sqlalchemy import select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session as DbSession
 
 from app.app import App
 from app.engine.bus import EngineEvent, TreeHashMoved
 from app.extensions import db
-from app.models import Project
+from app.models import Price, Project
 from app.service_user_cli import create_service_user
 from app.services.container import ServiceContainer
-from app.startup import load_test_data_hook, register_cli_commands
+from app.services.price_service import read_price_file
+from app.startup import (
+    load_test_data_hook,
+    post_migration_hook,
+    register_cli_commands,
+)
 from app.store_update_cli import update_store
 
 
@@ -46,7 +51,41 @@ class TestConfigureEngine:
                 connection.invalidate()
 
 
+def _prices(db: DbSession) -> int:
+    return db.scalar(select(func.count()).select_from(Price)) or 0
+
+
+class TestPostMigrationHook:
+    def test_it_loads_the_price_file_and_prints_what_it_wrote(
+        self,
+        app: Flask,
+        container: ServiceContainer,
+        session: DbSession,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert isinstance(app, App)
+        session.execute(delete(Price).where(Price.model_code == "claude-opus-5-5"))
+
+        post_migration_hook(app)
+
+        assert _prices(session) == len(read_price_file())
+        assert capsys.readouterr().out == (
+            "Prices loaded: 5 added, 0 models priced as another or no longer,"
+            " 0 calls priced\n"
+        )
+
+
 class TestLoadTestDataHook:
+    def test_it_loads_the_price_file(
+        self, app: Flask, container: ServiceContainer, session: DbSession
+    ) -> None:
+        assert isinstance(app, App)
+        session.execute(delete(Price))
+
+        load_test_data_hook(app)
+
+        assert _prices(session) == len(read_price_file())
+
     def test_it_commits_the_seed_and_prints_its_counts(
         self,
         app: Flask,
