@@ -319,6 +319,22 @@ class TestTheCarry:
 
         assert sizes[1] - sizes[0] == 20
 
+    def test_a_line_awaited_counts_in_its_size_with_its_id(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked([typed(0), assistant(4, "msg_01"), assistant(9, "msg_02")])
+
+        sizes = [
+            read(
+                filed(tmp_path, [lines[0] | {"parentUuid": follows}, *lines[1:]]),
+                SETTINGS,
+            ).carry.size
+            for follows in (None, "a-line", "a-line-of-another-file")
+        ]
+
+        assert sizes[2] - sizes[1] == len("-of-another-file")
+        assert sizes[1] - sizes[0] > len("a-line")
+
 
 class TestAFileThatGrew:
     def test_it_is_published_appended_on_what_the_carry_was_built_on(
@@ -460,6 +476,20 @@ class TestAFileThatGrew:
             "a line before its boundary follows one written from it on",
         }
         assert appended == 4
+
+    def test_a_line_awaited_before_the_boundary_stays_in_the_carry(
+        self, tmp_path: Path
+    ) -> None:
+        first = linked([typed(0), assistant(4, "msg_01"), assistant(9, "msg_02")])
+        first[0]["parentUuid"] = "a-line-of-another-file"
+
+        _, grown = _grown(
+            tmp_path, first, _continuing("line-3", [typed(12), assistant(14, "msg_03")])
+        )
+
+        assert grown.publication.appended is not None
+        assert grown.carry.stands.calls == 2
+        assert grown.carry.stands.awaited == ("a-line-of-another-file",)
 
     def test_the_boundarys_call_takes_what_its_later_lines_say(
         self, tmp_path: Path
