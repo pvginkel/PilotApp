@@ -170,7 +170,7 @@ class Launch(db.Model):  # type: ignore[name-defined]
     `session_id` and `turn_seq` are Pilot's: the Session that ran it and,
     of that Session, the Turn that started it or during which its driver
     did, none for a Launch started between two Turns (DB decision 79 point
-    7). `launch_placement` sets them, once.
+    7). `launch_placement` sets them.
 
     That its Transcript is a main thread (DB 536), that it runs with a
     Component Version (DB 389) and that its Session's `conversation_id` is
