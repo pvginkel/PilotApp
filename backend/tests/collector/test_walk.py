@@ -35,6 +35,7 @@ from werkzeug.serving import make_server
 from app.extensions import db
 from app.models import (
     Call,
+    Compaction,
     ComponentVersion,
     Launch,
     LaunchComponent,
@@ -1013,6 +1014,12 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
             select(Prompt).where(Prompt.transcript_id == thread.id).order_by(Prompt.id)
         ).all()
         prompt = {row.id: place for place, row in enumerate(prompts, start=1)}
+        compactions = record.scalars(
+            select(Compaction)
+            .where(Compaction.transcript_id == thread.id)
+            .order_by(Compaction.id)
+        ).all()
+        compaction = {row.id: place for place, row in enumerate(compactions, start=1)}
         calls = record.scalars(
             select(Call).where(Call.transcript_id == thread.id).order_by(Call.position)
         ).all()
@@ -1034,11 +1041,13 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
                 for launch_id, code, version in components
             ),
             "prompts": [_row(row, launch_id=launch[row.launch_id]) for row in prompts],
+            "compactions": [_row(row) for row in compactions],
             "calls": [
                 _row(
                     row,
                     prompt_id=row.prompt_id and prompt[row.prompt_id],
                     predecessor_id=row.predecessor_id and call[row.predecessor_id],
+                    compaction_id=row.compaction_id and compaction[row.compaction_id],
                 )
                 for row in calls
             ],
@@ -1127,6 +1136,14 @@ class TestAFileThatGrows:
 
         grown = _facts(committed_app, name)
         assert len(grown["launches"]) == (2 if main else 0)
+        crossed = [
+            row["compaction_id"] for row in grown["calls"] if row["compaction_id"]
+        ]
+        assert crossed == ([1, 2] if name == RECIPES else [])
+        assert len(grown["compactions"]) == len(crossed)
+        assert all(
+            row["predecessor_id"] for row in grown["calls"] if row["compaction_id"]
+        )
         assert replayed is not None and replayed < path.stat().st_size
         _configure(committed_app, settling=0.0)
         with caplog.at_level(logging.WARNING, PUBLICATIONS):

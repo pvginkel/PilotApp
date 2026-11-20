@@ -4,7 +4,7 @@ import tracemalloc
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from pilot_collector.carry import Carries, Carry, Open, Standing, digest
+from pilot_collector.carry import Carries, Carry, Lead, Open, Standing, digest
 
 STOOD = datetime(2026, 11, 12, 10, 2, 3, 456789, tzinfo=UTC)
 
@@ -20,7 +20,9 @@ def _carry(place: int = 0, queued: int = 0, removed: int = 0) -> Carry:
             calls=300 + place,
             launches=2 + place,
             prompts=400 + place,
+            compactions=3 + place,
             link=f"{place:08}-8b2d-4d57-9e3a-71c5d2b8a690",
+            leads=Lead(f"msg_01{place:022}", 3 + place),
             directory=f"/work/Loom{place}",
             environment=f"cleo-loom-{place:06}",
             launch=Open(STOOD + timedelta(hours=place), f"2.1.{place}", 300 + place),

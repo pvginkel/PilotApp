@@ -8,11 +8,11 @@ version 1), and the Turns of Pilot's its sessions ran under, which Pilot's
 side holds before a collector reads the transcript.
 
 A publication is what its thread's file says: the file's size and time, and
-each fact as the lines carry it. The files hold the lines the facts of the
-collector's first build are read off: a thread's ids and where it ran, its
-Launches, Prompts, Calls and Tool Calls. No line is written for a hook run,
-a compaction, an event or a context part, which the publications carry
-alone.
+each fact as the lines carry it. The files hold the lines these facts are
+read off: a thread's ids and where it ran, its Launches, Prompts, Calls and
+Tool Calls, its Compactions and each Call's place on the chain. No line is
+written for a hook run, an event or a context part, which the publications
+carry alone.
 
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
@@ -40,7 +40,7 @@ from pilot_scenario.script import (
 )
 from pilot_scenario.transcript import HomeFile, Lines, Spawned, request, text
 
-COLLECTOR = "1.3.0"
+COLLECTOR = "1.4.0"
 """The version of the collector the publications say read the files."""
 
 CLAUDE_CODE = "claude-code"
@@ -187,6 +187,7 @@ class _Thread:
                 )
             )
             self._crossed = len(self.compactions)
+            self.lines.compacted(step, self._builder.when(step.at))
             return
         self.ids.messages += 1
         message_id = f"msg_{self.ids.messages:04}"

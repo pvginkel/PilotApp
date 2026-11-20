@@ -11,7 +11,7 @@ from pilot_collection.publication import PublicationSchema
 from pilot_scenario import SCENARIO, Builder, Scenario
 
 from pilot_collector import VERSION
-from pilot_collector.carry import Carry, Open, Standing, digest
+from pilot_collector.carry import ROOT, Carry, Lead, Open, Standing, digest
 from pilot_collector.home import Transcript, transcript
 from pilot_collector.reader import NotContinuedError, Read, UnreadableError, read
 from tests import support
@@ -21,6 +21,7 @@ from tests.support import (
     MANAGED,
     Line,
     assistant,
+    boundary,
     cost,
     filed,
     instructions,
@@ -30,6 +31,7 @@ from tests.support import (
     queue,
     requesting,
     result,
+    summary,
     taken,
     typed,
     user,
@@ -56,6 +58,13 @@ def _grown(
     return before, read(named, SETTINGS, before.carry)
 
 
+def _continuing(last: str, lines: list[Line], name: str = "grown") -> list[Line]:
+    """The lines as a chain that goes on from the line `last` names."""
+    first, *rest = linked(lines, name)
+    follows = "logicalParentUuid" if "logicalParentUuid" in first else "parentUuid"
+    return [first | {follows: last}, *rest]
+
+
 def _held(held: PublicationSchema, grown: PublicationSchema) -> PublicationSchema:
     """What Pilot holds once it took `grown`, an appended publication, of a
     transcript it held as `held`: what lies before the boundary's places as
@@ -74,6 +83,8 @@ def _held(held: PublicationSchema, grown: PublicationSchema) -> PublicationSchem
         update={
             "appended": None,
             "launches": before + carried,
+            "compactions": held.compactions[: boundary.compaction - 1]
+            + grown.compactions,
             "calls": held.calls[: boundary.call - 1] + grown.calls,
         }
     )
@@ -111,7 +122,9 @@ class TestTheCarry:
             calls=1,
             launches=0,
             prompts=1,
+            compactions=0,
             link="line-3",
+            leads=Lead("msg_01"),
             directory=DIRECTORY,
             environment=None,
             launch=Open(moment(0), support.VERSION, 1),
@@ -226,6 +239,45 @@ class TestTheCarry:
         assert (stands.calls, stands.launches, stands.prompts) == (1, 0, 0)
         assert stands.launch is None
 
+    def test_it_holds_where_the_chain_leads_from_its_line_and_no_other_lines(
+        self, tmp_path: Path
+    ) -> None:
+        """The Call the chain leads to and the compaction crossed on the
+        way, however many lines and Calls lie before the boundary (D256)."""
+        lines = [typed(0)]
+        for place in range(1, 41):
+            lines += [typed(10 * place), assistant(10 * place + 4, f"msg_{place:02}")]
+        lines += [boundary(500), summary(499.7), assistant(510, "msg_41")]
+
+        carry = read(filed(tmp_path, linked(lines)), SETTINGS).carry
+
+        stands = carry.stands
+        assert (stands.calls, stands.compactions) == (40, 1)
+        assert (stands.link, stands.leads) == ("line-83", Lead("msg_40", 1))
+        few = read(filed(tmp_path, linked(lines[-5:], "lines")), SETTINGS).carry
+        assert (few.stands.calls, few.stands.link) == (1, "lines-4")
+        assert carry.size == few.size
+
+    def test_a_chain_that_reaches_no_call_leads_nowhere(self, tmp_path: Path) -> None:
+        lines = [typed(0), assistant(4, "msg_01")]
+
+        stands = read(filed(tmp_path, linked(lines)), SETTINGS).carry.stands
+
+        assert (stands.link, stands.leads) == ("line-1", ROOT)
+
+    def test_the_call_its_chain_leads_to_counts_in_its_size(
+        self, tmp_path: Path
+    ) -> None:
+        short = [typed(0), assistant(4, "msg_01"), assistant(9, "msg_02")]
+        long = [typed(0), assistant(4, "msg_01" + "0" * 20), assistant(9, "msg_02")]
+
+        sizes = [
+            read(filed(tmp_path, linked(lines)), SETTINGS).carry.size
+            for lines in (short, long)
+        ]
+
+        assert sizes[1] - sizes[0] == 20
+
 
 class TestAFileThatGrew:
     def test_it_is_published_appended_on_what_the_carry_was_built_on(
@@ -327,6 +379,86 @@ class TestAFileThatGrew:
         (call,) = grown.publication.calls
         (asked,) = call.tool_calls
         assert (asked.returned_at, asked.result_characters) == (moment(7), 5)
+
+    def test_the_boundarys_call_reaches_its_predecessor_behind_its_first_line(
+        self, tmp_path: Path
+    ) -> None:
+        """Pilot takes a predecessor before the boundary by its name."""
+        _, grown = _grown(
+            tmp_path,
+            linked([typed(0), assistant(4, "msg_01"), assistant(9, "msg_02")]),
+            _continuing("line-3", [assistant(14, "msg_03")]),
+        )
+
+        assert [
+            (call.message_id, call.predecessor) for call in grown.publication.calls
+        ] == [("msg_02", "msg_01"), ("msg_03", "msg_02")]
+
+    def test_the_boundarys_call_names_a_compaction_it_crossed_before_its_first_line(
+        self, tmp_path: Path
+    ) -> None:
+        """The compaction lies before the boundary, so the call carries
+        none, places its next after it and names it by its place among the
+        transcript's."""
+        before, grown = _grown(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    boundary(30),
+                    summary(29.7),
+                    assistant(40, "msg_02"),
+                ]
+            ),
+            _continuing("line-5", [assistant(42, "msg_02")]),
+        )
+
+        publication = grown.publication
+        assert _places(publication) == (2, 1, 2, 2)
+        assert publication.compactions == []
+        (call,) = publication.calls
+        assert (call.predecessor, call.compaction) == ("msg_01", 1)
+        assert (
+            _held(before.publication, publication)
+            == read(filed_again(tmp_path), SETTINGS).publication
+        )
+
+    def test_a_compaction_from_the_boundary_on_is_placed_after_those_before_it(
+        self, tmp_path: Path
+    ) -> None:
+        before, grown = _grown(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    boundary(30, postTokens=9_000),
+                    summary(29.7),
+                    assistant(40, "msg_02"),
+                ]
+            ),
+            _continuing(
+                "line-5",
+                [boundary(70, "manual"), summary(69.7), assistant(80, "msg_03")],
+            ),
+        )
+
+        publication = grown.publication
+        assert _places(publication) == (2, 1, 2, 2)
+        assert [(made.at, made.trigger) for made in publication.compactions] == [
+            (moment(70), "manual")
+        ]
+        assert [
+            (call.message_id, call.predecessor, call.compaction)
+            for call in publication.calls
+        ] == [("msg_02", "msg_01", 1), ("msg_03", "msg_02", 2)]
+        assert grown.carry.stands.compactions == 2
+        assert grown.carry.stands.leads == Lead("msg_02", 2)
+        assert (
+            _held(before.publication, publication)
+            == read(filed_again(tmp_path), SETTINGS).publication
+        )
 
     def test_the_launch_open_at_the_boundary_comes_with_its_prompts_from_there_on(
         self, tmp_path: Path
@@ -513,6 +645,15 @@ class TestAFileThatGrew:
         ]
 
 
+def filed_again(projects: Path) -> Transcript:
+    """The main thread's file as it stands."""
+    return Transcript(
+        projects,
+        projects / support.FOLDER / f"{support.SESSION}.jsonl",
+        support.SESSION,
+    )
+
+
 def _again(projects: Path, read_before: Read) -> PublicationSchema:
     """The file grown by one more line of its last response, read from
     where `read_before` stood."""
@@ -595,6 +736,67 @@ class TestAFileThatDoesNotContinueItsCarry:
             NotContinuedError, match="names a request no line from its boundary on"
         ):
             read(named, SETTINGS, carry)
+
+    def test_a_compaction_that_continues_a_line_behind_the_boundary_is_not_read_on(
+        self, named: Transcript, carry: Carry
+    ) -> None:
+        """The carry holds where the chain leads from its own line alone."""
+        (made,) = linked([boundary(14)], "grown")
+        _added(named, [made | {"logicalParentUuid": "line-2"}])
+
+        with pytest.raises(
+            NotContinuedError, match="a compaction continues a line before its boundary"
+        ):
+            read(named, SETTINGS, carry)
+
+        assert read(named, SETTINGS).publication.calls[-1].predecessor == "msg_01"
+
+    def test_a_compaction_that_names_no_line_of_the_file_is_not_read_on(
+        self, named: Transcript, carry: Carry
+    ) -> None:
+        """Read from its boundary on, a line the file does not hold is not
+        told from one behind the boundary."""
+        (made,) = linked([boundary(14)], "grown")
+        _added(
+            named,
+            [made | {"logicalParentUuid": "a-line-of-another-file"}, summary(13.7)],
+        )
+
+        with pytest.raises(
+            NotContinuedError, match="a compaction continues a line before its boundary"
+        ):
+            read(named, SETTINGS, carry)
+
+    def test_a_compaction_that_continues_the_carrys_line_or_a_later_one_is_read_on(
+        self, named: Transcript, carry: Carry
+    ) -> None:
+        assert carry.stands.link == "line-3"
+        made, left, answer = linked(
+            [boundary(14), summary(13.7), assistant(20, "msg_03")], "grown"
+        )
+        again, more = linked([boundary(30), assistant(34, "msg_04")], "more")
+        _added(
+            named,
+            [
+                made | {"logicalParentUuid": "line-3"},
+                left,
+                answer,
+                again | {"logicalParentUuid": "grown-2"},
+                more,
+            ],
+        )
+
+        publication = read(named, SETTINGS, carry).publication
+
+        assert len(publication.compactions) == 2
+        assert [
+            (call.message_id, call.predecessor, call.compaction)
+            for call in publication.calls
+        ] == [
+            ("msg_02", "msg_01", None),
+            ("msg_03", "msg_01", 1),
+            ("msg_04", "msg_01", 2),
+        ]
 
     def test_the_lines_of_a_file_that_grew_follow_the_carrys_line_and_each_other(
         self, named: Transcript, carry: Carry

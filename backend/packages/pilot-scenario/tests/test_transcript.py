@@ -1,8 +1,8 @@
 """The scenario as transcript files (F122.3): each thread a file in Claude
 Code's line shapes, in a home laid out as the fleet's is, and each
 publication what its file says: read back off the lines here, a thread's
-ids and place, its Launches, Prompts, Calls and Tool Calls are the
-publication's."""
+ids and place, its Launches, Prompts, Calls and Tool Calls, its Compactions
+and each Call's place on the chain are the publication's."""
 
 import json
 import re
@@ -13,7 +13,15 @@ from typing import Any
 
 import pytest
 from pilot_scenario import SCENARIO, Builder, HomeFile, Scenario
-from pilot_scenario.script import Call, Launch, Prompt, Session, Tokens, ToolUse
+from pilot_scenario.script import (
+    Call,
+    Compaction,
+    Launch,
+    Prompt,
+    Session,
+    Tokens,
+    ToolUse,
+)
 from pilot_scenario.transcript import folder, stamp, text
 
 UNTIL = datetime(2026, 11, 12, 9, 30, 0, 250_000, tzinfo=UTC)
@@ -37,11 +45,20 @@ FACTS = {
     "file_modified_at",
     "working_directory",
     "environment",
+    "compactions",
 }
 """What a publication says of its thread that its file's name, size, time
 and lines say."""
 
-CALL_FACTS = ("message_id", "prompt", "completed_at", "model", "tokens")
+CALL_FACTS = (
+    "message_id",
+    "prompt",
+    "predecessor",
+    "compaction",
+    "completed_at",
+    "model",
+    "tokens",
+)
 TOOL_CALL_FACTS = (
     "tool_use_id",
     "tool",
@@ -127,6 +144,31 @@ def _tool_call(
     return read
 
 
+def _is_boundary(line: dict[str, Any]) -> bool:
+    return bool(line["type"] == "system" and line["subtype"] == "compact_boundary")
+
+
+def _chain(
+    line: dict[str, Any], lines: list[dict[str, Any]]
+) -> tuple[str | None, int | None]:
+    """The Call the chain reaches from the line, by its `message.id`, and
+    the compaction it crosses on the way, by its place among the file's: up
+    each line's `parentUuid` and a boundary's `logicalParentUuid`."""
+    named = {each["uuid"]: each for each in lines if "uuid" in each}
+    boundaries = [each["uuid"] for each in lines if _is_boundary(each)]
+    crossed = None
+    while True:
+        boundary = _is_boundary(line)
+        if boundary and crossed is None:
+            crossed = boundaries.index(line["uuid"]) + 1
+        follows = line["logicalParentUuid" if boundary else "parentUuid"]
+        if follows is None:
+            return None, crossed
+        line = named[follows]
+        if line["type"] == "assistant":
+            return line["message"]["id"], crossed
+
+
 def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
     """The facts of a thread as its file says them, in a publication's
     words: an independent reading, with none of the builder's code."""
@@ -199,13 +241,31 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                 }
             )
             enqueued = None
+        elif _is_boundary(line):
+            made = line["compactMetadata"]
+            facts = {
+                "at": _time(line),
+                "trigger": made["trigger"],
+                "tokens_before": made["preTokens"],
+                "tokens_after": made.get("postTokens"),
+                "duration_ms": made.get("durationMs"),
+            }
+            read.setdefault("compactions", []).append(
+                {name: fact for name, fact in facts.items() if fact is not None}
+            )
         elif line["type"] == "assistant":
             message = line["message"]
-            call = calls.setdefault(
-                message["id"], {"message_id": message["id"], "tool_calls": []}
-            )
-            if main:
-                call.setdefault("prompt", prompts)
+            if message["id"] not in calls:
+                call = {"message_id": message["id"], "tool_calls": []}
+                predecessor, compaction = _chain(line, lines)
+                if predecessor is not None:
+                    call["predecessor"] = predecessor
+                if compaction is not None:
+                    call["compaction"] = compaction
+                if main:
+                    call["prompt"] = prompts
+                calls[message["id"]] = call
+            call = calls[message["id"]]
             spent = message["usage"]
             written = spent["cache_creation"]
             assert spent["cache_creation_input_tokens"] == sum(written.values())
@@ -314,6 +374,8 @@ def _resumed() -> Scenario:
                                         back_to="the first",
                                         tokens=Tokens(output=3),
                                     ),
+                                    Compaction(at=52, trigger="manual", before=900),
+                                    Call(at=55, tokens=Tokens(input=6, output=1)),
                                 ),
                             ),
                         ),
@@ -397,6 +459,24 @@ class TestAPublicationIsWhatItsFileSays:
             for tool_call in call.get("tool_calls", [])
         ]
 
+        publications = Builder(SCENARIO, UNTIL).publications()
+        (resumed,) = Builder(_resumed(), UNTIL).publications()
+        calls = [call for publication in publications for call in publication["calls"]]
+        assert [
+            sorted(made)
+            for publication in [*publications, resumed]
+            for made in publication.get("compactions", [])
+        ] == [
+            ["at", "duration_ms", "tokens_after", "tokens_before", "trigger"],
+            ["at", "tokens_before", "trigger"],
+        ]
+        assert sum("compaction" in call for call in calls) == 1
+        assert [call.get("predecessor") for call in resumed["calls"]] == [
+            None,
+            "msg_0001",
+            "msg_0001",
+            "msg_0003",
+        ]
         assert {call["tool"] for call in tool_calls} >= {"Bash", "Read", "Agent"}
         assert any(call.get("mcp_server") for call in tool_calls)
         assert any(call["failed"] and call.get("exit_code") for call in tool_calls)
@@ -432,14 +512,51 @@ class TestAPublicationIsWhatItsFileSays:
 
 class TestTheLines:
     def test_a_line_of_the_chain_follows_the_one_before_it(self) -> None:
+        """A compaction's boundary follows none, and names the one it
+        continues."""
         for file in _transcripts(Builder(SCENARIO, UNTIL)):
             chain = [line for line in _lines(file) if "uuid" in line]
             seen: set[str] = set()
             assert chain[0]["parentUuid"] is None
             for line in chain[1:]:
-                assert line["parentUuid"] in seen | {chain[0]["uuid"]}
+                follows = line["parentUuid"]
+                if _is_boundary(line):
+                    assert follows is None
+                    follows = line["logicalParentUuid"]
+                assert follows in seen | {chain[0]["uuid"]}
                 seen.add(line["uuid"])
             assert len({line["uuid"] for line in chain}) == len(chain)
+
+    def test_a_compaction_is_a_boundary_and_the_summary_the_chain_goes_on_from(
+        self,
+    ) -> None:
+        builder = Builder(SCENARIO, UNTIL)
+        lines = _lines(builder.files()[0])
+        (place,) = [place for place, line in enumerate(lines) if _is_boundary(line)]
+        before, made, summary, after = lines[place - 1 : place + 3]
+
+        assert (made["parentUuid"], made["logicalParentUuid"]) == (None, before["uuid"])
+        assert made["compactMetadata"] == {
+            "trigger": "auto",
+            "preTokens": 160_400,
+            "postTokens": 21_300,
+            "durationMs": 38_000,
+        }
+        assert made["timestamp"] == stamp(builder.when(150))
+        assert (summary["type"], summary["isCompactSummary"]) == ("user", True)
+        assert summary["parentUuid"] == made["uuid"]
+        assert "promptSource" not in summary and "isMeta" not in summary
+        assert summary["timestamp"] == stamp(
+            builder.when(150) - timedelta(milliseconds=300)
+        )
+        assert (after["type"], after["parentUuid"]) == ("assistant", summary["uuid"])
+        assert {made["version"], summary["version"]} == {"2.1.317"}
+
+    def test_a_boundary_records_what_its_compaction_gives_and_no_more(self) -> None:
+        lines = _lines(Builder(_resumed(), UNTIL).files()[0])
+        (made,) = [line for line in lines if _is_boundary(line)]
+
+        assert made["compactMetadata"] == {"trigger": "manual", "preTokens": 900}
 
     def test_a_line_beside_the_chain_carries_no_directory_and_the_queues_alone_a_time(
         self,

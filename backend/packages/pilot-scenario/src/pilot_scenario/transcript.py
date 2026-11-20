@@ -22,6 +22,11 @@ operations, the last prompt, and the cost line a process writes as it exits.
   its request's id, with `toolUseResult`, the tool's own record of it.
 - A sub-agent's file opens with the task its spawning call gave it, and every
   line of its chain is a `isSidechain` one that carries its `agentId`.
+- A compaction is a `system` line of subtype `compact_boundary` that follows
+  no line: its `logicalParentUuid` names the chain's last line before it, and
+  its `compactMetadata` has the trigger, the tokens before and after it and
+  how long it took. The summary follows it, a `user` line marked
+  `isCompactSummary` and timed before it, and the chain goes on from there.
 
 The shapes are Claude Code's; every word in them is invented.
 """
@@ -33,7 +38,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from pilot_scenario.script import Call, ToolUse
+from pilot_scenario.script import Call, Compaction, ToolUse
 
 SESSION_HOME = "/home/ubuntu/.claude"
 """The home as a session's own process names it: where a result's text says
@@ -49,6 +54,12 @@ _WORDS = "Stir the pot and taste the broth before the salt goes in. "
 
 _BETWEEN = timedelta(milliseconds=40)
 """The time from one line of a response to its next."""
+
+_SUMMARISED = timedelta(milliseconds=300)
+"""The time from a compaction's summary to its boundary's line."""
+
+_SUMMARY = 1_200
+"""The characters of a compaction's summary."""
 
 _ORIGINS = {
     "sdk": "sdk",
@@ -237,6 +248,36 @@ class Lines:
             files.insert(0, managed)
         self._chained(
             "attachment", at, attachment={"type": "instructions", "files": files}
+        )
+
+    def compacted(self, compaction: Compaction, at: datetime) -> None:
+        """The context is compacted: the boundary, written at `at`, and the
+        summary the chain goes on from."""
+        made: dict[str, Any] = {
+            "trigger": compaction.trigger,
+            "preTokens": compaction.before,
+        }
+        if compaction.after is not None:
+            made["postTokens"] = compaction.after
+        if compaction.took_ms is not None:
+            made["durationMs"] = compaction.took_ms
+        continues, self.leaf = self.leaf, None
+        self._chained(
+            "system",
+            at,
+            logicalParentUuid=continues,
+            subtype="compact_boundary",
+            content="Conversation compacted",
+            level="info",
+            compactMetadata=made,
+        )
+        self._chained(
+            "user",
+            at - _SUMMARISED,
+            promptId=self._id("prompt"),
+            isVisibleInTranscriptOnly=True,
+            isCompactSummary=True,
+            message={"role": "user", "content": text(_SUMMARY)},
         )
 
     def called(

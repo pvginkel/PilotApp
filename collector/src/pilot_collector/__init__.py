@@ -3,7 +3,7 @@ fleet's home and publishes each one's facts into Pilot's record. It holds no
 database and nothing of the app: what passes between it and Pilot is the
 package `pilot-collection`."""
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 """The collector's version, which every publication names as the one that
 read the file. It names how a file is read, and Pilot's inventory holds it
 for each transcript: a walk publishes again every transcript read under

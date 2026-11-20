@@ -160,8 +160,9 @@ class TestTheScenario:
             assert said.text.startswith("Exit code ")
 
     def test_a_line_says_who_wrote_it(self, tmp_path: Path) -> None:
-        """Pilot's brief and a person's typing on a main thread, and the
-        parent agent's task on a sub-agent's."""
+        """Pilot's brief and a person's typing on a main thread, with a
+        notice for each compaction's summary, and the parent agent's task on
+        a sub-agent's."""
         threads = _scenario(tmp_path)
         sources = {
             prompt["source"]
@@ -181,11 +182,13 @@ class TestTheScenario:
             if "agent_id" in publication:
                 assert writers == ["parent"]
                 continue
-            assert writers == [
+            assert [writer for writer in writers if writer != "notice"] == [
                 {"sdk": "brief", "typed": "person"}[prompt["source"]]
                 for launch in publication["launches"]
                 for prompt in launch["prompts"]
             ]
+            assert writers.count("notice") == len(publication.get("compactions", []))
+        assert any("compactions" in publication for publication, _ in threads)
 
 
 class TestACall:
