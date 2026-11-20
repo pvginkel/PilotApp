@@ -43,9 +43,13 @@ its newline is written. The facts are read off the lines in the file's order:
   compaction's boundary the one its `logicalParentUuid` names. A Call's
   predecessor is the nearest Call up the chain from its first line, and its
   compaction the boundary crossed on the way, the nearest where the chain
-  crosses several, by its place among the transcript's. A chain that ends
-  at a line that follows none, or names a line the file does not hold
-  before it, reaches no predecessor, and keeps a compaction it crossed.
+  crosses several, by its place among the transcript's. Claude Code writes
+  some lines before the line they follow, so a chain goes on through a line
+  wherever the file holds it, and passes the lines of its own Call and of
+  one that began later in the file: a predecessor is an earlier Call. A
+  chain that ends at a line that follows none, names a line the file does
+  not hold, or turns back on itself reaches no predecessor, and keeps a
+  compaction it crossed.
 - **A Tool Call** is a `tool_use` block of a Call's lines, requested at its
   line's time, and its result the first `tool_result` block that names its
   id, in a `user` line of the thread. Its argument is an Agent call's
@@ -70,7 +74,8 @@ Calls from the boundary's on, the Launches that wrote a line from there on,
 the first with its Prompts from there on, the Compactions made from there
 on, and the four places the boundary names. Such a reading holds no line
 before the boundary's byte but the one the carry names, with where the chain
-leads from it, so it stops, and the file is read whole, where:
+leads from it as the lines before that byte stand, so it stops, and the file
+is read whole, where:
 
 - the file is no larger than the one the carry was built on, or its bytes
   from the boundary's to its old end are other than those read then
@@ -78,7 +83,10 @@ leads from it, so it stops, and the file is read whole, where:
 - a line's `parentUuid`, or a compaction's `logicalParentUuid`, names a
   line that is neither the carry's nor one from the boundary's byte on, or
   a tool's result names a request no line from that byte on makes: each
-  reaches behind the boundary.
+  reaches behind the boundary, or names a line written later;
+- a line is one the carry awaits, named by a line before the boundary that
+  the file held no line of there: a chain before the boundary goes on
+  through it.
 """
 
 import json
@@ -176,6 +184,10 @@ _HEADLESS = "sdk"
 """What the entry point of a headless session opens with: `sdk-cli`, Claude
 Code run with `--print`, and an SDK's."""
 
+_BEFORE = -1
+"""The place of a Call before a reading's first line: every Call the
+reading takes began later."""
+
 _USAGE: dict[CallTokenKind, tuple[str, ...]] = {
     "input": ("input_tokens",),
     "cache_write_5m": ("cache_creation", "ephemeral_5m_input_tokens"),
@@ -227,14 +239,34 @@ class _ToolCall:
     saved_characters: int | None = None
 
 
+@dataclass(slots=True)
+class _Stop:
+    """A line the chain up from another line passes: a line of a Call, a
+    compaction's boundary, or one named before it was taken, which leads
+    nowhere until it is."""
+
+    call: str | None = None
+    """The Call the line is of."""
+    place: int = _BEFORE
+    """That Call's place among the transcript's, from 0."""
+    compaction: int | None = None
+    """The boundary's place among the transcript's Compactions."""
+    above: "_Stop | None" = None
+    """The nearest such line up the chain from this one; none where the
+    chain ends."""
+
+
 @dataclass
 class _Call:
+    place: int
+    """Its place among the transcript's Calls, from 0."""
     prompt: int | None
     completed_at: datetime
     model: str
     tokens: dict[str, int]
-    chain: Lead
-    """Where the chain leads from the line its first line follows."""
+    chain: _Stop | None
+    """The nearest stop up the chain from the line its first line
+    follows."""
     tool_calls: dict[str, _ToolCall] = field(default_factory=dict)
     """The tool calls it requested, by Claude's id of the request."""
 
@@ -388,18 +420,29 @@ class _Thread:
         """The tool calls requested, by Claude's id of the request."""
         self._link = before.link
         """The `uuid` of the last line taken that carries one."""
-        self._leads: dict[str, Lead] = {}
-        """Where the chain leads from each line taken, by its `uuid`, and
-        from the line the reading stands after."""
+        self._leads: dict[str, _Stop | None] = {}
+        """The nearest stop at or up the chain from each line taken, by its
+        `uuid`, and from the line the reading stands after."""
+        self._awaited: dict[str, _Stop] = {}
+        """The lines named that no line taken is yet, in the order they were
+        named: the stop each stands for."""
         if before.link is not None:
-            self._leads[before.link] = before.leads
+            led = before.leads
+            above = None if led.call is None else _Stop(led.call)
+            if led.compaction is not None:
+                above = _Stop(compaction=led.compaction, above=above)
+            self._leads[before.link] = above
 
     def take(self, line: dict[str, Any], byte: int) -> None:
         """Take the line that starts at `byte` of the file."""
         kind = line["type"]
         at = written_at(line)
         named = line.get("uuid")
-        chain = self._led(
+        if named in self._before.awaited:
+            raise NotContinuedError(
+                "a line before its boundary follows one written from it on"
+            )
+        chain = self._above(
             line.get("parentUuid"),
             "a line follows one before its boundary that is not the last there",
         )
@@ -410,14 +453,18 @@ class _Thread:
         )
         if answers and line["message"]["id"] not in self.calls:
             self.stands = self._standing(byte)
-        lead = chain
+        stop = chain
         if answers:
-            lead = Lead(line["message"]["id"])
+            answered = line["message"]["id"]
+            stop = _Stop(answered, self._placed(answered), above=chain)
         elif at is not None and kind == "system" and line.get("subtype") == _COMPACTED:
-            lead = self._compacted(line, at)
+            stop = self._compacted(line, at)
         if named is not None:
             self._link = named
-            self._leads[named] = lead
+            self._leads[named] = stop
+            awaited = self._awaited.pop(named, None)
+            if awaited is not None:
+                awaited.above = stop
         if self.directory is None and "cwd" in line:
             self.directory = line["cwd"]
         if kind == _COST:
@@ -454,14 +501,18 @@ class _Thread:
         """Where the reading stands before the line that starts at `byte`,
         none of it taken."""
         opened = None if self._exited else self.launches[-1]
+        calls = self._before.calls + len(self.calls)
         return Standing(
             byte=byte,
-            calls=self._before.calls + len(self.calls),
+            calls=calls,
             launches=self._published,
             prompts=self._prompts,
             compactions=self._before.compactions + len(self.compactions),
             link=self._link,
-            leads=ROOT if self._link is None else self._leads[self._link],
+            leads=ROOT
+            if self._link is None
+            else self._reached(self._leads[self._link], calls),
+            awaited=self._before.awaited + tuple(self._awaited),
             directory=self.directory,
             environment=self.environment,
             launch=None
@@ -473,24 +524,49 @@ class _Thread:
             removed=self._removed,
         )
 
-    def _led(self, follows: str | None, behind: str) -> Lead:
-        """Where the chain leads from the line `follows` names: nowhere
-        from none, and from one the reading holds no line of. A reading from
-        a boundary on stops at such a line, which lies `behind` it."""
+    def _placed(self, message_id: str) -> int:
+        """The place among the transcript's Calls of the one of that id,
+        from 0: the next where no line of it was taken."""
+        began = self.calls.get(message_id)
+        return self._before.calls + len(self.calls) if began is None else began.place
+
+    def _above(self, follows: str | None, behind: str) -> _Stop | None:
+        """The nearest stop at or up the chain from the line `follows`
+        names: none from no line, and from a line not taken the stop that
+        stands for it until it is. A reading from a boundary on stops at
+        such a line, which lies `behind` it or is written later."""
         if follows is None:
-            return ROOT
-        lead = self._leads.get(follows)
-        if lead is not None:
-            return lead
+            return None
+        if follows in self._leads:
+            return self._leads[follows]
         if self._before.byte:
             raise NotContinuedError(behind)
-        return ROOT
+        return self._awaited.setdefault(follows, _Stop())
 
-    def _compacted(self, line: dict[str, Any], at: datetime) -> Lead:
-        """A Compaction, its boundary written `at`; where the chain leads
-        from the boundary, which it crosses to the line its
-        `logicalParentUuid` names."""
-        continues = self._led(
+    def _reached(self, stop: _Stop | None, place: int) -> Lead:
+        """Where the chain leads from `stop` up, for a Call at `place`
+        among the transcript's, as the lines taken stand: the nearest Call
+        that began before it, and the nearest compaction crossed on the way
+        there, or to where the chain ends or turns back on itself."""
+        compaction = None
+        passed: set[int] = set()
+        while stop is not None and id(stop) not in passed:
+            if stop.call is not None and stop.place < place:
+                return Lead(stop.call, compaction)
+            passed.add(id(stop))
+            compaction = compaction or stop.compaction
+            stop = stop.above
+        return Lead(None, compaction)
+
+    def chain(self, call: _Call) -> Lead:
+        """The Call's predecessor and the compaction its chain crossed."""
+        return self._reached(call.chain, call.place)
+
+    def _compacted(self, line: dict[str, Any], at: datetime) -> _Stop:
+        """A Compaction, its boundary written `at`: the boundary's stop,
+        from which the chain goes on to the line its `logicalParentUuid`
+        names."""
+        continues = self._above(
             line.get("logicalParentUuid"),
             "a compaction continues a line before its boundary that is not the"
             " last there",
@@ -506,7 +582,7 @@ class _Thread:
             }
         )
         place = self._before.compactions + len(self.compactions)
-        return Lead(continues.call, place)
+        return _Stop(compaction=place, above=continues)
 
     def _queued(self, line: dict[str, Any], at: datetime) -> None:
         """A prompt's text is words: content that is none is no prompt's."""
@@ -572,14 +648,24 @@ class _Thread:
             {"received_at": at, "source": source, "characters": len(text)}
         )
 
-    def _answered(self, message: dict[str, Any], at: datetime, chain: Lead) -> None:
-        """A line of a response, which follows a line `chain` leads from."""
+    def _answered(
+        self, message: dict[str, Any], at: datetime, chain: _Stop | None
+    ) -> None:
+        """A line of a response, which follows a line `chain` is the
+        nearest stop from."""
         if message["model"] == SYNTHETIC:
             return
         model, tokens = message["model"], _tokens(message["usage"])
         call = self.calls.get(message["id"])
         if call is None:
-            call = _Call(self._prompts or None, at, model, tokens, chain)
+            call = _Call(
+                self._placed(message["id"]),
+                self._prompts or None,
+                at,
+                model,
+                tokens,
+                chain,
+            )
             self.calls[message["id"]] = call
         else:
             call.completed_at, call.model, call.tokens = at, model, tokens
@@ -672,8 +758,8 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
         {
             "message_id": message_id,
             "prompt": call.prompt,
-            "predecessor": call.chain.call,
-            "compaction": call.chain.compaction,
+            "predecessor": (chain := thread.chain(call)).call,
+            "compaction": chain.compaction,
             "completed_at": call.completed_at,
             "model": call.model,
             "tokens": call.tokens,

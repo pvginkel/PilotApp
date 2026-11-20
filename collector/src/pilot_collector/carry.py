@@ -13,11 +13,12 @@ the file's last Call, and the place its next would take in a file with none.
 The carry holds the byte the boundary's first line starts at and what the
 lines from there on continue: how many Calls, published Launches, Prompts and
 Compactions lie before it, the last line before it that lines link to and
-where the chain leads from that line, the directory and the environment the
-file named first, the Launch open there, the prompts waiting in the queue,
-and those a `remove` took out of it that no message taken in the middle of a
-run has claimed. No id of any other line before the boundary is held, and of
-no Call but the one the chain leads to.
+where the chain leads from that line, the lines named before it that the
+file holds no line of there, the directory and the environment the file
+named first, the Launch open there, the prompts waiting in the queue, and
+those a `remove` took out of it that no message taken in the middle of a run
+has claimed. No id of any other line before the boundary is held, and of no
+Call but the one the chain leads to.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
@@ -34,6 +35,9 @@ _DIGEST = 16
 
 _HELD = 1_280
 """The bytes a carry is counted at beside its words and its queue."""
+
+_AWAITED = 64
+"""The bytes a line awaited is counted at beside its id."""
 
 _QUEUED = 176
 """The bytes a prompt waiting in the queue, or held once a `remove` took it
@@ -93,7 +97,13 @@ class Standing:
     link: str | None = None
     """The `uuid` of the last line before it that carries one."""
     leads: Lead = ROOT
-    """Where the chain leads from the line `link` names."""
+    """Where the chain leads from the line `link` names, as the lines
+    before it stand."""
+    awaited: tuple[str, ...] = ()
+    """The `uuid`s the lines before it name as the line they follow, or a
+    compaction's boundary as the one it continues, that no line before it
+    carries, in the order they were named: a line of another file, or one
+    written later."""
     directory: str | None = None
     environment: str | None = None
     launch: Open | None = None
@@ -133,10 +143,12 @@ class Carry:
             stands.directory,
             stands.environment,
             self.collector,
+            *stands.awaited,
         )
         return (
             _HELD
             + sum(len(word) for word in words if word is not None)
+            + _AWAITED * len(stands.awaited)
             + _QUEUED * (len(stands.queue) + len(stands.removed))
         )
 

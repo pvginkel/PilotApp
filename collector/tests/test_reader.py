@@ -1284,6 +1284,121 @@ class TestACallsChain:
 
         assert _chains(_read(tmp_path, lines)) == [(None, None), (None, None)]
 
+    @pytest.mark.parametrize(
+        "between",
+        [
+            [requesting(4.1, "toolu_01", message_id="msg_01"), result(6, "toolu_01")],
+            [
+                chained("system", 5, subtype="turn_duration", durationMs=1_000),
+                chained("system", 6, subtype="turn_duration", durationMs=1_000),
+            ],
+        ],
+        ids=["a tool's result before its request's line", "a `system` line"],
+    )
+    def test_a_chain_goes_on_through_a_line_written_before_the_line_it_follows(
+        self, between: list[Line], tmp_path: Path
+    ) -> None:
+        """Claude Code writes some lines before the line their `parentUuid`
+        names."""
+        lines = linked(
+            [typed(0), assistant(4, "msg_01"), *between, assistant(9, "msg_02")]
+        )
+        early = [lines[at] for at in (0, 1, 3, 2, 4)]
+
+        assert _chains(_read(tmp_path, lines)) == [(None, None), ("msg_01", None)]
+        assert _chains(_read(tmp_path, early)) == [(None, None), ("msg_01", None)]
+
+    def test_a_chain_goes_on_through_a_line_written_after_the_call_it_leads_from(
+        self, tmp_path: Path
+    ) -> None:
+        """The line a Call's chain waits for is written once two later Calls
+        have begun."""
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                chained("system", 5, subtype="turn_duration", durationMs=1_000),
+                chained("system", 6, subtype="turn_duration", durationMs=1_000),
+                assistant(9, "msg_02"),
+                typed(12),
+                assistant(14, "msg_03"),
+            ]
+        )
+        late = [lines[at] for at in (0, 1, 3, 4, 5, 6, 2)]
+
+        assert _chains(_read(tmp_path, late)) == [
+            (None, None),
+            ("msg_01", None),
+            ("msg_02", None),
+        ]
+
+    def test_a_chain_crosses_a_boundary_written_after_the_line_that_follows_it(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                boundary(30),
+                summary(29.7),
+                assistant(40, "msg_02"),
+            ]
+        )
+        early = [lines[at] for at in (0, 1, 3, 2, 4)]
+
+        assert _chains(_read(tmp_path, early)) == [(None, None), ("msg_01", 1)]
+
+    def test_a_chain_passes_a_line_of_its_own_call(self, tmp_path: Path) -> None:
+        """A Call's second line is written before its first, which it
+        follows."""
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                typed(8),
+                assistant(10, "msg_02", output=1),
+                assistant(11, "msg_02", output=5),
+                assistant(14, "msg_03"),
+            ]
+        )
+        early = [lines[at] for at in (0, 1, 2, 4, 3, 5)]
+
+        assert _chains(_read(tmp_path, early)) == [
+            (None, None),
+            ("msg_01", None),
+            ("msg_02", None),
+        ]
+
+    def test_a_chain_passes_a_call_that_began_later_in_the_file(
+        self, tmp_path: Path
+    ) -> None:
+        """A predecessor is an earlier Call: `msg_03`'s chain runs through
+        `msg_02`'s line, written after `msg_03` began."""
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                typed(8),
+                assistant(10, "msg_02"),
+                typed(12),
+                assistant(14, "msg_03"),
+            ]
+        )
+        late = [lines[at] for at in (0, 1, 2, 4, 5, 3)]
+
+        publication = _read(tmp_path, late)
+
+        assert [call.message_id for call in publication.calls] == [
+            "msg_01",
+            "msg_03",
+            "msg_02",
+        ]
+        assert _chains(publication) == [
+            (None, None),
+            ("msg_01", None),
+            ("msg_01", None),
+        ]
+
     def test_a_sub_agents_chain_is_read_as_a_main_threads(self, tmp_path: Path) -> None:
         lines = linked(
             [

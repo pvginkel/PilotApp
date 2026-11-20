@@ -22,6 +22,7 @@ from tests.support import (
     Line,
     assistant,
     boundary,
+    chained,
     cost,
     filed,
     instructions,
@@ -88,6 +89,14 @@ def _held(held: PublicationSchema, grown: PublicationSchema) -> PublicationSchem
             "calls": held.calls[: boundary.call - 1] + grown.calls,
         }
     )
+
+
+def _ticks(count: int) -> list[Line]:
+    """That many `system` lines, each a second after the one before."""
+    return [
+        chained("system", 5 + place / 10, subtype="turn_duration", durationMs=1_000)
+        for place in range(count)
+    ]
 
 
 def _places(publication: PublicationSchema) -> tuple[int, int, int, int]:
@@ -265,6 +274,38 @@ class TestTheCarry:
 
         assert (stands.link, stands.leads) == ("line-1", ROOT)
 
+    def test_it_holds_the_lines_named_before_it_that_the_file_holds_none_of_there(
+        self, tmp_path: Path
+    ) -> None:
+        """A line of another file, and one written after the boundary's
+        first: the chain leads from the carry's line as the lines before the
+        boundary stand, nowhere, where the Call's own goes on through the
+        line written late."""
+        lines = linked([typed(0), assistant(4, "msg_01"), *_ticks(4), assistant(9)])
+        lines[0]["parentUuid"] = "a-line-of-another-file"
+        lines[-1]["message"]["id"] = "msg_02"
+        late = [lines[at] for at in (0, 1, 2, 3, 5, 6, 4)]
+
+        taken = read(filed(tmp_path, late), SETTINGS)
+
+        stands = taken.carry.stands
+        assert stands.byte == len(support.content(late[:5]))
+        assert stands.awaited == ("a-line-of-another-file", "line-5")
+        assert (stands.link, stands.leads) == ("line-6", ROOT)
+        assert taken.publication.calls[-1].predecessor == "msg_01"
+
+    def test_it_holds_no_line_written_early_whose_line_stands_before_it(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked([typed(0), assistant(4, "msg_01"), *_ticks(2), assistant(9)])
+        lines[-1]["message"]["id"] = "msg_02"
+        early = [lines[at] for at in (0, 1, 3, 2, 4)]
+
+        stands = read(filed(tmp_path, early), SETTINGS).carry.stands
+
+        assert stands.awaited == ()
+        assert (stands.link, stands.leads) == ("line-3", Lead("msg_01"))
+
     def test_the_call_its_chain_leads_to_counts_in_its_size(
         self, tmp_path: Path
     ) -> None:
@@ -351,6 +392,74 @@ class TestAFileThatGrew:
                 held = whole
         assert whole_instead == read_whole
         assert appended >= 10
+
+    def test_a_file_with_lines_written_early_grown_a_line_at_a_time_reads_as_its_whole(
+        self, tmp_path: Path
+    ) -> None:
+        """Lines written before the line they follow: a tool's result, a
+        `system` line a Call's first line apart from its own, a compaction's
+        summary and a response's second line. At every step the file is
+        read whole instead, or its appended publication on what Pilot held
+        is the whole one, with the whole reading's carry."""
+        lines = linked(
+            [
+                typed(0),
+                requesting(4, "toolu_01", message_id="msg_01"),
+                result(6, "toolu_01"),
+                assistant(9, "msg_02"),
+                typed(10),
+                assistant(11, "msg_03"),
+                *_ticks(2),
+                assistant(14, "msg_04"),
+                typed(15),
+                assistant(16, "msg_05"),
+                boundary(30),
+                summary(29.7),
+                assistant(40, "msg_06", output=1),
+                assistant(41, "msg_06", output=5),
+                typed(50),
+                assistant(54, "msg_07"),
+                typed(60),
+                assistant(64, "msg_08"),
+            ]
+        )
+        written = [
+            lines[at]
+            for at in (0, 2, 1, 3, 4, 5, 7, 8, 6, 9, 10, 12, 11, 14, 13, 15, 16, 17, 18)
+        ]
+        named = filed(tmp_path, written[:1])
+        held = read(named, SETTINGS)
+        appended, stopped = 0, set()
+        for line in written[1:]:
+            _added(named, [line])
+            whole = read(named, SETTINGS)
+            try:
+                taken = read(named, SETTINGS, held.carry)
+            except NotContinuedError as stop:
+                stopped.add(str(stop))
+            else:
+                assert _held(held.publication, taken.publication) == whole.publication
+                assert taken.carry == whole.carry
+                appended += 1
+            held = whole
+
+        assert [
+            (call.predecessor, call.compaction) for call in whole.publication.calls
+        ] == [
+            (None, None),
+            ("msg_01", None),
+            ("msg_02", None),
+            ("msg_03", None),
+            ("msg_04", None),
+            ("msg_05", 1),
+            ("msg_06", None),
+            ("msg_07", None),
+        ]
+        assert stopped == {
+            "a line follows one before its boundary that is not the last there",
+            "a line before its boundary follows one written from it on",
+        }
+        assert appended == 4
 
     def test_the_boundarys_call_takes_what_its_later_lines_say(
         self, tmp_path: Path
@@ -723,6 +832,37 @@ class TestAFileThatDoesNotContinueItsCarry:
 
         with pytest.raises(NotContinuedError, match="follows one before its boundary"):
             read(named, SETTINGS, carry)
+
+    def test_a_line_that_a_line_behind_the_boundary_follows_is_not_read_on(
+        self, tmp_path: Path
+    ) -> None:
+        """A compaction's summary written before its boundary, with two
+        Calls begun between them: the chain of the first, behind the
+        carry's boundary, crosses the compaction once its line is there."""
+        prompt, answer, made, left, *rest = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                boundary(30),
+                summary(29.7),
+                assistant(40, "msg_02"),
+                typed(50),
+                assistant(54, "msg_03"),
+            ]
+        )
+        named = filed(tmp_path, [prompt, answer, left, *rest])
+        before = read(named, SETTINGS)
+        assert before.carry.stands.awaited == ("line-3",)
+        assert before.publication.calls[1].compaction is None
+        _added(named, [made | {"logicalParentUuid": None}])
+
+        with pytest.raises(
+            NotContinuedError,
+            match="a line before its boundary follows one written from it on",
+        ):
+            read(named, SETTINGS, before.carry)
+
+        assert read(named, SETTINGS).publication.calls[1].compaction == 1
 
     def test_a_result_for_a_request_behind_the_boundary_is_not_read_on(
         self, named: Transcript, carry: Carry

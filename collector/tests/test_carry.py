@@ -9,7 +9,9 @@ from pilot_collector.carry import Carries, Carry, Lead, Open, Standing, digest
 STOOD = datetime(2026, 11, 12, 10, 2, 3, 456789, tzinfo=UTC)
 
 
-def _carry(place: int = 0, queued: int = 0, removed: int = 0) -> Carry:
+def _carry(
+    place: int = 0, queued: int = 0, removed: int = 0, awaited: int = 0
+) -> Carry:
     """A carry no other shares a word or a time with."""
     return Carry(
         file_size=61_000 + place,
@@ -23,6 +25,10 @@ def _carry(place: int = 0, queued: int = 0, removed: int = 0) -> Carry:
             compactions=3 + place,
             link=f"{place:08}-8b2d-4d57-9e3a-71c5d2b8a690",
             leads=Lead(f"msg_01{place:022}", 3 + place),
+            awaited=tuple(
+                f"{place:08}-{named:04}-4d57-9e3a-71c5d2b8a690"
+                for named in range(awaited)
+            ),
             directory=f"/work/Loom{place}",
             environment=f"cleo-loom-{place:06}",
             launch=Open(STOOD + timedelta(hours=place), f"2.1.{place}", 300 + place),
@@ -51,10 +57,12 @@ def _path(name: str) -> Path:
 
 class TestACarrysSize:
     def test_it_is_counted_at_no_less_than_the_memory_it_takes(self) -> None:
-        for queued in (0, 40):
+        for queued, awaited in ((0, 0), (40, 0), (0, 3)):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
-            carries = [_carry(place, queued) for place in range(1_000, 1_400)]
+            carries = [
+                _carry(place, queued, awaited=awaited) for place in range(1_000, 1_400)
+            ]
             taken = tracemalloc.get_traced_memory()[0] - before
             tracemalloc.stop()
 
@@ -63,6 +71,9 @@ class TestACarrysSize:
 
     def test_a_prompt_waiting_in_the_queue_counts(self) -> None:
         assert _carry(queued=3).size > _carry(queued=2).size > _carry().size
+
+    def test_a_line_awaited_counts(self) -> None:
+        assert _carry(awaited=2).size > _carry(awaited=1).size > _carry().size
 
     def test_a_prompt_a_remove_took_out_and_held_counts_as_one_waiting(
         self,
