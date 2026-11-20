@@ -52,13 +52,14 @@ projects too.
   screen reads either: they are the routes behind `pilot-projects`' `get_project` and `list_items`
   ([`mcp.md`](mcp.md#the-projects-surface)), whose `project` is an id or a folder.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, address, name, ticket, repo, state,
-  archived, autopilot, status, member, members, progress, tasks, notes, running_work, open_items,
-  autopilot_may_take, create_refusal, url}`. A member is `{handle, name, initials, avatar_slot}`, in
+  archived, autopilot, status, member, members, progress, tasks, notes, running_work, estimate,
+  open_items, autopilot_may_take, create_refusal, url}`. A member is `{handle, name, initials, avatar_slot}`, in
   the order they joined; a task is a step, `{id, title, status, notes}`, with its open notes; `notes`
   are the plan's own; a note is `{id, summary, content}`. `running_work` is `[{id, seq, title,
   environment}]`, in timeline order, the work items whose session runs, starts or is held, which
   Finish and Archive stop, `environment` the name of its Session's environment, null while it has
-  none. `url` is the project's page in the app, `<BASEURL>/projects/<address>`. `open_items` counts
+  none. `estimate` is the badge of the time its running work still takes, one of `running_work`'s,
+  null while none shows one ([below](#the-time-its-work-still-takes)). `url` is the project's page in the app, `<BASEURL>/projects/<address>`. `open_items` counts
   the project's open items but the opening, which is never done (D016), and those, which Finish
   closes unanswered; a finished project's is its archive question, while it
   is open (below). `autopilot_may_take` counts the open confirmations the switch would answer: the
@@ -360,7 +361,8 @@ showing on the page's colour.
 4. Last, the members fold to the first avatars and a "+N" count, whose tooltip names the rest. One
    avatar always stays.
 
-The ticket, the chips, auto pilot and the icons keep their size, and the step button stands no
+The badge of the time its work still takes, the ticket, the chips, auto pilot and the icons keep
+their size, and the step button stands no
 wider than 350px. A head whose parts, each at its floor, would still run its menu past it in one
 line stands in its two rows, where the name takes what its row leaves beside its chip, the ticket
 and the switch, with no floor. It is measured in one
@@ -410,7 +412,8 @@ The popovers and the menu close on a press outside them, which does nothing else
 ([`ui.md`](ui.md)).
 
 **A phone's head** (`PhoneHead`, `phone-head.tsx`) is one line, 52px high: the arrow to the home
-([`ui.md`](ui.md)); the name and its chip, with no ticket (D192) and no repo; the auto pilot switch without
+([`ui.md`](ui.md)); the name and its chip, with no ticket (D192) and no repo, the badge of the time
+its work still takes right after the name (below); the auto pilot switch without
 its label, named "Auto pilot" to a screen reader, and its warning triangle, or the Finished chip in
 its place; the plan's donut alone (`PlanDonut`), with no button's chrome and no step's name, its
 tooltip the step button's, a tap on it showing the Plan tab (below); the members, two circles at
@@ -423,6 +426,37 @@ the tooltip's and a screen reader's (D128). Only the name gives way, cut to noth
 finished head with three members and the notes' button holds its line from about 390px
 wide, and on a narrower phone its menu runs past the head's edge. A draft's has its name, the Draft
 chip, its members and its menu.
+
+### The time its work still takes
+
+**The head's badge** (`HeadEta`, `project-head.tsx`; `EtaBadge`, [`ui.md`](ui.md)) stands right
+after the project's name on both widths (D248), and shows the badge of one of its running work
+items, which the server picks (`project_estimate`, `backend/app/services/step_estimate.py`): of
+those longer than usual, the first whose running step has outrun its kind, else the marked one with
+the most time left; with none, the one with the most time left; of two alike, the first in the
+head's order. So the head reads the alert's "—" where any of its work has outrun its kind, else
+the time left of the marked one with the most, else the most time left
+([`work.md`](work.md#the-time-it-still-takes)). Its alert's
+sentence names the work item, "<title> has run 12 min, longer than such work usually takes: it may
+be stuck.", or "<title> runs longer …" while its Session has no start; on a phone it hangs from the
+head, 8px in from each side. The Plan tab shows none.
+
+The head carries it as `estimate`, as it read when the head was built: a work item's `estimate`
+([`work.md`](work.md#the-time-it-still-takes)) with `item_id`, the one of `running_work` it is of
+(`ProjectEstimateSchema`, `backend/app/schemas/projects.py`), null while none of `running_work`
+shows a badge. It rides no `work_moved`: the head is read again on `project_changed`, and by the
+minute's read.
+
+**`GET /api/projects/<id>/estimates`** answers `{estimate, work_items: [{id, estimate}]}`, the time
+the project's running work still takes as it reads now: the head's `estimate`, and each open work
+item's whose Session runs and that shows a badge, in timeline order (`ProjectService.estimates`). It
+reads no item's body, no timeline and no plan; an unknown id answers `404`. `useEstimates`
+(`frontend/src/hooks/use-estimates.ts`), on the project's page, reads it each minute while the head
+or any work item shows a badge, by the wall clock, looked at every 5 s, so that a page that lived
+through a suspend reads within 5 s of waking, and writes it over the head's and each work item's as read, a work
+item it does not list losing its badge. A move that changed a work item's badge reads it at once, so
+that the head's follows. The read writes only over what stands as it stood when the read was sent,
+so a `work_moved` heard meanwhile keeps its figure. The page computes nothing of an estimate.
 
 ## Create project
 
@@ -628,11 +662,14 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   names while its turn is in flight. It answers `201` `{ids}`; an unknown work item or a `to` of no
   item of its project is a `404`, a session with no environment yet or a file that cannot be copied
   a `409`, and the controller's own failure a `502`.
-- `POST /api/testing/items/<id>/progress` `{steps: [{code, label, state?, why?}]}` replaces the work item
-  `<id>`'s list of steps as its worker's `set_progress` does ([`mcp.md`](mcp.md)), its status moved
-  on every browser through `work_moved` where the list changed. It answers `200` `{steps}`, the list
-  as it stands; a session with no turn running is a `403`, an unknown work item a `404`, a session
-  with no environment yet or a repeated code a `409`, and a body outside the limits a `400`.
+- `POST /api/testing/items/<id>/progress` `{steps: [{code, label, state?, why?, kind?, marked?,
+  conversations?, duration?}]}` replaces the work item `<id>`'s list of steps as its worker's
+  `set_progress` does ([`mcp.md`](mcp.md)), a step's kind, mark, conversations and duration taken
+  as that tool takes them, its timing left with them, its status moved on every browser through
+  `work_moved` where the list changed. It answers `200` `{steps}`, the list as it stands; a session
+  with no turn running is a `403`, an unknown work item a `404`, a session with no environment yet,
+  a repeated code or a duration on a step the call leaves not done a `409`, and a body outside the
+  limits a `400`.
 - `POST /api/testing/items/<id>/debrief` `{debrief, entries, subject?, completes?, figures?}` gives
   the work item `<id>`'s debrief as its worker's `register_debrief` does ([`mcp.md`](mcp.md)),
   while its session's turn is in flight; its done line carries the Debrief once the turn ends, and

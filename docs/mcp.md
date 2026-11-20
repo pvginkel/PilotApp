@@ -4,7 +4,8 @@ Pilot hands its own MCP server to every headless session it creates, one of two 
 session's kind. A work item's session gets `pilot-work`: `register_document`, a decision document
 it wrote, put to a person on the project's timeline; `attach_file`, the material that backs one,
 copied into the record; `set_progress` and `set_progress_step`, the steps its run goes through,
-shown on its tile; and `register_debrief`, its run's debrief, shown behind the done work item's
+shown on its tile; `seed_step_timings`, past runs' finished steps, which the time a running work
+item still takes is estimated from beside a run's own; and `register_debrief`, its run's debrief, shown behind the done work item's
 Debrief and in its subject's debrief's notice. The brain's sessions, a project's chat, a conversation and the server's jobs, get
 `pilot-store`, the one door to the record beyond the project's folder: `add_item`, `attach_file`,
 `answer`, `mark`, `cancel_ask`, `stop_work`, `finish`, `ask_writer`, `write_notable`, `note` and
@@ -101,8 +102,8 @@ session alike, at the endpoint of the surface the create's scope names (`scoped_
 A create whose scope names no surface, a finished project's chat's ([`chats.md`](chats.md)), is
 handed neither variable nor the entry, so no bearer reaches either surface's routes from it; a
 token's hash is minted for it all the same. A worker's tools are `mcp__pilot__register_document`,
-`mcp__pilot__attach_file`, `mcp__pilot__set_progress`, `mcp__pilot__set_progress_step` and
-`mcp__pilot__register_debrief`, the
+`mcp__pilot__attach_file`, `mcp__pilot__set_progress`, `mcp__pilot__set_progress_step`,
+`mcp__pilot__seed_step_timings` and `mcp__pilot__register_debrief`, the
 brain's `mcp__pilot__add_item` and the rest. The token's
 sha256 is the Session's `token_hash`, written in the transaction that records the create's
 controller session, so a bearer resolves to the Session whose controller session carries it; a
@@ -205,31 +206,90 @@ answers `[]`. A call that attached is the effect "Attached · <title>" for one f
 
 ### `set_progress(steps)` and `set_progress_step(code, state)`
 
-The session's own work item's list of steps ([`work.md`](work.md)), each `{code, label, state,
-why}`: `code` the run's name for the step, unique in the list, `label` its words on the tile,
-`state` `pending`, `active` or `done`, and `why`, a short line shown under the label in the
-popover, which a run gives the step that opens a repeat round to say why the round before did not
-settle it, null where it gave none.
+The session's own work item's list of steps ([`work.md`](work.md)), each `{code, label, state, why,
+kind, marked, conversations}`: `code` the run's name for the step, unique in the list, `label` its
+words on the tile, `state` `pending`, `active` or `done`, and `why`, a short line shown under the
+label in the popover, which a run gives the step that opens a repeat round to say why the round
+before did not settle it, null where it gave none. `kind` is the run's name for the kind of step
+it is, `code-writer` rather than `code`, which Pilot stores and shows as given and reads nothing
+out of, as it reads no kind out of a code; `marked` is the run's word, by its own measure, that it
+holds the step to be in trouble; and `conversations` are the Claude Code session ids of the
+conversations that did the step's work (D251). The time a running work item still takes is
+estimated from the kinds ([`work.md`](work.md#the-time-it-still-takes)).
 
-- **`PUT /tools/pilot-work/progress`** `{steps: [{code, label, state?, why?}]}` replaces the list,
-  in the call's order: a code already on it keeps its row, and its state where its step gives
-  none; a new code starts `pending`, or in the state it gives; a code left out goes; and `[]`
-  removes the list. Each step's label and why are as the call gives them, so a step given without
-  a why has none, whatever it had.
+- **`PUT /tools/pilot-work/progress`** `{steps: [{code, label, state?, why?, kind?, marked?,
+  conversations?, duration?}]}` replaces the list, in the call's order: a code already on it keeps
+  its row, and its state where its step gives none; a new code starts `pending`, or in the state it
+  gives; a code left out goes; and `[]` removes the list. Each step's label, why, kind, mark and
+  conversations are as the call gives them, so a step given without a why has none, whatever it
+  had. `duration`, on a step the call leaves `done`, is the whole seconds its work took by the
+  run's own measure; the step does not keep it.
 - **`PATCH /tools/pilot-work/progress`** `{code, state}` moves one step, every step keeping its
-  place; a code not on the list is a `404` "Progress step <code> was not found".
+  place, its kind and its mark; a code not on the list is a `404` "Progress step <code> was not
+  found".
 
-Both answer `200` `{steps}`, the list as it stands, in order. A body outside the limits, an empty
-code, label or why, a code over 64 characters, a label or a why over 120, a list over 100 steps
-(`MAX_STEP_CODE`, `MAX_STEP_LABEL`, `MAX_STEP_WHY` and `MAX_STEPS` in
-`backend/app/schemas/pilot_work.py`, which `pilot_mcp/api.py` mirrors), a state outside the three
-or a field the step does not have, is a `400`, and a repeated code a `409`, nothing changed. The server's clock stamps a step's start when it first goes `active` or
-`done`, never changed after, and its end each time it goes `done`, cleared when it leaves `done`; a
-step set to the state it is in is left as it is. Each call holds the Session's row, `FOR NO KEY
-UPDATE`, and refuses with the gate's `403` unless its turn still runs, so two calls on one list,
-a script's and the agent's, are served one after the other, each answering the list its own change
-left. No call writes an effect. One that changed the steps' codes, labels, whys, states or order
-moves the work item's status ([`work.md`](work.md)); one that changed none of them sends nothing.
+Both answer `200` `{steps}`, the list as it stands, in order, each step `{code, label, state, why}`.
+A body outside the limits is a `400`, nothing changed: an empty code, label or why, an empty or
+blank kind, a code or a kind over 64 characters, a label or a why over 120, a duration that is not
+a whole number from 0 to 2,147,483,647, a `marked` that is not a boolean, a conversation empty,
+blank, over 64 characters or repeated on its step, over 100 conversations on a step, a list over
+100 steps (`MAX_STEP_CODE` to `MAX_STEP_CONVERSATIONS` in `backend/app/schemas/pilot_work.py`,
+which `pilot_mcp/api.py` mirrors and `test_a_steps_limits_are_its_routes` holds equal), a state
+outside the three or a field the step does not have. A repeated code is a `409`, and so is a
+duration on a step the call leaves not `done`, nothing changed. The server's clock stamps a step's
+start when it first goes `active` or `done`, never changed after, and its end each time it goes
+`done`, cleared when it leaves `done`; a step set to the state it is in is left as it is. With a
+step's first start the server notes whether it was **listed ahead**, standing on the list before it
+began: yes for a step that stood on it pending, no for one a call brings onto a standing list
+already begun, and unknown for one the work item's first list brings begun, a list published while
+the work item holds none, after `[]` included. A kind's row is written the first time a call names
+it (`step_kinds`, [`record.md`](record.md)). A step's conversations are its Step Transcripts,
+rewritten by their difference, so that a list republished at each move rewrites none; they go with
+their step, and each finds its main thread's Transcript by its session id once a collector has
+published it ([`collection.md`](collection.md)).
+
+**A step's timing.** A step that stood on the list not `done` and goes `done` in a `set_progress`
+call that gives it a kind and a duration leaves a Step Timing: its kind, its duration, its end as
+the server stamped it, whether it was listed ahead, the mark the call gave it, its code, and its
+repo, the work item's `repo` label, else its environment's, none with neither, stored with the row
+once (`step_timings`, [`record.md`](record.md)). A step is timed once: one moved back and done again
+leaves no second (`uq_step_timings_work_id_code`), and a timing stays when its step leaves the list.
+A step first seen `done`, a new code given `done`, leaves none, so a continuation's done steps are
+not timed again, and `set_progress_step`, which takes no duration, times nothing.
+
+Each call holds the Session's row, `FOR NO KEY UPDATE`, and refuses with the gate's `403` unless
+its turn still runs, so two calls on one list, a script's and the agent's, are served one after
+the other, each answering the list its own change left. No call writes an effect. One that changed
+the steps' codes, labels, whys, kinds, marks, states or order moves the work item's status
+([`work.md`](work.md)); one that changed none of them, its conversations alone among them, sends
+nothing.
+
+### `seed_step_timings(timings)`
+
+Past runs' finished steps in the session's own work item's repository, kept as Step Timings beside
+the ones `set_progress` leaves (D251): the workflow's seed command runs as a work item placed in the
+repo whose history it seeds and publishes them through this tool. Each timing is `{key, kind,
+ended_at, duration, listed_ahead?}`: `key`, the seed's name for it, unique within the repo and read
+for nothing; `kind` as a step's; `ended_at`, when the step ended, a date and time with its offset,
+stored as given; `duration`, its whole seconds by the run's own measure; and `listed_ahead`, where
+the seed knows it.
+
+**`POST /tools/pilot-work/step-timings`** `{timings}` answers `200` `{timings}`, the number written
+(`PilotWorkService.seed_step_timings`). Each timing hangs on the calling work item, in its repo, the
+work item's `repo` label, else its environment's, with its `key`, no code and no mark. A key the
+repo has a timing of already, whichever work item published it, has that timing replaced whole, its
+work item included, a `listed_ahead` left out leaving none: one `INSERT … ON CONFLICT (repo, key)
+DO UPDATE` over the unique index `uq_step_timings_repo_key`, written in the keys' order, so that two
+seeds of one repo at once leave each key once and neither deadlocks. A key is compared as text and
+stored as given. A body outside the limits is a `400`, nothing written: no timings or over 1,000
+(`MAX_TIMINGS`; a longer history is seeded in several calls), an empty or blank key or one over 200
+characters (`MAX_TIMING_KEY`), a kind or a duration outside a step's limits, an `ended_at` given
+as a number or with no offset, a `listed_ahead` that is not a boolean, or a field the
+timing does not have, `code` and `marked` among them. A key repeated in the call is a `409`, and so
+is a call from a work item placed in no repo, neither its own nor its environment's, since a key is
+unique within a repo, nothing written and no kind met. The call holds the Session's row and refuses
+with the gate's `403` unless its turn runs, as the steps' calls do; it writes no effect and moves
+nothing, and another work item's estimate takes its timings at its next read.
 
 ### `register_debrief(debrief, entries, subject?, completes?, figures?)`
 
@@ -639,7 +699,7 @@ and the tree's routes `tests/api/test_tree.py` and `tests/services/test_tree_rea
 services that inject; the suite's default settings set no URL, so other creates carry neither.
 `TestAScriptsCall` (`tests/pilot_mcp/test_server.py`) pins a script's lone `tools/call` as the
 transport admits it. The routes are `tests/api/test_pilot_work.py`, whose
-`test_the_surface_is_five_routes_outside_the_api` holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
+`test_the_surface_is_six_routes_outside_the_api` holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
 `tests/api/test_pilot_store.py`, whose `test_the_surface_is_eleven_routes_outside_the_api` holds
 its blueprint's rules, and `tests/services/test_pilot_store_service.py`, each tool's served schema
 `STORE_SURFACE` in `tests/pilot_mcp/test_server.py`, the scope
@@ -647,9 +707,11 @@ its blueprint's rules, and `tests/services/test_pilot_store_service.py`, each to
 copies `tests/engine/test_attachments.py`. The fake controller serves the file routes
 ([`controller.md`](controller.md)), and the record's testing routes `POST
 /api/testing/items/<id>/registrations`, `…/worker-attachments`, `…/progress` and `…/debrief`
-register a document, attach a file, replace the list of steps and give the debrief as the worker's
-tools do, `…/writer-questions` asks a document's writer as the pass does, `…/notable` writes
-Pilot's lines on a debrief as `write_notable` does, with no pass, and `…/notes` and `…/alerts`
-write Pilot's note and alert as `note` and `alert` do
+register a document, attach a file, replace the list of steps, each step's kind, mark,
+conversations and duration with it, and give the debrief as the worker's tools do; no testing route
+seeds timings, which a spec writes by `…/progress`'s steps going done; `…/writer-questions` asks a
+document's writer as the pass does, `…/notable` writes Pilot's lines on a debrief as
+`write_notable` does, with no pass, and `…/notes` and `…/alerts` write Pilot's note and alert as
+`note` and `alert` do
 ([`projects.md`](projects.md)). `frontend/tests/infrastructure/nginx.spec.ts` pins that the UI's
 nginx forwards no path under `/tools/`, whatever its extension.

@@ -19,7 +19,9 @@ suggests or starts the work it offers, and its alert where another ask must come
 which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its
 work items, each a
 session Pilot runs, live on the timeline with its one current line, the steps its run publishes on
-a donut, a repeat round's why under its step, Stop, Resume and Close, its session log, which shows
+a donut, a repeat round's why under its step, the time a running one still takes as a badge, the
+server's estimate from finished steps of each kind, which the project's head carries too, Stop,
+Resume and Close, its session log, which shows
 what each turn was sent, and, once done, the debrief its stage session gave, behind the Debrief on
 its line, every role's account in the full debrief behind that, and one notice per slice at its
 run's end, placed once Pilot's pass over it has ended, opening with each stage's time and what Pilot

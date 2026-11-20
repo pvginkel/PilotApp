@@ -291,6 +291,20 @@ In `src/components/shared/`:
   scrolls in (`showCurrentStep()`), once, after the popover has its height; the browser's own clamp
   keeps a step near an end of the list at that end, and a list with neither stays at its top. The
   phone's Plan tab places its list the same way.
+- `EtaBadge({estimate, title?, testId})` (`eta-badge.tsx`): the badge of the time a running work
+  item still takes, after a project's name and after a running work item's time (D248;
+  [`projects.md`](projects.md), [`work.md`](work.md#the-time-it-still-takes)), from the estimate
+  as the server gives it, the page computing none of it: Lucide's clock and the time left, "25 min",
+  "1 h", "3 h", with no tilde (D249), on `--primary-muted` in `--primary-muted-foreground`, 22px high, its
+  corners 6px, its text semibold in the size of what it stands in (`estimateBadge()`,
+  `src/lib/utils/status-labels.ts`). At rest it is words alone, named "25 min left" to a screen
+  reader, with no hover and no press. Longer than usual it is the alert (D250): red, on
+  `--destructive` at 12% (24% in the dark) in `--destructive-text`, with Lucide's clock-alert and
+  an em dash, "—", where the time stood, or the time left on a step the workflow marked, or the
+  icon alone; a button named by its sentence (`estimateAlertSentence()`), which drops under it on
+  hover off a phone and on a press, closed by a press elsewhere, which does nothing else, Esc or
+  the badge. `title` is the work item the sentence names, in a project's head; without it the
+  sentence opens "It".
 - `CopyButton({text, title, className?, testId})` (`copy-button.tsx`, D199): a ghost icon button that
   copies `text` to the clipboard as written, `title` its tooltip and its name, and shows a check
   in its icon's place for a moment once it has copied, the toast's copy's mark

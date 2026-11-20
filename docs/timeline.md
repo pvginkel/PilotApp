@@ -304,7 +304,7 @@ timeline's place ([`chats.md`](chats.md)).
   (`Markdown`, [`ui.md`](ui.md)), shown whole, nothing in the timeline cutting it short, the ask in
   its block's place; a notice's Read stands alone under its text. A concept has a
   dashed border. An open work item is its session's: its env chip once its start has an
-  environment, its one line and its Stop or Resume, Close beside a stopped one's Resume, the setup its Retry once it failed or stopped; every
+  environment, the badge of the time it still takes while it runs, its one line and its Stop or Resume, Close beside a stopped one's Resume, the setup its Retry once it failed or stopped; every
   other job of Pilot's own draws no item of its own, showing on the item it follows from
   ([`work.md`](work.md)). A debrief's notice open is its box (`debrief-notice.tsx`): its head and
   title, then each work item it carries with its stage's time, Pilot's lines where the pass wrote

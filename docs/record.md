@@ -179,10 +179,30 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   which is checked at the commit, so that a replace reorders a whole list in its transaction;
   `state_code` (`pending`, `active`, `done`); `started_at`, which an `active` or `done` step has
   (`ck_progress_steps_started`); and `ended_at`, set exactly while it is `done`
-  (`ck_progress_steps_ended`); and `why`, the short line the run gave with the step, as the last
-  list gave it. That the positions run without a gap, the code's, the label's, the why's and the
-  list's limits, and that only the work item's own session writes it are the server's checks at the
-  call ([`mcp.md`](mcp.md)).
+  (`ck_progress_steps_ended`); and `why`, the short line the run gave with the step, `kind_code`,
+  the kind it gave it (`step_kinds`), and `marked`, its mark, each as the last list gave it, none
+  where it gave none; and `listed_ahead`, the server's, written with the step's first start:
+  whether it stood pending on the list before it began, none before it begins and where that is
+  unknown. That the positions run without a gap, the code's, the label's, the why's, the kind's,
+  the conversations' and the list's limits, and that only the work item's own session writes it
+  are the server's checks at the call ([`mcp.md`](mcp.md)).
+- `step_transcripts`: a step's naming of a conversation that did its work, its `work`, its `code`
+  and `session_id`, Claude Code's id of the main thread, the key, deleted with its step (`ON DELETE
+  CASCADE`). It holds no transcript's id: a read joins `transcripts` on the session id and no
+  `agent_id` (`names_main_thread()`, `backend/app/models/step.py`), and finds none until a
+  collector has published the thread.
+- `step_timings`: a finished step of a work item's run, kept whatever becomes of the list, no key
+  reaching a progress step from it ([`mcp.md`](mcp.md)): its `work`, `kind_code`, `ended_at`,
+  `duration`, whole seconds from 0 (`ck_step_timings_duration`), `listed_ahead` and `marked`. One a
+  run's `set_progress` left has its step's `code`, a code of a work item timed once
+  (`uq_step_timings_work_id_code`); a seeded one has the seed's `key` and no mark
+  (`ck_step_timings_seeded_marked`), and none has both or neither
+  (`ck_step_timings_code_or_key`). `repo` is its work item's (below); a keyed one has one
+  (`ck_step_timings_seeded_repo`), and a repo has one timing of a key (`uq_step_timings_repo_key`,
+  over the keyed rows). A kind's last timings by their end, those listed ahead and those not apart,
+  are read through `ix_step_timings_kind_code_listed_ahead_ended_at` and, in one repo,
+  `ix_step_timings_repo_kind_code_listed_ahead_ended_at`, both ending on `id`, which orders two
+  timings of one instant.
 - `debrief_entries`: an account in a work item's debrief, as the workflow gave it, written with the
   `work` row's `debrief` at its one call and never changed, the `work` and its `position`, its place
   in the order given from 1 (`ck_debrief_entries_position`), the key: `section`, `round` (1 or more,
@@ -406,7 +426,9 @@ The collector's ten are tables too, keyed by `code` with a `name`, which no revi
 publication writes a code's row, its `name` the code, when it first names it
 ([`collection.md`](collection.md)): `components`, `models`, `tools` (with `mcp_server`),
 `prompt_sources`, `stop_reasons`, `miss_causes`, `denial_kinds`, `compaction_triggers`,
-`event_kinds` (with `is_error`) and `context_part_kinds`.
+`event_kinds` (with `is_error`) and `context_part_kinds`. So is `step_kinds`, a step's kind, whose
+row a `set_progress` or `seed_step_timings` call writes when it first names the kind
+([`mcp.md`](mcp.md)).
 
 ## The caches
 
@@ -427,6 +449,12 @@ The project's `state_code`, `archived`, `autopilot` and `paused` are caches of i
 written with each one ([`projects.md`](projects.md)). A session's `turns`, `turn_started_at` and
 `turn_ended_at` are caches of its turns, which the send, the turn's end and the session start
 refresh ([`sessions.md`](sessions.md)).
+
+A step timing's `repo` is its work item's when the row was written, its `repo` label, else the
+`repo` of its Session's environment, none with neither (`repo_of_work()`,
+`backend/app/models/step.py`), stored once so that a unique index holds one key per repo, and never
+refreshed: a work item's label is set at its placement and nothing changes it, and one with none
+keeps the environment it was placed in by name.
 
 ## Physical notes
 
