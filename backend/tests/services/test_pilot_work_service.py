@@ -1597,6 +1597,34 @@ class TestPilotWorkServiceSetProgressKindMarkAndConversations:
         assert _named(session, run) == []
         assert _named(session, other) == [("P1.code", THREAD)]
 
+    def test_a_conversation_two_work_items_name_on_one_step_is_each_ones_own(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A continuation publishes its predecessor's done steps again, with
+        the conversations that did them: a work item reads and removes its
+        own steps' alone, so that the second names the conversation too and
+        dropping it leaves the first's."""
+        first = _session(session, container, project, environment)
+        then = _session(session, container, project, environment, token="other")
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(
+            _worker(first), [_step("P1.code", conversations=[THREAD])]
+        )
+
+        pilot_work.set_progress(
+            _worker(then), [_step("P1.code", conversations=[THREAD])]
+        )
+        named = _named(session, then)
+        pilot_work.set_progress(_worker(then), [_step("P1.code")])
+
+        assert named == [("P1.code", THREAD)]
+        assert _named(session, then) == []
+        assert _named(session, first) == [("P1.code", THREAD)]
+
 
 class TestPilotWorkServiceListedAhead:
     """F156.1, DB decision 79: the server's own observation, written with a
