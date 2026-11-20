@@ -1,0 +1,441 @@
+"""The dimensions Pilot's code declares and those the record's rows give
+(F154.4): each a join path, read on the record at the query."""
+
+from datetime import date, timedelta
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session as DbSession
+
+from app import models
+from app.dashboard.dimensions import (
+    SOURCES,
+    WORK_TYPES,
+    own_dimensions,
+    version_dimension,
+    version_keys,
+)
+from app.models import Component, Project, User
+from app.models.reference import ChatKind, SessionState, TurnCause, WorkTrigger
+from app.services.container import ServiceContainer
+from tests.support.dashboard import ZONE, Record, catalogue, named, read, record
+from tests.support.transcripts import OPUS, STARTED
+from tests.support.turns import turn_at
+from tests.support.working_on import Camp
+
+QUESTION = "# Where do we pitch?\n\n```question id=Q1\n```\n"
+
+
+@pytest.fixture
+def held(
+    session: DbSession, person: User, project: Project, project_session: models.Session
+) -> Record:
+    return record(session, person, project, project_session)
+
+
+def _calls(session: DbSession, *dimensions: str) -> list[tuple[object, ...]]:
+    """The dimensions on the record's six rows of the Call fact, by their
+    moment: the work item's two Calls, its sub-agent's, its third, the
+    chat's Turn standing in, and the Call run by hand."""
+    index = catalogue(session)
+    return read(
+        session, index, "call", *named(index, *dimensions), by=lambda row: row["at"]
+    )
+
+
+class TestEveryDimension:
+    def test_it_reads_on_every_fact_that_offers_it(
+        self, session: DbSession, held: Record
+    ) -> None:
+        index = catalogue(session)
+
+        for dimension in index.dimensions:
+            offered = index.offered(dimension.key)
+            assert offered, dimension.key
+            for fact in offered:
+                paths = [
+                    path
+                    for path in (dimension.path, dimension.name, dimension.axis)
+                    if path is not None
+                ]
+                rows = read(session, index, fact, *paths, by=lambda row: row["at"])
+                assert rows, (dimension.key, fact)
+
+    def test_its_key_reads_as_a_part_of_a_state(self, session: DbSession) -> None:
+        for dimension in own_dimensions(ZONE):
+            assert dimension.key.replace("_", "").isalnum(), dimension.key
+            assert dimension.key == dimension.key.lower()
+
+    def test_a_part_has_its_nouns_and_an_order_its_part_and_axis(
+        self, session: DbSession
+    ) -> None:
+        dimensions = {dimension.key: dimension for dimension in own_dimensions(ZONE)}
+
+        for dimension in dimensions.values():
+            assert (dimension.group == "part") == (dimension.one is not None)
+            assert (dimension.group == "part") == (dimension.many is not None)
+            assert (dimension.group == "order") == (dimension.base is not None)
+            assert (dimension.group == "order") == (dimension.axis is not None)
+            assert dimension.group == "part" or not dimension.figures
+            for other in (dimension.next, dimension.next_null, dimension.base):
+                assert other is None or other in dimensions
+            for shown in dimension.shows:
+                assert shown in dimensions
+        assert dimensions["session_start"].base == "psession"
+        assert dimensions["turn_seq"].base == "pturn"
+        assert dimensions["session_start"].group == dimensions["turn_seq"].group
+
+    def test_what_a_fact_offers_is_what_its_rows_reach(
+        self, session: DbSession
+    ) -> None:
+        index = catalogue(session)
+
+        assert index.offered("project") == ("call", "turn", "event")
+        assert index.offered("conversation") == ("call", "turn", "event")
+        assert index.offered("qweek") == ("call", "turn", "event")
+        assert index.offered("model") == ("call", "event")
+        assert index.offered("call") == ("call", "event")
+        assert index.offered("estimate") == ("call",)
+        assert index.offered("event_kind") == ("event",)
+        assert index.offered("event_error") == ("event",)
+
+
+class TestParts:
+    def test_a_project_is_by_its_id_and_named(
+        self, session: DbSession, held: Record
+    ) -> None:
+        index = catalogue(session)
+        project = index.dimension("project")
+        assert project.name is not None
+
+        rows = read(
+            session, index, "call", project.path, project.name, by=lambda row: row["at"]
+        )
+
+        assert rows[0] == rows[4] == (held.project.id, "Recipe box")
+        assert rows[5] == (None, None)
+
+    def test_the_parts_of_pilots_work(self, session: DbSession, held: Record) -> None:
+        rows = _calls(session, "psession", "pturn", "conversation", "call")
+
+        assert rows[0] == (
+            held.work.id,
+            held.work_turn.id,
+            held.thread.id,
+            held.calls[0].id,
+        )
+        assert rows[2] == (
+            held.work.id,
+            held.work_turn.id,
+            held.sub_agent.id,
+            held.calls[3].id,
+        )
+        assert rows[4] == (held.chat.id, held.chat_turn.id, None, None)
+        assert rows[5] == (None, None, held.loose.id, held.calls[4].id)
+
+    def test_a_sitting_is_by_its_start(self, session: DbSession, held: Record) -> None:
+        rows = _calls(session, "sitting")
+
+        assert rows == [(None,)] * 5 + [(held.loose.first_call_at,)]
+
+    def test_an_order_dimension_is_its_part_with_its_place(
+        self, session: DbSession, held: Record
+    ) -> None:
+        index = catalogue(session)
+        sessions = index.dimension("session_start")
+        turns = index.dimension("turn_seq")
+        assert sessions.axis is not None and turns.axis is not None
+
+        rows = read(
+            session,
+            index,
+            "turn",
+            sessions.path,
+            sessions.axis,
+            turns.path,
+            turns.axis,
+            by=lambda row: row["at"],
+        )
+
+        assert rows == [
+            (
+                held.work.id,
+                held.work.created_at,
+                held.work_turn.id,
+                held.work_turn.started_at,
+            ),
+            (
+                held.chat.id,
+                held.chat.created_at,
+                held.chat_turn.id,
+                held.chat_turn.started_at,
+            ),
+        ]
+
+
+class TestPilotsAttributes:
+    def test_the_source_and_the_work_type_of_a_work_items_run_and_a_chat(
+        self, session: DbSession, held: Record
+    ) -> None:
+        rows = _calls(session, "source", "work_type", "session_kind")
+
+        assert rows[0] == ("work", "work", "work")
+        assert rows[4] == ("chat", "chat:project", "chat")
+        assert rows[5] == (None, None, None)
+
+    @pytest.mark.usefixtures("person")
+    def test_pilots_sessions_by_what_each_is_for(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        camp = Camp(container, session)
+        worker = camp.worker(conversation="camp-conversation")
+        pass_ = camp.job_after(worker)
+        clarifying = camp.clarification(pass_, worker)
+        question = camp.registered(worker, QUESTION)
+        researching = camp.worker()
+        camp.research(question, "Q1", researching)
+        doing = camp.worker()
+        camp.claim(question, "Q1", doing)
+        setup = camp.job_on(None, WorkTrigger.SETUP)
+        calling = models.Session(
+            project_id=camp.project.id,
+            kind_code="conversation",
+            cwd="/work/PilotProjects",
+            token_hash="4" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(calling)
+        session.flush()
+        runs = (worker, pass_, clarifying, researching, doing, setup, calling)
+        for minute, run in enumerate(runs):
+            turn_at(session, run, STARTED + timedelta(minutes=minute))
+        index = catalogue(session)
+
+        rows = read(
+            session,
+            index,
+            "turn",
+            *named(index, "source", "work_type", "session_kind"),
+            by=lambda row: row["at"],
+        )
+
+        assert rows == [
+            ("work", "work", "work"),
+            ("pilot", "job:worker_turn_ended", "job"),
+            ("pilot", "clarification", "work"),
+            ("pilot", "research", "work"),
+            ("work", "claimed", "work"),
+            ("pilot", "job:setup", "job"),
+            ("chat", "conversation", "conversation"),
+        ]
+
+    def test_the_source_and_work_type_values_are_pilots_closed_lists(self) -> None:
+        assert [value.code for value in SOURCES] == ["work", "pilot", "chat"]
+        assert [value.code for value in WORK_TYPES] == [
+            *(f"chat:{kind.value}" for kind in ChatKind),
+            "conversation",
+            *(f"job:{trigger.value}" for trigger in WorkTrigger),
+            "clarification",
+            "research",
+            "claimed",
+            "work",
+        ]
+
+    def test_a_turns_cause_its_person_and_whether_it_failed(
+        self, session: DbSession, held: Record, person: User
+    ) -> None:
+        index = catalogue(session)
+        author = index.dimension("person")
+        assert author.name is not None
+
+        rows = read(
+            session,
+            index,
+            "call",
+            *named(index, "turn_cause", "failed"),
+            author.path,
+            author.name,
+            by=lambda row: row["at"],
+        )
+
+        assert rows[0] == ("brief", 0, None, None)
+        assert rows[4] == ("person", 1, person.id, "Ada Example")
+        assert rows[5] == (None, 0, None, None)
+        assert [value.code for value in index.dimension("turn_cause").values or ()] == [
+            cause.value for cause in TurnCause
+        ]
+
+    def test_the_environment_is_the_threads_else_the_sessions(
+        self, session: DbSession, held: Record
+    ) -> None:
+        index = catalogue(session)
+        environment = index.dimension("environment")
+        assert environment.name is not None
+        held.chat.environment_id = held.work.environment_id
+        session.flush()
+
+        rows = read(
+            session,
+            index,
+            "call",
+            environment.path,
+            environment.name,
+            by=lambda row: row["at"],
+        )
+
+        assert rows[0] == rows[4] == (held.work.environment_id, "Example-1")
+        assert rows[5] == (None, None)
+
+    def test_the_repository_is_the_threads(
+        self, session: DbSession, held: Record
+    ) -> None:
+        index = catalogue(session)
+        repository = index.dimension("repository")
+        assert repository.name is not None
+
+        rows = read(session, index, "call", repository.name, by=lambda row: row["at"])
+
+        assert [name for (name,) in rows] == [
+            "RecipeBox",
+            "RecipeBox",
+            None,
+            "RecipeBox",
+            None,
+            None,
+        ]
+
+
+class TestTheCollectorsAttributes:
+    def test_a_threads_agent(self, session: DbSession, held: Record) -> None:
+        rows = _calls(session, "agent_type", "sub")
+
+        assert rows[0] == (None, 0)
+        assert rows[2] == ("Explore", 1)
+        assert rows[4] == (None, 0)
+
+    def test_a_calls_own(self, session: DbSession, held: Record) -> None:
+        rows = _calls(
+            session,
+            "model",
+            "effort",
+            "stop_reason",
+            "miss",
+            "miss_cause",
+            "past_ttl",
+            "rewind",
+            "compaction",
+            "compact_trigger",
+            "estimate",
+        )
+
+        assert rows[0] == (OPUS, "high", None, 0, None, 0, 0, 0, None, 0)
+        assert rows[1] == (OPUS, None, "max_tokens", 0, None, 1, 1, 0, None, 0)
+        assert rows[3] == (OPUS, None, None, 1, "compaction", 0, 0, 1, "auto", 0)
+        assert rows[4] == (None, None, None, 0, None, 0, 0, 0, None, 1)
+
+    def test_an_events_kind_and_whether_it_is_an_error(
+        self, session: DbSession, held: Record
+    ) -> None:
+        index = catalogue(session)
+
+        rows = read(session, index, "event", *named(index, "event_kind", "event_error"))
+
+        assert ("api_error", 1) in rows
+        assert ("hook_error", 1) in rows
+        assert ("cache_miss", 0) in rows
+        assert len(rows) == 10
+
+
+class TestTime:
+    def test_the_quota_week_is_by_its_start(
+        self, session: DbSession, held: Record
+    ) -> None:
+        rows = _calls(session, "qweek")
+        week = session.scalar(
+            select(models.QuotaWeek.starts_at).where(
+                models.QuotaWeek.starts_at <= STARTED,
+                STARTED < models.QuotaWeek.ends_at,
+            )
+        )
+
+        assert rows[0] == (week,)
+
+    def test_the_day_the_weekday_and_the_hour_are_the_zones(
+        self, session: DbSession, held: Record
+    ) -> None:
+        # The Call run by hand completed at 09:30 UTC on Friday 13 November.
+        held.calls[4].completed_at = held.calls[4].completed_at.replace(hour=23)
+        session.flush()
+
+        def local(zone: str) -> tuple[object, ...]:
+            index = catalogue(session, zone)
+            return read(
+                session,
+                index,
+                "call",
+                *named(index, "day", "weekday", "hod"),
+                by=lambda row: row["at"],
+            )[-1]
+
+        assert local("Europe/Amsterdam") == (date(2026, 11, 14), 6, 0)
+        assert local("UTC") == (date(2026, 11, 13), 5, 23)
+        assert local("America/New_York") == (date(2026, 11, 13), 5, 18)
+
+    def test_the_local_times_lines_name_the_zone(self) -> None:
+        dimensions = {
+            dimension.key: dimension for dimension in own_dimensions("Asia/Tokyo")
+        }
+
+        for key in ("day", "weekday", "hod"):
+            assert "Asia/Tokyo" in dimensions[key].line
+        assert [value.name for value in dimensions["weekday"].values or ()] == [
+            "Mon",
+            "Tue",
+            "Wed",
+            "Thu",
+            "Fri",
+            "Sat",
+            "Sun",
+        ]
+
+
+class TestVersions:
+    def test_a_component_is_a_dimension_of_the_version_a_launch_ran_with(
+        self, session: DbSession, held: Record
+    ) -> None:
+        index = catalogue(session)
+
+        assert index.dimension("claude_code_version").label == "claude-code version"
+        assert index.offered("claude_code_version") == ("call", "event")
+        assert _calls(session, "claude_code_version", "collector_version") == [
+            ("2.1.317", None),
+            ("2.1.317", None),
+            ("2.1.317", None),
+            ("2.1.317", None),
+            (None, None),
+            (None, None),
+        ]
+
+    def test_a_components_key_is_its_code_in_a_states_letters(self) -> None:
+        components = [
+            Component(code=code, name=code)
+            for code in ("plugin:dev", "claude-code", "plugin_dev", "Plugin.Dev")
+        ]
+
+        assert version_keys(components) == {
+            "Plugin.Dev": "plugin_dev_version",
+            "claude-code": "claude_code_version",
+            "plugin:dev": "plugin_dev_version_2",
+            "plugin_dev": "plugin_dev_version_3",
+        }
+
+    def test_a_version_dimension_names_its_component(self) -> None:
+        dimension = version_dimension(
+            Component(code="claude-code", name="Claude Code"), "claude_code_version"
+        )
+
+        assert (dimension.key, dimension.label, dimension.group) == (
+            "claude_code_version",
+            "Claude Code version",
+            "attribute",
+        )

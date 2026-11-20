@@ -4025,6 +4025,7 @@ class TestAdmitted:
             settings,
             container.adoption_service(),
             container.fleet_consumer(),
+            container.catalogue_service(),
         )
 
         with pytest.raises(AuthenticationException):
@@ -4138,6 +4139,7 @@ class TestInventory:
             settings,
             container.adoption_service(),
             container.fleet_consumer(),
+            container.catalogue_service(),
         )
 
         inventory = publications.inventory()

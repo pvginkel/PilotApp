@@ -8,6 +8,7 @@ import re
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Self
+from zoneinfo import available_timezones
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -307,6 +308,22 @@ class AppEnvironment(BaseSettings):
             "placed, later firings joining it (F136.4)"
         ),
     )
+    DASHBOARD_ZONE: str = Field(
+        default="Europe/Amsterdam",
+        description=(
+            "The IANA time zone the analysis dashboard derives the day, the "
+            "weekday and the hour in, and shows its times in (F160.11)"
+        ),
+    )
+    DASHBOARD_SITTING_GAP_SECONDS: float = Field(
+        default=14400.0,
+        gt=0,
+        description=(
+            "Seconds between one transcript's last call and the next one's "
+            "first at or over which a sitting of the sessions on no project "
+            "ends (F166.6)"
+        ),
+    )
     POOL_GUARD: bool = Field(
         default=False,
         description=(
@@ -523,6 +540,21 @@ class AppSettings(BaseModel):
     """How long after a wait's first pending firing the batcher places its run,
     counted on the scheduler's tick (F136.4)."""
 
+    dashboard_zone: str = "Europe/Amsterdam"
+    """The zone the analysis dashboard's day, weekday and hour are derived
+    in (DB decision 80.3)."""
+
+    dashboard_sitting_gap_seconds: float = 14400.0
+    """The gap from one Transcript's last Call to the next one's first that
+    ends a sitting (DB decision 80.3)."""
+
+    @field_validator("dashboard_zone")
+    @classmethod
+    def _is_a_zone(cls, zone: str) -> str:
+        if zone not in available_timezones():
+            raise ValueError("DASHBOARD_ZONE must be an IANA time zone")
+        return zone
+
     pool_guard: bool = False
     """The pool guard on the app's pools (app/utils/pool_guard.py), its
     nestings taken at /api/testing/pool-guard: Playwright's backends, in
@@ -591,6 +623,8 @@ class AppSettings(BaseModel):
             ),
             cache_expiration_ttl_seconds=env.CACHE_EXPIRATION_TTL,
             wait_quiet_window_seconds=env.WAIT_QUIET_WINDOW_SECONDS,
+            dashboard_zone=env.DASHBOARD_ZONE,
+            dashboard_sitting_gap_seconds=env.DASHBOARD_SITTING_GAP_SECONDS,
             pool_guard=env.POOL_GUARD,
             statement_cap=env.STATEMENT_CAP,
         )

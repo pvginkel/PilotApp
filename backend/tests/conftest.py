@@ -170,6 +170,13 @@ def controller_outage(app: Flask, session_app_isolation: None) -> ControllerOuta
     return outage
 
 
+@pytest.fixture(autouse=True)
+def no_catalogue_held(app: Flask) -> None:
+    """The process holds no catalogue of the dashboard's a test before this
+    one assembled from rows its transaction then rolled back."""
+    app.container.catalogue_service().drop()
+
+
 @pytest.fixture
 def person(session: DbSession) -> User:
     """A person who has signed in."""

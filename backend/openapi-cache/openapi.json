@@ -890,6 +890,705 @@
         "title": "CancelAskRequestSchema",
         "type": "object"
       },
+      "CatalogueQuerySchema.b67cf98": {
+        "description": "The part of the catalogue asked for.",
+        "properties": {
+          "part": {
+            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap",
+            "enum": [
+              "dimensions",
+              "measures",
+              "time"
+            ],
+            "title": "Part",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part"
+        ],
+        "title": "CatalogueQuerySchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98": {
+        "description": "One part of the catalogue: the fields of the part asked for are set,\nthe others null.",
+        "properties": {
+          "aggregates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.AggregateSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`measures`",
+            "title": "Aggregates"
+          },
+          "dimensions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.DimensionSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`dimensions`: every dimension, in the catalogue's order",
+            "title": "Dimensions"
+          },
+          "facts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.FactSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`measures`",
+            "title": "Facts"
+          },
+          "figures": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.FigureSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`measures`",
+            "title": "Figures"
+          },
+          "grains": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.GrainSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`measures`",
+            "title": "Grains"
+          },
+          "part": {
+            "enum": [
+              "dimensions",
+              "measures",
+              "time"
+            ],
+            "title": "Part",
+            "type": "string"
+          },
+          "ranges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.TimeRangeSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`time`",
+            "title": "Ranges"
+          },
+          "ratios": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.RatioSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`measures`: the built-in ratios",
+            "title": "Ratios"
+          },
+          "sitting_gap_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`time`: the gap that ends a sitting, in seconds",
+            "title": "Sitting Gap Seconds"
+          },
+          "zone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`time`: the zone the day, the weekday and the hour are derived in",
+            "examples": [
+              "Europe/Amsterdam"
+            ],
+            "title": "Zone"
+          }
+        },
+        "required": [
+          "part"
+        ],
+        "title": "CatalogueResponseSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.AggregateSchema": {
+        "description": "How a measure takes the items of its grain together.",
+        "properties": {
+          "key": {
+            "examples": [
+              "median"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Median"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "line": {
+            "description": "What it is",
+            "title": "Line",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "line"
+        ],
+        "title": "AggregateSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.DimensionSchema": {
+        "description": "What a view is By, filtered on and colored by.",
+        "properties": {
+          "base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An order dimension's alone: the part it puts in order",
+            "title": "Base"
+          },
+          "facts": {
+            "description": "The facts that offer it, by their keys",
+            "examples": [
+              [
+                "call"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "group": {
+            "description": "A part of the work, an attribute, a time, or a part along an order",
+            "enum": [
+              "part",
+              "attribute",
+              "time",
+              "order"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "description": "What a state names it by",
+            "examples": [
+              "project"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Project"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "line": {
+            "description": "What it is",
+            "title": "Line",
+            "type": "string"
+          },
+          "many": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A part's alone: the noun of several",
+            "examples": [
+              "projects"
+            ],
+            "title": "Many"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The dimension a click on its row moves the By to",
+            "title": "Next"
+          },
+          "next_null": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The dimension a click on the row with none moves the By to",
+            "title": "Next Null"
+          },
+          "null": {
+            "description": "The label of a row with none",
+            "examples": [
+              "(No project)"
+            ],
+            "title": "Null",
+            "type": "string"
+          },
+          "one": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A part's alone: the noun of one item of it",
+            "examples": [
+              "project"
+            ],
+            "title": "One"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.ValueSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its closed list; null where its values are open",
+            "title": "Values"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "group",
+          "line",
+          "null",
+          "facts",
+          "values",
+          "one",
+          "many",
+          "next",
+          "next_null",
+          "base"
+        ],
+        "title": "DimensionSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.FactSchema": {
+        "description": "What a measure counts or sums.",
+        "properties": {
+          "counts": {
+            "description": "The figure that counts its rows",
+            "title": "Counts",
+            "type": "string"
+          },
+          "grain": {
+            "description": "The grain one row of it is",
+            "title": "Grain",
+            "type": "string"
+          },
+          "key": {
+            "examples": [
+              "call"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Calls"
+            ],
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "counts",
+          "grain"
+        ],
+        "title": "FactSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.FigureSchema": {
+        "description": "A number of one row of its fact.",
+        "properties": {
+          "aggregate": {
+            "description": "The aggregate a measure of it takes by default",
+            "title": "Aggregate",
+            "type": "string"
+          },
+          "aggregates": {
+            "description": "The aggregates a measure of it takes",
+            "items": {
+              "type": "string"
+            },
+            "title": "Aggregates",
+            "type": "array"
+          },
+          "fact": {
+            "description": "Its fact's key",
+            "title": "Fact",
+            "type": "string"
+          },
+          "format": {
+            "description": "What its number is",
+            "enum": [
+              "usd",
+              "tokens",
+              "count",
+              "seconds",
+              "share"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "key": {
+            "description": "What a measure names it by",
+            "examples": [
+              "cost"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Cost"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "line": {
+            "description": "What it is",
+            "title": "Line",
+            "type": "string"
+          },
+          "stacks": {
+            "description": "Whether a color may stack it",
+            "title": "Stacks",
+            "type": "boolean"
+          },
+          "token_kinds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Token Kinds it splits by; null where it counts no tokens",
+            "title": "Token Kinds"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "fact",
+          "line",
+          "format",
+          "aggregate",
+          "aggregates",
+          "token_kinds",
+          "stacks"
+        ],
+        "title": "FigureSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.GrainSchema": {
+        "description": "What a measure's items are: a part, or a fact's own row.",
+        "properties": {
+          "figures": {
+            "description": "The figures an item of it carries",
+            "items": {
+              "type": "string"
+            },
+            "title": "Figures",
+            "type": "array"
+          },
+          "key": {
+            "examples": [
+              "conversation"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "many": {
+            "description": "The noun of several",
+            "examples": [
+              "conversations"
+            ],
+            "title": "Many",
+            "type": "string"
+          },
+          "one": {
+            "description": "The noun of one item",
+            "examples": [
+              "conversation"
+            ],
+            "title": "One",
+            "type": "string"
+          },
+          "shows": {
+            "description": "The dimensions shown with an item that is one row of a fact",
+            "items": {
+              "type": "string"
+            },
+            "title": "Shows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "one",
+          "many",
+          "figures",
+          "shows"
+        ],
+        "title": "GrainSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.RatioSchema": {
+        "description": "Two measures, the first over the second.",
+        "properties": {
+          "denominator": {
+            "description": "A measure, as a state writes it",
+            "examples": [
+              "calls.count"
+            ],
+            "title": "Denominator",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "usd",
+              "tokens",
+              "count",
+              "seconds",
+              "share"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "key": {
+            "description": "What a measure names it by, after `r:`",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Cost per call"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "line": {
+            "description": "What it is",
+            "title": "Line",
+            "type": "string"
+          },
+          "numerator": {
+            "description": "A measure, as a state writes it",
+            "examples": [
+              "cost.sum"
+            ],
+            "title": "Numerator",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "line",
+          "format",
+          "numerator",
+          "denominator"
+        ],
+        "title": "RatioSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.TimeRangeSchema": {
+        "description": "A time range a state names by a key.",
+        "properties": {
+          "key": {
+            "examples": [
+              "d7"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Last 7 days"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "line": {
+            "description": "What it holds",
+            "title": "Line",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "line"
+        ],
+        "title": "TimeRangeSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.ValueSchema": {
+        "description": "One value of a dimension's closed list.",
+        "properties": {
+          "code": {
+            "description": "What a state names it by",
+            "examples": [
+              "api_error"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "is_error": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An event kind's alone: whether an event of it counts as an error",
+            "title": "Is Error"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What it is, where its source says",
+            "title": "Line"
+          },
+          "name": {
+            "description": "Its label",
+            "examples": [
+              "API error"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its place in its list, where its source gives one",
+            "title": "Position"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "line",
+          "position",
+          "is_error"
+        ],
+        "title": "ValueSchema",
+        "type": "object"
+      },
       "ChatListSchema.f9d9b43": {
         "description": "A project's chats, and the caller's place in them.",
         "properties": {
@@ -17956,6 +18655,80 @@
           }
         ],
         "summary": "Read Pilot's reply to the calling session's latest message in its conversation, as it stands: every text Pilot wrote since the message, and whether its turn runs on, ended, failed or was stopped. It answers at once, a turn in flight `running`: a caller that waits for the turn's end asks again. A closed conversation answers its last reply.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/catalogue": {
+      "get": {
+        "description": "Returns:     200: The part asked for     400: No part, or one the catalogue has not     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "get__api_dashboard_catalogue",
+        "parameters": [
+          {
+            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap",
+            "in": "query",
+            "name": "part",
+            "required": true,
+            "schema": {
+              "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap",
+              "enum": [
+                "dimensions",
+                "measures",
+                "time"
+              ],
+              "title": "Part",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and built-in ratios; or its time, the ranges, the zone and the sitting's gap.",
         "tags": [],
         "x-required-role": "editor"
       }
