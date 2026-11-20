@@ -1,11 +1,13 @@
 """Rows of an invented transcript, for tests of what the record holds of
-one. Each helper adds its row and flushes, so the row has its id."""
+one, and a step's naming of one. Each helper adds its row and flushes, so
+the row has its id."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session as DbSession
 
+from app import models
 from app.models import (
     Call,
     Compaction,
@@ -14,12 +16,15 @@ from app.models import (
     ComponentVersion,
     Launch,
     Model,
+    ProgressStep,
     Prompt,
     PromptSource,
+    StepTranscript,
     Tool,
     ToolCall,
     Transcript,
 )
+from app.models.reference import ProgressState
 
 STARTED = datetime(2026, 11, 12, 9, 30, tzinfo=UTC)
 CAMP = "0b5e3c1a-7d42-4f6e-9a18-2c4d6e8f0a1b"
@@ -136,3 +141,22 @@ def tool_call(db: DbSession, request: Call, **overrides: Any) -> ToolCall:
     }
     values.update(overrides)
     return _added(db, ToolCall(**values))
+
+
+def named_by_step(
+    db: DbSession, run: models.Session, conversation: str = CAMP, code: str = "P1.code"
+) -> None:
+    """A step `code` of the Work `run` is, which names the conversation: the
+    workflow's word that the thread did that step's work."""
+    db.add(
+        ProgressStep(
+            work_id=run.id,
+            code=code,
+            label="P1 · the scaling",
+            position=1,
+            state_code=ProgressState.PENDING,
+        )
+    )
+    db.flush()
+    db.add(StepTranscript(work_id=run.id, code=code, session_id=conversation))
+    db.flush()

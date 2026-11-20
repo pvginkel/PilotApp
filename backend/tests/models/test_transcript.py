@@ -268,6 +268,31 @@ class TestTranscript:
 
         assert violated_constraint(session) == "ck_transcripts_environment"
 
+    def test_it_holds_its_first_and_its_last_calls_time(
+        self, session: DbSession, collector: ComponentVersion
+    ) -> None:
+        thread = _thread(
+            collector,
+            first_call_at=STARTED,
+            last_call_at=STARTED + timedelta(minutes=11),
+        )
+        session.add(thread)
+        session.flush()
+        session.refresh(thread)
+
+        assert (thread.first_call_at, thread.last_call_at) == (
+            STARTED,
+            STARTED + timedelta(minutes=11),
+        )
+
+    @pytest.mark.parametrize("time", ["first_call_at", "last_call_at"])
+    def test_it_holds_both_of_its_calls_times_or_neither(
+        self, session: DbSession, collector: ComponentVersion, time: str
+    ) -> None:
+        session.add(_thread(collector, **{time: STARTED}))
+
+        assert violated_constraint(session) == "ck_transcripts_call_times"
+
     def test_a_main_thread_is_adopted_by_an_adopted_project(
         self, session: DbSession, collector: ComponentVersion, service_user: User
     ) -> None:

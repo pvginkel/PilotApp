@@ -31,14 +31,21 @@ Publications of one conversation, its main thread's and its sub-agents',
 take turns, so that a sub-agent's thread finds its main thread and its
 spawning Tool Call whichever comes first.
 
-A main thread's Launches that a Turn of Pilot's started are placed under
-their Session and Turn as the write ends (`launch_placement`; DB decision 79
-point 7), and a Launch the call names again keeps what it was placed under.
+A main thread's Launches that a Turn of Pilot's started, or a driver under
+a Session whose step names the thread, are placed under their Session and
+Turn as the write ends (`launch_placement`; DB decision 79 point 7), and a
+Launch the call names again keeps what it was placed under.
 
 A Call is written with its cost, at the Prices in force (`price_service`; DB
 548), and a Model the call is the first to name with the Model it is priced
 as. A publication writes under the Prices' turn, so that a load of the price
 file prices every Call written before it.
+
+A Call is written with its other caches too, its wait, whether it is a
+rewind, a cache miss or past the cache's lifetime, and the Launch it was
+made in, and its Transcript with its first and its last Call's time
+(`call_caches`; DB §7.4). A main thread's publication leaves each Call of
+its sub-agents' threads in the Launch that holds it.
 
 A main thread whose call names a group is adopted by the group's adopted
 Project, which the call makes where Pilot has none (`adoption_service`;
@@ -114,6 +121,7 @@ from app.models import (
     Prompt,
     PromptSource,
     Repository,
+    StepTranscript,
     StopReason,
     Tool,
     ToolCall,
@@ -122,6 +130,7 @@ from app.models import (
 from app.models import Session as AgentSession
 from app.models.call import RECORDED_ELSEWHERE
 from app.services.adoption_service import AdoptionService, group_faults
+from app.services.call_caches import caches, hold_sub_agents_calls
 from app.services.environment_service import reported_columns
 from app.services.fleet_consumer import FleetConsumer
 from app.services.launch_placement import conversation_turn, place_launches
@@ -423,13 +432,17 @@ class PublicationService:
         rest writes are logged with it (`_replayed`). After an appended one
         Pilot holds what the call carries from its boundary on, what lies
         before it as it was, and `replayed_size` as it stood. After either,
-        each Launch of a main thread that a Turn of Pilot's started stands
-        under its Session and Turn (DB 538). After either, a main thread
+        each Launch of a main thread that a Turn of Pilot's started, or a
+        driver under a Session whose step names the thread, stands under
+        its Session and Turn (DB 538). After either, a main thread
         is adopted by the adopted Project of the `group` the call names,
         made where no Project holds the group and renamed where the group
         was, and by none where the call names none. After either, each Call
         it carries holds its cost at the Prices in force, none where a kind
-        it counts tokens of has no Price.
+        it counts tokens of has no Price, and its other caches
+        (`call_caches`); the Transcript holds its first and its last Call's
+        time; and each Call of a main thread's sub-agents' threads is in
+        the Launch that holds it (DB 543).
 
         An Environment, a Repository, a Component Version and a reference
         code the call names that Pilot has no row for are written, the
@@ -470,6 +483,7 @@ class PublicationService:
             self._facts(thread, publication, versions, boundary, ids)
         self._join(publication.session_id)
         if publication.agent_id is None:
+            hold_sub_agents_calls(self.db, publication.session_id)
             place_launches(self.db, publication.session_id)
         return thread
 
@@ -837,9 +851,10 @@ class PublicationService:
     def _adopted_by(self, publication: PublicationSchema) -> uuid.UUID | None:
         """The id of the adopted Project of the group the call names, none
         where it names none. A Session of Pilot's ran the Transcript where
-        one runs a Launch of it, or names its conversation while no Project
-        has adopted it: one adopted before a Session named it stays adopted,
-        its Launches off that Session (`launch_placement.place_launches`).
+        one runs a Launch of it, or names its conversation, itself or by a
+        step, while no Project has adopted it: one adopted before a Session
+        named it stays adopted, its Launches off that Session
+        (`launch_placement.place_launches`).
 
         Raises:
             TranscriptNotAdoptableException: a Session of Pilot's ran the
@@ -859,7 +874,10 @@ class PublicationService:
                     Launch.session_id.is_not(None),
                 )
                 | (
-                    exists().where(AgentSession.conversation_id == conversation)
+                    (
+                        exists().where(AgentSession.conversation_id == conversation)
+                        | exists().where(StepTranscript.session_id == conversation)
+                    )
                     & ~exists().where(
                         Transcript.session_id == conversation,
                         Transcript.adopted_project_id.is_not(None),
@@ -1036,7 +1054,8 @@ class PublicationService:
     ) -> Transcript:
         """The Transcript's row as the call has it, adopted by the Project
         `adopted_by`, its `replayed_size` its file's size after a whole call
-        alone (DB 605). A sub-agent's thread
+        alone (DB 605), with its first and its last Call's time as the call
+        leaves them. A sub-agent's thread
         is under its main thread where Pilot holds that one, and a main
         thread first held takes the sub-agents' threads that came before it."""
         facts: dict[str, Any] = {
@@ -1073,6 +1092,7 @@ class PublicationService:
                 Transcript.agent_id.is_not_distinct_from(publication.agent_id),
             )
         ).one_or_none()
+        facts |= self._call_times(publication, thread)
         if thread is not None:
             _set(thread, facts)
             self.db.flush()
@@ -1093,6 +1113,35 @@ class PublicationService:
                 .values(main_id=thread.id)
             )
         return thread
+
+    def _call_times(
+        self, publication: PublicationSchema, thread: Transcript | None
+    ) -> dict[str, datetime | None]:
+        """The Transcript's `first_call_at` and `last_call_at` once the call
+        is written, where it moves them; `thread` is its row as Pilot holds
+        it, None where it does not. The Calls before an appended call's
+        boundary stand, so its first Call's time does: read from that Call
+        where the row has none, a server from before these times having
+        written it."""
+        calls = publication.calls
+        last = calls[-1].completed_at if calls else None
+        appended = publication.appended
+        if thread is None or appended is None or appended.boundary.call == 1:
+            return {
+                "first_call_at": calls[0].completed_at if calls else None,
+                "last_call_at": last,
+            }
+        if not calls:
+            return {}
+        first = (
+            thread.first_call_at
+            or self.db.scalars(
+                select(Call.completed_at).where(
+                    Call.transcript_id == thread.id, Call.position == 1
+                )
+            ).one()
+        )
+        return {"first_call_at": first, "last_call_at": last}
 
     def _launches(
         self,
@@ -1250,7 +1299,7 @@ class PublicationService:
         the Calls Pilot held from the boundary on that it no longer names. A
         Call Pilot has not met takes an id before it is written, so that one
         written beside it names it as its predecessor. Each is written with
-        its cost."""
+        its cost and its other caches."""
         held = {
             row.message_id: row
             for row in self.db.scalars(
@@ -1283,6 +1332,7 @@ class PublicationService:
         for position, call in enumerate(calls, start=boundary.call):
             facts: dict[str, Any] = {
                 "id": ids[call.message_id],
+                "transcript_id": thread.id,
                 "position": position,
                 "prompt_id": prompts[call.prompt - 1].id if call.prompt else None,
                 "predecessor_id": ids[call.predecessor] if call.predecessor else None,
@@ -1304,14 +1354,14 @@ class PublicationService:
                 facts[f"{kind}_tokens"] = call.tokens.get(kind, 0)
             written.append(facts)
         priced = costs(self.db, written)
+        derived = caches(self.db, written)
         met: list[tuple[Call, dict[str, Any]]] = []
         for call, facts in zip(calls, written, strict=True):
             facts["cost"] = priced[facts["id"]]
+            facts |= derived[facts["id"]]
             row = held.get(call.message_id)
             if row is None:
-                self.db.add(
-                    Call(transcript_id=thread.id, message_id=call.message_id, **facts)
-                )
+                self.db.add(Call(message_id=call.message_id, **facts))
             else:
                 met.append((row, facts))
         # A held Call's predecessor may be one written here: the new rows

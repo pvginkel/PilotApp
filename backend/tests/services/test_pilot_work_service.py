@@ -11,7 +11,7 @@ stored once with its subject and whether it completes it, and moving nothing
 (F85.5; DB 322 to 329, 608)."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import pytest
@@ -75,9 +75,11 @@ from app.services.pilot_server import token_hash
 from app.services.pilot_work_service import Worker
 from app.services.session_record_service import read_records
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support import transcripts
 from tests.support.debriefs import FIGURES
 from tests.support.fake_controller import ServedFakeController
 from tests.support.locks import in_thread, lock_waits
+from tests.support.statements import sent
 from tests.support.supervisor import wait_until
 
 TOKEN = "worker-token"
@@ -1566,6 +1568,63 @@ class TestPilotWorkServiceSetProgressKindMarkAndConversations:
             ("P1.code", THIRD_THREAD),
             ("P1.code", OTHER_THREAD),
         ]
+
+    def test_a_step_that_names_a_conversation_places_the_launch_pilot_holds_of_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 538; F152.9: the round's transcript was published before its
+        step named it, and stands under the work item from the naming on."""
+        run = _session(session, container, project, environment)
+        turn = _turn_in_flight(session, run)
+        thread = transcripts.transcript(
+            session, transcripts.component_version(session), session_id=THREAD
+        )
+        launch = transcripts.launch(
+            session, thread, started_at=turn.started_at + timedelta(seconds=30)
+        )
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(_worker(run), [_step("P1.code", state=ACTIVE)])
+        unnamed = (launch.session_id, launch.turn_seq)
+
+        pilot_work.set_progress(
+            _worker(run), [_step("P1.code", state=ACTIVE, conversations=[THREAD])]
+        )
+
+        session.refresh(launch)
+        assert unnamed == (None, None)
+        assert (launch.session_id, launch.turn_seq) == (run.id, turn.seq)
+
+    def test_a_conversation_a_step_names_already_is_not_placed_again(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A list published again takes no conversation's turn: a Launch
+        that came since is its publication's to place."""
+        run = _session(session, container, project, environment)
+        turn = _turn_in_flight(session, run)
+        pilot_work = container.pilot_work_service()
+        steps = [_step("P1.code", state=ACTIVE, conversations=[THREAD])]
+        pilot_work.set_progress(_worker(run), steps)
+        thread = transcripts.transcript(
+            session, transcripts.component_version(session), session_id=THREAD
+        )
+        launch = transcripts.launch(
+            session, thread, started_at=turn.started_at + timedelta(seconds=30)
+        )
+
+        with sent(session) as statements:
+            pilot_work.set_progress(_worker(run), steps)
+
+        session.refresh(launch)
+        assert (launch.session_id, launch.turn_seq) == (None, None)
+        assert not any("pg_advisory_xact_lock" in each for each in statements.texts)
 
     def test_a_step_left_out_takes_its_conversations_with_it(
         self,

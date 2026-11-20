@@ -1,9 +1,11 @@
 """A Launch placed under the Session and the Turn of Pilot's that started it
-(DB decision 79 point 7; assertions 537 and 538; F152.4).
+(DB decision 79 point 7; assertions 537 and 538; F152.4, F152.9).
 
 The rule that protects the most: a Launch is placed once, under the Session
 whose Turn was sent last before its start, and what it was placed under
-stands whatever Turn follows (`TestPlacedOnce`)."""
+stands whatever Turn follows (`TestPlacedOnce`). A round a driver started is
+on the work item that was running when its process started, however many
+work items' steps name it (`TestDriverStarted`)."""
 
 import logging
 import uuid
@@ -21,11 +23,13 @@ from app.models import (
     ComponentVersion,
     Environment,
     Launch,
+    ProgressStep,
     Project,
     Transcript,
     User,
 )
 from app.models.reference import SessionState, UserKind
+from app.services.container import ServiceContainer
 from app.services.launch_placement import conversation_named, place_launches
 from tests.support import publications, transcripts
 from tests.support.adoption import adopted_project
@@ -82,6 +86,47 @@ def _carrying_on(db: DbSession, run: models.Session) -> models.Session:
     )
     db.add(later)
     db.flush()
+    return later
+
+
+@pytest.fixture
+def waited(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    project_session: models.Session,
+) -> models.Session:
+    """A Session of Pilot's that is a Work, created ten minutes before the
+    conversation began, whose step names the conversation: the one that
+    waited on the loop a driver ran it in."""
+    project_session.created_at = _at(-10)
+    container.record_service().place_work(project, project_session, "Scaling")
+    transcripts.named_by_step(session, project_session)
+    return project_session
+
+
+def _continuing(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    run: models.Session,
+    created_at: datetime,
+) -> models.Session:
+    """A later Work of `run`'s project, created at `created_at`, whose step
+    names the conversation again: the continuation of `run`'s."""
+    later = models.Session(
+        project_id=run.project_id,
+        environment_id=run.environment_id,
+        kind_code="work",
+        cwd="/work/Example",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.RUNNING,
+        created_at=created_at,
+    )
+    db.add(later)
+    db.flush()
+    container.record_service().place_work(project, later, "Scaling, continued")
+    transcripts.named_by_step(db, later)
     return later
 
 
@@ -240,6 +285,211 @@ class TestPlaced:
             place_launches(session, CAMP)
 
         assert wrote == {}
+
+
+class TestDriverStarted:
+    """A Launch a driver started under a loop session continues a Transcript
+    no Session's `conversation_id` names, which a step of the Session that
+    waited on its loop names (DB 538; F152.9)."""
+
+    def test_it_is_under_the_session_whose_step_names_it_and_its_turn_in_flight(
+        self, session: DbSession, thread: Transcript, waited: models.Session
+    ) -> None:
+        turn_at(session, waited, _at(-9), _at(-5))
+        turn_at(session, waited, _at(-1))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (waited.id, 2)
+
+    def test_one_started_between_two_turns_has_the_session_and_no_turn(
+        self, session: DbSession, thread: Transcript, waited: models.Session
+    ) -> None:
+        turn_at(session, waited, _at(-9), _at(-5))
+        turn_at(session, waited, _at(20))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (waited.id, None)
+
+    def test_one_started_before_the_sessions_first_turn_has_the_session_and_no_turn(
+        self, session: DbSession, thread: Transcript, waited: models.Session
+    ) -> None:
+        turn_at(session, waited, _at(20))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (waited.id, None)
+
+    def test_one_started_before_the_session_was_created_has_neither(
+        self, session: DbSession, thread: Transcript, waited: models.Session
+    ) -> None:
+        turn_at(session, waited, _at(-9))
+        launch = transcripts.launch(session, thread, started_at=_at(-11))
+
+        with writes(session) as wrote:
+            place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (None, None)
+        assert wrote == {}
+
+    def test_a_round_a_continuation_names_again_stays_on_the_work_that_ran_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        thread: Transcript,
+        waited: models.Session,
+    ) -> None:
+        """F152.9: the step stands on both work items' lists, and the round
+        on the one created last before its process started."""
+        turn_at(session, waited, _at(-9), _at(30))
+        continuation = _continuing(session, container, project, waited, _at(40))
+        turn_at(session, continuation, _at(41))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (waited.id, 1)
+
+    def test_a_round_started_under_the_continuation_is_the_continuations(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        thread: Transcript,
+        waited: models.Session,
+    ) -> None:
+        """A loop session the continuation's driver resumed: its two
+        Launches are on the two work items."""
+        turn_at(session, waited, _at(-9), _at(30))
+        continuation = _continuing(session, container, project, waited, _at(40))
+        turn_at(session, continuation, _at(41))
+        first = transcripts.launch(session, thread, started_at=_at(1), ended_at=_at(9))
+        resumed = transcripts.launch(session, thread, started_at=_at(45))
+
+        place_launches(session, CAMP)
+
+        assert [_placed(session, first), _placed(session, resumed)] == [
+            (waited.id, 1),
+            (continuation.id, 1),
+        ]
+
+    def test_a_session_whose_step_names_another_conversation_runs_none_of_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        thread: Transcript,
+    ) -> None:
+        container.record_service().place_work(project, project_session, "Scaling")
+        project_session.created_at = _at(-10)
+        transcripts.named_by_step(session, project_session, OTHER)
+        turn_at(session, project_session, _at(-9))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        with writes(session) as wrote:
+            place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (None, None)
+        assert wrote == {}
+
+    def test_a_conversation_a_session_names_is_placed_by_its_turns_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        thread: Transcript,
+        waited: models.Session,
+    ) -> None:
+        """A step that names the thread its own Session's Turn started: the
+        Launch from before that Session's first Turn stays unplaced, as a
+        Turn-started one does."""
+        waited.conversation_id = CAMP
+        turn_at(session, waited, _at(5))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (None, None)
+
+    def test_a_placed_launch_stays_when_its_step_goes(
+        self, session: DbSession, thread: Transcript, waited: models.Session
+    ) -> None:
+        turn_at(session, waited, _at(-9))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+        place_launches(session, CAMP)
+
+        session.delete(session.get_one(ProgressStep, (waited.id, "P1.code")))
+        session.flush()
+        with writes(session) as wrote:
+            place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (waited.id, 1)
+        assert wrote == {}
+
+    def test_a_placed_launch_stays_when_a_continuation_names_it_later(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        thread: Transcript,
+        waited: models.Session,
+    ) -> None:
+        turn_at(session, waited, _at(-9))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+        place_launches(session, CAMP)
+        _continuing(session, container, project, waited, _at(0))
+
+        place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (waited.id, 1)
+
+    def test_a_launch_held_unplaced_is_placed_once_a_step_names_its_conversation(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        thread: Transcript,
+    ) -> None:
+        project_session.created_at = _at(-10)
+        container.record_service().place_work(project, project_session, "Scaling")
+        turn_at(session, project_session, _at(-9))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+        place_launches(session, CAMP)
+
+        transcripts.named_by_step(session, project_session)
+        conversation_named(session, CAMP)
+
+        assert _placed(session, launch) == (project_session.id, 1)
+
+    def test_an_adopted_transcripts_launches_stay_off_the_session_whose_step_names_it(
+        self,
+        session: DbSession,
+        thread: Transcript,
+        waited: models.Session,
+        service_user: User,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """DB 539."""
+        adopted = adopted_project(session, service_user)
+        thread.adopted_project_id = adopted.id
+        turn_at(session, waited, _at(-9))
+        launch = transcripts.launch(session, thread, started_at=_at(1))
+
+        with caplog.at_level(logging.WARNING, logger=LOGGER):
+            place_launches(session, CAMP)
+
+        assert _placed(session, launch) == (None, None)
+        assert caplog.messages == [
+            f"Transcript {CAMP} is adopted by project {adopted.id}, and a step of a"
+            " Session of Pilot's names it: its launches stay off that Session"
+        ]
 
 
 class TestAdopted:
@@ -401,9 +651,71 @@ def _committed_run(db: DbSession) -> uuid.UUID:
     return run.id
 
 
+def _committed_work(container: ServiceContainer) -> uuid.UUID:
+    """As `_committed_run`, the Session a Work, created before the
+    conversation began."""
+    with scoped_session(container) as db:
+        run = db.get_one(models.Session, _committed_run(db))
+        run.created_at = _at(-10)
+        container.record_service().place_work(
+            db.get_one(Project, run.project_id), run, "Scaling"
+        )
+        return run.id
+
+
 class TestConversationNamed:
     """The two writers of what a placement reads take turns, so that the
     later one sees what the earlier committed."""
+
+    def test_a_step_naming_beside_the_transcripts_publication_places_its_launch(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        run_id = _committed_work(container)
+
+        def named() -> None:
+            with scoped_session(container) as db:
+                transcripts.named_by_step(db, db.get_one(models.Session, run_id))
+                conversation_named(db, CAMP)
+
+        with scoped_session(container):
+            container.publication_service().publish(_camp())
+            naming = in_thread(named)
+            wait_until(lambda: lock_waits(container) == 1, "the naming's turn waiting")
+
+        naming.result()
+        with scoped_session(container) as db:
+            assert db.execute(select(Launch.session_id, Launch.turn_seq)).all() == [
+                (run_id, 1)
+            ]
+
+    def test_a_transcript_published_beside_a_steps_naming_has_its_launch_placed(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        run_id = _committed_work(container)
+
+        def published() -> None:
+            with scoped_session(container):
+                container.publication_service().publish(_camp())
+
+        naming = container.session_maker()()
+        try:
+            transcripts.named_by_step(naming, naming.get_one(models.Session, run_id))
+            conversation_named(naming, CAMP)
+            publishing = in_thread(published)
+            wait_until(
+                lambda: lock_waits(container) == 1, "the publication's turn waiting"
+            )
+            naming.commit()
+        finally:
+            naming.close()
+
+        publishing.result()
+        with scoped_session(container) as db:
+            assert db.execute(select(Launch.session_id, Launch.turn_seq)).all() == [
+                (run_id, 1)
+            ]
 
     def test_a_session_named_beside_its_transcripts_publication_runs_its_launch(
         self, committed_app: Flask

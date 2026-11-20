@@ -12,8 +12,9 @@ writes from its boundary on alone (`TestAppended`), and one that does not
 continue what Pilot holds is refused whole (`TestNotAppendable`). The rows a
 replay at rest writes are logged (`TestReplayedAtRest`; F152.16, decision 81
 point 2). A Launch a Turn of Pilot's started stands under its Session and
-Turn (`TestRan`). What Pilot holds is handed to a walk as its inventory
-(`TestInventory`; F152.2)."""
+Turn (`TestRan`). A Call is written with its caches, its Transcript with its
+first and its last Call's time (`TestCaches`; DB §7.4). What Pilot holds is
+handed to a walk as its inventory (`TestInventory`; F152.2)."""
 
 import logging
 from datetime import UTC, datetime, timedelta, timezone
@@ -345,9 +346,70 @@ def _projects(db: DbSession, thread: Transcript) -> list[Any]:
     )
 
 
+def _caches(db: DbSession, thread: Transcript) -> list[tuple[Any, ...]]:
+    """The caches of each Call of the Transcript, in the file's order: its
+    wait, whether it is a rewind, a miss and past the cache's lifetime, and
+    the Launch it was made in, by its place among the Launches Pilot
+    holds."""
+    places = {
+        launch_id: place
+        for place, launch_id in enumerate(
+            db.scalars(select(Launch.id).order_by(Launch.id)), start=1
+        )
+    }
+    return [
+        (
+            row.waited_seconds,
+            row.rewind,
+            row.cache_miss,
+            row.past_ttl,
+            places.get(row.launch_id),
+        )
+        for row in db.execute(
+            select(
+                Call.waited_seconds,
+                Call.rewind,
+                Call.cache_miss,
+                Call.past_ttl,
+                Call.launch_id,
+            )
+            .where(Call.transcript_id == thread.id)
+            .order_by(Call.position)
+        )
+    ]
+
+
+def _call_times(db: DbSession, thread: Transcript) -> tuple[Any, Any]:
+    """The Transcript's first and last Call's time, as the record holds
+    them."""
+    row = db.execute(
+        select(Transcript.first_call_at, Transcript.last_call_at).where(
+            Transcript.id == thread.id
+        )
+    ).one()
+    return row.first_call_at, row.last_call_at
+
+
 @pytest.fixture
 def publications(container: ServiceContainer) -> PublicationService:
     return container.publication_service()
+
+
+@pytest.fixture
+def waited(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    project_session: models.Session,
+) -> models.Session:
+    """A Session of Pilot's that is a Work, created before the conversation
+    began, its Turn in flight since then, whose step names the main thread:
+    the one that waited on the loop a driver ran the thread in."""
+    project_session.created_at = _at_time(-10)
+    container.record_service().place_work(project, project_session, "Scaling")
+    turn_at(session, project_session, _at_time(-9))
+    transcripts.named_by_step(session, project_session)
+    return project_session
 
 
 @pytest.fixture
@@ -3141,6 +3203,34 @@ class TestRan:
 
         assert _projects(session, thread) == [run.project_id]
 
+    def test_a_launch_a_driver_started_is_under_the_session_whose_step_names_it(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        waited: models.Session,
+    ) -> None:
+        """DB 538; F152.9: a loop session's thread, which no Session's
+        `conversation_id` names."""
+        thread = publications.publish(_camp())
+
+        assert _ran(session) == [(waited.id, 1), (waited.id, 1)]
+        assert _projects(session, thread) == [waited.project_id]
+
+    def test_a_driver_started_launch_named_again_keeps_what_it_was_placed_under(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        waited: models.Session,
+    ) -> None:
+        publications.publish(_camp())
+        end_turns(session, waited)
+
+        with writes(session) as wrote:
+            publications.publish(_camp())
+
+        assert _ran(session) == [(waited.id, 1), (waited.id, 1)]
+        assert wrote == {"transcripts": Written(updated=1)}
+
     def test_one_no_session_of_pilots_ran_lands_on_no_project(
         self, session: DbSession, publications: PublicationService, run: models.Session
     ) -> None:
@@ -3277,6 +3367,224 @@ class TestRan:
 
         assert _ran(session) == [(run.id, 1)]
         assert _count(session, Turn) == 2
+
+
+class TestCaches:
+    """A Call is written with its derived caches and its Transcript with its
+    first and its last Call's time (DB §7.4; decision 79.14)."""
+
+    def test_each_call_is_written_with_its_caches(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The third Call's context is under nine tenths of what the second
+        left: its chain crossed a compaction, and it missed no cache (DB
+        546)."""
+        thread = publications.publish(_camp())
+
+        assert _caches(session, thread) == [
+            (None, False, False, False, 1),
+            (60.0, False, False, False, 1),
+            (60.0, False, False, False, 1),
+            (60.0, False, False, False, 2),
+        ]
+
+    def test_a_wait_past_the_caches_lifetime_a_rewind_and_a_miss_are_told(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The third Call goes back to the first, 69 minutes after it
+        completed, and reads nothing of the hour's cache it left."""
+        back = call(
+            3,
+            predecessor="msg_0001",
+            sent_at=_at(70),
+            completed_at=_at(71),
+            tokens={"input": 1_204, "cache_write_1h": 52_000, "output": 2_870},
+        )
+
+        thread = publications.publish(
+            _camp(calls=[call(1), call(2, predecessor="msg_0001"), back])
+        )
+
+        assert _caches(session, thread) == [
+            (None, False, False, False, None),
+            (60.0, False, False, False, None),
+            (69 * 60.0, True, True, True, None),
+        ]
+
+    def test_an_appended_calls_predecessor_before_its_boundary_is_read(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_camp())
+        back = call(
+            5,
+            prompt=3,
+            predecessor="msg_0002",
+            sent_at=(STARTED + timedelta(minutes=4, seconds=30)).isoformat(),
+        )
+
+        with writes(session) as wrote:
+            publications.publish(_grown(call=5, calls=[back]))
+
+        assert _caches(session, thread)[4] == (150.0, True, False, False, 2)
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "calls": Written(inserted=1),
+        }
+
+    def test_a_call_named_again_whose_predecessor_moved_holds_its_caches_anew(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_camp())
+        calls = _calls()
+        calls[3] = calls[3] | {"predecessor": "msg_0001"}
+
+        publications.publish(_camp(calls=calls))
+
+        assert _caches(session, thread)[3] == (180.0, True, False, False, 2)
+
+    def test_a_transcript_holds_its_first_and_its_last_calls_time(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_camp())
+
+        assert _call_times(session, thread) == (_at_time(1), _at_time(4))
+
+    def test_a_transcript_with_no_call_holds_neither(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_camp())
+        held = _call_times(session, thread)
+
+        publications.publish(_camp(calls=[]))
+
+        assert held != (None, None)
+        assert _call_times(session, thread) == (None, None)
+
+    def test_an_appended_call_moves_its_last_calls_time_alone(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_camp())
+
+        publications.publish(_grown())
+
+        assert _call_times(session, thread) == (_at_time(1), _at_time(5))
+
+    def test_an_appended_call_that_carries_no_call_moves_neither(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_camp())
+
+        publications.publish(_grown(call=5, calls=[]))
+
+        assert _call_times(session, thread) == (_at_time(1), _at_time(4))
+
+    def test_an_appended_call_from_the_files_first_call_on_sets_both(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_camp(calls=[]))
+
+        publications.publish(
+            appended(
+                launch=2,
+                prompt=4,
+                compaction=2,
+                launches=[_second_launch(prompts=[])],
+                calls=[call(1, prompt=1), call(2, prompt=3, predecessor="msg_0001")],
+            )
+        )
+
+        assert _call_times(session, thread) == (_at_time(1), _at_time(2))
+
+    def test_an_appended_call_reads_the_first_calls_time_a_transcript_lacks(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """A server from before these times wrote the Transcript and its
+        Calls."""
+        thread = publications.publish(_camp())
+        thread.first_call_at = thread.last_call_at = None
+        session.flush()
+
+        publications.publish(_grown())
+
+        assert _call_times(session, thread) == (_at_time(1), _at_time(5))
+
+    def test_a_sub_agents_calls_are_made_in_the_main_threads_launch_that_holds_them(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """DB 543: the first Launch ended nine minutes in, and the second
+        began a minute later."""
+        publications.publish(_camp())
+
+        thread = publications.publish(
+            sub_agent(
+                calls=[
+                    call(1, completed_at=_at(3)),
+                    call(
+                        2, completed_at=(STARTED + timedelta(seconds=570)).isoformat()
+                    ),
+                    call(3, completed_at=_at(12)),
+                ]
+            )
+        )
+
+        assert [launch for *_, launch in _caches(session, thread)] == [1, None, 2]
+
+    def test_a_main_thread_published_later_holds_its_sub_agents_calls(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(
+            sub_agent(
+                calls=[call(1, completed_at=_at(3)), call(2, completed_at=_at(12))]
+            )
+        )
+        before = _caches(session, thread)
+
+        with writes(session) as wrote:
+            publications.publish(_camp())
+
+        assert [launch for *_, launch in before] == [None, None]
+        assert [launch for *_, launch in _caches(session, thread)] == [1, 2]
+        assert wrote["calls"] == Written(inserted=4, updated=2)
+
+    def test_a_main_thread_named_again_leaves_its_sub_agents_calls_as_they_are(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp())
+        publications.publish(sub_agent(calls=[call(1, completed_at=_at(3))]))
+
+        with writes(session) as wrote:
+            publications.publish(_camp())
+
+        assert wrote == {"transcripts": Written(updated=1)}
+
+    def test_a_launch_the_main_thread_no_longer_names_leaves_its_sub_agents_calls(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """F152.17: the Launch goes, and the Call it held is in none."""
+        publications.publish(_camp())
+        thread = publications.publish(
+            sub_agent(
+                calls=[call(1, completed_at=_at(3)), call(2, completed_at=_at(12))]
+            )
+        )
+
+        publications.publish(_camp(launches=[_first_launch()], calls=_calls()[:3]))
+
+        assert [launch for *_, launch in _caches(session, thread)] == [1, None]
+
+    def test_a_launch_that_ended_later_holds_the_sub_agents_calls_up_to_its_end(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp(launches=[_first_launch()], calls=_calls()[:3]))
+        thread = publications.publish(sub_agent(calls=[call(1, completed_at=_at(12))]))
+        before = _caches(session, thread)
+
+        publications.publish(
+            _camp(launches=[_first_launch(ended_at=_at(15))], calls=_calls()[:3])
+        )
+
+        assert [launch for *_, launch in before] == [None]
+        assert [launch for *_, launch in _caches(session, thread)] == [1]
 
 
 class TestAdopted:
@@ -3448,6 +3756,23 @@ class TestAdopted:
         run: models.Session,
         service_user: User,
     ) -> None:
+        with (
+            writes(session) as wrote,
+            pytest.raises(TranscriptNotAdoptableException),
+        ):
+            publications.publish(_camp(group=group()))
+
+        assert wrote == {}
+
+    def test_a_group_named_for_a_transcript_a_sessions_step_names_is_refused(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        waited: models.Session,
+        service_user: User,
+    ) -> None:
+        """A loop session's thread is a Session of Pilot's work as much as
+        the thread its own Turn started (DB 538, 539)."""
         with (
             writes(session) as wrote,
             pytest.raises(TranscriptNotAdoptableException),

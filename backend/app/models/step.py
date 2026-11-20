@@ -63,6 +63,9 @@ class StepTranscript(db.Model):  # type: ignore[name-defined]
             ["progress_steps.work_id", "progress_steps.code"],
             ondelete="CASCADE",
         ),
+        # Read at each publication of a main thread, for the Works whose
+        # steps name it (`launch_placement`).
+        Index("ix_step_transcripts_session_id", "session_id"),
     )
 
     work_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)

@@ -25,6 +25,7 @@ from app.services.app_page_service import AppPageService
 from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
 from app.services.brief_service import BriefService
+from app.services.call_caches import CallCacheService
 from app.services.caller_environment_service import CallerEnvironmentService
 from app.services.chat_close_service import ChatCloseService
 from app.services.chat_read_service import ChatReadService
@@ -596,6 +597,7 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # The Prices' load from the price file (F152.12)
     price_service = providers.Factory(PriceService, db=db_session)
+    call_cache_service = providers.Factory(CallCacheService, db=db_session)
 
     # A collector's publication of a transcript (F152.3)
     adoption_service = providers.Factory(

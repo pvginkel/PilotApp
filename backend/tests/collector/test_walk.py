@@ -990,7 +990,9 @@ def _row(row: Any, **places: Any) -> dict[str, Any]:
 def _facts(app: Flask, name: str) -> dict[str, Any]:
     """What Pilot holds of the transcript of that name, in the file's
     order, each row named by its place: the same for two transcripts whose
-    files hold the same lines."""
+    files hold the same lines. A Call's Launch is named by its place among
+    the transcript's own, and left out where it is its main thread's: that
+    one is read from another file."""
     with _record(app) as record:
         thread = _thread(record, name)
         launches = record.scalars(
@@ -1039,6 +1041,7 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
                     row,
                     prompt_id=row.prompt_id and prompt[row.prompt_id],
                     predecessor_id=row.predecessor_id and call[row.predecessor_id],
+                    launch_id=launch.get(row.launch_id),
                 )
                 for row in calls
             ],
