@@ -37,9 +37,10 @@ its newline is written. The facts are read off the lines in the file's order:
   first of them; its usage, model and completion time are the last one's.
 - **A Tool Call** is a `tool_use` block of a Call's lines, requested at its
   line's time, and its result the first `tool_result` block that names its
-  id, in a `user` line of the thread. Its argument is the first of its input
-  that is text, cut to its first line that is not blank, and its MCP server
-  the one its name is under, `mcp__<server>__<tool>`. The result gives when
+  id, in a `user` line of the thread. Its argument is an Agent call's
+  description, any other's first of its input that is text, which is its
+  command, path or query, cut to its first line that is not blank, and its
+  MCP server the one its name is under, `mcp__<server>__<tool>`. The result gives when
   it returned, whether it was an error, and the characters of its text.
   - An exit code is Bash's alone: the `Exit code N` its error opens with,
     and 0 where its result is no error, which is not published: Pilot
@@ -106,6 +107,10 @@ _BASH = "Bash"
 
 _MCP = "mcp"
 """What the name of an MCP server's tool opens with, before the server."""
+
+_AGENT = "Agent"
+"""The tool that starts a sub-agent: what it was given is its task's
+description, which the model writes among its input in any order."""
 
 _EXIT = re.compile(r"Exit code (-?\d+)(?:\n|\Z)")
 """How a failed command's result opens."""
@@ -287,13 +292,18 @@ def _taken_out(
     return waiting, None
 
 
-def _argument(given: dict[str, Any]) -> str | None:
-    """A tool's argument: the first of its input that is text, cut to its
-    first line that is not blank."""
-    for value in given.values():
-        if isinstance(value, str):
-            return next((line for line in value.splitlines() if line.strip()), None)
-    return None
+def _argument(tool: str, given: dict[str, Any]) -> str | None:
+    """A tool's argument, cut to its first line that is not blank: an Agent
+    call's description, none where it has none, and any other tool's first
+    of its input that is text."""
+    said = (
+        given.get("description")
+        if tool == _AGENT
+        else next((value for value in given.values() if isinstance(value, str)), None)
+    )
+    if not isinstance(said, str):
+        return None
+    return next((line for line in said.splitlines() if line.strip()), None)
 
 
 def _server(tool: str) -> str | None:
@@ -518,7 +528,8 @@ class _Thread:
             call.completed_at, call.model, call.tokens = at, model, tokens
         for block in message["content"]:
             if block["type"] == "tool_use" and block["id"] not in self._requested:
-                asked = _ToolCall(block["name"], _argument(block["input"]), at)
+                argument = _argument(block["name"], block["input"])
+                asked = _ToolCall(block["name"], argument, at)
                 self._requested[block["id"]] = call.tool_calls[block["id"]] = asked
 
     def _returned(

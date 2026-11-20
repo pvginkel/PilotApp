@@ -1154,6 +1154,54 @@ class TestToolCalls:
         assert asked.first_argument == argument
 
     @pytest.mark.parametrize(
+        ("given", "argument"),
+        [
+            (
+                {
+                    "description": "Count the heddles",
+                    "prompt": "Count every heddle.",
+                    "subagent_type": "Explore",
+                },
+                "Count the heddles",
+            ),
+            (
+                {
+                    "subagent_type": "Explore",
+                    "description": "Count the heddles",
+                    "prompt": "Count every heddle.",
+                },
+                "Count the heddles",
+            ),
+            (
+                {
+                    "model": "haiku",
+                    "description": "Count the heddles",
+                    "prompt": "Count every heddle.",
+                },
+                "Count the heddles",
+            ),
+            (
+                {"description": "\n Count the heddles\nand the reeds"},
+                " Count the heddles",
+            ),
+            ({"subagent_type": "Explore", "prompt": "Count every heddle."}, None),
+        ],
+        ids=[
+            "its description first",
+            "its type first",
+            "a model first",
+            "cut to a line",
+            "no description",
+        ],
+    )
+    def test_an_agent_calls_argument_is_its_description(
+        self, given: dict[str, Any], argument: str | None, tmp_path: Path
+    ) -> None:
+        asked = _tool_call(tmp_path, requesting(4, tool="Agent", given=given))
+
+        assert asked.first_argument == argument
+
+    @pytest.mark.parametrize(
         ("error", "failed"), [(True, True), (False, False), (None, False)]
     )
     def test_it_failed_where_its_result_is_an_error(

@@ -370,7 +370,8 @@ def request(
     use: ToolUse, tool_use_id: str, spawned: Spawned | None, task: str | None
 ) -> dict[str, Any]:
     """A `tool_use` block: the request of one tool, its argument the first
-    of its input."""
+    of its input, an Agent call's its description, written after its
+    type."""
     asked: dict[str, Any]
     if use.argument is None:
         asked = {}
@@ -387,9 +388,9 @@ def request(
         }
     elif use.tool == "Agent":
         asked = {
+            "subagent_type": "general-purpose" if spawned is None else spawned.type,
             "description": use.argument,
             "prompt": task,
-            "subagent_type": "general-purpose" if spawned is None else spawned.type,
         }
     else:
         asked = {"query": use.argument}

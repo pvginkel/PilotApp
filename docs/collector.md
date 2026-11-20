@@ -170,8 +170,9 @@ each rule in full. The facts are read off the lines in the file's order:
 - **A Tool Call** is a `tool_use` block of a Call's lines, requested at its line's time. Its result
   is the first `tool_result` block that names its id, in a `user` line of the thread. A result that
   names no request of the file is dropped.
-  - Its `first_argument` is the first of its input that is text, cut to its first line that is not
-    blank; an input with no text gives none.
+  - Its `first_argument` is an Agent call's `description`, which the model writes among its input
+    in any order, and any other tool's first of its input that is text, its command, path or query;
+    cut to its first line that is not blank. An input with no such text gives none.
   - Its `mcp_server` is the one its name is under, `mcp__<server>__<tool>`.
   - The result gives `returned_at`, `failed` (its `is_error`) and `result_characters`, the
     characters of its text: its string, or its `text` blocks together.

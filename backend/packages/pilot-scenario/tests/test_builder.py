@@ -108,7 +108,7 @@ class TestAMainThread:
         } == {
             "file_size": len(Builder(SCENARIO, UNTIL).files()[0].content),
             "file_modified_at": _at(221),
-            "collector": {"version": "1.2.0"},
+            "collector": {"version": "1.3.0"},
             "working_directory": "/work/RecipeBox",
             "repository": "RecipeBox",
             "environment": "ben-recipebox-51f0c2",

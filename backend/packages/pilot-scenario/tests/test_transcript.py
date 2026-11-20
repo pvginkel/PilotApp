@@ -95,7 +95,12 @@ def _tool_call(
     if asked["name"].startswith("mcp__"):
         read["mcp_server"] = asked["name"].split("__")[1]
     if asked["input"]:
-        read["first_argument"] = next(iter(asked["input"].values()))
+        given = asked["input"]
+        read["first_argument"] = (
+            given["description"]
+            if asked["name"] == "Agent"
+            else next(iter(given.values()))
+        )
     if result is None:
         return read
     (block,) = _blocks(result, "tool_result")
