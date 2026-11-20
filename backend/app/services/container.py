@@ -65,6 +65,7 @@ from app.services.project_service import ProjectService
 from app.services.publication_service import PublicationService
 from app.services.push_subscription_service import PushSubscriptionService
 from app.services.quota_overrule_service import QuotaOverruleService
+from app.services.quota_week_service import QuotaWeekService
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import RelayWatchdog
 from app.services.scenario_service import ScenarioService
@@ -346,6 +347,12 @@ class ServiceContainer(containers.DeclarativeContainer):
         usage_halts=usage_halts,
     )
     register_for_background_startup(lambda c: c.usage_watcher())
+    # The Quota Weeks, brought to the reset each reading recorded names (DB
+    # §2.5); built at startup so that it hears the first.
+    quota_week_service = providers.Singleton(
+        QuotaWeekService, container=__self__, usage_service=usage_service
+    )
+    register_for_background_startup(lambda c: c.quota_week_service())
     # The halt file where a work item runs under a cooperative halt or its
     # project's pause (design 2 §13.4); its job and timer register on the
     # supervisor when built, before STARTUP.

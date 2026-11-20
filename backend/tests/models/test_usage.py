@@ -1,11 +1,12 @@
-"""Usage Reading and Window Share: what a row must hold."""
+"""Usage Reading, Window Share and Quota Week: what a row must hold."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from app.models import UsageReading, WindowShare
+from app.models import QuotaWeek, UsageReading, WindowShare
 from app.models.reference import UsageWindow
 from tests.support.database import violated_constraint
 
@@ -92,3 +93,59 @@ class TestUsageReading:
         )
 
         assert violated_constraint(session) == "window_shares_reading_id_fkey"
+
+
+# A Thursday 10:00 UTC before the first week the revisions seed.
+WEEK_STARTS_AT = datetime(2024, 11, 7, 10, tzinfo=UTC)
+WEEK = timedelta(days=7)
+
+
+def _week(session: DbSession, starts_at: datetime, ends_at: datetime) -> None:
+    session.add(QuotaWeek(starts_at=starts_at, ends_at=ends_at))
+
+
+class TestQuotaWeek:
+    def test_a_week_starts_where_the_one_before_it_ends(
+        self, session: DbSession
+    ) -> None:
+        _week(session, WEEK_STARTS_AT, WEEK_STARTS_AT + WEEK)
+        _week(session, WEEK_STARTS_AT + WEEK, WEEK_STARTS_AT + 2 * WEEK)
+
+        session.flush()
+
+        held = session.scalars(
+            select(QuotaWeek.starts_at).where(
+                QuotaWeek.starts_at <= WEEK_STARTS_AT + WEEK,
+                QuotaWeek.ends_at > WEEK_STARTS_AT + WEEK,
+            )
+        ).all()
+        assert held == [WEEK_STARTS_AT + WEEK]
+
+    @pytest.mark.parametrize(
+        "length", [timedelta(0), timedelta(seconds=-1)], ids=["empty", "backwards"]
+    )
+    def test_a_week_ends_after_it_starts(
+        self, session: DbSession, length: timedelta
+    ) -> None:
+        _week(session, WEEK_STARTS_AT, WEEK_STARTS_AT + length)
+
+        assert violated_constraint(session) == "ck_quota_weeks_period"
+
+    @pytest.mark.parametrize(
+        ("starts", "ends"),
+        [
+            (timedelta(days=6, hours=23, minutes=59, seconds=59), 2 * WEEK),
+            (timedelta(days=-3), timedelta(seconds=1)),
+            (timedelta(days=1), timedelta(days=2)),
+            (timedelta(0), WEEK),
+        ],
+        ids=["a-second-before-its-end", "a-second-into-it", "inside-it", "the-same"],
+    )
+    def test_no_two_weeks_overlap(
+        self, session: DbSession, starts: timedelta, ends: timedelta
+    ) -> None:
+        _week(session, WEEK_STARTS_AT, WEEK_STARTS_AT + WEEK)
+        session.flush()
+        _week(session, WEEK_STARTS_AT + starts, WEEK_STARTS_AT + ends)
+
+        assert violated_constraint(session) == "ex_quota_weeks_overlap"

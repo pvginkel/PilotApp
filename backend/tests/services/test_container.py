@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 from flask import Flask
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import create_app
@@ -28,6 +28,7 @@ from app.models import (
     Item,
     Project,
     ProjectMember,
+    QuotaWeek,
     StoreUpdate,
     Turn,
     User,
@@ -67,6 +68,7 @@ from app.services.notification_reconcile_service import (
 )
 from app.services.pilot_server import token_hash
 from app.services.push_subscription_service import PushSubscriptionService
+from app.services.quota_week_service import QuotaWeekService
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
 from app.services.session_start_service import NUDGE, SessionStartService
@@ -816,6 +818,37 @@ class TestUsageWatcherWiring:
                 )
             finally:
                 coordinator.shutdown()
+
+
+class TestQuotaWeekWiring:
+    def test_the_fleet_streams_reading_writes_the_week_its_reset_closes(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(AppSettings(controller_url=fake_controller.url))
+        client_of(container, fake_controller)
+        assert isinstance(container.fleet_consumer(), FleetConsumer)
+        assert isinstance(container.quota_week_service(), QuotaWeekService)
+        with scoped_session(container) as db:
+            running = db.scalars(select(func.max(QuotaWeek.ends_at))).one()
+        reset = running + timedelta(days=7)
+        coordinator = container.lifecycle_coordinator()
+
+        with listening("app.services.quota_week_service") as weeks:
+            coordinator.fire_startup()
+            try:
+                fake_controller.usage(seven_day=0.2, seven_day_resets_at=reset)
+                weeks.wait_for("Quota week written: .*")
+            finally:
+                coordinator.shutdown()
+
+        with scoped_session(container) as db:
+            latest = db.execute(
+                select(QuotaWeek.starts_at, QuotaWeek.ends_at)
+                .order_by(QuotaWeek.starts_at.desc())
+                .limit(1)
+            ).one()
+        assert tuple(latest) == (running, reset)
 
 
 class TestChatCloseWiring:
