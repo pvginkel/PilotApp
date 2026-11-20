@@ -35,6 +35,11 @@ A main thread's Launches that a Turn of Pilot's started are placed under
 their Session and Turn as the write ends (`launch_placement`; DB decision 79
 point 7), and a Launch the call names again keeps what it was placed under.
 
+A Call is written with its cost, at the Prices in force (`price_service`; DB
+548), and a Model the call is the first to name with the Model it is priced
+as. A publication writes under the Prices' turn, so that a load of the price
+file prices every Call written before it.
+
 A main thread whose call names a group is adopted by the group's adopted
 Project, which the call makes where Pilot has none (`adoption_service`;
 F152.8), and by none where its call names none: the label is the call's. A
@@ -120,6 +125,7 @@ from app.services.adoption_service import AdoptionService, group_faults
 from app.services.environment_service import reported_columns
 from app.services.fleet_consumer import FleetConsumer
 from app.services.launch_placement import conversation_turn, place_launches
+from app.services.price_service import costs, price_as_family, prices_turn
 
 logger = logging.getLogger(__name__)
 
@@ -421,13 +427,15 @@ class PublicationService:
         under its Session and Turn (DB 538). After either, a main thread
         is adopted by the adopted Project of the `group` the call names,
         made where no Project holds the group and renamed where the group
-        was, and by none where the call names none.
+        was, and by none where the call names none. After either, each Call
+        it carries holds its cost at the Prices in force, none where a kind
+        it counts tokens of has no Price.
 
         An Environment, a Repository, a Component Version and a reference
         code the call names that Pilot has no row for are written, the
         Environment as the fleet stream reports it (`_environment`), the code
-        as its own name and with what the call says of its category; one
-        Pilot has met stands as it is.
+        as its own name and with what the call says of its category, a Model
+        with the Model it is priced as; one Pilot has met stands as it is.
 
         Raises:
             PublicationInvalidException: the call has faults; nothing is
@@ -445,6 +453,7 @@ class PublicationService:
         if found:
             raise PublicationInvalidException(_name(publication), found)
         conversation_turn(self.db, publication.session_id)
+        prices_turn(self.db)
         boundary = _WHOLE
         ids: dict[str, int] = {}
         held = self._held(publication)
@@ -880,9 +889,13 @@ class PublicationService:
             [compaction.trigger for compaction in publication.compactions],
         )
         self._meet(MissCause, [call.miss_cause for call in calls])
-        self._meet(
-            Model,
-            [call.model for call in calls] + [call.requested_model for call in calls],
+        price_as_family(
+            self.db,
+            self._meet(
+                Model,
+                [call.model for call in calls]
+                + [call.requested_model for call in calls],
+            ),
         )
         self._meet(
             PromptSource,
@@ -913,12 +926,13 @@ class PublicationService:
         entity: type[Any],
         codes: Sequence[str | None],
         facts: Mapping[str, dict[str, Any]] | None = None,
-    ) -> None:
+    ) -> list[str]:
         """Write the reference entity's row of each code Pilot has not met,
-        named by its code, with the `facts` the call gives of its category."""
+        named by its code, with the `facts` the call gives of its category;
+        returned are those codes."""
         named = {code for code in codes if code is not None}
         if not named:
-            return
+            return []
         met: set[str] = set(
             self.db.scalars(select(entity.code).where(entity.code.in_(named)))
         )
@@ -931,6 +945,7 @@ class PublicationService:
                     for code in unmet
                 ],
             )
+        return unmet
 
     def _versions(self, publication: PublicationSchema) -> dict[_Version, int]:
         """The id of each Component Version the call names. One Pilot has not
@@ -1234,7 +1249,8 @@ class PublicationService:
         Call the call names, by its `message_id`; returned are the ids of
         the Calls Pilot held from the boundary on that it no longer names. A
         Call Pilot has not met takes an id before it is written, so that one
-        written beside it names it as its predecessor."""
+        written beside it names it as its predecessor. Each is written with
+        its cost."""
         held = {
             row.message_id: row
             for row in self.db.scalars(
@@ -1263,9 +1279,10 @@ class PublicationService:
                 )
             )
 
-        met: list[tuple[Call, dict[str, Any]]] = []
+        written: list[dict[str, Any]] = []
         for position, call in enumerate(calls, start=boundary.call):
             facts: dict[str, Any] = {
+                "id": ids[call.message_id],
                 "position": position,
                 "prompt_id": prompts[call.prompt - 1].id if call.prompt else None,
                 "predecessor_id": ids[call.predecessor] if call.predecessor else None,
@@ -1285,15 +1302,15 @@ class PublicationService:
             }
             for kind in _TOKEN_KINDS:
                 facts[f"{kind}_tokens"] = call.tokens.get(kind, 0)
+            written.append(facts)
+        priced = costs(self.db, written)
+        met: list[tuple[Call, dict[str, Any]]] = []
+        for call, facts in zip(calls, written, strict=True):
+            facts["cost"] = priced[facts["id"]]
             row = held.get(call.message_id)
             if row is None:
                 self.db.add(
-                    Call(
-                        id=ids[call.message_id],
-                        transcript_id=thread.id,
-                        message_id=call.message_id,
-                        **facts,
-                    )
+                    Call(transcript_id=thread.id, message_id=call.message_id, **facts)
                 )
             else:
                 met.append((row, facts))

@@ -1,8 +1,10 @@
-"""Call, Tool Call, Event and Context Part: what a row must hold (DB §2.7;
-the assertions of §4.31)."""
+"""Call, Price, Tool Call, Event and Context Part, and a Model priced as
+another: what a row must hold (DB §2.7, §2.11; the assertions of §4.31)."""
 
 import uuid
 from datetime import timedelta
+from decimal import Decimal
+from typing import Any
 
 import pytest
 from sqlalchemy import func, select, text
@@ -20,15 +22,20 @@ from app.models import (
     Launch,
     MissCause,
     Model,
+    Price,
     StopReason,
     TokenKind,
     Tool,
     ToolCall,
     Transcript,
 )
+from app.models.call import PRICED_KINDS
 from tests.support import transcripts
 from tests.support.database import violated_constraint
 from tests.support.transcripts import HAIKU, OPUS, OTHER, STARTED, SUB_AGENT
+
+PANTRY = "claude-pantry-2"
+"""An invented model."""
 
 
 @pytest.fixture
@@ -123,7 +130,8 @@ class TestCall:
     def test_its_tokens_are_a_column_per_token_kind_nothing_is_within(
         self, session: DbSession, request_: Call
     ) -> None:
-        """Call Token Count has no table (DB §7.7); its kinds are 547's."""
+        """Call Token Count has no table (DB §7.7); its kinds are 547's, and
+        a Price is of one of them."""
         kinds = set(session.scalars(select(TokenKind.code)))
         coarser = set(
             session.scalars(
@@ -135,9 +143,11 @@ class TestCall:
         columns = {
             column.name.removesuffix("_tokens")
             for column in Call.__table__.columns
-            if column.name.endswith("_tokens") and not column.nullable
+            if column.name.endswith("_tokens")
+            and not column.nullable
+            and column.computed is None
         }
-        assert columns == kinds - coarser
+        assert columns == kinds - coarser == set(PRICED_KINDS)
         assert {kind: getattr(request_, f"{kind}_tokens") for kind in columns} == {
             "input": 1_204,
             "cache_write_5m": 0,
@@ -145,6 +155,25 @@ class TestCall:
             "cache_read": 48_112,
             "output": 2_870,
         }
+
+    def test_its_context_tokens_are_its_tokens_of_the_input_and_cache_kinds(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        assert request_.context_tokens == 1_204 + 3_310 + 48_112
+
+        request_.cache_write_5m_tokens = 500
+        request_.output_tokens = 9_000
+        session.flush()
+        session.expire(request_)
+
+        assert request_.context_tokens == 1_204 + 500 + 3_310 + 48_112
+
+    def test_it_holds_no_cost_until_it_is_priced(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        session.expire(request_)
+
+        assert request_.cost is None
 
     def test_a_sub_agents_call_follows_no_prompt(
         self, session: DbSession, collector: ComponentVersion
@@ -335,6 +364,114 @@ def _call(thread: Transcript, position: int, **overrides: object) -> Call:
     }
     values.update(overrides)
     return Call(**values)
+
+
+class TestModel:
+    def test_it_is_priced_as_another_model(self, session: DbSession) -> None:
+        newer = Model(code="claude-opus-9", name="claude-opus-9", priced_as_code=OPUS)
+        session.add(newer)
+        session.flush()
+        session.expire(newer)
+
+        assert newer.priced_as_code == OPUS
+
+    def test_it_is_not_priced_as_itself(self, session: DbSession) -> None:
+        session.add(
+            Model(
+                code="claude-opus-9",
+                name="claude-opus-9",
+                priced_as_code="claude-opus-9",
+            )
+        )
+
+        assert violated_constraint(session) == "ck_models_priced_as"
+
+    def test_the_model_it_is_priced_as_is_held(self, session: DbSession) -> None:
+        session.add(
+            Model(code="claude-opus-9", name="claude-opus-9", priced_as_code="opus")
+        )
+
+        assert violated_constraint(session) == "models_priced_as_code_fkey"
+
+
+def _price(**overrides: Any) -> Price:
+    """An invented model's input rate, the model met."""
+    values: dict[str, Any] = {
+        "model_code": PANTRY,
+        "token_kind_code": "input",
+        "rate": Decimal("3"),
+        "effective_at": STARTED,
+    }
+    return Price(**values | overrides)
+
+
+@pytest.fixture
+def pantry(session: DbSession) -> Model:
+    """An invented model, which the price file does not name."""
+    return transcripts.reference(session, Model, PANTRY)
+
+
+@pytest.mark.usefixtures("pantry")
+class TestPrice:
+    def test_a_price_holds_a_models_rate_for_a_kind_from_a_moment_on(
+        self, session: DbSession
+    ) -> None:
+        base = _price()
+        tier = _price(above_context=100_001, rate=Decimal("6.5"))
+        session.add_all([base, tier])
+        session.flush()
+        session.expire_all()
+
+        assert (base.model_code, base.token_kind_code) == (PANTRY, "input")
+        assert (base.above_context, base.rate) == (None, Decimal("3"))
+        assert base.effective_at == STARTED
+        assert (tier.above_context, tier.rate) == (100_001, Decimal("6.5"))
+
+    def test_a_models_rate_for_a_kind_changes_from_a_later_moment(
+        self, session: DbSession
+    ) -> None:
+        session.add_all(
+            [
+                _price(),
+                _price(rate=Decimal("4"), effective_at=STARTED + timedelta(days=30)),
+            ]
+        )
+
+        session.flush()
+
+    @pytest.mark.parametrize("above_context", [None, 100_001])
+    def test_two_prices_of_one_model_kind_context_size_and_moment_are_refused(
+        self, session: DbSession, above_context: int | None
+    ) -> None:
+        """DB 549, the base rate's among them, whose context size is none."""
+        session.add(_price(above_context=above_context))
+        session.flush()
+        session.add(_price(above_context=above_context, rate=Decimal("4")))
+
+        assert violated_constraint(session) == (
+            "prices_model_code_token_kind_code_above_context_effective_a_key"
+        )
+
+    def test_it_is_of_a_kind_nothing_is_within(self, session: DbSession) -> None:
+        """DB 547."""
+        session.add(_price(token_kind_code="cache_write"))
+
+        assert violated_constraint(session) == "ck_prices_kind"
+
+    def test_it_prices_a_model(self, session: DbSession) -> None:
+        session.add(_price(model_code="claude-larder-1"))
+
+        assert violated_constraint(session) == "prices_model_code_fkey"
+
+    def test_its_context_size_is_above_none(self, session: DbSession) -> None:
+        session.add(_price(above_context=0))
+
+        assert violated_constraint(session) == "ck_prices_above_context"
+
+    def test_its_rate_is_never_negative(self, session: DbSession) -> None:
+        session.add(_price(rate=Decimal("-1")))
+
+        assert violated_constraint(session) == "ck_prices_rate"
 
 
 class TestToolCall:

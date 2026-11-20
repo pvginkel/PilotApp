@@ -24,6 +24,7 @@ from app.models import (
     Environment,
     Event,
     Launch,
+    Model,
     Project,
     Repository,
     ToolCall,
@@ -75,6 +76,19 @@ class TestLoad:
         assert counting.session_id == halving.session_id != gears.session_id
         assert [len(_calls(session, thread)) for thread in loaded] == [6, 3, 5]
         assert session.scalar(select(func.count()).select_from(Transcript)) == 3
+
+    def test_each_call_is_priced_at_its_own_models_public_rates(
+        self, session: DbSession, loaded: list[Transcript]
+    ) -> None:
+        used = select(Call.model_code).distinct()
+
+        assert session.scalar(select(func.count()).where(Call.cost.is_(None))) == 0
+        assert session.scalar(select(func.min(Call.cost))) > 0
+        assert session.execute(
+            select(Model.code, Model.priced_as_code)
+            .where(Model.code.in_(used))
+            .order_by(Model.code)
+        ).all() == [("claude-haiku-4-5-20251001", None), ("claude-opus-4-5", None)]
 
     def test_a_sub_agent_stands_under_its_main_thread_and_its_spawning_call(
         self, session: DbSession, loaded: list[Transcript]

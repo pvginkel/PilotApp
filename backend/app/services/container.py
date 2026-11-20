@@ -59,6 +59,7 @@ from app.services.people_service import PeopleService
 from app.services.pilot_server import PilotServer
 from app.services.pilot_store_service import PilotStoreService
 from app.services.pilot_work_service import PilotWorkService
+from app.services.price_service import PriceService
 from app.services.project_event_service import ProjectEventService
 from app.services.project_service import ProjectService
 from app.services.publication_service import PublicationService
@@ -585,6 +586,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         engine_bus=engine_bus,
         lifecycle_coordinator=lifecycle_coordinator,
     )
+
+    # The Prices' load from the price file (F152.12)
+    price_service = providers.Factory(PriceService, db=db_session)
 
     # A collector's publication of a transcript (F152.3)
     adoption_service = providers.Factory(
