@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.models.reference import ProgressState, SessionState
 from app.schemas.timeline import LongerThanUsual
+from app.services.container import ServiceContainer
 from app.services.step_estimate import (
     StepEstimates,
     WorkEstimate,
@@ -999,6 +1000,23 @@ class TestStepEstimates:
 
         assert _minutes(estimates[run]) == pytest.approx(40 + 5)
         assert estimates == _estimates(session, [run], window=2, running=5)
+
+    def test_the_container_hands_it_the_window_and_the_60(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        run: uuid.UUID,
+        past: uuid.UUID,
+    ) -> None:
+        """Twenty timings of 10 minutes, the newest, before forty of 40: the
+        window of 20 prices the step not begun at 10 minutes, where 60 would
+        at 30; the running step's 60 leave it 35 more, where 20 would 5."""
+        _timed(session, past, "write", [10] * 20 + [40] * 40)
+        _list(session, run, [_active("write", 5), _pending("write")])
+
+        estimates = container.step_estimates().of(session, [run], NOW)
+
+        assert _minutes(estimates[run]) == pytest.approx(35 + 10)
 
 
 def _shown(
