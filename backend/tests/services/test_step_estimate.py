@@ -721,6 +721,38 @@ class TestWorkEstimatesRepeatsOwed:
 
         assert left == pytest.approx(4 + 5 + 2.5)
 
+    def test_a_begun_step_of_its_kind_of_a_listing_unknown_releases_nothing(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """Begun after the listed `write`, the second is no unlisted step:
+        the first owes until the `ship` not begun is done."""
+        left = self._left(
+            session,
+            run,
+            [
+                _done("write", 60),
+                _active("write", 10, listed=None),
+                _pending("ship"),
+            ],
+        )
+
+        assert left == pytest.approx(5 + 10 + 2.5)
+
+    def test_a_step_not_begun_is_the_next_listed_step_on_the_list(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """A list done out of order: the `ship` not begun stands between the
+        `write` and the `review` done after it, so the `write` owes until the
+        `ship` is done, and the `review`, with nothing listed after it, while
+        a step is left."""
+        left = self._left(
+            session,
+            run,
+            [_done("write", 60), _pending("ship"), _done("review", 40)],
+        )
+
+        assert left == pytest.approx(5 + 2.5 + 1)
+
     def test_a_kind_owed_alone_is_a_kind_the_estimate_needs(
         self, session: DbSession, run: uuid.UUID, past: uuid.UUID
     ) -> None:
