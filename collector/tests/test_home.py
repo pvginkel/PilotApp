@@ -169,6 +169,32 @@ class TestTheHomesTranscripts:
 
         assert _names(tmp_path) == {SESSION, f"{SESSION}/{AGENT}"}
 
+    def test_a_pipe_of_a_transcripts_name_is_not_listed(self, tmp_path: Path) -> None:
+        """Its read would wait for a writer, and the walk with it."""
+        _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
+        os.mkfifo(tmp_path / FOLDER / f"{OTHER}.jsonl")
+        sub_agents = tmp_path / FOLDER / SESSION / "subagents"
+        sub_agents.mkdir(parents=True)
+        os.mkfifo(sub_agents / f"agent-{AGENT}.jsonl")
+
+        assert _names(tmp_path) == {SESSION}
+
+    def test_a_folder_that_cannot_be_listed_holds_none_and_is_logged(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
+        closed = tmp_path / "-work-Spindle"
+        _put(closed / f"{OTHER}.jsonl")
+        closed.chmod(0)
+        try:
+            if os.access(closed, os.R_OK):
+                pytest.skip("this user lists a folder whatever its mode")
+
+            assert _names(tmp_path) == {SESSION}
+        finally:
+            closed.chmod(0o755)
+        assert f"The folder {closed} cannot be listed" in caplog.text
+
     def test_a_home_with_no_projects_is_an_error(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             transcripts(tmp_path / "projects")

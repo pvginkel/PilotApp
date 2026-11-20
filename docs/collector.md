@@ -45,9 +45,11 @@ character that is no letter or digit a `-`. A sub-agent's is
 `<folder>/<session_id>/subagents/agent-<agent_id>.jsonl`, and one a workflow started lies deeper,
 under `subagents/workflows/<workflow>/`. The ids are the path's. Nothing else under `projects` is a
 transcript: a workflow's `journal.jsonl`, a sub-agent's `.meta.json` and the outputs saved under
-`<session_id>/tool-results/` are not. A walk lists every transcript with a `stat` and follows no
-symlink: a sub-agent's file linked into another session's folder is its own session's, and the walk
-meets it there.
+`<session_id>/tool-results/` are not. A walk lists every transcript with a `stat`, a regular file
+alone, never a pipe or a device of a transcript's name, and follows no symlink: a sub-agent's file
+linked into another session's folder is its own session's, and the walk meets it there. A folder
+under `projects` that cannot be listed holds no transcript for the walk, which logs at `WARNING`
+"The folder <folder> cannot be listed, so no transcript in it is: <why>".
 
 ## The walk
 

@@ -13,18 +13,21 @@ An output too large for its result is saved as
 sub-agents, and the result names it by its path as the session's own process
 sees the home.
 
-A walk lists every transcript with a `stat` (F152.2) and follows no symlink:
-a sub-agent's file linked into another session's folder is its own
-session's, where the walk meets the file itself. A transcript found by its
-ids is one a walk lists.
+A walk lists every transcript with a `stat` (F152.2), a regular file alone,
+and follows no symlink: a sub-agent's file linked into another session's
+folder is its own session's, where the walk meets the file itself. A
+transcript found by its ids is one a walk lists.
 """
 
+import logging
 import os
 import stat
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
+
+logger = logging.getLogger(__name__)
 
 PROJECTS = "projects"
 """The folder of the home that holds the transcripts."""
@@ -92,23 +95,32 @@ def modified_at(status: os.stat_result) -> datetime:
 
 
 def _files(folder: str, depth: int) -> Iterator[os.DirEntry[str]]:
-    """The files in the folders a transcript can lie in, from `folder` down,
-    which is `depth` folders under `projects`: of a session's folder its
-    `subagents` alone, and no symlink. A folder under `projects` gone since
-    it was listed holds none."""
+    """The regular files in the folders a transcript can lie in, from
+    `folder` down, which is `depth` folders under `projects`: of a session's
+    folder its `subagents` alone, and no symlink, pipe or device. A folder
+    under `projects` gone since it was listed holds none, and so does one
+    that cannot be listed, which is logged."""
     try:
         entries = os.scandir(folder)
-    except FileNotFoundError:
+    except OSError as error:
         if depth == 0:
             raise
+        if not isinstance(error, FileNotFoundError):
+            logger.warning(
+                "The folder %s cannot be listed, so no transcript in it is: %s",
+                folder,
+                error,
+            )
         return
     with entries:
         for entry in entries:
             if entry.is_symlink():
                 continue
-            if not entry.is_dir(follow_symlinks=False):
+            if entry.is_file(follow_symlinks=False):
                 yield entry
-            elif depth != 2 or entry.name == _SUB_AGENTS:
+            elif entry.is_dir(follow_symlinks=False) and (
+                depth != 2 or entry.name == _SUB_AGENTS
+            ):
                 yield from _files(entry.path, depth + 1)
 
 
