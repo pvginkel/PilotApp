@@ -94,6 +94,7 @@ from sqlalchemy.orm import Session, aliased
 from sqlalchemy.orm.session import UOWTransaction
 
 from app.app_config import AppSettings
+from app.dashboard.assembly import CatalogueService
 from app.exceptions import (
     AuthenticationException,
     CollectorProtocolUnsupportedException,
@@ -135,6 +136,7 @@ from app.services.environment_service import reported_columns
 from app.services.fleet_consumer import FleetConsumer
 from app.services.launch_placement import conversation_turn, place_launches
 from app.services.price_service import costs, price_as_family, prices_turn
+from app.utils.after_commit import after_commit
 
 logger = logging.getLogger(__name__)
 
@@ -355,16 +357,20 @@ class PublicationService:
         app_settings: AppSettings,
         adoption_service: AdoptionService,
         fleet_consumer: FleetConsumer,
+        catalogue_service: CatalogueService,
     ) -> None:
         """
         Args:
             fleet_consumer: The fleet stream's latest report of each
                 environment, for the row of one a call names first
+            catalogue_service: The dashboard's catalogue, which holds the
+                reference entities' rows and is dropped where a call adds one
         """
         self.db = db
         self.app_settings = app_settings
         self.adoption_service = adoption_service
         self.fleet_consumer = fleet_consumer
+        self.catalogue_service = catalogue_service
         self._replay: _Replay | None = None
 
     def admit(self, authorization: str | None, protocol: str | None) -> None:
@@ -956,6 +962,7 @@ class PublicationService:
         )
         unmet = sorted(named - met)
         if unmet:
+            after_commit(self.catalogue_service.drop)
             self.db.execute(
                 pg_insert(entity).on_conflict_do_nothing(),
                 [

@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.app_config import AppSettings
 from app.config import Settings
+from app.dashboard.assembly import CatalogueService
 from app.engine.attachments import AttachmentStore, AttachService
 from app.engine.bus import EngineBus
 from app.engine.closed_chats import ClosedChats
@@ -599,6 +600,13 @@ class ServiceContainer(containers.DeclarativeContainer):
     price_service = providers.Factory(PriceService, db=db_session)
     call_cache_service = providers.Factory(CallCacheService, db=db_session)
 
+    # The dashboard's catalogue, the process's one (F154.4)
+    catalogue_service = providers.Singleton(
+        CatalogueService,
+        zone=app_config.provided.dashboard_zone,
+        sitting_gap_seconds=app_config.provided.dashboard_sitting_gap_seconds,
+    )
+
     # A collector's publication of a transcript (F152.3)
     adoption_service = providers.Factory(
         AdoptionService,
@@ -612,6 +620,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         app_settings=app_config,
         adoption_service=adoption_service,
         fleet_consumer=fleet_consumer,
+        catalogue_service=catalogue_service,
     )
 
     # A walk's end, its event and the collector's readiness check (F152.14)

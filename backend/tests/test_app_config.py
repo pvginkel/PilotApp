@@ -447,6 +447,32 @@ class TestAppSettings:
 
         assert settings.wait_quiet_window_seconds == 12
 
+    def test_the_dashboards_zone_and_sitting_gap_have_their_defaults(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.dashboard_zone == "Europe/Amsterdam"
+        assert settings.dashboard_sitting_gap_seconds == 4 * 60 * 60
+
+    def test_load_reads_the_dashboards_zone_and_sitting_gap_from_the_environment(
+        self,
+    ) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                _env_file=None,
+                DASHBOARD_ZONE="America/New_York",
+                DASHBOARD_SITTING_GAP_SECONDS=1800,
+            )
+        )
+
+        assert settings.dashboard_zone == "America/New_York"
+        assert settings.dashboard_sitting_gap_seconds == 1800
+
+    def test_load_refuses_a_zone_that_is_none(self) -> None:
+        with pytest.raises(ValidationError, match="DASHBOARD_ZONE must be an IANA"):
+            AppSettings.load(
+                AppEnvironment(_env_file=None, DASHBOARD_ZONE="Europe/Atlantis")
+            )
+
     def test_the_pool_guard_is_off_by_default(self) -> None:
         settings = AppSettings.load(AppEnvironment(_env_file=None))
 
@@ -469,7 +495,12 @@ class TestAppSettings:
 
     @pytest.mark.parametrize(
         "name",
-        ["CHAT_CLOSE_TIMEOUT", "CACHE_EXPIRATION_TTL", "WAIT_QUIET_WINDOW_SECONDS"],
+        [
+            "CHAT_CLOSE_TIMEOUT",
+            "CACHE_EXPIRATION_TTL",
+            "WAIT_QUIET_WINDOW_SECONDS",
+            "DASHBOARD_SITTING_GAP_SECONDS",
+        ],
     )
     @pytest.mark.parametrize("seconds", [0, -1])
     def test_load_refuses_a_time_not_above_zero(self, name: str, seconds: int) -> None:
@@ -546,6 +577,8 @@ class TestAppSettings:
             "chat_close_timeout_seconds": repr(3300.0),
             "cache_expiration_ttl_seconds": repr(3300.0),
             "wait_quiet_window_seconds": repr(5.0),
+            "dashboard_zone": repr("Europe/Amsterdam"),
+            "dashboard_sitting_gap_seconds": repr(14400.0),
             "pool_guard": "False",
             "statement_cap": "False",
         }
@@ -656,6 +689,8 @@ class TestAppSettings:
             "chat_close_timeout_seconds": repr(3300.0),
             "cache_expiration_ttl_seconds": repr(3300.0),
             "wait_quiet_window_seconds": repr(5.0),
+            "dashboard_zone": repr("Europe/Amsterdam"),
+            "dashboard_sitting_gap_seconds": repr(14400.0),
             "pool_guard": "False",
             "statement_cap": "False",
         }
