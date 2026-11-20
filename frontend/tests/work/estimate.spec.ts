@@ -266,6 +266,10 @@ test.describe('The time a running work item still takes', () => {
       await expect(eta).toHaveRole('button');
       await expect(eta.locator('svg')).toHaveClass(/lucide-clock-alert/);
     }
+    // Named by the time left it shows, then its sentence.
+    const named = (sentence: RegExp) => new RegExp(`^10 min left\\. ${sentence.source.slice(1)}`);
+    await expect(item.work.eta).toHaveAccessibleName(named(ALERT));
+    await expect(projectHead.eta).toHaveAccessibleName(named(alertOf(TITLE)));
     await item.work.eta.click();
     await expect(item.work.etaSays).toBeVisible();
     await expect(item.work.etaSays).toHaveText(ALERT);
@@ -287,6 +291,7 @@ test.describe('The time a running work item still takes', () => {
     await item.work.eta.click();
     await expect(item.work.etaSays).toBeVisible();
     await expect(item.work.etaSays).toHaveText(ALERT);
+    await expect(item.work.eta).toHaveAccessibleName(ALERT);
 
     // The mark taken back: nothing, and nothing in its place.
     await projects.setProgress(work, [...listOf({ kind }).slice(0, 5), step('running', untimed, { state: 'active' })]);

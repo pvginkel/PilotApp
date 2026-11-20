@@ -4,8 +4,8 @@
  * server rounds it. At rest it is words alone, with no hover and no press. Longer than usual
  * (F156.7) it is the alert, red with the clock's alert: an em dash where the time stood, the time
  * left on a step the workflow marked, or the icon alone (status-labels.ts); the alert is a button
- * whose sentence drops under it on hover off a phone and on a press, closed by a press elsewhere,
- * Esc or the badge.
+ * named by its sentence, opened by the time left where it shows one, whose sentence drops under it
+ * on hover off a phone and on a press, closed by a press elsewhere, Esc or the badge.
  */
 
 import { useCallback, useState } from 'react';
@@ -25,7 +25,12 @@ interface EtaBadgeProps {
 
 export function EtaBadge({ estimate, title = null, testId }: EtaBadgeProps) {
   const { alert, text } = estimateBadge(estimate);
-  if (alert) return <Alert text={text} says={estimateAlertSentence(estimate, title)} testId={testId} />;
+  if (alert) {
+    const says = estimateAlertSentence(estimate, title);
+    // The button's name replaces its text: a time left shown opens it.
+    const name = estimate.longer_than_usual === 'marked' && text !== null ? `${estimateLeftLabel(text)}. ${says}` : says;
+    return <Alert text={text} says={says} name={name} testId={testId} />;
+  }
   return (
     <div className="eta-wrap">
       {/* At rest the server gives the time left. */}
@@ -37,7 +42,7 @@ export function EtaBadge({ estimate, title = null, testId }: EtaBadgeProps) {
   );
 }
 
-function Alert({ text, says, testId }: { text: string | null; says: string; testId: string }) {
+function Alert({ text, says, name, testId }: { text: string | null; says: string; name: string; testId: string }) {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const anchor = useDismiss('plan', open, close);
@@ -48,7 +53,7 @@ function Alert({ text, says, testId }: { text: string | null; says: string; test
         className="eta-badge long"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        aria-label={says}
+        aria-label={name}
         data-testid={testId}
       >
         <ClockAlert className="icon" aria-hidden="true" />

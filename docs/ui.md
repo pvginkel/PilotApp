@@ -301,9 +301,9 @@ In `src/components/shared/`:
   reader, with no hover and no press. Longer than usual it is the alert (D250): red, on
   `--destructive` at 12% (24% in the dark) in `--destructive-text`, with Lucide's clock-alert and
   an em dash, "—", where the time stood, or the time left on a step the workflow marked, or the
-  icon alone; a button named by its sentence (`estimateAlertSentence()`), which drops under it on
-  hover off a phone and on a press, closed by a press elsewhere, which does nothing else, Esc or
-  the badge. `title` is the work item the sentence names, in a project's head; without it the
+  icon alone; a button named by its sentence (`estimateAlertSentence()`), opened by the time left
+  where it shows one, "10 min left.", the sentence dropping under it on hover off a phone and on a
+  press, closed by a press elsewhere, which does nothing else, Esc or the badge. `title` is the work item the sentence names, in a project's head; without it the
   sentence opens "It".
 - `CopyButton({text, title, className?, testId})` (`copy-button.tsx`, D199): a ghost icon button that
   copies `text` to the clipboard as written, `title` its tooltip and its name, and shows a check
