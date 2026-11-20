@@ -7,9 +7,9 @@ names it. Read it top to bottom and do what it says.
 ## What this phase proves, and what it does not
 
 **Pilot has two stages, and a push deploys to dev** ([`deployment.md`](deployment.md)). A push to
-`main` runs the Jenkins job `PilotApp/Build-Main` (the suites, the sidecar's tests, the `pilot`,
-`pilot-ui` and `pilot-sync` images, tagged `dev-<n>`), which pins `pilot` and `pilot-ui` for both
-stages in `pvginkel/PilotDeploy`'s `main`, from which Argo CD rolls the Application `pilot-dev`: the
+`main` runs the Jenkins job `PilotApp/Build-Main` (the suites, the sidecar's and the collector's
+tests, the `pilot`, `pilot-ui`, `pilot-sync` and `pilot-collector` images, tagged `dev-<n>`), which
+pins `pilot`, `pilot-ui` and `pilot-collector` for both stages in `pvginkel/PilotDeploy`'s `main`, from which Argo CD rolls the Application `pilot-dev`: the
 pod behind `https://pilot-dev.home`, internal, whose sessions and environments are
 `kubecoder-dev`'s. Production, `pilot-prd` behind `https://pilot.ginbov.nl`, which the operator and
 their wife use, follows PilotDeploy's `prd` branch, which only `PilotApp/Promote-PRD` moves, and only
@@ -578,7 +578,7 @@ honouring any repo named in `plan.md`'s `## Push holds`, in an order that holds:
    ```
 
 2. **PilotDeploy first when it adds a pin key the PilotApp build writes.** The build's last stage,
-   `cicd.writeVersionPins`, edits `images.pilot` and `images.pilotUI` in PilotDeploy's
+   `cicd.writeVersionPins`, edits `images.pilot`, `images.pilotUI` and `images.collector` in PilotDeploy's
    `config/dev/values.yaml` and `config/prd/values.yaml` in place, in one commit, and fails on a
    file or key that `origin/main` does not already hold. Every green build pins, so the rule is
    about a key the PilotDeploy change adds, not about pinning as such. Otherwise push the chart
@@ -620,7 +620,7 @@ Each push starts its repo's jobs, and each is followed to its end:
 
 | Push to | Starts |
 |---------|--------|
-| PilotApp | `PilotApp/Build-Main` (`Jenkinsfile`: the suites, the sidecar's tests, three images tagged `dev-<n>` and `dev-latest`, the pin commit of two for both stages) and `AaC/PilotApp` (`Jenkinsfile.architecture`: validates and archives `docs/architecture/*.yaml`) |
+| PilotApp | `PilotApp/Build-Main` (`Jenkinsfile`: the suites, the sidecar's and the collector's tests, four images tagged `dev-<n>` and `dev-latest`, the pin commit of three for both stages) and `AaC/PilotApp` (`Jenkinsfile.architecture`: validates and archives `docs/architecture/*.yaml`) |
 | PilotDeploy's `main`, the build's pin commits included | `AaC/PilotDeployDev` (`Jenkinsfile.architecture-dev`: generates and publishes the `pilot-dev-deploy` model, the dev stage's), and `pilot-dev` rolls it |
 | PilotDeploy's `prd`, which a promotion moves | `AaC/PilotDeploy` (generates and publishes the `pilot-deploy` model, production's) |
 | Architecture | `AaC/Architecture` |
@@ -789,7 +789,7 @@ Steps 1 to 4 of the order above decide it; this is how each push is followed. Th
 5. **PilotApp**, last, now that the stage runs, so that its build's pin commit rolls `pilot-dev`
    under the roll check, as every later build's does. Follow `PilotApp/Build-Main` and
    `AaC/PilotApp` to green as above; then `git -C ../PilotDeploy fetch -q && git -C ../PilotDeploy
-   show origin/main:config/dev/values.yaml` pins both images to `:dev-<n>` and `config/prd/values.yaml`
+   show origin/main:config/dev/values.yaml` pins the three images to `:dev-<n>` and `config/prd/values.yaml`
    to `:prd-<n>`, `<n>` the build's number. Bring the local PilotDeploy up to it
    (`git -C ../PilotDeploy rebase origin/main`).
 
@@ -831,13 +831,13 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    at the tag `origin/main`'s
    `config/dev/values.yaml` pins, `:dev-<n>`, `<n>` the latest green `PilotApp/Build-Main` build,
    and each `imageID` the digest the registry holds for that tag. The build pushed `pilot-sync`
-   too, and each image's `dev-latest` is its `dev-<n>`:
+   and `pilot-collector` too, and each image's `dev-latest` is its `dev-<n>`:
 
    ```bash
    cexec iac kubectl -n pilot-dev get pod $POD -o wide
    cexec iac kubectl -n pilot-dev get pod $POD -o jsonpath='{range .status.initContainerStatuses[*]}{.name} {.state.terminated.reason}{"\n"}{end}{range .status.containerStatuses[*]}{.name} {.ready} {.restartCount} {.image} {.imageID}{"\n"}{end}'
    curl -fsS -u "$JENKINS_USER:$JENKINS_TOKEN" "$JENKINS_URL/job/PilotApp/job/Build-Main/lastSuccessfulBuild/api/json?tree=number"; echo
-   for img in pilot pilot-ui pilot-sync; do for tag in dev-<n> dev-latest; do
+   for img in pilot pilot-ui pilot-sync pilot-collector; do for tag in dev-<n> dev-latest; do
      echo "$img:$tag $(curl -sI -H 'Accept: application/vnd.oci.image.manifest.v1+json' http://registry:5000/v2/$img/manifests/$tag | grep -i docker-content-digest)"
    done; done
    cexec iac kubectl -n pilot-dev logs $POD -c migrate    # the migrations, run before the backend served
@@ -848,11 +848,28 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    the caller's email, and the realm signs in by email: from then on it is read only through a
    `grep` for the lines a check wants, never whole, and no line of a signed-in request is printed.
 
+   The collector, once `images.collector` is pinned: one pod `1/1 Running`, ready with no restarts,
+   on srvk8s4, the node labelled `homelab.local/storage: zpool5`, at the tag dev's values pin. Its
+   log says the readings are served on port 3503, then one line per walk that published, set aside
+   or left anything; a walk that ended early, or a transcript set aside, is a finding to read
+   ([`collector.md`](collector.md#the-walk)). A refusal by admission shows as `FailedCreate` in its
+   ReplicaSet's events, with no pod, and a folder the node lacks as the pod's `FailedMount`:
+
+   ```bash
+   cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot-collector -o wide
+   cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot-collector -o jsonpath='{range .items[*]}{.spec.containers[*].image}{"\n"}{end}'
+   cexec iac kubectl -n pilot-dev logs deploy/pilot-collector | grep -E 'served on port|A walk over|ended early|set aside' | tail -n 20
+   ```
+
 3. **The backend's readiness, on the pod's IP, its controller and its fleet stream.** `200` with
    `"status": "ok"`: `checks.database` `ok` (connected, no migration pending) and
    `checks.controller` `ok` (the controller's `/readyz` answers, verified against the homelab root
-   the chart mounts). The controller's check is not critical: a controller that does not answer
-   reads `"status": "degraded"`, still `200`, and is a finding here. The controller is
+   the chart mounts), and `checks.collector` `ok`, its `detail` "the collector's latest walk ended
+   at <UTC ISO time>" ([`collection.md`](collection.md#a-walks-end)). Neither check is critical: a
+   controller that does not answer, and a collector before its first walk or with no walk for two
+   intervals, read `"status": "degraded"`, still `200`, and are a finding here. A passing result is
+   reused for 30 s, so the walk's time can be that much old. `checks.collector` reads `disabled`
+   until `images.collector` is pinned. The controller is
    `kubecoder-dev`'s, never the operator's fleet:
 
    ```bash
@@ -877,10 +894,12 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    cexec iac kubectl -n pilot-dev logs $POD -c backend | grep -E 'Fleet stream connected|Loop fleet'
    ```
 
-4. **The secrets.** Six ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc`,
-   `pilot-kubecoder`, `pilot-sync` and `pilot-vapid` (from `openbao-prd`, `eso/prd/pilot/dev/oidc`,
-   `eso/prd/pilot/dev/kubecoder`, `eso/prd/pilot/dev/sync` and `eso/prd/pilot/dev/vapid`) and the
-   generated `pilot-secret-key` and `pilot-drain-auth`:
+4. **The secrets.** Nine ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc`,
+   `pilot-kubecoder`, `pilot-sync`, `pilot-vapid` and `pilot-service-user` (from `openbao-prd`,
+   `eso/prd/pilot/dev/oidc`, `eso/prd/pilot/dev/kubecoder`, `eso/prd/pilot/dev/sync`,
+   `eso/prd/pilot/dev/vapid` and `eso/prd/pilot/dev/service-user`), `pilot-projects-token` (the
+   shared `eso/prd/pilot/projects-token`), and the generated `pilot-secret-key`, `pilot-drain-auth`
+   and `pilot-collector-token`:
 
    ```bash
    cexec iac kubectl -n pilot-dev get externalsecrets

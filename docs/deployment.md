@@ -27,6 +27,7 @@ number):
 | KubeCoder | `https://kubecoder-dev.home` | `https://kubecoder.home` |
 | Store environment | `pvginkel-pilotprojects-d75970` | `pvginkel-pilotprojects-8b0225` |
 | The store's `pilot-sync` | `:dev-latest` | `:prd-latest` |
+| The collector's fleet's home, on srvk8s4 | `/zpool5/kubecoder-dev/system/home` | `/zpool5/kubecoder/system/home` |
 | OpenBao leaves | `eso/prd/pilot/dev/{oidc,kubecoder,sync,vapid,service-user}` and the shared `eso/prd/pilot/projects-token` | `eso/prd/pilot/prd/{oidc,kubecoder,sync,vapid,service-user,youtrack-webhook-token}` and the shared `eso/prd/pilot/projects-token` |
 | Service user's Keycloak client | `pilot-app-dev-service` | `pilot-app-service` |
 | Database | `pilot_dev_db` | `pilot_prd_db` |
@@ -37,14 +38,18 @@ A push to PilotApp's `main` starts two Jenkins jobs, each triggered by GitHub's 
 
 - **`PilotApp/Build-Main`** runs the `Jenkinsfile`: the backend and frontend suites through the
   pipeline library's `modernApp.test`, then `Test sidecar`, `go vet` and `go test -race` of
-  `sidecar/` in a `golang` container on the image this environment's `go` tool runs. Then the
-  images `registry:5000/pilot` (the backend), `registry:5000/pilot-ui` (the UI) and
-  `registry:5000/pilot-sync` (the store's sync sidecar), each tagged `dev-<n>` and `dev-latest`,
-  `<n>` the build number. Last, one commit to PilotDeploy's `main` pins the first two for both
-  stages, as `images.pilot` and `images.pilotUI`: `:dev-<n>` in `config/dev/values.yaml` and
-  `:prd-<n>` in `config/prd/values.yaml`, tags that exist only once a promotion has made them
-  (below). The pin step edits those lines in place and never creates a key, so the four keys stay
-  in their files. A new build aborts one still running. Its `Checkout` stage writes the commit to
+  `sidecar/` in a `golang` container on the image this environment's `go` tool runs, and `Test
+  collector`, the collector's tests in the pod's `modern-app-toolchain` container, the validation
+  Job's image ([`collector.md`](collector.md#testing-it)). A red collector test fails that stage
+  and shows in its console alone: it is no JUnit suite of the build. Then the images
+  `registry:5000/pilot` (the backend), `registry:5000/pilot-ui` (the UI),
+  `registry:5000/pilot-sync` (the store's sync sidecar) and `registry:5000/pilot-collector` (the
+  collector, built from the repository's root, [`collector.md`](collector.md#its-image)), each
+  tagged `dev-<n>` and `dev-latest`, `<n>` the build number. Last, one commit to PilotDeploy's
+  `main` pins the backend, the UI and the collector for both stages, as `images.pilot`,
+  `images.pilotUI` and `images.collector`: `:dev-<n>` in `config/dev/values.yaml` and `:prd-<n>` in
+  `config/prd/values.yaml`, tags that exist only once a promotion has made them (below). The pin
+  step edits those lines in place and never creates a key, so the six keys stay in their files. A new build aborts one still running. Its `Checkout` stage writes the commit to
   `frontend/git-rev`, which the suites' tree, which holds no `.git`, and the UI's image read, so
   that the profile menu names the commit the page is built from ([`ui.md`](ui.md)); production's
   images being retagged from dev's, its menu names the commit of the build it promoted.
@@ -79,8 +84,10 @@ runs PilotDeploy's `Jenkinsfile.promote`, with one parameter, `commit`: the comm
 `main` to promote, its tip when empty. Its steps run in order, each only once the one before it
 succeeded, so `prd` never pins a tag that does not exist:
 
-1. **Retag.** The commit's `config/prd/values.yaml` pins `pilot` and `pilot-ui` to `:prd-<n>`, both
-   of one build, or the job refuses. `pilot`, `pilot-ui` and `pilot-sync` of that build are tagged
+1. **Retag.** The commit's `config/prd/values.yaml` pins `pilot`, `pilot-ui` and `collector` to
+   `:prd-<n>`, all of one build, or the job refuses; the collector's pin alone may be empty or
+   absent, a commit with no collector, which the job promotes with no collector retagged. `pilot`,
+   `pilot-ui`, `pilot-collector` where it is pinned and `pilot-sync` of that build are tagged
    `prd-<n>` in `registry:5000` from its `dev-<n>`. A `prd-<n>` an earlier promotion made is left as
    it is.
 2. **Advance `prd`.** `prd` fast-forwards to the commit, in a push with no force, which is refused
@@ -89,7 +96,7 @@ succeeded, so `prd` never pins a tag that does not exist:
    of the build `prd` runs, a rollback's older build included. Production's store runs it
    ([the store environments](#the-store-environments)).
 4. **Tag the release.** An annotated tag `release-<m>`, `<m>` the job's build number, goes on the
-   commit, its message naming the three images.
+   commit, its message naming the images it released.
 
 Production therefore runs only commits of `main`, which dev follows, and images retagged from a
 build's `dev-<n>`. A re-run for the commit `prd` already names finishes a promotion whose
@@ -157,8 +164,12 @@ objects into each stage's namespace:
   as `STORE_ENVIRONMENT_ID`, and the store's bearer as `SYNC_TOKEN`, from the Secret `pilot-sync`.
   That reference is optional: a backend started while the Secret is absent runs with `SYNC_TOKEN`
   unset, which refuses every sync call, until its next start, and never fails to start for it.
-  `migrate` sets neither. No stage sets `COLLECTOR_TOKEN`, so the collector's door refuses every
-  call there ([`collection.md`](collection.md)).
+  `migrate` sets neither. Where the stage has a collector (below), the backend takes the
+  collector's bearer as `COLLECTOR_TOKEN` from the Secret `pilot-collector-token`, key `password`,
+  a read that is not optional; where it has none it takes no bearer, so the collector's door
+  refuses every call and the readiness check `collector` reads `disabled`
+  ([`collection.md`](collection.md#a-walks-end)). `migrate` sets none. The walk's interval and the
+  settling time are the backend's defaults on both stages.
   Production's backend takes YouTrack's webhook token, which its tracker-events endpoint compares
   with each delivery's `X-YouTrack-Token` ([`waits.md`](waits.md)), as `YOUTRACK_WEBHOOK_TOKEN`
   from the Secret `pilot-youtrack-webhook-token`, key `token` ([below](#secrets)). That reference
@@ -199,6 +210,24 @@ objects into each stage's namespace:
   A browser turns its notifications on at one stage's site and is subscribed with that stage's key,
   in that stage's database, so pilot-dev pushes only the browsers turned on at
   `https://pilot-dev.home`.
+- **Deployment `pilot-collector`** and **Service `pilot-collector`**, the collector
+  ([`collector.md`](collector.md)), rendered only where the stage's `images.collector` is set and
+  nothing of either while it is the empty string (`chart/templates/collector.yaml`). One pod, the
+  image's own command, on the node labelled `homelab.local/storage: zpool5`, srvk8s4, whose taint
+  `homelab.local/performance=high:NoSchedule` it tolerates, one at a time (`Recreate`), so that a
+  roll never runs two walks. It mounts two folders of the stage's fleet's home, `collector.home` in
+  the values (the table above), read-only: `<home>/.claude/projects` and `<home>/.claude/plugins`
+  at `/home/ubuntu/.claude/projects` and `/home/ubuntu/.claude/plugins`, host paths of type
+  `Directory`, so that a folder the node lacks keeps the pod from starting; never `.claude` whole,
+  no other volume and no service account token. It runs as uid 1000, the image's user, which owns
+  the transcripts. Its settings are `COLLECTOR_HOME` `/home/ubuntu/.claude`, `COLLECTOR_PILOT_URL`
+  `http://pilot`, Service `pilot`, whose nginx proxies `/api/` to the backend, and
+  `COLLECTOR_TOKEN` from the Secret `pilot-collector-token`. The Service, port 3503, is the
+  backend's way to the readings, `http://pilot-collector:3503` in the stage's own namespace, and
+  carries none of the front door's annotations, so nothing outside the cluster reaches it. The
+  probes are TCP probes of that port, since every path there asks for the bearer. A walk that meets
+  the outgoing backend pod during a roll is answered `401` and ends untold; the next follows an
+  interval later.
 - **Service `pilot`**, port 80 to the UI, its annotation `nginx.webathome.org/server-name` the
   stage's host. Production's `nginx.webathome.org/is-public: "true"` has the estate's front door
   serve it as a public site, over HTTPS with a Let's Encrypt certificate. Dev's `is-public: "false"`
@@ -221,14 +250,14 @@ whose `pilot-sync` sidecar is the one sidecar the stage's sync admits ([`sync.md
 dev stage's is `pvginkel-pilotprojects-d75970` on `kubecoder-dev`, production's
 `pvginkel-pilotprojects-8b0225` on KubeCoder's production fleet, each named by
 `store.environmentId` in `config/<stage>/values.yaml`. Nothing PilotDeploy renders runs
-`pilot-sync`, the third image: KubeCoder composes it into the store's pod from its catalog entry,
+`pilot-sync`, the one image no pin names: KubeCoder composes it into the store's pod from its catalog entry,
 which is KubeCoderDeploy's. The brain's sessions there are boxed ([`sessions.md`](sessions.md)),
 which needs the store's pod composed with KubeCoder's sandbox profile: one started before its fleet
 had the profile answers a boxed create `409 capability-unavailable` until it is restarted
 ([`controller.md`](controller.md)).
 
 **The image floats per stage and is pinned nowhere** (D029). Each build tags it `dev-<n>` and
-`dev-latest`, and a promotion tags it `prd-<n>` with the two pinned images and then moves
+`dev-latest`, and a promotion tags it `prd-<n>` with the pinned images and then moves
 `prd-latest` to it (above). The catalog entry names `registry:5000/pilot-sync:dev-latest` in
 KubeCoderDeploy's `config/dev/values.yaml` and `:prd-latest` in its `config/prd/values.yaml`, with
 no pull policy: `registry:5000` is one of KubeCoder's digest registries, so each start of the store
@@ -303,9 +332,10 @@ projects surface's token, through the `openbao-prd` store.
   is the key `pilot-sync-token` of the same stage's KubeCoder catalog leaf,
   `eso/prd/kubecoder/<stage>/catalog`, which KubeCoder reads whole and hands to the store's sidecar
   as `PILOT_SYNC_TOKEN`.
-- **Flask's `SECRET_KEY` and the drain endpoint's `DRAIN_AUTH_KEY`** are generated in each
-  namespace, once, by External Secrets `Password` generators, into the Secrets `pilot-secret-key`
-  and `pilot-drain-auth`.
+- **Flask's `SECRET_KEY`, the drain endpoint's `DRAIN_AUTH_KEY` and the collector's bearer** are
+  generated in each namespace, once, by External Secrets `Password` generators, into the Secrets
+  `pilot-secret-key`, `pilot-drain-auth` and `pilot-collector-token`. Nobody places the bearer: the
+  collector and the backend both read it, as `COLLECTOR_TOKEN`.
 - **The stage's VAPID key**, which signs every web push, is the stage's `vapid` leaf
   (`private_key`), a P-256 key in PKCS#8 PEM minted for that stage. It is not the operator's to
   write: it is placed through Ansible's tooling, as a new random secret at a known OpenBao path is.
@@ -363,7 +393,8 @@ Three producers publish Pilot into the estate's architecture model, all register
 `pvginkel/Architecture`'s `pipeline-producers.yaml`:
 
 - **`pilot-app`** is this repo's hand-authored `docs/architecture/architecture.yaml`: the products
-  `app:pilot` and `app:pilot-ui`, the services they expose and what the backend consumes. `kc
+  `app:pilot`, `app:pilot-ui` and `app:pilot-collector`, the services they expose and what the
+  backend and the collector consume, the collector the API's `/api/collector` routes. `kc
   project lint` validates it; `AaC/PilotApp` validates and archives it on every push to `main`. A
   change to what the app exposes or consumes updates it. Both products carry `logo: pilot`, the
   Pilot mark from the Architecture repo's logo library, which the model stamps onto every instance,

@@ -731,6 +731,9 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
 - `POST /api/testing/scenarios` `{projects}` loads the invented scenario, its conversations
   published through the collector's publication service, and answers `201` `{transcripts}`
   ([`collection.md`](collection.md#testing-it)).
+- `POST /api/testing/walks` ends a walk as a collector tells its end, through the same service,
+  and answers `201` `{ended_at, announced}`, `announced` whether its `collection_changed` is sent
+  ([`collection.md`](collection.md#testing-it)).
 - `GET /api/testing/projects/<id>/sightings?handle=<handle>` answers `{item_ids}`, the items the
   person's open membership of the project was shown, which the notification's reconcile writes off
   the request that showed them ([`notifications.md`](notifications.md)); no person with the handle,

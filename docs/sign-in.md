@@ -34,7 +34,7 @@ chooses theirs at their first sign-in, before the app opens, and is on Pilot's r
   open after its token expires.
 - **Four surfaces are not a person's, and sit outside the API blueprint**, where the OIDC gate
   never sees them: the store's sync routes, behind the store's bearer ([`sync.md`](sync.md)); the
-  collector's publication route, behind the collector's bearer ([`collection.md`](collection.md)); the
+  collector's routes, behind the collector's bearer ([`collection.md`](collection.md)); the
   tools' routes, the worker's `/tools/pilot-work/` and the brain's `/tools/pilot-store/`, behind the
   bearer Pilot minted for the session that calls ([`mcp.md`](mcp.md)), which no site reaches; and
   the tracker-events endpoint, `/api/tracker-events/<tracker>`, behind the tracker's own token,

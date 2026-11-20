@@ -192,11 +192,17 @@ runs there. The claim ends with its deadline: `_end_claim` clears `server_starte
 `started_pod_at` and `stop_due_at` together.
 
 - `ensure_environment(db, env_id)` makes the Environment row from the controller's own report on
-  Pilot's first touch of the environment, in the caller's transaction, and leaves a row that exists
-  as it is. `start` makes its row through it, the sync's gate, a brain session's start and the
+  Pilot's first touch of the environment, in the caller's transaction. A row a report has reached
+  is left as it is, and the controller is not asked. A row no report has reached, with no
+  `last_seen_at`, takes the report as a missing one would (D260): a transcript's publication or a
+  conversation's opening wrote it, named by its id and not exempt
+  ([`collection.md`](collection.md#a-publication), [`conversations.md`](conversations.md)).
+  `start` makes its row through it, the sync's gate, a brain session's start and the
   store's update the store's ([`sync.md`](sync.md), [`chats.md`](chats.md)), and `pilot-store`'s copy of outside
-  material its source's ([`mcp.md`](mcp.md)); the controller's `404` raises `ControllerProblem`
-  `not-found`.
+  material its source's ([`mcp.md`](mcp.md)). `ensure_reported(db, env_id)`, which a placement by
+  name calls, asks the controller whether Pilot has the row or not, and writes the report the same
+  way, into a missing row or one no report has reached; it locks no row a report has reached. The
+  controller's `404` raises `ControllerProblem` `not-found`.
 - `CallerEnvironmentService.name(env_id)` (`backend/app/services/caller_environment_service.py`)
   names the environment a call to `pilot-projects` came from, for its draft's brief
   ([`projects.md`](projects.md)): its Environment row's name, else the name the controller reports,

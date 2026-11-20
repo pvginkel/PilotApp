@@ -2,21 +2,30 @@
 
 Pilot's record holds the facts of the Claude Code transcripts on the fleet's home, a main thread's
 and a sub-agent's alike, as a collector reads them off their files and publishes them, one
-transcript a call. A collector calls one door of Pilot's, under a bearer of its own; what it
-publishes lands in the tables of [`record.md`](record.md#the-tables), and a group of work
-done before Pilot that a transcript's label names stands in the record as an adopted project.
-Nothing of a transcript's text is published: its facts alone, its sizes, times, counts and codes.
+transcript a call. The collector is a component of Pilot's own, a pod beside each stage's fleet's
+home that walks it every 30 s ([`collector.md`](collector.md)). It calls one door of Pilot's, under a
+bearer of its own; what it publishes lands in the tables of [`record.md`](record.md#the-tables),
+and a group of work done before Pilot that a transcript's label names stands in the record as an
+adopted project. Nothing of a transcript's text is published: its facts alone, its sizes, times,
+counts and codes. Its text is the collector's to serve, to Pilot's backend alone, as the
+conversation's reading ([`collector.md`](collector.md#the-reading)).
 No key of those tables reaches a person or a project's members, so a conversation is open to
 everyone signed in, the operator's own sessions included.
 
 ## The door
 
-**`POST /api/collector/publications`** takes one transcript's publication and writes it in the
-request's transaction (`backend/app/api/collector.py`, `PublicationService.publish` in
-`backend/app/services/publication_service.py`). The route is registered on the app, not on the
-API blueprint, so the OIDC gate never sees it: the caller is a collector, which signs in to
-nothing ([`sign-in.md`](sign-in.md)). Every call passes `PublicationService.admit` first, the
-blueprint's `before_request`:
+The collector's routes are three, under `/api/collector` (`backend/app/api/collector.py`):
+
+- **`GET /api/collector/inventory`**, what Pilot holds, which a walk asks for as it starts
+  ([below](#the-inventory));
+- **`POST /api/collector/publications`**, one transcript's publication, written in the request's
+  transaction (`PublicationService.publish` in `backend/app/services/publication_service.py`);
+- **`POST /api/collector/walks`**, a walk's end, which a walk tells after its last publication
+  ([below](#a-walks-end)).
+
+Their blueprint is registered on the app, not on the API blueprint, so the OIDC gate never sees
+them: the caller is a collector, which signs in to nothing ([`sign-in.md`](sign-in.md)). Every call
+passes `PublicationService.admit` first, the blueprint's `before_request`:
 
 - **The bearer.** `Authorization: Bearer <token>`, the setting `COLLECTOR_TOKEN`, compared in
   constant time. While the setting is empty every call is refused.
@@ -25,7 +34,8 @@ blueprint's `before_request`:
   change to a request or response shape of the collector's routes bumps the maximum, and the
   minimum with it where the server cannot serve the old collector.
 
-The bearer is asked for before the version, and both before the body is read. Each answer is the
+The bearer is asked for before the version, and both before the body is read. Past them the
+inventory answers `200` and a walk's end `204`, with no other answer. A publication's answer is the
 call's outcome, and every answer but `204` leaves the record as it was:
 
 | Answer | When | Then |
@@ -48,10 +58,56 @@ server's log line (below).
 | Setting | Default | |
 |---|---|---|
 | `COLLECTOR_TOKEN` | empty | the collector's bearer, a secret; empty refuses every call of a collector's |
+| `COLLECTOR_WALK_INTERVAL_SECONDS` | `30` | from one walk's start to the next one's, above 0; each inventory hands it to the collector |
+| `COLLECTOR_SETTLING_SECONDS` | `600` | how long a transcript's file stands unchanged before its replay at rest, 0 or more; each inventory hands it over |
+
+## The inventory
+
+**`GET /api/collector/inventory`** answers `200` `{walk_interval_seconds, settling_seconds,
+transcripts}`, in protocol version 1 (`InventorySchema` in `pilot_collection.inventory`,
+`PublicationService.inventory`). It is every transcript Pilot holds, whole at every call, in one
+read, ordered by `session_id`, a main thread before its sub-agents'. Each transcript is
+`{session_id, agent_id, file_size, file_modified_at, replayed_size, collector}`. `agent_id` is null
+on a main thread. `file_size`, `file_modified_at` and `collector`, the version's string, are its
+last publication's, which an appended call's `builds_on` names. `file_modified_at` is as Pilot holds
+it, to the microsecond. A transcript the home has and the inventory lacks, or holds at another size,
+time or version, is one for the collector to publish. One whose `replayed_size` is short of its
+`file_size`, its file unchanged for `settling_seconds`, is due its replay at rest, a whole
+publication once ([`collector.md`](collector.md#the-walk)). The inventory names no `collected_at`.
+
+## A walk's end
+
+**`POST /api/collector/walks`**, with no body, stamps a Walk at that moment and answers `204`
+(`WalkService.end`, `backend/app/services/walk_service.py`). The record keeps the latest 20 Walks,
+`walks` (`id`, `ended_at`), pruned at each end. A walk's end that never arrives loses nothing: the
+next compares against the last Walk kept. The collector's version is not kept with a Walk: a walk's
+end that passed the gate spoke a version Pilot takes.
+
+**Its event.** A walk wrote a row where a Transcript was collected since the Walk before it ended,
+`collected_at` at or after that Walk's `ended_at`, or where no Walk ended before and the record
+holds a Transcript: every publication Pilot takes writes its Transcript's row. Such a walk's end is
+told to every person's connections once the call has committed, as one SSE event:
+`collection_changed`, `{"as_of": "<the walk's end, UTC, to the microsecond>"}`
+(`CollectionChangedSchema` in `backend/app/schemas/walk.py`, `EVENT_NAME` in `walk_service.py`),
+sent to each person by subject as `conditions_changed` is. A walk that wrote nothing raises none, so
+one walk raises one event however many transcripts it published. `latest_walk_end(db)` is the
+latest Walk's end, how fresh the record's facts of the transcripts are.
+
+**The readiness check** `collector`, in `/health/readyz`, is not critical: Pilot serves its record
+without a collector, and a `503` would take the backend out of the Service the collector's own
+calls come through. It is `disabled` while `COLLECTOR_TOKEN` is empty, "COLLECTOR_TOKEN is empty".
+It is `error` before a first walk, "no walk of the collector's has ended", and once the latest
+Walk ended more than two walk intervals ago, "the collector's latest walk ended at <UTC ISO time>,
+more than <twice the interval> s before this check", 60 at the default. Otherwise it is `ok`, its `detail` "the collector's latest walk
+ended at <UTC ISO time>". So a stage whose backend holds the bearer reads `degraded`, still `200`,
+until its collector's first walk ends, and again once its walks stop for two intervals. Readyz
+reuses a passing result for 30 s, so the time in `detail` can be that much older than the latest
+walk. The check reads on a session of its own under a 2 s `statement_timeout`.
 
 ## A publication
 
-One call is one transcript (`PublicationSchema`, `backend/app/schemas/publication.py`): Claude
+One call is one transcript (`PublicationSchema` in `pilot_collection.publication`,
+`backend/packages/pilot-collection/`, the shapes the collector and the backend share): Claude
 Code's `session_id` of its main thread and, on a sub-agent's thread, its `agent_id`; the file's
 size and time; the collector's version that read it; the directory it was first launched in, the
 name of the checkout that holds it, and on a main thread the id of the environment it ran in,
@@ -92,13 +148,33 @@ end; nothing before them is read as the call's or written, and `replayed_size` s
 larger than the one it builds on, or the call is a `400`. It is a `409`
 `PUBLICATION_NOT_APPENDABLE` unless it continues what Pilot holds: Pilot holds the transcript at
 the size, time and collector's version it builds on, holds a row at every place before the
-boundary's, and the call carries every Launch, Prompt, Compaction and Call Pilot holds from there
-on and no Call or Tool Call Pilot holds before. So an appended write removes nothing but what
-hangs on a Call or a Prompt it carries again.
+boundary's, the call carries every Launch, Prompt, Compaction and Call Pilot holds from there
+on and no Call or Tool Call Pilot holds before, and the call's first Launch, Prompt and Compaction
+are the rows Pilot holds at the boundary's places, where it holds one there, told by their
+`started_at`, `received_at` and `at` as instants. A call that names another reads, among its
+reasons, "the boundary's `launch` is 2, where Pilot holds a launch begun at <UTC ISO time>, and the
+call's first was begun at <UTC ISO time>", and the same for `prompt` with "received" and
+`compaction` with "made". So an appended write removes nothing but what hangs on a Call or a Prompt
+it carries again, and a time the collector reads must read the same at every walk of a file that
+only grew, or each growth costs a whole publication.
 
-**What Pilot first meets.** An Environment the call names that Pilot has no row for is written
-named by its id, until the fleet stream reports it ([`controller.md`](controller.md)); a
-Repository by its checkout's name; a Component Version with its release time, which a later call
+**The replay at rest** is a whole call of the file Pilot holds, at the `file_size`,
+`file_modified_at` and collector's version Pilot holds, part of it taken in appended calls since
+the last whole one: `replayed_size` short of `file_size`. Pilot holds no boundary, so a row the
+replay writes that differs from what Pilot held is logged at `WARNING`, on
+`app.services.publication_service`, with how much of the file was taken in parts and the rows it
+wrote by table: "The replay at rest of transcript <session_id>[/<agent_id>], 12888 of its 61000
+bytes taken in parts, wrote rows that differ from what Pilot held: calls 1, tool_calls 1". The line
+counts the rows changed, added and removed under the Transcript; a row that goes with the one it
+hangs on is not counted, nor a Launch's placing under its Session. A whole call of a file that
+changed, or read under another version, logs nothing.
+
+**What Pilot first meets.** An Environment the call names that Pilot has no row for is written as
+the fleet stream reports it, its name, exemption and state with it. One the stream has not given,
+and any while the stream is down, is written named by its id, not exempt and with no
+`last_seen_at`: a row no report of the controller's has reached, which the stream's next report and
+Pilot's first touch of the environment both make the controller's (D260,
+[`controller.md`](controller.md#environments-on-demand)); a Repository by its checkout's name; a Component Version with its release time, which a later call
 that gives one sets and one that gives none leaves; a reference code with the code as its name, a
 Tool with the `mcp_server` the call gives and an Event Kind with its `is_error`. A reference code
 Pilot holds stands as it is, whatever a later call says of it. `collected_at` is the server's clock
@@ -179,6 +255,19 @@ each thread's whole call as a JSON object, a main thread before its sub-agents, 
 the Turns of Pilot's. A conversation's ids are drawn from the scenario's and the session's names,
 the same in every build.
 
+**As files.** `files()` gives the scenario as files of a home, each a `HomeFile` with its path from
+the home's folder, its bytes and its time. They are each thread's transcript in Claude Code's line
+shapes (`pilot_scenario.transcript`, [`collector.md`](collector.md#a-transcripts-lines)), in the
+publications' order, each followed by the outputs its results say were saved to disk, under
+`<session_id>/tool-results/`. `write(home)` puts them under `home`, the folder that holds
+`projects`, each at the time its publication gives. A collector's reading of them is what
+`publications()` says, but for the facts the files do not carry: `_facts` in the package's
+`tests/test_transcript.py` is that cut, and `_read` there an independent reading of the files. The
+builder's times are cut to the millisecond, as a line's `timestamp` is. `halving`'s brief is an
+`sdk` prompt and `gears`' prompts are `typed`; `gears` interrupts a Bash call; and two results, the
+sub-agent's grep and the MCP call, are outputs saved to disk, one in each of Claude Code's wordings.
+The files are generated when a suite runs and never committed.
+
 **Its load.** `POST /api/testing/scenarios` `{projects: {"recipe-box": <a project's id>}}`, one of
 the record's testing routes ([`projects.md`](projects.md#testing-it)), loads it, its last moment
 the transaction's `now()` (`ScenarioService.load`, `backend/app/services/scenario_service.py`): the
@@ -194,6 +283,14 @@ with no service user a `409` `NO_SERVICE_USER`, each writing nothing. A Playwrig
 service user with `people.serviceUser()` and loads it with `projects.loadScenario(id)`
 (`frontend/tests/support/`); a backend test takes the `service_user` fixture.
 
+**A walk's end.** `POST /api/testing/walks`, with no body, for a signed-in editor on every stage but
+prd, as the record's testing routes are, ends a walk through the same service and answers `201`
+`{ended_at, announced}`, `announced` whether its `collection_changed` is sent. A spec that loaded a
+scenario posts it and waits for the event; a second post with no load between raises none. On a
+stage with a collector, the collector's own walk's end can come between a load and the post. That
+end then sends the event, and the post answers `announced: false` and sends none, so a check there
+holds the live stream before it loads and takes the event of either end.
+
 **The guards.** `test_the_scenario_has_no_word_of_the_workflow`
 (`backend/packages/pilot-scenario/tests/test_scenario.py`) fails on a word of the workflow,
 `slice`, `stage` or `phase`, in any string of the scenario. `backend/tests/test_no_transcript_file.py`
@@ -203,12 +300,18 @@ a transcript in a test is generated when the suite runs, and the six invented st
 `backend/tests/fixtures/raw/`, a turn's events as the controller relays them, are the one kind of
 JSON Lines file the tree holds.
 
-The door is pinned in `backend/tests/api/test_collector.py`, the write in
+The door and its three routes are pinned in `backend/tests/api/test_collector.py`, the write in
 `tests/services/test_publication_service.py`, the call's shape in `tests/schemas/test_publication.py`,
+on the package's import, the walk's end, its event and the readiness check in
+`tests/services/test_walk_service.py`, the Walk's revision in `tests/migrations/test_0050_walks.py`,
 the placement in `tests/services/test_launch_placement.py`, the adoption in
 `tests/services/test_adoption_service.py`, the load in `tests/services/test_scenario_service.py`
-and the builder in the package's `tests/test_builder.py`. `tests/support/publications.py` makes a
-call (`whole()`, `sub_agent()`, `appended()`, `collector_headers()`), `tests/support/transcripts.py`
-the rows, and `writes()` in `tests/support/database.py` counts the rows a block writes, by table.
-The adopted project's row and head are pinned in `frontend/tests/projects/adopted-project.spec.ts`.
-The Playwright backends have no `COLLECTOR_TOKEN`, so the door refuses every call there.
+and the walks' testing route in `tests/api/test_testing_record.py`. The package `pilot-collection`'s
+`tests/test_package.py` pins that it stands without the app, and the builder is pinned in
+`pilot-scenario`'s `tests/test_builder.py` and its files in `tests/test_transcript.py`. A collector's
+walk against these routes is `tests/collector/test_walk.py` ([`collector.md`](collector.md#testing-it)).
+`tests/support/publications.py` makes a call (`whole()`, `sub_agent()`, `appended()`,
+`collector_headers()`), `tests/support/transcripts.py` the rows, and `writes()` in
+`tests/support/database.py` counts the rows a block writes, by table. The adopted project's row and
+head are pinned in `frontend/tests/projects/adopted-project.spec.ts`. The Playwright backends have
+no `COLLECTOR_TOKEN` and no collector, so the door refuses every call there.

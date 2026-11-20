@@ -66,9 +66,10 @@ item. Every surface addresses by them.
 
 ## The surfaces are contracts
 
-Pilot's MCP tools, the sidecar protocol, the REST endpoints and the block DSL's package,
-`pilot-dsl`, are what other code is written against: the brain's skills and scripts in
-`pvginkel/PilotProjects`, the sessions Pilot injects its tools into, the Go sidecar and the UI. A
+Pilot's MCP tools, the sidecar protocol, the collector's protocol and its reading, the REST
+endpoints and the block DSL's package, `pilot-dsl`, are what other code is written against: the
+brain's skills and scripts in `pvginkel/PilotProjects`, the sessions Pilot injects its tools into,
+the Go sidecar, the collector and the UI. A
 running session keeps the tool definitions it loaded when it started. So a change to any of them is
 deliberate:
 

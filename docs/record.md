@@ -111,11 +111,13 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   environment's start makes one from the controller's report when it first touches it; the store's
   sidecar's first sync call makes the store's the same way ([`sync.md`](sync.md)), or by its id
   alone while no controller is configured. The fleet stream keeps its `name`, `last_state`,
-  `last_seen_at` and `exempt` current, and a publication that names an environment Pilot has no
-  row for makes one by its id, named by it until the stream reports it
-  ([`collection.md`](collection.md)), as does a conversation's opening from an environment the
-  controller does not report, and a placement by name makes one from the controller's report
-  ([`conversations.md`](conversations.md), [`sessions.md`](sessions.md)); `server_started_at` and `started_pod_at` are Pilot's claim,
+  `last_seen_at` and `exempt` current. A publication that names an environment Pilot has no row
+  for makes one as the stream reports it, else by its id with no `last_seen_at`
+  ([`collection.md`](collection.md)); a conversation's opening from an environment the controller
+  does not report makes one by its id the same way ([`conversations.md`](conversations.md)); and
+  Pilot's first touch gives such a row the controller's report
+  ([`controller.md`](controller.md#environments-on-demand)). A placement by name makes one from the
+  controller's report ([`sessions.md`](sessions.md)); `server_started_at` and `started_pod_at` are Pilot's claim,
   that it started the environment and the pod's start that bring-up settled on, and `stop_due_at`
   is when Pilot stops it. An environment Pilot created is its own: `server_created_at` and `repo`,
   the repository it was made from, set together, and `delete_due_at`, when Pilot deletes it while
@@ -298,8 +300,10 @@ reaches a person or a member from
   time, and `read_under_id`, the collector's Component Version, are its last publication's;
   `replayed_size`, `bigint` as `file_size` is, the file's size at its last whole one, at most
   `file_size` (`ck_transcripts_replayed_size`).
-- `launches`: a start of a Claude Code process on a main thread, `started_at` its first line's time
-  and `ended_at` its last's that carries one, none while it runs; and Pilot's own two,
+- `launches`: a run of Claude Code on a main thread, as its transcript's file shows it, from the
+  file's first line with a time or the first such line after a cost line
+  ([`collector.md`](collector.md#a-transcripts-facts)): `started_at` its first line's time and
+  `ended_at` its last's that carries one, none while it runs; and Pilot's own two,
   `session_id`, the Session that ran it, and `turn_seq`, that Session's Turn that started it, a Turn
   of that Session by its key, never without the Session (`ck_launches_turn`), each set once by the
   placement ([`collection.md`](collection.md#a-launch-of-pilots)). `sessions.conversation_id` is
@@ -332,6 +336,8 @@ reaches a person or a member from
   (`RECORDED_ELSEWHERE`, `ck_events_kind`); `context_parts`: a part of what a Call carried that no
   earlier Call of its Launch did, `kind_code`, `name` and `characters`.
 - `repositories`: a git repository the fleet works in, by the unique `name` of its checkout.
+- `walks`: a walk of the collector's over the fleet's home, `ended_at` when the server took its
+  end, the latest 20 kept ([`collection.md`](collection.md#a-walks-end)).
 
 A Launch's delete takes its versions and Prompts, a Prompt's its Hook Runs, a Call's its Tool
 Calls, Events and Context Parts; nothing follows a Transcript's, which no publication deletes.

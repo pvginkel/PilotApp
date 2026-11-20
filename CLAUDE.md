@@ -21,8 +21,9 @@ on: its line, the read-only strip with Stop and take over, a held block's line, 
 the Cancel, and the projects surface: the service user, `pilot-projects` and its tools, and the
 profile's join switch, and the debrief: a repeat round's why under its step, the Debrief on a done
 work item, the debrief and the full debrief, the pass reading it, and the debrief's notice, one per
-slice at its run's end, with its Read, and the collection: the
-transcripts a collector publishes through its door, whole or appended, a launch of Pilot's on its
+slice at its run's end, with its Read, and the collection: the collector, a pod beside each stage's
+fleet's home that walks it every 30 s, the transcripts it publishes through its door, whole or
+appended, the walk's end and its event, the reading it serves the backend, a launch of Pilot's on its
 Session, the adopted project a group names, and the invented scenario that drives it in the suite,
 and the conversation: a session outside Pilot talking to it through the projects surface, its long
 poll and its Conversations tab, and a work item placed in a named environment, and Pilot's note on a
@@ -47,22 +48,30 @@ phase ticks it ([`docs/slice-doc-plan.md`](docs/slice-doc-plan.md) §6), and an 
 ## Repo structure
 
 - **Root** — the `run-suite` orchestrator (`tools/suite_runner/`, CI's single entry point), the
-  shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, the `Jenkinsfile`, and the
-  `Jenkinsfile.architecture` that publishes the hand-authored model in `docs/architecture/`.
+  shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, the `Jenkinsfile`, the
+  `Jenkinsfile.architecture` that publishes the hand-authored model in `docs/architecture/`, and
+  the `.dockerignore` of the collector's image, the one built with the root as its context.
 - **`backend/`** — the Flask API (Python, uv), on PostgreSQL; `pilot_mcp/`, Pilot's MCP server,
   the image's second entry point (`python -m pilot_mcp`); `packages/pilot-dsl/`, the block DSL,
   a package the backend takes by path and PilotProjects pins from git
-  ([`docs/block-dsl.md`](docs/block-dsl.md)); and `packages/pilot-scenario/`, the invented scenario
-  and its builder, taken by path too ([`docs/collection.md`](docs/collection.md)).
+  ([`docs/block-dsl.md`](docs/block-dsl.md)); `packages/pilot-scenario/`, the invented scenario
+  and its builder, taken by path too ([`docs/collection.md`](docs/collection.md)); and
+  `packages/pilot-collection/`, the publication's, the inventory's and the reading's shapes, which
+  the collector takes by path as well.
+- **`collector/`** — the collector (Python, uv), app-owned, the image `pilot-collector`: it walks a
+  fleet's home, publishes its transcripts to the backend and serves their readings
+  ([`docs/collector.md`](docs/collector.md)); its walk's proof against the backend runs in the
+  backend's suite, `backend/tests/collector/`.
 - **`frontend/`** — the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
 - **`sidecar/`** — `pilot-sync`, the store environment's sync sidecar (Go), app-owned.
 
 Everything builds through `kc project build|test|lint|setup`, run **from the repo root** — those
 verbs are cwd-bound. The toolchain lives in the `modern-app` sidecar, so ad-hoc `uv`/`pnpm`
-commands need `cexec modern-app`, and `go` ones `cexec go`. The root and `backend/` are two uv
-projects, each with its own `uv.lock`, and both locks are committed, because CI and the image sync
-`--locked`. `scripts/dev.py` starts the dev stack and `scripts/dev.py stop` stops it from another
+commands need `cexec modern-app`, and `go` ones `cexec go`. The root, `backend/` and `collector/`
+are three uv projects, each with its own `uv.lock`, and every lock is committed, because CI and the
+images sync `--locked`; the backend's lock names the collector's dependencies too, so a dependency
+the collector gains is locked in both. `scripts/dev.py` starts the dev stack and `scripts/dev.py stop` stops it from another
 shell. After a backend API change, `scripts/regenerate-openapi.py --frontend` refreshes the
 OpenAPI cache, the backend's file in `backend/openapi-cache/` that the frontend reads through the
 symlink `frontend/openapi-cache`, and the client; a backend test fails while the committed cache is stale.
@@ -114,7 +123,10 @@ Twenty-six stand today: the `Jenkinsfile`, the app's own as a whole, which tags 
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
-which the template, rendering no `sidecar/`, has no place for (D008), and which copies the
+and the collector's `Test collector` stage in the pod's `modern-app-toolchain` container, its
+`Build pilot-collector image` stage, built from the root with the root's `.dockerignore`, and its pin
+`images.collector`, which the template, rendering no `sidecar/` or `collector/`, has no place for
+(D008), and which copies the
 backend's OpenAPI cache into the `pilot-ui` build context, where `frontend/openapi-cache` is a
 symlink to `backend/openapi-cache`, and which writes the commit to `frontend/git-rev` at checkout,
 where the template wrote it for the image alone, so that the suite's tree, which holds no `.git`,
@@ -311,9 +323,12 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   them.
 - [`docs/sync.md`](docs/sync.md): the sync protocol and `pilot-sync`, the sidecar that keeps the
   store's tree in step with the record, and its write lock, through which each save is a session's.
-- [`docs/collection.md`](docs/collection.md): the transcripts a collector publishes: its door and
-  bearer, a publication whole or appended, a launch of Pilot's on its Session, the adopted project,
-  and the invented scenario with its load.
+- [`docs/collection.md`](docs/collection.md), [`docs/collector.md`](docs/collector.md): the
+  transcripts a collector publishes: its door and bearer, the inventory, a publication whole or
+  appended, a walk's end, its event and readiness, a launch of Pilot's on its Session, the adopted
+  project, and the invented scenario with its load and its files; and the collector: its process
+  and settings, the home, the walk, a transcript's lines and facts, the carry, the reading it
+  serves, its image and its tests.
 - [`docs/jobs.md`](docs/jobs.md), [`docs/controller.md`](docs/controller.md),
   [`docs/sessions.md`](docs/sessions.md), [`docs/work.md`](docs/work.md): the supervisor that runs
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
