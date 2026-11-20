@@ -13,8 +13,10 @@ the file's last Call, and the place its next would take in a file with none.
 The carry holds the byte the boundary's first line starts at and what the
 lines from there on continue: how many Calls, published Launches and Prompts
 lie before it, the last line before it that lines link to, the directory and
-the environment the file named first, the Launch open there, and the prompts
-waiting in the queue. No id of any other line before the boundary is held.
+the environment the file named first, the Launch open there, the prompts
+waiting in the queue, and those a `remove` took out of it that no message
+taken in the middle of a run has claimed. No id of any other line before the
+boundary is held.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
@@ -33,7 +35,8 @@ _HELD = 1_024
 """The bytes a carry is counted at beside its words and its queue."""
 
 _QUEUED = 176
-"""The bytes a prompt waiting in the queue is counted at."""
+"""The bytes a prompt waiting in the queue, or held once a `remove` took it
+out, is counted at."""
 
 
 def digest(content: bytes) -> bytes:
@@ -78,6 +81,10 @@ class Standing:
     """The prompts waiting in the process's queue there, in the order they
     arrived: a digest of each one's text and the time of its `enqueue`
     line."""
+    removed: tuple[tuple[bytes, datetime], ...] = ()
+    """The prompts a `remove` took out of the queue before it that no
+    message taken in the middle of a run has claimed, in the order they were
+    taken out, as the queue holds them."""
 
 
 @dataclass(frozen=True)
@@ -102,7 +109,7 @@ class Carry:
         return (
             _HELD
             + sum(len(word) for word in words if word is not None)
-            + _QUEUED * len(stands.queue)
+            + _QUEUED * (len(stands.queue) + len(stands.removed))
         )
 
 

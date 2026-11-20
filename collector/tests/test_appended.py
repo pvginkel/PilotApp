@@ -30,6 +30,7 @@ from tests.support import (
     queue,
     requesting,
     result,
+    taken,
     typed,
     user,
 )
@@ -196,6 +197,26 @@ class TestTheCarry:
         stands = read(filed(tmp_path, lines), SETTINGS).carry.stands
 
         assert stands.queue == ((digest(b"Thread the heddles."), moment(2)),)
+
+    def test_it_holds_the_prompts_a_remove_took_out_that_none_claimed(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            typed(0),
+            queue("enqueue", 2, "Thread the heddles."),
+            queue("enqueue", 3, "Tie the treadles."),
+            queue("remove", 3.5, "Tie the treadles."),
+            queue("remove", 3.6, "Thread the heddles."),
+            taken(3.7, "Thread the heddles."),
+            assistant(4, "msg_01"),
+        ]
+
+        stands = read(filed(tmp_path, lines), SETTINGS).carry.stands
+
+        assert (stands.queue, stands.removed) == (
+            (),
+            ((digest(b"Tie the treadles."), moment(3)),),
+        )
 
     def test_a_sub_agents_thread_has_no_launch_open(self, tmp_path: Path) -> None:
         lines = [user(0), assistant(4, "msg_01"), assistant(9, "msg_02")]
@@ -388,6 +409,36 @@ class TestAFileThatGrew:
 
         (launch,) = grown.publication.launches
         assert [prompt.received_at for prompt in launch.prompts] == [moment(2)]
+
+    def test_a_message_taken_mid_run_was_received_when_queued_before_the_boundary(
+        self, tmp_path: Path
+    ) -> None:
+        _, grown = _grown(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    queue("enqueue", 2, "Beat the weft."),
+                    queue("enqueue", 3, "Tie on."),
+                    queue("remove", 3.5, "Tie on."),
+                    assistant(4, "msg_01"),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+            linked(
+                [
+                    taken(15, "Tie on."),
+                    taken(16, "Beat the weft.", "task-notification"),
+                ],
+                "grown",
+            ),
+        )
+
+        (launch,) = grown.publication.launches
+        assert [(prompt.received_at, prompt.source) for prompt in launch.prompts] == [
+            (moment(3), "queued"),
+            (moment(2), "system"),
+        ]
 
     def test_the_place_stays_the_files_first(self, tmp_path: Path) -> None:
         hosted = instructions(1, loaded("Managed", "# Environment: cleo-loom-7a41d9\n"))

@@ -36,6 +36,7 @@ from tests.support import (
     requesting,
     result,
     saved,
+    taken,
     too_large,
     typed,
     user,
@@ -45,6 +46,12 @@ UNTIL = datetime(2026, 11, 12, 9, 30, 0, 250_000, tzinfo=UTC)
 
 INTERRUPTED = "[Request interrupted by user for tool use]"
 """Claude Code's words for the result of a tool call the person interrupted."""
+
+NOTIFIED = (
+    "<task-notification>\n<task-id>b7wq2k</task-id>\n<status>completed</status>\n"
+    "<summary>The dye vat settled</summary>\n</task-notification>"
+)
+"""A task notification, as a background task's end is announced."""
 
 SETTINGS = support.settings()
 
@@ -637,15 +644,7 @@ class TestPrompts:
             ),
             user(5, "What came before.", isCompactSummary=True),
             result(5),
-            chained(
-                "attachment",
-                5,
-                attachment={
-                    "type": "queued_command",
-                    "prompt": "Beat.",
-                    "commandMode": "prompt",
-                },
-            ),
+            taken(5, "! ls looms", "bash"),
             chained(
                 "attachment",
                 5,
@@ -666,7 +665,7 @@ class TestPrompts:
             "a skill's words, in an older session",
             "a compaction's summary",
             "a tool's result",
-            "a message taken in the middle of a run",
+            "a message taken in the middle of a run of another mode",
             "a hook's added context",
         ],
     )
@@ -771,6 +770,118 @@ class TestPrompts:
             moment(120),
             moment(30),
         ]
+
+    def test_a_message_taken_in_the_middle_of_a_run_is_a_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        """A task notification reads `system` and a person's message
+        `queued`, received when it was queued, else at its own time; the
+        Calls after it follow it."""
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                assistant(4, "msg_01", output=3),
+                queue("enqueue", 5, NOTIFIED),
+                taken(8, NOTIFIED, "task-notification"),
+                assistant(9, "msg_02", output=3),
+                queue("enqueue", 10, "Beat."),
+                taken(13, [{"type": "text", "text": "Beat."}]),
+                assistant(14, "msg_03", output=3),
+                taken(20, "Weave on."),
+                assistant(21, "msg_04", output=3),
+            ],
+        )
+
+        (launch,) = publication.launches
+        assert [
+            (prompt.received_at, prompt.source, prompt.characters)
+            for prompt in launch.prompts
+        ] == [
+            (moment(0), "typed", 14),
+            (moment(5), "system", len(NOTIFIED)),
+            (moment(10), "queued", 5),
+            (moment(20), "queued", 9),
+        ]
+        assert [call.prompt for call in publication.calls] == [1, 2, 3, 4]
+
+    def test_one_a_remove_took_out_of_the_queue_first_was_received_when_queued(
+        self, tmp_path: Path
+    ) -> None:
+        """Claude Code writes the queue's `remove` of a message it takes in
+        the middle of a run before the attachment or after it."""
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                queue("enqueue", 10, "Beat."),
+                queue("enqueue", 11, "Tie on."),
+                queue("remove", 12, "Tie on."),
+                queue("remove", 12, "Beat."),
+                assistant(12.5, "msg_01", output=3),
+                taken(13, "Beat."),
+                taken(13, "Tie on."),
+                queue("enqueue", 20, "Weave on."),
+                taken(22, "Weave on."),
+                queue("remove", 22, "Weave on."),
+            ],
+        )
+
+        (launch,) = publication.launches
+        assert [prompt.received_at for prompt in launch.prompts] == [
+            moment(0),
+            moment(10),
+            moment(11),
+            moment(20),
+        ]
+
+    def test_one_takes_its_text_out_of_the_queue(self, tmp_path: Path) -> None:
+        """So a later prompt of its text was received at its own time."""
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                queue("enqueue", 10, "Beat."),
+                taken(13, "Beat."),
+                user(100, "Beat.", promptSource="queued"),
+            ],
+        )
+
+        (launch,) = publication.launches
+        assert [prompt.received_at for prompt in launch.prompts] == [
+            moment(0),
+            moment(10),
+            moment(100),
+        ]
+
+    def test_a_process_that_exits_lends_the_next_one_none_a_remove_took_out(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                queue("enqueue", 10, "Beat."),
+                queue("remove", 11, "Beat."),
+                cost(),
+                typed(60),
+                taken(70, "Beat."),
+            ],
+        )
+
+        assert [
+            [prompt.received_at for prompt in launch.prompts]
+            for launch in publication.launches
+        ] == [[moment(0)], [moment(60), moment(70)]]
+
+    def test_a_sub_agents_message_taken_in_the_middle_of_a_run_is_no_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [user(0, "Count the heddles."), taken(3, "Beat."), assistant(4)]
+
+        publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
+
+        assert [call.prompt for call in publication.calls] == [None]
 
     def test_a_queued_prompt_a_process_never_took_lends_the_next_process_no_time(
         self, tmp_path: Path

@@ -26,6 +26,13 @@ its newline is written. The facts are read off the lines in the file's order:
   a headless one, `typed` in an interactive one. It was received when its
   `enqueue` line was written, where the queue holds one with its text, else
   at its own time.
+- **A message Claude takes in the middle of a run** is a Prompt too: a main
+  thread's `queued_command` attachment, a task notification
+  (`commandMode` `task-notification`) read as `system` and a person's
+  message (`prompt`) as `queued`. It was received when it was queued: its
+  text's `enqueue` line, the queue's first of that text, or where a
+  `remove` took that one out before the attachment was written, the first
+  of that text the removes took out; else at its own time.
 - **A Call** is the `assistant` lines under one `message.id`, placed by the
   first of them; its usage, model and completion time are the last one's.
 - **A Tool Call** is a `tool_use` block of a Call's lines, requested at its
@@ -133,6 +140,15 @@ _NEWER = {
 }
 """An older field's word for a prompt's source, by the word `promptSource`
 has for the same."""
+
+_MID_RUN = "queued_command"
+"""The type of the attachment a message Claude takes in the middle of a run
+is written as."""
+
+_TAKEN = {"task-notification": "system", "prompt": "queued"}
+"""The source of a message taken in the middle of a run, by its
+`commandMode`: the word Claude Code has for the same taken at a turn's
+start."""
 
 _INTERACTIVE = "cli"
 """The entry point of a session a person types in."""
@@ -259,6 +275,18 @@ def _entered(line: dict[str, Any]) -> str | None:
     return "sdk" if entered.startswith(_HEADLESS) else None
 
 
+def _taken_out(
+    waiting: tuple[tuple[bytes, datetime], ...], words: bytes
+) -> tuple[tuple[tuple[bytes, datetime], ...], datetime | None]:
+    """`waiting` with the first prompt of those words taken out, and the
+    time that one was queued; `waiting` itself and none where it holds
+    none."""
+    for place, (queued, at) in enumerate(waiting):
+        if queued == words:
+            return waiting[:place] + waiting[place + 1 :], at
+    return waiting, None
+
+
 def _argument(given: dict[str, Any]) -> str | None:
     """A tool's argument: the first of its input that is text, cut to its
     first line that is not blank."""
@@ -324,6 +352,10 @@ class _Thread:
         """The prompts waiting in the process's queue, in the order they
         arrived: a digest of each one's text and the time of its `enqueue`
         line."""
+        self._removed = before.removed
+        """The prompts a `remove` took out of the queue that no message
+        taken in the middle of a run has claimed, in the order they were
+        taken out, as the queue holds them."""
         self._requested: dict[str, _ToolCall] = {}
         """The tool calls requested, by Claude's id of the request."""
         self._link = before.link
@@ -364,6 +396,7 @@ class _Thread:
                 self._published += 1
             self._exited = True
             self._queue = ()
+            self._removed = ()
         if at is None:
             return
         if self._main:
@@ -386,7 +419,7 @@ class _Thread:
         elif kind == "queue-operation":
             self._queued(line, at)
         elif kind == "attachment":
-            self._attached(line["attachment"])
+            self._attached(line["attachment"], at)
 
     def _standing(self, byte: int) -> Standing:
         """Where the reading stands before the line that starts at `byte`,
@@ -406,6 +439,7 @@ class _Thread:
                 opened.started_at, opened.version, opened.kept + len(opened.prompts)
             ),
             queue=self._queue,
+            removed=self._removed,
         )
 
     def _queued(self, line: dict[str, Any], at: datetime) -> None:
@@ -418,19 +452,21 @@ class _Thread:
         elif operation == "enqueue":
             self._queue += ((_words(content), at),)
         elif operation == "remove":
-            self._waited(content)
+            words = _words(content)
+            self._queue, queued = _taken_out(self._queue, words)
+            if queued is not None:
+                self._removed += ((words, queued),)
 
     def _waited(self, text: str) -> datetime | None:
         """Take the first prompt of that text out of the queue: the time
         it arrived, none where the queue holds none."""
-        words = _words(text)
-        for place, (queued, at) in enumerate(self._queue):
-            if queued == words:
-                self._queue = self._queue[:place] + self._queue[place + 1 :]
-                return at
-        return None
+        self._queue, queued = _taken_out(self._queue, _words(text))
+        return queued
 
-    def _attached(self, attachment: dict[str, Any]) -> None:
+    def _attached(self, attachment: dict[str, Any], at: datetime) -> None:
+        if attachment["type"] == _MID_RUN:
+            self._taken(attachment, at)
+            return
         if self.environment is not None or attachment["type"] != "instructions":
             return
         pattern = self._settings.COLLECTOR_ENVIRONMENT_PATTERN
@@ -447,13 +483,27 @@ class _Thread:
         if source is None:
             return
         text = text_of(content)
+        self._received(source, text, self._waited(text) or at)
+
+    def _taken(self, attachment: dict[str, Any], at: datetime) -> None:
+        """A message Claude took in the middle of a run, a Prompt where its
+        `commandMode` says which: queued where the queue holds its text, or
+        a `remove` took that out before the attachment was written."""
+        source = _TAKEN.get(attachment.get("commandMode") or "")
+        if source is None:
+            return
+        text = text_of(attachment["prompt"])
+        words = _words(text)
+        self._queue, queued = _taken_out(self._queue, words)
+        if queued is None:
+            self._removed, queued = _taken_out(self._removed, words)
+        self._received(source, text, queued or at)
+
+    def _received(self, source: str, text: str, at: datetime) -> None:
+        """A Prompt of the Launch open, `text` from `source`, received `at`."""
         self._prompts += 1
         self.launches[-1].prompts.append(
-            {
-                "received_at": self._waited(text) or at,
-                "source": source,
-                "characters": len(text),
-            }
+            {"received_at": at, "source": source, "characters": len(text)}
         )
 
     def _answered(self, message: dict[str, Any], at: datetime) -> None:

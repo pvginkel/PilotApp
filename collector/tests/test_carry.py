@@ -9,7 +9,7 @@ from pilot_collector.carry import Carries, Carry, Open, Standing, digest
 STOOD = datetime(2026, 11, 12, 10, 2, 3, 456789, tzinfo=UTC)
 
 
-def _carry(place: int = 0, queued: int = 0) -> Carry:
+def _carry(place: int = 0, queued: int = 0, removed: int = 0) -> Carry:
     """A carry no other shares a word or a time with."""
     return Carry(
         file_size=61_000 + place,
@@ -30,6 +30,13 @@ def _carry(place: int = 0, queued: int = 0) -> Carry:
                     STOOD + timedelta(days=place, seconds=waiting),
                 )
                 for waiting in range(queued)
+            ),
+            removed=tuple(
+                (
+                    digest(f"{place} removed {held}".encode()),
+                    STOOD + timedelta(days=place, minutes=held),
+                )
+                for held in range(removed)
             ),
         ),
         end=digest(str(place).encode()),
@@ -54,6 +61,11 @@ class TestACarrysSize:
 
     def test_a_prompt_waiting_in_the_queue_counts(self) -> None:
         assert _carry(queued=3).size > _carry(queued=2).size > _carry().size
+
+    def test_a_prompt_a_remove_took_out_and_held_counts_as_one_waiting(
+        self,
+    ) -> None:
+        assert _carry(removed=2).size == _carry(queued=2).size > _carry().size
 
 
 class TestTheBound:

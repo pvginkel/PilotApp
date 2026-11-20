@@ -107,6 +107,9 @@ operations (`queue-operation`, an `enqueue` with a prompt's text, a `dequeue`, a
 
 - A prompt is a `user` line whose `message.content` is its text, with Claude Code's word for its
   source. One that waited in the queue follows its `enqueue` and `dequeue` lines.
+- A message Claude takes in the middle of a run is an `attachment` line of type `queued_command`,
+  its text its `prompt` and its kind its `commandMode`, `task-notification` or `prompt`. It names
+  no source. The queue's `remove` of its text is written before it, after it or not at all.
 - A process's first prompt is followed by an `attachment` line of type `instructions`, whose
   `files` list the instruction files it loaded, the managed one of `type` `Managed` among them.
 - A response is one `assistant` line a block, all under its `message.id`. Each line carries the
@@ -151,9 +154,16 @@ each rule in full. The facts are read off the lines in the file's order:
   - Its time is that of the `enqueue` line that holds its text, the queue's first of that text,
     else its own. A `remove` that names a text takes it out of the queue, and a `popAll` and a cost
     line empty it.
+  - A message Claude takes in the middle of a run is a Prompt as well: a main thread's
+    `queued_command` attachment, a task notification (`commandMode` `task-notification`) read as
+    `system` and a person's message (`prompt`) as `queued`. Its time is that of the `enqueue` line
+    of its text, the queue's first, or where a `remove` took that out before the attachment was
+    written, that of the first of its text the removes took out and none has claimed; else its own.
+    It takes its text out of the queue, so a later prompt of that text keeps its own time. A cost
+    line drops what the removes took out.
   - Not a Prompt: a line that names no source and is no older prompt, a person's interruption, a
-    skill's `isMeta` words, a compaction's summary, a tool's result, a `queued_command` attachment,
-    and the context a hook added, which arrives as an attachment.
+    skill's `isMeta` words, a compaction's summary, a tool's result, a `queued_command` attachment
+    of another mode, and the context a hook added, which arrives as an attachment.
 - **A Call** is the `assistant` lines under one `message.id` whose model is no `<synthetic>` one,
   placed by the first of them, and follows the Prompt last received before it, where there is one.
   Its model, its `completed_at` and its usage are the last line's, its five token counts read there.
@@ -202,6 +212,8 @@ Call the place its first would take. Of the reading there, the carry holds:
 - the directory and the environment the file named first;
 - the Launch open there, with its start, its version and its Prompts so far;
 - the prompts waiting in the queue, each as a digest of its text with its `enqueue` time;
+- those a `remove` took out of the queue that no message taken in the middle of a run has claimed,
+  held as the queue holds them;
 - a digest of the file's bytes from the boundary's on, as they were read.
 
 No other id of a line before the boundary is held: there is no map of the file's ids.

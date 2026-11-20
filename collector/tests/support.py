@@ -81,6 +81,13 @@ def typed(seconds: float, text: Any = "Warp the loom.") -> Line:
     return user(seconds, text, promptSource="typed")
 
 
+def taken(seconds: float, text: Any, mode: str = "prompt") -> Line:
+    """A message Claude took in the middle of a run, `text` of the kind
+    `mode` names."""
+    attachment = {"type": "queued_command", "prompt": text, "commandMode": mode}
+    return chained("attachment", seconds, attachment=attachment)
+
+
 def result(
     seconds: float,
     tool_use_id: str = "toolu_01",
