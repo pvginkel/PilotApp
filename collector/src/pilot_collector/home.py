@@ -19,6 +19,7 @@ folder is its own session's, where the walk meets the file itself. A
 transcript found by its ids is one a walk lists.
 """
 
+import errno
 import logging
 import os
 import stat
@@ -174,12 +175,21 @@ def find(projects: Path, session_id: str, agent_id: str | None = None) -> Listed
     return None
 
 
+def _no_such_name(error: OSError) -> bool:
+    """Whether a lookup by a name failed for there being no file of that
+    name: none there, a file where a folder would be, or a name too long
+    for one."""
+    return error.errno in (errno.ENOENT, errno.ENOTDIR, errno.ENAMETOOLONG)
+
+
 def _main_thread(projects: Path, folder: str, session_id: str) -> Listed | None:
     path = Path(folder, f"{session_id}{_SUFFIX}")
     try:
         status = os.lstat(path)
-    except FileNotFoundError:
-        return None
+    except OSError as error:
+        if _no_such_name(error):
+            return None
+        raise
     if stat.S_ISLNK(status.st_mode) or stat.S_ISDIR(status.st_mode):
         return None
     return Listed(
@@ -193,8 +203,10 @@ def _sub_agent(
     session = os.path.join(folder, session_id)
     try:
         status = os.lstat(session)
-    except FileNotFoundError:
-        return None
+    except OSError as error:
+        if _no_such_name(error):
+            return None
+        raise
     if not stat.S_ISDIR(status.st_mode):
         return None
     for entry in _files(session, 2):

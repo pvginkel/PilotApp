@@ -278,6 +278,21 @@ class TestATranscriptByItsIds:
 
         assert find(tmp_path, session_id, agent_id) is None
 
+    @pytest.mark.parametrize(
+        ("session_id", "agent_id"),
+        [
+            (f"{SESSION}.jsonl", AGENT),
+            ("a" * 300, None),
+            ("a" * 300, AGENT),
+        ],
+    )
+    def test_an_id_that_names_a_file_or_is_too_long_for_a_name_finds_none(
+        self, tmp_path: Path, session_id: str, agent_id: str | None
+    ) -> None:
+        _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
+
+        assert find(tmp_path, session_id, agent_id) is None
+
     def test_a_home_with_no_projects_is_an_error(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             find(tmp_path / "projects", SESSION)
