@@ -4,8 +4,8 @@ Slice 050 (DB decisions 79.19 and 79.28): `walks`, a row per pass of the
 collector over the fleet's home, holding when the server was told that it
 ended and nothing else. Nothing is backfilled: no collector has walked.
 
-Revision ID: 0047
-Revises: 0046
+Revision ID: 0050
+Revises: 0049
 Create Date: 2026-11-19
 
 """
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0047"
-down_revision: str | None = "0046"
+revision: str = "0050"
+down_revision: str | None = "0049"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
