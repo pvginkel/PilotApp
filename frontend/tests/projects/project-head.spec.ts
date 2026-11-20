@@ -822,6 +822,28 @@ test.describe('A tight head beside the side panel', () => {
     await clear(projectHead, panel);
   });
 
+  test('a name pressed to its own width shows whole, a fraction of a pixel in that width included', async ({ page, people, projects, projectHead, panel }) => {
+    // The name a quarter of a pixel past a whole width: its text sized to nothing, a box of that width before it.
+    await page.addInitScript(() =>
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent =
+          '[data-testid="project.name"] { font-size: 0; } [data-testid="project.name"]::before { content: ""; display: inline-block; width: 120.25px; height: 1px; }';
+        document.head.append(style);
+      }),
+    );
+    await page.setViewportSize({ width: 1340, height: 720 });
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Short'), ticket: 'PL-7', members: [me.handle!, 'ada'], tasks: [LONG_STEP] });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await twoRows(projectHead)).toBe(false);
+    expect(await cut(projectHead.step.getByTestId('project.step.name'))).toBe(true);
+    expect(await width(projectHead.name)).toBeGreaterThanOrEqual(120.25);
+    await clear(projectHead, panel);
+  });
+
   test('the step button stands no wider than 350px, its name cut and its tooltip naming the steps in progress whole', async ({
     page,
     people,

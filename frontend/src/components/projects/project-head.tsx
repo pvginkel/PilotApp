@@ -251,14 +251,21 @@ const NAME_FLOOR = 250;
 
 /**
  * Sets the name's floor, `--name-floor` (project-head.css), from the name measured whole: no CSS
- * width is the lesser of a length and the content's.
+ * width is the lesser of a length and the content's. Its width keeps its fraction, which
+ * `scrollWidth` rounds away, and is rounded up, so that a name held at its own width is never cut.
  */
 function useNameFloor(name: string) {
   const heading = useRef<HTMLHeadingElement>(null);
   useLayoutEffect(() => {
     const element = heading.current!;
     element.style.removeProperty('--name-floor');
-    element.style.setProperty('--name-floor', `${Math.min(NAME_FLOOR, element.scrollWidth)}px`);
+    // Its content's width, unpressed, read before the browser paints it so.
+    element.style.flex = 'none';
+    element.style.width = 'max-content';
+    const whole = Math.ceil(element.getBoundingClientRect().width);
+    element.style.removeProperty('flex');
+    element.style.removeProperty('width');
+    element.style.setProperty('--name-floor', `${Math.min(NAME_FLOOR, whole)}px`);
   }, [name]);
   return heading;
 }
