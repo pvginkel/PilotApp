@@ -190,7 +190,14 @@ def _main_thread(projects: Path, folder: str, session_id: str) -> Listed | None:
 def _sub_agent(
     projects: Path, folder: str, session_id: str, agent_id: str
 ) -> Listed | None:
-    for entry in _files(os.path.join(folder, session_id), 2):
+    session = os.path.join(folder, session_id)
+    try:
+        status = os.lstat(session)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISDIR(status.st_mode):
+        return None
+    for entry in _files(session, 2):
         found = transcript(projects, Path(entry.path))
         if found is None or found.agent_id != agent_id:
             continue

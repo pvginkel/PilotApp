@@ -230,7 +230,8 @@ class TestATranscriptByItsIds:
         assert find(tmp_path, FOLDER) is None
 
     def test_what_a_walk_does_not_list_is_not_found(self, tmp_path: Path) -> None:
-        """A symlink, and what is no transcript's by its place."""
+        """A symlink, a linked session's folder among them, and what is no
+        transcript's by its place."""
         main = _put(tmp_path / FOLDER / f"{SESSION}.jsonl")
         own = _put(tmp_path / FOLDER / SESSION / "subagents" / f"agent-{AGENT}.jsonl")
         elsewhere = tmp_path / FOLDER / OTHER / "subagents"
@@ -239,11 +240,17 @@ class TestATranscriptByItsIds:
         (tmp_path / FOLDER / f"{OTHER}.jsonl").symlink_to(main)
         _put(tmp_path / FOLDER / SESSION / "tool-results" / "agent-b81e.jsonl")
         (tmp_path / FOLDER / "a-folder.jsonl").mkdir()
+        linked = "0e5a9b1c-3d7f-4e26-8a4b-c6d0f2e1a397"
+        (tmp_path / FOLDER / linked).symlink_to(tmp_path / FOLDER / SESSION)
 
         assert find(tmp_path, OTHER) is None
         assert find(tmp_path, OTHER, AGENT) is None
         assert find(tmp_path, SESSION, "b81e") is None
         assert find(tmp_path, "a-folder") is None
+        assert find(tmp_path, linked, AGENT) is None
+        assert linked not in {
+            each.transcript.session_id for each in transcripts(tmp_path)
+        }
 
     @pytest.mark.parametrize(
         ("session_id", "agent_id"),
