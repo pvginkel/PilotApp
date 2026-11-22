@@ -10,10 +10,14 @@ from flask import Blueprint
 from spectree import Response as SpectreeResponse
 from sqlalchemy.orm import Session
 
+from app.api.dashboard_store import (
+    custom_ratio_response,
+    quick_filter_response,
+    saved_view_response,
+)
 from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.catalogue import Catalogue
-from app.dashboard.state import PREFIX
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.dashboard import (
     AddressQuerySchema,
@@ -25,9 +29,7 @@ from app.schemas.dashboard import (
     FactSchema,
     FigureSchema,
     GrainSchema,
-    QuickFilterSchema,
     RatioSchema,
-    SavedViewSchema,
     TimeRangeSchema,
     ValueSchema,
 )
@@ -61,8 +63,8 @@ def get_catalogue(
     dimensions, each with its closed list of values where it has one; its
     measures, the facts, figures, aggregates, grains and ratios, built in
     and stored; its time, the ranges, the zone and the sitting's gap; or
-    what it stores, the saved views, each with its address, and the quick
-    filters.
+    what it stores, the saved views, each with its address, the quick
+    filters and the stored ratios, each with whether the catalogue offers it.
 
     Returns:
         200: The part asked for
@@ -220,30 +222,19 @@ def _time(catalogue: Catalogue) -> CatalogueResponseSchema:
 def _stored(
     catalogue: Catalogue, dashboard_store_service: DashboardStoreService
 ) -> CatalogueResponseSchema:
+    quick_filters = {quick_filter.key for quick_filter in catalogue.quick_filters}
+    ratios = {ratio.key for ratio in catalogue.ratios if ratio.origin is not None}
     return CatalogueResponseSchema(
         part="stored",
         saved_views=[
-            SavedViewSchema(
-                id=view.id,
-                system=view.system,
-                origin=view.origin_code.value,
-                key=view.key,
-                name=view.name,
-                address=PREFIX + view.state,
-                note=view.note,
-                saved_at=view.saved_at,
-            )
-            for view in dashboard_store_service.saved_views()
+            saved_view_response(view) for view in dashboard_store_service.saved_views()
         ],
         quick_filters=[
-            QuickFilterSchema(
-                key=quick_filter.key,
-                label=quick_filter.label,
-                condition=quick_filter.condition,
-                marks=quick_filter.marks,
-                amount=quick_filter.amount,
-                note=quick_filter.note,
-            )
-            for quick_filter in catalogue.quick_filters
+            quick_filter_response(row, offered=row.code in quick_filters)
+            for row in dashboard_store_service.quick_filters()
+        ],
+        custom_ratios=[
+            custom_ratio_response(row, offered=row.key in ratios)
+            for row in dashboard_store_service.custom_ratios()
         ],
     )

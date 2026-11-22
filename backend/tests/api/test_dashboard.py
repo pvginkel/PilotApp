@@ -11,7 +11,7 @@ from flask.testing import FlaskClient
 from sqlalchemy.orm import Session as DbSession
 
 from app.dashboard.views import VIEWS
-from app.models import Component, CustomRatio, EventKind, SavedView
+from app.models import Component, CustomRatio, EventKind, QuickFilter, SavedView
 from app.models.reference import Origin
 from tests.support.transcripts import reference
 
@@ -38,7 +38,7 @@ class TestGetCatalogue:
             "dimensions": {"dimensions"},
             "measures": {"facts", "figures", "aggregates", "grains", "ratios"},
             "time": {"ranges", "zone", "sitting_gap_seconds"},
-            "stored": {"saved_views", "quick_filters"},
+            "stored": {"saved_views", "quick_filters", "custom_ratios"},
         }
 
         for part, own in fields.items():
@@ -293,7 +293,11 @@ class TestGetCatalogue:
             "outliers",
             "past_ttl",
         ]
-        assert quick_filters["past_ttl"] == {
+        assert {
+            key: value
+            for key, value in quick_filters["past_ttl"].items()
+            if key not in ("id", "saved_at")
+        } == {
             "key": "past_ttl",
             "label": "Waits past the cache TTL",
             "condition": "past_ttl:1",
@@ -303,7 +307,9 @@ class TestGetCatalogue:
                 "The Calls that waited longer than the cache their predecessor "
                 "wrote lives; the amount is the cost of those that missed it"
             ),
+            "offered": True,
         }
+        assert body["custom_ratios"] == []
 
     def test_a_stored_ratio_is_a_measure_with_its_origin(
         self, client: FlaskClient, session: DbSession
@@ -311,7 +317,7 @@ class TestGetCatalogue:
         session.add(
             CustomRatio(
                 origin_code=Origin.PERSON,
-                key="mine_per_turn",
+                key="person_per_turn",
                 name="Cost per turn",
                 numerator="reported_cost.sum",
                 denominator="turns.count",
@@ -323,7 +329,7 @@ class TestGetCatalogue:
         ratios = _part(client, "measures")["ratios"]
 
         assert ratios[-1] == {
-            "key": "mine_per_turn",
+            "key": "person_per_turn",
             "label": "Cost per turn",
             "line": None,
             "format": "usd",
@@ -331,6 +337,43 @@ class TestGetCatalogue:
             "denominator": "turns.count",
             "origin": "person",
         }
+
+    def test_what_it_stores_that_no_longer_reads_is_listed_not_offered(
+        self, client: FlaskClient, session: DbSession
+    ) -> None:
+        """A row the catalogue leaves out still holds its key and its name, so
+        that the screen shows it, and anyone may remove a person's."""
+        session.add_all(
+            [
+                CustomRatio(
+                    origin_code=Origin.PERSON,
+                    key="person_per_crate",
+                    name="Cost per crate",
+                    numerator="cost.sum",
+                    denominator="crates.count",
+                    saved_at=SAVED_AT,
+                ),
+                QuickFilter(
+                    code="crates",
+                    label="Crates",
+                    condition="crate:1",
+                    marks=False,
+                    saved_at=datetime.now(UTC),
+                ),
+            ]
+        )
+        session.flush()
+
+        body = _part(client, "stored")
+
+        assert [(one["key"], one["offered"]) for one in body["custom_ratios"]] == [
+            ("person_per_crate", False)
+        ]
+        assert body["quick_filters"][-1]["key"] == "crates"
+        assert not body["quick_filters"][-1]["offered"]
+        assert all(one["offered"] for one in body["quick_filters"][:-1])
+        ratios = [ratio["key"] for ratio in _part(client, "measures")["ratios"]]
+        assert "person_per_crate" not in ratios
 
     @pytest.mark.parametrize("query", [{}, {"part": "views"}, {"part": ""}])
     def test_no_part_or_one_it_has_not_is_refused(

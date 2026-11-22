@@ -13,6 +13,7 @@ CataloguePart = Literal["dimensions", "measures", "time", "stored"]
 Group = Literal["part", "attribute", "time", "order"]
 Format = Literal["usd", "tokens", "count", "seconds", "share"]
 Origin = Literal["pilot", "workflow", "person"]
+StoredOrigin = Literal["workflow", "person"]
 
 
 class CatalogueQuerySchema(BaseModel):
@@ -24,7 +25,7 @@ class CatalogueQuerySchema(BaseModel):
             "`measures`: the facts, the figures, the aggregates, the grains "
             "and the ratios; `time`: the time ranges, the zone and the "
             "sitting's gap; `stored`: the saved views, the system's and a "
-            "person's, and the quick filters"
+            "person's, the quick filters and the stored ratios"
         )
     )
 
@@ -177,6 +178,7 @@ class QuickFilterSchema(BaseModel):
     """A filter kept under a label, for everyone, that a view turns on by its
     key in `b=`."""
 
+    id: uuid.UUID
     key: str = Field(description="What `b=` names it by", examples=["misses"])
     label: str = Field(examples=["Cache misses"])
     condition: str = Field(
@@ -191,6 +193,51 @@ class QuickFilterSchema(BaseModel):
         examples=["miss_cost"],
     )
     note: str | None = Field(description="A line of explanation shown with it")
+    saved_at: datetime = Field(description="When it was made")
+    offered: bool = Field(
+        description=(
+            "Whether the catalogue offers it: false where its chip or its amount "
+            "names what is gone, so that `b=` naming it drops it with a note"
+        )
+    )
+
+
+class CustomRatioSchema(BaseModel):
+    """A ratio of two measures kept under a name, for everyone: loaded with the
+    workflow's views, or made by a person."""
+
+    id: uuid.UUID
+    system: bool = Field(
+        description="Whether it was loaded, which no one changes or removes"
+    )
+    origin: StoredOrigin = Field(description="Where it comes from")
+    key: str = Field(
+        description=(
+            "What a measure names it by, after `r:`; a person's begins `person_`, "
+            "made from its first name and kept"
+        ),
+        examples=["person_cost_per_turn"],
+    )
+    name: str = Field(
+        description="Its name, unique among the loaded ones and among a person's",
+        examples=["Cost per turn"],
+    )
+    numerator: str = Field(
+        description="The measure above the line, as a state writes it",
+        examples=["reported_cost.sum"],
+    )
+    denominator: str = Field(
+        description="The measure below the line, as a state writes it",
+        examples=["turns.count"],
+    )
+    note: str | None = Field(description="A line of explanation shown with it")
+    saved_at: datetime = Field(description="When it was last saved, or loaded")
+    offered: bool = Field(
+        description=(
+            "Whether the catalogue offers it among the ratios: false where a side "
+            "names what is gone, or a loaded one has a built-in ratio's key"
+        )
+    )
 
 
 class TimeRangeSchema(BaseModel):
@@ -236,7 +283,15 @@ class CatalogueResponseSchema(BaseModel):
         ),
     )
     quick_filters: list[QuickFilterSchema] | None = Field(
-        default=None, description="`stored`: in the order they were made"
+        default=None,
+        description="`stored`: every quick filter, in the order they were made",
+    )
+    custom_ratios: list[CustomRatioSchema] | None = Field(
+        default=None,
+        description=(
+            "`stored`: every stored ratio, the loaded ones, then a person's, each "
+            "list by name"
+        ),
     )
 
 

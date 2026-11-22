@@ -613,7 +613,12 @@ class ServiceContainer(containers.DeclarativeContainer):
         AddressService, db=db_session, catalogue_service=catalogue_service
     )
     # What the dashboard stores, Pilot's own system views among it (F155)
-    dashboard_store_service = providers.Factory(DashboardStoreService, db=db_session)
+    dashboard_store_service = providers.Factory(
+        DashboardStoreService,
+        db=db_session,
+        catalogue_service=catalogue_service,
+        address_service=address_service,
+    )
 
     # A collector's publication of a transcript (F152.3)
     adoption_service = providers.Factory(

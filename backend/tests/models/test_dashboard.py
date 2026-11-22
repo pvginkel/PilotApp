@@ -272,7 +272,7 @@ class TestCustomRatio:
     ) -> None:
         ratios = [
             _ratio(session, Origin.WORKFLOW, "per_step", "Cost per step"),
-            _ratio(session, Origin.PERSON, "mine_per_step", "Cost per step"),
+            _ratio(session, Origin.PERSON, "person_per_step", "Cost per step"),
         ]
         session.expire_all()
 
@@ -295,11 +295,11 @@ class TestCustomRatio:
 
     def test_its_key_is_unique_among_all(self, session: DbSession) -> None:
         """DB 602."""
-        _ratio(session, Origin.WORKFLOW, "per_step", "Cost per step")
+        _ratio(session, Origin.PERSON, "person_per_step", "Cost per step")
         session.add(
             CustomRatio(
                 origin_code=Origin.PERSON,
-                key="per_step",
+                key="person_per_step",
                 name="My cost per step",
                 numerator="cost.sum",
                 denominator="calls.count",
@@ -315,7 +315,7 @@ class TestCustomRatio:
     ) -> None:
         session.add(
             CustomRatio(
-                origin_code=Origin.PERSON,
+                origin_code=Origin.WORKFLOW,
                 key=key,
                 name="Cost per step",
                 numerator="cost.sum",
@@ -326,14 +326,35 @@ class TestCustomRatio:
 
         assert violated_constraint(session) == "ck_custom_ratios_key"
 
+    @pytest.mark.parametrize(
+        ("origin", "key"),
+        [(Origin.PERSON, "per_step"), (Origin.WORKFLOW, "person_per_step")],
+    )
+    def test_a_persons_key_and_none_but_a_persons_is_in_their_space(
+        self, session: DbSession, origin: Origin, key: str
+    ) -> None:
+        """DB 602: a person's key from a space no loaded ratio's is in."""
+        session.add(
+            CustomRatio(
+                origin_code=origin,
+                key=key,
+                name="Cost per step",
+                numerator="cost.sum",
+                denominator="calls.count",
+                saved_at=SAVED_AT,
+            )
+        )
+
+        assert violated_constraint(session) == "ck_custom_ratios_key_space"
+
     def test_two_of_a_persons_ratios_may_not_share_a_name(
         self, session: DbSession
     ) -> None:
-        _ratio(session, Origin.PERSON, "mine_per_step", "Cost per step")
+        _ratio(session, Origin.PERSON, "person_per_step", "Cost per step")
         session.add(
             CustomRatio(
                 origin_code=Origin.PERSON,
-                key="mine_per_step_2",
+                key="person_per_step_2",
                 name="Cost per step",
                 numerator="cost.sum",
                 denominator="calls.count",

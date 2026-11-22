@@ -30,6 +30,10 @@ SYSTEM = "origin_code <> 'person'"
 """A row's `system`, carried from its Origin: whether that Origin is
 managed, Pilot's own or the workflow's."""
 
+PERSON_KEYS = "person_"
+"""What a Custom Ratio's key begins with exactly when a person made it: the
+space no built-in or loaded ratio's key is in (DB 602)."""
+
 
 class SavedView(db.Model):  # type: ignore[name-defined]
     """A view of the dashboard kept under a name, for everyone: a system
@@ -122,14 +126,19 @@ class CustomRatio(db.Model):  # type: ignore[name-defined]
     A name stands once among the loaded and once among a person's (DB 602),
     as a Saved View's does. `key` is what a view's state names it by after
     `r:`, written there as it stands, so it is a word of lower-case letters,
-    digits and underscores. `numerator` and `denominator` are measures as a
-    view's state writes them.
+    digits and underscores, a person's in `PERSON_KEYS` and a loaded one's
+    outside it. `numerator` and `denominator` are measures as a view's state
+    writes them.
     """
 
     __tablename__ = "custom_ratios"
     __table_args__ = (
         CheckConstraint("origin_code <> 'pilot'", name="ck_custom_ratios_origin"),
         CheckConstraint("key ~ '^[a-z][a-z0-9_]*$'", name="ck_custom_ratios_key"),
+        CheckConstraint(
+            f"(origin_code = 'person') = starts_with(key, '{PERSON_KEYS}')",
+            name="ck_custom_ratios_key_space",
+        ),
         UniqueConstraint("system", "name"),
     )
 

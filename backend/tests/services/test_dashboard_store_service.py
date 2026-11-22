@@ -1,18 +1,43 @@
 """What the dashboard stores (F155): Pilot's own system views made what the
 release holds, a load of an Origin's system views by key (F155.3; DB 601 to
-604), and the saved views as they are listed."""
+604); the saved views saved, renamed and removed by anyone, a system view by
+no one (F155.1, DB 601); a person's stars and favourite dimensions (F155.2);
+the quick filters made and removed; and the ratios a person made, made,
+changed and removed, a loaded one by no one (F155.3), each in the normal form
+a view's state writes (F155.4)."""
 
-from datetime import UTC, datetime
+import re
+import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session as DbSession
 
 from app.dashboard.views import VIEWS, SystemView
-from app.models import SavedView, User, ViewStar
-from app.models.reference import Origin
+from app.exceptions import (
+    InvalidOperationException,
+    RecordNotFoundException,
+    ResourceConflictException,
+    StateRefusedException,
+    ValidationException,
+)
+from app.models import (
+    CustomRatio,
+    DimensionFavourite,
+    QuickFilter,
+    SavedView,
+    User,
+    ViewStar,
+)
+from app.models.reference import FavouriteMenu, Origin, UserKind
 from app.services.container import ServiceContainer
-from app.services.dashboard_store_service import DashboardStoreService, Loaded
+from app.services.dashboard_store_service import (
+    DashboardStoreService,
+    Favourites,
+    Loaded,
+)
+from app.utils.after_commit import run_after_commit_callbacks
 
 EARLIER = datetime(2026, 11, 1, 9, tzinfo=UTC)
 NOW = datetime(2026, 11, 22, 9, tzinfo=UTC)
@@ -251,3 +276,582 @@ class TestSavedViews:
             "Apples",
             "Writers",
         ]
+
+
+def _bea(db: DbSession) -> User:
+    bea = User(
+        kind_code=UserKind.PERSON,
+        subject="subject-bea",
+        handle="bea",
+        name="Bea Example",
+        avatar_slot=2,
+    )
+    db.add(bea)
+    db.flush()
+    return bea
+
+
+def _system(db: DbSession, name: str = "Projects") -> SavedView:
+    return db.scalars(
+        select(SavedView).where(SavedView.system.is_(True), SavedView.name == name)
+    ).one()
+
+
+def _persons(db: DbSession, name: str) -> SavedView:
+    return db.scalars(
+        select(SavedView).where(SavedView.system.is_(False), SavedView.name == name)
+    ).one()
+
+
+def _loaded_ratio(db: DbSession) -> CustomRatio:
+    ratio = CustomRatio(
+        origin_code=Origin.WORKFLOW,
+        key="per_crate",
+        name="Cost per crate",
+        numerator="cost.sum",
+        denominator="calls.count",
+        saved_at=EARLIER,
+    )
+    db.add(ratio)
+    db.flush()
+    return ratio
+
+
+class TestSaveView:
+    def test_it_saves_the_state_in_its_normal_form_for_everyone(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        saved = service.save_view("Opus", "#dash/m=cost.sum&by=model&t=d7", None, NOW)
+
+        assert saved.made
+        assert saved.notes == ()
+        assert (saved.view.origin_code, saved.view.key) == (Origin.PERSON, None)
+        assert (saved.view.name, saved.view.state) == (
+            "Opus",
+            "t=d7&by=model&m=cost.sum&col=none",
+        )
+        assert saved.view.saved_at == NOW
+        assert not saved.view.system
+
+    def test_the_bands_length_is_saved_with_it(
+        self, service: DashboardStoreService
+    ) -> None:
+        saved = service.save_view("Short band", "by=model&roll=5,5", None, NOW)
+
+        assert saved.view.state == "t=qw&by=model&m=cost.sum&col=none&roll=5,5"
+
+    def test_a_save_under_a_saved_views_name_replaces_it_its_stars_kept(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        first = service.save_view("Opus", STATE, "The first", EARLIER).view
+        _star(session, person, first)
+
+        saved = service.save_view("Opus", OTHER_STATE, None, NOW)
+
+        assert not saved.made
+        assert saved.view.id == first.id
+        assert (saved.view.state, saved.view.note, saved.view.saved_at) == (
+            OTHER_STATE,
+            None,
+            NOW,
+        )
+        assert _stars(session) == [(None, "Opus")]
+
+    def test_a_system_views_name_saves_a_view_beside_it(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        """F155.1: a system view may have the same name."""
+        shipped = _system(session)
+
+        saved = service.save_view("Projects", OTHER_STATE, None, NOW)
+
+        assert saved.made
+        assert saved.view.id != shipped.id
+        assert _system(session).state == shipped.state
+
+    def test_a_quick_filter_that_is_gone_is_dropped_with_a_note(
+        self, service: DashboardStoreService
+    ) -> None:
+        saved = service.save_view("Gone", "by=model&b=misses,shelf", None, NOW)
+
+        assert saved.view.state == "t=qw&by=model&m=cost.sum&b=misses&col=none"
+        assert saved.notes == (
+            'b=misses,shelf: no quick filter has the key "shelf", so it is dropped.',
+        )
+
+    def test_a_state_with_faults_is_refused_and_nothing_saved(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        before = len(service.saved_views())
+
+        with pytest.raises(StateRefusedException) as refused:
+            service.save_view("Broken", "by=projet&t=d8", None, NOW)
+
+        assert [fault.part for fault in refused.value.faults] == ["by=projet", "t=d8"]
+        assert len(service.saved_views()) == before
+
+
+class TestRenameView:
+    def test_a_saved_view_is_renamed_its_stars_kept(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        view = service.save_view("Opus", STATE, None, EARLIER).view
+        _star(session, person, view)
+
+        renamed = service.rename_view(view.id, "Opus this week")
+
+        assert (renamed.id, renamed.name, renamed.saved_at) == (
+            view.id,
+            "Opus this week",
+            EARLIER,
+        )
+        assert _stars(session) == [(None, "Opus this week")]
+
+    def test_it_may_take_a_system_views_name(
+        self, service: DashboardStoreService
+    ) -> None:
+        view = service.save_view("Opus", STATE, None, NOW).view
+
+        assert service.rename_view(view.id, "Projects").name == "Projects"
+
+    def test_its_own_name_changes_nothing(self, service: DashboardStoreService) -> None:
+        view = service.save_view("Opus", STATE, None, NOW).view
+
+        assert service.rename_view(view.id, "Opus").name == "Opus"
+
+    def test_another_saved_views_name_is_refused(
+        self, service: DashboardStoreService
+    ) -> None:
+        view = service.save_view("Opus", STATE, None, NOW).view
+        service.save_view("Fable", OTHER_STATE, None, NOW)
+
+        with pytest.raises(ResourceConflictException) as refused:
+            service.rename_view(view.id, "Fable")
+
+        assert refused.value.message == (
+            'A saved view with the name "Fable" already exists'
+        )
+
+    def test_a_system_view_is_refused(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        """DB 601."""
+        with pytest.raises(InvalidOperationException) as refused:
+            service.rename_view(_system(session).id, "Mine")
+
+        assert refused.value.message == (
+            'Cannot rename the view "Projects" because it is a system view, which '
+            "the system manages: a star is all a person changes of it"
+        )
+        assert _system(session).name == "Projects"
+
+    def test_no_view_is_refused(self, service: DashboardStoreService) -> None:
+        with pytest.raises(RecordNotFoundException):
+            service.rename_view(uuid.uuid4(), "Mine")
+
+
+class TestRemoveView:
+    def test_a_saved_view_is_removed_the_stars_on_it_with_it(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        view = service.save_view("Opus", STATE, None, NOW).view
+        _star(session, person, view)
+
+        service.remove_view(view.id)
+
+        assert session.get(SavedView, view.id) is None
+        assert _stars(session) == []
+
+    def test_a_system_view_is_refused(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as refused:
+            service.remove_view(_system(session).id)
+
+        assert refused.value.message.startswith(
+            'Cannot remove the view "Projects" because it is a system view'
+        )
+
+    def test_no_view_is_refused(self, service: DashboardStoreService) -> None:
+        with pytest.raises(RecordNotFoundException):
+            service.remove_view(uuid.uuid4())
+
+
+class TestStars:
+    def test_a_person_stars_a_system_view_and_a_saved_one_listed_as_starred(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        saved = service.save_view("Opus", STATE, None, NOW).view
+        shipped = _system(session)
+
+        service.star(person, saved.id, EARLIER)
+        service.star(person, shipped.id, NOW)
+
+        assert service.favourites(person).views == [saved.id, shipped.id]
+
+    def test_a_star_again_keeps_its_place(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        first, second = _system(session), _system(session, "Work types")
+        service.star(person, first.id, EARLIER)
+        service.star(person, second.id, NOW)
+
+        service.star(person, first.id, NOW + timedelta(hours=1))
+
+        assert service.favourites(person).views == [first.id, second.id]
+
+    def test_the_stars_are_each_persons_own(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        shipped = _system(session)
+        service.star(person, shipped.id, NOW)
+
+        assert service.favourites(_bea(session)).views == []
+
+    def test_a_star_taken_off(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        shipped = _system(session)
+        service.star(person, shipped.id, NOW)
+
+        service.unstar(person, shipped.id)
+        service.unstar(person, shipped.id)
+
+        assert service.favourites(person).views == []
+        assert _system(session).name == "Projects"
+
+    def test_no_view_is_refused(
+        self, service: DashboardStoreService, person: User
+    ) -> None:
+        with pytest.raises(RecordNotFoundException):
+            service.star(person, uuid.uuid4())
+        with pytest.raises(RecordNotFoundException):
+            service.unstar(person, uuid.uuid4())
+
+
+class TestFavourites:
+    def test_a_dimension_in_bys_list_and_a_color_in_colors(
+        self, service: DashboardStoreService, person: User
+    ) -> None:
+        for menu, dimension in (
+            (FavouriteMenu.BY, "project"),
+            (FavouriteMenu.BY, "day"),
+            (FavouriteMenu.COLOR, "work_type"),
+            (FavouriteMenu.COLOR, "token_kind"),
+            (FavouriteMenu.BY, "project"),
+        ):
+            service.favour(person, menu, dimension)
+
+        assert service.favourites(person) == Favourites(
+            views=[], by=["day", "project"], color=["token_kind", "work_type"]
+        )
+
+    def test_a_favourite_taken_off(
+        self, service: DashboardStoreService, person: User
+    ) -> None:
+        service.favour(person, FavouriteMenu.BY, "project")
+        service.favour(person, FavouriteMenu.COLOR, "project")
+
+        service.unfavour(person, FavouriteMenu.BY, "project")
+        service.unfavour(person, FavouriteMenu.BY, "model")
+
+        assert service.favourites(person) == Favourites(
+            views=[], by=[], color=["project"]
+        )
+
+    def test_one_the_catalogue_no_longer_offers_is_left_out(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        session.add(
+            DimensionFavourite(
+                user_id=person.id, menu_code=FavouriteMenu.BY, dimension="shelf"
+            )
+        )
+        session.flush()
+
+        assert service.favourites(person).by == []
+
+    def test_a_dimension_the_catalogue_does_not_offer_is_refused(
+        self, service: DashboardStoreService, person: User
+    ) -> None:
+        with pytest.raises(ValidationException) as refused:
+            service.favour(person, FavouriteMenu.BY, "projet")
+
+        assert refused.value.message == (
+            'Cannot mark "projet" a favourite in By\'s list because it is no '
+            'dimension of the catalogue\'s. Did you mean "project"?'
+        )
+
+    def test_a_color_is_a_part_an_attribute_or_the_token_kind(
+        self, service: DashboardStoreService, person: User
+    ) -> None:
+        with pytest.raises(ValidationException) as refused:
+            service.favour(person, FavouriteMenu.COLOR, "day")
+
+        assert refused.value.message == (
+            'Cannot mark "day" a favourite in Color\'s list because a color is a '
+            "part, an attribute or token_kind."
+        )
+
+
+class TestQuickFilters:
+    def test_one_is_made_for_everyone_under_a_code_of_its_own(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        now = datetime.now(UTC)
+        made = service.add_quick_filter(
+            "Opus only", "model:claude-opus-5-5", "cost", "The big model", now
+        )
+
+        assert re.fullmatch("[a-z][a-z0-9]{3}", made.code)
+        assert (made.label, made.condition, made.marks) == (
+            "Opus only",
+            "model:claude-opus-5-5",
+            False,
+        )
+        assert (made.amount_figure, made.note, made.saved_at) == (
+            "cost",
+            "The big model",
+            now,
+        )
+        assert service.quick_filters()[-1].id == made.id
+
+    def test_a_chip_that_marks_makes_one_that_marks(
+        self, service: DashboardStoreService
+    ) -> None:
+        made = service.add_quick_filter("Marked misses", "~miss:1", None, None, NOW)
+
+        assert (made.condition, made.marks) == ("miss:1", True)
+
+    def test_its_chip_is_kept_in_its_normal_form(
+        self, service: DashboardStoreService
+    ) -> None:
+        made = service.add_quick_filter(
+            "Dear", "@items,gt,1.50,cost.sum", None, None, NOW
+        )
+
+        assert made.condition == "@items,gt,1.5,cost.sum"
+
+    def test_the_catalogue_offers_it_once_its_write_has_committed(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        catalogue_service = container.catalogue_service()
+        catalogue_service.catalogue(session)
+        made = container.dashboard_store_service().add_quick_filter(
+            "Opus only", "model:claude-opus-5-5", None, None
+        )
+
+        run_after_commit_callbacks()
+
+        keys = [one.key for one in catalogue_service.catalogue(session).quick_filters]
+        assert keys[-1] == made.code
+
+    def test_a_chip_with_faults_is_refused(
+        self, service: DashboardStoreService
+    ) -> None:
+        with pytest.raises(StateRefusedException) as refused:
+            service.add_quick_filter("Broken", "modle:x", None, None, NOW)
+
+        assert [fault.part for fault in refused.value.faults] == ["c=modle:x"]
+
+    def test_an_amount_no_figure_has_is_refused(
+        self, service: DashboardStoreService
+    ) -> None:
+        with pytest.raises(ValidationException) as refused:
+            service.add_quick_filter("Opus", "model:claude-opus-5-5", "cots", None, NOW)
+
+        assert refused.value.message == (
+            'Cannot add the quick filter "Opus" because no figure has the key '
+            '"cots". Did you mean "cost"?'
+        )
+
+    def test_one_is_removed_one_the_dashboard_shipped_with_too(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        shipped = session.scalars(
+            select(QuickFilter).where(QuickFilter.code == "misses")
+        ).one()
+
+        service.remove_quick_filter(shipped.id)
+
+        assert "misses" not in [row.code for row in service.quick_filters()]
+
+    def test_no_quick_filter_is_refused(self, service: DashboardStoreService) -> None:
+        with pytest.raises(RecordNotFoundException):
+            service.remove_quick_filter(uuid.uuid4())
+
+
+class TestCustomRatios:
+    def test_one_is_made_under_a_key_from_its_name_in_a_persons_space(
+        self, service: DashboardStoreService
+    ) -> None:
+        made = service.add_ratio(
+            "Cost per turn", "reported_cost.sum", "turns.count", None, NOW
+        )
+
+        assert (made.origin_code, made.key, made.name) == (
+            Origin.PERSON,
+            "person_cost_per_turn",
+            "Cost per turn",
+        )
+        assert (made.numerator, made.denominator) == (
+            "reported_cost.sum",
+            "turns.count",
+        )
+        assert not made.system
+
+    def test_its_sides_are_kept_in_their_normal_form(
+        self, service: DashboardStoreService
+    ) -> None:
+        made = service.add_ratio("Waits", "waited", "calls.count", None, NOW)
+
+        assert (made.numerator, made.denominator) == ("waited.sum", "calls.count")
+
+    @pytest.mark.parametrize(
+        ("name", "key"),
+        [
+            ("Kosten über Zeit!", "person_kosten_uber_zeit"),
+            ("€", "person_ratio"),
+            ("A very long name for a ratio of costs", "person_a_very_long_name_for_a"),
+        ],
+    )
+    def test_its_key_is_a_word_of_its_name(
+        self, service: DashboardStoreService, name: str, key: str
+    ) -> None:
+        assert service.add_ratio(name, "cost.sum", "calls.count", None, NOW).key == key
+
+    def test_a_key_taken_is_numbered(self, service: DashboardStoreService) -> None:
+        first = service.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+        service.edit_ratio(first.id, "Turn cost", "cost.sum", "turns.count", None, NOW)
+
+        again = service.add_ratio("Cost per turn", "cost.sum", "calls.count", None, NOW)
+        third = service.add_ratio(
+            "Cost  per turn", "cost.sum", "calls.count", None, NOW
+        )
+
+        assert [first.key, again.key, third.key] == [
+            "person_cost_per_turn",
+            "person_cost_per_turn_2",
+            "person_cost_per_turn_3",
+        ]
+
+    def test_a_loaded_ratios_name_may_stand_among_a_persons(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        _loaded_ratio(session)
+
+        made = service.add_ratio("Cost per crate", "cost.sum", "calls.count", None, NOW)
+
+        assert made.name == "Cost per crate"
+        assert [ratio.system for ratio in service.custom_ratios()] == [True, False]
+
+    def test_a_persons_name_taken_is_refused(
+        self, service: DashboardStoreService
+    ) -> None:
+        service.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+
+        with pytest.raises(ResourceConflictException) as refused:
+            service.add_ratio("Cost per turn", "cost.sum", "calls.count", None, NOW)
+
+        assert refused.value.message == (
+            'A custom ratio with the name "Cost per turn" already exists'
+        )
+
+    def test_every_fault_of_both_sides_is_named(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        with pytest.raises(StateRefusedException) as refused:
+            service.add_ratio("Broken", "cots.sum", "calls.cuont", None, NOW)
+
+        assert [fault.part for fault in refused.value.faults] == [
+            "m=cots.sum",
+            "m=calls.cuont",
+        ]
+        assert refused.value.message.startswith(
+            "Cannot read the view because its state has 2 faults."
+        )
+        assert service.custom_ratios() == []
+
+    def test_one_is_changed_under_its_key(self, service: DashboardStoreService) -> None:
+        made = service.add_ratio("Cost per turn", "cost.sum", "turns.count", "A", NOW)
+        later = NOW + timedelta(hours=1)
+
+        changed = service.edit_ratio(
+            made.id, "Turn cost", "reported_cost.sum", "turns.count", None, later
+        )
+
+        assert (changed.id, changed.key, changed.name) == (
+            made.id,
+            "person_cost_per_turn",
+            "Turn cost",
+        )
+        assert (changed.numerator, changed.note, changed.saved_at) == (
+            "reported_cost.sum",
+            None,
+            later,
+        )
+
+    def test_a_change_may_keep_its_name_and_not_take_anothers(
+        self, service: DashboardStoreService
+    ) -> None:
+        made = service.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+        service.add_ratio("Cost per call", "cost.sum", "calls.count", None, NOW)
+
+        service.edit_ratio(
+            made.id, "Cost per turn", "cost.sum", "turns.count", "B", NOW
+        )
+        with pytest.raises(ResourceConflictException):
+            service.edit_ratio(
+                made.id, "Cost per call", "cost.sum", "turns.count", None, NOW
+            )
+
+    def test_one_is_removed(self, service: DashboardStoreService) -> None:
+        made = service.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+
+        service.remove_ratio(made.id)
+
+        assert service.custom_ratios() == []
+
+    def test_a_loaded_one_is_neither_changed_nor_removed(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        """DB 601."""
+        loaded = _loaded_ratio(session)
+
+        with pytest.raises(InvalidOperationException) as changed:
+            service.edit_ratio(loaded.id, "Mine", "cost.sum", "turns.count", None, NOW)
+        with pytest.raises(InvalidOperationException) as removed:
+            service.remove_ratio(loaded.id)
+
+        assert changed.value.message == (
+            'Cannot change the ratio "Cost per crate" because it was loaded with '
+            "the workflow's views, and nobody changes or removes a loaded ratio"
+        )
+        assert removed.value.message.startswith(
+            'Cannot remove the ratio "Cost per crate" because'
+        )
+        assert [ratio.name for ratio in service.custom_ratios()] == ["Cost per crate"]
+
+    def test_the_catalogue_offers_one_once_its_write_has_committed(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        catalogue_service = container.catalogue_service()
+        store = container.dashboard_store_service()
+        catalogue_service.catalogue(session)
+        made = store.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+        run_after_commit_callbacks()
+
+        assert catalogue_service.catalogue(session).ratios[-1].key == made.key
+
+        store.remove_ratio(made.id)
+        run_after_commit_callbacks()
+
+        assert made.key not in [
+            ratio.key for ratio in catalogue_service.catalogue(session).ratios
+        ]
+
+    def test_no_ratio_is_refused(self, service: DashboardStoreService) -> None:
+        with pytest.raises(RecordNotFoundException):
+            service.edit_ratio(uuid.uuid4(), "Mine", "cost.sum", "calls.count", None)
+        with pytest.raises(RecordNotFoundException):
+            service.remove_ratio(uuid.uuid4())

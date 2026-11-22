@@ -232,7 +232,7 @@ class TestTheStoredConfiguration:
     def test_a_stored_ratio_follows_the_built_in_ones_the_loaded_first(
         self, session: DbSession
     ) -> None:
-        _ratio(session, Origin.PERSON, "mine_misses", "miss_cost.sum", "cost.sum")
+        _ratio(session, Origin.PERSON, "person_misses", "miss_cost.sum", "cost.sum")
         _ratio(
             session,
             Origin.WORKFLOW,
@@ -256,8 +256,8 @@ class TestTheStoredConfiguration:
                 origin="workflow",
             ),
             Ratio(
-                key="mine_misses",
-                label="Mine misses",
+                key="person_misses",
+                label="Person misses",
                 line=None,
                 format="share",
                 numerator="miss_cost.sum",
@@ -267,23 +267,23 @@ class TestTheStoredConfiguration:
         ]
 
     def test_a_state_names_each_by_its_key(self, session: DbSession) -> None:
-        _ratio(session, Origin.PERSON, "mine_misses", "miss_cost.sum", "cost.sum")
+        _ratio(session, Origin.PERSON, "person_misses", "miss_cost.sum", "cost.sum")
         _quick_filter(session, "market_day", "weekday:6")
 
         checked = read(
-            "m=r:mine_misses&b=market_day,misses",
+            "m=r:person_misses&b=market_day,misses",
             assemble(session, ZONE, GAP),
             quota_weeks(session),
         )
 
-        assert checked.state.measures == (RatioKey("mine_misses"),)
+        assert checked.state.measures == (RatioKey("person_misses"),)
         assert checked.state.quick_filters == ("market_day", "misses")
         assert checked.notes == ()
 
     def test_a_ratio_whose_measure_does_not_read_is_left_out_and_dropped_by_a_state(
         self, session: DbSession
     ) -> None:
-        _ratio(session, Origin.PERSON, "per_crate", "cost.sum", "crates.count")
+        _ratio(session, Origin.WORKFLOW, "per_crate", "cost.sum", "crates.count")
 
         catalogue = assemble(session, ZONE, GAP)
 

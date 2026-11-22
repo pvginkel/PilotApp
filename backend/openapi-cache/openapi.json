@@ -369,6 +369,67 @@
         "title": "AddItemRequestSchema",
         "type": "object"
       },
+      "AddQuickFilterSchema.ddf95d6": {
+        "description": "A quick filter to make for everyone.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The figure whose sum shows beside its count; null for none",
+            "examples": [
+              "cost"
+            ],
+            "title": "Amount"
+          },
+          "chip": {
+            "description": "The chip it applies, as a view's state writes it after `c=`; one written to mark (`~` before it) makes a quick filter that marks",
+            "examples": [
+              "model:claude-opus-5-5"
+            ],
+            "minLength": 1,
+            "title": "Chip",
+            "type": "string"
+          },
+          "label": {
+            "description": "Its words",
+            "examples": [
+              "Opus only"
+            ],
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "label",
+          "chip"
+        ],
+        "title": "AddQuickFilterSchema",
+        "type": "object"
+      },
       "AddedSchema.4ff8b5e": {
         "description": "The item added.",
         "properties": {
@@ -959,7 +1020,7 @@
         "description": "The part of the catalogue asked for.",
         "properties": {
           "part": {
-            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, and the quick filters",
+            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, the quick filters and the stored ratios",
             "enum": [
               "dimensions",
               "measures",
@@ -994,6 +1055,22 @@
             "default": null,
             "description": "`measures`",
             "title": "Aggregates"
+          },
+          "custom_ratios": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.CustomRatioSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`stored`: every stored ratio, the loaded ones, then a person's, each list by name",
+            "title": "Custom Ratios"
           },
           "dimensions": {
             "anyOf": [
@@ -1082,7 +1159,7 @@
               }
             ],
             "default": null,
-            "description": "`stored`: in the order they were made",
+            "description": "`stored`: every quick filter, in the order they were made",
             "title": "Quick Filters"
           },
           "ranges": {
@@ -1198,6 +1275,99 @@
           "line"
         ],
         "title": "AggregateSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.CustomRatioSchema": {
+        "description": "A ratio of two measures kept under a name, for everyone: loaded with the\nworkflow's views, or made by a person.",
+        "properties": {
+          "denominator": {
+            "description": "The measure below the line, as a state writes it",
+            "examples": [
+              "turns.count"
+            ],
+            "title": "Denominator",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "What a measure names it by, after `r:`; a person's begins `person_`, made from its first name and kept",
+            "examples": [
+              "person_cost_per_turn"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, unique among the loaded ones and among a person's",
+            "examples": [
+              "Cost per turn"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "numerator": {
+            "description": "The measure above the line, as a state writes it",
+            "examples": [
+              "reported_cost.sum"
+            ],
+            "title": "Numerator",
+            "type": "string"
+          },
+          "offered": {
+            "description": "Whether the catalogue offers it among the ratios: false where a side names what is gone, or a loaded one has a built-in ratio's key",
+            "title": "Offered",
+            "type": "boolean"
+          },
+          "origin": {
+            "description": "Where it comes from",
+            "enum": [
+              "workflow",
+              "person"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "saved_at": {
+            "description": "When it was last saved, or loaded",
+            "format": "date-time",
+            "title": "Saved At",
+            "type": "string"
+          },
+          "system": {
+            "description": "Whether it was loaded, which no one changes or removes",
+            "title": "System",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "system",
+          "origin",
+          "key",
+          "name",
+          "numerator",
+          "denominator",
+          "note",
+          "saved_at",
+          "offered"
+        ],
+        "title": "CustomRatioSchema",
         "type": "object"
       },
       "CatalogueResponseSchema.b67cf98.DimensionSchema": {
@@ -1564,6 +1734,11 @@
             "title": "Condition",
             "type": "string"
           },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
           "key": {
             "description": "What `b=` names it by",
             "examples": [
@@ -1595,15 +1770,29 @@
             ],
             "description": "A line of explanation shown with it",
             "title": "Note"
+          },
+          "offered": {
+            "description": "Whether the catalogue offers it: false where its chip or its amount names what is gone, so that `b=` naming it drops it with a note",
+            "title": "Offered",
+            "type": "boolean"
+          },
+          "saved_at": {
+            "description": "When it was made",
+            "format": "date-time",
+            "title": "Saved At",
+            "type": "string"
           }
         },
         "required": [
+          "id",
           "key",
           "label",
           "condition",
           "marks",
           "amount",
-          "note"
+          "note",
+          "saved_at",
+          "offered"
         ],
         "title": "QuickFilterSchema",
         "type": "object"
@@ -2705,6 +2894,154 @@
         "title": "ConversationTurnSchema",
         "type": "object"
       },
+      "CustomRatioSchema.b67cf98": {
+        "description": "A ratio of two measures kept under a name, for everyone: loaded with the\nworkflow's views, or made by a person.",
+        "properties": {
+          "denominator": {
+            "description": "The measure below the line, as a state writes it",
+            "examples": [
+              "turns.count"
+            ],
+            "title": "Denominator",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "What a measure names it by, after `r:`; a person's begins `person_`, made from its first name and kept",
+            "examples": [
+              "person_cost_per_turn"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, unique among the loaded ones and among a person's",
+            "examples": [
+              "Cost per turn"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "numerator": {
+            "description": "The measure above the line, as a state writes it",
+            "examples": [
+              "reported_cost.sum"
+            ],
+            "title": "Numerator",
+            "type": "string"
+          },
+          "offered": {
+            "description": "Whether the catalogue offers it among the ratios: false where a side names what is gone, or a loaded one has a built-in ratio's key",
+            "title": "Offered",
+            "type": "boolean"
+          },
+          "origin": {
+            "description": "Where it comes from",
+            "enum": [
+              "workflow",
+              "person"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "saved_at": {
+            "description": "When it was last saved, or loaded",
+            "format": "date-time",
+            "title": "Saved At",
+            "type": "string"
+          },
+          "system": {
+            "description": "Whether it was loaded, which no one changes or removes",
+            "title": "System",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "system",
+          "origin",
+          "key",
+          "name",
+          "numerator",
+          "denominator",
+          "note",
+          "saved_at",
+          "offered"
+        ],
+        "title": "CustomRatioSchema",
+        "type": "object"
+      },
+      "CustomRatioWriteSchema.ddf95d6": {
+        "description": "A ratio a person makes or changes, for everyone.",
+        "properties": {
+          "denominator": {
+            "description": "The measure below the line, as a state writes it after `m=`",
+            "examples": [
+              "turns.count"
+            ],
+            "minLength": 1,
+            "title": "Denominator",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, which no other ratio a person made has",
+            "examples": [
+              "Cost per turn"
+            ],
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "numerator": {
+            "description": "The measure above the line, as a state writes it after `m=`",
+            "examples": [
+              "reported_cost.sum"
+            ],
+            "minLength": 1,
+            "title": "Numerator",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "numerator",
+          "denominator"
+        ],
+        "title": "CustomRatioWriteSchema",
+        "type": "object"
+      },
       "DebriefSchema.1fdd8ae": {
         "description": "A done work item's debrief, as its Debrief opens it and the full debrief\nshows it (F26.9, F26.10).",
         "properties": {
@@ -2935,6 +3272,84 @@
           "status"
         ],
         "title": "DeploymentTriggerResponseSchema",
+        "type": "object"
+      },
+      "DimensionFavouriteSchema.ddf95d6": {
+        "description": "A dimension in one of the two lists, By's or Color's.",
+        "properties": {
+          "dimension": {
+            "description": "The dimension's key; in Color's list a part's, an attribute's or `token_kind`",
+            "examples": [
+              "project"
+            ],
+            "minLength": 1,
+            "title": "Dimension",
+            "type": "string"
+          },
+          "menu": {
+            "description": "The list: By's or Color's",
+            "enum": [
+              "by",
+              "color"
+            ],
+            "title": "Menu",
+            "type": "string"
+          }
+        },
+        "required": [
+          "menu",
+          "dimension"
+        ],
+        "title": "DimensionFavouriteSchema",
+        "type": "object"
+      },
+      "FavouritesSchema.ddf95d6": {
+        "description": "The signed-in person's favourites.",
+        "properties": {
+          "by": {
+            "description": "Their favourite dimensions in By's list, by key",
+            "examples": [
+              [
+                "project",
+                "model"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "By",
+            "type": "array"
+          },
+          "color": {
+            "description": "Their favourite colors in Color's list, by key",
+            "examples": [
+              [
+                "work_type",
+                "token_kind"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Color",
+            "type": "array"
+          },
+          "views": {
+            "description": "The views they starred, by their ids, in the order starred",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "views",
+          "by",
+          "color"
+        ],
+        "title": "FavouritesSchema",
         "type": "object"
       },
       "FinishRequestSchema.4ff8b5e": {
@@ -11760,6 +12175,95 @@
         "title": "PushSubscriptionKeysSchema",
         "type": "object"
       },
+      "QuickFilterSchema.b67cf98": {
+        "description": "A filter kept under a label, for everyone, that a view turns on by its\nkey in `b=`.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The figure shown beside its count; null for none",
+            "examples": [
+              "miss_cost"
+            ],
+            "title": "Amount"
+          },
+          "condition": {
+            "description": "The chip it applies, as a view's state writes it after `c=`",
+            "examples": [
+              "miss:1"
+            ],
+            "title": "Condition",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "What `b=` names it by",
+            "examples": [
+              "misses"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Cache misses"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "marks": {
+            "description": "Whether it marks what the chip keeps rather than filters to it",
+            "title": "Marks",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "offered": {
+            "description": "Whether the catalogue offers it: false where its chip or its amount names what is gone, so that `b=` naming it drops it with a note",
+            "title": "Offered",
+            "type": "boolean"
+          },
+          "saved_at": {
+            "description": "When it was made",
+            "format": "date-time",
+            "title": "Saved At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "label",
+          "condition",
+          "marks",
+          "amount",
+          "note",
+          "saved_at",
+          "offered"
+        ],
+        "title": "QuickFilterSchema",
+        "type": "object"
+      },
       "QuotaOverruleRequestSchema.72d99af": {
         "description": "The overrule the signed-in person makes.",
         "properties": {
@@ -12183,6 +12687,26 @@
         "title": "RegisteredDocumentSchema",
         "type": "object"
       },
+      "RenameViewSchema.ddf95d6": {
+        "description": "A saved view's new name.",
+        "properties": {
+          "name": {
+            "description": "Its new name, which no other view a person saved has",
+            "examples": [
+              "Opus last week"
+            ],
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RenameViewSchema",
+        "type": "object"
+      },
       "SSEOutageQuerySchema.6b6ce9f": {
         "description": "Query parameters for POST /api/testing/sse/outage.",
         "properties": {
@@ -12194,6 +12718,238 @@
           }
         },
         "title": "SSEOutageQuerySchema",
+        "type": "object"
+      },
+      "SaveViewResponseSchema.ddf95d6": {
+        "description": "A view saved, and what of its state was dropped.",
+        "properties": {
+          "notes": {
+            "description": "One for each part of the state dropped: a quick filter or a ratio it named by a key that is gone",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "view": {
+            "$ref": "#/components/schemas/SaveViewResponseSchema.ddf95d6.SavedViewSchema"
+          }
+        },
+        "required": [
+          "view",
+          "notes"
+        ],
+        "title": "SaveViewResponseSchema",
+        "type": "object"
+      },
+      "SaveViewResponseSchema.ddf95d6.SavedViewSchema": {
+        "description": "A view kept under a name, for everyone: a system view, Pilot's own or\nthe workflow's, or one a person saved.",
+        "properties": {
+          "address": {
+            "description": "Its state in its normal form after `#dash/`, as it was saved",
+            "examples": [
+              "#dash/t=all&by=project&m=cost.sum&col=work_type"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A system view's key in its source; null for a person's",
+            "title": "Key"
+          },
+          "name": {
+            "description": "Its name, unique among the system views and among the others",
+            "examples": [
+              "Projects"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "origin": {
+            "description": "Where it comes from",
+            "enum": [
+              "pilot",
+              "workflow",
+              "person"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "saved_at": {
+            "description": "When it was last saved, or loaded",
+            "format": "date-time",
+            "title": "Saved At",
+            "type": "string"
+          },
+          "system": {
+            "description": "Whether it is a system view, which no one renames, replaces or removes",
+            "title": "System",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "system",
+          "origin",
+          "key",
+          "name",
+          "address",
+          "note",
+          "saved_at"
+        ],
+        "title": "SavedViewSchema",
+        "type": "object"
+      },
+      "SaveViewSchema.ddf95d6": {
+        "description": "A view's whole state to save for everyone under a name.",
+        "properties": {
+          "name": {
+            "description": "Its name: a view a person saved under it is replaced; a system view's may be the same",
+            "examples": [
+              "Opus this week"
+            ],
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "state": {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; kept in its normal form",
+            "examples": [
+              "t=qw&by=project&m=cost.sum&c=model:claude-opus-5-5"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "state"
+        ],
+        "title": "SaveViewSchema",
+        "type": "object"
+      },
+      "SavedViewSchema.b67cf98": {
+        "description": "A view kept under a name, for everyone: a system view, Pilot's own or\nthe workflow's, or one a person saved.",
+        "properties": {
+          "address": {
+            "description": "Its state in its normal form after `#dash/`, as it was saved",
+            "examples": [
+              "#dash/t=all&by=project&m=cost.sum&col=work_type"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A system view's key in its source; null for a person's",
+            "title": "Key"
+          },
+          "name": {
+            "description": "Its name, unique among the system views and among the others",
+            "examples": [
+              "Projects"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "origin": {
+            "description": "Where it comes from",
+            "enum": [
+              "pilot",
+              "workflow",
+              "person"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "saved_at": {
+            "description": "When it was last saved, or loaded",
+            "format": "date-time",
+            "title": "Saved At",
+            "type": "string"
+          },
+          "system": {
+            "description": "Whether it is a system view, which no one renames, replaces or removes",
+            "title": "System",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "system",
+          "origin",
+          "key",
+          "name",
+          "address",
+          "note",
+          "saved_at"
+        ],
+        "title": "SavedViewSchema",
         "type": "object"
       },
       "SeedStepTimingsRequestSchema.ce33d8b": {
@@ -19031,12 +19787,12 @@
         "operationId": "get__api_dashboard_catalogue",
         "parameters": [
           {
-            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, and the quick filters",
+            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, the quick filters and the stored ratios",
             "in": "query",
             "name": "part",
             "required": true,
             "schema": {
-              "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, and the quick filters",
+              "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, the quick filters and the stored ratios",
               "enum": [
                 "dimensions",
                 "measures",
@@ -19095,7 +19851,1039 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and ratios, built in and stored; its time, the ranges, the zone and the sitting's gap; or what it stores, the saved views, each with its address, and the quick filters.",
+        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and ratios, built in and stored; its time, the ranges, the zone and the sitting's gap; or what it stores, the saved views, each with its address, the quick filters and the stored ratios, each with whether the catalogue offers it.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/custom-ratios": {
+      "post": {
+        "description": "Returns:     201: The ratio     400: No name, or a side missing; or a side has faults: the error         names every one of both, and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     409: A ratio a person made has the name",
+        "operationId": "post__api_dashboard_custom-ratios",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomRatioWriteSchema.ddf95d6"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomRatioSchema.b67cf98"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Make a ratio of two measures for everyone, its key made from its name in a space no built-in or loaded ratio's key is in, and kept (F155.3).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/custom-ratios/{ratio_id}": {
+      "delete": {
+        "description": "Returns:     204: The ratio is removed     401: No one is signed in     403: The caller lacks the editor role     404: No stored ratio has the id     409: The ratio was loaded, which no one removes",
+        "operationId": "delete__api_dashboard_custom-ratios_{ratio_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "ratio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Remove a ratio a person made, for everyone: a view that shows it shows without it, with a note.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "put": {
+        "description": "Returns:     200: The ratio, changed     400: No name, or a side missing; or a side has faults: the error         names every one of both, and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     404: No stored ratio has the id     409: The ratio was loaded, which no one changes; or another ratio a         person made has the name",
+        "operationId": "put__api_dashboard_custom-ratios_{ratio_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "ratio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomRatioWriteSchema.ddf95d6"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomRatioSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Change a ratio a person made, for everyone, under its key: the views that show it show it changed.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/favourites": {
+      "get": {
+        "description": "Returns:     200: Their favourites     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle, or is a service user",
+        "operationId": "get__api_dashboard_favourites",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavouritesSchema.ddf95d6"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the signed-in person's favourites: the views they starred, and their dimensions in By's list and in Color's (F155.2).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/favourites/dimensions": {
+      "delete": {
+        "description": "Returns:     204: The dimension is no favourite of theirs there     400: No list, or one that is neither; or no dimension     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle, or is a service user",
+        "operationId": "delete__api_dashboard_favourites_dimensions",
+        "parameters": [
+          {
+            "description": "The list: By's or Color's",
+            "in": "query",
+            "name": "menu",
+            "required": true,
+            "schema": {
+              "description": "The list: By's or Color's",
+              "enum": [
+                "by",
+                "color"
+              ],
+              "title": "Menu",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The dimension's key; in Color's list a part's, an attribute's or `token_kind`",
+            "in": "query",
+            "name": "dimension",
+            "required": true,
+            "schema": {
+              "description": "The dimension's key; in Color's list a part's, an attribute's or `token_kind`",
+              "examples": [
+                "project"
+              ],
+              "minLength": 1,
+              "title": "Dimension",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Take a dimension off the signed-in person's favourites in By's list or Color's, one the catalogue no longer offers among them.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "post": {
+        "description": "Returns:     204: The dimension is their favourite there     400: No list, or one that is neither; or a dimension the catalogue         offers not in that list: the error names the nearest     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle, or is a service user",
+        "operationId": "post__api_dashboard_favourites_dimensions",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DimensionFavouriteSchema.ddf95d6"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Mark a dimension a favourite of the signed-in person's in By's list or Color's.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/quick-filters": {
+      "post": {
+        "description": "Returns:     201: The quick filter     400: No label, or no chip; or the chip has faults: the error names         every one, and ends on a correct example; or no figure has the         amount's key     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "post__api_dashboard_quick-filters",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddQuickFilterSchema.ddf95d6"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickFilterSchema.b67cf98"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Make a quick filter for everyone, under a key of its own: a chip, filtering or marking as written, fixed once made (F155.1).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/quick-filters/{quick_filter_id}": {
+      "delete": {
+        "description": "Returns:     204: The quick filter is removed     401: No one is signed in     403: The caller lacks the editor role     404: No quick filter has the id",
+        "operationId": "delete__api_dashboard_quick-filters_{quick_filter_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "quick_filter_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Remove a quick filter for everyone, one the dashboard shipped with too, which stays removed (F155.3).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/saved-views": {
+      "post": {
+        "description": "Returns:     200: The view of the name, replaced, and a note for each part of the         state dropped     201: The view, saved, and a note for each part of the state dropped     400: No name, or no state; or the state has faults: the error names         every one, and ends on a correct example of each kind of part         refused     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "post__api_dashboard_saved-views",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveViewSchema.ddf95d6"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveViewResponseSchema.ddf95d6"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveViewResponseSchema.ddf95d6"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Save a view's whole state for everyone under a name, in its normal form, its band's length with it (F155.1). A view a person saved under the name is replaced, its stars kept; a system view of the name stays beside it.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/saved-views/{view_id}": {
+      "delete": {
+        "description": "Returns:     204: The view is removed     401: No one is signed in     403: The caller lacks the editor role     404: No saved view has the id     409: The view is a system view, which no one removes",
+        "operationId": "delete__api_dashboard_saved-views_{view_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Remove a view a person saved, for everyone, the stars on it with it.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "patch": {
+        "description": "Returns:     200: The view, renamed     400: No name     401: No one is signed in     403: The caller lacks the editor role     404: No saved view has the id     409: The view is a system view, which no one renames; or another view         a person saved has the name",
+        "operationId": "patch__api_dashboard_saved-views_{view_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameViewSchema.ddf95d6"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedViewSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Rename a view a person saved, for everyone; its stars stay on it.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/saved-views/{view_id}/star": {
+      "delete": {
+        "description": "Returns:     204: The person has no star on the view     401: No one is signed in     403: The caller lacks the editor role     404: No saved view has the id     409: The caller has not chosen a handle, or is a service user",
+        "operationId": "delete__api_dashboard_saved-views_{view_id}_star",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Take the signed-in person's star off a view.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "put": {
+        "description": "Returns:     204: The person has a star on the view     401: No one is signed in     403: The caller lacks the editor role     404: No saved view has the id     409: The caller has not chosen a handle, or is a service user",
+        "operationId": "put__api_dashboard_saved-views_{view_id}_star",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Star a view, a system view or a saved one, for the signed-in person; a view they starred keeps its place among their stars (F155.2).",
         "tags": [],
         "x-required-role": "editor"
       }

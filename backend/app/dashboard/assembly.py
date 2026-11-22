@@ -2,7 +2,8 @@
 record's rows give — a vocabulary's rows as a dimension's values, a version
 dimension per Component, and from the stored configuration the custom
 ratios and the quick filters — and the process's copy of it, kept until a
-publication writes a vocabulary's row.
+publication writes a vocabulary's row or a person writes a quick filter or a
+ratio.
 
 A stored ratio or quick filter is offered where what it names reads under
 the rest of the catalogue: a ratio's two measures, a quick filter's chip and
@@ -197,8 +198,9 @@ def _own(db: Session, zone: str, sitting_gap: timedelta) -> Catalogue:
 
 class CatalogueService:
     """The process's catalogue: assembled at its first read and kept until
-    `drop`, which the publication that wrote a vocabulary's row calls once
-    its transaction has committed."""
+    `drop`, which the publication that wrote a vocabulary's row, and a write
+    of a quick filter or a custom ratio, calls once its transaction has
+    committed."""
 
     def __init__(self, zone: str, sitting_gap_seconds: float) -> None:
         self.zone = zone
