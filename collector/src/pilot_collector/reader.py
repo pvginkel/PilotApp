@@ -127,6 +127,21 @@ its newline is written. The facts are read off the lines in the file's order:
   place, or the summary names one hook and an error. It prevented the end
   where the summary says it prevented the run from going on. A tool's hooks
   log no summary.
+- **The Context Parts of a Launch's first Call**, what it carried, each
+  where Claude Code records what the model saw; on a sub-agent's thread,
+  of its first Call:
+  - the system prompt and the tools' schemas, `system_prompt` and
+    `tool_schemas`, from the line of the shape its request's `shapeHash`
+    names (2.1.300 on), else from the `prompt_snapshot` the Launch wrote
+    before it (2.1.261 on, at a file's first Launch), each where the line
+    records one: the characters of the system prompt's text, but for a
+    snapshot's marker of where Claude Code splits it, and of the tools as
+    JSON;
+  - each instruction file the `instructions` attachment before it lists,
+    an `instruction_file` named by its path, of its content's characters;
+  - each Prompt the Launch received before it, `prompt`, of the Prompt's
+    characters: on a sub-agent's thread, its task, the `user` lines before
+    its first Call that are no `isMeta` one.
 
 **From the boundary on.** A reading leaves a carry (`carry.py`): where it
 stood before the file's last Call. Given that carry, a file that grew is read
@@ -141,9 +156,10 @@ Such a reading holds no line before the boundary's byte but the one the
 carry names, with where the chain leads from it as the lines before that
 byte stand and what the Call it leads to left the next, the request lines
 before it written since the last one a Call named, the Events before it
-where no Call is, and the latest Prompt before it where the Launch open
-there received it, with its Hook Runs, so it stops, and the file is read
-whole, where:
+where no Call is, the latest Prompt before it where the Launch open there
+received it, with its Hook Runs, and what the lines before it record of the
+Context Parts of the boundary's Call where it is its Launch's first, so it
+stops, and the file is read whole, where:
 
 - the file is no larger than the one the carry was built on, or its bytes
   from the boundary's to its old end are other than those read then
@@ -153,6 +169,9 @@ whole, where:
   tool's result names a request no line from that byte on makes, or a
   fallback's line one no Call from that byte on answered: each reaches
   behind the boundary, or names a line written later;
+- a request of a Launch's first Call names a shape no line from the
+  boundary's byte on records: a resumed process names the shapes an earlier
+  one's lines record;
 - a line is one the carry awaits, named by a line before the boundary that
   the file held no line of there: a chain before the boundary goes on
   through it;
@@ -163,7 +182,7 @@ whole, where:
 import json
 import os
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -179,9 +198,11 @@ from pilot_collector.carry import (
     Left,
     Occurred,
     Open,
+    Opening,
     Prompted,
     Ran,
     Requested,
+    Shape,
     Standing,
     digest,
 )
@@ -199,6 +220,19 @@ _COMPACTED = "compact_boundary"
 
 _REQUEST = "api-request"
 """The type of the line a request to the model is."""
+
+_SHAPE = "api-request-shape"
+"""The type of the line that records the system prompt and the tools a
+request sent, by the `shapeHash` the request names: Claude Code writes it
+once in a file, before the first request that names it."""
+
+_SNAPSHOT = "prompt_snapshot"
+"""The type of the attachment that records the system prompt and the tools
+a process started with, never shown to the model."""
+
+_SPLIT = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
+"""The marker a snapshot's system prompt holds where Claude Code splits it,
+which no request sends."""
 
 _FELL_BACK = "model_refusal_fallback"
 """The subtype of the `system` line that records a fallback: the model the
@@ -426,6 +460,8 @@ class _Call:
     """The tool calls it requested, by Claude's id of the request."""
     events: list[Occurred] = field(default_factory=list)
     """The Events it marks, in the file's order."""
+    parts: list[dict[str, Any]] = field(default_factory=list)
+    """Its Context Parts."""
 
     @property
     def requested_model(self) -> str | None:
@@ -519,16 +555,46 @@ def _prompted(prompt: dict[str, Any]) -> Prompted:
     )
 
 
-def _requested(line: dict[str, Any], at: datetime) -> Requested:
-    """A request line, written `at`, as the Call that names it reads it."""
-    kept = line.get("keep")
-    return Requested(
-        line["id"],
-        at,
-        line.get("shapeHash"),
-        kept,
-        None if kept is None else kept + len(line.get("tail") or []),
-    )
+def _schemas(tools: list[Any]) -> int | None:
+    """The characters of the tools' schemas as JSON, none where there are
+    none."""
+    if not tools:
+        return None
+    return len(json.dumps(tools, ensure_ascii=False, separators=(",", ":")))
+
+
+def _shape(shape: dict[str, Any]) -> Shape:
+    """What a request shape's line records the request sent."""
+    return Shape(len(text_of(shape["system"])) or None, _schemas(shape["tools"]))
+
+
+def _snapshot(attachment: dict[str, Any]) -> Shape:
+    """What a snapshot records of the system prompt and the tools a process
+    started with: a newer version's records no tools."""
+    system = sum(len(part) for part in attachment["systemPrompt"] if part != _SPLIT)
+    return Shape(system or None, _schemas(attachment.get("tools") or []))
+
+
+def _opened(opening: Opening, request: Requested | None) -> list[dict[str, Any]]:
+    """The Context Parts of a Launch's first Call, the lines before it
+    recording `opening`, its first line naming `request`: the system prompt
+    and the tools its request's shape sent, else those a snapshot records."""
+    shown = None if request is None else request.sends
+    if shown is None:
+        shown = opening.snapshot
+    parts: list[dict[str, Any]] = []
+    if shown is not None and shown.system is not None:
+        parts.append({"kind": "system_prompt", "characters": shown.system})
+    if shown is not None and shown.tools is not None:
+        parts.append({"kind": "tool_schemas", "characters": shown.tools})
+    parts += [
+        {"kind": "instruction_file", "name": path, "characters": characters}
+        for path, characters in opening.files
+    ]
+    parts += [
+        {"kind": "prompt", "characters": characters} for characters in opening.prompts
+    ]
+    return parts
 
 
 def _words(text: str) -> bytes:
@@ -682,6 +748,13 @@ class _Thread:
         self._failing: dict[str, set[str]] = {}
         """The commands that reported an error at the Stop event, by the
         `toolUseID` of the run of the Stop hooks they are of."""
+        self._shapes: dict[str, Shape] = {}
+        """What each request shape's line taken records, by its
+        `shapeHash`."""
+        self._opening = before.opening if before.byte or main else Opening()
+        """What the lines taken record of the Context Parts of the open
+        Launch's first Call, none once it began: on a sub-agent's thread, of
+        its first Call."""
         self._leads: dict[str, _Stop | None] = {}
         """The nearest stop at or up the chain from each line taken, by its
         `uuid`, and from the line the reading stands after."""
@@ -735,12 +808,15 @@ class _Thread:
             self._exited = True
             self._queue = ()
             self._removed = ()
+        elif kind == _SHAPE:
+            self._shapes[line["shapeHash"]] = _shape(line["shape"])
         if at is None:
             return
         if self._main:
             if self._exited:
                 self.launches.append(_Launch(at))
                 self._exited = False
+                self._opening = Opening()
             launch = self.launches[-1]
             if launch.version is None:
                 launch.version = line.get("version")
@@ -749,7 +825,7 @@ class _Thread:
                 self._occurred("api_error", at, _status(line.get("apiErrorStatus")))
             self._answered(line, at, chain)
         elif kind == _REQUEST:
-            self._requests += (_requested(line, at),)
+            self._requests += (self._request(line, at),)
         elif kind == "system" and line.get("subtype") == _FELL_BACK:
             self._fell_back(line)
         elif kind == "system" and line.get("subtype") == _API_ERROR:
@@ -764,12 +840,14 @@ class _Thread:
                 self._occurred("interrupt", at)
             elif self._main:
                 self._prompted(line, content, at)
+            elif not line.get("isMeta"):
+                self._carries(len(text_of(content)))
+        elif kind == "attachment":
+            self._attached(line["attachment"], at)
         elif not self._main:
             return
         elif kind == "queue-operation":
             self._queued(line, at)
-        elif kind == "attachment":
-            self._attached(line["attachment"], at)
         elif kind == "system" and line.get("subtype") == _HOOKED:
             self._hooked(line)
 
@@ -800,6 +878,7 @@ class _Thread:
             prompt=None
             if not received or self._prompt is None
             else _prompted(self._prompt),
+            opening=self._opening,
             queue=self._queue,
             removed=self._removed,
         )
@@ -893,6 +972,17 @@ class _Thread:
         return queued
 
     def _attached(self, attachment: dict[str, Any], at: datetime) -> None:
+        if self._opening is not None and attachment["type"] == _SNAPSHOT:
+            if self._opening.snapshot is None:
+                self._opening = replace(self._opening, snapshot=_snapshot(attachment))
+        elif self._opening is not None and attachment["type"] == "instructions":
+            loaded = tuple(
+                (instructions["path"], len(instructions["content"]))
+                for instructions in attachment["files"]
+            )
+            self._opening = replace(self._opening, files=self._opening.files + loaded)
+        if not self._main:
+            return
         if attachment["type"] == _MID_RUN:
             self._taken(attachment, at)
             return
@@ -943,6 +1033,14 @@ class _Thread:
             "hook_runs": [],
         }
         self.launches[-1].prompts.append(self._prompt)
+        self._carries(len(text))
+
+    def _carries(self, characters: int) -> None:
+        """A Prompt of that length, or a sub-agent's task, which the open
+        Launch's first Call carries where it has not begun."""
+        if self._opening is not None:
+            prompts = self._opening.prompts + (characters,)
+            self._opening = replace(self._opening, prompts=prompts)
 
     def _hooked(self, line: dict[str, Any]) -> None:
         """A Stop hook's summary: a Hook Run of each command it names, on
@@ -1001,6 +1099,9 @@ class _Thread:
                 events=self._early,
             )
             self._early = []
+            if self._opening is not None:
+                call.parts = _opened(self._opening, call.request)
+                self._opening = None
             self._latest = self.calls[message["id"]] = call
             answered = line.get("requestId")
             if answered is not None:
@@ -1034,6 +1135,30 @@ class _Thread:
             raise NotContinuedError(
                 "a fallback names a request no Call from its boundary on answered"
             )
+
+    def _request(self, line: dict[str, Any], at: datetime) -> Requested:
+        """A request line, written `at`, as the Call that names it reads it:
+        on a request of a Launch's first Call, with what its shape's line
+        records it sent. A reading from a boundary on stops at one whose
+        shape no line it took records, which may lie behind it."""
+        shape = line.get("shapeHash")
+        sends = None
+        if self._opening is not None and shape is not None:
+            sends = self._shapes.get(shape)
+            if sends is None and self._before.byte:
+                raise NotContinuedError(
+                    "a launch's first request names a shape no line from its"
+                    " boundary on records"
+                )
+        kept = line.get("keep")
+        return Requested(
+            line["id"],
+            at,
+            shape,
+            kept,
+            None if kept is None else kept + len(line.get("tail") or []),
+            sends,
+        )
 
     def _sent(self, request: str | None) -> Requested | None:
         """The request line of that `id` among those taken since the last
@@ -1233,6 +1358,7 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
                 }
                 for event in call.events
             ],
+            "context_parts": call.parts,
         }
         for message_id, call in thread.calls.items()
     ]

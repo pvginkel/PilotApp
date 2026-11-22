@@ -1,6 +1,7 @@
 """The carries a collector keeps between walks, and their bound (F152.15)."""
 
 import tracemalloc
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,9 +12,11 @@ from pilot_collector.carry import (
     Left,
     Occurred,
     Open,
+    Opening,
     Prompted,
     Ran,
     Requested,
+    Shape,
     Standing,
     digest,
 )
@@ -29,6 +32,7 @@ def _carry(
     requested: int = 0,
     occurred: int = 0,
     ran: int = 0,
+    loaded: int = 0,
 ) -> Carry:
     """A carry no other shares a word or a time with."""
     return Carry(
@@ -68,6 +72,7 @@ def _carry(
                     f"{place:032}{named:032}",
                     40 + named,
                     42 + named,
+                    Shape(9_000 + place, 45_000 + named),
                 )
                 for named in range(requested)
             ),
@@ -96,6 +101,14 @@ def _carry(
                     for named in range(ran)
                 ),
             ),
+            opening=Opening(
+                Shape(8_000 + place, 40_000 + place),
+                tuple(
+                    (f"/work/Loom{place}/looms/{named}/CLAUDE.md", 3_000 + named)
+                    for named in range(loaded)
+                ),
+                (1_000 + place,),
+            ),
             queue=tuple(
                 (
                     digest(f"{place} {waiting}".encode()),
@@ -121,13 +134,14 @@ def _path(name: str) -> Path:
 
 class TestACarrysSize:
     def test_it_is_counted_at_no_less_than_the_memory_it_takes(self) -> None:
-        for queued, awaited, requested, occurred, ran in (
-            (0, 0, 0, 0, 0),
-            (40, 0, 0, 0, 0),
-            (0, 3, 0, 0, 0),
-            (0, 0, 7, 0, 0),
-            (0, 0, 0, 9, 0),
-            (0, 0, 0, 0, 6),
+        for queued, awaited, requested, occurred, ran, loaded in (
+            (0, 0, 0, 0, 0, 0),
+            (40, 0, 0, 0, 0, 0),
+            (0, 3, 0, 0, 0, 0),
+            (0, 0, 7, 0, 0, 0),
+            (0, 0, 0, 9, 0, 0),
+            (0, 0, 0, 0, 6, 0),
+            (0, 0, 0, 0, 0, 8),
         ):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
@@ -139,6 +153,7 @@ class TestACarrysSize:
                     requested=requested,
                     occurred=occurred,
                     ran=ran,
+                    loaded=loaded,
                 )
                 for place in range(1_000, 1_400)
             ]
@@ -162,6 +177,15 @@ class TestACarrysSize:
 
     def test_a_hook_run_of_the_latest_prompt_counts(self) -> None:
         assert _carry(ran=2).size > _carry(ran=1).size > _carry().size
+
+    def test_an_instruction_file_the_boundarys_call_carries_counts(self) -> None:
+        assert _carry(loaded=2).size > _carry(loaded=1).size > _carry().size
+
+    def test_what_the_boundarys_call_carries_counts(self) -> None:
+        carry = _carry()
+        opened = replace(carry, stands=replace(carry.stands, opening=None))
+
+        assert carry.size > opened.size
 
     def test_a_prompt_a_remove_took_out_and_held_counts_as_one_waiting(
         self,

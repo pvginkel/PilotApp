@@ -3,7 +3,8 @@ Code's line shapes, in a home laid out as the fleet's is, and each
 publication what its file says: read back off the lines here, a thread's
 ids and place, its Launches, Prompts and their Hook Runs, its Calls and Tool
 Calls with their denials, its Compactions, each Call's place on the chain
-and when it was sent, and the Events are the publication's."""
+and when it was sent, the Events, and the context parts of a Launch's first
+Call are the publication's."""
 
 import json
 import re
@@ -16,6 +17,7 @@ import pytest
 from pilot_scenario import SCENARIO, Builder, HomeFile, Scenario
 from pilot_scenario.script import (
     Call,
+    Carried,
     Compaction,
     HookRun,
     Launch,
@@ -25,7 +27,14 @@ from pilot_scenario.script import (
     Tokens,
     ToolUse,
 )
-from pilot_scenario.transcript import INTERRUPTION, SYNTHETIC, folder, stamp, text
+from pilot_scenario.transcript import (
+    INTERRUPTION,
+    MANAGED,
+    SYNTHETIC,
+    folder,
+    stamp,
+    text,
+)
 
 UNTIL = datetime(2026, 11, 12, 9, 30, 0, 250_000, tzinfo=UTC)
 
@@ -84,6 +93,8 @@ TOOL_CALL_FACTS = (
     "result_characters",
     "saved_characters",
 )
+OPENING = ("system_prompt", "tool_schemas", "instruction_file", "prompt")
+"""The Context Part Kinds of a Launch's first Call that its lines say."""
 DENIALS = {"permission-rule": "rule", "user-rejected": "person"}
 """A Denial Kind by the `toolDenialKind` a result's line names."""
 
@@ -187,6 +198,19 @@ def _chain(
             return line["message"]["id"], crossed
 
 
+def _shaped(shape: dict[str, Any]) -> list[dict[str, Any]]:
+    """The context parts a request's shape says it sent: its system prompt's
+    text and its tools' schemas as JSON, each where it sent any."""
+    parts = []
+    system = "".join(block["text"] for block in shape["system"])
+    if system:
+        parts.append({"kind": "system_prompt", "characters": len(system)})
+    if shape["tools"]:
+        schemas = json.dumps(shape["tools"], separators=(",", ":"))
+        parts.append({"kind": "tool_schemas", "characters": len(schemas)})
+    return parts
+
+
 def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
     """The facts of a thread as its file says them, in a publication's
     words: an independent reading, with none of the builder's code."""
@@ -215,6 +239,14 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
         for block in _blocks(line, "tool_result")
     }
     requests = {line["id"]: line for line in lines if line["type"] == "api-request"}
+    shapes = {
+        line["shapeHash"]: line["shape"]
+        for line in lines
+        if line["type"] == "api-request-shape"
+    }
+    opening: dict[str, list[Any]] | None = None if main else {"files": [], "tasks": []}
+    """What the first Call of the Launch open, or of a sub-agent's thread,
+    carries, as the lines so far say: none once it began."""
     launches: list[dict[str, Any]] = []
     calls: dict[str, dict[str, Any]] = {}
     exited, prompts, enqueued = True, 0, None
@@ -250,23 +282,33 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                 }
             )
             exited = False
+            opening = {"files": [], "tasks": []}
         if main and launches[-1]["components"] is None and "version" in line:
             launches[-1]["components"] = [
                 {"component": "claude-code", "version": line["version"]}
             ]
         if line["type"] == "queue-operation" and line["operation"] == "enqueue":
             enqueued = line
-        elif line["type"] == "attachment" and main:
+        elif line["type"] == "attachment":
             attached = line["attachment"]
             if attached["type"] == "hook_non_blocking_error":
-                assert attached["hookEvent"] == "Stop"
+                assert main and attached["hookEvent"] == "Stop"
                 failing.setdefault(attached["toolUseID"], set()).add(
                     attached["command"]
                 )
                 continue
+            assert attached["type"] == "instructions" and opening is not None
+            opening["files"] += [
+                {
+                    "kind": "instruction_file",
+                    "name": instructions["path"],
+                    "characters": len(instructions["content"]),
+                }
+                for instructions in attached["files"]
+            ]
             for instructions in attached["files"]:
                 named = re.match(r"# Environment: (\S+)\n", instructions["content"])
-                if instructions["type"] == "Managed" and named is not None:
+                if main and instructions["type"] == "Managed" and named is not None:
                     read.setdefault("environment", named.group(1))
         elif line["type"] == "system" and line["subtype"] == "api_error":
             occurred("api_retry", True, line, line["error"].get("status"))
@@ -291,6 +333,8 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
             if enqueued is not None:
                 assert enqueued["content"] == said
             prompts += 1
+            if opening is not None:
+                opening["tasks"].append(len(said))
             launches[-1]["prompts"].append(
                 {
                     "received_at": _time(enqueued or line),
@@ -299,6 +343,13 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                 }
             )
             enqueued = None
+        elif (
+            line["type"] == "user"
+            and not main
+            and isinstance(line["message"]["content"], str)
+            and opening is not None
+        ):
+            opening["tasks"].append(len(line["message"]["content"]))
         elif _is_boundary(line):
             made = line["compactMetadata"]
             facts = {
@@ -326,6 +377,19 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                     call["prompt"] = prompts
                 if early:
                     call["events"], early = early, []
+                if opening is not None:
+                    parts = (
+                        _shaped(shapes[requests[line["requestRef"]]["shapeHash"]])
+                        if "requestRef" in line
+                        else []
+                    )
+                    parts += opening["files"] + [
+                        {"kind": "prompt", "characters": characters}
+                        for characters in opening["tasks"]
+                    ]
+                    if parts:
+                        call["context_parts"] = parts
+                    opening = None
                 calls[message["id"]] = call
             call = calls[message["id"]]
             spent = message["usage"]
@@ -390,16 +454,19 @@ def _facts(publication: dict[str, Any]) -> dict[str, Any]:
             }
             for launch in publication["launches"]
         ]
-    cut["calls"] = [
-        {name: call[name] for name in CALL_FACTS if name in call}
-        | {
-            "tool_calls": [
-                {name: asked[name] for name in TOOL_CALL_FACTS if name in asked}
-                for asked in call.get("tool_calls", [])
-            ]
-        }
-        for call in publication["calls"]
-    ]
+    cut["calls"] = []
+    for call in publication["calls"]:
+        facts = {name: call[name] for name in CALL_FACTS if name in call}
+        facts["tool_calls"] = [
+            {name: asked[name] for name in TOOL_CALL_FACTS if name in asked}
+            for asked in call.get("tool_calls", [])
+        ]
+        parts = [
+            part for part in call.get("context_parts", []) if part["kind"] in OPENING
+        ]
+        if parts:
+            facts["context_parts"] = parts
+        cut["calls"].append(facts)
     return cut
 
 
@@ -698,6 +765,7 @@ class TestTheLines:
             "permission-mode",
             "queue-operation",
             "queue-operation",
+            "api-request-shape",
             *["api-request"] * 7,
             "last-prompt",
             "cost-state",
@@ -706,6 +774,7 @@ class TestTheLines:
         assert [line["type"] for line in beside if "timestamp" in line] == [
             "queue-operation",
             "queue-operation",
+            "api-request-shape",
             *["api-request"] * 7,
         ]
         assert "cwd" not in _lines(halving)[0]
@@ -738,6 +807,106 @@ class TestTheLines:
             } == {lines[place]["id"]}
         assert {lines[place]["version"] for place in places} == {"2.1.317"}
         assert {lines[place]["querySource"] for place in places} == {"sdk"}
+
+    def test_a_requests_shape_is_written_once_before_the_first_request_naming_it(
+        self,
+    ) -> None:
+        """It holds the system prompt and the tools the thread's first Call
+        carries."""
+        halving, counting, gears = _transcripts(Builder(SCENARIO, UNTIL))
+
+        for file, system, tools in (
+            (halving, 9_100, 45_200),
+            (counting, 3_900, 11_800),
+            (gears, 9_100, 45_200),
+        ):
+            lines = _lines(file)
+            (shape,) = [
+                place
+                for place, line in enumerate(lines)
+                if line["type"] == "api-request-shape"
+            ]
+            requests = [
+                place
+                for place, line in enumerate(lines)
+                if line["type"] == "api-request"
+            ]
+            assert shape < requests[0]
+            assert {lines[place]["shapeHash"] for place in requests} == {
+                lines[shape]["shapeHash"]
+            }
+            assert _shaped(lines[shape]["shape"]) == [
+                {"kind": "system_prompt", "characters": system},
+                {"kind": "tool_schemas", "characters": tools},
+            ]
+        assert [
+            line.get("agentId")
+            for line in _lines(counting)
+            if line["type"] == "api-request-shape"
+        ] == [COUNTING]
+
+    def test_a_processs_instruction_files_are_those_its_first_call_carries(
+        self,
+    ) -> None:
+        """Each its path and as long as the script has it; the managed one
+        names the environment, and a process that loaded none writes none."""
+        halving, counting, _ = _transcripts(Builder(SCENARIO, UNTIL))
+        (resumed,) = _transcripts(Builder(_resumed(), UNTIL))
+
+        for file in (halving, counting):
+            (attached,) = [
+                line["attachment"]
+                for line in _lines(file)
+                if line["type"] == "attachment"
+                and line["attachment"]["type"] == "instructions"
+            ]
+            assert [
+                (loaded["type"], loaded["path"], len(loaded["content"]))
+                for loaded in attached["files"]
+            ] == [
+                ("Managed", MANAGED, 2_350),
+                ("Project", "/work/RecipeBox/CLAUDE.md", 3_750),
+            ]
+            assert attached["files"][0]["content"].startswith(
+                "# Environment: ben-recipebox-51f0c2\n\n"
+            )
+        assert not any(line["type"] == "attachment" for line in _lines(resumed))
+
+    @pytest.mark.parametrize(
+        ("carried", "environment", "refused"),
+        [
+            (
+                (Carried("system_prompt", 900),),
+                None,
+                "read off the shape its request sent: it is `sent`",
+            ),
+            ((), "cleo-rides-7a1e04", "loads the managed instruction file"),
+            ((Carried("instruction_file", 400),), None, "named by its path"),
+        ],
+        ids=[
+            "a system prompt no request sent",
+            "a hosted process with no managed file",
+            "a file with no path",
+        ],
+    )
+    def test_a_first_call_whose_parts_no_line_can_say_is_refused(
+        self, carried: tuple[Carried, ...], environment: str | None, refused: str
+    ) -> None:
+        session = _resumed().sessions[0]
+        prompt = Prompt(
+            at=0,
+            source="typed",
+            characters=20,
+            steps=(Call(at=5, tokens=Tokens(input=10), carried=carried),),
+        )
+        launch = Launch(versions=(("claude-code", "2.1.317"),), prompts=(prompt,))
+        scenario = replace(
+            _resumed(),
+            sessions=(replace(session, launches=(launch,), environment=environment),),
+        )
+
+        with pytest.raises(ValueError, match=refused):
+            Builder(scenario, UNTIL).files()
 
     def test_a_request_keeps_what_the_last_one_sent_that_its_chain_still_holds(
         self,

@@ -2,6 +2,7 @@
 files read as the builder's publications, and each rule of the reading on a
 file built for it."""
 
+import json
 import os
 import re
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ from tests.support import (
     AGENT,
     DIRECTORY,
     FOLDER,
+    MANAGED,
     SESSION,
     Line,
     answering,
@@ -50,6 +52,8 @@ from tests.support import (
     retried,
     saved,
     sent,
+    shaped,
+    snapshot,
     summary,
     synthetic,
     taken,
@@ -70,6 +74,19 @@ NOTIFIED = (
 """A task notification, as a background task's end is announced."""
 
 SETTINGS = support.settings()
+
+LOOM = {
+    "name": "Weave",
+    "description": "Weave a row of the cloth.",
+    "input_schema": {"type": "object", "properties": {"row": {"type": "integer"}}},
+}
+"""A tool a request sends."""
+
+SCHEMAS = len(json.dumps([LOOM], separators=(",", ":")))
+"""The characters of that tool's schema as JSON."""
+
+SPLIT = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
+"""The marker a snapshot's system prompt holds where Claude Code splits it."""
 
 THREAD = (
     "session_id",
@@ -105,6 +122,9 @@ CALL = (
     "tool_calls",
     "events",
 )
+OPENING = ("system_prompt", "tool_schemas", "instruction_file", "prompt")
+"""The Context Part Kinds a Launch's first Call carries that the reader
+reads."""
 
 
 def _resumed() -> Scenario:
@@ -168,6 +188,13 @@ def _cut(publication: dict[str, Any]) -> dict[str, Any]:
     cut["compactions"] = publication.get("compactions", [])
     cut["calls"] = [
         {name: call[name] for name in CALL if name in call}
+        | {
+            "context_parts": [
+                part
+                for part in call.get("context_parts", [])
+                if part["kind"] in OPENING
+            ]
+        }
         for call in publication["calls"]
     ]
     return cut
@@ -349,6 +376,18 @@ class TestTheScenario:
         runs = [prompt.get("hook_runs", []) for prompt in prompts]
         assert {run["failed"] for ran in runs for run in ran} == {True, False}
         assert any(len(ran) > 1 for ran in runs)
+        for publication in publications:
+            first, *later = publication["calls"]
+            assert {part["kind"] for part in first["context_parts"]} == set(OPENING)
+            assert not any(
+                part["kind"] in OPENING
+                for call in later
+                for part in call.get("context_parts", [])
+            )
+        assert [
+            [part["kind"] for part in call.get("context_parts", [])]
+            for call in resumed[0]["calls"]
+        ] == [["prompt"], [], ["prompt"]]
 
     def test_a_reading_is_a_call_pilot_takes_by_its_shape(self, tmp_path: Path) -> None:
         builder = Builder(SCENARIO, UNTIL)
@@ -2162,6 +2201,226 @@ class TestEvents:
 
         assert _events(read(named, SETTINGS).publication) == [
             [("api_retry", True, 5, "529")]
+        ]
+
+
+def _parts(publication: PublicationSchema) -> list[list[tuple[str, str | None, int]]]:
+    """Each Call's Context Parts: its kind, its name and its characters."""
+    return [
+        [(part.kind, part.name, part.characters) for part in call.context_parts]
+        for call in publication.calls
+    ]
+
+
+class TestContextParts:
+    def test_a_launchs_first_call_carries_its_system_prompt_tools_files_and_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        managed = "# Environment: cleo-loom-4b7d21\n\nWarp before weft."
+        project = "# Looms\n\nThread the heddles."
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    instructions(
+                        0.1,
+                        loaded("Managed", managed),
+                        loaded("Project", project, f"{DIRECTORY}/CLAUDE.md"),
+                    ),
+                    shaped(0.5, system=("You weave.", " Slowly."), tools=(LOOM,)),
+                    request(1, shapeHash="shape-1"),
+                    sent(assistant(4, "msg_01"), "request-1"),
+                    typed(6, "Weft now."),
+                    request(7, "request-2", shapeHash="shape-1"),
+                    sent(assistant(9, "msg_02"), "request-2"),
+                ]
+            ),
+        )
+
+        assert _parts(publication) == [
+            [
+                ("system_prompt", None, len("You weave. Slowly.")),
+                ("tool_schemas", None, SCHEMAS),
+                ("instruction_file", MANAGED, len(managed)),
+                ("instruction_file", f"{DIRECTORY}/CLAUDE.md", len(project)),
+                ("prompt", None, len("Warp the loom.")),
+            ],
+            [],
+        ]
+
+    def test_each_prompt_received_before_the_first_call_is_a_part(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked([typed(0), typed(1, "And the weft."), assistant(4, "msg_01")]),
+        )
+
+        assert _parts(publication) == [
+            [("prompt", None, len("Warp the loom.")), ("prompt", None, 13)]
+        ]
+
+    def test_a_snapshot_gives_them_where_no_line_of_a_shape_does(
+        self, tmp_path: Path
+    ) -> None:
+        """Its marker is no text a request sends; a newer snapshot records
+        no tools."""
+        older = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    snapshot(0.2, "You weave.", SPLIT, " Slowly.", tools=[LOOM]),
+                    assistant(4, "msg_01"),
+                ]
+            ),
+        )
+        newer = _read(
+            tmp_path,
+            linked([typed(0), snapshot(0.2, "You weave."), assistant(4, "msg_01")]),
+        )
+
+        assert _parts(older)[0][:2] == [
+            ("system_prompt", None, len("You weave. Slowly.")),
+            ("tool_schemas", None, SCHEMAS),
+        ]
+        assert _parts(newer)[0][:2] == [
+            ("system_prompt", None, len("You weave.")),
+            ("prompt", None, len("Warp the loom.")),
+        ]
+
+    def test_the_shape_its_request_sent_is_read_before_a_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    snapshot(0.2, "You weave, and you weave well.", tools=[]),
+                    shaped(0.5, tools=(LOOM,)),
+                    request(1, shapeHash="shape-1"),
+                    sent(assistant(4, "msg_01"), "request-1"),
+                ]
+            ),
+        )
+
+        assert _parts(publication)[0][:2] == [
+            ("system_prompt", None, len("You weave.")),
+            ("tool_schemas", None, SCHEMAS),
+        ]
+
+    @pytest.mark.parametrize(
+        ("snapshotted", "parts"),
+        [
+            (True, [("system_prompt", None, len("You spin."))]),
+            (False, []),
+        ],
+        ids=["a snapshot", "none"],
+    )
+    def test_a_shape_the_file_holds_no_line_of_leaves_what_a_snapshot_records(
+        self,
+        snapshotted: bool,
+        parts: list[tuple[str, str | None, int]],
+        tmp_path: Path,
+    ) -> None:
+        lines = [
+            typed(0),
+            request(1, shapeHash="shape-9"),
+            sent(assistant(4, "msg_01"), "request-1"),
+        ]
+        if snapshotted:
+            lines.insert(1, snapshot(0.2, "You spin."))
+
+        publication = _read(tmp_path, linked(lines))
+
+        assert _parts(publication) == [
+            [*parts, ("prompt", None, len("Warp the loom."))]
+        ]
+
+    def test_a_shape_that_sends_neither_is_no_part(self, tmp_path: Path) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    shaped(0.5, system=()),
+                    request(1, shapeHash="shape-1"),
+                    sent(assistant(4, "msg_01"), "request-1"),
+                ]
+            ),
+        )
+
+        assert _parts(publication) == [[("prompt", None, len("Warp the loom."))]]
+
+    def test_a_later_launchs_first_call_carries_everything_again(
+        self, tmp_path: Path
+    ) -> None:
+        """A resumed process names a shape an earlier one's lines record, and
+        writes no snapshot."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    snapshot(0.2, "You weave."),
+                    shaped(0.5, tools=(LOOM,)),
+                    request(1, shapeHash="shape-1"),
+                    sent(assistant(4, "msg_01"), "request-1"),
+                    cost(),
+                    typed(20, "Weft now."),
+                    request(21, "request-2", shapeHash="shape-1"),
+                    sent(assistant(24, "msg_02"), "request-2"),
+                    typed(30, "And again."),
+                    assistant(34, "msg_03"),
+                ]
+            ),
+        )
+
+        opened = [("system_prompt", None, 10), ("tool_schemas", None, SCHEMAS)]
+        assert _parts(publication) == [
+            [*opened, ("prompt", None, len("Warp the loom."))],
+            [*opened, ("prompt", None, len("Weft now."))],
+            [],
+        ]
+
+    def test_an_older_first_call_carries_its_prompt_alone(self, tmp_path: Path) -> None:
+        """Before Claude Code 2.1.261 no line records the system prompt, the
+        tools or the instruction files."""
+        publication = _read(tmp_path, [typed(0), assistant(4, "msg_01")])
+
+        assert _parts(publication) == [[("prompt", None, len("Warp the loom."))]]
+
+    def test_a_sub_agents_first_call_carries_its_task_and_no_meta_line(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                user(0, "Count the threads."),
+                user(0.1, "Base directory for this skill: /loom/skills/count")
+                | {"isMeta": True},
+                instructions(
+                    0.2, loaded("Project", "# Looms", f"{DIRECTORY}/CLAUDE.md")
+                ),
+                shaped(0.5, tools=(LOOM,)) | {"agentId": AGENT},
+                request(1, shapeHash="shape-1") | {"agentId": AGENT},
+                sent(assistant(4, "msg_01"), "request-1"),
+                user(5, "Count them again."),
+                assistant(8, "msg_02"),
+            ]
+        )
+
+        publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
+
+        assert _parts(publication) == [
+            [
+                ("system_prompt", None, 10),
+                ("tool_schemas", None, SCHEMAS),
+                ("instruction_file", f"{DIRECTORY}/CLAUDE.md", 7),
+                ("prompt", None, len("Count the threads.")),
+            ],
+            [],
         ]
 
 

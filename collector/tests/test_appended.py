@@ -19,9 +19,11 @@ from pilot_collector.carry import (
     Left,
     Occurred,
     Open,
+    Opening,
     Prompted,
     Ran,
     Requested,
+    Shape,
     Standing,
     digest,
 )
@@ -55,12 +57,14 @@ from tests.support import (
     result,
     retried,
     sent,
+    shaped,
+    snapshot,
     summary,
     taken,
     typed,
     user,
 )
-from tests.test_reader import UNTIL, _resumed
+from tests.test_reader import LOOM, SCHEMAS, UNTIL, _resumed
 
 SETTINGS = support.settings()
 
@@ -527,6 +531,66 @@ class TestTheCarry:
 
         assert sizes[2] - sizes[1] == len("-of-another-file")
         assert sizes[1] - sizes[0] > len("a-line")
+
+    def test_it_holds_what_the_boundarys_call_carries_where_it_is_its_launchs_first(
+        self, tmp_path: Path
+    ) -> None:
+        """What the lines before it record of its Context Parts, its
+        requests with what their shape's line records they sent."""
+        managed = "# Environment: cleo-loom-4b7d21"
+        opening = [
+            typed(0),
+            instructions(0.1, loaded("Managed", managed)),
+            snapshot(0.2, "You spin."),
+            shaped(0.5, tools=(LOOM,)),
+            request(1, shapeHash="shape-1"),
+            sent(assistant(4, "msg_01"), "request-1"),
+        ]
+
+        first = read(filed(tmp_path, linked(opening)), SETTINGS).carry.stands
+        later = read(
+            filed(
+                tmp_path,
+                linked([*opening, request(6, "request-2", shapeHash="shape-1")])
+                + [sent(assistant(9, "msg_02"), "request-2")],
+            ),
+            SETTINGS,
+        ).carry.stands
+
+        assert first.opening == Opening(
+            Shape(len("You spin.")),
+            ((MANAGED, len(managed)),),
+            (len("Warp the loom."),),
+        )
+        assert first.requests == (
+            Requested("request-1", moment(1), "shape-1", sends=Shape(10, SCHEMAS)),
+        )
+        assert later.opening is None
+        assert later.requests == (Requested("request-2", moment(6), "shape-1"),)
+
+    def test_a_sub_agents_thread_holds_what_its_first_call_carries(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked([user(0, "Count the threads."), assistant(4, "msg_01")])
+
+        stands = read(filed(tmp_path, lines, AGENT), SETTINGS).carry.stands
+
+        assert stands.opening == Opening(prompts=(len("Count the threads."),))
+
+    def test_what_the_boundarys_call_carries_counts_in_its_size_with_its_files(
+        self, tmp_path: Path
+    ) -> None:
+        def size(path: str) -> int:
+            lines = [
+                typed(0),
+                instructions(0.1, loaded("Project", "# Looms", path)),
+                assistant(4, "msg_01"),
+            ]
+            return read(filed(tmp_path, linked(lines)), SETTINGS).carry.size
+
+        assert size(f"{DIRECTORY}/looms/CLAUDE.md") - size(
+            f"{DIRECTORY}/CLAUDE.md"
+        ) == len("/looms")
 
 
 class TestAFileThatGrew:
@@ -1222,6 +1286,66 @@ class TestAFileThatGrew:
         assert grown.carry.stands.environment is None
         assert MANAGED == hosted["attachment"]["files"][0]["path"]
 
+    @pytest.mark.parametrize(
+        "agent", [None, AGENT], ids=["a launch's", "a sub-agent's"]
+    )
+    def test_the_boundarys_call_carries_what_the_lines_before_it_record(
+        self, agent: str | None, tmp_path: Path
+    ) -> None:
+        """Its first Call is the boundary's."""
+        opened = [
+            typed(0) if agent is None else user(0, "Count the threads."),
+            instructions(0.1, loaded("Project", "# Looms", f"{DIRECTORY}/CLAUDE.md")),
+            shaped(0.5, tools=(LOOM,)),
+            request(1, shapeHash="shape-1"),
+            sent(assistant(4, "msg_01", output=1), "request-1"),
+        ]
+        before, grown = _grown(
+            tmp_path,
+            linked(opened),
+            _continuing(
+                "line-3",
+                [sent(assistant(5, "msg_01", output=9), "request-1"), typed(8)]
+                + [assistant(12, "msg_02")],
+            ),
+            agent,
+        )
+
+        whole = read(filed_again(tmp_path, agent), SETTINGS)
+        first, later = grown.publication.calls
+        assert [part.kind for part in first.context_parts] == [
+            "system_prompt",
+            "tool_schemas",
+            "instruction_file",
+            "prompt",
+        ]
+        assert later.context_parts == []
+        assert _held(before.publication, grown.publication) == whole.publication
+        assert grown.carry == whole.carry
+
+    def test_a_resumed_launchs_own_shape_from_the_boundary_on_is_read(
+        self, tmp_path: Path
+    ) -> None:
+        _, grown = _grown(
+            tmp_path,
+            linked([typed(0), assistant(4, "msg_01")]),
+            linked(
+                [
+                    cost(),
+                    typed(60),
+                    shaped(60.5, "shape-2", tools=(LOOM,)),
+                    request(61, shapeHash="shape-2"),
+                    sent(assistant(64, "msg_02"), "request-1"),
+                ],
+                "grown",
+            ),
+        )
+
+        assert [
+            [part.kind for part in call.context_parts]
+            for call in grown.publication.calls
+        ] == [["prompt"], ["system_prompt", "tool_schemas", "prompt"]]
+
     def test_a_sub_agents_thread_names_no_launch_and_no_prompt_before(
         self, tmp_path: Path
     ) -> None:
@@ -1266,13 +1390,18 @@ class TestAFileThatGrew:
         ]
 
 
-def filed_again(projects: Path) -> Transcript:
-    """The main thread's file as it stands."""
-    return Transcript(
-        projects,
-        projects / support.FOLDER / f"{support.SESSION}.jsonl",
-        support.SESSION,
-    )
+def filed_again(projects: Path, agent: str | None = None) -> Transcript:
+    """The main thread's file as it stands or, with `agent`, a sub-agent's."""
+    path = projects / support.FOLDER / f"{support.SESSION}.jsonl"
+    if agent is not None:
+        path = (
+            projects
+            / support.FOLDER
+            / support.SESSION
+            / "subagents"
+            / f"agent-{agent}.jsonl"
+        )
+    return Transcript(projects, path, support.SESSION, agent)
 
 
 def _again(projects: Path, read_before: Read) -> PublicationSchema:
@@ -1386,6 +1515,36 @@ class TestAFileThatDoesNotContinueItsCarry:
 
         with pytest.raises(
             NotContinuedError, match="names a request no line from its boundary on"
+        ):
+            read(named, SETTINGS, carry)
+
+    def test_a_launchs_first_request_naming_a_shape_behind_the_boundary_is_not_read_on(
+        self, tmp_path: Path
+    ) -> None:
+        """A resumed process names the shapes an earlier one's lines
+        record."""
+        named = filed(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    shaped(0.5),
+                    request(1, shapeHash="shape-1"),
+                    sent(assistant(4, "msg_01"), "request-1"),
+                    typed(6),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+        )
+        carry = read(named, SETTINGS).carry
+        _added(
+            named,
+            [cost(), request(61, "request-2", shapeHash="shape-1")],
+        )
+
+        with pytest.raises(
+            NotContinuedError,
+            match="a launch's first request names a shape no line from its boundary on",
         ):
             read(named, SETTINGS, carry)
 

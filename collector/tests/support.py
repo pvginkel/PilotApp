@@ -73,6 +73,37 @@ def request(seconds: float, named: str = "request-1", **asked: Any) -> Line:
     return line | asked
 
 
+def shaped(
+    seconds: float,
+    named: str = "shape-1",
+    system: tuple[str, ...] = ("You weave.",),
+    tools: tuple[dict[str, Any], ...] = (),
+) -> Line:
+    """The line of the shape `named` that requests name as `shapeHash`: the
+    text blocks of the system prompt they send and their tools."""
+    return beside(
+        "api-request-shape",
+        shapeHash=named,
+        timestamp=stamp(seconds),
+        version=VERSION,
+        shape={"system": [words(said) for said in system], "tools": list(tools)},
+    )
+
+
+def snapshot(
+    seconds: float, *system: str, tools: list[dict[str, Any]] | None = None
+) -> Line:
+    """The snapshot of the system prompt and, where a version records them,
+    the tools a process started with."""
+    attachment: dict[str, Any] = {
+        "type": "prompt_snapshot",
+        "systemPrompt": list(system),
+    }
+    if tools is not None:
+        attachment["tools"] = tools
+    return chained("attachment", seconds, attachment=attachment)
+
+
 def sent(line: Line, named: str = "request-1") -> Line:
     """A line of a response that names the request line `named`."""
     return line | {"requestRef": named}
@@ -371,16 +402,17 @@ def instructions(seconds: float, *files: dict[str, str]) -> Line:
 
 def linked(lines: list[Line], name: str = "line") -> list[Line]:
     """The lines as a chain: each that has a time and is neither an
-    operation of the queue's nor a request is named by a `uuid`, `name` and
-    its place among them, and follows the one before; the first follows
-    none, and neither does a compaction's boundary, which names the one
-    before as its `logicalParentUuid`."""
+    operation of the queue's, a request nor a request's shape is named by a
+    `uuid`, `name` and its place among them, and follows the one before; the
+    first follows none, and neither does a compaction's boundary, which names
+    the one before as its `logicalParentUuid`."""
     chain: list[Line] = []
     last: str | None = None
     for line in lines:
         if "timestamp" not in line or line["type"] in (
             "queue-operation",
             "api-request",
+            "api-request-shape",
         ):
             chain.append(line)
             continue

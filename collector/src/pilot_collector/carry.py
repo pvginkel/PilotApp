@@ -18,10 +18,12 @@ the next, the lines named before it that the file holds no line of there,
 the request lines written since the last one a Call named, the Events before
 the transcript's first Call, the directory and the environment the file
 named first, the Launch open there and the latest Prompt it received, with
-the Hook Runs taken for that Prompt, the prompts waiting in the queue, and
-those a `remove` took out of it that no message taken in the middle of a run
-has claimed. No id of any other line before the boundary is held, and of no
-Call but the one the chain leads to.
+the Hook Runs taken for that Prompt, what the lines before it record of the
+Context Parts of the boundary's Call where it is its Launch's first, the
+prompts waiting in the queue, and those a `remove` took out of it that no
+message taken in the middle of a run has claimed. No id of any other line
+before the boundary is held, and of no Call but the one the chain leads to;
+no request shape but those the boundary's Call's requests name.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
@@ -62,6 +64,17 @@ _PROMPTED = 280
 
 _RAN = 200
 """The bytes a Hook Run held is counted at beside its command."""
+
+_OPENING = 160
+"""The bytes what a Launch's first Call carries is counted at beside its
+instruction files and its snapshot."""
+
+_FILE = 120
+"""The bytes an instruction file loaded is counted at beside its path."""
+
+_SHAPE = 160
+"""The bytes what a line records of a system prompt and its tools is
+counted at."""
 
 
 def digest(content: bytes) -> bytes:
@@ -126,6 +139,17 @@ ROOT = Lead()
 
 
 @dataclass(frozen=True)
+class Shape:
+    """What a line records of the system prompt and the tools a request
+    sent, or a process started with: the characters of each, none where it
+    records none."""
+
+    system: int | None = None
+    tools: int | None = None
+    """The characters of the tools' schemas, as JSON."""
+
+
+@dataclass(frozen=True)
 class Requested:
     """A request line: what the Call whose lines name it reads of it."""
 
@@ -138,6 +162,26 @@ class Requested:
     """`keep`: the messages it kept of those the request before it sent."""
     sent: int | None = None
     """The messages it sent: those it kept and those of its `tail`."""
+    sends: Shape | None = None
+    """What the line of its shape records it sent, on a request of a
+    Launch's first Call: none where no such line stood before it, and on
+    any other request."""
+
+
+@dataclass(frozen=True)
+class Opening:
+    """What lines record of the Context Parts of a Launch's first Call, as
+    they stand before that Call begins: on a sub-agent's thread, of its
+    first Call."""
+
+    snapshot: Shape | None = None
+    """The system prompt and the tools a snapshot of them records, written
+    as the process started."""
+    files: tuple[tuple[str, int], ...] = ()
+    """The instruction files loaded: each one's path and characters."""
+    prompts: tuple[int, ...] = ()
+    """The characters of each Prompt received: on a sub-agent's thread, of
+    its task."""
 
 
 @dataclass(frozen=True)
@@ -215,6 +259,10 @@ class Standing:
     """The latest Prompt before it, where the Launch open there received
     it: a Stop hook's summary from it on, before the next Prompt, lies on
     that one."""
+    opening: Opening | None = None
+    """What the lines before it record of the Context Parts of the Launch
+    open there's first Call, where that Call has not begun: on a sub-agent's
+    thread, before its first Call."""
     queue: tuple[tuple[bytes, datetime], ...] = ()
     """The prompts waiting in the process's queue there, in the order they
     arrived: a digest of each one's text and the time of its `enqueue`
@@ -246,6 +294,11 @@ class Carry:
         left = stands.leads.left
         prompt = stands.prompt
         runs = () if prompt is None else prompt.runs
+        opening = stands.opening
+        files = () if opening is None else opening.files
+        shapes = [asked.sends for asked in stands.requests if asked.sends is not None]
+        if opening is not None and opening.snapshot is not None:
+            shapes.append(opening.snapshot)
         words = (
             stands.link,
             stands.leads.call,
@@ -262,6 +315,7 @@ class Carry:
             ),
             *(() if prompt is None else (prompt.source,)),
             *(run.command for run in runs),
+            *(path for path, _ in files),
         )
         return (
             _HELD
@@ -269,6 +323,9 @@ class Carry:
             + (0 if left is None else _LEFT)
             + (0 if prompt is None else _PROMPTED)
             + _RAN * len(runs)
+            + (0 if opening is None else _OPENING)
+            + _FILE * len(files)
+            + _SHAPE * len(shapes)
             + _AWAITED * len(stands.awaited)
             + _REQUESTED * len(stands.requests)
             + _OCCURRED * len(stands.events)

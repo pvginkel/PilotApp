@@ -12,9 +12,11 @@ each fact as the lines carry it. The files hold the lines these facts are
 read off: a thread's ids and where it ran, its Launches, Prompts, Calls and
 Tool Calls, a denied call's denial among them, its Compactions, each Call's
 place on the chain, the request it answered and those that failed before
-it, what Claude Code records of its choices, the Events, and the Stop hooks
-run at a Prompt's end. No line is written for a context part, which the
-publications carry alone.
+it, what Claude Code records of its choices, the Events, the Stop hooks
+run at a Prompt's end, and the context parts of a Launch's first Call: the
+system prompt and the tools its request's shape sent, the instruction files
+and the Prompts received before it, a sub-agent's task. No line is written
+for a later Call's context parts, which the publications carry alone.
 
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
@@ -40,7 +42,7 @@ from pilot_scenario.script import (
     SubAgent,
     ToolUse,
 )
-from pilot_scenario.transcript import HomeFile, Lines, Spawned, request, text
+from pilot_scenario.transcript import MANAGED, HomeFile, Lines, Spawned, request, text
 
 COLLECTOR = "1.4.0"
 """The version of the collector the publications say read the files."""
@@ -112,6 +114,22 @@ def _moments(steps: Sequence[Step]) -> Iterator[int]:
                 yield from (retry.sent, retry.failed)
 
 
+def _instruction_files(steps: Iterator[Step]) -> list[tuple[str, int]]:
+    """The instruction files the first Call of the steps carries, each its
+    path and its characters."""
+    first = next((step for step in steps if isinstance(step, Call)), None)
+    if first is None:
+        return []
+    files = []
+    for part in first.carried:
+        if part.kind != "instruction_file":
+            continue
+        if part.name is None:
+            raise ValueError("An instruction file is named by its path")
+        files.append((part.name, part.characters))
+    return files
+
+
 def _launch_moments(launch: Launch) -> Iterator[int]:
     for prompt in launch.prompts:
         yield prompt.at
@@ -170,6 +188,9 @@ class _Thread:
         """The chain's last line once each named Call was written, with its
         tools' results."""
         self._crossed: int | None = None
+        self.opening: list[int] | None = None
+        """The characters of each Prompt received since the Launch began,
+        or of a sub-agent's task, none once its first Call carried them."""
 
     def back(self, step: Step) -> None:
         """Where the step is a rewind, the chain goes on from the Call it
@@ -249,9 +270,14 @@ class _Thread:
                 context_parts=[
                     _given(kind=part.kind, name=part.name, characters=part.characters)
                     for part in step.carried
+                ]
+                + [
+                    {"kind": "prompt", "characters": characters}
+                    for characters in self.opening or []
                 ],
             )
         )
+        self.opening = None
         self._crossed = None
         self._write(step, message_id, [call["tool_use_id"] for call in tool_calls])
         if step.name is not None:
@@ -430,6 +456,15 @@ class Builder:
         place = 0
         for launch in session.launches:
             lines.launched(dict(launch.versions)[CLAUDE_CODE])
+            thread.opening = []
+            loaded = _instruction_files(
+                step for prompt in launch.prompts for step in prompt.steps
+            )
+            if session.environment is not None and MANAGED not in dict(loaded):
+                raise ValueError(
+                    "A process an environment hosts loads the managed instruction"
+                    " file: its Launch's first Call carries it"
+                )
             prompts: list[dict[str, Any]] = []
             for received, prompt in enumerate(launch.prompts):
                 place += 1
@@ -452,8 +487,10 @@ class Builder:
                 if prompt.steps:
                     thread.back(prompt.steps[0])
                 lines.prompted(prompt.source, prompt.characters, self.when(prompt.at))
+                if thread.opening is not None:
+                    thread.opening.append(prompt.characters)
                 if received == 0:
-                    lines.instructed(session.environment, self.when(prompt.at))
+                    lines.instructed(loaded, session.environment, self.when(prompt.at))
                 for followed, step in enumerate(prompt.steps):
                     if followed:
                         thread.back(step)
@@ -500,8 +537,13 @@ class Builder:
         lines = self._lines(session, agent)
         lines.version = spawning.version
         lines.tasked(_TASK, self.when(spawning.at))
-        lines.instructed(session.environment, self.when(spawning.at))
+        lines.instructed(
+            _instruction_files(iter(agent.steps)),
+            session.environment,
+            self.when(spawning.at),
+        )
         thread = _Thread(self, main.ids, lines, {})
+        thread.opening = [len(_TASK)]
         for step in agent.steps:
             thread.back(step)
             thread.read(step, None)

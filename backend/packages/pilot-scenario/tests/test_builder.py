@@ -241,6 +241,51 @@ class TestAMainThread:
             ],
         }
 
+    def test_a_launchs_first_call_carries_the_prompts_received_before_it(
+        self,
+    ) -> None:
+        """Beside its system prompt, its tools and its instruction files, as
+        the script has them; no later Call carries a Prompt."""
+        first, *later = _built()["halving"]["calls"]
+        waited = Prompt(at=0, source="typed", characters=20)
+        answered = Prompt(
+            at=5, source="typed", characters=12, steps=(Call(at=9, tokens=Tokens()),)
+        )
+        session = replace(
+            _one().sessions[0],
+            launches=(
+                Launch(
+                    versions=(("claude-code", "2.1.317"),), prompts=(waited, answered)
+                ),
+            ),
+        )
+        (two,) = Builder(replace(_one(), sessions=(session,)), UNTIL).publications()
+
+        assert first["context_parts"] == [
+            {"kind": "system_prompt", "characters": 9_100},
+            {"kind": "tool_schemas", "characters": 45_200},
+            {
+                "kind": "instruction_file",
+                "name": "/etc/claude-code/CLAUDE.md",
+                "characters": 2_350,
+            },
+            {
+                "kind": "instruction_file",
+                "name": "/work/RecipeBox/CLAUDE.md",
+                "characters": 3_750,
+            },
+            {"kind": "prompt", "characters": 412},
+        ]
+        assert not any(
+            part["kind"] == "prompt"
+            for call in later
+            for part in call.get("context_parts", [])
+        )
+        assert two["calls"][0]["context_parts"] == [
+            {"kind": "prompt", "characters": 20},
+            {"kind": "prompt", "characters": 12},
+        ]
+
     def test_a_call_was_sent_at_its_moment_before_it_completed(self) -> None:
         halving = _built()["halving"]
 
@@ -560,6 +605,12 @@ class TestASubAgent:
         assert built["counting"]["spawned_by"] == "toolu_0002"
         assert built["counting"]["description"] == spawning["first_argument"]
         assert built["counting"]["agent_type"] == "Explore"
+
+    def test_its_first_call_carries_its_task(self) -> None:
+        first, *later = _built()["counting"]["calls"]
+
+        assert first["context_parts"][-1] == {"kind": "prompt", "characters": 220}
+        assert not any("context_parts" in call for call in later)
 
     def test_its_ids_repeat_none_of_its_main_threads(self) -> None:
         """A conversation's threads name their messages and tool calls

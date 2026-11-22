@@ -14,8 +14,8 @@ process writes as it exits.
   queue follows its `enqueue` and `dequeue` lines, and the `enqueue` has its
   text and the time it arrived.
 - A process's first prompt is followed by an `attachment` line of type
-  `instructions`, whose `files` list the instruction files it loaded: the
-  managed one opens `# Environment: <id>`.
+  `instructions`, whose `files` list the instruction files it loaded, each
+  its path and its content: the managed one opens `# Environment: <id>`.
 - A response is one `assistant` line a block, all under its `message.id`.
   Each carries the response's `usage`; the lines before the last carry fewer
   output tokens and thinking tokens than it and no `stop_reason`. Each names
@@ -27,7 +27,10 @@ process writes as it exits.
   line, and each line of the response names it by its `id` as `requestRef`.
   It holds what was sent: a digest of each message on the chain, those the
   last request of its process sent and it kept, `keep` of its `base`, and
-  those it adds, its `tail`.
+  those it adds, its `tail`; and as `shapeHash` the shape it sent, the
+  system prompt and the tools, whose `api-request-shape` line, written once
+  in the file before the first request that names it, holds them: the
+  system prompt's text blocks and the tools' schemas.
 - A tool's result is a `user` line holding one `tool_result` block that names
   its request's id, with `toolUseResult`, the tool's own record of it. A
   denied call's result is an error in Claude Code's words for its denial,
@@ -124,6 +127,9 @@ _REJECTED = (
 _STOP = "Stop"
 """The event a Stop hook runs at."""
 
+_SHAPED = ("system_prompt", "tool_schemas")
+"""The Context Part Kinds a request's shape holds."""
+
 _ORIGINS = {
     "sdk": "sdk",
     "typed": "human",
@@ -183,6 +189,17 @@ def _digest(*parts: str) -> str:
     return hashlib.sha256("/".join(parts).encode()).hexdigest()
 
 
+def _tools(characters: int) -> list[dict[str, Any]]:
+    """Tools whose schemas are `characters` long as JSON."""
+    tool: dict[str, Any] = {
+        "name": "Taste",
+        "description": "",
+        "input_schema": {"type": "object", "properties": {}},
+    }
+    around = len(json.dumps([tool], separators=(",", ":")))
+    return [tool | {"description": text(characters - around)}]
+
+
 def _kilobytes(size: int) -> str:
     """A size as Claude Code says one a result was too large at."""
     return f"{round(size / 1024, 1):g}KB"
@@ -223,9 +240,12 @@ class Lines:
             else f"agent:builtin:{agent_type}"
         )
         """What the requests are sent for, in Claude Code's words."""
-        self._shape = _digest(conversation, agent or "", "shape")
-        """The system prompt and the tools every request of the thread sends,
-        as a digest."""
+        self._shape: tuple[int | None, int | None] = (None, None)
+        """The characters of the system prompt and of the tools' schemas the
+        thread's requests send: those the latest Call that carries either
+        carried."""
+        self._shaped: set[str] = set()
+        """The shapes whose line is written, by their digest."""
 
     @property
     def path(self) -> str:
@@ -323,25 +343,28 @@ class Lines:
             message={"role": "user", "content": task},
         )
 
-    def instructed(self, environment: str | None, at: datetime) -> None:
-        """The instruction files a process loaded: the managed one where an
-        environment hosts it, and the project's."""
-        files = [
-            {
-                "type": "Project",
-                "path": f"{self._directory}/CLAUDE.md",
-                "content": f"# House rules\n\n{text(180)}\n",
-            }
-        ]
-        if environment is not None:
-            managed = {
-                "type": "Managed",
-                "path": MANAGED,
-                "content": f"# Environment: {environment}\n\n{text(240)}\n",
-            }
-            files.insert(0, managed)
+    def instructed(
+        self, files: list[tuple[str, int]], environment: str | None, at: datetime
+    ) -> None:
+        """The instruction files a process loaded, each its path and its
+        characters, where it loaded any: the managed one opens naming the
+        environment that hosts it."""
+        if not files:
+            return
+        loaded = []
+        for path, characters in files:
+            head = "# House rules\n\n"
+            if path == MANAGED and environment is not None:
+                head = f"# Environment: {environment}\n\n"
+            loaded.append(
+                {
+                    "type": "Managed" if path == MANAGED else "Project",
+                    "path": path,
+                    "content": head + text(characters - len(head)),
+                }
+            )
         self._chained(
-            "attachment", at, attachment={"type": "instructions", "files": files}
+            "attachment", at, attachment={"type": "instructions", "files": loaded}
         )
 
     def compacted(self, compaction: Compaction, at: datetime) -> None:
@@ -451,10 +474,45 @@ class Lines:
                 held.append(message)
         return [_digest(message) for message in reversed(held)]
 
+    def _shaped_by(self, call: Call, at: datetime) -> str:
+        """The digest of the shape the request of the response to come
+        sends, its line written at `at` where none is: the system prompt and
+        the tools `call` carries, where it carries either."""
+        carried = {part.kind: part.characters for part in call.carried}
+        if "system_prompt" in carried or "tool_schemas" in carried:
+            self._shape = (carried.get("system_prompt"), carried.get("tool_schemas"))
+        system, tools = self._shape
+        shape = _digest(
+            self._conversation, self._agent or "", "shape", str(system), str(tools)
+        )
+        if shape in self._shaped:
+            return shape
+        self._shaped.add(shape)
+        line: dict[str, Any] = {
+            "type": "api-request-shape",
+            "sessionId": self._conversation,
+        }
+        if self._agent is not None:
+            line["agentId"] = self._agent
+        line |= {
+            "shapeHash": shape,
+            "timestamp": stamp(at),
+            "version": self.version,
+            "shape": {
+                "system": []
+                if system is None
+                else [{"type": "text", "text": text(system)}],
+                "tools": [] if tools is None else _tools(tools),
+            },
+        }
+        self._lines.append(line)
+        return shape
+
     def _send(self, call: Call, at: datetime) -> str:
         """The line of the request of the response to come, sent at `at`;
         its id."""
         sent = self._messages()
+        shape = self._shaped_by(call, at)
         line: dict[str, Any] = {"type": "api-request", "sessionId": self._conversation}
         if self._agent is not None:
             line["agentId"] = self._agent
@@ -470,7 +528,7 @@ class Lines:
             "timestamp": stamp(at),
             "version": self.version,
             "querySource": self._source,
-            "shapeHash": self._shape,
+            "shapeHash": shape,
             "params": params,
         }
         kept = 0
@@ -488,7 +546,7 @@ class Lines:
                 {"path": ["system", 1], "value": cached},
                 {"path": ["messages", len(sent) - 1, "content", 0], "value": cached},
             ],
-            "requestDigest": _digest(self._shape, *sent),
+            "requestDigest": _digest(shape, *sent),
         }
         self._lines.append(line)
         self._asked = (named, sent)
@@ -509,6 +567,11 @@ class Lines:
         asked: dict[str, Any] = {}
         if sent is not None:
             asked["requestRef"] = self._send(call, sent)
+        elif any(part.kind in _SHAPED for part in call.carried):
+            raise ValueError(
+                "A Call's system prompt and tools are read off the shape its request"
+                " sent: it is `sent`"
+            )
         asked["requestedModel"] = call.requested or call.model
         for name, chosen in (
             ("effort", call.effort),

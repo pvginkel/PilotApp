@@ -35,6 +35,7 @@ from pilot_scenario.script import (
     Turn,
     Unit,
 )
+from pilot_scenario.transcript import MANAGED
 
 OPUS = "claude-opus-4-5"
 HAIKU = "claude-haiku-4-5-20251001"
@@ -54,6 +55,8 @@ COUNTING = SubAgent(
             carried=(
                 Carried("system_prompt", 3_900),
                 Carried("tool_schemas", 11_800),
+                Carried("instruction_file", 2_350, MANAGED),
+                Carried("instruction_file", 3_750, "/work/RecipeBox/CLAUDE.md"),
             ),
             tools=(
                 ToolUse(
@@ -133,7 +136,12 @@ HALVING = Session(
                             carried=(
                                 Carried("system_prompt", 9_100),
                                 Carried("tool_schemas", 45_200),
-                                Carried("instruction_file", 6_100, "CLAUDE.md"),
+                                Carried("instruction_file", 2_350, MANAGED),
+                                Carried(
+                                    "instruction_file",
+                                    3_750,
+                                    "/work/RecipeBox/CLAUDE.md",
+                                ),
                             ),
                             tools=(
                                 ToolUse(
@@ -284,6 +292,10 @@ GEARS = Session(
                             carried=(
                                 Carried("system_prompt", 9_100),
                                 Carried("tool_schemas", 45_200),
+                                Carried("instruction_file", 2_350, MANAGED),
+                                Carried(
+                                    "instruction_file", 1_480, "/work/BikeLog/CLAUDE.md"
+                                ),
                             ),
                             tools=(
                                 ToolUse(
