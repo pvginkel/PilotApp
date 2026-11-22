@@ -23,6 +23,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select, text
+from sqlalchemy.orm import Session
 
 from app.database import scoped_session
 from app.models import QuotaWeek
@@ -49,6 +50,16 @@ class Period:
 
     starts_at: datetime
     ends_at: datetime
+
+
+def quota_weeks(db: Session) -> tuple[Period, ...]:
+    """The quota weeks the record holds, in the order they start."""
+    return tuple(
+        Period(starts_at, ends_at)
+        for starts_at, ends_at in db.execute(
+            select(QuotaWeek.starts_at, QuotaWeek.ends_at).order_by(QuotaWeek.starts_at)
+        )
+    )
 
 
 def follow(running: Period, reset: datetime) -> list[Period]:

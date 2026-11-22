@@ -1,17 +1,34 @@
 """The catalogue's assembly (F154.4): Pilot's code's entries, with what the
-record's rows give — a vocabulary's rows as a dimension's values, and a
-version dimension per Component — and the process's copy of it, kept until a
-publication writes a vocabulary's row."""
+record's rows give — a vocabulary's rows as a dimension's values, a version
+dimension per Component, and from the stored configuration the custom
+ratios and the quick filters — and the process's copy of it, kept until a
+publication writes a vocabulary's row.
+
+A stored ratio or quick filter is offered where what it names reads under
+the rest of the catalogue: a ratio's two measures, a quick filter's chip and
+its amount's figure; and a ratio where its key is no built-in ratio's. One
+that does not is left out, so that a state naming it drops it with a note
+(`reading`), as it does one that is gone.
+"""
 
 import threading
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.dashboard.catalogue import Catalogue, Value
+from app import models
+from app.dashboard.catalogue import (
+    Catalogue,
+    Format,
+    QuickFilter,
+    Ratio,
+    RatioOrigin,
+    Value,
+)
 from app.dashboard.dimensions import (
     own_dimensions,
     version_dimension,
@@ -20,6 +37,9 @@ from app.dashboard.dimensions import (
 )
 from app.dashboard.facts import FACTS, OCCURRENCES, own_joins, version_joins
 from app.dashboard.measures import AGGREGATES, FIGURES, RANGES, RATIOS
+from app.dashboard.reading import read_chip, read_simple
+from app.dashboard.state import Simple
+from app.exceptions import StateRefusedException
 from app.models import (
     CompactionTrigger,
     Component,
@@ -29,6 +49,7 @@ from app.models import (
     SessionKind,
     StopReason,
 )
+from app.services.quota_week_service import Period, quota_weeks
 
 _VOCABULARIES: dict[str, type[Any]] = {
     "session_kind": SessionKind,
@@ -63,9 +84,88 @@ def _event_kinds(db: Session) -> tuple[Value, ...]:
     return tuple(sorted(stored + recorded, key=lambda kind: (kind.name, kind.code)))
 
 
+def _format(catalogue: Catalogue, numerator: Simple, denominator: Simple) -> Format:
+    """A stored ratio's format: a share of two measures of one format, else
+    its numerator's."""
+    above = catalogue.figure(numerator.figure).format
+    below = catalogue.figure(denominator.figure).format
+    return "share" if above == below else above
+
+
+def _ratios(
+    db: Session, catalogue: Catalogue, weeks: Sequence[Period]
+) -> tuple[Ratio, ...]:
+    built_in = {ratio.key for ratio in catalogue.ratios}
+    ratios = []
+    for row in db.scalars(
+        select(models.CustomRatio).order_by(
+            models.CustomRatio.system.desc(), models.CustomRatio.name
+        )
+    ):
+        if row.key in built_in:
+            continue
+        try:
+            numerator = read_simple(row.numerator, catalogue, weeks)
+            denominator = read_simple(row.denominator, catalogue, weeks)
+        except StateRefusedException:
+            continue
+        ratios.append(
+            Ratio(
+                key=row.key,
+                label=row.name,
+                line=row.note,
+                format=_format(catalogue, numerator, denominator),
+                numerator=row.numerator,
+                denominator=row.denominator,
+                origin=cast(RatioOrigin, row.origin_code.value),
+            )
+        )
+    return tuple(ratios)
+
+
+def _quick_filters(
+    db: Session, catalogue: Catalogue, weeks: Sequence[Period]
+) -> tuple[QuickFilter, ...]:
+    figures = {figure.key for figure in catalogue.figures}
+    quick_filters = []
+    for row in db.scalars(
+        select(models.QuickFilter).order_by(
+            models.QuickFilter.saved_at, models.QuickFilter.code
+        )
+    ):
+        if row.amount_figure is not None and row.amount_figure not in figures:
+            continue
+        try:
+            read_chip(row.condition, catalogue, weeks)
+        except StateRefusedException:
+            continue
+        quick_filters.append(
+            QuickFilter(
+                key=row.code,
+                label=row.label,
+                condition=row.condition,
+                marks=row.marks,
+                amount=row.amount_figure,
+                note=row.note,
+            )
+        )
+    return tuple(quick_filters)
+
+
 def assemble(db: Session, zone: str, sitting_gap: timedelta) -> Catalogue:
     """The catalogue as the record stands: the local time derived in `zone`,
     a sitting ended by a gap of `sitting_gap`."""
+    own = _own(db, zone, sitting_gap)
+    weeks = quota_weeks(db)
+    return replace(
+        own,
+        ratios=own.ratios + _ratios(db, own, weeks),
+        quick_filters=_quick_filters(db, own, weeks),
+    )
+
+
+def _own(db: Session, zone: str, sitting_gap: timedelta) -> Catalogue:
+    """Pilot's code's entries with the record's vocabularies."""
     components: Sequence[Component] = db.scalars(
         select(Component).order_by(Component.code)
     ).all()

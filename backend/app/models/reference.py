@@ -2,8 +2,8 @@
 
 A reference entity with a fact about the category is a table: Item Kind, Done
 Cause, Confirmation Reason, Session Kind and Token Kind. The other twenty are
-PostgreSQL enums (DB §7.2), as are Turn Cause and Hold Kind, Pilot's own of the analysis
-dashboard's (DB §2.11). The revisions are the one place a value is added, a
+PostgreSQL enums (DB §7.2), as are Turn Cause, Hold Kind, Favourite Menu and
+Origin, Pilot's own of the analysis dashboard's (DB §2.11). The revisions are the one place a value is added, a
 table's rows included.
 """
 
@@ -232,6 +232,27 @@ class HoldKind(StrEnum):
     environment, is running or starting."""
 
 
+class FavouriteMenu(StrEnum):
+    """A kind of list a dimension is a favourite in (DB §2.11): the
+    dashboard's By or its Color."""
+
+    BY = "by"
+    COLOR = "color"
+
+
+class Origin(StrEnum):
+    """A kind of place a stored view or ratio of the dashboard comes from
+    (DB §2.11; decision 80). Pilot's own and the workflow's are managed: no
+    User changes a row of them (DB 601), which a row's `system` carries."""
+
+    PILOT = "pilot"
+    """Shipped with Pilot and changed by its release."""
+    WORKFLOW = "workflow"
+    """Loaded from the workflow plugin's file and changed by a load."""
+    PERSON = "person"
+    """Made by a person and changed by anyone."""
+
+
 def _enum_type(enum_class: type[StrEnum], name: str) -> Enum:
     # The database holds the values, not the member names.
     return Enum(
@@ -264,6 +285,8 @@ USAGE_WINDOW = _enum_type(UsageWindow, "usage_window")
 PROGRESS_STATE = _enum_type(ProgressState, "progress_state")
 TURN_CAUSE = _enum_type(TurnCause, "turn_cause")
 HOLD_KIND = _enum_type(HoldKind, "hold_kind")
+FAVOURITE_MENU = _enum_type(FavouriteMenu, "favourite_menu")
+ORIGIN = _enum_type(Origin, "origin")
 
 # Autogenerate compares no enum type, so the schema tests check these against
 # the database's.
@@ -290,6 +313,8 @@ ENUM_TYPES = (
     PROGRESS_STATE,
     TURN_CAUSE,
     HOLD_KIND,
+    FAVOURITE_MENU,
+    ORIGIN,
 )
 
 

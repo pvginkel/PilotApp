@@ -1,6 +1,7 @@
 """The Quota Weeks as the usage readings write them (DB §2.5, Quota Week;
 decision 79.26; assertion 550): the rule a reset is followed by, a week's
-label, and the weeks stored after each reading recorded."""
+label, the weeks the record holds, and the weeks stored after each reading
+recorded."""
 
 from collections.abc import Generator
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -17,6 +18,7 @@ from app.services.quota_week_service import (
     QuotaWeekService,
     follow,
     label,
+    quota_weeks,
 )
 from app.services.usage_service import UsageService
 from tests.support.supervisor import LogWaiter, listening
@@ -221,6 +223,22 @@ class TestLabel:
         self, starts_at: datetime, ends_at: datetime, labelled: date
     ) -> None:
         assert label(starts_at, ends_at) == labelled
+
+
+class TestQuotaWeeks:
+    def test_they_are_the_records_in_the_order_they_start(
+        self, session: DbSession
+    ) -> None:
+        session.execute(delete(QuotaWeek))
+        session.add_all(
+            [
+                QuotaWeek(starts_at=STARTS_AT, ends_at=ENDS_AT),
+                QuotaWeek(starts_at=STARTS_AT - WEEK, ends_at=STARTS_AT),
+            ]
+        )
+        session.flush()
+
+        assert quota_weeks(session) == (Period(STARTS_AT - WEEK, STARTS_AT), RUNNING)
 
 
 def _reading(

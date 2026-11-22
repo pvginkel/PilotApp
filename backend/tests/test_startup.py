@@ -1,6 +1,7 @@
 """The app's startup hooks: the engine's listener that turns PostgreSQL's JIT
-off, the price file a deploy loads after the revisions, the seed `cli
-load-test-data` loads (slice 002 P9), and the app's CLI commands."""
+off, the price file a deploy loads after the revisions with Pilot's own
+system views, the seed `cli load-test-data` loads (slice 002 P9), and the
+app's CLI commands."""
 
 import click
 import pytest
@@ -9,9 +10,11 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session as DbSession
 
 from app.app import App
+from app.dashboard.views import VIEWS
 from app.engine.bus import EngineEvent, TreeHashMoved
 from app.extensions import db
-from app.models import Price, Project
+from app.models import Price, Project, QuickFilter, SavedView
+from app.models.reference import Origin
 from app.service_user_cli import create_service_user
 from app.services.container import ServiceContainer
 from app.services.price_service import read_price_file
@@ -56,6 +59,12 @@ def _prices(db: DbSession) -> int:
     return db.scalar(select(func.count()).select_from(Price)) or 0
 
 
+def _pilots_views(db: DbSession) -> set[str | None]:
+    return set(
+        db.scalars(select(SavedView.key).where(SavedView.origin_code == Origin.PILOT))
+    )
+
+
 class TestPostMigrationHook:
     def test_it_loads_the_price_file_and_prints_what_it_wrote(
         self,
@@ -74,6 +83,7 @@ class TestPostMigrationHook:
             "Prices loaded: 5 added, 0 models priced as another or no longer,"
             " 0 calls priced\n"
             "Call caches derived: 0 calls of 0 transcripts\n"
+            "Pilot's system views: 0 added, 0 changed, 0 removed\n"
         )
 
     def test_it_gives_a_stored_call_with_no_caches_its_caches(
@@ -91,9 +101,37 @@ class TestPostMigrationHook:
 
         session.refresh(call)
         assert (call.rewind, call.cache_miss, call.past_ttl) == (False, False, False)
-        assert capsys.readouterr().out.endswith(
-            "Call caches derived: 1 calls of 1 transcripts\n"
+        assert (
+            "Call caches derived: 1 calls of 1 transcripts\n" in capsys.readouterr().out
         )
+
+    def test_it_makes_pilots_own_system_views_what_the_release_holds(
+        self,
+        app: Flask,
+        container: ServiceContainer,
+        session: DbSession,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        assert isinstance(app, App)
+        session.execute(delete(SavedView).where(SavedView.key == "projects"))
+
+        post_migration_hook(app)
+
+        assert _pilots_views(session) == {view.key for view in VIEWS}
+        assert capsys.readouterr().out.endswith(
+            "Pilot's system views: 1 added, 0 changed, 0 removed\n"
+        )
+
+    def test_a_removed_quick_filter_stays_removed(
+        self, app: Flask, container: ServiceContainer, session: DbSession
+    ) -> None:
+        """The revisions write the shipped ones once; no deploy writes them."""
+        assert isinstance(app, App)
+        session.execute(delete(QuickFilter).where(QuickFilter.code == "misses"))
+
+        post_migration_hook(app)
+
+        assert "misses" not in set(session.scalars(select(QuickFilter.code)))
 
 
 class TestLoadTestDataHook:
@@ -106,6 +144,16 @@ class TestLoadTestDataHook:
         load_test_data_hook(app)
 
         assert _prices(session) == len(read_price_file())
+
+    def test_it_ships_pilots_own_system_views(
+        self, app: Flask, container: ServiceContainer, session: DbSession
+    ) -> None:
+        assert isinstance(app, App)
+        session.execute(delete(SavedView))
+
+        load_test_data_hook(app)
+
+        assert _pilots_views(session) == {view.key for view in VIEWS}
 
     def test_it_commits_the_seed_and_prints_its_counts(
         self,

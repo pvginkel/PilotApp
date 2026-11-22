@@ -959,11 +959,12 @@
         "description": "The part of the catalogue asked for.",
         "properties": {
           "part": {
-            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap",
+            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, and the quick filters",
             "enum": [
               "dimensions",
               "measures",
-              "time"
+              "time",
+              "stored"
             ],
             "title": "Part",
             "type": "string"
@@ -1062,10 +1063,27 @@
             "enum": [
               "dimensions",
               "measures",
-              "time"
+              "time",
+              "stored"
             ],
             "title": "Part",
             "type": "string"
+          },
+          "quick_filters": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.QuickFilterSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`stored`: in the order they were made",
+            "title": "Quick Filters"
           },
           "ranges": {
             "anyOf": [
@@ -1096,8 +1114,24 @@
               }
             ],
             "default": null,
-            "description": "`measures`: the built-in ratios",
+            "description": "`measures`: the built-in ratios, then the stored ones",
             "title": "Ratios"
+          },
+          "saved_views": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.SavedViewSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`stored`: the system views, then those a person saved, each list by name",
+            "title": "Saved Views"
           },
           "sitting_gap_seconds": {
             "anyOf": [
@@ -1504,6 +1538,76 @@
         "title": "GrainSchema",
         "type": "object"
       },
+      "CatalogueResponseSchema.b67cf98.QuickFilterSchema": {
+        "description": "A filter kept under a label, for everyone, that a view turns on by its\nkey in `b=`.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The figure shown beside its count; null for none",
+            "examples": [
+              "miss_cost"
+            ],
+            "title": "Amount"
+          },
+          "condition": {
+            "description": "The chip it applies, as a view's state writes it after `c=`",
+            "examples": [
+              "miss:1"
+            ],
+            "title": "Condition",
+            "type": "string"
+          },
+          "key": {
+            "description": "What `b=` names it by",
+            "examples": [
+              "misses"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Cache misses"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "marks": {
+            "description": "Whether it marks what the chip keeps rather than filters to it",
+            "title": "Marks",
+            "type": "boolean"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "condition",
+          "marks",
+          "amount",
+          "note"
+        ],
+        "title": "QuickFilterSchema",
+        "type": "object"
+      },
       "CatalogueResponseSchema.b67cf98.RatioSchema": {
         "description": "Two measures, the first over the second.",
         "properties": {
@@ -1539,9 +1643,16 @@
             "type": "string"
           },
           "line": {
-            "description": "What it is",
-            "title": "Line",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What it is, where its source says",
+            "title": "Line"
           },
           "numerator": {
             "description": "A measure, as a state writes it",
@@ -1550,6 +1661,22 @@
             ],
             "title": "Numerator",
             "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "enum": [
+                  "workflow",
+                  "person"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A stored ratio's: loaded with the workflow's views, which no one edits or removes, or a person's; null for a built-in one",
+            "title": "Origin"
           }
         },
         "required": [
@@ -1557,10 +1684,94 @@
           "label",
           "line",
           "format",
+          "origin",
           "numerator",
           "denominator"
         ],
         "title": "RatioSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.SavedViewSchema": {
+        "description": "A view kept under a name, for everyone: a system view, Pilot's own or\nthe workflow's, or one a person saved.",
+        "properties": {
+          "address": {
+            "description": "Its state in its normal form after `#dash/`, as it was saved",
+            "examples": [
+              "#dash/t=all&by=project&m=cost.sum&col=work_type"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A system view's key in its source; null for a person's",
+            "title": "Key"
+          },
+          "name": {
+            "description": "Its name, unique among the system views and among the others",
+            "examples": [
+              "Projects"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "origin": {
+            "description": "Where it comes from",
+            "enum": [
+              "pilot",
+              "workflow",
+              "person"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "saved_at": {
+            "description": "When it was last saved, or loaded",
+            "format": "date-time",
+            "title": "Saved At",
+            "type": "string"
+          },
+          "system": {
+            "description": "Whether it is a system view, which no one renames, replaces or removes",
+            "title": "System",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "system",
+          "origin",
+          "key",
+          "name",
+          "address",
+          "note",
+          "saved_at"
+        ],
+        "title": "SavedViewSchema",
         "type": "object"
       },
       "CatalogueResponseSchema.b67cf98.TimeRangeSchema": {
@@ -18820,16 +19031,17 @@
         "operationId": "get__api_dashboard_catalogue",
         "parameters": [
           {
-            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap",
+            "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, and the quick filters",
             "in": "query",
             "name": "part",
             "required": true,
             "schema": {
-              "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap",
+              "description": "`dimensions`: what a view is By, filtered on and colored by; `measures`: the facts, the figures, the aggregates, the grains and the ratios; `time`: the time ranges, the zone and the sitting's gap; `stored`: the saved views, the system's and a person's, and the quick filters",
               "enum": [
                 "dimensions",
                 "measures",
-                "time"
+                "time",
+                "stored"
               ],
               "title": "Part",
               "type": "string"
@@ -18883,7 +19095,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and built-in ratios; or its time, the ranges, the zone and the sitting's gap.",
+        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and ratios, built in and stored; its time, the ranges, the zone and the sitting's gap; or what it stores, the saved views, each with its address, and the quick filters.",
         "tags": [],
         "x-required-role": "editor"
       }

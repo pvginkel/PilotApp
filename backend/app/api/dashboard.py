@@ -1,6 +1,7 @@
 """The dashboard's catalogue (F154.4), what a view may name, read through
-one route, a part at a call; and a view's address (F159), its state checked
-and written back in its normal form."""
+one route, a part at a call, with what the dashboard stores (F155); and a
+view's address (F159), its state checked and written back in its normal
+form."""
 
 from typing import Any
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.catalogue import Catalogue
+from app.dashboard.state import PREFIX
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.dashboard import (
     AddressQuerySchema,
@@ -23,11 +25,14 @@ from app.schemas.dashboard import (
     FactSchema,
     FigureSchema,
     GrainSchema,
+    QuickFilterSchema,
     RatioSchema,
+    SavedViewSchema,
     TimeRangeSchema,
     ValueSchema,
 )
 from app.services.container import ServiceContainer
+from app.services.dashboard_store_service import DashboardStoreService
 from app.utils.spectree_config import api
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
@@ -48,11 +53,16 @@ def get_catalogue(
     query: CatalogueQuerySchema,
     db: Session = Provide[ServiceContainer.db_session],
     catalogue_service: CatalogueService = Provide[ServiceContainer.catalogue_service],
+    dashboard_store_service: DashboardStoreService = Provide[
+        ServiceContainer.dashboard_store_service
+    ],
 ) -> Any:
     """Read one part of what a view of the dashboard may name: its
     dimensions, each with its closed list of values where it has one; its
-    measures, the facts, figures, aggregates, grains and built-in ratios; or
-    its time, the ranges, the zone and the sitting's gap.
+    measures, the facts, figures, aggregates, grains and ratios, built in
+    and stored; its time, the ranges, the zone and the sitting's gap; or
+    what it stores, the saved views, each with its address, and the quick
+    filters.
 
     Returns:
         200: The part asked for
@@ -61,6 +71,8 @@ def get_catalogue(
         403: The caller lacks the editor role
     """
     catalogue = catalogue_service.catalogue(db)
+    if query.part == "stored":
+        return _stored(catalogue, dashboard_store_service).model_dump(mode="json")
     part = {"dimensions": _dimensions, "measures": _measures, "time": _time}[query.part]
     return part(catalogue).model_dump()
 
@@ -186,6 +198,7 @@ def _measures(catalogue: Catalogue) -> CatalogueResponseSchema:
                 format=ratio.format,
                 numerator=ratio.numerator,
                 denominator=ratio.denominator,
+                origin=ratio.origin,
             )
             for ratio in catalogue.ratios
         ],
@@ -201,4 +214,36 @@ def _time(catalogue: Catalogue) -> CatalogueResponseSchema:
         ],
         zone=catalogue.zone,
         sitting_gap_seconds=catalogue.sitting_gap.total_seconds(),
+    )
+
+
+def _stored(
+    catalogue: Catalogue, dashboard_store_service: DashboardStoreService
+) -> CatalogueResponseSchema:
+    return CatalogueResponseSchema(
+        part="stored",
+        saved_views=[
+            SavedViewSchema(
+                id=view.id,
+                system=view.system,
+                origin=view.origin_code.value,
+                key=view.key,
+                name=view.name,
+                address=PREFIX + view.state,
+                note=view.note,
+                saved_at=view.saved_at,
+            )
+            for view in dashboard_store_service.saved_views()
+        ],
+        quick_filters=[
+            QuickFilterSchema(
+                key=quick_filter.key,
+                label=quick_filter.label,
+                condition=quick_filter.condition,
+                marks=quick_filter.marks,
+                amount=quick_filter.amount,
+                note=quick_filter.note,
+            )
+            for quick_filter in catalogue.quick_filters
+        ],
     )

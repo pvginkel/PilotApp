@@ -1,14 +1,18 @@
 """Schemas for GET /api/dashboard/catalogue, what a view of the dashboard may
-name, a part at a call (F154.4); and for GET /api/dashboard/address, a view's
-state checked and written back in its normal form (F159)."""
+name, a part at a call (F154.4), with what the dashboard stores (F155); and
+for GET /api/dashboard/address, a view's state checked and written back in
+its normal form (F159)."""
 
+import uuid
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-CataloguePart = Literal["dimensions", "measures", "time"]
+CataloguePart = Literal["dimensions", "measures", "time", "stored"]
 Group = Literal["part", "attribute", "time", "order"]
 Format = Literal["usd", "tokens", "count", "seconds", "share"]
+Origin = Literal["pilot", "workflow", "person"]
 
 
 class CatalogueQuerySchema(BaseModel):
@@ -19,7 +23,8 @@ class CatalogueQuerySchema(BaseModel):
             "`dimensions`: what a view is By, filtered on and colored by; "
             "`measures`: the facts, the figures, the aggregates, the grains "
             "and the ratios; `time`: the time ranges, the zone and the "
-            "sitting's gap"
+            "sitting's gap; `stored`: the saved views, the system's and a "
+            "person's, and the quick filters"
         )
     )
 
@@ -128,14 +133,64 @@ class RatioSchema(BaseModel):
 
     key: str = Field(description="What a measure names it by, after `r:`")
     label: str = Field(examples=["Cost per call"])
-    line: str = Field(description="What it is")
+    line: str | None = Field(description="What it is, where its source says")
     format: Format
+    origin: Literal["workflow", "person"] | None = Field(
+        description=(
+            "A stored ratio's: loaded with the workflow's views, which no one "
+            "edits or removes, or a person's; null for a built-in one"
+        )
+    )
     numerator: str = Field(
         description="A measure, as a state writes it", examples=["cost.sum"]
     )
     denominator: str = Field(
         description="A measure, as a state writes it", examples=["calls.count"]
     )
+
+
+class SavedViewSchema(BaseModel):
+    """A view kept under a name, for everyone: a system view, Pilot's own or
+    the workflow's, or one a person saved."""
+
+    id: uuid.UUID
+    system: bool = Field(
+        description="Whether it is a system view, which no one renames, replaces or removes"
+    )
+    origin: Origin = Field(description="Where it comes from")
+    key: str | None = Field(
+        description="A system view's key in its source; null for a person's"
+    )
+    name: str = Field(
+        description="Its name, unique among the system views and among the others",
+        examples=["Projects"],
+    )
+    address: str = Field(
+        description="Its state in its normal form after `#dash/`, as it was saved",
+        examples=["#dash/t=all&by=project&m=cost.sum&col=work_type"],
+    )
+    note: str | None = Field(description="A line of explanation shown with it")
+    saved_at: datetime = Field(description="When it was last saved, or loaded")
+
+
+class QuickFilterSchema(BaseModel):
+    """A filter kept under a label, for everyone, that a view turns on by its
+    key in `b=`."""
+
+    key: str = Field(description="What `b=` names it by", examples=["misses"])
+    label: str = Field(examples=["Cache misses"])
+    condition: str = Field(
+        description="The chip it applies, as a view's state writes it after `c=`",
+        examples=["miss:1"],
+    )
+    marks: bool = Field(
+        description="Whether it marks what the chip keeps rather than filters to it"
+    )
+    amount: str | None = Field(
+        description="The figure shown beside its count; null for none",
+        examples=["miss_cost"],
+    )
+    note: str | None = Field(description="A line of explanation shown with it")
 
 
 class TimeRangeSchema(BaseModel):
@@ -162,7 +217,8 @@ class CatalogueResponseSchema(BaseModel):
     )
     grains: list[GrainSchema] | None = Field(default=None, description="`measures`")
     ratios: list[RatioSchema] | None = Field(
-        default=None, description="`measures`: the built-in ratios"
+        default=None,
+        description="`measures`: the built-in ratios, then the stored ones",
     )
     ranges: list[TimeRangeSchema] | None = Field(default=None, description="`time`")
     zone: str | None = Field(
@@ -172,6 +228,15 @@ class CatalogueResponseSchema(BaseModel):
     )
     sitting_gap_seconds: float | None = Field(
         default=None, description="`time`: the gap that ends a sitting, in seconds"
+    )
+    saved_views: list[SavedViewSchema] | None = Field(
+        default=None,
+        description=(
+            "`stored`: the system views, then those a person saved, each list by name"
+        ),
+    )
+    quick_filters: list[QuickFilterSchema] | None = Field(
+        default=None, description="`stored`: in the order they were made"
     )
 
 

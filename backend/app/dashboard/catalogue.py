@@ -17,6 +17,9 @@ source gave it, so a source that declares more adds rows and no shape.
 - A **figure** is a number of one fact's row; a view's measure is a figure
   under an aggregate at a grain. A **grain** is any part, or a fact's own row.
 - A **ratio** is two measures, each as a view's state writes it.
+
+From the stored configuration come the custom ratios, among the ratios, and
+the quick filters, each offered where what it names reads.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from typing import Any, Literal
 from sqlalchemy import ColumnElement, FromClause
 
 Group = Literal["part", "attribute", "time", "order"]
+RatioOrigin = Literal["workflow", "person"]
 Format = Literal["usd", "tokens", "count", "seconds", "share"]
 Within = Literal["sum", "max"]
 
@@ -204,24 +208,32 @@ class Grain:
 @dataclass(frozen=True)
 class Ratio:
     """Two measures, each as a view's state writes it (F155.4), the first
-    over the second. A built-in one names nothing of a workflow."""
+    over the second. A built-in one names nothing of a workflow and has no
+    `origin`; a stored one's is the Origin of its row, and its `line` its
+    note, where it has one."""
 
     key: str
     label: str
-    line: str
+    line: str | None
     format: Format
     numerator: str
     denominator: str
+    origin: RatioOrigin | None = None
 
 
 @dataclass(frozen=True)
 class QuickFilter:
     """A chip everyone turns on with a click, kept under a key: `condition`
-    the chip as a view's state writes it."""
+    the chip as a view's state writes it, with no mark; `marks` whether it
+    marks what the chip keeps rather than filters to it; `amount` the
+    figure shown beside its count, none for none."""
 
     key: str
     label: str
     condition: str
+    marks: bool = False
+    amount: str | None = None
+    note: str | None = None
 
 
 @dataclass(frozen=True)

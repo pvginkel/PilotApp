@@ -1,21 +1,26 @@
 """The catalogue's assembly (F154.4): Pilot's code's entries with the
-record's vocabularies, and the process's copy, kept until a publication
-writes a vocabulary's row."""
+record's vocabularies and the stored configuration's ratios and quick
+filters, and the process's copy, kept until a publication writes a
+vocabulary's row."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from app import models
 from app.dashboard.assembly import CatalogueService, assemble
-from app.dashboard.catalogue import Catalogue
+from app.dashboard.catalogue import Catalogue, QuickFilter, Ratio
 from app.dashboard.facts import FACTS, OCCURRENCES
 from app.dashboard.measures import AGGREGATES, FIGURES, RANGES, RATIOS
+from app.dashboard.reading import read
+from app.dashboard.state import RatioKey
 from app.models import (
     CompactionTrigger,
     Component,
+    CustomRatio,
     EventKind,
     MissCause,
     Model,
@@ -23,7 +28,9 @@ from app.models import (
     SessionKind,
     StopReason,
 )
+from app.models.reference import Origin
 from app.services.container import ServiceContainer
+from app.services.quota_week_service import quota_weeks
 from app.utils.after_commit import run_after_commit_callbacks
 from tests.support.dashboard import GAP, ZONE
 from tests.support.transcripts import reference
@@ -144,6 +151,170 @@ class TestAssemble:
         compiled = select(sitting.c.id).compile()
 
         assert compiled.params == {"gap": 1800.0}
+
+
+LATER = datetime(2099, 1, 1, tzinfo=UTC)
+"""After the shipped quick filters were made, whenever the suite runs."""
+
+
+def _ratio(
+    db: DbSession,
+    origin: Origin,
+    key: str,
+    numerator: str,
+    denominator: str,
+    note: str | None = None,
+) -> None:
+    db.add(
+        CustomRatio(
+            origin_code=origin,
+            key=key,
+            name=key.replace("_", " ").capitalize(),
+            numerator=numerator,
+            denominator=denominator,
+            note=note,
+            saved_at=LATER,
+        )
+    )
+    db.flush()
+
+
+def _quick_filter(
+    db: DbSession,
+    code: str,
+    condition: str,
+    amount: str | None = None,
+    marks: bool = False,
+) -> None:
+    db.add(
+        models.QuickFilter(
+            code=code,
+            label=code.replace("_", " ").capitalize(),
+            condition=condition,
+            marks=marks,
+            amount_figure=amount,
+            note=f"The {code}",
+            saved_at=LATER,
+        )
+    )
+    db.flush()
+
+
+def _stored_ratios(catalogue: Catalogue) -> list[Ratio]:
+    return [ratio for ratio in catalogue.ratios if ratio.origin is not None]
+
+
+class TestTheStoredConfiguration:
+    def test_the_quick_filters_are_the_stored_ones_in_the_order_made(
+        self, session: DbSession
+    ) -> None:
+        _quick_filter(session, "market_day", "weekday:6", "cost", marks=True)
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert [quick.key for quick in catalogue.quick_filters] == [
+            "compactions",
+            "expensive",
+            "misses",
+            "outliers",
+            "past_ttl",
+            "market_day",
+        ]
+        assert catalogue.quick_filters[-1] == QuickFilter(
+            key="market_day",
+            label="Market day",
+            condition="weekday:6",
+            marks=True,
+            amount="cost",
+            note="The market_day",
+        )
+
+    def test_a_stored_ratio_follows_the_built_in_ones_the_loaded_first(
+        self, session: DbSession
+    ) -> None:
+        _ratio(session, Origin.PERSON, "mine_misses", "miss_cost.sum", "cost.sum")
+        _ratio(
+            session,
+            Origin.WORKFLOW,
+            "per_crate",
+            "cost.sum(source=work)",
+            "calls.count",
+            "The cost of a crate",
+        )
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert catalogue.ratios[: len(RATIOS)] == RATIOS
+        assert _stored_ratios(catalogue) == [
+            Ratio(
+                key="per_crate",
+                label="Per crate",
+                line="The cost of a crate",
+                format="usd",
+                numerator="cost.sum(source=work)",
+                denominator="calls.count",
+                origin="workflow",
+            ),
+            Ratio(
+                key="mine_misses",
+                label="Mine misses",
+                line=None,
+                format="share",
+                numerator="miss_cost.sum",
+                denominator="cost.sum",
+                origin="person",
+            ),
+        ]
+
+    def test_a_state_names_each_by_its_key(self, session: DbSession) -> None:
+        _ratio(session, Origin.PERSON, "mine_misses", "miss_cost.sum", "cost.sum")
+        _quick_filter(session, "market_day", "weekday:6")
+
+        checked = read(
+            "m=r:mine_misses&b=market_day,misses",
+            assemble(session, ZONE, GAP),
+            quota_weeks(session),
+        )
+
+        assert checked.state.measures == (RatioKey("mine_misses"),)
+        assert checked.state.quick_filters == ("market_day", "misses")
+        assert checked.notes == ()
+
+    def test_a_ratio_whose_measure_does_not_read_is_left_out_and_dropped_by_a_state(
+        self, session: DbSession
+    ) -> None:
+        _ratio(session, Origin.PERSON, "per_crate", "cost.sum", "crates.count")
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert _stored_ratios(catalogue) == []
+        assert read("m=r:per_crate", catalogue, quota_weeks(session)).notes[0] == (
+            'm=r:per_crate: no ratio has the key "per_crate", so the measure is '
+            'dropped. Did you mean "per_call"?'
+        )
+
+    def test_a_loaded_ratio_under_a_built_in_ones_key_is_left_out(
+        self, session: DbSession
+    ) -> None:
+        _ratio(session, Origin.WORKFLOW, "per_call", "cost.sum", "turns.count")
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert catalogue.ratios == RATIOS
+
+    @pytest.mark.parametrize(
+        ("condition", "amount"),
+        [("weekday:9", None), ("@crates", None), ("weekday:6", "crate_cost")],
+        ids=["a value it lacks", "no chip", "an amount no figure is"],
+    )
+    def test_a_quick_filter_naming_what_does_not_read_is_left_out(
+        self, session: DbSession, condition: str, amount: str | None
+    ) -> None:
+        _quick_filter(session, "market_day", condition, amount)
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert "market_day" not in {quick.key for quick in catalogue.quick_filters}
 
 
 class TestCatalogueService:

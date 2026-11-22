@@ -1,17 +1,22 @@
 """/api/dashboard/catalogue, what a view of the dashboard may name, a part
-at a call (F154.4); and /api/dashboard/address, a view's state checked and
-written back in its normal form (F159)."""
+at a call (F154.4), with what the dashboard stores (F155); and
+/api/dashboard/address, a view's state checked and written back in its
+normal form (F159)."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from flask.testing import FlaskClient
 from sqlalchemy.orm import Session as DbSession
 
-from app.models import Component, EventKind
+from app.dashboard.views import VIEWS
+from app.models import Component, CustomRatio, EventKind, SavedView
+from app.models.reference import Origin
 from tests.support.transcripts import reference
 
 CATALOGUE = "/api/dashboard/catalogue"
+SAVED_AT = datetime(2026, 11, 20, 9, 30, tzinfo=UTC)
 
 
 def _part(client: FlaskClient, part: str) -> dict[str, Any]:
@@ -33,6 +38,7 @@ class TestGetCatalogue:
             "dimensions": {"dimensions"},
             "measures": {"facts", "figures", "aggregates", "grains", "ratios"},
             "time": {"ranges", "zone", "sitting_gap_seconds"},
+            "stored": {"saved_views", "quick_filters"},
         }
 
         for part, own in fields.items():
@@ -191,6 +197,7 @@ class TestGetCatalogue:
                 "format": "share",
                 "numerator": "cost.sum(source=chat|pilot)",
                 "denominator": "cost.sum(source=work)",
+                "origin": None,
             },
             {
                 "key": "miss_share",
@@ -199,6 +206,7 @@ class TestGetCatalogue:
                 "format": "share",
                 "numerator": "miss_cost.sum",
                 "denominator": "cost.sum",
+                "origin": None,
             },
             {
                 "key": "per_call",
@@ -207,6 +215,7 @@ class TestGetCatalogue:
                 "format": "usd",
                 "numerator": "cost.sum",
                 "denominator": "calls.count",
+                "origin": None,
             },
         ]
 
@@ -242,6 +251,86 @@ class TestGetCatalogue:
             "l8",
             "all",
         ]
+
+    def test_what_it_stores(self, client: FlaskClient, session: DbSession) -> None:
+        session.add(
+            SavedView(
+                origin_code=Origin.PERSON,
+                name="Projects",
+                state="t=d7&by=model&m=cost.sum&col=none",
+                saved_at=SAVED_AT,
+            )
+        )
+        session.flush()
+
+        body = _part(client, "stored")
+
+        views = body["saved_views"]
+        assert [(view["system"], view["name"]) for view in views] == [
+            (True, "Projects"),
+            (True, "Where the week went"),
+            (True, "Work types"),
+            (False, "Projects"),
+        ]
+        assert {key: value for key, value in views[0].items() if key != "saved_at"} == {
+            "id": views[0]["id"],
+            "system": True,
+            "origin": "pilot",
+            "key": "projects",
+            "name": "Projects",
+            "address": "#dash/" + VIEWS[0].state,
+            "note": VIEWS[0].note,
+        }
+        assert views[-1]["origin"] == "person"
+        assert views[-1]["key"] is None
+        assert views[-1]["address"] == "#dash/t=d7&by=model&m=cost.sum&col=none"
+        assert views[-1]["saved_at"] == "2026-11-20T09:30:00Z"
+        quick_filters = _by_key(body["quick_filters"])
+        assert list(quick_filters) == [
+            "compactions",
+            "expensive",
+            "misses",
+            "outliers",
+            "past_ttl",
+        ]
+        assert quick_filters["past_ttl"] == {
+            "key": "past_ttl",
+            "label": "Waits past the cache TTL",
+            "condition": "past_ttl:1",
+            "marks": False,
+            "amount": "miss_cost",
+            "note": (
+                "The Calls that waited longer than the cache their predecessor "
+                "wrote lives; the amount is the cost of those that missed it"
+            ),
+        }
+
+    def test_a_stored_ratio_is_a_measure_with_its_origin(
+        self, client: FlaskClient, session: DbSession
+    ) -> None:
+        session.add(
+            CustomRatio(
+                origin_code=Origin.PERSON,
+                key="mine_per_turn",
+                name="Cost per turn",
+                numerator="reported_cost.sum",
+                denominator="turns.count",
+                saved_at=SAVED_AT,
+            )
+        )
+        session.flush()
+
+        ratios = _part(client, "measures")["ratios"]
+
+        assert ratios[-1] == {
+            "key": "mine_per_turn",
+            "label": "Cost per turn",
+            "line": None,
+            "format": "usd",
+            "numerator": "reported_cost.sum",
+            "denominator": "turns.count",
+            "origin": "person",
+        }
 
     @pytest.mark.parametrize("query", [{}, {"part": "views"}, {"part": ""}])
     def test_no_part_or_one_it_has_not_is_refused(

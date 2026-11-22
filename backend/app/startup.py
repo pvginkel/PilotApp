@@ -142,14 +142,24 @@ def register_cli_commands(cli: click.Group) -> None:
 def post_migration_hook(app: App) -> None:
     """Load the price file after the database's revisions, at every deploy:
     the Prices it gained, and the cost of each Call they change
-    (`PriceService.load`); then give each stored Call with none its other
-    caches (`CallCacheService.derive`)."""
+    (`PriceService.load`); give each stored Call with none its other caches
+    (`CallCacheService.derive`); and make Pilot's own system views what this
+    release holds (`DashboardStoreService.ship`)."""
     with scoped_session(app.container):
         _load_prices(app)
         derived = app.container.call_cache_service().derive()
+        print(
+            f"Call caches derived: {derived.calls} calls of {derived.transcripts}"
+            " transcripts"
+        )
+        _ship_views(app)
+
+
+def _ship_views(app: App) -> None:
+    shipped = app.container.dashboard_store_service().ship()
     print(
-        f"Call caches derived: {derived.calls} calls of {derived.transcripts}"
-        " transcripts"
+        f"Pilot's system views: {shipped.added} added, {shipped.changed} changed,"
+        f" {shipped.removed} removed"
     )
 
 
@@ -162,11 +172,12 @@ def _load_prices(app: App) -> None:
 
 
 def load_test_data_hook(app: App) -> None:
-    """Load the price file and the invented record (`TestDataService`) after
-    database recreation."""
+    """Load the price file, Pilot's own system views and the invented record
+    (`TestDataService`) after database recreation."""
     print("Loading the invented record...")
     with scoped_session(app.container):
         _load_prices(app)
+        _ship_views(app)
         counts = app.container.test_data_service().load_all()
     print("Test data loaded:")
     for entity, count in counts.items():

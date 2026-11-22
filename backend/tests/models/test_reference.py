@@ -28,9 +28,10 @@ class TestEnumTypes:
 
         assert dict(rows) == {enum.name: list(enum.enums) for enum in ENUM_TYPES}
 
-    def test_the_enums_are_twenty_two(self) -> None:
+    def test_the_enums_are_twenty_four(self) -> None:
         """Twenty of DB §2.4, with the five tables its 25 reference
-        entities, and Turn Cause and Hold Kind, Pilot's own of DB §2.11."""
+        entities, and Turn Cause, Hold Kind, Favourite Menu and Origin,
+        Pilot's own of DB §2.11."""
         assert {enum.name for enum in ENUM_TYPES} == {
             "user_kind",
             "overrule_kind",
@@ -54,6 +55,8 @@ class TestEnumTypes:
             "progress_state",
             "turn_cause",
             "hold_kind",
+            "favourite_menu",
+            "origin",
         }
 
 

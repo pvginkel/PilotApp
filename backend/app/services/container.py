@@ -38,6 +38,7 @@ from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
 from app.services.conversation_read_service import ConversationReadService
 from app.services.conversation_service import ConversationService
+from app.services.dashboard_store_service import DashboardStoreService
 from app.services.draft_service import DraftService
 from app.services.effect_service import EffectService
 from app.services.environment_service import EnvironmentService
@@ -611,6 +612,8 @@ class ServiceContainer(containers.DeclarativeContainer):
     address_service = providers.Factory(
         AddressService, db=db_session, catalogue_service=catalogue_service
     )
+    # What the dashboard stores, Pilot's own system views among it (F155)
+    dashboard_store_service = providers.Factory(DashboardStoreService, db=db_session)
 
     # A collector's publication of a transcript (F152.3)
     adoption_service = providers.Factory(

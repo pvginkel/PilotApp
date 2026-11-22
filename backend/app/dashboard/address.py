@@ -28,8 +28,7 @@ from app.dashboard.state import (
     look,
     write,
 )
-from app.models import QuotaWeek
-from app.services.quota_week_service import Period
+from app.services.quota_week_service import Period, quota_weeks
 
 ENTRY_MEASURES = (Simple("cost", "sum"), Simple("misses", "sum"))
 """An entry's measures, cost and the cache misses, one set for every kind
@@ -81,14 +80,7 @@ class AddressService:
 
     def weeks(self) -> tuple[Period, ...]:
         """The quota weeks the record holds, in the order they start."""
-        return tuple(
-            Period(starts_at, ends_at)
-            for starts_at, ends_at in self.db.execute(
-                select(QuotaWeek.starts_at, QuotaWeek.ends_at).order_by(
-                    QuotaWeek.starts_at
-                )
-            )
-        )
+        return quota_weeks(self.db)
 
     def entry(self, catalogue: Catalogue, checked: Checked) -> Checked:
         """An entry's state: its focus's path as the drill stack, each level
