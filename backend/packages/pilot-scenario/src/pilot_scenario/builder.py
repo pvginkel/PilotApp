@@ -10,10 +10,11 @@ side holds before a collector reads the transcript.
 A publication is what its thread's file says: the file's size and time, and
 each fact as the lines carry it. The files hold the lines these facts are
 read off: a thread's ids and where it ran, its Launches, Prompts, Calls and
-Tool Calls, its Compactions, each Call's place on the chain, the request it
-answered and those that failed before it, what Claude Code records of its
-choices, and the Events. No line is written for a hook run or a context
-part, which the publications carry alone.
+Tool Calls, a denied call's denial among them, its Compactions, each Call's
+place on the chain, the request it answered and those that failed before
+it, what Claude Code records of its choices, the Events, and the Stop hooks
+run at a Prompt's end. No line is written for a context part, which the
+publications carry alone.
 
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
@@ -271,6 +272,7 @@ class _Thread:
             failed=use.failed,
             exit_code=use.exit_code,
             interrupted=use.interrupted,
+            denial_kind=use.denied,
             result_characters=use.characters,
             saved_characters=use.saved,
         )
@@ -456,6 +458,9 @@ class Builder:
                     if followed:
                         thread.back(step)
                     thread.read(step, place)
+                if prompt.hooks:
+                    last = max((prompt.at, *_moments(prompt.steps)))
+                    lines.hooked(prompt.hooks, self.when(last))
             started, ended = launch.prompts[0].at, max(_launch_moments(launch))
             lines.exited(
                 self.when(started),

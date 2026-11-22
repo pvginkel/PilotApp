@@ -17,7 +17,8 @@ where the chain leads from that line, with what the Call it leads to left
 the next, the lines named before it that the file holds no line of there,
 the request lines written since the last one a Call named, the Events before
 the transcript's first Call, the directory and the environment the file
-named first, the Launch open there, the prompts waiting in the queue, and
+named first, the Launch open there and the latest Prompt it received, with
+the Hook Runs taken for that Prompt, the prompts waiting in the queue, and
 those a `remove` took out of it that no message taken in the middle of a run
 has claimed. No id of any other line before the boundary is held, and of no
 Call but the one the chain leads to.
@@ -55,6 +56,12 @@ _OCCURRED = 224
 _QUEUED = 176
 """The bytes a prompt waiting in the queue, or held once a `remove` took it
 out, is counted at."""
+
+_PROMPTED = 280
+"""The bytes the latest Prompt held is counted at beside its source."""
+
+_RAN = 200
+"""The bytes a Hook Run held is counted at beside its command."""
 
 
 def digest(content: bytes) -> bytes:
@@ -146,6 +153,28 @@ class Occurred:
 
 
 @dataclass(frozen=True)
+class Ran:
+    """A Hook Run: a run of one hook command at the end of a Prompt's
+    run."""
+
+    command: str
+    duration_ms: int
+    failed: bool
+    prevented_end: bool
+
+
+@dataclass(frozen=True)
+class Prompted:
+    """A Prompt as its publication gives it, with the Hook Runs taken for
+    it."""
+
+    received_at: datetime
+    source: str
+    characters: int
+    runs: tuple[Ran, ...] = ()
+
+
+@dataclass(frozen=True)
 class Standing:
     """Where a reading stands before one line of the file: what the lines
     from that line on continue. A file's first line continues nothing."""
@@ -182,6 +211,10 @@ class Standing:
     launch: Open | None = None
     """The Launch open there; none on a sub-agent's thread, before a main
     thread's first Launch and after an exit."""
+    prompt: Prompted | None = None
+    """The latest Prompt before it, where the Launch open there received
+    it: a Stop hook's summary from it on, before the next Prompt, lies on
+    that one."""
     queue: tuple[tuple[bytes, datetime], ...] = ()
     """The prompts waiting in the process's queue there, in the order they
     arrived: a digest of each one's text and the time of its `enqueue`
@@ -211,6 +244,8 @@ class Carry:
         """The bytes of memory the carry is counted at."""
         stands = self.stands
         left = stands.leads.left
+        prompt = stands.prompt
+        runs = () if prompt is None else prompt.runs
         words = (
             stands.link,
             stands.leads.call,
@@ -225,11 +260,15 @@ class Carry:
                 if left is None
                 else (left.model, left.effort, left.version, left.shape)
             ),
+            *(() if prompt is None else (prompt.source,)),
+            *(run.command for run in runs),
         )
         return (
             _HELD
             + sum(len(word) for word in words if word is not None)
             + (0 if left is None else _LEFT)
+            + (0 if prompt is None else _PROMPTED)
+            + _RAN * len(runs)
             + _AWAITED * len(stands.awaited)
             + _REQUESTED * len(stands.requests)
             + _OCCURRED * len(stands.events)

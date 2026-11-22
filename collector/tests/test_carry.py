@@ -11,6 +11,8 @@ from pilot_collector.carry import (
     Left,
     Occurred,
     Open,
+    Prompted,
+    Ran,
     Requested,
     Standing,
     digest,
@@ -26,6 +28,7 @@ def _carry(
     awaited: int = 0,
     requested: int = 0,
     occurred: int = 0,
+    ran: int = 0,
 ) -> Carry:
     """A carry no other shares a word or a time with."""
     return Carry(
@@ -79,6 +82,20 @@ def _carry(
             directory=f"/work/Loom{place}",
             environment=f"cleo-loom-{place:06}",
             launch=Open(STOOD + timedelta(hours=place), f"2.1.{place}", 300 + place),
+            prompt=Prompted(
+                STOOD + timedelta(hours=place, seconds=1),
+                f"typed-{place}",
+                1_000 + place,
+                tuple(
+                    Ran(
+                        f"/work/hooks/tidy-{place}-{named}.sh",
+                        2_000 + named,
+                        False,
+                        True,
+                    )
+                    for named in range(ran)
+                ),
+            ),
             queue=tuple(
                 (
                     digest(f"{place} {waiting}".encode()),
@@ -104,12 +121,13 @@ def _path(name: str) -> Path:
 
 class TestACarrysSize:
     def test_it_is_counted_at_no_less_than_the_memory_it_takes(self) -> None:
-        for queued, awaited, requested, occurred in (
-            (0, 0, 0, 0),
-            (40, 0, 0, 0),
-            (0, 3, 0, 0),
-            (0, 0, 7, 0),
-            (0, 0, 0, 9),
+        for queued, awaited, requested, occurred, ran in (
+            (0, 0, 0, 0, 0),
+            (40, 0, 0, 0, 0),
+            (0, 3, 0, 0, 0),
+            (0, 0, 7, 0, 0),
+            (0, 0, 0, 9, 0),
+            (0, 0, 0, 0, 6),
         ):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
@@ -120,6 +138,7 @@ class TestACarrysSize:
                     awaited=awaited,
                     requested=requested,
                     occurred=occurred,
+                    ran=ran,
                 )
                 for place in range(1_000, 1_400)
             ]
@@ -140,6 +159,9 @@ class TestACarrysSize:
 
     def test_an_event_held_counts(self) -> None:
         assert _carry(occurred=2).size > _carry(occurred=1).size > _carry().size
+
+    def test_a_hook_run_of_the_latest_prompt_counts(self) -> None:
+        assert _carry(ran=2).size > _carry(ran=1).size > _carry().size
 
     def test_a_prompt_a_remove_took_out_and_held_counts_as_one_waiting(
         self,

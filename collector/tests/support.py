@@ -153,6 +153,62 @@ def assistant(
     return chained("assistant", seconds, message=message)
 
 
+def denied(line: Line, kind: str) -> Line:
+    """A result's line that names the kind of its call's denial,
+    `toolDenialKind`."""
+    return line | {"toolDenialKind": kind}
+
+
+def hooked(
+    seconds: float,
+    *commands: str,
+    run: str = "hooks-1",
+    errors: tuple[str, ...] = (),
+    prevented: bool = False,
+    **fields: Any,
+) -> Line:
+    """The summary of the run `run` of the Stop hooks: each of `commands`
+    ran 10 ms and one more per its place, with the `errors` they reported;
+    `fields` are what a newer version adds, `failedHookErrorIndexes`."""
+    hooks = [
+        {"command": command, "durationMs": 10 + place}
+        for place, command in enumerate(commands)
+    ]
+    return chained(
+        "system",
+        seconds,
+        subtype="stop_hook_summary",
+        hookCount=len(hooks),
+        hookInfos=hooks,
+        hookErrors=list(errors),
+        hookAdditionalContext=[],
+        preventedContinuation=prevented,
+        stopReason="",
+        hasOutput=bool(errors),
+        level="suggestion",
+        toolUseID=run,
+        **fields,
+    )
+
+
+def hook_failed(
+    seconds: float, command: str, run: str = "hooks-1", event: str = "Stop"
+) -> Line:
+    """The error a hook `command` reported at `event`, in the run `run`."""
+    attachment = {
+        "type": "hook_non_blocking_error",
+        "hookName": event,
+        "toolUseID": run,
+        "hookEvent": event,
+        "stderr": "The shuttle jammed.",
+        "stdout": "",
+        "exitCode": 1,
+        "command": command,
+        "durationMs": 12,
+    }
+    return chained("attachment", seconds, attachment=attachment)
+
+
 def requesting(
     seconds: float,
     tool_use_id: str = "toolu_01",

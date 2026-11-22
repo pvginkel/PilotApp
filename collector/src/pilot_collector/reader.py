@@ -112,18 +112,38 @@ its newline is written. The facts are read off the lines in the file's order:
     words for that, never where it quotes them. The full size is the saved
     file's characters, the file found under `projects` by the path the
     result names; else the characters the result states; else none.
+  - It was denied where its result is an error and Claude Code says by
+    what: by a hook, `hook`, where the result opens in Claude Code's words
+    for a `PreToolUse` hook's block of that tool, whatever its line names;
+    else by the `toolDenialKind` its result's line names, from 2.1.201: a
+    permission rule, `rule`, for `permission-rule`, the person, `person`,
+    for `user-rejected`. A `toolDenialKind` of `interrupted` is no denial:
+    the person interrupted the call.
+- **A Hook Run** is a hook command a Stop hook's summary names, a main
+  thread's `system` line of subtype `stop_hook_summary` (2.1.250 on), on
+  the latest Prompt before it, with the command's duration. It failed where
+  an error the hook reported for the Stop event names its command and the
+  summary's `toolUseID`, the summary's `failedHookErrorIndexes` name its
+  place, or the summary names one hook and an error. It prevented the end
+  where the summary says it prevented the run from going on. A tool's hooks
+  log no summary.
 
 **From the boundary on.** A reading leaves a carry (`carry.py`): where it
 stood before the file's last Call. Given that carry, a file that grew is read
 from the boundary's byte on, and its publication is an appended one: the
 Calls from the boundary's on, the Launches that wrote a line from there on,
 the first with its Prompts from there on, the Compactions made from there
-on, and the four places the boundary names. Such a reading holds no line
-before the boundary's byte but the one the carry names, with where the chain
-leads from it as the lines before that byte stand and what the Call it leads
-to left the next, the request lines before it written since the last one a
-Call named, and the Events before it where no Call is, so it stops, and the
-file is read whole, where:
+on, and the four places the boundary names. A Stop hook's summary follows
+its run's last Call, so its Prompt was received before the boundary: where
+one from there on lies on that Prompt, the first Launch's Prompts open with
+it, published again with its Hook Runs, and the boundary names its place.
+Such a reading holds no line before the boundary's byte but the one the
+carry names, with where the chain leads from it as the lines before that
+byte stand and what the Call it leads to left the next, the request lines
+before it written since the last one a Call named, the Events before it
+where no Call is, and the latest Prompt before it where the Launch open
+there received it, with its Hook Runs, so it stops, and the file is read
+whole, where:
 
 - the file is no larger than the one the carry was built on, or its bytes
   from the boundary's to its old end are other than those read then
@@ -135,13 +155,15 @@ file is read whole, where:
   behind the boundary, or names a line written later;
 - a line is one the carry awaits, named by a line before the boundary that
   the file held no line of there: a chain before the boundary goes on
-  through it.
+  through it;
+- a Stop hook's summary lies on a Prompt received before the Launch open at
+  the boundary.
 """
 
 import json
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -157,6 +179,8 @@ from pilot_collector.carry import (
     Left,
     Occurred,
     Open,
+    Prompted,
+    Ran,
     Requested,
     Standing,
     digest,
@@ -194,6 +218,27 @@ a response with."""
 
 _ERRORS = {"api_retry": True, "api_error": True, "interrupt": False}
 """Whether an Event of each kind the collector reads counts as an error."""
+
+_HOOKED = "stop_hook_summary"
+"""The subtype of the `system` line that sums up the Stop hooks run at the
+end of a Prompt's run."""
+
+_HOOK_ERROR = "hook_non_blocking_error"
+"""The type of the attachment that records an error a hook command
+reported."""
+
+_STOP = "Stop"
+"""The event a Stop hook runs at."""
+
+_DENIALS = {"permission-rule": "rule", "user-rejected": "person"}
+"""The Denial Kind of a tool call by the `toolDenialKind` its result's line
+names."""
+
+_HOOK = "hook"
+"""The Denial Kind of a tool call a hook blocked."""
+
+_STOPPED = "interrupted"
+"""The `toolDenialKind` of a tool call the person interrupted."""
 
 _HOUR = timedelta(hours=1)
 """How long what a Call wrote to the cache that lasts an hour lasts."""
@@ -332,6 +377,7 @@ class _ToolCall:
     interrupted: bool = False
     result_characters: int | None = None
     saved_characters: int | None = None
+    denial_kind: str | None = None
 
 
 @dataclass(slots=True)
@@ -441,6 +487,36 @@ def _status(status: Any) -> str | None:
     """An API error's status as an Event's detail, none where its line gives
     none."""
     return None if status is None else str(status)
+
+
+def _denial(tool: str, said: str, denied: str | None) -> str | None:
+    """The Denial Kind of a call of `tool` whose result is an error saying
+    `said`, its line naming `denied` as its `toolDenialKind`: a hook's where
+    the result opens in Claude Code's words for a hook's block of the tool,
+    whatever its line names; none where the line names no kind of denial."""
+    if said.startswith(f"PreToolUse:{tool} hook error:"):
+        return _HOOK
+    return None if denied is None else _DENIALS.get(denied)
+
+
+def _prompt(prompt: Prompted) -> dict[str, Any]:
+    """A Prompt a carry holds, as a reading takes one."""
+    return {
+        "received_at": prompt.received_at,
+        "source": prompt.source,
+        "characters": prompt.characters,
+        "hook_runs": [asdict(run) for run in prompt.runs],
+    }
+
+
+def _prompted(prompt: dict[str, Any]) -> Prompted:
+    """A Prompt a reading took, as a carry holds one."""
+    return Prompted(
+        prompt["received_at"],
+        prompt["source"],
+        prompt["characters"],
+        tuple(Ran(**run) for run in prompt["hook_runs"]),
+    )
 
 
 def _requested(line: dict[str, Any], at: datetime) -> Requested:
@@ -595,6 +671,17 @@ class _Thread:
         self._answering: dict[str, _Call] = {}
         """The Calls taken, by the API's id of the request each answered,
         `requestId`."""
+        self._prompt = None if before.prompt is None else _prompt(before.prompt)
+        """The latest Prompt taken, else the carry's: the one a Stop hook's
+        summary lies on."""
+        self._carried = self._prompt
+        """The Prompt the carry holds, received before the boundary."""
+        self.reopened = False
+        """Whether the Prompt the carry holds is published again: a Stop
+        hook's summary from the boundary on lies on it."""
+        self._failing: dict[str, set[str]] = {}
+        """The commands that reported an error at the Stop event, by the
+        `toolUseID` of the run of the Stop hooks they are of."""
         self._leads: dict[str, _Stop | None] = {}
         """The nearest stop at or up the chain from each line taken, by its
         `uuid`, and from the line the reading stands after."""
@@ -670,7 +757,9 @@ class _Thread:
         elif kind == "user":
             content = line["message"]["content"]
             if is_a_tools_result(content):
-                self._returned(content, line.get("toolUseResult"), at)
+                self._returned(
+                    content, line.get("toolUseResult"), line.get("toolDenialKind"), at
+                )
             elif _interrupts(content):
                 self._occurred("interrupt", at)
             elif self._main:
@@ -681,11 +770,14 @@ class _Thread:
             self._queued(line, at)
         elif kind == "attachment":
             self._attached(line["attachment"], at)
+        elif kind == "system" and line.get("subtype") == _HOOKED:
+            self._hooked(line)
 
     def _standing(self, byte: int) -> Standing:
         """Where the reading stands before the line that starts at `byte`,
         none of it taken."""
         opened = None if self._exited else self.launches[-1]
+        received = 0 if opened is None else opened.kept + len(opened.prompts)
         calls = self._before.calls + len(self.calls)
         return Standing(
             byte=byte,
@@ -704,9 +796,10 @@ class _Thread:
             environment=self.environment,
             launch=None
             if opened is None
-            else Open(
-                opened.started_at, opened.version, opened.kept + len(opened.prompts)
-            ),
+            else Open(opened.started_at, opened.version, received),
+            prompt=None
+            if not received or self._prompt is None
+            else _prompted(self._prompt),
             queue=self._queue,
             removed=self._removed,
         )
@@ -803,6 +896,11 @@ class _Thread:
         if attachment["type"] == _MID_RUN:
             self._taken(attachment, at)
             return
+        if attachment["type"] == _HOOK_ERROR:
+            if attachment["hookEvent"] == _STOP:
+                failing = self._failing.setdefault(attachment["toolUseID"], set())
+                failing.add(attachment["command"])
+            return
         if self.environment is not None or attachment["type"] != "instructions":
             return
         pattern = self._settings.COLLECTOR_ENVIRONMENT_PATTERN
@@ -838,9 +936,46 @@ class _Thread:
     def _received(self, source: str, text: str, at: datetime) -> None:
         """A Prompt of the Launch open, `text` from `source`, received `at`."""
         self._prompts += 1
-        self.launches[-1].prompts.append(
-            {"received_at": at, "source": source, "characters": len(text)}
-        )
+        self._prompt = {
+            "received_at": at,
+            "source": source,
+            "characters": len(text),
+            "hook_runs": [],
+        }
+        self.launches[-1].prompts.append(self._prompt)
+
+    def _hooked(self, line: dict[str, Any]) -> None:
+        """A Stop hook's summary: a Hook Run of each command it names, on
+        the latest Prompt. A reading from a boundary on stops at one that
+        lies on a Prompt received before the Launch open there."""
+        failing = self._failing.pop(line["toolUseID"], set())
+        prompt = self._prompt
+        if prompt is None:
+            if self._prompts:
+                raise NotContinuedError(
+                    "a Stop hook's summary lies on a prompt received before its"
+                    " boundary's launch"
+                )
+            return
+        if prompt is self._carried and not self.reopened:
+            opened = self.launches[0]
+            opened.prompts.insert(0, prompt)
+            opened.kept -= 1
+            self.reopened = True
+        hooks = line["hookInfos"]
+        errors = bool(line.get("hookErrors"))
+        failed = line.get("failedHookErrorIndexes") or []
+        for place, hook in enumerate(hooks):
+            prompt["hook_runs"].append(
+                {
+                    "command": hook["command"],
+                    "duration_ms": hook["durationMs"],
+                    "failed": hook["command"] in failing
+                    or place in failed
+                    or (errors and len(hooks) == 1),
+                    "prevented_end": line.get("preventedContinuation") is True,
+                }
+            )
 
     def _answered(
         self, line: dict[str, Any], at: datetime, chain: _Stop | None
@@ -920,11 +1055,16 @@ class _Thread:
             self._latest.events.append(event)
 
     def _returned(
-        self, content: list[dict[str, Any]], record: Any, at: datetime
+        self,
+        content: list[dict[str, Any]],
+        record: Any,
+        denied: str | None,
+        at: datetime,
     ) -> None:
         """The results a line carries, each its tool call's where the thread
         requested one of its id that no result has reached; `record` is the
-        tool's own record of the result."""
+        tool's own record of the result, and `denied` the `toolDenialKind`
+        the line names."""
         for block in content:
             if block["type"] != "tool_result":
                 continue
@@ -948,7 +1088,12 @@ class _Thread:
                     asked.exit_code = 0
             asked.interrupted = (
                 isinstance(record, dict) and record.get("interrupted") is True
-            ) or (asked.failed and _INTERRUPTED.match(said) is not None)
+            ) or (
+                asked.failed
+                and (_INTERRUPTED.match(said) is not None or denied == _STOPPED)
+            )
+            if asked.failed:
+                asked.denial_kind = _denial(asked.tool, said, denied)
 
 
 def _repository(directory: str, settings: Settings) -> str | None:
@@ -1073,6 +1218,7 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
                     "failed": asked.failed,
                     "exit_code": asked.exit_code or None,
                     "interrupted": asked.interrupted,
+                    "denial_kind": asked.denial_kind,
                     "result_characters": asked.result_characters,
                     "saved_characters": asked.saved_characters,
                 }
@@ -1163,7 +1309,7 @@ def read(
             "boundary": {
                 "call": before.calls + 1,
                 "launch": before.launches + 1,
-                "prompt": before.prompts + 1,
+                "prompt": before.prompts + (0 if thread.reopened else 1),
                 "compaction": before.compactions + 1,
             },
         }

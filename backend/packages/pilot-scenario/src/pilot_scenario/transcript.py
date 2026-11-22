@@ -29,7 +29,17 @@ process writes as it exits.
   last request of its process sent and it kept, `keep` of its `base`, and
   those it adds, its `tail`.
 - A tool's result is a `user` line holding one `tool_result` block that names
-  its request's id, with `toolUseResult`, the tool's own record of it.
+  its request's id, with `toolUseResult`, the tool's own record of it. A
+  denied call's result is an error in Claude Code's words for its denial,
+  its line naming the kind as `toolDenialKind`: `permission-rule` for a
+  rule's and for a hook's, whose words open `PreToolUse:<tool> hook error:`,
+  and `user-rejected` for the person's.
+- The Stop hooks run at the end of a prompt's run are a `system` line of
+  subtype `stop_hook_summary` after its last Call, with each hook's command
+  and duration, the errors they reported and whether they kept the run from
+  ending, under a `toolUseID` of the run's. A hook that failed reports its
+  error before it: an `attachment` of type `hook_non_blocking_error` for the
+  Stop event, which names its command and that `toolUseID`.
 - A sub-agent's file opens with the task its spawning call gave it, and every
   line of its chain is a `isSidechain` one that carries its `agentId`.
 - A compaction is a `system` line of subtype `compact_boundary` that follows
@@ -56,7 +66,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from pilot_scenario.script import Call, Compaction, Occurrence, Retry, ToolUse
+from pilot_scenario.script import (
+    Call,
+    Compaction,
+    HookRun,
+    Occurrence,
+    Retry,
+    ToolUse,
+)
 
 SESSION_HOME = "/home/ubuntu/.claude"
 """The home as a session's own process names it: where a result's text says
@@ -87,6 +104,25 @@ INTERRUPTION = "[Request interrupted by user]"
 
 _RETRIES = 10
 """The most times Claude Code sends a request again after API errors."""
+
+_DENIED = {
+    "rule": "permission-rule",
+    "person": "user-rejected",
+    "hook": "permission-rule",
+}
+"""The `toolDenialKind` a denied call's result's line names, by the Denial
+Kind."""
+
+_GUARD = "guard_pantry.sh"
+"""The hook command whose block of a tool call its result names."""
+
+_REJECTED = (
+    "The user doesn't want to proceed with this tool use. The tool use was rejected. "
+)
+"""How the result opens of a tool call the person rejected."""
+
+_STOP = "Stop"
+"""The event a Stop hook runs at."""
 
 _ORIGINS = {
     "sdk": "sdk",
@@ -214,8 +250,11 @@ class Lines:
         """A line beside the chain."""
         self._lines.append({"type": kind, **fields, "sessionId": self._conversation})
 
-    def _chained(self, kind: str, at: datetime, **fields: Any) -> str:
-        """The chain's next line, which follows its leaf; its id."""
+    def _chained(
+        self, kind: str, at: datetime, shown: bool = True, **fields: Any
+    ) -> str:
+        """The chain's next line, which follows its leaf; its id. A line
+        that is not `shown` to the model is no message a request sends."""
         line: dict[str, Any] = {
             "parentUuid": self.leaf,
             "isSidechain": self._agent is not None,
@@ -228,7 +267,7 @@ class Lines:
         elif kind == "assistant":
             self._follows[self.leaf] = (line["parentUuid"], None)
         else:
-            message = None if kind == "system" else self.leaf
+            message = None if kind == "system" or not shown else self.leaf
             self._follows[self.leaf] = (line["parentUuid"], message)
         line |= fields
         line |= {
@@ -545,6 +584,8 @@ class Lines:
     ) -> None:
         """The result of the tool call whose request is the line `request`
         arrives, `use.characters` long."""
+        if use.denied is not None and not use.failed:
+            raise ValueError("A denied call's result is an error: it is `failed`")
         saved = None
         if use.saved is not None:
             named = (
@@ -567,6 +608,9 @@ class Lines:
         }
         if use.failed or use.tool == "Bash":
             block["is_error"] = use.failed
+        denied: dict[str, Any] = {}
+        if use.denied is not None:
+            denied["toolDenialKind"] = _DENIED[use.denied]
         self.leaf = request
         self._chained(
             "user",
@@ -574,7 +618,57 @@ class Lines:
             promptId=self._id("prompt"),
             message={"role": "user", "content": [block]},
             toolUseResult=_record(use, result, saved, spawned, task),
+            **denied,
             sourceToolAssistantUUID=request,
+        )
+
+    def hooked(self, hooks: tuple[HookRun, ...], at: datetime) -> None:
+        """The Stop hooks run at `at`, the end of a prompt's run: the error
+        each that failed reported, then their summary."""
+        held = {hook.held for hook in hooks}
+        if len(held) > 1:
+            raise ValueError(
+                "A Stop hook's summary says of all its hooks at once whether they"
+                " kept the run from ending"
+            )
+        run = self._id("hooks")
+        errors: list[str] = []
+        for hook in hooks:
+            if not hook.failed:
+                continue
+            said = f"Failed with non-blocking status code: {text(28)}"
+            errors.append(said)
+            self._chained(
+                "attachment",
+                at,
+                shown=False,
+                attachment={
+                    "type": "hook_non_blocking_error",
+                    "hookName": _STOP,
+                    "toolUseID": run,
+                    "hookEvent": _STOP,
+                    "stderr": said,
+                    "stdout": "",
+                    "exitCode": 1,
+                    "command": hook.command,
+                    "durationMs": hook.took_ms,
+                },
+            )
+        self._chained(
+            "system",
+            at,
+            subtype="stop_hook_summary",
+            hookCount=len(hooks),
+            hookInfos=[
+                {"command": hook.command, "durationMs": hook.took_ms} for hook in hooks
+            ],
+            hookErrors=errors,
+            hookAdditionalContext=[],
+            preventedContinuation=held == {True},
+            stopReason="",
+            hasOutput=bool(errors),
+            level="suggestion",
+            toolUseID=run,
         )
 
     def exited(self, started: datetime, ended: datetime, calls: list[Call]) -> None:
@@ -648,7 +742,13 @@ def _result(use: ToolUse, saved: str | None) -> str:
     invented ones."""
     length = use.characters or 0
     head, foot = "", ""
-    if saved is not None and use.saved is not None:
+    if use.denied == "hook":
+        head = f"PreToolUse:{use.tool} hook error: [{_GUARD}]: "
+    elif use.denied == "person":
+        head = _REJECTED
+    elif use.denied == "rule":
+        head = f"Permission to use {use.tool} has been denied. "
+    elif saved is not None and use.saved is not None:
         path = f"{SESSION_HOME}/{saved}"
         if use.server is None:
             head = (
@@ -674,6 +774,8 @@ def _record(
     task: str | None,
 ) -> Any:
     """`toolUseResult`, the tool's own record of its result."""
+    if use.denied == "person":
+        return "User rejected tool use"
     if use.failed:
         return f"Error: {result}"
     if use.tool == "Bash":

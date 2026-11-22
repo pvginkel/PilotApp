@@ -59,7 +59,10 @@ class ToolUse:
     result's length; `saved` the output's full length where it was saved to
     disk, the result then saying so in Claude Code's words; `interrupted`
     whether the person interrupted a command, which came back with no error;
-    `spawns` the sub-agent it started, by name."""
+    `denied` the Denial Kind's code where it was denied before it ran, by a
+    permission rule (`rule`), the person (`person`) or a hook (`hook`), its
+    result an error in Claude Code's words for that, so `failed`; `spawns`
+    the sub-agent it started, by name."""
 
     tool: str
     argument: str | None = None
@@ -70,6 +73,7 @@ class ToolUse:
     exit_code: int | None = None
     interrupted: bool = False
     saved: int | None = None
+    denied: str | None = None
     spawns: str | None = None
 
 
@@ -116,7 +120,10 @@ class Compaction:
 
 @dataclass(frozen=True)
 class HookRun:
-    """A run of one hook command at the end of a Prompt's run."""
+    """A run of one hook command at the end of a Prompt's run, a Stop
+    hook's: `failed` where it reported an error, `held` where it kept the
+    run from ending, which Claude Code records of all a Prompt's hooks at
+    once."""
 
     command: str
     took_ms: int

@@ -356,6 +356,39 @@ class TestAMainThread:
             }
         ]
 
+    def test_a_denied_call_names_its_denial_and_failed(self) -> None:
+        built = _built()
+
+        assert [
+            (asked["tool_use_id"], asked["denial_kind"], asked["failed"])
+            for thread in ("counting", "gears")
+            for call in built[thread]["calls"]
+            for asked in call.get("tool_calls", [])
+            if "denial_kind" in asked
+        ] == [
+            ("toolu_0009", "hook", True),
+            ("toolu_0010", "rule", True),
+            ("toolu_0003", "person", True),
+        ]
+
+    def test_a_prompts_hook_runs_are_the_scripts(self) -> None:
+        gears = _built()["gears"]
+
+        assert gears["launches"][0]["prompts"][0]["hook_runs"] == [
+            {
+                "command": "log_ride.sh",
+                "duration_ms": 40,
+                "failed": False,
+                "prevented_end": False,
+            },
+            {
+                "command": "sync_notes.sh",
+                "duration_ms": 1_210,
+                "failed": True,
+                "prevented_end": False,
+            },
+        ]
+
     def test_a_prompts_source_is_in_claude_codes_word(self) -> None:
         built = _built()
 

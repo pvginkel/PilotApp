@@ -29,11 +29,14 @@ from tests.support import (
     boundary,
     chained,
     cost,
+    denied,
     erred,
     fallback,
     fell_back,
     filed,
     finished,
+    hook_failed,
+    hooked,
     instructions,
     interruption,
     linked,
@@ -78,7 +81,7 @@ THREAD = (
     "repository",
     "environment",
 )
-PROMPT = ("received_at", "source", "characters")
+PROMPT = ("received_at", "source", "characters", "hook_runs")
 CHOICES = (
     "requested_model",
     "effort",
@@ -156,7 +159,7 @@ def _cut(publication: dict[str, Any]) -> dict[str, Any]:
                     if used["component"] == "claude-code"
                 ],
                 "prompts": [
-                    {name: prompt[name] for name in PROMPT}
+                    {name: prompt[name] for name in PROMPT if name in prompt}
                     for prompt in launch["prompts"]
                 ],
             }
@@ -340,6 +343,12 @@ class TestTheScenario:
         assert [
             event["kind"] for call in calls for event in call.get("events", [])
         ] == ["api_retry"]
+        assert {
+            asked["denial_kind"] for asked in tool_calls if "denial_kind" in asked
+        } == {"rule", "person", "hook"}
+        runs = [prompt.get("hook_runs", []) for prompt in prompts]
+        assert {run["failed"] for ran in runs for run in ran} == {True, False}
+        assert any(len(ran) > 1 for ran in runs)
 
     def test_a_reading_is_a_call_pilot_takes_by_its_shape(self, tmp_path: Path) -> None:
         builder = Builder(SCENARIO, UNTIL)
@@ -2456,6 +2465,238 @@ class TestToolCalls:
             18,
             0,
         ]
+
+
+HOOK = "PreToolUse:Bash hook error: [guard.sh]: The loom is locked."
+"""A result in Claude Code's words for a hook's block of a Bash call."""
+
+
+def _denied(projects: Path, said: str, kind: str | None) -> PublishedToolCallSchema:
+    """The one tool call of a file whose result is an error saying `said`,
+    its line naming `kind` as its `toolDenialKind`."""
+    returned = result(5, said=said, error=True)
+    return _tool_call(
+        projects, requesting(4), returned if kind is None else denied(returned, kind)
+    )
+
+
+def _runs(publication: PublicationSchema) -> list[list[tuple[str, int, bool, bool]]]:
+    """Each Prompt's Hook Runs: the command, its duration, whether it
+    failed and whether it prevented the end."""
+    return [
+        [
+            (run.command, run.duration_ms, run.failed, run.prevented_end)
+            for run in prompt.hook_runs
+        ]
+        for launch in publication.launches
+        for prompt in launch.prompts
+    ]
+
+
+class TestDenials:
+    def test_a_hooks_block_is_a_denial_by_a_hook_whatever_kind_its_line_names(
+        self, tmp_path: Path
+    ) -> None:
+        for kind in ("permission-rule", "user-rejected", None):
+            asked = _denied(tmp_path, HOOK, kind)
+
+            assert (asked.denial_kind, asked.failed) == ("hook", True)
+
+    def test_a_rule_and_the_person_deny_by_the_kind_the_line_names(
+        self, tmp_path: Path
+    ) -> None:
+        said = "Permission to use Bash has been denied."
+
+        assert [
+            _denied(tmp_path, said, kind).denial_kind
+            for kind in ("permission-rule", "user-rejected")
+        ] == ["rule", "person"]
+
+    def test_an_older_denial_names_no_kind(self, tmp_path: Path) -> None:
+        """Before 2.1.201 the words do not say who denied the call."""
+        said = "The user doesn't want to proceed with this tool use."
+
+        assert _denied(tmp_path, said, None).denial_kind is None
+
+    def test_a_call_the_person_interrupted_is_no_denial(self, tmp_path: Path) -> None:
+        asked = _denied(tmp_path, "The session ended before the loom.", "interrupted")
+
+        assert (asked.denial_kind, asked.interrupted) == (None, True)
+
+    def test_a_result_that_is_no_error_is_no_denial(self, tmp_path: Path) -> None:
+        asked = _tool_call(
+            tmp_path,
+            requesting(4),
+            denied(result(5, said=HOOK, error=False), "permission-rule"),
+        )
+
+        assert (asked.denial_kind, asked.failed) == (None, False)
+
+    def test_a_hooks_block_of_another_tool_is_not_the_calls(
+        self, tmp_path: Path
+    ) -> None:
+        said = HOOK.replace("PreToolUse:Bash", "PreToolUse:Write")
+
+        assert [
+            _denied(tmp_path, said, kind).denial_kind
+            for kind in ("permission-rule", None)
+        ] == ["rule", None]
+
+    def test_a_sub_agents_denials_are_read_as_a_main_threads(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            user(0, "Count the threads."),
+            requesting(4),
+            denied(result(5, said=HOOK, error=True), "permission-rule"),
+        ]
+        publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
+
+        assert [asked.denial_kind for asked in _tool_calls(publication)] == ["hook"]
+
+
+class TestHookRuns:
+    def test_a_stop_hooks_summary_is_a_run_of_each_command_on_the_latest_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    typed(10, "Beat the weft."),
+                    assistant(14, "msg_02"),
+                    hooked(15, "tidy.sh", "notes.sh"),
+                ]
+            ),
+        )
+
+        assert _runs(publication) == [
+            [],
+            [("tidy.sh", 10, False, False), ("notes.sh", 11, False, False)],
+        ]
+
+    def test_each_summary_adds_its_runs_to_its_prompts(self, tmp_path: Path) -> None:
+        """A hook that kept the run from ending makes it go on."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    hooked(5, "tidy.sh", prevented=True),
+                    assistant(8, "msg_02"),
+                    hooked(9, "tidy.sh", run="hooks-2"),
+                ]
+            ),
+        )
+
+        assert _runs(publication) == [
+            [("tidy.sh", 10, False, True), ("tidy.sh", 10, False, False)]
+        ]
+
+    def test_a_run_failed_where_an_error_at_the_stop_event_names_it(
+        self, tmp_path: Path
+    ) -> None:
+        """The error names the summary's run and the command."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    hook_failed(1, "tidy.sh", event="SessionStart"),
+                    assistant(4, "msg_01"),
+                    hook_failed(5, "notes.sh"),
+                    hook_failed(5, "tidy.sh", run="hooks-0"),
+                    hooked(5, "tidy.sh", "notes.sh", errors=("The shuttle jammed.",)),
+                ]
+            ),
+        )
+
+        assert _runs(publication) == [
+            [("tidy.sh", 10, False, False), ("notes.sh", 11, True, False)]
+        ]
+
+    def test_a_newer_summary_names_the_places_of_those_that_failed(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    hooked(
+                        5,
+                        "tidy.sh",
+                        "notes.sh",
+                        errors=("The shuttle jammed.",),
+                        failedHookErrorIndexes=[0],
+                    ),
+                ]
+            ),
+        )
+
+        assert [[run[2] for run in ran] for ran in _runs(publication)] == [
+            [True, False]
+        ]
+
+    def test_one_hook_and_an_error_is_its_failure(self, tmp_path: Path) -> None:
+        """Where a summary names several hooks, an error alone does not say
+        whose it is."""
+        failing = ("The shuttle jammed.",)
+        lines = [
+            typed(0),
+            assistant(4, "msg_01"),
+            hooked(5, "tidy.sh", errors=failing),
+            typed(10, "Beat the weft."),
+            assistant(14, "msg_02"),
+            hooked(15, "tidy.sh", "notes.sh", run="hooks-2", errors=failing),
+        ]
+
+        assert [
+            [run[2] for run in ran] for ran in _runs(_read(tmp_path, linked(lines)))
+        ] == [
+            [True],
+            [False, False],
+        ]
+
+    def test_a_summary_lies_on_the_latest_prompt_wherever_it_was_received(
+        self, tmp_path: Path
+    ) -> None:
+        """A Launch that received none."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    cost(),
+                    assistant(30, "msg_02"),
+                    hooked(31, "tidy.sh"),
+                ]
+            ),
+        )
+
+        assert [len(launch.prompts) for launch in publication.launches] == [1, 0]
+        assert _runs(publication) == [[("tidy.sh", 10, False, False)]]
+
+    def test_a_summary_before_any_prompt_lies_on_none(self, tmp_path: Path) -> None:
+        publication = _read(
+            tmp_path, linked([assistant(4, "msg_01"), hooked(5, "tidy.sh")])
+        )
+
+        assert [len(launch.prompts) for launch in publication.launches] == [0]
+
+    def test_a_sub_agents_summary_lies_on_none(self, tmp_path: Path) -> None:
+        lines = [
+            user(0, "Count the threads."),
+            assistant(4, "msg_01"),
+            hooked(5, "tidy.sh"),
+        ]
+
+        assert read(filed(tmp_path, lines, AGENT), SETTINGS).publication.launches == []
 
 
 class TestAnOutputSavedToDisk:

@@ -19,6 +19,8 @@ from pilot_collector.carry import (
     Left,
     Occurred,
     Open,
+    Prompted,
+    Ran,
     Requested,
     Standing,
     digest,
@@ -41,6 +43,7 @@ from tests.support import (
     fell_back,
     filed,
     finished,
+    hooked,
     instructions,
     interruption,
     linked,
@@ -170,6 +173,7 @@ class TestTheCarry:
             directory=DIRECTORY,
             environment=None,
             launch=Open(moment(0), support.VERSION, 1),
+            prompt=Prompted(moment(0), "typed", len("Warp the loom.")),
             queue=(),
         )
         assert carry.end == digest(support.content(lines[3:]))
@@ -456,6 +460,57 @@ class TestTheCarry:
         assert size("claude-opus-4-5-of-a-loom") - size("claude-opus-4-5") == len(
             "-of-a-loom"
         )
+
+    def test_it_holds_the_latest_prompt_the_launch_open_received_with_its_runs(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                hooked(5, "tidy.sh", prevented=True),
+                assistant(8, "msg_02"),
+                hooked(9, "notes.sh", run="hooks-2"),
+            ]
+        )
+
+        stands = read(filed(tmp_path, lines), SETTINGS).carry.stands
+
+        assert stands.prompt == Prompted(
+            moment(0),
+            "typed",
+            len("Warp the loom."),
+            (Ran("tidy.sh", 10, False, True),),
+        )
+
+    def test_it_holds_no_prompt_where_the_launch_open_received_none(
+        self, tmp_path: Path
+    ) -> None:
+        for resumed in ([], [chained("system", 28, subtype="turn_duration")]):
+            lines = linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    cost(),
+                    *resumed,
+                    assistant(30, "msg_02"),
+                ]
+            )
+
+            assert read(filed(tmp_path, lines), SETTINGS).carry.stands.prompt is None
+
+    def test_the_latest_prompt_counts_in_its_size_with_its_runs(
+        self, tmp_path: Path
+    ) -> None:
+        def size(*commands: str) -> int:
+            summaries = [hooked(5, command) for command in commands]
+            lines = linked(
+                [typed(0), assistant(4, "msg_01"), *summaries, assistant(8, "msg_02")]
+            )
+            return read(filed(tmp_path, lines), SETTINGS).carry.size
+
+        assert size("t.sh", "tidy.sh") > size("tidy.sh") > size()
+        assert size("tidy.sh") - size() > len("tidy.sh")
 
     def test_a_line_awaited_counts_in_its_size_with_its_id(
         self, tmp_path: Path
@@ -972,6 +1027,60 @@ class TestAFileThatGrew:
             == read(filed_again(tmp_path), SETTINGS).publication
         )
 
+    def test_a_stop_hooks_summary_from_the_boundary_on_publishes_its_prompt_again(
+        self, tmp_path: Path
+    ) -> None:
+        """With the runs of the summaries before the boundary, and at its
+        place among the Transcript's."""
+        first = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                hooked(5, "tidy.sh", prevented=True),
+                assistant(8, "msg_02"),
+            ]
+        )
+        before, grown = _grown(
+            tmp_path,
+            first,
+            _continuing("line-4", [hooked(9, "notes.sh", run="hooks-2")]),
+        )
+
+        publication = grown.publication
+        assert _places(publication) == (2, 1, 1, 1)
+        (launch,) = publication.launches
+        assert [
+            (prompt.received_at, [run.command for run in prompt.hook_runs])
+            for prompt in launch.prompts
+        ] == [(moment(0), ["tidy.sh", "notes.sh"])]
+        whole = read(filed_again(tmp_path), SETTINGS)
+        assert _held(before.publication, publication) == whole.publication
+        assert grown.carry == whole.carry
+
+    def test_a_summary_from_the_boundary_on_of_a_prompt_taken_there_is_its(
+        self, tmp_path: Path
+    ) -> None:
+        """The Prompt the carry holds is not published again."""
+        _, grown = _grown(
+            tmp_path,
+            linked([typed(0), assistant(4, "msg_01")]),
+            _continuing(
+                "line-2",
+                [
+                    typed(10, "Beat the weft."),
+                    assistant(14, "msg_02"),
+                    hooked(15, "notes.sh"),
+                ],
+            ),
+        )
+
+        publication = grown.publication
+        assert _places(publication) == (1, 1, 2, 1)
+        (launch,) = publication.launches
+        assert [
+            [run.command for run in prompt.hook_runs] for prompt in launch.prompts
+        ] == [["notes.sh"]]
+
     def test_the_launch_open_at_the_boundary_comes_with_its_prompts_from_there_on(
         self, tmp_path: Path
     ) -> None:
@@ -1312,6 +1421,25 @@ class TestAFileThatDoesNotContinueItsCarry:
             "claude-opus-4-1",
             None,
         ]
+
+    def test_a_summary_on_a_prompt_before_the_boundarys_launch_is_not_read_on(
+        self, tmp_path: Path
+    ) -> None:
+        """Read whole, it lies on the Launch before's last Prompt."""
+        named = filed(
+            tmp_path,
+            linked([typed(0), assistant(4, "msg_01"), cost(), assistant(30, "msg_02")]),
+        )
+        carry = read(named, SETTINGS).carry
+        _added(named, _continuing("line-3", [hooked(31, "tidy.sh")]))
+
+        with pytest.raises(
+            NotContinuedError,
+            match="a Stop hook's summary lies on a prompt received before its boundary's",
+        ):
+            read(named, SETTINGS, carry)
+        whole = read(named, SETTINGS).publication
+        assert [len(prompt.hook_runs) for prompt in whole.launches[0].prompts] == [1]
 
     def test_a_compaction_that_continues_a_line_behind_the_boundary_is_not_read_on(
         self, named: Transcript, carry: Carry

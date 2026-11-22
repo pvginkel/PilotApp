@@ -4,13 +4,16 @@ and `ben`, the projects `recipe-box` and `bike-log`.
 Pilot is sent to halve the stew in the recipe box, an errand's first leg. Its
 session reads the recipe, has a sub-agent count the servings, meets a
 failing command and an API error its request is sent again after, and
-carries on past a compaction, missing the cache; two of its tools' outputs
-are too large and are saved to disk. The sub-agent asks for
-Opus once and Haiku answers in its place, and its last answer runs out of
-tokens. Ada, by hand, looks at the bike log's gear table, stops the command
-her second question started, takes that question back and comes back after
-the cache has lapsed, each time missing it: one of the first rides'
-conversations, a group of work done before Pilot ran any.
+carries on past a compaction, missing the cache, a Stop hook tidying up at
+its end; two of its tools' outputs are too large and are saved to disk. The
+sub-agent asks for Opus once and Haiku answers in its place, while a hook
+keeps it from the pantry's token and a permission rule from the pantry's
+stock, and its last answer runs out of tokens. Ada, by hand, looks at the
+bike log's gear table, one of her two Stop hooks failing, stops the command
+her second question started, takes that question back and turns down the
+edit Claude then asks for, and comes back after the cache has lapsed, each
+time missing it: one of the first rides' conversations, a group of work
+done before Pilot ran any.
 
 The model names are the public ones. Everything else is invented.
 """
@@ -68,7 +71,25 @@ COUNTING = SubAgent(
             model=HAIKU,
             requested=OPUS,
             tokens=Tokens(input=310, cache_read=6_020, output=72),
-            tools=(ToolUse("Read", "recipes/stew.md", took=1, characters=2_210),),
+            tools=(
+                ToolUse("Read", "recipes/stew.md", took=1, characters=2_210),
+                ToolUse(
+                    "Bash",
+                    "cat ~/.pantry/token",
+                    took=1,
+                    characters=260,
+                    failed=True,
+                    denied="hook",
+                ),
+                ToolUse(
+                    "Bash",
+                    "curl pantry.local/stock",
+                    took=1,
+                    characters=120,
+                    failed=True,
+                    denied="rule",
+                ),
+            ),
         ),
         Call(
             at=74,
@@ -282,6 +303,10 @@ GEARS = Session(
                             ),
                         ),
                     ),
+                    hooks=(
+                        HookRun("log_ride.sh", took_ms=40),
+                        HookRun("sync_notes.sh", took_ms=1_210, failed=True),
+                    ),
                 ),
                 Prompt(
                     at=350,
@@ -324,6 +349,16 @@ GEARS = Session(
                                 cache_write_5m=20_400,
                                 cache_read=1_920,
                                 output=298,
+                            ),
+                            tools=(
+                                ToolUse(
+                                    "Edit",
+                                    "rides/gears.md",
+                                    took=6,
+                                    characters=160,
+                                    failed=True,
+                                    denied="person",
+                                ),
                             ),
                         ),
                     ),

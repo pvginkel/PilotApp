@@ -38,6 +38,7 @@ from app.models import (
     Compaction,
     ComponentVersion,
     Event,
+    HookRun,
     Launch,
     LaunchComponent,
     Prompt,
@@ -1017,6 +1018,11 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
             select(Prompt).where(Prompt.transcript_id == thread.id).order_by(Prompt.id)
         ).all()
         prompt = {row.id: place for place, row in enumerate(prompts, start=1)}
+        hook_runs = record.scalars(
+            select(HookRun)
+            .where(HookRun.prompt_id.in_(list(prompt)))
+            .order_by(HookRun.id)
+        ).all()
         compactions = record.scalars(
             select(Compaction)
             .where(Compaction.transcript_id == thread.id)
@@ -1050,6 +1056,10 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
                 for launch_id, code, version in components
             ),
             "prompts": [_row(row, launch_id=launch[row.launch_id]) for row in prompts],
+            "hook_runs": sorted(
+                (_row(row, prompt_id=prompt[row.prompt_id]) for row in hook_runs),
+                key=lambda run: run["prompt_id"],
+            ),
             "compactions": [_row(row) for row in compactions],
             "calls": [
                 _row(
@@ -1159,6 +1169,27 @@ class TestAFileThatGrows:
         )
         assert [row["kind_code"] for row in grown["events"]] == (
             ["api_retry"] * 2 if name == RECIPES else []
+        )
+        assert [
+            (run["prompt_id"], run["command"], run["failed"])
+            for run in grown["hook_runs"]
+        ] == {
+            RECIPES: [(1, "tidy_up.sh", False), (2, "tidy_up.sh", False)],
+            SCALER: [],
+            RIDES: [
+                (1, "log_ride.sh", False),
+                (1, "sync_notes.sh", True),
+                (5, "log_ride.sh", False),
+                (5, "sync_notes.sh", True),
+            ],
+        }[name]
+        assert (
+            sorted(
+                row["denial_kind_code"]
+                for row in grown["tool_calls"]
+                if row["denial_kind_code"]
+            )
+            == {RECIPES: [], SCALER: ["hook", "rule"], RIDES: ["person"] * 2}[name]
         )
         assert replayed is not None and replayed < path.stat().st_size
         _configure(committed_app, settling=0.0)

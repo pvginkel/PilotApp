@@ -1,9 +1,9 @@
 """The scenario as transcript files (F122.3): each thread a file in Claude
 Code's line shapes, in a home laid out as the fleet's is, and each
 publication what its file says: read back off the lines here, a thread's
-ids and place, its Launches, Prompts, Calls and Tool Calls, its Compactions,
-each Call's place on the chain and when it was sent, and the Events are the
-publication's."""
+ids and place, its Launches, Prompts and their Hook Runs, its Calls and Tool
+Calls with their denials, its Compactions, each Call's place on the chain
+and when it was sent, and the Events are the publication's."""
 
 import json
 import re
@@ -17,6 +17,7 @@ from pilot_scenario import SCENARIO, Builder, HomeFile, Scenario
 from pilot_scenario.script import (
     Call,
     Compaction,
+    HookRun,
     Launch,
     Occurrence,
     Prompt,
@@ -79,9 +80,12 @@ TOOL_CALL_FACTS = (
     "failed",
     "exit_code",
     "interrupted",
+    "denial_kind",
     "result_characters",
     "saved_characters",
 )
+DENIALS = {"permission-rule": "rule", "user-rejected": "person"}
+"""A Denial Kind by the `toolDenialKind` a result's line names."""
 
 
 def _lines(file: HomeFile) -> list[dict[str, Any]]:
@@ -140,6 +144,10 @@ def _tool_call(
         "failed": block.get("is_error", False),
         "result_characters": len(said),
     }
+    if said.startswith(f"PreToolUse:{asked['name']} hook error:"):
+        read["denial_kind"] = "hook"
+    elif "toolDenialKind" in result:
+        read["denial_kind"] = DENIALS[result["toolDenialKind"]]
     if asked["name"] == "Bash":
         exited = re.match(r"Exit code (-?\d+)", said) if read["failed"] else None
         if exited is not None:
@@ -212,6 +220,9 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
     exited, prompts, enqueued = True, 0, None
     early: list[dict[str, Any]] = []
     """The Events before the first Call, which it marks."""
+    failing: dict[str, set[str]] = {}
+    """The Stop hooks' commands that reported an error, by their run's
+    `toolUseID`."""
 
     def occurred(kind: str, is_error: bool, line: dict[str, Any], status: Any) -> None:
         """An Event, on the last Call begun before it, else the first."""
@@ -246,12 +257,30 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
         if line["type"] == "queue-operation" and line["operation"] == "enqueue":
             enqueued = line
         elif line["type"] == "attachment" and main:
-            for instructions in line["attachment"]["files"]:
+            attached = line["attachment"]
+            if attached["type"] == "hook_non_blocking_error":
+                assert attached["hookEvent"] == "Stop"
+                failing.setdefault(attached["toolUseID"], set()).add(
+                    attached["command"]
+                )
+                continue
+            for instructions in attached["files"]:
                 named = re.match(r"# Environment: (\S+)\n", instructions["content"])
                 if instructions["type"] == "Managed" and named is not None:
                     read.setdefault("environment", named.group(1))
         elif line["type"] == "system" and line["subtype"] == "api_error":
             occurred("api_retry", True, line, line["error"].get("status"))
+        elif line["type"] == "system" and line["subtype"] == "stop_hook_summary":
+            failed = failing.pop(line["toolUseID"], set())
+            launches[-1]["prompts"][-1]["hook_runs"] = [
+                {
+                    "command": hook["command"],
+                    "duration_ms": hook["durationMs"],
+                    "failed": hook["command"] in failed,
+                    "prevented_end": line["preventedContinuation"],
+                }
+                for hook in line["hookInfos"]
+            ]
         elif line["type"] == "assistant" and line["message"]["model"] == SYNTHETIC:
             assert line["isApiErrorMessage"]
             occurred("api_error", True, line, line["apiErrorStatus"])
@@ -353,7 +382,8 @@ def _facts(publication: dict[str, Any]) -> dict[str, Any]:
                 "prompts": [
                     {
                         name: prompt[name]
-                        for name in ("received_at", "source", "characters")
+                        for name in ("received_at", "source", "characters", "hook_runs")
+                        if name in prompt
                     }
                     for prompt in launch["prompts"]
                 ],
@@ -560,6 +590,27 @@ class TestAPublicationIsWhatItsFileSays:
         assert any(call["failed"] and call.get("exit_code") for call in tool_calls)
         assert any(call["interrupted"] for call in tool_calls)
         assert sorted(
+            call["denial_kind"] for call in tool_calls if "denial_kind" in call
+        ) == [
+            "hook",
+            "person",
+            "rule",
+        ]
+        runs = [
+            run
+            for publication in publications
+            for launch in publication.get("launches", [])
+            for prompt in launch["prompts"]
+            for run in prompt.get("hook_runs", [])
+        ]
+        assert {run["failed"] for run in runs} == {True, False}
+        assert any(
+            len(prompt.get("hook_runs", [])) > 1
+            for publication in publications
+            for launch in publication.get("launches", [])
+            for prompt in launch["prompts"]
+        )
+        assert sorted(
             (call["tool"], call["saved_characters"])
             for call in tool_calls
             if "saved_characters" in call
@@ -720,7 +771,7 @@ class TestTheLines:
             (2, 2),
             (4, 2),
             (5, 1),
-            (6, 2),
+            (6, 3),
         ]
 
     def test_an_attempt_that_failed_is_its_request_and_the_error_it_met(
@@ -978,6 +1029,112 @@ class TestTheLines:
 
         with pytest.raises(ValueError, match="shorter than Claude Code's own words"):
             Builder(scenario, UNTIL).files()
+
+    def test_a_denied_calls_result_is_an_error_in_claude_codes_words_for_it(
+        self,
+    ) -> None:
+        """A hook's block and a rule's name the kind `permission-rule`, the
+        person's `user-rejected`."""
+        _, counting, gears = _transcripts(Builder(SCENARIO, UNTIL))
+        denied = [
+            line
+            for file in (counting, gears)
+            for line in _lines(file)
+            if "toolDenialKind" in line
+        ]
+
+        assert [
+            (line["toolDenialKind"], block["is_error"], block["content"][:29])
+            for line in denied
+            for block in _blocks(line, "tool_result")
+        ] == [
+            ("permission-rule", True, "PreToolUse:Bash hook error: ["),
+            ("permission-rule", True, "Permission to use Bash has be"),
+            ("user-rejected", True, "The user doesn't want to proc"),
+        ]
+        assert [line["toolUseResult"][:6] for line in denied] == [
+            "Error:",
+            "Error:",
+            "User r",
+        ]
+
+    def test_a_denied_call_whose_result_is_no_error_is_refused(self) -> None:
+        session = _resumed().sessions[0]
+        denied = Prompt(
+            at=0,
+            source="typed",
+            characters=20,
+            steps=(
+                Call(
+                    at=5,
+                    tokens=Tokens(input=10),
+                    tools=(
+                        ToolUse("Bash", "ls", took=1, characters=60, denied="rule"),
+                    ),
+                ),
+            ),
+        )
+        launch = Launch(versions=(("claude-code", "2.1.317"),), prompts=(denied,))
+        scenario = replace(_resumed(), sessions=(replace(session, launches=(launch,)),))
+
+        with pytest.raises(ValueError, match="A denied call's result is an error"):
+            Builder(scenario, UNTIL).files()
+
+    def test_the_stop_hooks_are_a_summary_after_the_runs_last_call(self) -> None:
+        """Each that failed reports its error before it, under the run's
+        `toolUseID`."""
+        lines = _lines(_transcripts(Builder(SCENARIO, UNTIL))[2])
+        (summary,) = [
+            line for line in lines if line.get("subtype") == "stop_hook_summary"
+        ]
+        (error,) = [
+            line
+            for line in lines
+            if line["type"] == "attachment"
+            and line["attachment"]["type"] == "hook_non_blocking_error"
+        ]
+        last = [
+            line for line in lines if line.get("message", {}).get("id") == "msg_0002"
+        ][-1]
+
+        assert error["parentUuid"] == last["uuid"]
+        assert summary["parentUuid"] == error["uuid"]
+        assert summary["timestamp"] == last["timestamp"]
+        assert summary["hookInfos"] == [
+            {"command": "log_ride.sh", "durationMs": 40},
+            {"command": "sync_notes.sh", "durationMs": 1_210},
+        ]
+        assert summary["hookErrors"] == [error["attachment"]["stderr"]]
+        assert summary["preventedContinuation"] is False
+        assert (
+            error["attachment"]["hookEvent"],
+            error["attachment"]["command"],
+            error["attachment"]["toolUseID"],
+        ) == ("Stop", "sync_notes.sh", summary["toolUseID"])
+
+    def test_a_hooks_error_is_no_message_a_request_sends(self) -> None:
+        lines = _lines(_transcripts(Builder(SCENARIO, UNTIL))[2])
+        (error,) = [line for line in lines if line["type"] == "attachment"][1:]
+        asked = [line for line in lines if line["type"] == "api-request"]
+
+        assert error["attachment"]["type"] == "hook_non_blocking_error"
+        assert (asked[2]["keep"], len(asked[2]["tail"])) == (4, 2)
+
+    def test_hooks_that_differ_on_keeping_the_run_from_ending_are_refused(
+        self,
+    ) -> None:
+        """Claude Code says it of all a summary's hooks at once."""
+        resumed = _resumed()
+        (session,) = resumed.sessions
+        first, *rest = session.launches
+        (prompt,) = first.prompts
+        hooks = (HookRun("a.sh", took_ms=3), HookRun("b.sh", took_ms=4, held=True))
+        held = replace(prompt, hooks=hooks)
+        launches = (replace(first, prompts=(held,)), *rest)
+        other = replace(resumed, sessions=(replace(session, launches=launches),))
+
+        with pytest.raises(ValueError, match="all its hooks at once"):
+            Builder(other, UNTIL).files()
 
     def test_invented_words_are_as_long_as_asked(self) -> None:
         assert [len(text(length)) for length in (0, 1, 57, 58, 4_096)] == [
