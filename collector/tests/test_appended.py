@@ -20,11 +20,15 @@ from tests.support import (
     DIRECTORY,
     MANAGED,
     Line,
+    answering,
     assistant,
     boundary,
     chained,
     cost,
+    fallback,
+    fell_back,
     filed,
+    finished,
     instructions,
     linked,
     loaded,
@@ -544,6 +548,50 @@ class TestAFileThatGrew:
         assert (call.tokens, call.completed_at) == ({"output": 31}, moment(6))
         assert grown.carry.stands.calls == 0
 
+    def test_the_boundarys_call_takes_its_choices_from_its_lines_from_there_on(
+        self, tmp_path: Path
+    ) -> None:
+        """Each lies on a line of the Call's own."""
+        before, grown = _grown(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    answering(4, "msg_01", fallback("claude-opus-4-1"))
+                    | {"effort": "high", "attributionSkill": "loom:warping"},
+                ]
+            ),
+            _continuing(
+                "line-2",
+                [finished(assistant(6, "msg_01", output=31), 12, "max_tokens")],
+            ),
+        )
+
+        (call,) = grown.publication.calls
+        assert (call.requested_model, call.effort, call.attributed_skill) == (
+            "claude-opus-4-1",
+            "high",
+            "loom:warping",
+        )
+        assert (call.thinking_tokens, call.stop_reason) == (12, "max_tokens")
+        assert (
+            _held(before.publication, grown.publication)
+            == read(filed_again(tmp_path), SETTINGS).publication
+        )
+
+    def test_a_fallbacks_line_from_the_boundary_on_names_the_boundarys_call(
+        self, tmp_path: Path
+    ) -> None:
+        """Claude Code writes it after the lines of the Call it names."""
+        _, grown = _grown(
+            tmp_path,
+            linked([typed(0), assistant(4, "msg_01") | {"requestId": "req_01"}]),
+            _continuing("line-2", [fell_back(4.2, "req_01", "claude-opus-4-1")]),
+        )
+
+        (call,) = grown.publication.calls
+        assert call.requested_model == "claude-opus-4-1"
+
     def test_a_result_from_the_boundary_on_reaches_its_request(
         self, tmp_path: Path
     ) -> None:
@@ -1004,6 +1052,39 @@ class TestAFileThatDoesNotContinueItsCarry:
             NotContinuedError, match="names a request no line from its boundary on"
         ):
             read(named, SETTINGS, carry)
+
+    def test_a_fallbacks_line_that_names_a_call_behind_the_boundary_is_not_read_on(
+        self, tmp_path: Path
+    ) -> None:
+        """One written once the next Call began names a Call the carry
+        holds nothing of."""
+        named = filed(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01") | {"requestId": "req_01"},
+                    assistant(9, "msg_02") | {"requestId": "req_02"},
+                ]
+            ),
+        )
+        carry = read(named, SETTINGS).carry
+        _added(
+            named, _continuing("line-3", [fell_back(9.2, "req_01", "claude-opus-4-1")])
+        )
+
+        with pytest.raises(
+            NotContinuedError,
+            match="a fallback names a request no Call from its boundary on answered",
+        ):
+            read(named, SETTINGS, carry)
+
+        assert [
+            call.requested_model for call in read(named, SETTINGS).publication.calls
+        ] == [
+            "claude-opus-4-1",
+            None,
+        ]
 
     def test_a_compaction_that_continues_a_line_behind_the_boundary_is_not_read_on(
         self, named: Transcript, carry: Carry

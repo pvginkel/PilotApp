@@ -58,6 +58,12 @@ CALL_FACTS = (
     "sent_at",
     "completed_at",
     "model",
+    "requested_model",
+    "effort",
+    "stop_reason",
+    "thinking_tokens",
+    "attributed_skill",
+    "attributed_plugin",
     "tokens",
 )
 TOOL_CALL_FACTS = (
@@ -285,6 +291,24 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                 "model": message["model"],
                 "tokens": {kind: tokens for kind, tokens in counted.items() if tokens},
             }
+            for fact, key in (
+                ("effort", "effort"),
+                ("attributed_skill", "attributionSkill"),
+                ("attributed_plugin", "attributionPlugin"),
+            ):
+                if key in line:
+                    call[fact] = line[key]
+            asked = [block["from"]["model"] for block in _blocks(line, "fallback")]
+            if asked:
+                call["requested_model"] = asked[0]
+            elif line["requestedModel"] != message["model"]:
+                call.setdefault("requested_model", line["requestedModel"])
+            if "output_tokens_details" in spent:
+                call["thinking_tokens"] = spent["output_tokens_details"][
+                    "thinking_tokens"
+                ]
+            if message["stop_reason"] not in (None, "end_turn", "tool_use"):
+                call["stop_reason"] = message["stop_reason"]
             call["tool_calls"] += [
                 _tool_call(asked, line, results.get(asked["id"]), home)
                 for asked in _blocks(line, "tool_use")
@@ -476,6 +500,15 @@ class TestAPublicationIsWhatItsFileSays:
         ]
         assert sum("compaction" in call for call in calls) == 1
         assert all("sent_at" in call for call in calls)
+        for chosen in (
+            "requested_model",
+            "effort",
+            "stop_reason",
+            "thinking_tokens",
+            "attributed_skill",
+            "attributed_plugin",
+        ):
+            assert any(chosen in call for call in calls)
         assert not any("sent_at" in call for call in resumed["calls"])
         assert [call.get("predecessor") for call in resumed["calls"]] == [
             None,
@@ -679,6 +712,56 @@ class TestTheLines:
             stamp(builder.when(19) - timedelta(milliseconds=40)),
             stamp(builder.when(19)),
         ]
+
+    def test_a_responses_lines_name_its_choices_and_its_last_its_thinking_and_end(
+        self,
+    ) -> None:
+        halving, counting, _ = _transcripts(Builder(SCENARIO, UNTIL))
+        first = [
+            line
+            for line in _lines(halving)
+            if line.get("message", {}).get("id") == "msg_0001"
+        ]
+        last = [
+            line
+            for line in _lines(counting)
+            if line.get("message", {}).get("id") == "msg_0009"
+        ]
+
+        assert {line["requestedModel"] for line in first} == {"claude-opus-4-5"}
+        assert {line["effort"] for line in first} == {"high"}
+        assert [
+            line["message"]["usage"]["output_tokens_details"]["thinking_tokens"]
+            for line in first
+        ] == [47, 47, 188]
+        assert [line["message"]["stop_reason"] for line in last] == ["max_tokens"]
+        assert not any("effort" in line or "attributionSkill" in line for line in last)
+
+    def test_a_response_a_fallback_answered_opens_with_its_block(self) -> None:
+        """It names the model asked for, which the request asked for and
+        each of its lines names."""
+        lines = _lines(_transcripts(Builder(SCENARIO, UNTIL))[1])
+        answered = [
+            line for line in lines if line.get("message", {}).get("id") == "msg_0008"
+        ]
+        (asked,) = [
+            line
+            for line in lines
+            if line["type"] == "api-request" and line["id"] == answered[0]["requestRef"]
+        ]
+
+        assert answered[0]["message"]["content"] == [
+            {
+                "type": "fallback",
+                "from": {"model": "claude-opus-4-5"},
+                "to": {"model": "claude-haiku-4-5-20251001"},
+            }
+        ]
+        assert {line["message"]["model"] for line in answered} == {
+            "claude-haiku-4-5-20251001"
+        }
+        assert {line["requestedModel"] for line in answered} == {"claude-opus-4-5"}
+        assert asked["params"]["model"] == "claude-opus-4-5"
 
     def test_a_time_is_written_in_utc_to_the_millisecond(self) -> None:
         assert stamp(UNTIL) == "2026-11-12T09:30:00.250Z"

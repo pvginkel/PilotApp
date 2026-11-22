@@ -18,7 +18,11 @@ process writes as it exits.
   managed one opens `# Environment: <id>`.
 - A response is one `assistant` line a block, all under its `message.id`.
   Each carries the response's `usage`; the lines before the last carry fewer
-  output tokens than it and no `stop_reason`.
+  output tokens and thinking tokens than it and no `stop_reason`. Each names
+  the model the request asked for as `requestedModel`, and where they are
+  Claude Code's word the effort and the skill and plugin the response acted
+  under. A response a fallback answered opens with a `fallback` block, from
+  the model asked for to the one that answered.
 - A request is an `api-request` line, written before its response's first
   line, and each line of the response names it by its `id` as `requestRef`.
   It holds what was sent: a digest of each message on the chain, those the
@@ -332,7 +336,10 @@ class Lines:
         if self._agent is not None:
             line["agentId"] = self._agent
         named = self._id("request")
-        params: dict[str, Any] = {"model": call.model, "max_tokens": 64_000}
+        params: dict[str, Any] = {
+            "model": call.requested or call.model,
+            "max_tokens": 64_000,
+        }
         if call.effort is not None:
             params["output_config"] = {"effort": call.effort}
         line |= {
@@ -372,12 +379,30 @@ class Lines:
         at: datetime,
         sent: datetime | None = None,
     ) -> list[str]:
-        """A response that completed at `at`, a line a block: its thinking,
-        its words and each of `requests`, its `tool_use` blocks, each line
-        naming its request where it was `sent` at a time Claude Code
-        records. The ids of the requests' lines."""
-        asked = {} if sent is None else {"requestRef": self._send(call, sent)}
+        """A response that completed at `at`, a line a block: a fallback's,
+        its thinking, its words and each of `requests`, its `tool_use`
+        blocks, each line naming its request where it was `sent` at a time
+        Claude Code records. The ids of the requests' lines."""
+        asked: dict[str, Any] = {}
+        if sent is not None:
+            asked["requestRef"] = self._send(call, sent)
+        asked["requestedModel"] = call.requested or call.model
+        for name, chosen in (
+            ("effort", call.effort),
+            ("attributionSkill", call.skill),
+            ("attributionPlugin", call.plugin),
+        ):
+            if chosen is not None:
+                asked[name] = chosen
         blocks: list[dict[str, Any]] = []
+        if call.requested is not None:
+            blocks.append(
+                {
+                    "type": "fallback",
+                    "from": {"model": call.requested},
+                    "to": {"model": call.model},
+                }
+            )
         if call.thinking is not None:
             signature = uuid.uuid5(_IDS, f"{message_id}/thinking").hex * 4
             blocks.append({"type": "thinking", "thinking": "", "signature": signature})
@@ -396,6 +421,11 @@ class Lines:
             "output_tokens": spent.output,
             "service_tier": "standard",
         }
+        partly = usage | {"output_tokens": spent.output // 4}
+        if call.thinking is not None:
+            usage["output_tokens_details"] = {"thinking_tokens": call.thinking}
+            partly["output_tokens_details"] = {"thinking_tokens": call.thinking // 4}
+        ended = call.stop or ("tool_use" if requests else "end_turn")
         written: list[str] = []
         for place, block in enumerate(blocks):
             last = place == len(blocks) - 1
@@ -405,13 +435,9 @@ class Lines:
                 "type": "message",
                 "role": "assistant",
                 "content": [block],
-                "stop_reason": ("tool_use" if requests else "end_turn")
-                if last
-                else None,
+                "stop_reason": ended if last else None,
                 "stop_sequence": None,
-                "usage": usage
-                if last
-                else usage | {"output_tokens": spent.output // 4},
+                "usage": usage if last else partly,
             }
             written.append(
                 self._chained(

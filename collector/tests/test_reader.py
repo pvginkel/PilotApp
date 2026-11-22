@@ -23,12 +23,16 @@ from tests.support import (
     FOLDER,
     SESSION,
     Line,
+    answering,
     assistant,
     beside,
     boundary,
     chained,
     cost,
+    fallback,
+    fell_back,
     filed,
+    finished,
     instructions,
     linked,
     loaded,
@@ -72,6 +76,15 @@ THREAD = (
     "environment",
 )
 PROMPT = ("received_at", "source", "characters")
+CHOICES = (
+    "requested_model",
+    "effort",
+    "stop_reason",
+    "thinking_tokens",
+    "attributed_skill",
+    "attributed_plugin",
+)
+"""What Claude Code records of a Call's own choices."""
 CALL = (
     "message_id",
     "prompt",
@@ -80,6 +93,7 @@ CALL = (
     "sent_at",
     "completed_at",
     "model",
+    *CHOICES,
     "tokens",
     "tool_calls",
 )
@@ -275,6 +289,13 @@ class TestTheScenario:
             for call in publication["calls"]
             if "compaction" in call
         ] == ["msg_0004"]
+        calls = [call for publication in publications for call in publication["calls"]]
+        assert [call["requested_model"] for call in calls if "requested_model" in call]
+        assert [call["stop_reason"] for call in calls if "stop_reason" in call]
+        for chosen in ("effort", "thinking_tokens", "attributed_skill"):
+            assert any(chosen in call for call in calls)
+            assert not all(chosen in call for call in calls)
+        assert any("attributed_plugin" in call for call in calls)
 
     def test_a_reading_is_a_call_pilot_takes_by_its_shape(self, tmp_path: Path) -> None:
         builder = Builder(SCENARIO, UNTIL)
@@ -1206,6 +1227,149 @@ class TestASendingTime:
         publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
 
         assert _sends(publication) == [("msg_07", moment(1))]
+
+
+class TestOwnChoices:
+    def test_a_calls_choices_are_what_its_lines_name(self, tmp_path: Path) -> None:
+        (call,) = _read(
+            tmp_path,
+            [
+                typed(0),
+                finished(assistant(4, output=12), 60, "max_tokens")
+                | {
+                    "requestedModel": "claude-opus-4-1",
+                    "effort": "high",
+                    "attributionSkill": "loom:warping",
+                    "attributionPlugin": "loom",
+                },
+            ],
+        ).calls
+
+        assert (call.model, call.requested_model) == (
+            "claude-opus-4-5",
+            "claude-opus-4-1",
+        )
+        assert (call.effort, call.attributed_skill, call.attributed_plugin) == (
+            "high",
+            "loom:warping",
+            "loom",
+        )
+        assert (call.thinking_tokens, call.stop_reason) == (60, "max_tokens")
+
+    def test_a_model_asked_for_that_answered_is_none(self, tmp_path: Path) -> None:
+        """Pilot refuses a `requested_model` that is the Call's `model`."""
+        (call,) = _read(
+            tmp_path,
+            [typed(0), assistant(4) | {"requestedModel": "claude-opus-4-5"}],
+        ).calls
+
+        assert call.requested_model is None
+
+    def test_a_fallback_block_names_the_model_asked_for(self, tmp_path: Path) -> None:
+        """A fallback's request may name the model that answered it."""
+        (call,) = _read(
+            tmp_path,
+            [
+                typed(0),
+                answering(4, "msg_01", fallback("claude-opus-4-1"))
+                | {"requestedModel": "claude-opus-4-5"},
+                assistant(5) | {"requestedModel": "claude-opus-4-5"},
+            ],
+        ).calls
+
+        assert call.requested_model == "claude-opus-4-1"
+
+    def test_a_fallbacks_line_names_the_model_its_requests_call_asked_for(
+        self, tmp_path: Path
+    ) -> None:
+        """It follows the Call, and names the request the Call answered."""
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                assistant(4, "msg_01") | {"requestId": "req_01"},
+                assistant(9, "msg_02") | {"requestId": "req_02"},
+                assistant(10, "msg_02") | {"requestId": "req_02"},
+                fell_back(10.2, "req_02", "claude-opus-4-1"),
+            ],
+        )
+
+        assert [
+            (call.message_id, call.requested_model) for call in publication.calls
+        ] == [
+            ("msg_01", None),
+            ("msg_02", "claude-opus-4-1"),
+        ]
+
+    def test_a_fallbacks_line_that_names_no_calls_request_is_none(
+        self, tmp_path: Path
+    ) -> None:
+        (call,) = _read(
+            tmp_path,
+            [
+                typed(0),
+                assistant(4) | {"requestId": "req_01"},
+                fell_back(4.2, "req_of_no_call", "claude-opus-4-1"),
+            ],
+        ).calls
+
+        assert call.requested_model is None
+
+    def test_a_calls_thinking_and_end_are_its_last_lines(self, tmp_path: Path) -> None:
+        (call,) = _read(
+            tmp_path,
+            [
+                typed(0),
+                finished(assistant(4, output=3), 12, "refusal"),
+                finished(assistant(5, output=40), 31, "max_tokens"),
+            ],
+        ).calls
+
+        assert (call.thinking_tokens, call.stop_reason) == (31, "max_tokens")
+
+    @pytest.mark.parametrize("ended", ["end_turn", "tool_use", None])
+    def test_an_ordinary_end_is_no_stop_reason(
+        self, ended: str | None, tmp_path: Path
+    ) -> None:
+        (call,) = _read(tmp_path, [typed(0), finished(assistant(4), 0, ended)]).calls
+
+        assert (call.thinking_tokens, call.stop_reason) == (0, None)
+
+    def test_a_choice_the_lines_name_once_is_the_calls(self, tmp_path: Path) -> None:
+        """Before Claude Code 2.1.293 a Call's effort is on some of its
+        lines alone."""
+        (call,) = _read(
+            tmp_path,
+            [
+                typed(0),
+                assistant(4) | {"effort": "medium", "attributionSkill": "loom"},
+                assistant(5, output=8),
+            ],
+        ).calls
+
+        assert (call.effort, call.attributed_skill) == ("medium", "loom")
+
+    def test_an_older_calls_lines_record_no_choice(self, tmp_path: Path) -> None:
+        """Its lines name no model asked for, effort or attribution, count
+        no thinking tokens, and, before Claude Code 2.1.300, its last line
+        may say no end."""
+        (call,) = _read(tmp_path, [typed(0), assistant(4), assistant(5)]).calls
+
+        assert call.model_dump(include=set(CHOICES)) == dict.fromkeys(CHOICES)
+
+    def test_a_sub_agents_choices_are_read_as_a_main_threads(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            user(0, "Count the heddles."),
+            finished(assistant(3, "msg_07", "claude-haiku-4-5"), 9, "refusal")
+            | {"requestedModel": "claude-opus-4-5", "effort": "low"},
+        ]
+
+        (call,) = read(filed(tmp_path, lines, AGENT), SETTINGS).publication.calls
+
+        assert (call.requested_model, call.effort) == ("claude-opus-4-5", "low")
+        assert (call.thinking_tokens, call.stop_reason) == (9, "refusal")
 
 
 class TestCompactions:

@@ -64,14 +64,19 @@ class ToolUse:
 class Call:
     """A request to the model, completed at `at`. `sent` is the moment the
     request was sent, before its response's first line, where Claude Code
-    records it. `back_to` makes it a rewind: the earlier Call, by name, its
-    chain continues from. `miss` is the cause of a cache miss."""
+    records it. `requested` is the model the request asked for where a
+    fallback had `model` answer it instead, and `stop` how the response
+    ended where it was no ordinary end, a Stop Reason's code. `back_to`
+    makes it a rewind: the earlier Call, by name, its chain continues from.
+    `miss` is the cause of a cache miss."""
 
     at: int
     tokens: Tokens
     sent: int | None = None
     name: str | None = None
     model: str = "claude-opus-4-5"
+    requested: str | None = None
+    stop: str | None = None
     effort: str | None = None
     thinking: int | None = None
     skill: str | None = None

@@ -233,6 +233,23 @@ class TestAMainThread:
             for call in publication["calls"]
         )
 
+    def test_a_calls_own_choices_are_the_scripts(self) -> None:
+        """A model asked for where a fallback had another answer, and an end
+        that was no ordinary one."""
+        counting = _built()["counting"]
+
+        assert _calls(counting, "model") == ["claude-haiku-4-5-20251001"] * 3
+        assert _calls(counting, "requested_model") == [None, "claude-opus-4-5", None]
+        assert _calls(counting, "stop_reason") == [None, None, "max_tokens"]
+        assert _calls(_built()["halving"], "thinking_tokens") == [
+            188,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+
     def test_a_command_the_person_interrupted_says_so(self) -> None:
         gears = _built()["gears"]
 

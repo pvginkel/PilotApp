@@ -10,9 +10,9 @@ side holds before a collector reads the transcript.
 A publication is what its thread's file says: the file's size and time, and
 each fact as the lines carry it. The files hold the lines these facts are
 read off: a thread's ids and where it ran, its Launches, Prompts, Calls and
-Tool Calls, its Compactions, each Call's place on the chain and the request
-it answered. No line is written for a hook run, an event or a context part,
-which the publications carry alone.
+Tool Calls, its Compactions, each Call's place on the chain, the request it
+answered and what Claude Code records of its choices. No line is written for
+a hook run, an event or a context part, which the publications carry alone.
 
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
@@ -207,7 +207,9 @@ class _Thread:
                 sent_at=None if step.sent is None else at(step.sent),
                 completed_at=at(step.at),
                 model=step.model,
+                requested_model=step.requested,
                 effort=step.effort,
+                stop_reason=step.stop,
                 thinking_tokens=step.thinking,
                 attributed_skill=step.skill,
                 attributed_plugin=step.plugin,

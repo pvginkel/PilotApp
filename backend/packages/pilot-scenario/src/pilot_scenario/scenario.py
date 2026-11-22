@@ -4,10 +4,12 @@ and `ben`, the projects `recipe-box` and `bike-log`.
 Pilot is sent to halve the stew in the recipe box, an errand's first leg. Its
 session reads the recipe, has a sub-agent count the servings, meets an API
 error and a failing command, and carries on past a compaction; two of its
-tools' outputs are too large and are saved to disk. Ada, by hand, looks at
-the bike log's gear table, stops the command her second question started,
-takes that question back and comes back after the cache has lapsed: one of
-the first rides' conversations, a group of work done before Pilot ran any.
+tools' outputs are too large and are saved to disk. The sub-agent asks for
+Opus once and Haiku answers in its place, and its last answer runs out of
+tokens. Ada, by hand, looks at the bike log's gear table, stops the command
+her second question started, takes that question back and comes back after
+the cache has lapsed: one of the first rides' conversations, a group of work
+done before Pilot ran any.
 
 The model names are the public ones. Everything else is invented.
 """
@@ -63,6 +65,7 @@ COUNTING = SubAgent(
             at=58,
             sent=49,
             model=HAIKU,
+            requested=OPUS,
             tokens=Tokens(input=310, cache_read=6_020, output=72),
             tools=(ToolUse("Read", "recipes/stew.md", took=1, characters=2_210),),
         ),
@@ -70,6 +73,7 @@ COUNTING = SubAgent(
             at=74,
             sent=60,
             model=HAIKU,
+            stop="max_tokens",
             tokens=Tokens(input=780, cache_read=6_020, output=268),
         ),
     ),

@@ -179,6 +179,36 @@ def answering(seconds: float, message_id: str, *blocks: dict[str, Any]) -> Line:
     return line
 
 
+def fallback(asked: str, answered: str = "claude-opus-4-5") -> dict[str, Any]:
+    """The block a response opens with that a fallback answered: the model
+    `asked` for, and the one that `answered`."""
+    return {"type": "fallback", "from": {"model": asked}, "to": {"model": answered}}
+
+
+def fell_back(
+    seconds: float, request_id: str, asked: str, answered: str = "claude-opus-4-5"
+) -> Line:
+    """The line that records a fallback: the request of that `requestId`
+    asked for one model, and another answered it."""
+    return chained(
+        "system",
+        seconds,
+        subtype="model_refusal_fallback",
+        requestId=request_id,
+        originalModel=asked,
+        fallbackModel=answered,
+        level="warning",
+    )
+
+
+def finished(line: Line, thinking: int, ended: str | None) -> Line:
+    """A line of a response that counts `thinking` tokens of thinking, and
+    says how the response `ended`."""
+    line["message"]["usage"]["output_tokens_details"] = {"thinking_tokens": thinking}
+    line["message"]["stop_reason"] = ended
+    return line
+
+
 def synthetic(seconds: float, said: str) -> Line:
     """A line Claude Code wrote itself where a response would stand."""
     line = assistant(seconds, "msg_synthetic", "<synthetic>")

@@ -35,6 +35,18 @@ its newline is written. The facts are read off the lines in the file's order:
   of that text the removes took out; else at its own time.
 - **A Call** is the `assistant` lines under one `message.id`, placed by the
   first of them; its usage, model and completion time are the last one's.
+- **A Call's own choices**, what Claude Code records of them, each from the
+  version that writes it and none on older lines:
+  - the model asked for, where it is not the one that answered: the model a
+    fallback left, by a `fallback` block among the Call's or a
+    `model_refusal_fallback` line that names the request the Call answered,
+    else the lines' `requestedModel`;
+  - the effort, and the skill and plugin it acted under: the lines'
+    `effort`, `attributionSkill` and `attributionPlugin`;
+  - its thinking tokens and how the response ended: the last line's
+    `usage.output_tokens_details.thinking_tokens` and `stop_reason`, the
+    end published where it was none of the ordinary ones, `end_turn` and
+    `tool_use`.
 - **A Call's sending time** is the time of the `api-request` line its first
   line names by `requestRef`, among the request lines written since the one
   the Call before it named: a retry writes a request line again, and the
@@ -87,9 +99,10 @@ is read whole, where:
   from the boundary's to its old end are other than those read then
   (F152.17);
 - a line's `parentUuid`, or a compaction's `logicalParentUuid`, names a
-  line that is neither the carry's nor one from the boundary's byte on, or
-  a tool's result names a request no line from that byte on makes: each
-  reaches behind the boundary, or names a line written later;
+  line that is neither the carry's nor one from the boundary's byte on, a
+  tool's result names a request no line from that byte on makes, or a
+  fallback's line one no Call from that byte on answered: each reaches
+  behind the boundary, or names a line written later;
 - a line is one the carry awaits, named by a line before the boundary that
   the file held no line of there: a chain before the boundary goes on
   through it.
@@ -122,6 +135,18 @@ _COMPACTED = "compact_boundary"
 
 _REQUEST = "api-request"
 """The type of the line a request to the model is."""
+
+_FELL_BACK = "model_refusal_fallback"
+"""The subtype of the `system` line that records a fallback: the model the
+request asked for, and the one that answered it."""
+
+_FALLBACK = "fallback"
+"""The type of the block of a response that records the fallback it was
+answered by."""
+
+_ORDINARY = (None, "end_turn", "tool_use")
+"""How a response ends that is no Stop Reason's: a line written before the
+end names none."""
 
 SYNTHETIC = "<synthetic>"
 """The model of an `assistant` line Claude Code wrote itself: no response."""
@@ -271,14 +296,30 @@ class _Call:
     """Its place among the transcript's Calls, from 0."""
     prompt: int | None
     sent_at: datetime | None
-    completed_at: datetime
-    model: str
-    tokens: dict[str, int]
     chain: _Stop | None
     """The nearest stop up the chain from the line its first line
     follows."""
+    completed_at: datetime
+    model: str
+    tokens: dict[str, int]
+    thinking_tokens: int | None = None
+    ended: str | None = None
+    """How its last line says the response ended."""
+    requested: str | None = None
+    """The model its lines say the request asked for."""
+    fell_back: str | None = None
+    """The model asked for that a fallback left."""
+    effort: str | None = None
+    skill: str | None = None
+    plugin: str | None = None
     tool_calls: dict[str, _ToolCall] = field(default_factory=dict)
     """The tool calls it requested, by Claude's id of the request."""
+
+    @property
+    def requested_model(self) -> str | None:
+        """The model asked for, none where it is the one that answered."""
+        asked = self.fell_back or self.requested
+        return None if asked == self.model else asked
 
 
 def written_at(line: dict[str, Any]) -> datetime | None:
@@ -433,6 +474,9 @@ class _Thread:
         self._requests = before.requests
         """The request lines taken since the last one a Call named, in the
         file's order: each one's `id` and time."""
+        self._answering: dict[str, _Call] = {}
+        """The Calls taken, by the API's id of the request each answered,
+        `requestId`."""
         self._leads: dict[str, _Stop | None] = {}
         """The nearest stop at or up the chain from each line taken, by its
         `uuid`, and from the line the reading stands after."""
@@ -496,9 +540,11 @@ class _Thread:
             if launch.version is None:
                 launch.version = line.get("version")
         if kind == "assistant":
-            self._answered(line["message"], at, chain, line.get("requestRef"))
+            self._answered(line, at, chain)
         elif kind == _REQUEST:
             self._requests += ((line["id"], at),)
+        elif kind == "system" and line.get("subtype") == _FELL_BACK:
+            self._fell_back(line)
         elif kind == "user":
             content = line["message"]["content"]
             if is_a_tools_result(content):
@@ -665,36 +711,59 @@ class _Thread:
         )
 
     def _answered(
-        self,
-        message: dict[str, Any],
-        at: datetime,
-        chain: _Stop | None,
-        request: str | None,
+        self, line: dict[str, Any], at: datetime, chain: _Stop | None
     ) -> None:
         """A line of a response, which follows a line `chain` is the
-        nearest stop from and names the request line `request`."""
+        nearest stop from."""
+        message = line["message"]
         if message["model"] == SYNTHETIC:
             return
-        model, tokens = message["model"], _tokens(message["usage"])
+        usage = message["usage"]
+        model, tokens = message["model"], _tokens(usage)
         call = self.calls.get(message["id"])
         if call is None:
             call = _Call(
                 self._placed(message["id"]),
                 self._prompts or None,
-                self._sent(request),
+                self._sent(line.get("requestRef")),
+                chain,
                 at,
                 model,
                 tokens,
-                chain,
             )
             self.calls[message["id"]] = call
+            answered = line.get("requestId")
+            if answered is not None:
+                self._answering.setdefault(answered, call)
         else:
             call.completed_at, call.model, call.tokens = at, model, tokens
+        call.thinking_tokens = (usage.get("output_tokens_details") or {}).get(
+            "thinking_tokens"
+        )
+        call.ended = message.get("stop_reason")
+        call.requested = _named(line, "requestedModel", call.requested)
+        call.effort = _named(line, "effort", call.effort)
+        call.skill = _named(line, "attributionSkill", call.skill)
+        call.plugin = _named(line, "attributionPlugin", call.plugin)
         for block in message["content"]:
-            if block["type"] == "tool_use" and block["id"] not in self._requested:
+            if block["type"] == _FALLBACK:
+                call.fell_back = call.fell_back or block["from"]["model"]
+            elif block["type"] == "tool_use" and block["id"] not in self._requested:
                 argument = _argument(block["name"], block["input"])
                 asked = _ToolCall(block["name"], argument, at)
                 self._requested[block["id"]] = call.tool_calls[block["id"]] = asked
+
+    def _fell_back(self, line: dict[str, Any]) -> None:
+        """A fallback's record: the model asked for, of the Call that
+        answered the request it names. A reading from a boundary on stops
+        at one that names no Call it took, which may lie behind it."""
+        call = self._answering.get(line["requestId"])
+        if call is not None:
+            call.fell_back = call.fell_back or line["originalModel"]
+        elif self._before.byte:
+            raise NotContinuedError(
+                "a fallback names a request no Call from its boundary on answered"
+            )
 
     def _sent(self, request: str | None) -> datetime | None:
         """The time of the request line of that `id` among those taken
@@ -751,6 +820,12 @@ def _repository(directory: str, settings: Settings) -> str | None:
     return None
 
 
+def _named(line: dict[str, Any], key: str, held: str | None) -> str | None:
+    """What the line names under `key`, `held` where it names nothing."""
+    named: str | None = line.get(key)
+    return held if named is None else named
+
+
 def _tokens(usage: dict[str, Any]) -> dict[str, int]:
     """A response's tokens by Token Kind, a kind that counts none left
     out."""
@@ -794,6 +869,12 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
             "sent_at": call.sent_at,
             "completed_at": call.completed_at,
             "model": call.model,
+            "requested_model": call.requested_model,
+            "effort": call.effort,
+            "stop_reason": None if call.ended in _ORDINARY else call.ended,
+            "thinking_tokens": call.thinking_tokens,
+            "attributed_skill": call.skill,
+            "attributed_plugin": call.plugin,
             "tokens": call.tokens,
             "tool_calls": [
                 {
