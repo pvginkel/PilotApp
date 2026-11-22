@@ -1,6 +1,7 @@
 """What the dashboard stores (F155): Pilot's own system views made what the
-release holds, a load of an Origin's system views by key (F155.3; DB 601 to
-604); the saved views saved, renamed and removed by anyone, a system view by
+release holds, a load of an Origin's system views by key, and the load of the
+workflow's views and ratios from its file, on an invented one, every entry
+checked before any is written (F155.3; DB 601 to 604); the saved views saved, renamed and removed by anyone, a system view by
 no one (F155.1, DB 601); a person's stars and favourite dimensions (F155.2);
 the quick filters made and removed; and the ratios a person made, made,
 changed and removed, a loaded one by no one (F155.3), each in the normal form
@@ -36,8 +37,11 @@ from app.services.dashboard_store_service import (
     DashboardStoreService,
     Favourites,
     Loaded,
+    RatioEntry,
+    WorkflowLoaded,
 )
 from app.utils.after_commit import run_after_commit_callbacks
+from tests.support import workflow_views
 
 EARLIER = datetime(2026, 11, 1, 9, tzinfo=UTC)
 NOW = datetime(2026, 11, 22, 9, tzinfo=UTC)
@@ -255,6 +259,284 @@ class TestLoadViews:
         assert _rows(session, Origin.WORKFLOW) == []
         assert len(_rows(session, Origin.PILOT)) == len(VIEWS)
         assert _rows(session, Origin.PERSON) == [(None, "Mine", STATE)]
+
+    def test_two_views_that_swap_their_names_in_one_call_are_loaded(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        swapped = (
+            SystemView("pantry", "Larder", STATE),
+            SystemView("larder", "Pantry", OTHER_STATE),
+        )
+
+        loaded = service.load_views(Origin.WORKFLOW, swapped, NOW)
+
+        assert loaded == Loaded(added=0, changed=2, removed=0)
+        assert _rows(session, Origin.WORKFLOW) == [
+            ("larder", "Pantry", OTHER_STATE),
+            ("pantry", "Larder", STATE),
+        ]
+
+
+ERRANDS = "t=l8&by=project&m=cost.sum&m=r:per_serving&col=model"
+LEGS = "t=qw&by=conversation&m=cost.median&col=none&roll=5,5"
+RIDES = "t=d7&by=project&p=time,day&m=cost.sum&m=r:per_ride&col=source"
+
+
+def _ratios(db: DbSession, origin: Origin) -> list[tuple[str, str, str, str]]:
+    return [
+        (row.key, row.name, row.numerator, row.denominator)
+        for row in db.scalars(
+            select(CustomRatio)
+            .where(CustomRatio.origin_code == origin)
+            .order_by(CustomRatio.key)
+        )
+    ]
+
+
+@pytest.fixture
+def from_the_file(service: DashboardStoreService) -> None:
+    """The invented file loaded, earlier."""
+    service.load_workflow(*workflow_views.entries(), EARLIER)
+
+
+class TestLoadWorkflow:
+    def test_the_file_is_loaded_each_entry_in_its_normal_form(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        loaded = service.load_workflow(*workflow_views.entries(), NOW)
+
+        assert loaded == WorkflowLoaded(
+            views=Loaded(added=3, changed=0, removed=0),
+            ratios=Loaded(added=2, changed=0, removed=0),
+            notes=(),
+        )
+        assert _rows(session, Origin.WORKFLOW) == [
+            ("errands", "Errands", ERRANDS),
+            ("legs", "Legs", LEGS),
+            ("rides", "Rides", RIDES),
+        ]
+        assert _ratios(session, Origin.WORKFLOW) == [
+            ("per_ride", "Cost per ride", "cost.sum", "turns.count"),
+            ("per_serving", "Cost per serving", "cost.sum", "calls.count"),
+        ]
+        assert _row(session, Origin.WORKFLOW, "errands").note == (
+            "What each project's errands cost over the last eight quota weeks, "
+            "and per serving"
+        )
+
+    def test_a_view_by_a_unit_keeps_the_band_its_state_sets(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        """F154.1: the length is the view's, the load setting none by a
+        kind's name; a view that sets none takes ten and fifteen."""
+        service.load_workflow(*workflow_views.entries(), NOW)
+
+        assert _row(session, Origin.WORKFLOW, "legs").state.endswith("&roll=5,5")
+        assert "roll=" not in _row(session, Origin.WORKFLOW, "rides").state
+
+    @pytest.mark.usefixtures("from_the_file")
+    def test_a_load_again_changes_by_key_adds_and_removes_the_stars_going_with_a_view(
+        self, session: DbSession, service: DashboardStoreService, person: User
+    ) -> None:
+        """DB 604."""
+        errands = _row(session, Origin.WORKFLOW, "errands")
+        _star(session, person, errands)
+        _star(session, person, _row(session, Origin.WORKFLOW, "rides"))
+        views = (
+            SystemView("errands", "Errands by week", ERRANDS),
+            SystemView("legs", "Legs", LEGS),
+            SystemView("suppers", "Suppers", "t=qw&by=project&m=cost.sum&col=none"),
+        )
+        ratios = (
+            RatioEntry("per_serving", "Cost per serving", "cost.sum", "turns.count"),
+            RatioEntry("per_supper", "Cost per supper", "cost.sum", "calls.count"),
+        )
+
+        loaded = service.load_workflow(views, ratios, NOW)
+
+        assert loaded == WorkflowLoaded(
+            views=Loaded(added=1, changed=1, removed=1),
+            ratios=Loaded(added=1, changed=1, removed=1),
+            notes=(),
+        )
+        assert _row(session, Origin.WORKFLOW, "errands").id == errands.id
+        assert _stars(session) == [("errands", "Errands by week")]
+        assert _ratios(session, Origin.WORKFLOW) == [
+            ("per_serving", "Cost per serving", "cost.sum", "turns.count"),
+            ("per_supper", "Cost per supper", "cost.sum", "calls.count"),
+        ]
+
+    @pytest.mark.usefixtures("from_the_file")
+    def test_the_same_file_again_changes_nothing_and_keeps_its_times(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        loaded = service.load_workflow(*workflow_views.entries(), NOW)
+
+        assert loaded == WorkflowLoaded(
+            views=Loaded(added=0, changed=0, removed=0),
+            ratios=Loaded(added=0, changed=0, removed=0),
+            notes=(),
+        )
+        loaded_at = select(SavedView.saved_at).where(
+            SavedView.origin_code == Origin.WORKFLOW
+        )
+        assert set(session.scalars(loaded_at)) == {EARLIER}
+        assert set(session.scalars(select(CustomRatio.saved_at))) == {EARLIER}
+
+    @pytest.mark.usefixtures("from_the_file")
+    def test_names_swapped_in_one_load_are_loaded(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        views = (
+            SystemView("errands", "Rides", ERRANDS),
+            SystemView("legs", "Legs", LEGS),
+            SystemView("rides", "Errands", RIDES),
+        )
+        ratios = (
+            RatioEntry("per_serving", "Cost per ride", "cost.sum", "calls.count"),
+            RatioEntry("per_ride", "Cost per serving", "cost.sum", "turns.count"),
+        )
+
+        loaded = service.load_workflow(views, ratios, NOW)
+
+        assert (loaded.views, loaded.ratios) == (
+            Loaded(added=0, changed=2, removed=0),
+            Loaded(added=0, changed=2, removed=0),
+        )
+        assert [name for _, name, _ in _rows(session, Origin.WORKFLOW)] == [
+            "Rides",
+            "Legs",
+            "Errands",
+        ]
+        assert [name for _, name, _, _ in _ratios(session, Origin.WORKFLOW)] == [
+            "Cost per serving",
+            "Cost per ride",
+        ]
+
+    @pytest.mark.usefixtures("from_the_file")
+    def test_every_fault_of_every_entry_is_named_with_its_entry_and_nothing_written(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        views = (
+            SystemView("errands", "Errands", "t=l8&by=servings&m=cost.sum"),
+            SystemView("legs", "Projects", LEGS),
+            SystemView("legs", "Legs", LEGS),
+            SystemView("rides", "Errands", RIDES),
+        )
+        ratios = (
+            RatioEntry("per_serving", "Cost per serving", "cots.sum", "calls.count"),
+            RatioEntry("person_rides", "Cost per ride", "cost.sum", "turns.count"),
+            RatioEntry("overhead", "Cost per serving", "cost.sum", "turns.count"),
+        )
+
+        with pytest.raises(StateRefusedException) as refused:
+            service.load_workflow(views, ratios, NOW)
+
+        assert [fault.part for fault in refused.value.faults] == [
+            'view "legs"',
+            'view "rides", name "Errands"',
+            'view "errands", by=servings',
+            'view "legs", name "Projects"',
+            'ratio "overhead", name "Cost per serving"',
+            'ratio "per_serving", m=cots.sum',
+            'ratio "person_rides", key',
+            'ratio "overhead", key',
+        ]
+        assert refused.value.message == (
+            "Cannot load the views and ratios because their entries have 8 faults.\n"
+            '- view "legs": the key stands on 2 entries, and a load takes one entry '
+            "a key.\n"
+            '- view "rides", name "Errands": the view "errands" has the name too, '
+            "and a name stands once among the loaded views.\n"
+            '- view "errands", by=servings: "servings" is no dimension. By takes a '
+            "part or an attribute; the catalogue's dimensions list them.\n"
+            '- view "legs", name "Projects": one of Pilot\'s own system views has '
+            "the name, and a name stands once among the system views.\n"
+            '- ratio "overhead", name "Cost per serving": the ratio "per_serving" '
+            "has the name too, and a name stands once among the loaded ratios.\n"
+            '- ratio "per_serving", m=cots.sum: "cots" is no figure. Did you mean '
+            '"cost"? The catalogue\'s measures list the figures.\n'
+            '- ratio "person_rides", key: a key that begins "person_" is a ratio a '
+            "person made, and a loaded ratio's key is outside that space.\n"
+            '- ratio "overhead", key: a ratio built into the dashboard has the key, '
+            "and a loaded ratio's key is no built-in one's.\n"
+            "A By reads by=<dimension>, as in by=project.\n"
+            "A measure reads m=<figure>.<aggregate>[.<grain>][(<filter>;…)], "
+            "m=r:<ratio> or m=r:<name>:<measure>/<measure>, as in "
+            "m=cost.median.conversation or m=cost.sum(miss=1)."
+        )
+        assert _rows(session, Origin.WORKFLOW) == [
+            ("errands", "Errands", ERRANDS),
+            ("legs", "Legs", LEGS),
+            ("rides", "Rides", RIDES),
+        ]
+        assert [key for key, _, _, _ in _ratios(session, Origin.WORKFLOW)] == [
+            "per_ride",
+            "per_serving",
+        ]
+
+    def test_a_part_dropped_is_a_note_named_with_its_view(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        """A quick filter that is gone, and a ratio the load does not hold,
+        as a state's read drops them (F154.2)."""
+        views = (
+            SystemView("errands", "Errands", f"{ERRANDS}&b=pantry"),
+            SystemView("rides", "Rides", RIDES),
+        )
+        ratios = (
+            RatioEntry("per_serving", "Cost per serving", "cost.sum", "calls.count"),
+        )
+
+        loaded = service.load_workflow(views, ratios, NOW)
+
+        assert loaded.notes == (
+            'view "errands", b=pantry: no quick filter has the key "pantry", so it '
+            "is dropped.",
+            'view "rides", m=r:per_ride: no ratio has the key "per_ride", so the '
+            "measure is dropped.",
+        )
+        assert _rows(session, Origin.WORKFLOW) == [
+            ("errands", "Errands", ERRANDS),
+            ("rides", "Rides", "t=d7&by=project&p=time,day&m=cost.sum&col=source"),
+        ]
+
+    def test_it_leaves_pilots_own_views_and_what_a_person_made_alone(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        service.save_view("Mine", STATE, None, EARLIER)
+        mine = service.add_ratio("Cost per turn", "cost.sum", "turns.count", None)
+
+        service.load_workflow(*workflow_views.entries(), NOW)
+        service.load_workflow([], [], NOW)
+
+        assert _rows(session, Origin.WORKFLOW) == []
+        assert _ratios(session, Origin.WORKFLOW) == []
+        assert [name for _, name, _ in _rows(session, Origin.PILOT)] == [
+            view.name for view in sorted(VIEWS, key=lambda view: view.key)
+        ]
+        assert _rows(session, Origin.PERSON) == [(None, "Mine", STATE)]
+        assert service.custom_ratios() == [mine]
+
+    def test_the_catalogue_offers_its_ratios_once_the_load_has_committed(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        catalogue_service = container.catalogue_service()
+        catalogue_service.catalogue(session)
+
+        container.dashboard_store_service().load_workflow(
+            *workflow_views.entries(), NOW
+        )
+        run_after_commit_callbacks()
+
+        assert [
+            (ratio.key, ratio.label, ratio.origin)
+            for ratio in catalogue_service.catalogue(session).ratios
+            if ratio.origin is not None
+        ] == [
+            ("per_ride", "Cost per ride", "workflow"),
+            ("per_serving", "Cost per serving", "workflow"),
+        ]
 
 
 class TestSavedViews:

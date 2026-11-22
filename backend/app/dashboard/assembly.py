@@ -85,7 +85,9 @@ def _event_kinds(db: Session) -> tuple[Value, ...]:
     return tuple(sorted(stored + recorded, key=lambda kind: (kind.name, kind.code)))
 
 
-def _format(catalogue: Catalogue, numerator: Simple, denominator: Simple) -> Format:
+def ratio_format(
+    catalogue: Catalogue, numerator: Simple, denominator: Simple
+) -> Format:
     """A stored ratio's format: a share of two measures of one format, else
     its numerator's."""
     above = catalogue.figure(numerator.figure).format
@@ -115,7 +117,7 @@ def _ratios(
                 key=row.key,
                 label=row.name,
                 line=row.note,
-                format=_format(catalogue, numerator, denominator),
+                format=ratio_format(catalogue, numerator, denominator),
                 numerator=row.numerator,
                 denominator=row.denominator,
                 origin=cast(RatioOrigin, row.origin_code.value),

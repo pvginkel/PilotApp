@@ -2,7 +2,8 @@
 the custom ratios everyone shares, written by anyone signed in, and a
 person's favourites, their stars on views and their dimensions in By's list
 and Color's. The server holds no tab and nothing of a By's look (F155.2).
-What is stored is listed by the catalogue's part `stored`."""
+The workflow's views and ratios are loaded from its file by the service user
+alone. What is stored is listed by the catalogue's part `stored`."""
 
 import uuid
 from typing import Any, cast
@@ -13,6 +14,7 @@ from spectree import Response as SpectreeResponse
 
 from app.api.caller import caller
 from app.dashboard.state import PREFIX
+from app.dashboard.views import SystemView
 from app.models import CustomRatio, QuickFilter, SavedView
 from app.models.reference import FavouriteMenu
 from app.schemas.common import ApiErrorResponseSchema
@@ -27,12 +29,19 @@ from app.schemas.dashboard_store import (
     CustomRatioWriteSchema,
     DimensionFavouriteSchema,
     FavouritesSchema,
+    LoadCountsSchema,
     RenameViewSchema,
     SaveViewResponseSchema,
     SaveViewSchema,
+    WorkflowLoadedSchema,
+    WorkflowLoadSchema,
 )
 from app.services.container import ServiceContainer
-from app.services.dashboard_store_service import DashboardStoreService
+from app.services.dashboard_store_service import (
+    DashboardStoreService,
+    Loaded,
+    RatioEntry,
+)
 from app.services.people_service import PeopleService
 from app.utils.spectree_config import api
 
@@ -448,6 +457,69 @@ def remove_custom_ratio(
     """
     store.remove_ratio(ratio_id)
     return "", 204
+
+
+@dashboard_store_bp.route("/workflow", methods=["PUT"])
+@api.validate(
+    json=WorkflowLoadSchema,
+    resp=SpectreeResponse(
+        HTTP_200=WorkflowLoadedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def load_workflow(
+    store: DashboardStoreService = Provide[ServiceContainer.dashboard_store_service],
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+) -> Any:
+    """Load the workflow's views and ratios from the entries of its file,
+    each by its key, as the service user, which the workflow's command calls
+    as (F155.3): an entry a system view or a loaded ratio of the workflow's
+    has changes it in place, a view's stars kept; one none has is added; one
+    whose key the entries no longer hold is removed, a view's stars with it.
+    Every entry is checked before any is written, a view's state and a
+    ratio's two measures as any state is, and kept in their normal form; a
+    view's state may name a ratio of the same load.
+
+    Returns:
+        200: The views and the ratios it added, changed and removed, and a
+            note for each part of a view's state dropped
+        400: An entry has faults: the error names every fault of every entry
+            with its entry, and ends on a correct example of each kind of
+            part refused; or an entry lacks a key, a name, its state or a
+            measure
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The caller is no service user
+    """
+    people_service.require_service_user(
+        caller(), "load the workflow's views and ratios"
+    )
+    body = WorkflowLoadSchema.model_validate(request.get_json())
+    loaded = store.load_workflow(
+        [SystemView(view.key, view.name, view.state, view.note) for view in body.views],
+        [
+            RatioEntry(
+                ratio.key, ratio.name, ratio.numerator, ratio.denominator, ratio.note
+            )
+            for ratio in body.ratios
+        ],
+    )
+    answer = WorkflowLoadedSchema(
+        views=_counts(loaded.views),
+        ratios=_counts(loaded.ratios),
+        notes=list(loaded.notes),
+    )
+    return answer.model_dump(mode="json")
+
+
+def _counts(loaded: Loaded) -> LoadCountsSchema:
+    return LoadCountsSchema(
+        added=loaded.added, changed=loaded.changed, removed=loaded.removed
+    )
 
 
 def saved_view_response(view: SavedView) -> SavedViewSchema:

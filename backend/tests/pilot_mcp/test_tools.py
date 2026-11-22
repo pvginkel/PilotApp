@@ -48,6 +48,7 @@ from app.models.reference import (
     AttachmentSource,
     ChatKind,
     CloseCause,
+    Origin,
     ProjectState,
     SessionState,
     TaskStatus,
@@ -93,6 +94,7 @@ from tests.support.pilot_mcp import (
 )
 from tests.support.starts import configured_starts
 from tests.support.supervisor import Supervise
+from tests.support.workflow_views import arguments as workflow_file
 
 PATH = "/work/Example/docs/refinement.md"
 
@@ -4992,3 +4994,102 @@ class TestGetResponse:
             "text": None,
         }
         assert clock.time == 90
+
+
+def _with_ratio(**ratio: Any) -> dict[str, Any]:
+    """The invented file, its first ratio with `ratio`'s fields."""
+    written = workflow_file()
+    written["ratios"][0] |= ratio
+    return written
+
+
+@pytest.mark.anyio
+class TestLoadWorkflowViews:
+    """`load_workflow_views` (F155.3): the workflow's file loaded by the
+    command that reads it, called as the service user through the sign-in
+    gate, on an invented file that names nothing of a workflow."""
+
+    async def test_the_file_is_loaded_by_one_put_to_its_route_under_the_minted_token(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        session: DbSession,
+    ) -> None:
+        result = await _ask(projects_app, "load_workflow_views", workflow_file())
+
+        assert not result.isError, result
+        [(request, answer)] = gated_routes.calls
+        [minted] = token_endpoint.minted
+        assert (request.method, str(request.url), answer.status_code) == (
+            "PUT",
+            f"{API_URL}/api/dashboard/workflow",
+            200,
+        )
+        assert json.loads(request.content) == workflow_file()
+        assert request.headers["authorization"] == f"Bearer {minted}"
+        assert result.structuredContent == {
+            "views": {"added": 3, "changed": 0, "removed": 0},
+            "ratios": {"added": 2, "changed": 0, "removed": 0},
+            "notes": [],
+        }
+        assert session.scalars(
+            select(models.SavedView.key)
+            .where(models.SavedView.origin_code == Origin.WORKFLOW)
+            .order_by(models.SavedView.key)
+        ).all() == ["errands", "legs", "rides"]
+        assert session.scalars(
+            select(models.CustomRatio.key).order_by(models.CustomRatio.key)
+        ).all() == ["per_ride", "per_serving"]
+
+    async def test_a_load_with_a_fault_is_the_routes_refusal_its_reason_whole(
+        self, projects_app: Starlette, gated_routes: ApiRoutes, session: DbSession
+    ) -> None:
+        result = await _ask(
+            projects_app, "load_workflow_views", _with_ratio(numerator="cots.sum")
+        )
+
+        assert error_text(result) == (
+            "Error executing tool load_workflow_views: Cannot load the views and"
+            " ratios because their entries have 1 fault.\n"
+            '- ratio "per_serving", m=cots.sum: "cots" is no figure. Did you mean'
+            ' "cost"? The catalogue\'s measures list the figures.\n'
+            "A measure reads m=<figure>.<aggregate>[.<grain>][(<filter>;…)],"
+            " m=r:<ratio> or m=r:<name>:<measure>/<measure>, as in"
+            " m=cost.median.conversation or m=cost.sum(miss=1)."
+        )
+        [(_, answer)] = gated_routes.calls
+        assert answer.status_code == 400
+        assert session.scalars(select(models.CustomRatio)).all() == []
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"views": []},
+            _with_ratio(key="per-serving"),
+            _with_ratio(name="Cost per\nserving"),
+            _with_ratio(note=" "),
+            _with_ratio(colour="red"),
+            {"views": [], "ratios": [workflow_file()["ratios"][0]] * 201},
+        ],
+        ids=[
+            "no-ratios",
+            "a-key-with-a-hyphen",
+            "a-name-of-two-lines",
+            "a-blank-note",
+            "a-field-it-takes-no",
+            "201-ratios",
+        ],
+    )
+    async def test_arguments_the_route_would_refuse_are_refused_without_calling_it(
+        self,
+        projects_app: Starlette,
+        gated_routes: ApiRoutes,
+        token_endpoint: TokenEndpoint,
+        arguments: dict[str, Any],
+    ) -> None:
+        result = await _ask(projects_app, "load_workflow_views", arguments)
+
+        assert result.isError
+        assert gated_routes.calls == []
+        assert token_endpoint.forms == []

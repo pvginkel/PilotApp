@@ -1,0 +1,36 @@
+{
+  "views": [
+    {
+      "key": "errands",
+      "name": "Errands",
+      "state": "t=l8&by=project&m=cost.sum&m=r:per_serving&col=model",
+      "note": "What each project's errands cost over the last eight quota weeks, and per serving"
+    },
+    {
+      "key": "legs",
+      "name": "Legs",
+      "state": "#dash/by=conversation&t=qw&roll=5,5&m=cost.median&col=none"
+    },
+    {
+      "key": "rides",
+      "name": "Rides",
+      "state": "t=d7&by=day&m=cost.sum&m=r:per_ride&col=source",
+      "note": "The last seven days' rides, day by day"
+    }
+  ],
+  "ratios": [
+    {
+      "key": "per_serving",
+      "name": "Cost per serving",
+      "numerator": "cost.sum",
+      "denominator": "calls.count",
+      "note": "What a serving of the stew cost"
+    },
+    {
+      "key": "per_ride",
+      "name": "Cost per ride",
+      "numerator": "cost.sum",
+      "denominator": "turns.count"
+    }
+  ]
+}

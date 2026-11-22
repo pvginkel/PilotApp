@@ -18634,6 +18634,212 @@
         "title": "UserSchema",
         "type": "object"
       },
+      "WorkflowLoadSchema.ddf95d6": {
+        "description": "The entries of the workflow's file of views and ratios, whole.",
+        "properties": {
+          "ratios": {
+            "description": "Every ratio of the file, each key once",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowLoadSchema.ddf95d6.WorkflowRatioSchema"
+            },
+            "maxItems": 200,
+            "title": "Ratios",
+            "type": "array"
+          },
+          "views": {
+            "description": "Every view of the file, each key once",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowLoadSchema.ddf95d6.WorkflowViewSchema"
+            },
+            "maxItems": 200,
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "views",
+          "ratios"
+        ],
+        "title": "WorkflowLoadSchema",
+        "type": "object"
+      },
+      "WorkflowLoadSchema.ddf95d6.WorkflowRatioSchema": {
+        "description": "A ratio of the workflow's file.",
+        "properties": {
+          "denominator": {
+            "description": "The measure below the line, as a state writes it after `m=`",
+            "examples": [
+              "calls.count"
+            ],
+            "minLength": 1,
+            "title": "Denominator",
+            "type": "string"
+          },
+          "key": {
+            "description": "The key the file names it by, which a view's state names it by after `r:`: no built-in ratio's, and not beginning `person_`",
+            "examples": [
+              "per_serving"
+            ],
+            "maxLength": 60,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, one line, which no other loaded ratio has",
+            "examples": [
+              "Cost per serving"
+            ],
+            "maxLength": 60,
+            "minLength": 1,
+            "pattern": "^[^\\r\\n]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "numerator": {
+            "description": "The measure above the line, as a state writes it after `m=`",
+            "examples": [
+              "cost.sum"
+            ],
+            "minLength": 1,
+            "title": "Numerator",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "numerator",
+          "denominator"
+        ],
+        "title": "WorkflowRatioSchema",
+        "type": "object"
+      },
+      "WorkflowLoadSchema.ddf95d6.WorkflowViewSchema": {
+        "description": "A view of the workflow's file.",
+        "properties": {
+          "key": {
+            "description": "The key the file names it by, which matches it to its system view at every load, so that a renamed one keeps its stars",
+            "examples": [
+              "errands"
+            ],
+            "maxLength": 60,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, one line, which no other system view has",
+            "examples": [
+              "Errands"
+            ],
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[^\\r\\n]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A line of explanation shown with it",
+            "title": "Note"
+          },
+          "state": {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; kept in its normal form. It may name a ratio of the same load by `r:<key>`",
+            "examples": [
+              "t=l8&by=project&m=cost.sum&m=r:per_serving&col=model"
+            ],
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "state"
+        ],
+        "title": "WorkflowViewSchema",
+        "type": "object"
+      },
+      "WorkflowLoadedSchema.ddf95d6": {
+        "description": "What a load of the workflow's views and ratios wrote.",
+        "properties": {
+          "notes": {
+            "description": "One for each part of a view's state dropped, after the view it is in: a quick filter or a ratio it named by a key that is gone",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "ratios": {
+            "$ref": "#/components/schemas/WorkflowLoadedSchema.ddf95d6.LoadCountsSchema"
+          },
+          "views": {
+            "$ref": "#/components/schemas/WorkflowLoadedSchema.ddf95d6.LoadCountsSchema"
+          }
+        },
+        "required": [
+          "views",
+          "ratios",
+          "notes"
+        ],
+        "title": "WorkflowLoadedSchema",
+        "type": "object"
+      },
+      "WorkflowLoadedSchema.ddf95d6.LoadCountsSchema": {
+        "description": "What a load wrote of one kind of row.",
+        "properties": {
+          "added": {
+            "description": "The rows it added",
+            "title": "Added",
+            "type": "integer"
+          },
+          "changed": {
+            "description": "The rows it changed in place",
+            "title": "Changed",
+            "type": "integer"
+          },
+          "removed": {
+            "description": "The rows it removed",
+            "title": "Removed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "changed",
+          "removed"
+        ],
+        "title": "LoadCountsSchema",
+        "type": "object"
+      },
       "WriterQuestionRequestSchema.4ff8b5e": {
         "additionalProperties": false,
         "description": "A question to a registered document's writer about one of its blocks,\nthe block's id naming the document.",
@@ -20884,6 +21090,83 @@
           }
         ],
         "summary": "Star a view, a system view or a saved one, for the signed-in person; a view they starred keeps its place among their stars (F155.2).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/workflow": {
+      "put": {
+        "description": "Returns:     200: The views and the ratios it added, changed and removed, and a         note for each part of a view's state dropped     400: An entry has faults: the error names every fault of every entry         with its entry, and ends on a correct example of each kind of         part refused; or an entry lacks a key, a name, its state or a         measure     401: No one is signed in     403: The caller lacks the editor role     409: The caller is no service user",
+        "operationId": "put__api_dashboard_workflow",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowLoadSchema.ddf95d6"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowLoadedSchema.ddf95d6"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Load the workflow's views and ratios from the entries of its file, each by its key, as the service user, which the workflow's command calls as (F155.3): an entry a system view or a loaded ratio of the workflow's has changes it in place, a view's stars kept; one none has is added; one whose key the entries no longer hold is removed, a view's stars with it. Every entry is checked before any is written, a view's state and a ratio's two measures as any state is, and kept in their normal form; a view's state may name a ratio of the same load.",
         "tags": [],
         "x-required-role": "editor"
       }

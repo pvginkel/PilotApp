@@ -2750,6 +2750,222 @@ PROJECTS_SURFACE = {
         " person is refused, as is every call while Pilot is updating, and"
         " nothing is started.",
     ),
+    "load_workflow_views": (
+        {
+            "$defs": {
+                "WorkflowRatio": {
+                    "additionalProperties": False,
+                    "description": "A ratio of the workflow's file.",
+                    "properties": {
+                        "key": {
+                            "description": (
+                                "The key your file names it by, which a view's state"
+                                " names it by after `r:`: lower-case letters, digits"
+                                " and underscores, a letter first, at most 60"
+                                " characters; neither the key of a ratio built into the"
+                                " dashboard nor one that begins `person_`"
+                            ),
+                            "maxLength": 60,
+                            "pattern": "^[a-z][a-z0-9_]*$",
+                            "title": "Key",
+                            "type": "string",
+                        },
+                        "name": {
+                            "description": (
+                                "Its name in the dashboard's list of ratios, one line"
+                                " of at most 60 characters, which no other ratio of the"
+                                " workflow's has"
+                            ),
+                            "maxLength": 60,
+                            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$",
+                            "title": "Name",
+                            "type": "string",
+                        },
+                        "numerator": {
+                            "description": (
+                                "The measure above the line, as a view's state writes"
+                                " it after `m=` (e.g. `cost.sum`)"
+                            ),
+                            "minLength": 1,
+                            "title": "Numerator",
+                            "type": "string",
+                        },
+                        "denominator": {
+                            "description": (
+                                "The measure below the line, as a view's state writes"
+                                " it after `m=` (e.g. `calls.count`)"
+                            ),
+                            "minLength": 1,
+                            "title": "Denominator",
+                            "type": "string",
+                        },
+                        "note": {
+                            "anyOf": [
+                                {"maxLength": 200, "pattern": "\\S", "type": "string"},
+                                {"type": "null"},
+                            ],
+                            "default": None,
+                            "description": (
+                                "A line shown with it, at most 200 characters; omit for"
+                                " none"
+                            ),
+                            "title": "Note",
+                        },
+                    },
+                    "required": ["key", "name", "numerator", "denominator"],
+                    "title": "WorkflowRatio",
+                    "type": "object",
+                },
+                "WorkflowView": {
+                    "additionalProperties": False,
+                    "description": "A view of the workflow's file.",
+                    "properties": {
+                        "key": {
+                            "description": (
+                                "The key your file names it by: lower-case letters,"
+                                " digits and underscores, a letter first, at most 60"
+                                " characters. Each load matches it to its view by it,"
+                                " so that a view renamed keeps its stars"
+                            ),
+                            "maxLength": 60,
+                            "pattern": "^[a-z][a-z0-9_]*$",
+                            "title": "Key",
+                            "type": "string",
+                        },
+                        "name": {
+                            "description": (
+                                "Its name in the dashboard's list of views, one line of"
+                                " at most 80 characters, which no other view of the"
+                                " workflow's or of Pilot's own has"
+                            ),
+                            "maxLength": 80,
+                            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$",
+                            "title": "Name",
+                            "type": "string",
+                        },
+                        "state": {
+                            "description": (
+                                "The view, as the dashboard's address writes it after"
+                                " `#dash/` (e.g. `t=qw&by=project&m=cost.sum`); it may"
+                                " name a ratio of the same call by `r:<key>`"
+                            ),
+                            "minLength": 1,
+                            "title": "State",
+                            "type": "string",
+                        },
+                        "note": {
+                            "anyOf": [
+                                {"maxLength": 200, "pattern": "\\S", "type": "string"},
+                                {"type": "null"},
+                            ],
+                            "default": None,
+                            "description": (
+                                "A line shown with it, at most 200 characters; omit for"
+                                " none"
+                            ),
+                            "title": "Note",
+                        },
+                    },
+                    "required": ["key", "name", "state"],
+                    "title": "WorkflowView",
+                    "type": "object",
+                },
+            },
+            "properties": {
+                "views": {
+                    "description": (
+                        "Every view of the workflow's file, each key once, at most 200;"
+                        " an empty list removes every view of the workflow's"
+                    ),
+                    "items": {"$ref": "#/$defs/WorkflowView"},
+                    "maxItems": 200,
+                    "title": "Views",
+                    "type": "array",
+                },
+                "ratios": {
+                    "description": (
+                        "Every ratio of the workflow's file, each key once, at most"
+                        " 200; an empty list removes every ratio of the workflow's"
+                    ),
+                    "items": {"$ref": "#/$defs/WorkflowRatio"},
+                    "maxItems": 200,
+                    "title": "Ratios",
+                    "type": "array",
+                },
+            },
+            "required": ["views", "ratios"],
+            "title": "load_workflow_viewsArguments",
+            "type": "object",
+        },
+        {
+            "$defs": {
+                "LoadCounts": {
+                    "description": (
+                        "What a load did to the workflow's views, or to its ratios."
+                    ),
+                    "properties": {
+                        "added": {
+                            "description": "How many it added",
+                            "title": "Added",
+                            "type": "integer",
+                        },
+                        "changed": {
+                            "description": "How many it changed in place",
+                            "title": "Changed",
+                            "type": "integer",
+                        },
+                        "removed": {
+                            "description": "How many it removed",
+                            "title": "Removed",
+                            "type": "integer",
+                        },
+                    },
+                    "required": ["added", "changed", "removed"],
+                    "title": "LoadCounts",
+                    "type": "object",
+                },
+            },
+            "description": "What a load of the workflow's views and ratios did.",
+            "properties": {
+                "views": {"$ref": "#/$defs/LoadCounts"},
+                "ratios": {"$ref": "#/$defs/LoadCounts"},
+                "notes": {
+                    "description": (
+                        "One for each part of a view's state left out, after the view"
+                        " it is in: a quick filter or a ratio it names by a key that is"
+                        " gone"
+                    ),
+                    "items": {"type": "string"},
+                    "title": "Notes",
+                    "type": "array",
+                },
+            },
+            "required": ["views", "ratios", "notes"],
+            "title": "LoadedWorkflow",
+            "type": "object",
+        },
+        (
+            "Load the workflow's views and ratios into the dashboard of what the"
+            " projects Pilot manages cost, from the entries of the workflow's file,"
+            " each under its key: after the call the workflow's views and ratios on the"
+            " dashboard are those entries. A view or a ratio whose key the call holds"
+            " is changed in place, a view keeping the stars people gave it; one whose"
+            " key is new is added; one whose key the call no longer holds is removed, a"
+            " view's stars with it. A view's `state` is the view as the dashboard's"
+            " address writes it after `#dash/`, and may name a ratio of the same call"
+            " by `r:<key>`; a ratio's `numerator` and `denominator` are measures as a"
+            " view's state writes them after `m=`. Each is kept as the dashboard writes"
+            " it. Every entry is checked before any is written, and a call with a fault"
+            " anywhere is refused whole, every fault named with its entry, and changes"
+            " nothing: a state or a measure the dashboard cannot read, a key or a name"
+            " given twice, a view under the name of one of Pilot's own views, and a"
+            " ratio under the key of one built into the dashboard or a key that begins"
+            " `person_`, which a person's ratios take. Answers `{views, ratios,"
+            " notes}`: how many views and how many ratios it added, changed and"
+            " removed, and a note for each part of a view's state left out, a quick"
+            " filter or a ratio it names that is gone."
+        ),
+    ),
     "start_conversation": (
         {
             "properties": {"project": _PROJECT, "text": _MESSAGE_TEXT},

@@ -4,11 +4,13 @@ filters and the custom ratios everyone shares, and a person's favourites.
 The system views are the system's: no User changes one but by its star (DB
 601). Pilot's own name nothing of a workflow and are what this release's code
 holds (`app/dashboard/views.py`): each deploy loads them after the revisions
-(`post_migration_hook`), as does the load of the invented record. A load of
-an Origin's views leaves them the entries it is given, matched by key: an
-entry a row has changes that row in place, its stars kept; one no row has is
-added; a row whose key the entries no longer hold is removed, its stars with
-it (DB 604).
+(`post_migration_hook`), as does the load of the invented record. The
+workflow's views and its loaded ratios are what the entries of its file make
+them, which the service user hands the route of their load (F155.3), every
+entry checked before any is written. A load of an Origin's rows leaves them
+the entries it is given, matched by key: an entry a row has changes that row
+in place, its stars kept; one no row has is added; a row whose key the
+entries no longer hold is removed, its stars with it (DB 604).
 
 A view one person saved is anyone's to replace, rename and remove; a quick
 filter anyone's to make and remove, never to change; a ratio a person made
@@ -26,16 +28,26 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.dashboard.address import AddressService
-from app.dashboard.assembly import CatalogueService
-from app.dashboard.catalogue import Catalogue
-from app.dashboard.reading import read_chip, read_simple
-from app.dashboard.refusal import Fault, listed, nearest, quoted, refused
+from app.dashboard.assembly import CatalogueService, ratio_format
+from app.dashboard.catalogue import Catalogue, Ratio
+from app.dashboard.reading import read, read_chip, read_simple
+from app.dashboard.refusal import (
+    ENTRY,
+    Fault,
+    in_entry,
+    listed,
+    nearest,
+    quoted,
+    refused,
+    refused_load,
+)
 from app.dashboard.state import TOKEN_KIND, chip_key, simple_key, write
 from app.dashboard.views import VIEWS, SystemView
 from app.exceptions import (
@@ -71,12 +83,34 @@ _CODE_LETTERS = string.ascii_lowercase + string.digits
 
 @dataclass(frozen=True)
 class Loaded:
-    """What a load of system views wrote: the views it added, changed and
-    removed."""
+    """What a load of system views or loaded ratios wrote: the rows it
+    added, changed and removed."""
 
     added: int
     changed: int
     removed: int
+
+
+@dataclass(frozen=True)
+class RatioEntry:
+    """A ratio as the workflow's file names it: `key` matches it to its
+    loaded row, and is what a view's state names it by after `r:`."""
+
+    key: str
+    name: str
+    numerator: str
+    denominator: str
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowLoaded:
+    """What a load of the workflow's views and ratios wrote, and a note for
+    each part of a view's state dropped, named with its view."""
+
+    views: Loaded
+    ratios: Loaded
+    notes: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -124,35 +158,151 @@ class DashboardStoreService:
     ) -> Loaded:
         """The system views of `origin` made `views`, one per key, by key; a
         view added or changed saved at `now`."""
-        held = {
-            row.key: row
-            for row in self.db.scalars(
-                select(SavedView).where(SavedView.origin_code == origin)
+        return self._load(SavedView, origin, views, _VIEW_FIELDS, now)
+
+    def load_workflow(
+        self,
+        views: Sequence[SystemView],
+        ratios: Sequence[RatioEntry],
+        now: datetime | None = None,
+    ) -> WorkflowLoaded:
+        """The workflow's system views and loaded ratios made the entries of
+        its file, each by its key (F155.3; DB 604): a view's state and a
+        ratio's two sides kept in their normal form, a view's read under the
+        ratios the load leaves, so that it may name one the same load holds.
+
+        Raises:
+            StateRefusedException: an entry has a fault, every fault of every
+                entry named with its entry, and nothing is written
+        """
+        catalogue = self.catalogue_service.catalogue(self.db)
+        weeks = quota_weeks(self.db)
+        built_in = {ratio.key for ratio in catalogue.ratios if ratio.origin is None}
+        ratio_faults = _repeated("ratio", ratios)
+        kept: list[RatioEntry] = []
+        offered: list[Ratio] = []
+        for ratio in ratios:
+            place = f'ratio "{ratio.key}"'
+            key_fault = _key_fault(place, ratio.key, built_in)
+            if key_fault is not None:
+                ratio_faults.append(key_fault)
+            sides = []
+            for written in (ratio.numerator, ratio.denominator):
+                try:
+                    sides.append(read_simple(written, catalogue, weeks))
+                except StateRefusedException as refusal:
+                    ratio_faults.extend(
+                        in_entry(place, fault) for fault in refusal.faults
+                    )
+            if len(sides) < 2:
+                continue
+            above, below = sides
+            kept.append(
+                replace(
+                    ratio, numerator=simple_key(above), denominator=simple_key(below)
+                )
             )
-        }
-        keys = {view.key for view in views}
-        gone = [row.id for key, row in held.items() if key not in keys]
-        if gone:
-            # Before the others are written, so that a name a removed view
-            # held is free for one of them.
-            self.db.execute(delete(SavedView).where(SavedView.id.in_(gone)))
-        added = changed = 0
-        for view in views:
-            row = held.get(view.key)
-            if row is None:
-                self.db.add(
-                    SavedView(
-                        origin_code=origin,
-                        key=view.key,
-                        name=view.name,
-                        state=view.state,
-                        note=view.note,
-                        saved_at=now,
+            if key_fault is None:
+                offered.append(
+                    Ratio(
+                        key=ratio.key,
+                        label=ratio.name,
+                        line=ratio.note,
+                        format=ratio_format(catalogue, above, below),
+                        numerator=simple_key(above),
+                        denominator=simple_key(below),
+                        origin="workflow",
                     )
                 )
+        leaves = replace(
+            catalogue,
+            ratios=(
+                *(one for one in catalogue.ratios if one.origin != "workflow"),
+                *offered,
+            ),
+        )
+        pilots = set(
+            self.db.scalars(
+                select(SavedView.name).where(SavedView.origin_code == Origin.PILOT)
+            )
+        )
+        view_faults = _repeated("view", views)
+        normal: list[SystemView] = []
+        notes: list[str] = []
+        for view in views:
+            place = f'view "{view.key}"'
+            if view.name in pilots:
+                view_faults.append(
+                    Fault(
+                        f'{place}, name "{view.name}"',
+                        ENTRY,
+                        "one of Pilot's own system views has the name, and a name "
+                        "stands once among the system views",
+                    )
+                )
+            try:
+                checked = read(view.state, leaves, weeks)
+            except StateRefusedException as refusal:
+                view_faults.extend(in_entry(place, fault) for fault in refusal.faults)
+                continue
+            normal.append(replace(view, state=write(checked.state)))
+            notes.extend(f"{place}, {note}" for note in checked.notes)
+        if view_faults or ratio_faults:
+            raise refused_load([*view_faults, *ratio_faults])
+        saved_at = now or datetime.now(UTC)
+        loaded = WorkflowLoaded(
+            self.load_views(Origin.WORKFLOW, normal, saved_at),
+            self._load(CustomRatio, Origin.WORKFLOW, kept, _RATIO_FIELDS, saved_at),
+            tuple(notes),
+        )
+        after_commit(self.catalogue_service.drop)
+        return loaded
+
+    def _load(
+        self,
+        model: type[SavedView] | type[CustomRatio],
+        origin: Origin,
+        entries: Sequence[SystemView | RatioEntry],
+        fields: tuple[str, ...],
+        now: datetime,
+    ) -> Loaded:
+        """The rows of `model` of `origin` made `entries`, one per key, by
+        key, each entry's `fields` its row's; a row added or changed saved
+        at `now`."""
+        rows: list[Any] = list(
+            self.db.scalars(select(model).where(model.origin_code == origin))
+        )
+        held = {row.key: row for row in rows}
+        keys = {entry.key for entry in entries}
+        gone = [row.id for key, row in held.items() if key not in keys]
+        if gone:
+            # Before the others are written, so that a name a removed row
+            # held is free for one of them.
+            self.db.execute(delete(model).where(model.id.in_(gone)))
+        renamed = [
+            held[entry.key]
+            for entry in entries
+            if entry.key in held and held[entry.key].name != entry.name
+        ]
+        if renamed:
+            # A name stands once in its list at every row's write, so a name
+            # one row takes from another is freed first, under a stand-in a
+            # line break leads: no name of one line is one.
+            for row in renamed:
+                row.name = f"\n{row.id}"
+            self.db.flush()
+        added = changed = 0
+        for entry in entries:
+            values = {field: getattr(entry, field) for field in fields}
+            row = held.get(entry.key)
+            if row is None:
+                self.db.add(
+                    model(origin_code=origin, key=entry.key, saved_at=now, **values)
+                )
                 added += 1
-            elif (row.name, row.state, row.note) != (view.name, view.state, view.note):
-                row.name, row.state, row.note = view.name, view.state, view.note
+            elif any(getattr(row, field) != value for field, value in values.items()):
+                for field, value in values.items():
+                    setattr(row, field, value)
                 row.saved_at = now
                 changed += 1
         self.db.flush()
@@ -562,6 +712,60 @@ class DashboardStoreService:
         while key in taken:
             key, number = f"{base}_{number}", number + 1
         return key
+
+
+_VIEW_FIELDS = ("name", "state", "note")
+_RATIO_FIELDS = ("name", "numerator", "denominator", "note")
+
+
+def _repeated(kind: str, entries: Sequence[SystemView | RatioEntry]) -> list[Fault]:
+    """A fault for each key that stands on more than one entry, and for each
+    entry whose name one before it has."""
+    faults = []
+    keys = [entry.key for entry in entries]
+    for key in dict.fromkeys(keys):
+        if (count := keys.count(key)) > 1:
+            faults.append(
+                Fault(
+                    f'{kind} "{key}"',
+                    ENTRY,
+                    f"the key stands on {count} entries, and a load takes one "
+                    "entry a key",
+                )
+            )
+    named: dict[str, str] = {}
+    for entry in entries:
+        first = named.setdefault(entry.name, entry.key)
+        if first != entry.key:
+            faults.append(
+                Fault(
+                    f'{kind} "{entry.key}", name "{entry.name}"',
+                    ENTRY,
+                    f'the {kind} "{first}" has the name too, and a name stands '
+                    f"once among the loaded {kind}s",
+                )
+            )
+    return faults
+
+
+def _key_fault(place: str, key: str, built_in: set[str]) -> Fault | None:
+    """The fault of a loaded ratio's key: one in the space of a person's
+    keys (DB 602), or a built-in ratio's."""
+    if key.startswith(PERSON_KEYS):
+        return Fault(
+            f"{place}, key",
+            ENTRY,
+            f'a key that begins "{PERSON_KEYS}" is a ratio a person made, and a '
+            "loaded ratio's key is outside that space",
+        )
+    if key in built_in:
+        return Fault(
+            f"{place}, key",
+            ENTRY,
+            "a ratio built into the dashboard has the key, and a loaded ratio's "
+            "key is no built-in one's",
+        )
+    return None
 
 
 _LISTS = {FavouriteMenu.BY: "By's list", FavouriteMenu.COLOR: "Color's list"}

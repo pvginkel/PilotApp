@@ -11,7 +11,9 @@
   paged here, as KubeCoder's fleet adapter pages its own: their routes answer
   a list whole. A conversation's tools call `/api/conversations`
   (`app/api/conversations.py`), which reads whose a conversation is from
-  those two headers; a message whose send failed is its tool's error.
+  those two headers; a message whose send failed is its tool's error. The
+  load of the workflow's views and ratios calls `/api/dashboard/workflow`
+  (`app/api/dashboard_store.py`), which takes the service user alone.
   `get_response` alone holds its call (F150.10): it asks the API where the
   conversation stands every `POLL_SECONDS`, each ask answered at once, until
   no turn is in flight or its wait is over, then reads the reply once, and
@@ -852,6 +854,126 @@ class TurnResponse(BaseModel):
     )
 
 
+MAX_LOADED = 200
+MAX_LOADED_KEY = 60
+MAX_LOADED_VIEW_NAME = 80
+MAX_LOADED_RATIO_NAME = 60
+MAX_LOADED_NOTE = 200
+"""The limits of a load of the workflow's views and ratios, as its route
+takes them (`app/schemas/dashboard_store.py`)."""
+
+LOADED_KEY = r"^[a-z][a-z0-9_]*$"
+_ONE_LINE = r"^[^\r\n]*\S[^\r\n]*$"
+
+_LOADED_NOTE = "A line shown with it, at most 200 characters; omit for none"
+
+
+class WorkflowView(BaseModel):
+    """A view of the workflow's file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(
+        pattern=LOADED_KEY,
+        max_length=MAX_LOADED_KEY,
+        description=(
+            "The key your file names it by: lower-case letters, digits and"
+            " underscores, a letter first, at most 60 characters. Each load"
+            " matches it to its view by it, so that a view renamed keeps its"
+            " stars"
+        ),
+    )
+    name: str = Field(
+        pattern=_ONE_LINE,
+        max_length=MAX_LOADED_VIEW_NAME,
+        description=(
+            "Its name in the dashboard's list of views, one line of at most 80"
+            " characters, which no other view of the workflow's or of Pilot's"
+            " own has"
+        ),
+    )
+    state: str = Field(
+        min_length=1,
+        description=(
+            "The view, as the dashboard's address writes it after `#dash/`"
+            " (e.g. `t=qw&by=project&m=cost.sum`); it may name a ratio of the"
+            " same call by `r:<key>`"
+        ),
+    )
+    note: str | None = Field(
+        default=None,
+        pattern=r"\S",
+        max_length=MAX_LOADED_NOTE,
+        description=_LOADED_NOTE,
+    )
+
+
+class WorkflowRatio(BaseModel):
+    """A ratio of the workflow's file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(
+        pattern=LOADED_KEY,
+        max_length=MAX_LOADED_KEY,
+        description=(
+            "The key your file names it by, which a view's state names it by"
+            " after `r:`: lower-case letters, digits and underscores, a letter"
+            " first, at most 60 characters; neither the key of a ratio built"
+            " into the dashboard nor one that begins `person_`"
+        ),
+    )
+    name: str = Field(
+        pattern=_ONE_LINE,
+        max_length=MAX_LOADED_RATIO_NAME,
+        description=(
+            "Its name in the dashboard's list of ratios, one line of at most 60"
+            " characters, which no other ratio of the workflow's has"
+        ),
+    )
+    numerator: str = Field(
+        min_length=1,
+        description=(
+            "The measure above the line, as a view's state writes it after"
+            " `m=` (e.g. `cost.sum`)"
+        ),
+    )
+    denominator: str = Field(
+        min_length=1,
+        description=(
+            "The measure below the line, as a view's state writes it after"
+            " `m=` (e.g. `calls.count`)"
+        ),
+    )
+    note: str | None = Field(
+        default=None,
+        pattern=r"\S",
+        max_length=MAX_LOADED_NOTE,
+        description=_LOADED_NOTE,
+    )
+
+
+class LoadCounts(BaseModel):
+    """What a load did to the workflow's views, or to its ratios."""
+
+    added: int = Field(description="How many it added")
+    changed: int = Field(description="How many it changed in place")
+    removed: int = Field(description="How many it removed")
+
+
+class LoadedWorkflow(BaseModel):
+    """What a load of the workflow's views and ratios did."""
+
+    views: LoadCounts
+    ratios: LoadCounts
+    notes: list[str] = Field(
+        description=(
+            "One for each part of a view's state left out, after the view it"
+            " is in: a quick filter or a ratio it names by a key that is gone"
+        )
+    )
+
+
 class Clock(Protocol):
     """The time a held call waits by."""
 
@@ -1518,6 +1640,20 @@ class PilotProjectsApi:
         standing = await self._send("GET", path, caller, timeout=_POLL_TIMEOUT)
         in_flight: bool = standing["in_flight"]
         return in_flight
+
+    async def load_workflow_views(
+        self,
+        caller: Caller,
+        views: list[WorkflowView],
+        ratios: list[WorkflowRatio],
+    ) -> LoadedWorkflow:
+        body = {
+            "views": [view.model_dump(exclude_none=True) for view in views],
+            "ratios": [ratio.model_dump(exclude_none=True) for ratio in ratios],
+        }
+        return LoadedWorkflow.model_validate(
+            await self._send("PUT", "/api/dashboard/workflow", caller, body=body)
+        )
 
     async def _get(self, path: str, caller: Caller, query: dict[str, str]) -> Any:
         return await self._send("GET", path, caller, query=query)

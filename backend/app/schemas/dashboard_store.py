@@ -29,6 +29,34 @@ Note = Annotated[
 ]
 Menu = Literal["by", "color"]
 
+KEY = 60
+"""The longest key of a view or a ratio of the workflow's file."""
+
+MAX_LOADED = 200
+"""The most views, and the most ratios, one load of the workflow's takes."""
+
+LOADED_KEY = r"^[a-z][a-z0-9_]*$"
+"""A key of the workflow's file: lower-case letters, digits and underscores,
+a letter first, as a ratio's key stands after `r:` in a view's state."""
+
+ONE_LINE = r"^[^\r\n]*$"
+"""A loaded name, one line: the load's stand-in for a name it frees holds a
+line break (`DashboardStoreService._load`)."""
+
+LoadedKey = Annotated[str, StringConstraints(pattern=LOADED_KEY, max_length=KEY)]
+LoadedViewName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=VIEW_NAME, pattern=ONE_LINE
+    ),
+]
+LoadedRatioName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=NAME, pattern=ONE_LINE
+    ),
+]
+
 
 class SaveViewSchema(BaseModel):
     """A view's whole state to save for everyone under a name."""
@@ -144,4 +172,95 @@ class CustomRatioWriteSchema(BaseModel):
     )
     note: Note | None = Field(
         default=None, description="A line of explanation shown with it"
+    )
+
+
+class WorkflowViewSchema(BaseModel):
+    """A view of the workflow's file."""
+
+    key: LoadedKey = Field(
+        description=(
+            "The key the file names it by, which matches it to its system view "
+            "at every load, so that a renamed one keeps its stars"
+        ),
+        examples=["errands"],
+    )
+    name: LoadedViewName = Field(
+        description="Its name, one line, which no other system view has",
+        examples=["Errands"],
+    )
+    state: str = Field(
+        min_length=1,
+        description=(
+            "The view's state as the URL writes it after `#dash/`, `#dash/` "
+            "before it or not; kept in its normal form. It may name a ratio of "
+            "the same load by `r:<key>`"
+        ),
+        examples=["t=l8&by=project&m=cost.sum&m=r:per_serving&col=model"],
+    )
+    note: Note | None = Field(
+        default=None, description="A line of explanation shown with it"
+    )
+
+
+class WorkflowRatioSchema(BaseModel):
+    """A ratio of the workflow's file."""
+
+    key: LoadedKey = Field(
+        description=(
+            "The key the file names it by, which a view's state names it by "
+            "after `r:`: no built-in ratio's, and not beginning `person_`"
+        ),
+        examples=["per_serving"],
+    )
+    name: LoadedRatioName = Field(
+        description="Its name, one line, which no other loaded ratio has",
+        examples=["Cost per serving"],
+    )
+    numerator: str = Field(
+        min_length=1,
+        description="The measure above the line, as a state writes it after `m=`",
+        examples=["cost.sum"],
+    )
+    denominator: str = Field(
+        min_length=1,
+        description="The measure below the line, as a state writes it after `m=`",
+        examples=["calls.count"],
+    )
+    note: Note | None = Field(
+        default=None, description="A line of explanation shown with it"
+    )
+
+
+class WorkflowLoadSchema(BaseModel):
+    """The entries of the workflow's file of views and ratios, whole."""
+
+    views: list[WorkflowViewSchema] = Field(
+        max_length=MAX_LOADED,
+        description="Every view of the file, each key once",
+    )
+    ratios: list[WorkflowRatioSchema] = Field(
+        max_length=MAX_LOADED,
+        description="Every ratio of the file, each key once",
+    )
+
+
+class LoadCountsSchema(BaseModel):
+    """What a load wrote of one kind of row."""
+
+    added: int = Field(description="The rows it added")
+    changed: int = Field(description="The rows it changed in place")
+    removed: int = Field(description="The rows it removed")
+
+
+class WorkflowLoadedSchema(BaseModel):
+    """What a load of the workflow's views and ratios wrote."""
+
+    views: LoadCountsSchema
+    ratios: LoadCountsSchema
+    notes: list[str] = Field(
+        description=(
+            "One for each part of a view's state dropped, after the view it is "
+            "in: a quick filter or a ratio it named by a key that is gone"
+        )
     )

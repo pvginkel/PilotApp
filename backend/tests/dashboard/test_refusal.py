@@ -1,14 +1,18 @@
 """A refusal of a view's state (F154.2): every fault at once, the nearest
 names by edit distance, and a correct example of each kind of part refused,
-in one text for the screen and a tool."""
+in one text for the screen and a tool; and of a load of the workflow's views
+and ratios, each fault named with its entry (F155.3)."""
 
 from app.dashboard.refusal import (
+    ENTRY,
     Fault,
     distance,
+    in_entry,
     listed,
     nearest,
     refusal,
     refused,
+    refused_load,
 )
 from app.exceptions import StateRefusedException
 
@@ -102,3 +106,57 @@ class TestRefusal:
         assert exception.message == refusal(faults)
         assert exception.faults == tuple(faults)
         assert exception.error_code == "STATE_REFUSED"
+
+
+class TestRefusedLoad:
+    def test_it_names_every_fault_with_its_entry_and_ends_on_an_example_of_each_kind(
+        self,
+    ) -> None:
+        faults = [
+            in_entry(
+                'view "errands"',
+                Fault("by=phases", "by", '"phases" is no dimension'),
+            ),
+            Fault(
+                'view "legs", name "Projects"',
+                ENTRY,
+                "one of Pilot's own system views has the name",
+            ),
+        ]
+
+        refused = refused_load(faults)
+
+        assert refused.message == (
+            "Cannot load the views and ratios because their entries have 2 "
+            "faults.\n"
+            '- view "errands", by=phases: "phases" is no dimension.\n'
+            '- view "legs", name "Projects": one of Pilot\'s own system views has '
+            "the name.\n"
+            "A By reads by=<dimension>, as in by=project."
+        )
+        assert refused.faults == tuple(faults)
+        assert refused.error_code == "STATE_REFUSED"
+
+    def test_a_fault_of_an_entry_alone_ends_on_no_example(self) -> None:
+        refused = refused_load(
+            [Fault('ratio "person_x", key', ENTRY, "a person's key")]
+        )
+
+        assert refused.message == (
+            "Cannot load the views and ratios because their entries have 1 "
+            "fault.\n"
+            '- ratio "person_x", key: a person\'s key.'
+        )
+
+    def test_in_entry_keeps_the_fault_but_its_part(self) -> None:
+        fault = Fault(
+            "m=cost.medain", "m", '"medain" is no aggregate', ("median",), "sum"
+        )
+
+        assert in_entry('ratio "per_serving"', fault) == Fault(
+            'ratio "per_serving", m=cost.medain',
+            "m",
+            '"medain" is no aggregate',
+            ("median",),
+            "sum",
+        )

@@ -1,7 +1,9 @@
 """/api/dashboard's writes of what the dashboard stores (F155): the saved
 views saved, renamed and removed, a system view by no one; a person's stars
 and favourite dimensions; the quick filters made and removed; the ratios a
-person made, made, changed and removed, a loaded one by no one."""
+person made, made, changed and removed, a loaded one by no one; and the load
+of the workflow's views and ratios, the service user's alone, on an invented
+file (F155.3)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -14,12 +16,14 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.models import CustomRatio, QuickFilter, SavedView, User
 from app.models.reference import Origin, UserKind
+from tests.support import workflow_views
 
 VIEWS = "/api/dashboard/saved-views"
 FAVOURITES = "/api/dashboard/favourites"
 DIMENSIONS = "/api/dashboard/favourites/dimensions"
 QUICK_FILTERS = "/api/dashboard/quick-filters"
 RATIOS = "/api/dashboard/custom-ratios"
+WORKFLOW = "/api/dashboard/workflow"
 STATE = "t=d7&by=model&m=cost.sum&col=none"
 OTHER_STATE = "t=qw&by=project&m=cost.sum&col=none"
 EARLIER = datetime(2026, 11, 1, 9, tzinfo=UTC)
@@ -518,6 +522,127 @@ class TestCustomRatios:
         assert client.delete(f"{RATIOS}/{uuid.uuid4()}").status_code == 404
 
 
+def _entries(views: list[dict[str, Any]] | None = None, **ratio: Any) -> Any:
+    """The invented file, its views `views` where given, and its first ratio
+    with `ratio`'s fields."""
+    written = workflow_views.arguments()
+    if views is not None:
+        written["views"] = views
+    written["ratios"][0] |= ratio
+    return written
+
+
+class TestLoadWorkflow:
+    def test_the_service_user_loads_the_file_and_every_person_reads_it(
+        self, client: FlaskClient, service_user: User, person: User
+    ) -> None:
+        _sign_in(client, service_user.subject)
+
+        response = client.put(WORKFLOW, json=workflow_views.arguments())
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "views": {"added": 3, "changed": 0, "removed": 0},
+            "ratios": {"added": 2, "changed": 0, "removed": 0},
+            "notes": [],
+        }
+        _sign_in(client)
+        stored = _stored(client)
+        assert [
+            (view["key"], view["name"], view["address"])
+            for view in stored["saved_views"]
+            if view["origin"] == "workflow"
+        ] == [
+            (
+                "errands",
+                "Errands",
+                "#dash/t=l8&by=project&m=cost.sum&m=r:per_serving&col=model",
+            ),
+            (
+                "legs",
+                "Legs",
+                "#dash/t=qw&by=conversation&m=cost.median&col=none&roll=5,5",
+            ),
+            (
+                "rides",
+                "Rides",
+                "#dash/t=d7&by=project&p=time,day&m=cost.sum&m=r:per_ride&col=source",
+            ),
+        ]
+        assert [
+            (ratio["key"], ratio["system"], ratio["offered"])
+            for ratio in stored["custom_ratios"]
+        ] == [("per_ride", True, True), ("per_serving", True, True)]
+
+    def test_a_dropped_part_is_a_note(
+        self, client: FlaskClient, service_user: User
+    ) -> None:
+        _sign_in(client, service_user.subject)
+        views = [{"key": "errands", "name": "Errands", "state": "by=model&b=pantry"}]
+
+        response = client.put(WORKFLOW, json=_entries(views))
+
+        assert response.status_code == 200
+        assert response.get_json()["notes"] == [
+            'view "errands", b=pantry: no quick filter has the key "pantry", so it '
+            "is dropped."
+        ]
+
+    def test_a_person_is_refused(self, client: FlaskClient, person: User) -> None:
+        _sign_in(client)
+
+        response = client.put(WORKFLOW, json=workflow_views.arguments())
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot load the workflow's views and ratios because you do not call "
+            "as a service user"
+        )
+
+    def test_a_load_with_faults_is_refused_with_its_text_and_writes_nothing(
+        self, client: FlaskClient, session: DbSession, service_user: User
+    ) -> None:
+        _sign_in(client, service_user.subject)
+
+        response = client.put(WORKFLOW, json=_entries(key="person_serving"))
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+        assert _error(response) == (
+            "Cannot load the views and ratios because their entries have 1 fault.\n"
+            '- ratio "person_serving", key: a key that begins "person_" is a ratio '
+            "a person made, and a loaded ratio's key is outside that space."
+        )
+        assert (
+            session.scalars(
+                select(SavedView).where(SavedView.origin_code == Origin.WORKFLOW)
+            ).all()
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        "entries",
+        [
+            _entries(key="per-serving"),
+            _entries(name="Cost per\nserving"),
+            _entries([{"key": "errands", "name": "Errands"}]),
+            _entries(
+                [
+                    {"key": f"view_{number}", "name": f"View {number}", "state": "x"}
+                    for number in range(201)
+                ]
+            ),
+        ],
+        ids=["a-key-with-a-hyphen", "a-name-of-two-lines", "no-state", "201-views"],
+    )
+    def test_an_entry_the_schema_takes_no_part_of_is_refused(
+        self, client: FlaskClient, service_user: User, entries: Any
+    ) -> None:
+        _sign_in(client, service_user.subject)
+
+        assert client.put(WORKFLOW, json=entries).status_code == 400
+
+
 ROUTES = [
     ("post", VIEWS, {"name": "Opus", "state": STATE}),
     ("patch", f"{VIEWS}/{NOWHERE}", {"name": "Opus"}),
@@ -536,6 +661,7 @@ ROUTES = [
         {"name": "Mine", "numerator": "cost", "denominator": "turns"},
     ),
     ("delete", f"{RATIOS}/{NOWHERE}", None),
+    ("put", WORKFLOW, {"views": [], "ratios": []}),
 ]
 
 

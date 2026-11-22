@@ -2,14 +2,15 @@
 and a tool read one text: every fault at once, each with its part as
 written, what is wrong, the nearest names and what is allowed there, and at
 its end a correct example of each kind of part refused
-(`tools/cost-dashboard/brain-tools.md` §3.5). The texts are a contract: the
-suite pins them.
+(`tools/cost-dashboard/brain-tools.md` §3.5); and of a load of the
+workflow's views and ratios, its faults each named with its entry. The texts
+are a contract: the suite pins them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.exceptions import StateRefusedException
 
@@ -116,11 +117,40 @@ def refused(faults: Sequence[Fault]) -> StateRefusedException:
 def refusal(faults: Sequence[Fault]) -> str:
     """The refusal's text: every fault, each on a line, then a correct
     example of each kind of part refused."""
-    count = len(faults)
-    head = (
-        "Cannot read the view because its state has "
-        f"{count} fault{'' if count == 1 else 's'}."
+    return _text(
+        f"Cannot read the view because its state has {_count(faults)}.", faults
     )
+
+
+ENTRY = "entry"
+"""The kind of a load's fault that is no part of a state: an entry's key or
+name; no example follows it."""
+
+
+def in_entry(entry: str, fault: Fault) -> Fault:
+    """A fault of a state or a measure as a load names it: its part after
+    the entry it is in, `view "<key>"` or `ratio "<key>"`."""
+    return replace(fault, part=f"{entry}, {fault.part}")
+
+
+def refused_load(faults: Sequence[Fault]) -> StateRefusedException:
+    """The refusal of a load of views and ratios with `faults`, each named
+    with its entry (`in_entry`), in the order they stand."""
+    return StateRefusedException(
+        _text(
+            "Cannot load the views and ratios because their entries have "
+            f"{_count(faults)}.",
+            faults,
+        ),
+        tuple(faults),
+    )
+
+
+def _count(faults: Sequence[Fault]) -> str:
+    return f"{len(faults)} fault{'' if len(faults) == 1 else 's'}"
+
+
+def _text(head: str, faults: Sequence[Fault]) -> str:
     kinds = [kind for kind in FORMS if any(fault.kind == kind for fault in faults)]
     examples = [
         f"{FORMS[kind][0]} reads {FORMS[kind][1]}, as in {FORMS[kind][2]}."

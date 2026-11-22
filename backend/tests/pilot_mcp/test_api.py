@@ -14,7 +14,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from app import models
 from app.models.reference import ProgressState
 from app.models.reference import ProjectState as RecordedProjectState
-from app.schemas import pilot_store, pilot_work
+from app.schemas import dashboard_store, pilot_store, pilot_work
 from app.schemas.projects import ProjectStatus as ApiProjectStatus
 from app.schemas.timeline import HeldReason, ItemKindCode
 from pilot_mcp import api as pilot_mcp_api
@@ -106,6 +106,24 @@ def test_a_steps_limits_are_its_routes(limit: str) -> None:
 def test_the_figures_and_the_liness_limits_are_their_routes() -> None:
     assert pilot_mcp_api.MAX_DEBRIEF_FIGURES == pilot_work.MAX_DEBRIEF_FIGURES
     assert pilot_mcp_api.MAX_NOTABLE == pilot_store.MAX_NOTABLE
+
+
+def test_a_loads_limits_are_its_routes() -> None:
+    assert (
+        pilot_mcp_api.MAX_LOADED,
+        pilot_mcp_api.MAX_LOADED_KEY,
+        pilot_mcp_api.MAX_LOADED_VIEW_NAME,
+        pilot_mcp_api.MAX_LOADED_RATIO_NAME,
+        pilot_mcp_api.MAX_LOADED_NOTE,
+        pilot_mcp_api.LOADED_KEY,
+    ) == (
+        dashboard_store.MAX_LOADED,
+        dashboard_store.KEY,
+        dashboard_store.VIEW_NAME,
+        dashboard_store.NAME,
+        dashboard_store.NOTE,
+        dashboard_store.LOADED_KEY,
+    )
 
 
 @pytest.mark.anyio

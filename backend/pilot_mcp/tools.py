@@ -10,8 +10,9 @@ two carries is the API's to resolve; a tool passes it on as it came, with the
 tool-use id Claude Code sends in the call's `_meta`, which the call's effect
 names, where it records one. A call to `pilot-projects` hands on its caller,
 never its bearer (`api.py`), and its words are the outside's (F150.3): Pilot,
-a project, its items and documents, and a conversation with Pilot about one,
-whose tools are KubeCoder's session tools one for one (F150.10).
+a project, its items and documents, a conversation with Pilot about one,
+whose tools are KubeCoder's session tools one for one (F150.10), and the
+load of the workflow's views and ratios into the dashboard (F155.3).
 """
 
 import functools
@@ -35,6 +36,7 @@ from pilot_mcp.api import (
     MAX_DEBRIEF_ENTRIES,
     MAX_DEBRIEF_FIGURES,
     MAX_DEBRIEF_SUBJECT,
+    MAX_LOADED,
     MAX_NOTABLE,
     MAX_STEP_CODE,
     MAX_STEPS,
@@ -56,6 +58,7 @@ from pilot_mcp.api import (
     FoundFiles,
     ItemKind,
     Items,
+    LoadedWorkflow,
     Mark,
     NewItem,
     PilotProjectsApi,
@@ -75,6 +78,8 @@ from pilot_mcp.api import (
     StepState,
     StepTiming,
     TurnResponse,
+    WorkflowRatio,
+    WorkflowView,
     Written,
 )
 
@@ -1281,6 +1286,52 @@ def register_projects_tools(mcp: FastMCP, api: PilotProjectsApi) -> None:
         names no person is refused, as is every call while Pilot is updating,
         and nothing is started."""
         return await api.start_project(_caller(ctx), brief, title, for_)
+
+    @mcp.tool()
+    async def load_workflow_views(
+        ctx: Call,
+        views: Annotated[
+            list[WorkflowView],
+            Field(
+                max_length=MAX_LOADED,
+                description=(
+                    "Every view of the workflow's file, each key once, at most"
+                    " 200; an empty list removes every view of the workflow's"
+                ),
+            ),
+        ],
+        ratios: Annotated[
+            list[WorkflowRatio],
+            Field(
+                max_length=MAX_LOADED,
+                description=(
+                    "Every ratio of the workflow's file, each key once, at most"
+                    " 200; an empty list removes every ratio of the workflow's"
+                ),
+            ),
+        ],
+    ) -> LoadedWorkflow:
+        """Load the workflow's views and ratios into the dashboard of what
+        the projects Pilot manages cost, from the entries of the workflow's
+        file, each under its key: after the call the workflow's views and
+        ratios on the dashboard are those entries. A view or a ratio whose
+        key the call holds is changed in place, a view keeping the stars
+        people gave it; one whose key is new is added; one whose key the call
+        no longer holds is removed, a view's stars with it. A view's `state`
+        is the view as the dashboard's address writes it after `#dash/`, and
+        may name a ratio of the same call by `r:<key>`; a ratio's `numerator`
+        and `denominator` are measures as a view's state writes them after
+        `m=`. Each is kept as the dashboard writes it. Every entry is checked
+        before any is written, and a call with a fault anywhere is refused
+        whole, every fault named with its entry, and changes nothing: a state
+        or a measure the dashboard cannot read, a key or a name given twice,
+        a view under the name of one of Pilot's own views, and a ratio under
+        the key of one built into the dashboard or a key that begins
+        `person_`, which a person's ratios take. Answers `{views, ratios,
+        notes}`: how many views and how many ratios it added, changed and
+        removed, and a note for each part of a view's state left out, a quick
+        filter or a ratio it names that is gone."""
+        return await api.load_workflow_views(_caller(ctx), views, ratios)
 
     @mcp.tool()
     async def start_conversation(
