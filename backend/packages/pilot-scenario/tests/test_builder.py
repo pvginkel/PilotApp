@@ -171,6 +171,7 @@ class TestAMainThread:
             "message_id": "msg_0003",
             "prompt": 1,
             "predecessor": "msg_0002",
+            "sent_at": _at(79),
             "completed_at": _at(92),
             "model": "claude-opus-4-5",
             "effort": "high",
@@ -214,6 +215,23 @@ class TestAMainThread:
                 {"kind": "skill_body", "name": "pantry:scaling", "characters": 4_300}
             ],
         }
+
+    def test_a_call_was_sent_at_its_moment_before_it_completed(self) -> None:
+        halving = _built()["halving"]
+
+        assert _calls(halving, "sent_at") == [
+            _at(5),
+            _at(21),
+            _at(79),
+            _at(102),
+            _at(151),
+            _at(208),
+        ]
+        assert all(
+            call["sent_at"] < call["completed_at"]
+            for publication in _built().values()
+            for call in publication["calls"]
+        )
 
     def test_a_command_the_person_interrupted_says_so(self) -> None:
         gears = _built()["gears"]
@@ -447,6 +465,7 @@ class TestASubAgent:
         assert spawning["requested_at"] == _at(33)
         assert spawning["returned_at"] == _at(78)
         assert _calls(built["counting"], "completed_at") == [_at(46), _at(58), _at(74)]
+        assert _calls(built["counting"], "sent_at") == [_at(34), _at(49), _at(60)]
 
 
 class TestTheTurnsOfPilots:

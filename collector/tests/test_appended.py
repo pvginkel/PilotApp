@@ -30,8 +30,10 @@ from tests.support import (
     loaded,
     moment,
     queue,
+    request,
     requesting,
     result,
+    sent,
     summary,
     taken,
     typed,
@@ -306,6 +308,42 @@ class TestTheCarry:
         assert stands.awaited == ()
         assert (stands.link, stands.leads) == ("line-3", Lead("msg_01"))
 
+    def test_it_holds_the_requests_written_since_the_last_one_a_call_named(
+        self, tmp_path: Path
+    ) -> None:
+        """The boundary's Call's request among them, and one a later Call's
+        lines name, written before the boundary."""
+        lines = [
+            typed(0),
+            request(1, "request-1"),
+            sent(assistant(4, "msg_01"), "request-1"),
+            request(6, "request-2"),
+            request(9.5, "request-3"),
+            sent(assistant(9, "msg_02"), "request-2"),
+            request(10, "request-4"),
+        ]
+
+        stands = read(filed(tmp_path, lines), SETTINGS).carry.stands
+
+        assert stands.requests == (("request-2", moment(6)), ("request-3", moment(9.5)))
+
+    def test_a_request_held_counts_in_its_size_with_its_id(
+        self, tmp_path: Path
+    ) -> None:
+        def size(*requests: str) -> int:
+            lines = [
+                typed(0),
+                assistant(4, "msg_01"),
+                *(request(5, named) for named in requests),
+                sent(assistant(9, "msg_02"), "request-1"),
+            ]
+            return read(filed(tmp_path, lines), SETTINGS).carry.size
+
+        none, short, long = size(), size("request-1"), size("request-1-of-a-retry")
+
+        assert long - short == len("-of-a-retry")
+        assert short - none > len("request-1")
+
     def test_the_call_its_chain_leads_to_counts_in_its_size(
         self, tmp_path: Path
     ) -> None:
@@ -359,7 +397,7 @@ class TestAFileThatGrew:
 
     @pytest.mark.parametrize(
         ("scenario", "read_whole"),
-        [(SCENARIO, 2), (_resumed(), 0)],
+        [(SCENARIO, 3), (_resumed(), 0)],
         ids=["the scenario", "a resumed thread"],
     )
     def test_a_scenarios_file_grown_a_line_at_a_time_reads_as_its_whole(
@@ -561,6 +599,66 @@ class TestAFileThatGrew:
         assert (
             _held(before.publication, publication)
             == read(filed_again(tmp_path), SETTINGS).publication
+        )
+
+    def test_the_boundarys_call_was_sent_when_its_request_before_its_first_line_was(
+        self, tmp_path: Path
+    ) -> None:
+        before, grown = _grown(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    request(5, "request-2"),
+                    sent(assistant(9, "msg_02"), "request-2"),
+                ]
+            ),
+            _continuing(
+                "line-3",
+                [
+                    typed(10),
+                    request(11, "request-3"),
+                    sent(assistant(14, "msg_03"), "request-3"),
+                ],
+            ),
+        )
+
+        assert [
+            (call.message_id, call.sent_at) for call in grown.publication.calls
+        ] == [("msg_02", moment(5)), ("msg_03", moment(11))]
+        assert grown.carry.stands.requests == (("request-3", moment(11)),)
+
+    def test_a_later_call_was_sent_when_its_request_before_the_boundary_was(
+        self, tmp_path: Path
+    ) -> None:
+        """Claude Code may write the next request before the lines of the
+        response it follows, the boundary's Call's."""
+        named = filed(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    request(5, "request-2"),
+                    request(9.5, "request-3"),
+                    sent(assistant(9, "msg_02"), "request-2"),
+                ]
+            ),
+        )
+        before = read(named, SETTINGS)
+        _added(
+            named, _continuing("line-3", [sent(assistant(12, "msg_03"), "request-3")])
+        )
+
+        grown = read(named, SETTINGS, before.carry)
+
+        assert [
+            (call.message_id, call.sent_at) for call in grown.publication.calls
+        ] == [("msg_02", moment(5)), ("msg_03", moment(9.5))]
+        assert (
+            _held(before.publication, grown.publication)
+            == read(named, SETTINGS).publication
         )
 
     def test_a_compaction_from_the_boundary_on_is_placed_after_those_before_it(

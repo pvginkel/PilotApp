@@ -934,6 +934,8 @@ def _resumed(lines: list[bytes]) -> list[bytes]:
     read = [json.loads(line) for line in lines]
     ids = {line["uuid"] for line in read if "uuid" in line}
     for line in read:
+        if line["type"] == "api-request":
+            ids.add(line["id"])
         if line["type"] == "assistant":
             ids.add(line["message"]["id"])
             ids.update(
@@ -1063,7 +1065,7 @@ class TestAFileThatGrows:
 
     @pytest.mark.parametrize(
         ("name", "read_whole"),
-        [(RECIPES, 0), (SCALER, 0), (RIDES, 4)],
+        [(RECIPES, 0), (SCALER, 0), (RIDES, 6)],
         ids=["a main thread", "a sub-agent's thread", "a thread that goes back"],
     )
     def test_grown_a_line_at_a_time_pilot_holds_what_one_whole_publication_gives(

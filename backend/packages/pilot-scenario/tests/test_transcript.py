@@ -1,8 +1,8 @@
 """The scenario as transcript files (F122.3): each thread a file in Claude
 Code's line shapes, in a home laid out as the fleet's is, and each
 publication what its file says: read back off the lines here, a thread's
-ids and place, its Launches, Prompts, Calls and Tool Calls, its Compactions
-and each Call's place on the chain are the publication's."""
+ids and place, its Launches, Prompts, Calls and Tool Calls, its Compactions,
+each Call's place on the chain and when it was sent are the publication's."""
 
 import json
 import re
@@ -55,6 +55,7 @@ CALL_FACTS = (
     "prompt",
     "predecessor",
     "compaction",
+    "sent_at",
     "completed_at",
     "model",
     "tokens",
@@ -196,6 +197,7 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
         for line in lines
         for block in _blocks(line, "tool_result")
     }
+    requests = {line["id"]: line for line in lines if line["type"] == "api-request"}
     launches: list[dict[str, Any]] = []
     calls: dict[str, dict[str, Any]] = {}
     exited, prompts, enqueued = True, 0, None
@@ -262,6 +264,8 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                     call["predecessor"] = predecessor
                 if compaction is not None:
                     call["compaction"] = compaction
+                if "requestRef" in line:
+                    call["sent_at"] = _time(requests[line["requestRef"]])
                 if main:
                     call["prompt"] = prompts
                 calls[message["id"]] = call
@@ -471,6 +475,8 @@ class TestAPublicationIsWhatItsFileSays:
             ["at", "tokens_before", "trigger"],
         ]
         assert sum("compaction" in call for call in calls) == 1
+        assert all("sent_at" in call for call in calls)
+        assert not any("sent_at" in call for call in resumed["calls"])
         assert [call.get("predecessor") for call in resumed["calls"]] == [
             None,
             "msg_0001",
@@ -533,7 +539,7 @@ class TestTheLines:
         builder = Builder(SCENARIO, UNTIL)
         lines = _lines(builder.files()[0])
         (place,) = [place for place, line in enumerate(lines) if _is_boundary(line)]
-        before, made, summary, after = lines[place - 1 : place + 3]
+        before, made, summary, asked, after = lines[place - 1 : place + 4]
 
         assert (made["parentUuid"], made["logicalParentUuid"]) == (None, before["uuid"])
         assert made["compactMetadata"] == {
@@ -549,6 +555,7 @@ class TestTheLines:
         assert summary["timestamp"] == stamp(
             builder.when(150) - timedelta(milliseconds=300)
         )
+        assert asked["type"] == "api-request"
         assert (after["type"], after["parentUuid"]) == ("assistant", summary["uuid"])
         assert {made["version"], summary["version"]} == {"2.1.317"}
 
@@ -558,7 +565,7 @@ class TestTheLines:
 
         assert made["compactMetadata"] == {"trigger": "manual", "preTokens": 900}
 
-    def test_a_line_beside_the_chain_carries_no_directory_and_the_queues_alone_a_time(
+    def test_a_line_beside_the_chain_carries_no_directory_and_the_queues_and_the_requests_alone_a_time(
         self,
     ) -> None:
         (halving, _, _) = _transcripts(Builder(SCENARIO, UNTIL))
@@ -568,6 +575,7 @@ class TestTheLines:
             "permission-mode",
             "queue-operation",
             "queue-operation",
+            *["api-request"] * 6,
             "last-prompt",
             "cost-state",
         ]
@@ -575,8 +583,71 @@ class TestTheLines:
         assert [line["type"] for line in beside if "timestamp" in line] == [
             "queue-operation",
             "queue-operation",
+            *["api-request"] * 6,
         ]
         assert "cwd" not in _lines(halving)[0]
+
+    def test_a_request_is_written_before_its_responses_first_line_which_names_it(
+        self,
+    ) -> None:
+        builder = Builder(SCENARIO, UNTIL)
+        lines = _lines(builder.files()[0])
+        places = [
+            place for place, line in enumerate(lines) if line["type"] == "api-request"
+        ]
+
+        assert [lines[place]["timestamp"] for place in places] == [
+            stamp(builder.when(moment)) for moment in (5, 21, 79, 102, 151, 208)
+        ]
+        assert len({lines[place]["id"] for place in places}) == len(places)
+        for place in places:
+            answered = lines[place + 1]["message"]["id"]
+            assert {
+                line["requestRef"]
+                for line in lines
+                if line.get("message", {}).get("id") == answered
+            } == {lines[place]["id"]}
+        assert {lines[place]["version"] for place in places} == {"2.1.317"}
+        assert {lines[place]["querySource"] for place in places} == {"sdk"}
+
+    def test_a_request_keeps_what_the_last_one_sent_that_its_chain_still_holds(
+        self,
+    ) -> None:
+        """Its process's first keeps none and builds on none; one past a
+        compaction keeps none, and a rewind fewer than the last sent."""
+        halving, _, gears = _transcripts(Builder(SCENARIO, UNTIL))
+
+        def sent(file: HomeFile) -> list[dict[str, Any]]:
+            return [line for line in _lines(file) if line["type"] == "api-request"]
+
+        for requests in (sent(halving), sent(gears)):
+            assert "base" not in requests[0]
+            assert [request["base"] for request in requests[1:]] == [
+                request["id"] for request in requests[:-1]
+            ]
+        assert [
+            (request["keep"], len(request["tail"])) for request in sent(halving)
+        ] == [
+            (0, 2),
+            (2, 2),
+            (4, 2),
+            (6, 2),
+            (0, 1),
+            (1, 2),
+        ]
+        assert [(request["keep"], len(request["tail"])) for request in sent(gears)] == [
+            (0, 2),
+            (2, 2),
+            (4, 2),
+            (5, 1),
+            (6, 2),
+        ]
+
+    def test_a_call_sent_at_no_moment_names_no_request(self) -> None:
+        lines = _lines(Builder(_resumed(), UNTIL).files()[0])
+
+        assert not [line for line in lines if line["type"] == "api-request"]
+        assert not [line for line in lines if "requestRef" in line]
 
     def test_a_response_is_a_line_a_block_and_its_last_line_has_its_usage(
         self,
@@ -676,7 +747,12 @@ class TestTheLines:
         assert lines[0]["message"]["content"] == spawning["input"]["prompt"]
         assert lines[0]["timestamp"] == stamp(builder.when(33))
         assert "promptSource" not in lines[0]
-        assert all(line["isSidechain"] for line in lines)
+        assert all(line["isSidechain"] for line in lines if "uuid" in line)
+        assert [
+            (line["agentId"], line["querySource"])
+            for line in lines
+            if line["type"] == "api-request"
+        ] == [(COUNTING, "agent:builtin:Explore")] * 3
         assert not any(line["type"] == "cost-state" for line in lines)
         assert result["toolUseResult"]["agentId"] == COUNTING
         assert spawning["input"]["subagent_type"] == "Explore"

@@ -35,6 +35,11 @@ its newline is written. The facts are read off the lines in the file's order:
   of that text the removes took out; else at its own time.
 - **A Call** is the `assistant` lines under one `message.id`, placed by the
   first of them; its usage, model and completion time are the last one's.
+- **A Call's sending time** is the time of the `api-request` line its first
+  line names by `requestRef`, among the request lines written since the one
+  the Call before it named: a retry writes a request line again, and the
+  Call names the last. A Call names none where the version writes none, and
+  is sent at none where no such line stands before its first line.
 - **A Compaction** is a `system` line of subtype `compact_boundary`, made
   when the line was written: `compactMetadata` gives its trigger and the
   tokens before it, and where the version records them the tokens after it
@@ -74,7 +79,8 @@ Calls from the boundary's on, the Launches that wrote a line from there on,
 the first with its Prompts from there on, the Compactions made from there
 on, and the four places the boundary names. Such a reading holds no line
 before the boundary's byte but the one the carry names, with where the chain
-leads from it as the lines before that byte stand, so it stops, and the file
+leads from it as the lines before that byte stand, and the request lines
+before it written since the last one a Call named, so it stops, and the file
 is read whole, where:
 
 - the file is no larger than the one the carry was built on, or its bytes
@@ -113,6 +119,9 @@ _COST = "cost-state"
 
 _COMPACTED = "compact_boundary"
 """The subtype of the `system` line a compaction's boundary is."""
+
+_REQUEST = "api-request"
+"""The type of the line a request to the model is."""
 
 SYNTHETIC = "<synthetic>"
 """The model of an `assistant` line Claude Code wrote itself: no response."""
@@ -261,6 +270,7 @@ class _Call:
     place: int
     """Its place among the transcript's Calls, from 0."""
     prompt: int | None
+    sent_at: datetime | None
     completed_at: datetime
     model: str
     tokens: dict[str, int]
@@ -420,6 +430,9 @@ class _Thread:
         """The tool calls requested, by Claude's id of the request."""
         self._link = before.link
         """The `uuid` of the last line taken that carries one."""
+        self._requests = before.requests
+        """The request lines taken since the last one a Call named, in the
+        file's order: each one's `id` and time."""
         self._leads: dict[str, _Stop | None] = {}
         """The nearest stop at or up the chain from each line taken, by its
         `uuid`, and from the line the reading stands after."""
@@ -483,7 +496,9 @@ class _Thread:
             if launch.version is None:
                 launch.version = line.get("version")
         if kind == "assistant":
-            self._answered(line["message"], at, chain)
+            self._answered(line["message"], at, chain, line.get("requestRef"))
+        elif kind == _REQUEST:
+            self._requests += ((line["id"], at),)
         elif kind == "user":
             content = line["message"]["content"]
             if is_a_tools_result(content):
@@ -513,6 +528,7 @@ class _Thread:
             if self._link is None
             else self._reached(self._leads[self._link], calls),
             awaited=self._before.awaited + tuple(self._awaited),
+            requests=self._requests,
             directory=self.directory,
             environment=self.environment,
             launch=None
@@ -649,10 +665,14 @@ class _Thread:
         )
 
     def _answered(
-        self, message: dict[str, Any], at: datetime, chain: _Stop | None
+        self,
+        message: dict[str, Any],
+        at: datetime,
+        chain: _Stop | None,
+        request: str | None,
     ) -> None:
         """A line of a response, which follows a line `chain` is the
-        nearest stop from."""
+        nearest stop from and names the request line `request`."""
         if message["model"] == SYNTHETIC:
             return
         model, tokens = message["model"], _tokens(message["usage"])
@@ -661,6 +681,7 @@ class _Thread:
             call = _Call(
                 self._placed(message["id"]),
                 self._prompts or None,
+                self._sent(request),
                 at,
                 model,
                 tokens,
@@ -674,6 +695,16 @@ class _Thread:
                 argument = _argument(block["name"], block["input"])
                 asked = _ToolCall(block["name"], argument, at)
                 self._requested[block["id"]] = call.tool_calls[block["id"]] = asked
+
+    def _sent(self, request: str | None) -> datetime | None:
+        """The time of the request line of that `id` among those taken
+        since the last one a Call named, which it and those before it are
+        no longer; none where none is."""
+        for place, (named, at) in enumerate(self._requests):
+            if named == request:
+                self._requests = self._requests[place + 1 :]
+                return at
+        return None
 
     def _returned(
         self, content: list[dict[str, Any]], record: Any, at: datetime
@@ -760,6 +791,7 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
             "prompt": call.prompt,
             "predecessor": (chain := thread.chain(call)).call,
             "compaction": chain.compaction,
+            "sent_at": call.sent_at,
             "completed_at": call.completed_at,
             "model": call.model,
             "tokens": call.tokens,

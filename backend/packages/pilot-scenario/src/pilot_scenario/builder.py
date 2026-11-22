@@ -10,9 +10,9 @@ side holds before a collector reads the transcript.
 A publication is what its thread's file says: the file's size and time, and
 each fact as the lines carry it. The files hold the lines these facts are
 read off: a thread's ids and where it ran, its Launches, Prompts, Calls and
-Tool Calls, its Compactions and each Call's place on the chain. No line is
-written for a hook run, an event or a context part, which the publications
-carry alone.
+Tool Calls, its Compactions, each Call's place on the chain and the request
+it answered. No line is written for a hook run, an event or a context part,
+which the publications carry alone.
 
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
@@ -204,6 +204,7 @@ class _Thread:
                 prompt=prompt,
                 predecessor=predecessor,
                 compaction=self._crossed,
+                sent_at=None if step.sent is None else at(step.sent),
                 completed_at=at(step.at),
                 model=step.model,
                 effort=step.effort,
@@ -271,6 +272,7 @@ class _Thread:
             message_id,
             [request(*one) for one in asked],
             when(call.at),
+            None if call.sent is None else when(call.sent),
         )
         for (use, tool_use_id, spawned, task), line in zip(
             asked, requests, strict=True
@@ -361,9 +363,14 @@ class Builder:
             )
         return built
 
-    def _lines(self, session: Session, agent: str | None = None) -> Lines:
+    def _lines(self, session: Session, agent: SubAgent | None = None) -> Lines:
         entrypoint = "sdk-cli" if session.person is None else "cli"
-        return Lines(self.conversation(session), session.directory, entrypoint, agent)
+        if agent is None:
+            return Lines(self.conversation(session), session.directory, entrypoint)
+        named = self.agent(session, agent)
+        return Lines(
+            self.conversation(session), session.directory, entrypoint, named, agent.type
+        )
 
     def _agents(self, session: Session) -> dict[str, Spawned]:
         return {
@@ -460,7 +467,7 @@ class Builder:
         """The sub-agent's thread, named for the tool call of the main
         thread that started it."""
         spawning = main.spawned[agent.name]
-        lines = self._lines(session, self.agent(session, agent))
+        lines = self._lines(session, agent)
         lines.version = spawning.version
         lines.tasked(_TASK, self.when(spawning.at))
         lines.instructed(session.environment, self.when(spawning.at))

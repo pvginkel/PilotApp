@@ -65,6 +65,17 @@ def cost() -> Line:
     return beside("cost-state", totalDuration=1_000)
 
 
+def request(seconds: float, named: str = "request-1") -> Line:
+    """The line of a request to the model, sent at `seconds`: the lines of
+    its response name it by its `id`, `named`."""
+    return beside("api-request", id=named, timestamp=stamp(seconds), version=VERSION)
+
+
+def sent(line: Line, named: str = "request-1") -> Line:
+    """A line of a response that names the request line `named`."""
+    return line | {"requestRef": named}
+
+
 def queue(operation: str, seconds: float, text: str | None = None) -> Line:
     """An operation of the queue's: it carries a time and no version."""
     line = beside("queue-operation", operation=operation, timestamp=stamp(seconds))
@@ -238,15 +249,18 @@ def instructions(seconds: float, *files: dict[str, str]) -> Line:
 
 
 def linked(lines: list[Line], name: str = "line") -> list[Line]:
-    """The lines as a chain: each that has a time and is no operation of the
-    queue's is named by a `uuid`, `name` and its place among them, and
-    follows the one before; the first follows none, and neither does a
-    compaction's boundary, which names the one before as its
-    `logicalParentUuid`."""
+    """The lines as a chain: each that has a time and is neither an
+    operation of the queue's nor a request is named by a `uuid`, `name` and
+    its place among them, and follows the one before; the first follows
+    none, and neither does a compaction's boundary, which names the one
+    before as its `logicalParentUuid`."""
     chain: list[Line] = []
     last: str | None = None
     for line in lines:
-        if "timestamp" not in line or line["type"] == "queue-operation":
+        if "timestamp" not in line or line["type"] in (
+            "queue-operation",
+            "api-request",
+        ):
             chain.append(line)
             continue
         named = f"{name}-{sum('uuid' in each for each in chain) + 1}"

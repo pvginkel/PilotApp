@@ -10,7 +10,11 @@ STOOD = datetime(2026, 11, 12, 10, 2, 3, 456789, tzinfo=UTC)
 
 
 def _carry(
-    place: int = 0, queued: int = 0, removed: int = 0, awaited: int = 0
+    place: int = 0,
+    queued: int = 0,
+    removed: int = 0,
+    awaited: int = 0,
+    requested: int = 0,
 ) -> Carry:
     """A carry no other shares a word or a time with."""
     return Carry(
@@ -28,6 +32,13 @@ def _carry(
             awaited=tuple(
                 f"{place:08}-{named:04}-4d57-9e3a-71c5d2b8a690"
                 for named in range(awaited)
+            ),
+            requests=tuple(
+                (
+                    f"{place:08}-{named:04}-4b1e-8c2d-5f0a9e3b7d61",
+                    STOOD + timedelta(days=place, hours=named),
+                )
+                for named in range(requested)
             ),
             directory=f"/work/Loom{place}",
             environment=f"cleo-loom-{place:06}",
@@ -57,11 +68,12 @@ def _path(name: str) -> Path:
 
 class TestACarrysSize:
     def test_it_is_counted_at_no_less_than_the_memory_it_takes(self) -> None:
-        for queued, awaited in ((0, 0), (40, 0), (0, 3)):
+        for queued, awaited, requested in ((0, 0, 0), (40, 0, 0), (0, 3, 0), (0, 0, 7)):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
             carries = [
-                _carry(place, queued, awaited=awaited) for place in range(1_000, 1_400)
+                _carry(place, queued, awaited=awaited, requested=requested)
+                for place in range(1_000, 1_400)
             ]
             taken = tracemalloc.get_traced_memory()[0] - before
             tracemalloc.stop()
@@ -74,6 +86,9 @@ class TestACarrysSize:
 
     def test_a_line_awaited_counts(self) -> None:
         assert _carry(awaited=2).size > _carry(awaited=1).size > _carry().size
+
+    def test_a_request_held_counts(self) -> None:
+        assert _carry(requested=2).size > _carry(requested=1).size > _carry().size
 
     def test_a_prompt_a_remove_took_out_and_held_counts_as_one_waiting(
         self,

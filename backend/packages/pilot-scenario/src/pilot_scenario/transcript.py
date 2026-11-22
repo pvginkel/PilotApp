@@ -5,8 +5,9 @@ A transcript's file is JSON Lines. A line with a `uuid` is one of the
 thread's chain: it names the line it follows as `parentUuid` and carries its
 time, the directory, the session's id and Claude Code's version. The lines
 Claude Code writes beside the chain carry no `uuid`, and of them the queue's
-alone a time: the permission mode a process starts under, the queue's
-operations, the last prompt, and the cost line a process writes as it exits.
+and the requests' alone a time: the permission mode a process starts under,
+the queue's operations, the requests, the last prompt, and the cost line a
+process writes as it exits.
 
 - A prompt is a `user` line whose `message.content` is its text, with
   `promptSource`, Claude Code's word for its source. One that waited in the
@@ -18,6 +19,11 @@ operations, the last prompt, and the cost line a process writes as it exits.
 - A response is one `assistant` line a block, all under its `message.id`.
   Each carries the response's `usage`; the lines before the last carry fewer
   output tokens than it and no `stop_reason`.
+- A request is an `api-request` line, written before its response's first
+  line, and each line of the response names it by its `id` as `requestRef`.
+  It holds what was sent: a digest of each message on the chain, those the
+  last request of its process sent and it kept, `keep` of its `base`, and
+  those it adds, its `tail`.
 - A tool's result is a `user` line holding one `tool_result` block that names
   its request's id, with `toolUseResult`, the tool's own record of it.
 - A sub-agent's file opens with the task its spawning call gave it, and every
@@ -31,6 +37,7 @@ operations, the last prompt, and the cost line a process writes as it exits.
 The shapes are Claude Code's; every word in them is invented.
 """
 
+import hashlib
 import json
 import re
 import uuid
@@ -115,6 +122,11 @@ def text(length: int) -> str:
     return (_WORDS * (length // len(_WORDS) + 1))[:length]
 
 
+def _digest(*parts: str) -> str:
+    """A digest as a request's line writes one."""
+    return hashlib.sha256("/".join(parts).encode()).hexdigest()
+
+
 def _kilobytes(size: int) -> str:
     """A size as Claude Code says one a result was too large at."""
     return f"{round(size / 1024, 1):g}KB"
@@ -122,7 +134,7 @@ def _kilobytes(size: int) -> str:
 
 class Lines:
     """One thread's lines in the file's order, the conversation's main
-    thread's or, with `agent`, a sub-agent's."""
+    thread's or, with `agent`, a sub-agent's of `agent_type`."""
 
     def __init__(
         self,
@@ -130,6 +142,7 @@ class Lines:
         directory: str,
         entrypoint: str,
         agent: str | None = None,
+        agent_type: str | None = None,
     ) -> None:
         self.version = ""
         """Claude Code's version the lines are written under."""
@@ -143,6 +156,20 @@ class Lines:
         self._agent = agent
         self._lines: list[dict[str, Any]] = []
         self._prompts = 0
+        self._follows: dict[str, tuple[str | None, str | None]] = {}
+        """Each line of the chain's: the line it follows, and the message it
+        is of, none for a line that is of none."""
+        self._asked: tuple[str, list[str]] | None = None
+        """The last request the process sent: its id and its messages."""
+        self._source = (
+            ("sdk" if entrypoint.startswith("sdk") else "repl_main_thread")
+            if agent is None
+            else f"agent:builtin:{agent_type}"
+        )
+        """What the requests are sent for, in Claude Code's words."""
+        self._shape = _digest(conversation, agent or "", "shape")
+        """The system prompt and the tools every request of the thread sends,
+        as a digest."""
 
     @property
     def path(self) -> str:
@@ -176,6 +203,11 @@ class Lines:
         if self._agent is not None:
             line["agentId"] = self._agent
         self.leaf = self._id("line")
+        if kind == "assistant":
+            self._follows[self.leaf] = (line["parentUuid"], fields["message"]["id"])
+        else:
+            message = None if kind == "system" else self.leaf
+            self._follows[self.leaf] = (line["parentUuid"], message)
         line |= fields
         line |= {
             "type": kind,
@@ -194,6 +226,7 @@ class Lines:
     def launched(self, version: str) -> None:
         """A process of that version of Claude Code starts."""
         self.version = version
+        self._asked = None
         mode = "default" if self._entrypoint == "cli" else "bypassPermissions"
         self._beside("permission-mode", permissionMode=mode)
 
@@ -280,16 +313,70 @@ class Lines:
             message={"role": "user", "content": text(_SUMMARY)},
         )
 
+    def _messages(self) -> list[str]:
+        """What a request sends: a digest of each message on the chain from
+        its first line to its leaf, a response's lines one message."""
+        held: list[str] = []
+        line = self.leaf
+        while line is not None:
+            line, message = self._follows[line]
+            if message is not None and (not held or held[-1] != message):
+                held.append(message)
+        return [_digest(message) for message in reversed(held)]
+
+    def _send(self, call: Call, at: datetime) -> str:
+        """The line of the request of the response to come, sent at `at`;
+        its id."""
+        sent = self._messages()
+        line: dict[str, Any] = {"type": "api-request", "sessionId": self._conversation}
+        if self._agent is not None:
+            line["agentId"] = self._agent
+        named = self._id("request")
+        params: dict[str, Any] = {"model": call.model, "max_tokens": 64_000}
+        if call.effort is not None:
+            params["output_config"] = {"effort": call.effort}
+        line |= {
+            "id": named,
+            "timestamp": stamp(at),
+            "version": self.version,
+            "querySource": self._source,
+            "shapeHash": self._shape,
+            "params": params,
+        }
+        kept = 0
+        if self._asked is not None:
+            line["base"], before = self._asked
+            while kept < min(len(before), len(sent)) and before[kept] == sent[kept]:
+                kept += 1
+        cached = {"type": "ephemeral"}
+        if call.tokens.cache_write_1h:
+            cached["ttl"] = "1h"
+        line |= {
+            "keep": kept,
+            "tail": sent[kept:],
+            "cacheControl": [
+                {"path": ["system", 1], "value": cached},
+                {"path": ["messages", len(sent) - 1, "content", 0], "value": cached},
+            ],
+            "requestDigest": _digest(self._shape, *sent),
+        }
+        self._lines.append(line)
+        self._asked = (named, sent)
+        return named
+
     def called(
         self,
         call: Call,
         message_id: str,
         requests: list[dict[str, Any]],
         at: datetime,
+        sent: datetime | None = None,
     ) -> list[str]:
         """A response that completed at `at`, a line a block: its thinking,
-        its words and each of `requests`, its `tool_use` blocks. The ids of
-        the requests' lines."""
+        its words and each of `requests`, its `tool_use` blocks, each line
+        naming its request where it was `sent` at a time Claude Code
+        records. The ids of the requests' lines."""
+        asked = {} if sent is None else {"requestRef": self._send(call, sent)}
         blocks: list[dict[str, Any]] = []
         if call.thinking is not None:
             signature = uuid.uuid5(_IDS, f"{message_id}/thinking").hex * 4
@@ -332,6 +419,7 @@ class Lines:
                     at - _BETWEEN * max(0, final - place),
                     message=message,
                     requestId=f"req_{message_id.removeprefix('msg_')}",
+                    **asked,
                 )
             )
         return written[len(blocks) - len(requests) :]

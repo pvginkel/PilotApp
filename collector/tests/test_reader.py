@@ -35,9 +35,11 @@ from tests.support import (
     moment,
     over_the_tokens,
     queue,
+    request,
     requesting,
     result,
     saved,
+    sent,
     summary,
     synthetic,
     taken,
@@ -75,6 +77,7 @@ CALL = (
     "prompt",
     "predecessor",
     "compaction",
+    "sent_at",
     "completed_at",
     "model",
     "tokens",
@@ -170,6 +173,11 @@ def _sources(publication: PublicationSchema) -> list[str]:
     ]
 
 
+def _sends(publication: PublicationSchema) -> list[tuple[str, datetime | None]]:
+    """Each Call's `message_id` and when it was sent."""
+    return [(call.message_id, call.sent_at) for call in publication.calls]
+
+
 def _chains(publication: PublicationSchema) -> list[tuple[str | None, int | None]]:
     """Each Call's predecessor and the compaction its chain crossed."""
     return [(call.predecessor, call.compaction) for call in publication.calls]
@@ -247,6 +255,12 @@ class TestTheScenario:
             for compaction in publication.get("compactions", [])
         ]
         assert {"tokens_after", "duration_ms"} <= set(compaction)
+        assert all(
+            "sent_at" in call
+            for publication in publications
+            for call in publication["calls"]
+        )
+        assert not any("sent_at" in call for call in resumed[0]["calls"])
         for threads in (publications, resumed):
             calls = [thread["calls"] for thread in threads]
             assert any("predecessor" not in thread[0] for thread in calls)
@@ -1050,6 +1064,148 @@ class TestCalls:
 
         assert (call.message_id, call.completed_at) == ("msg_07", moment(4))
         assert call.tokens == {"input": 5, "output": 22}
+
+
+class TestASendingTime:
+    def test_a_call_was_sent_when_the_request_its_lines_name_was_written(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                request(1, "request-1"),
+                sent(assistant(4, "msg_01", output=1), "request-1"),
+                sent(assistant(5, "msg_01", output=3), "request-1"),
+                result(6),
+                request(6.5, "request-2"),
+                sent(assistant(9, "msg_02"), "request-2"),
+            ],
+        )
+
+        assert _sends(publication) == [("msg_01", moment(1)), ("msg_02", moment(6.5))]
+
+    def test_a_retried_request_was_sent_when_the_last_its_call_names_was(
+        self, tmp_path: Path
+    ) -> None:
+        """A retry writes its request line again, and the Call names the
+        last."""
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                request(1, "request-1"),
+                request(1.3, "request-2"),
+                sent(assistant(4, "msg_01"), "request-2"),
+            ],
+        )
+
+        assert _sends(publication) == [("msg_01", moment(1.3))]
+
+    def test_a_call_that_names_no_request_was_sent_at_none(
+        self, tmp_path: Path
+    ) -> None:
+        """A version that records no send writes no request line, and no
+        `requestRef` names one."""
+        publication = _read(
+            tmp_path, [typed(0), request(1), assistant(4, "msg_01", output=1)]
+        )
+
+        assert _sends(publication) == [("msg_01", None)]
+
+    def test_a_request_its_file_holds_no_line_of_was_sent_at_none(
+        self, tmp_path: Path
+    ) -> None:
+        """A fork's requests are written in its main thread's file, and a
+        history copied in names those of the file it was copied from."""
+        publication = _read(
+            tmp_path,
+            [typed(0), request(1), sent(assistant(4), "a-request-of-another-file")],
+        )
+
+        assert _sends(publication) == [("msg_01", None)]
+
+    def test_a_request_written_after_its_calls_first_line_is_not_its_send(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                sent(assistant(4, "msg_01", output=1)),
+                request(4.5),
+                sent(assistant(5, "msg_01", output=3)),
+            ],
+        )
+
+        assert _sends(publication) == [("msg_01", None)]
+
+    def test_the_request_written_before_a_responses_lines_is_the_next_calls(
+        self, tmp_path: Path
+    ) -> None:
+        """Claude Code may write the next request before the lines of the
+        response it follows."""
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                request(1, "request-1"),
+                request(4.2, "request-2"),
+                sent(assistant(4, "msg_01"), "request-1"),
+                sent(assistant(9, "msg_02"), "request-2"),
+            ],
+        )
+
+        assert _sends(publication) == [("msg_01", moment(1)), ("msg_02", moment(4.2))]
+
+    def test_a_request_a_call_named_and_those_before_it_are_no_later_calls(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                request(1, "request-1"),
+                request(2, "request-2"),
+                sent(assistant(4, "msg_01"), "request-2"),
+                sent(assistant(9, "msg_02"), "request-1"),
+                sent(assistant(12, "msg_03"), "request-2"),
+            ],
+        )
+
+        assert _sends(publication) == [
+            ("msg_01", moment(2)),
+            ("msg_02", None),
+            ("msg_03", None),
+        ]
+
+    def test_a_line_claude_code_wrote_itself_takes_no_request(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                request(1),
+                sent(synthetic(2, "API Error: 529 overloaded")),
+                sent(assistant(4)),
+            ],
+        )
+
+        assert _sends(publication) == [("msg_01", moment(1))]
+
+    def test_a_sub_agents_calls_are_sent_as_a_main_threads(
+        self, tmp_path: Path
+    ) -> None:
+        lines = [
+            user(0, "Count the heddles."),
+            request(1),
+            sent(assistant(3, "msg_07")),
+        ]
+
+        publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
+
+        assert _sends(publication) == [("msg_07", moment(1))]
 
 
 class TestCompactions:

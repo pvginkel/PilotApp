@@ -42,6 +42,7 @@ COUNTING = SubAgent(
     steps=(
         Call(
             at=46,
+            sent=34,
             model=HAIKU,
             tokens=Tokens(input=2_140, cache_write_5m=6_020, output=96),
             carried=(
@@ -60,12 +61,14 @@ COUNTING = SubAgent(
         ),
         Call(
             at=58,
+            sent=49,
             model=HAIKU,
             tokens=Tokens(input=310, cache_read=6_020, output=72),
             tools=(ToolUse("Read", "recipes/stew.md", took=1, characters=2_210),),
         ),
         Call(
             at=74,
+            sent=60,
             model=HAIKU,
             tokens=Tokens(input=780, cache_read=6_020, output=268),
         ),
@@ -95,6 +98,7 @@ HALVING = Session(
                     steps=(
                         Call(
                             at=19,
+                            sent=5,
                             effort="high",
                             thinking=188,
                             tokens=Tokens(
@@ -113,6 +117,7 @@ HALVING = Session(
                         ),
                         Call(
                             at=33,
+                            sent=21,
                             effort="high",
                             tokens=Tokens(
                                 input=12,
@@ -132,6 +137,7 @@ HALVING = Session(
                         ),
                         Call(
                             at=92,
+                            sent=79,
                             effort="high",
                             skill="pantry:scaling",
                             plugin="pantry",
@@ -171,6 +177,7 @@ HALVING = Session(
                         ),
                         Call(
                             at=118,
+                            sent=102,
                             effort="high",
                             tokens=Tokens(
                                 input=14,
@@ -193,6 +200,7 @@ HALVING = Session(
                         ),
                         Call(
                             at=204,
+                            sent=151,
                             effort="high",
                             miss="compaction",
                             tokens=Tokens(input=30, cache_write_1h=21_300, output=480),
@@ -208,6 +216,7 @@ HALVING = Session(
                         ),
                         Call(
                             at=221,
+                            sent=208,
                             effort="high",
                             tokens=Tokens(
                                 input=11,
@@ -249,6 +258,7 @@ GEARS = Session(
                     steps=(
                         Call(
                             at=311,
+                            sent=301,
                             tokens=Tokens(input=940, cache_write_5m=18_700, output=205),
                             carried=(
                                 Carried("system_prompt", 9_100),
@@ -262,6 +272,7 @@ GEARS = Session(
                         ),
                         Call(
                             at=326,
+                            sent=313,
                             name="the ratios",
                             tokens=Tokens(
                                 input=8,
@@ -279,6 +290,7 @@ GEARS = Session(
                     steps=(
                         Call(
                             at=362,
+                            sent=351,
                             tokens=Tokens(
                                 input=10,
                                 cache_write_5m=380,
@@ -304,6 +316,7 @@ GEARS = Session(
                     steps=(
                         Call(
                             at=401,
+                            sent=391,
                             back_to="the ratios",
                             miss="rewind",
                             tokens=Tokens(
@@ -322,6 +335,7 @@ GEARS = Session(
                     steps=(
                         Call(
                             at=972,
+                            sent=961,
                             miss="ttl",
                             tokens=Tokens(input=12, cache_write_5m=20_660, output=140),
                         ),

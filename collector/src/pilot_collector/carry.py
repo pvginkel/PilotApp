@@ -14,11 +14,12 @@ The carry holds the byte the boundary's first line starts at and what the
 lines from there on continue: how many Calls, published Launches, Prompts and
 Compactions lie before it, the last line before it that lines link to and
 where the chain leads from that line, the lines named before it that the
-file holds no line of there, the directory and the environment the file
-named first, the Launch open there, the prompts waiting in the queue, and
-those a `remove` took out of it that no message taken in the middle of a run
-has claimed. No id of any other line before the boundary is held, and of no
-Call but the one the chain leads to.
+file holds no line of there, the request lines written since the last one a
+Call named, the directory and the environment the file named first, the
+Launch open there, the prompts waiting in the queue, and those a `remove`
+took out of it that no message taken in the middle of a run has claimed. No
+id of any other line before the boundary is held, and of no Call but the one
+the chain leads to.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
@@ -38,6 +39,9 @@ _HELD = 1_280
 
 _AWAITED = 64
 """The bytes a line awaited is counted at beside its id."""
+
+_REQUESTED = 176
+"""The bytes a request line held is counted at beside its id."""
 
 _QUEUED = 176
 """The bytes a prompt waiting in the queue, or held once a `remove` took it
@@ -104,6 +108,11 @@ class Standing:
     compaction's boundary as the one it continues, that no line before it
     carries, in the order they were named: a line of another file, or one
     written later."""
+    requests: tuple[tuple[str, datetime], ...] = ()
+    """The request lines before it written since the last one a Call named,
+    in the file's order: each one's `id` and time. A Call's first line names
+    its request among them, and that one and those before it are no later
+    Call's."""
     directory: str | None = None
     environment: str | None = None
     launch: Open | None = None
@@ -144,11 +153,13 @@ class Carry:
             stands.environment,
             self.collector,
             *stands.awaited,
+            *(named for named, _ in stands.requests),
         )
         return (
             _HELD
             + sum(len(word) for word in words if word is not None)
             + _AWAITED * len(stands.awaited)
+            + _REQUESTED * len(stands.requests)
             + _QUEUED * (len(stands.queue) + len(stands.removed))
         )
 
