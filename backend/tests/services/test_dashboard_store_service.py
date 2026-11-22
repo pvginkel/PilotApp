@@ -475,6 +475,29 @@ class TestLoadWorkflow:
             "per_serving",
         ]
 
+    @pytest.mark.usefixtures("from_the_file")
+    def test_a_ratios_key_on_two_entries_is_a_fault_named_with_its_entry(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        views, _ = workflow_views.entries()
+        ratios = (
+            RatioEntry("per_serving", "Cost per serving", "cost.sum", "calls.count"),
+            RatioEntry("per_serving", "Cost per supper", "cost.sum", "turns.count"),
+        )
+
+        with pytest.raises(StateRefusedException) as refused:
+            service.load_workflow(views, ratios, NOW)
+
+        assert refused.value.message == (
+            "Cannot load the views and ratios because their entries have 1 fault.\n"
+            '- ratio "per_serving": the key stands on 2 entries, and a load takes '
+            "one entry a key."
+        )
+        assert [key for key, _, _, _ in _ratios(session, Origin.WORKFLOW)] == [
+            "per_ride",
+            "per_serving",
+        ]
+
     def test_a_part_dropped_is_a_note_named_with_its_view(
         self, session: DbSession, service: DashboardStoreService
     ) -> None:

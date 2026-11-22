@@ -202,7 +202,7 @@ class DashboardStoreService:
                     ratio, numerator=simple_key(above), denominator=simple_key(below)
                 )
             )
-            if key_fault is None:
+            if key_fault is None and all(one.key != ratio.key for one in offered):
                 offered.append(
                     Ratio(
                         key=ratio.key,
