@@ -17,7 +17,7 @@ from app.exceptions import StateRefusedException
 from app.models import Project, QuotaWeek, User
 from app.services.container import ServiceContainer
 from app.services.quota_week_service import Period
-from tests.support.dashboard import Record, catalogue, record
+from tests.support.dashboard import Record, catalogue, record, sent
 
 THIS = datetime(2026, 11, 19, 10, tzinfo=UTC)
 LAST = THIS - timedelta(days=7)
@@ -171,6 +171,17 @@ class TestEntry:
             f"&m=cost.sum&m=misses.sum&dr=project:{project}@project"
             f"&dr=psession:{work}@psession&col=none&f=psession:{work}"
         )
+
+    def test_its_read_runs_under_the_engines_bounds(
+        self, service: AddressService, session: DbSession, worked: Record
+    ) -> None:
+        with sent(session) as statements:
+            service.address(f"f=project:{worked.project.id}")
+
+        at = statements.index("SET TRANSACTION READ ONLY")
+        assert statements[at + 1] == "SET LOCAL statement_timeout = 30000"
+        assert statements[at + 2].startswith("SELECT DISTINCT")
+        assert statements[at + 3].startswith("ROLLBACK")
 
     def test_one_the_record_holds_nothing_of_takes_all_time(
         self, service: AddressService

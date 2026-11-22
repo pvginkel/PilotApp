@@ -7,12 +7,14 @@ a chat's Session with one Turn and no thread, which stands in; and a thread
 no Session ran, with one Call.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -281,3 +283,20 @@ def read(
 
 def named(held: Catalogue, *dimensions: str) -> list[Path]:
     return [held.dimension(key).path for key in dimensions]
+
+
+@contextmanager
+def sent(db: DbSession) -> Iterator[list[str]]:
+    """The statements sent on the test's connection while the block runs,
+    each as sent."""
+    bind = db.get_bind()
+    statements: list[str] = []
+
+    def kept(*args: Any) -> None:
+        statements.append(args[2])
+
+    event.listen(bind, "before_cursor_execute", kept)
+    try:
+        yield statements
+    finally:
+        event.remove(bind, "before_cursor_execute", kept)

@@ -10,6 +10,8 @@ from app.app_config import AppSettings
 from app.config import Settings
 from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
+from app.dashboard.bounds import Bounds
+from app.dashboard.rows import RowsService
 from app.engine.attachments import AttachmentStore, AttachService
 from app.engine.bus import EngineBus
 from app.engine.closed_chats import ClosedChats
@@ -608,9 +610,29 @@ class ServiceContainer(containers.DeclarativeContainer):
         zone=app_config.provided.dashboard_zone,
         sitting_gap_seconds=app_config.provided.dashboard_sitting_gap_seconds,
     )
+    # The bounds every statement of the dashboard's engine runs under, the
+    # process's one (F154.5)
+    dashboard_bounds = providers.Singleton(
+        Bounds,
+        timeout_seconds=app_config.provided.dashboard_statement_timeout_seconds,
+        at_once=app_config.provided.dashboard_statements_at_once,
+        pool=providers.Callable(
+            lambda config: config.db_pool_size + config.db_pool_max_overflow, config
+        ),
+    )
     # A view's state checked and written back as its address (F159)
     address_service = providers.Factory(
-        AddressService, db=db_session, catalogue_service=catalogue_service
+        AddressService,
+        db=db_session,
+        catalogue_service=catalogue_service,
+        bounds=dashboard_bounds,
+    )
+    # A view's rows, answered from the record at the query (F154.1)
+    rows_service = providers.Factory(
+        RowsService,
+        db=db_session,
+        address_service=address_service,
+        bounds=dashboard_bounds,
     )
     # What the dashboard stores, Pilot's own system views among it (F155)
     dashboard_store_service = providers.Factory(

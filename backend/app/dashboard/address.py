@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.dashboard.assembly import CatalogueService
+from app.dashboard.bounds import Bounds
 from app.dashboard.catalogue import Catalogue
 from app.dashboard.reading import WEEK, Checked, is_entry, read
 from app.dashboard.state import (
@@ -51,13 +52,26 @@ class Address:
     notes: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class View:
+    """A state's address, with the catalogue and the quota weeks it was
+    read under."""
+
+    address: Address
+    catalogue: Catalogue
+    weeks: tuple[Period, ...]
+
+
 class AddressService:
     """A view's state checked against the catalogue and the record, and
     written back as its address."""
 
-    def __init__(self, db: Session, catalogue_service: CatalogueService) -> None:
+    def __init__(
+        self, db: Session, catalogue_service: CatalogueService, bounds: Bounds
+    ) -> None:
         self.db = db
         self.catalogue_service = catalogue_service
+        self.bounds = bounds
 
     def address(
         self, written: str, fix_time: bool = False, now: datetime | None = None
@@ -65,6 +79,13 @@ class AddressService:
         """The address of the state `written`, an entry's filled in from the
         record; with `fix_time`, its time range as it stands at `now`.
         `StateRefusedException` where the state has a fault."""
+        return self.view(written, fix_time, now).address
+
+    def view(
+        self, written: str, fix_time: bool = False, now: datetime | None = None
+    ) -> View:
+        """The address of the state `written`, as `address` gives it, with
+        the catalogue and the quota weeks it was read under."""
         catalogue = self.catalogue_service.catalogue(self.db)
         weeks = self.weeks()
         checked = read(written, catalogue, weeks)
@@ -76,7 +97,11 @@ class AddressService:
                 state,
                 time=fixed(state.time, catalogue, weeks, now or datetime.now(UTC)),
             )
-        return Address(state, PREFIX + write(state), look(state), checked.notes)
+        return View(
+            Address(state, PREFIX + write(state), look(state), checked.notes),
+            catalogue,
+            weeks,
+        )
 
     def weeks(self) -> tuple[Period, ...]:
         """The quota weeks the record holds, in the order they start."""
@@ -86,7 +111,8 @@ class AddressService:
         """An entry's state: its focus's path as the drill stack, each level
         as if drilled from By its own part; By the focus's parts in rows;
         cost and the cache misses; the quota weeks its Calls fall in, all
-        time where it has none (F166.1)."""
+        time where it has none (F166.1). Its read runs under the engine's
+        bounds."""
         focus = checked.state.focus
         assert focus is not None
         dimension = catalogue.dimension(focus.dimension)
@@ -97,13 +123,14 @@ class AddressService:
             *(catalogue.dimension(key).path(row) for key in above),
         ]
         named = dimension.path(row) == focus.key
-        found = self.db.execute(
-            select(*columns)
-            .select_from(row.source())
-            .where(named)
-            .distinct()
-            .execution_options(max_statement_length=_ENTRY_LENGTH)
-        ).all()
+        with self.bounds.read(self.db) as db:
+            found = db.execute(
+                select(*columns)
+                .select_from(row.source())
+                .where(named)
+                .distinct()
+                .execution_options(max_statement_length=_ENTRY_LENGTH)
+            ).all()
         starts = sorted(
             {found_row[0] for found_row in found if found_row[0] is not None}
         )

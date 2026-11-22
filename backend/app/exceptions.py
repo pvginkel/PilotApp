@@ -4,7 +4,7 @@ These are template-provided base exceptions that all apps need. Add
 app-specific exceptions below these base classes.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from app.dashboard.refusal import Fault
@@ -174,3 +174,22 @@ class NoServiceUserException(InvalidOperationException):
             "the stage has no service user to make it",
         )
         self.error_code = "NO_SERVICE_USER"
+
+
+QueryRefusal = Literal["timeout", "temp_file_limit", "busy"]
+
+
+class QueryRefusedException(InvalidOperationException):
+    """Raised when the dashboard's engine cannot answer a view within its
+    bounds (F154.5): `reason` says which, a statement past the engine's
+    timeout, one the database ended at its limit on temporary files, or no
+    slot among the engine's statements at once freed within the timeout."""
+
+    def __init__(self, reason: QueryRefusal, cause: str) -> None:
+        super().__init__("answer the dashboard's view", cause)
+        self.reason = reason
+        self.error_code = {
+            "timeout": "QUERY_TIMEOUT",
+            "temp_file_limit": "QUERY_TEMP_FILE_LIMIT",
+            "busy": "QUERY_BUSY",
+        }[reason]

@@ -484,6 +484,29 @@ class TestAppSettings:
         assert settings.dashboard_zone == "America/New_York"
         assert settings.dashboard_sitting_gap_seconds == 1800
 
+    def test_the_engines_bounds_have_their_defaults(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.dashboard_statement_timeout_seconds == 30
+        assert settings.dashboard_statements_at_once == 4
+
+    def test_load_reads_the_engines_bounds_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                _env_file=None,
+                DASHBOARD_STATEMENT_TIMEOUT_SECONDS=5,
+                DASHBOARD_STATEMENTS_AT_ONCE=2,
+            )
+        )
+
+        assert settings.dashboard_statement_timeout_seconds == 5
+        assert settings.dashboard_statements_at_once == 2
+
+    @pytest.mark.parametrize("count", [0, -1])
+    def test_load_refuses_no_statement_at_once(self, count: int) -> None:
+        with pytest.raises(ValidationError, match="DASHBOARD_STATEMENTS_AT_ONCE"):
+            AppEnvironment.model_validate({"DASHBOARD_STATEMENTS_AT_ONCE": count})
+
     def test_load_refuses_a_zone_that_is_none(self) -> None:
         with pytest.raises(ValidationError, match="DASHBOARD_ZONE must be an IANA"):
             AppSettings.load(
@@ -517,6 +540,7 @@ class TestAppSettings:
             "CACHE_EXPIRATION_TTL",
             "WAIT_QUIET_WINDOW_SECONDS",
             "DASHBOARD_SITTING_GAP_SECONDS",
+            "DASHBOARD_STATEMENT_TIMEOUT_SECONDS",
         ],
     )
     @pytest.mark.parametrize("seconds", [0, -1])
@@ -597,6 +621,8 @@ class TestAppSettings:
             "wait_quiet_window_seconds": repr(5.0),
             "dashboard_zone": repr("Europe/Amsterdam"),
             "dashboard_sitting_gap_seconds": repr(14400.0),
+            "dashboard_statement_timeout_seconds": repr(30.0),
+            "dashboard_statements_at_once": "4",
             "pool_guard": "False",
             "statement_cap": "False",
         }
@@ -710,6 +736,8 @@ class TestAppSettings:
             "wait_quiet_window_seconds": repr(5.0),
             "dashboard_zone": repr("Europe/Amsterdam"),
             "dashboard_sitting_gap_seconds": repr(14400.0),
+            "dashboard_statement_timeout_seconds": repr(30.0),
+            "dashboard_statements_at_once": "4",
             "pool_guard": "False",
             "statement_cap": "False",
         }

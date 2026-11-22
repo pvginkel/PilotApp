@@ -1,10 +1,10 @@
 """Schemas for GET /api/dashboard/catalogue, what a view of the dashboard may
-name, a part at a call (F154.4), with what the dashboard stores (F155); and
-for GET /api/dashboard/address, a view's state checked and written back in
-its normal form (F159)."""
+name, a part at a call (F154.4), with what the dashboard stores (F155); for
+GET /api/dashboard/address, a view's state checked and written back in its
+normal form (F159); and for GET /api/dashboard/rows, a view's rows (F154.1)."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -332,3 +332,155 @@ class AddressResponseSchema(BaseModel):
     notes: list[str] = Field(
         description="A note for each part it dropped, a quick filter or a ratio that is gone"
     )
+
+
+Key = int | uuid.UUID | datetime | date | str | None
+"""A value of a dimension, typed as its dimension reads it: a whole number,
+an id, an instant, a date, a text; null for the row with none."""
+
+
+class RowsQuerySchema(BaseModel):
+    """A view's state, whose rows are asked."""
+
+    state: str = Field(
+        description=(
+            "The view's state as the URL writes it after `#dash/`, `#dash/` "
+            "before it or not; an entry, its focus alone, is filled in from "
+            "the record"
+        ),
+        examples=["t=qw&by=project&m=cost.sum&col=none"],
+    )
+
+
+class SpanSchema(BaseModel):
+    """A span of the time a view reads, its end the instant before which it
+    ends."""
+
+    start: datetime | None = Field(description="Its start; null, open")
+    end: datetime | None = Field(description="Its end, exclusive; null, open")
+
+
+class RowsDimensionSchema(BaseModel):
+    """The dimension the rows are By."""
+
+    key: str = Field(examples=["project"])
+    label: str = Field(examples=["Project"])
+    group: Group
+
+
+class RowsMeasureSchema(BaseModel):
+    """A measure as the rows answer it, in the view's order."""
+
+    key: str = Field(
+        description="The measure as the view's normal form writes it",
+        examples=["cost.median.conversation"],
+    )
+    label: str = Field(description="Its figure's label, or its ratio's")
+    format: Format
+    aggregate: str | None = Field(description="Its aggregate; null for a ratio")
+    grain: str | None = Field(
+        description=(
+            "The part its items are; null for its fact's own rows, and for a ratio"
+        )
+    )
+    stacks: bool = Field(
+        description="Whether it splits by the color, each row's `split` holding it"
+    )
+    refused: str | None = Field(
+        description="Why it is not answered, where it is not: its values are null"
+    )
+    median: float | None = Field(
+        description=(
+            "The median of its rows' values, the rows holding the focus left "
+            "out: the peers' median"
+        )
+    )
+
+
+class ColorValueSchema(BaseModel):
+    """A value of the color."""
+
+    key: Key = Field(
+        description="The value, typed as its dimension reads it; null for none, or for the values folded"
+    )
+    label: str | None = Field(description="Its label; null where the key is its own")
+    total: float | None = Field(
+        description="The first stacked measure's amount on the All row"
+    )
+    others: int = Field(
+        description="The count of values folded into it; 0 for a value of its own"
+    )
+
+
+class ColorSchema(BaseModel):
+    """The color the stacked measures split by."""
+
+    key: str = Field(description="A dimension's key, or `token_kind`")
+    label: str
+    values: list[ColorValueSchema] = Field(
+        description=(
+            "Its values, by the first stacked measure's amount, the largest "
+            "first, or the token kinds in their order; empty where no measure "
+            "stacks"
+        )
+    )
+
+
+class LineSchema(BaseModel):
+    """The All row: each measure's value, in the view's order."""
+
+    values: list[float | None] = Field(
+        description="Each measure's value; null where it has no item here"
+    )
+    n: list[int] = Field(description="Each measure's items with a value here")
+    split: list[list[float] | None] | None = Field(
+        description=(
+            "With a color, each measure's amounts over the color's values, in "
+            "their order; null for a measure that does not stack"
+        )
+    )
+
+
+class ByRowSchema(LineSchema):
+    """A row of the By."""
+
+    key: Key = Field(description="The By's value, typed as the By reads it")
+    label: str | None = Field(
+        description="Its label; null where the key is its own, as a date or a time"
+    )
+    focus: bool = Field(description="Whether it holds the view's focus")
+
+
+class SortSchema(BaseModel):
+    """The order of the rows."""
+
+    direction: Literal["asc", "desc"]
+    column: str = Field(
+        description="A measure as the normal form writes it, or label, axis or n"
+    )
+
+
+class RowsResponseSchema(BaseModel):
+    """A view's rows."""
+
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+    zone: str = Field(
+        description="The zone the view's days, weekdays and hours are in",
+        examples=["Europe/Amsterdam"],
+    )
+    window: list[SpanSchema] | None = Field(
+        description="The time it reads; null for all time, empty for none of it"
+    )
+    by: RowsDimensionSchema
+    measures: list[RowsMeasureSchema]
+    color: ColorSchema | None
+    all: LineSchema
+    rows: list[ByRowSchema] = Field(description="The By's rows, in the sort")
+    total_rows: int = Field(description="The By's rows, those answered and the rest")
+    sort: SortSchema

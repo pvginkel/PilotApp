@@ -2,6 +2,7 @@
   "about": [
     "States of a dashboard view as written, each with what the server reads in it (F154.2, F159).",
     "An entry that reads has its normal form, the state after #dash/ in the address the server answers, its look-only parts as that form writes them, and its notes where it has any, one per part dropped.",
+    "It has the query it means too, the planner's: its time, a range by its key as written, else its spans as instants in UTC, each end exclusive; its By, color and focus; its scope, each drill level and each chip on a dimension's values as a chip writes it; each measure with its fact and the part its items are, or why it is refused, a ratio with its two; its statements, a grouped scan per fact and a statement per fact and grain over a part's items, each with its groupings, the joins it reads and each dimension it reads through another fact's conversations; and the chips and quick filters its statements leave to what follows them.",
     "An entry with a fault has the refusal's exact text, a line an item.",
     "The backend's suite reads every entry through GET /api/dashboard/address's service (tests/dashboard/test_states.py), on the suite's database, whose quota weeks start on 2 January 2025."
   ],
@@ -10,133 +11,868 @@
       "about": "The scratch, the barest view that draws",
       "state": "t=qw&by=project&m=cost.sum&col=none",
       "normal": "t=qw&by=project&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "Nothing is the scratch",
       "state": "",
       "normal": "t=qw&by=project&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "An address's #dash/ is read off",
       "state": "#dash/t=d7&by=model&m=cost.sum&col=none",
       "normal": "t=d7&by=model&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "d7",
+        "by": "model",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "model"
+              ],
+              []
+            ],
+            "joins": []
+          }
+        ]
+      }
     },
     {
       "about": "Its parts in any order, each left out taking its default",
       "state": "m=cost&by=psession",
       "normal": "t=qw&by=psession&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "psession",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "psession"
+              ],
+              []
+            ],
+            "joins": [
+              "session"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A figure's default aggregate, and its fact's own grain written as none",
       "state": "m=ctx&m=cost.sum.call&m=turns.count.pturn&m=cost.median.conversation",
       "normal": "t=qw&by=project&m=ctx.max&m=cost.sum&m=turns.count&m=cost.median.conversation&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "ctx.max",
+            "fact": "call"
+          },
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          },
+          {
+            "measure": "turns.count",
+            "fact": "turn"
+          },
+          {
+            "measure": "cost.median.conversation",
+            "fact": "call",
+            "items": "conversation"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          },
+          {
+            "fact": "turn",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          },
+          {
+            "fact": "call",
+            "items": "conversation",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A measure's own filters",
       "state": "m=cost.sum(source=chat|pilot;!miss=1)",
       "normal": "t=qw&by=project&m=cost.sum(source=chat|pilot;!miss=1)&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum(source=chat|pilot;!miss=1)",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project",
+              "clarification"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A ratio by its key, and one written out",
       "state": "m=cost.sum&m=r:overhead&m=r:Miss%20share:miss_cost.sum/cost",
       "normal": "t=qw&by=project&m=cost.sum&m=r:overhead&m=r:Miss%20share:miss_cost.sum/cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          },
+          {
+            "measure": "r:overhead",
+            "over": [
+              {
+                "measure": "cost.sum(source=chat|pilot)",
+                "fact": "call"
+              },
+              {
+                "measure": "cost.sum(source=work)",
+                "fact": "call"
+              }
+            ]
+          },
+          {
+            "measure": "r:Miss%20share:miss_cost.sum/cost.sum",
+            "over": [
+              {
+                "measure": "miss_cost.sum",
+                "fact": "call"
+              },
+              {
+                "measure": "cost.sum",
+                "fact": "call"
+              }
+            ]
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project",
+              "clarification"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A time dimension as By is over time at that grain",
       "state": "by=day",
       "normal": "t=qw&by=project&p=time,day&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "Over time names its grain, the week where none is written",
       "state": "p=time",
       "normal": "t=qw&by=project&p=time,qweek&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "An order dimension as By is its part in order",
       "state": "by=session_start&m=cost.median.psession",
       "normal": "t=qw&by=psession&p=order&m=cost.median.psession&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "psession",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.median.psession",
+            "fact": "call",
+            "items": "psession"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "psession"
+              ],
+              []
+            ],
+            "joins": [
+              "session"
+            ]
+          },
+          {
+            "fact": "call",
+            "items": "psession",
+            "grouping": [
+              [
+                "psession"
+              ],
+              []
+            ],
+            "joins": []
+          }
+        ]
+      }
     },
     {
       "about": "In order names its order only where it is not the By's first",
       "state": "by=pturn&p=order,turn_seq",
       "normal": "t=qw&by=pturn&p=order&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "pturn",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "pturn"
+              ],
+              []
+            ],
+            "joins": [
+              "turn"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "Rows are written as none",
       "state": "p=rows&by=conversation",
       "normal": "t=qw&by=conversation&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "conversation",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "conversation"
+              ],
+              []
+            ],
+            "joins": []
+          }
+        ]
+      }
     },
     {
       "about": "Lanes, a part's",
       "state": "by=conversation&p=lanes",
       "normal": "t=qw&by=conversation&p=lanes&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "conversation",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "conversation"
+              ],
+              []
+            ],
+            "joins": []
+          }
+        ]
+      }
     },
     {
       "about": "The table",
       "state": "p=table",
       "normal": "t=qw&by=project&p=table&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "Quota weeks by their keys, the instants they start, in order and once each",
       "state": "t=wk,2025-01-09T10:00:00Z,2025-01-02T10%3A00%3A00Z,2025-01-09T11:00:00%2B01:00",
       "normal": "t=wk,2025-01-02T10%3A00%3A00Z,2025-01-09T10%3A00%3A00Z&by=project&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": [
+          [
+            "2025-01-02T10:00:00Z",
+            "2025-01-16T10:00:00Z"
+          ]
+        ],
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A range between a time of day and a date, the date holding its day",
       "state": "t=c,2026-11-01T08:30:00,2026-11-07",
       "normal": "t=c,2026-11-01T08%3A30,2026-11-07&by=project&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": [
+          [
+            "2026-11-01T07:30:00Z",
+            "2026-11-07T23:00:00Z"
+          ]
+        ],
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A range open at its end",
       "state": "t=c,2026-11-01,",
       "normal": "t=c,2026-11-01,&by=project&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": [
+          [
+            "2026-10-31T23:00:00Z",
+            null
+          ]
+        ],
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A drill stack, outermost first, each level with what it was drilled from",
       "state": "dr=project:5B0E6A4C-2F4A-4D7E-9B1E-0C3F0C7C1A2B@project&dr=psession:~@session_start&by=conversation",
       "normal": "t=qw&by=conversation&m=cost.sum&dr=project:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b@project&dr=psession:~@session_start&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "conversation",
+        "color": null,
+        "scope": [
+          "project:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b",
+          "psession:~"
+        ],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "conversation"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A time dimension as By, over time by the level under the drill stack",
       "state": "dr=project:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b@project&by=day",
       "normal": "t=qw&by=psession&p=time,day&m=cost.sum&dr=project:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b@project&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "psession",
+        "color": null,
+        "scope": [
+          "project:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b"
+        ],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "psession"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "Chips on a dimension's values, negated and marked, an order dimension's as its part's",
       "state": "c=!source:chat,pilot&c=~miss:1&c=session_start:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&c=effort:a%2Cb,~",
       "normal": "t=qw&by=project&m=cost.sum&c=!source:chat,pilot&c=~miss:1&c=psession:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&c=effort:a%2Cb,~&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [
+          "!source:chat,pilot",
+          "psession:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b",
+          "effort:a%2Cb,~"
+        ],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project",
+              "clarification"
+            ]
+          }
+        ],
+        "after": [
+          "~miss:1"
+        ]
+      }
     },
     {
       "about": "A threshold on the By's rows, a condition on each item and the outlier rows",
       "state": "c=@rows,gt,100,cost.median.psession&c=~!@items,ge,1.50,cost&c=~@outliers",
       "normal": "t=qw&by=project&m=cost.sum&c=@rows,gt,100,cost.median.psession&c=~!@items,ge,1.5,cost.sum&c=~@outliers&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ],
+        "after": [
+          "@rows,gt,100,cost.median.psession",
+          "~!@items,ge,1.5,cost.sum",
+          "~@outliers"
+        ]
+      }
     },
     {
       "about": "A color, and a sort on a measure spelled otherwise",
       "state": "col=model&m=cost&o=desc,cost.sum.call",
       "normal": "t=qw&by=project&m=cost.sum&col=model&o=desc,cost.sum",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": "model",
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              [],
+              [
+                "project",
+                "model"
+              ]
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "The drawer, its row, its grain, the reader and its call",
@@ -144,13 +880,69 @@
       "normal": "t=qw&by=project&m=cost.sum&col=none&d=items&sel=5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&ig=call&it=conversation,5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&call=42",
       "look": [
         "d=items"
-      ]
+      ],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A focus",
       "state": "f=psession:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&by=pturn",
       "normal": "t=qw&by=pturn&m=cost.sum&col=none&f=psession:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "pturn",
+        "color": null,
+        "focus": "psession:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b",
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "pturn"
+              ],
+              []
+            ],
+            "joins": [
+              "turn"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "The look-only parts",
@@ -164,19 +956,108 @@
         "lit=%E2%80%A6,work,~",
         "ev=-cache_miss,hook_error",
         "z=1763600000,1763686400.5"
-      ]
+      ],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": "source",
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              [],
+              [
+                "project",
+                "source"
+              ]
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project",
+              "clarification"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "The band's length",
       "state": "roll=5,5&by=psession&p=order",
       "normal": "t=qw&by=psession&p=order&m=cost.sum&col=none&roll=5,5",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "psession",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "psession"
+              ],
+              []
+            ],
+            "joins": [
+              "session"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "The band's default length is written as none",
       "state": "roll=10,15",
       "normal": "t=qw&by=project&m=cost.sum&col=none",
-      "look": []
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A ratio that is gone is dropped with a note, and the sort on it",
@@ -186,7 +1067,36 @@
       "notes": [
         "m=r:overhaed: no ratio has the key \"overhaed\", so the measure is dropped. Did you mean \"overhead\"?",
         "o=desc,r:overhaed: the sort is on a measure dropped, so it is dropped too."
-      ]
+      ],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A view left with no measure takes the scratch's",
@@ -196,7 +1106,36 @@
       "notes": [
         "m=r:gone: no ratio has the key \"gone\", so the measure is dropped.",
         "m=r:gone: the view keeps no measure, so it takes cost.sum."
-      ]
+      ],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A quick filter that is gone is dropped with a note",
@@ -205,7 +1144,36 @@
       "look": [],
       "notes": [
         "b=no_such_filter: no quick filter has the key \"no_such_filter\", so it is dropped."
-      ]
+      ],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "Every fault at once, in the order written",

@@ -1,7 +1,7 @@
 """The dashboard's catalogue (F154.4), what a view may name, read through
-one route, a part at a call, with what the dashboard stores (F155); and a
-view's address (F159), its state checked and written back in its normal
-form."""
+one route, a part at a call, with what the dashboard stores (F155); a view's
+address (F159), its state checked and written back in its normal form; and
+a view's rows (F154.1), answered from the record at the query."""
 
 from typing import Any
 
@@ -18,18 +18,29 @@ from app.api.dashboard_store import (
 from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.catalogue import Catalogue
+from app.dashboard.rows import ColorValue, Line, Rows, RowsService
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.dashboard import (
     AddressQuerySchema,
     AddressResponseSchema,
     AggregateSchema,
+    ByRowSchema,
     CatalogueQuerySchema,
     CatalogueResponseSchema,
+    ColorSchema,
+    ColorValueSchema,
     DimensionSchema,
     FactSchema,
     FigureSchema,
     GrainSchema,
+    LineSchema,
     RatioSchema,
+    RowsDimensionSchema,
+    RowsMeasureSchema,
+    RowsQuerySchema,
+    RowsResponseSchema,
+    SortSchema,
+    SpanSchema,
     TimeRangeSchema,
     ValueSchema,
 )
@@ -111,6 +122,103 @@ def get_address(
     return AddressResponseSchema(
         address=found.address, look=list(found.look), notes=list(found.notes)
     ).model_dump()
+
+
+@dashboard_bp.route("/rows", methods=["GET"])
+@api.validate(
+    query=RowsQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=RowsResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_rows(
+    query: RowsQuerySchema,
+    rows_service: RowsService = Provide[ServiceContainer.rows_service],
+) -> Any:
+    """Answer a view's rows from the record at the query: each measure on
+    every row of the By and on the All row, with the split by the color, in
+    the view's sort; its time as instants, with the zone its days are in.
+
+    Returns:
+        200: The view's rows, with its address, its look-only parts and a
+            note for each part dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The view passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    return _rows(rows_service.rows(query.state)).model_dump(mode="json")
+
+
+def _rows(found: Rows) -> RowsResponseSchema:
+    return RowsResponseSchema(
+        address=found.address.address,
+        look=list(found.address.look),
+        notes=list(found.address.notes),
+        zone=found.zone,
+        window=(
+            None
+            if found.window is None
+            else [SpanSchema(start=start, end=end) for start, end in found.window]
+        ),
+        by=RowsDimensionSchema(
+            key=found.by.key, label=found.by.label, group=found.by.group
+        ),
+        measures=[
+            RowsMeasureSchema(
+                key=measure.key,
+                label=measure.label,
+                format=measure.format,
+                aggregate=measure.aggregate,
+                grain=measure.grain,
+                stacks=measure.stacks,
+                refused=measure.refused,
+                median=measure.median,
+            )
+            for measure in found.measures
+        ],
+        color=(
+            None
+            if found.color is None
+            else ColorSchema(
+                key=found.color.key,
+                label=found.color.label,
+                values=[_color_value(value) for value in found.color.values],
+            )
+        ),
+        all=LineSchema(**_line(found.all)),
+        rows=[
+            ByRowSchema(**_line(row), key=row.key, label=row.label, focus=row.focus)
+            for row in found.rows
+        ],
+        total_rows=found.total_rows,
+        sort=SortSchema(direction=found.sort.direction, column=found.sort.column),
+    )
+
+
+def _color_value(value: ColorValue) -> ColorValueSchema:
+    return ColorValueSchema(
+        key=value.key, label=value.label, total=value.total, others=value.others
+    )
+
+
+def _line(line: Line) -> dict[str, Any]:
+    return {
+        "values": list(line.values),
+        "n": list(line.n),
+        "split": None
+        if line.split is None
+        else [None if one is None else list(one) for one in line.split],
+    }
 
 
 def _dimensions(catalogue: Catalogue) -> CatalogueResponseSchema:

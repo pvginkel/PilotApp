@@ -1,0 +1,112 @@
+"""The bounds every statement of the dashboard's engine runs under (F154.5).
+
+- **A read-only transaction under a timeout**, of the engine's own: a read
+  ends the caller's transaction first, so that it waits for its slot
+  holding no connection of the database's, then opens one, read only, with
+  `statement_timeout` set in it, and rolls it back at its end. Both are set
+  per transaction, `SET LOCAL` as `configure_engine()` sets JIT off
+  (app/startup.py): the stages reach PostgreSQL through a pooler in
+  transaction mode. In the suite the transaction is a savepoint of the
+  test's, and its rollback restores the test's own settings.
+- **`work_mem` is never raised**: every statement runs at the cluster's own,
+  4MB in production, since past an instance's memory limit there is no
+  refusal to give, PostgreSQL restarting and every app's connections
+  dropping.
+- **A refusal with a reason**: a statement past the timeout, PostgreSQL's
+  57014, and one the cluster ended at its `temp_file_limit`, 53400, are each
+  refused as what they are (`QueryRefusedException`).
+- **Statements at once**: the engine's reads hold a slot each, at most
+  `at_once` of them, fewer than the app's pool holds, so that a burst from
+  several tabs and tools leaves the pool to the rest of the app; and since
+  the cluster's limit on temporary files is per process, the slots also cap
+  the disk a burst can take. A read that finds no slot free within the
+  timeout is refused.
+"""
+
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
+
+from app.exceptions import ConfigurationError, QueryRefusedException
+
+TIMEOUT = "57014"
+"""PostgreSQL's code for a statement cancelled, at its timeout among others."""
+
+TEMP_FILE_LIMIT = "53400"
+"""PostgreSQL's code for a limit of its configuration exceeded, the one on
+temporary files among them."""
+
+
+class Bounds:
+    """The engine's bounds, the process's one: its timeout, and its slots,
+    `at_once` of them, fewer than `pool`, the connections the app's pool
+    holds."""
+
+    def __init__(self, timeout_seconds: float, at_once: int, pool: int) -> None:
+        if at_once >= pool:
+            raise ConfigurationError(
+                f"DASHBOARD_STATEMENTS_AT_ONCE is {at_once}, and the app's pool "
+                f"holds {pool} connections: the engine's statements at once "
+                "must leave the pool some"
+            )
+        self.timeout_seconds = timeout_seconds
+        self.at_once = at_once
+        self._slots = threading.BoundedSemaphore(at_once)
+
+    @contextmanager
+    def read(self, db: Session) -> Iterator[Session]:
+        """`db` in a read-only transaction of its own under the timeout,
+        once a slot is free, for the engine's statements; the caller's
+        transaction committed first, so a caller with writes of its own
+        makes them after. `QueryRefusedException` where no slot freed, or a
+        statement ran past the timeout or the limit on temporary files."""
+        db.commit()
+        if not self._slots.acquire(timeout=self.timeout_seconds):
+            raise QueryRefusedException(
+                "busy",
+                f"the engine already runs its {self.at_once} statements at once "
+                f"and none ended within {_seconds(self.timeout_seconds)}",
+            )
+        try:
+            db.execute(text("SET TRANSACTION READ ONLY"))
+            db.execute(
+                text(
+                    f"SET LOCAL statement_timeout = {round(self.timeout_seconds * 1000)}"
+                )
+            )
+            try:
+                yield db
+            except DBAPIError as error:
+                refusal = self._refusal(error)
+                if refusal is None:
+                    raise
+                raise refusal from error
+        finally:
+            db.rollback()
+            self._slots.release()
+
+    def _refusal(self, error: DBAPIError) -> QueryRefusedException | None:
+        code = getattr(error.orig, "sqlstate", None)
+        if code == TIMEOUT:
+            return QueryRefusedException(
+                "timeout",
+                "a statement ran past the engine's timeout of "
+                f"{_seconds(self.timeout_seconds)}: a shorter time range or a "
+                "narrower scope reads less",
+            )
+        if code == TEMP_FILE_LIMIT:
+            return QueryRefusedException(
+                "temp_file_limit",
+                "a statement needed more temporary disk than the database "
+                "allows one: a shorter time range or a narrower scope reads less",
+            )
+        return None
+
+
+def _seconds(seconds: float) -> str:
+    whole = int(seconds)
+    return f"{whole} s" if whole == seconds else f"{seconds:g} s"

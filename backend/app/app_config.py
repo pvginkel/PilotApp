@@ -324,6 +324,23 @@ class AppEnvironment(BaseSettings):
             "ends (F166.6)"
         ),
     )
+    DASHBOARD_STATEMENT_TIMEOUT_SECONDS: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "Seconds a statement of the analysis dashboard's engine runs at "
+            "most before it is refused, and a read waits at most for a slot "
+            "among its statements at once (F154.5)"
+        ),
+    )
+    DASHBOARD_STATEMENTS_AT_ONCE: int = Field(
+        default=4,
+        gt=0,
+        description=(
+            "The analysis dashboard's statements running at once at most, "
+            "each on a connection of the pool, which must be larger (F154.5)"
+        ),
+    )
     POOL_GUARD: bool = Field(
         default=False,
         description=(
@@ -548,6 +565,14 @@ class AppSettings(BaseModel):
     """The gap from one Transcript's last Call to the next one's first that
     ends a sitting (DB decision 80.3)."""
 
+    dashboard_statement_timeout_seconds: float = 30.0
+    """How long a statement of the dashboard's engine runs before it is
+    refused, and how long a read waits for a slot (F154.5)."""
+
+    dashboard_statements_at_once: int = 4
+    """How many statements of the dashboard's engine run at once at most,
+    fewer than the app's pool holds (F154.5)."""
+
     @field_validator("dashboard_zone")
     @classmethod
     def _is_a_zone(cls, zone: str) -> str:
@@ -625,6 +650,8 @@ class AppSettings(BaseModel):
             wait_quiet_window_seconds=env.WAIT_QUIET_WINDOW_SECONDS,
             dashboard_zone=env.DASHBOARD_ZONE,
             dashboard_sitting_gap_seconds=env.DASHBOARD_SITTING_GAP_SECONDS,
+            dashboard_statement_timeout_seconds=env.DASHBOARD_STATEMENT_TIMEOUT_SECONDS,
+            dashboard_statements_at_once=env.DASHBOARD_STATEMENTS_AT_ONCE,
             pool_guard=env.POOL_GUARD,
             statement_cap=env.STATEMENT_CAP,
         )

@@ -1,19 +1,30 @@
 """/api/dashboard/catalogue, what a view of the dashboard may name, a part
-at a call (F154.4), with what the dashboard stores (F155); and
+at a call (F154.4), with what the dashboard stores (F155);
 /api/dashboard/address, a view's state checked and written back in its
-normal form (F159)."""
+normal form (F159); and /api/dashboard/rows, a view's rows (F154.1)."""
 
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from flask.testing import FlaskClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session as DbSession
 
+from app import models
 from app.dashboard.views import VIEWS
-from app.models import Component, CustomRatio, EventKind, QuickFilter, SavedView
+from app.models import (
+    Component,
+    CustomRatio,
+    EventKind,
+    Project,
+    QuickFilter,
+    SavedView,
+    User,
+)
 from app.models.reference import Origin
-from tests.support.transcripts import reference
+from tests.support.dashboard import Record, record
+from tests.support.transcripts import OPUS, STARTED, reference
 
 CATALOGUE = "/api/dashboard/catalogue"
 SAVED_AT = datetime(2026, 11, 20, 9, 30, tzinfo=UTC)
@@ -480,3 +491,122 @@ class TestGetAddress:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.get(ADDRESS, query_string={"state": ""}).status_code == 401
+
+
+ROWS = "/api/dashboard/rows"
+
+
+@pytest.fixture
+def worked(
+    session: DbSession, person: User, project: Project, project_session: models.Session
+) -> Record:
+    return record(session, person, project, project_session)
+
+
+class TestGetRows:
+    def test_it_answers_the_rows_with_their_address(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(
+            ROWS,
+            query_string={
+                "state": "t=c,2026-11-12,2026-11-13&m=cost.sum&m=turns.count"
+                "&col=model&rel=1"
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["address"] == (
+            "#dash/t=c,2026-11-12,2026-11-13&by=project&m=cost.sum&m=turns.count"
+            "&col=model&rel=1"
+        )
+        assert (body["look"], body["notes"]) == (["rel=1"], [])
+        assert body["zone"] == "Europe/Amsterdam"
+        assert body["window"] == [
+            {"start": "2026-11-11T23:00:00Z", "end": "2026-11-13T23:00:00Z"}
+        ]
+        assert body["by"] == {"key": "project", "label": "Project", "group": "part"}
+        assert [
+            (measure["key"], measure["aggregate"], measure["stacks"])
+            for measure in body["measures"]
+        ] == [("cost.sum", "sum", True), ("turns.count", "count", False)]
+        assert body["color"]["key"] == "model"
+        assert [value["key"] for value in body["color"]["values"]] == [OPUS, None]
+        assert body["all"]["n"] == [6, 2]
+        assert body["rows"][0] == {
+            "key": str(worked.project.id),
+            "label": "Recipe box",
+            "focus": False,
+            "values": [2.6, 2.0],
+            "n": [5, 2],
+            "split": [[1.85, 0.75], None],
+        }
+        assert body["rows"][1]["key"] is None
+        assert body["total_rows"] == 2
+        assert body["sort"] == {"direction": "desc", "column": "cost.sum"}
+
+    def test_a_time_key_is_an_instant(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        body = client.get(ROWS, query_string={"state": "t=all&by=sitting"}).get_json()
+
+        assert [row["key"] for row in body["rows"]] == [
+            None,
+            "2026-11-13T09:30:00Z",
+        ]
+
+    def test_a_state_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(ROWS, query_string={"state": "by=phases"})
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
+    def test_a_view_past_the_engines_bounds_is_refused_with_why(
+        self, client: FlaskClient, session: DbSession, worked: Record
+    ) -> None:
+        session.execute(
+            text(
+                """
+                INSERT INTO calls (transcript_id, message_id, position, completed_at,
+                    model_code, input_tokens, cache_write_5m_tokens,
+                    cache_write_1h_tokens, cache_read_tokens, output_tokens, cost)
+                SELECT :thread, 'msg_many_' || n, 100 + n, :at, :model, 1, 0, 0, 0,
+                    1, n * 0.001
+                FROM generate_series(1, 5000) AS n
+                """
+            ),
+            {"thread": worked.thread.id, "at": STARTED, "model": OPUS},
+        )
+        session.execute(text("SET LOCAL work_mem = '64kB'"))
+        session.execute(text("SET LOCAL temp_file_limit = '64kB'"))
+
+        response = client.get(
+            ROWS, query_string={"state": "t=all&by=call&m=cost.median"}
+        )
+
+        assert response.status_code == 409
+        body = response.get_json()
+        assert body["code"] == "QUERY_TEMP_FILE_LIMIT"
+        assert body["error"] == (
+            "Cannot answer the dashboard's view because a statement needed more "
+            "temporary disk than the database allows one: a shorter time range or "
+            "a narrower scope reads less"
+        )
+
+    def test_no_state_is_refused(self, client: FlaskClient) -> None:
+        assert client.get(ROWS).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert client.get(ROWS, query_string={"state": ""}).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.get(ROWS, query_string={"state": ""}).status_code == 401
