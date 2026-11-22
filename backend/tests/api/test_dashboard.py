@@ -328,6 +328,12 @@ class TestGetAddress:
             "Relative reads rel=1, as in rel=1.",
         ]
 
+    def test_a_number_no_double_holds_is_refused(self, client: FlaskClient) -> None:
+        response = client.get(ADDRESS, query_string={"state": "z=nan,1"})
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
     def test_no_state_is_refused(self, client: FlaskClient) -> None:
         assert client.get(ADDRESS).status_code == 400
 

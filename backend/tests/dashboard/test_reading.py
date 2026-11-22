@@ -597,6 +597,14 @@ class TestChips:
                 "c=@items,gt,one,cost.sum",
                 '- c=@items,gt,one,cost.sum: "one" is no number.',
             ),
+            (
+                "c=@rows,gt,nan,cost.sum",
+                '- c=@rows,gt,nan,cost.sum: "nan" is no number.',
+            ),
+            (
+                "c=@items,gt,1e400,cost.sum",
+                '- c=@items,gt,1e400,cost.sum: "1e400" is no number.',
+            ),
         ],
     )
     def test_one_that_does_not_read(
@@ -878,6 +886,16 @@ class TestLook:
                 '- z=2,1: "2,1" is no window. A window is two epoch seconds, the first '
                 "the earlier.",
             ),
+            (
+                "z=nan,1",
+                '- z=nan,1: "nan,1" is no window. A window is two epoch seconds, the '
+                "first the earlier.",
+            ),
+            (
+                "z=1,inf",
+                '- z=1,inf: "1,inf" is no window. A window is two epoch seconds, the '
+                "first the earlier.",
+            ),
         ],
     )
     def test_one_that_does_not_read(
@@ -912,4 +930,14 @@ class TestReadOne:
 
         assert refused.value.message.splitlines()[1] == (
             '- c=miss:2: "2" is no value of miss. The values of miss are 1 and 0.'
+        )
+
+    def test_one_whose_threshold_is_no_finite_number_is_refused(
+        self, held: Catalogue, weeks: list[Period]
+    ) -> None:
+        with pytest.raises(StateRefusedException) as refused:
+            read_chip("@rows,gt,-inf,cost.sum", held, weeks)
+
+        assert refused.value.message.splitlines()[1] == (
+            '- c=@rows,gt,-inf,cost.sum: "-inf" is no number.'
         )

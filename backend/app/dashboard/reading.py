@@ -19,6 +19,7 @@ holds starts at.
 
 from __future__ import annotations
 
+import math
 import re
 import uuid
 from collections.abc import Iterable, Sequence
@@ -867,11 +868,9 @@ class _Reader:
                 nearest(operator, OPERATORS),
                 f"An operator is {listed(OPERATORS, 'or')}",
             )
-        try:
-            threshold = float(written_number)
-        except ValueError:
+        threshold = _number(written_number)
+        if threshold is None:
             self.fault(part, f'"{written_number}" is no number')
-            threshold = None
         simple = self.simple(part, ",".join(measure))
         if operator not in OPERATORS or threshold is None or simple is None:
             return None
@@ -1158,20 +1157,25 @@ class _Reader:
         return tuple(sorted(drawn.items())) or None
 
     def zoom(self, part: _Part) -> tuple[float, float] | None:
-        written = part.value.split(",")
-        try:
-            low, high = (float(one) for one in written)
-        except ValueError:
-            low = high = 0.0
-            written = []
-        if len(written) != 2 or low >= high:
-            self.fault(
-                part,
-                f'"{part.value}" is no window',
-                allowed="A window is two epoch seconds, the first the earlier",
-            )
-            return None
-        return low, high
+        match [_number(one) for one in part.value.split(",")]:
+            case [float() as low, float() as high] if low < high:
+                return low, high
+        self.fault(
+            part,
+            f'"{part.value}" is no window',
+            allowed="A window is two epoch seconds, the first the earlier",
+        )
+        return None
+
+
+def _number(text: str) -> float | None:
+    """A number as a state writes it, none where it is no finite one: the
+    normal form writes no NaN or infinity."""
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _instant(text: str) -> datetime | None:
