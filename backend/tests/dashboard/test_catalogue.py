@@ -15,6 +15,7 @@ from app.dashboard.catalogue import (
     Fact,
     Figure,
     Join,
+    QuickFilter,
     Ratio,
     TimeRange,
     Unreachable,
@@ -99,6 +100,9 @@ TAKINGS = Figure(
     path=lambda row: row["at"],
 )
 AGGREGATES = (Aggregate("sum", "Sum", "Added up"), Aggregate(COUNT, "Count", "Counted"))
+
+
+MARKET_DAY = QuickFilter("market_day", "Market day", "weekday:6")
 
 
 def _catalogue(**entries: object) -> Catalogue:
@@ -190,6 +194,7 @@ class TestCatalogue:
             ({"dimensions": (TOWN, STALL, TOWN)}, "dimension town"),
             ({"figures": (SALES, SALES)}, "figure sales"),
             ({"aggregates": (*AGGREGATES, AGGREGATES[0])}, "aggregate sum"),
+            ({"quick_filters": (MARKET_DAY, MARKET_DAY)}, "quick filter market_day"),
         ],
     )
     def test_a_key_stands_once_among_its_kind(

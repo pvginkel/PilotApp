@@ -454,6 +454,71 @@
         "title": "HeldReason",
         "type": "string"
       },
+      "AddressQuerySchema.b67cf98": {
+        "description": "A view's state to check.",
+        "properties": {
+          "fix_time": {
+            "default": false,
+            "description": "Write the time range as it stands now: a range of days as its two dates, a range of quota weeks as their keys",
+            "title": "Fix Time",
+            "type": "boolean"
+          },
+          "state": {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone (`f=<dimension>:<key>`), is filled in from the record",
+            "examples": [
+              "t=qw&by=project&m=cost.sum&col=none"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "AddressQuerySchema",
+        "type": "object"
+      },
+      "AddressResponseSchema.b67cf98": {
+        "description": "A view's state, read and checked.",
+        "properties": {
+          "address": {
+            "description": "The view's address, its state in its normal form after `#dash/`",
+            "examples": [
+              "#dash/t=qw&by=project&m=cost.sum&col=none"
+            ],
+            "title": "Address",
+            "type": "string"
+          },
+          "look": {
+            "description": "Its look-only parts as the address writes them, which no answer of the engine reads",
+            "examples": [
+              [
+                "rel=1"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Look",
+            "type": "array"
+          },
+          "notes": {
+            "description": "A note for each part it dropped, a quick filter or a ratio that is gone",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "look",
+          "notes"
+        ],
+        "title": "AddressResponseSchema",
+        "type": "object"
+      },
       "AlarmsSwitchSchema.d1d9f70": {
         "description": "Where a person turns their alarms switch (F142.1).",
         "properties": {
@@ -1129,6 +1194,11 @@
             "title": "Facts",
             "type": "array"
           },
+          "focus": {
+            "description": "A part's alone: whether a view is opened on one of its values, as `f=`",
+            "title": "Focus",
+            "type": "boolean"
+          },
           "group": {
             "description": "A part of the work, an attribute, a time, or a part along an order",
             "enum": [
@@ -1250,7 +1320,8 @@
           "many",
           "next",
           "next_null",
-          "base"
+          "base",
+          "focus"
         ],
         "title": "DimensionSchema",
         "type": "object"
@@ -18655,6 +18726,90 @@
           }
         ],
         "summary": "Read Pilot's reply to the calling session's latest message in its conversation, as it stands: every text Pilot wrote since the message, and whether its turn runs on, ended, failed or was stopped. It answers at once, a turn in flight `running`: a caller that waits for the turn's end asks again. A closed conversation answers its last reply.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/address": {
+      "get": {
+        "description": "Returns:     200: The view's address, its look-only parts and a note for each part         dropped     400: The state has faults: the error names every one, and ends on a         correct example of each kind of part refused     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "get__api_dashboard_address",
+        "parameters": [
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone (`f=<dimension>:<key>`), is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone (`f=<dimension>:<key>`), is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Write the time range as it stands now: a range of days as its two dates, a range of quota weeks as their keys",
+            "in": "query",
+            "name": "fix_time",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Write the time range as it stands now: a range of days as its two dates, a range of quota weeks as their keys",
+              "title": "Fix Time",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressResponseSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Check a view's state against the catalogue in every part and write it back in its normal form, the address a link carries; fill in an entry, its focus alone, from the record; and on request write its time range as it stands now.",
         "tags": [],
         "x-required-role": "editor"
       }

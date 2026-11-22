@@ -1,5 +1,6 @@
-"""Schemas for GET /api/dashboard/catalogue: what a view of the dashboard may
-name, a part at a call (F154.4)."""
+"""Schemas for GET /api/dashboard/catalogue, what a view of the dashboard may
+name, a part at a call (F154.4); and for GET /api/dashboard/address, a view's
+state checked and written back in its normal form (F159)."""
 
 from typing import Literal
 
@@ -71,6 +72,9 @@ class DimensionSchema(BaseModel):
     )
     base: str | None = Field(
         description="An order dimension's alone: the part it puts in order"
+    )
+    focus: bool = Field(
+        description="A part's alone: whether a view is opened on one of its values, as `f=`"
     )
 
 
@@ -168,4 +172,43 @@ class CatalogueResponseSchema(BaseModel):
     )
     sitting_gap_seconds: float | None = Field(
         default=None, description="`time`: the gap that ends a sitting, in seconds"
+    )
+
+
+class AddressQuerySchema(BaseModel):
+    """A view's state to check."""
+
+    state: str = Field(
+        description=(
+            "The view's state as the URL writes it after `#dash/`, `#dash/` "
+            "before it or not; an entry, its focus alone (`f=<dimension>:<key>`), "
+            "is filled in from the record"
+        ),
+        examples=["t=qw&by=project&m=cost.sum&col=none"],
+    )
+    fix_time: bool = Field(
+        default=False,
+        description=(
+            "Write the time range as it stands now: a range of days as its two "
+            "dates, a range of quota weeks as their keys"
+        ),
+    )
+
+
+class AddressResponseSchema(BaseModel):
+    """A view's state, read and checked."""
+
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`",
+        examples=["#dash/t=qw&by=project&m=cost.sum&col=none"],
+    )
+    look: list[str] = Field(
+        description=(
+            "Its look-only parts as the address writes them, which no answer "
+            "of the engine reads"
+        ),
+        examples=[["rel=1"]],
+    )
+    notes: list[str] = Field(
+        description="A note for each part it dropped, a quick filter or a ratio that is gone"
     )

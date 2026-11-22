@@ -138,6 +138,7 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             next="psession",
             next_null="sitting",
             figures=_ITEM_FIGURES,
+            focus=True,
         ),
         Dimension(
             key="psession",
@@ -151,6 +152,7 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             next="pturn",
             next_null="conversation",
             figures=_ITEM_FIGURES,
+            focus=True,
         ),
         Dimension(
             key="pturn",

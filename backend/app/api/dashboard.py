@@ -1,5 +1,6 @@
-"""The dashboard's catalogue (F154.4): what a view may name, read through
-one route, a part at a call."""
+"""The dashboard's catalogue (F154.4), what a view may name, read through
+one route, a part at a call; and a view's address (F159), its state checked
+and written back in its normal form."""
 
 from typing import Any
 
@@ -8,10 +9,13 @@ from flask import Blueprint
 from spectree import Response as SpectreeResponse
 from sqlalchemy.orm import Session
 
+from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.catalogue import Catalogue
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.dashboard import (
+    AddressQuerySchema,
+    AddressResponseSchema,
     AggregateSchema,
     CatalogueQuerySchema,
     CatalogueResponseSchema,
@@ -61,6 +65,40 @@ def get_catalogue(
     return part(catalogue).model_dump()
 
 
+@dashboard_bp.route("/address", methods=["GET"])
+@api.validate(
+    query=AddressQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=AddressResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_address(
+    query: AddressQuerySchema,
+    address_service: AddressService = Provide[ServiceContainer.address_service],
+) -> Any:
+    """Check a view's state against the catalogue in every part and write it
+    back in its normal form, the address a link carries; fill in an entry,
+    its focus alone, from the record; and on request write its time range as
+    it stands now.
+
+    Returns:
+        200: The view's address, its look-only parts and a note for each part
+            dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+    """
+    found = address_service.address(query.state, fix_time=query.fix_time)
+    return AddressResponseSchema(
+        address=found.address, look=list(found.look), notes=list(found.notes)
+    ).model_dump()
+
+
 def _dimensions(catalogue: Catalogue) -> CatalogueResponseSchema:
     return CatalogueResponseSchema(
         part="dimensions",
@@ -91,6 +129,7 @@ def _dimensions(catalogue: Catalogue) -> CatalogueResponseSchema:
                 next=dimension.next,
                 next_null=dimension.next_null,
                 base=dimension.base,
+                focus=dimension.focus,
             )
             for dimension in catalogue.dimensions
         ],

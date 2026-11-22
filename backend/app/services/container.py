@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.app_config import AppSettings
 from app.config import Settings
+from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.engine.attachments import AttachmentStore, AttachService
 from app.engine.bus import EngineBus
@@ -605,6 +606,10 @@ class ServiceContainer(containers.DeclarativeContainer):
         CatalogueService,
         zone=app_config.provided.dashboard_zone,
         sitting_gap_seconds=app_config.provided.dashboard_sitting_gap_seconds,
+    )
+    # A view's state checked and written back as its address (F159)
+    address_service = providers.Factory(
+        AddressService, db=db_session, catalogue_service=catalogue_service
     )
 
     # A collector's publication of a transcript (F152.3)

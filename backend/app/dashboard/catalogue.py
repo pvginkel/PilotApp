@@ -154,6 +154,9 @@ class Dimension:
     shows: tuple[str, ...] = ()
     """A part's alone: the figures an item of it carries and, on an item
     that is one row of a fact, the dimensions shown with it."""
+    focus: bool = False
+    """A part's alone: whether a view is opened on one of its values, the
+    piece of work a state's `f=` names."""
 
 
 @dataclass(frozen=True)
@@ -212,6 +215,16 @@ class Ratio:
 
 
 @dataclass(frozen=True)
+class QuickFilter:
+    """A chip everyone turns on with a click, kept under a key: `condition`
+    the chip as a view's state writes it."""
+
+    key: str
+    label: str
+    condition: str
+
+
+@dataclass(frozen=True)
 class TimeRange:
     """A time range a view's state names by a key: the last `count` of
     `unit`, the running one included, ending `back` of them before it; no
@@ -245,6 +258,7 @@ class Catalogue:
     aggregates: tuple[Aggregate, ...]
     ratios: tuple[Ratio, ...]
     ranges: tuple[TimeRange, ...]
+    quick_filters: tuple[QuickFilter, ...] = ()
     _joins: Mapping[str, Join] = field(init=False, repr=False, compare=False)
     _offered: Mapping[str, tuple[str, ...]] = field(
         init=False, repr=False, compare=False
@@ -259,6 +273,7 @@ class Catalogue:
             ("aggregate", self.aggregates),
             ("ratio", self.ratios),
             ("time range", self.ranges),
+            ("quick filter", self.quick_filters),
         ):
             keys = [entry.key for entry in entries]
             twice = sorted({key for key in keys if keys.count(key) > 1})

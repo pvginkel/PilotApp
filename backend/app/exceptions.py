@@ -4,6 +4,11 @@ These are template-provided base exceptions that all apps need. Add
 app-specific exceptions below these base classes.
 """
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.dashboard.refusal import Fault
+
 
 class ConfigurationError(Exception):
     """Raised when application configuration is invalid."""
@@ -79,6 +84,17 @@ class ValidationException(BusinessLogicException):
 
     def __init__(self, message: str) -> None:
         super().__init__(message, error_code="VALIDATION_FAILED")
+
+
+class StateRefusedException(ValidationException):
+    """Raised when a view's state of the dashboard has faults; its message is
+    the refusal's text, which names every fault and ends on a correct example
+    of each kind of part refused (F154.2), and `faults` holds each one."""
+
+    def __init__(self, text: str, faults: tuple["Fault", ...]) -> None:
+        super().__init__(text)
+        self.error_code = "STATE_REFUSED"
+        self.faults = faults
 
 
 class SyncProtocolUnsupportedException(BusinessLogicException):

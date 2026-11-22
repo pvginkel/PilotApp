@@ -1,5 +1,6 @@
-"""/api/dashboard/catalogue: what a view of the dashboard may name, a part
-at a call (F154.4)."""
+"""/api/dashboard/catalogue, what a view of the dashboard may name, a part
+at a call (F154.4); and /api/dashboard/address, a view's state checked and
+written back in its normal form (F159)."""
 
 from typing import Any
 
@@ -62,8 +63,13 @@ class TestGetCatalogue:
             "next": "psession",
             "next_null": "sitting",
             "base": None,
+            "focus": True,
         }
         assert dimensions["session_start"]["base"] == "psession"
+        assert [key for key, one in dimensions.items() if one["focus"]] == [
+            "project",
+            "psession",
+        ]
         assert dimensions["miss"]["values"] == [
             {
                 "code": "1",
@@ -256,3 +262,83 @@ class TestGetCatalogue:
         assert (
             oidc_client.get(CATALOGUE, query_string={"part": "time"}).status_code == 401
         )
+
+
+ADDRESS = "/api/dashboard/address"
+
+
+class TestGetAddress:
+    def test_it_answers_the_normal_form_its_look_and_its_notes(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(
+            ADDRESS, query_string={"state": "m=cost&m=r:gone&rel=1&by=psession"}
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "address": "#dash/t=qw&by=psession&m=cost.sum&col=none&rel=1",
+            "look": ["rel=1"],
+            "notes": [
+                'm=r:gone: no ratio has the key "gone", so the measure is dropped.'
+            ],
+        }
+
+    def test_an_address_is_read_as_its_state(self, client: FlaskClient) -> None:
+        body = client.get(
+            ADDRESS, query_string={"state": "#dash/t=all&by=model"}
+        ).get_json()
+
+        assert body["address"] == "#dash/t=all&by=model&m=cost.sum&col=none"
+
+    def test_it_fixes_the_time_on_request(self, client: FlaskClient) -> None:
+        body = client.get(
+            ADDRESS, query_string={"state": "t=lqw", "fix_time": "true"}
+        ).get_json()
+
+        assert body["address"].startswith("#dash/t=wk,")
+        assert body["address"].endswith("&by=project&m=cost.sum&col=none")
+
+    def test_it_fills_in_an_entry(self, client: FlaskClient) -> None:
+        key = "5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b"
+
+        body = client.get(
+            ADDRESS, query_string={"state": f"f=project:{key}"}
+        ).get_json()
+
+        assert body["address"] == (
+            f"#dash/t=all&by=psession&m=cost.sum&m=misses.sum"
+            f"&dr=project:{key}@project&col=none&f=project:{key}"
+        )
+
+    def test_a_state_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(ADDRESS, query_string={"state": "by=phases&rel=2"})
+
+        assert response.status_code == 400
+        body = response.get_json()
+        assert body["code"] == "STATE_REFUSED"
+        assert body["error"].splitlines() == [
+            "Cannot read the view because its state has 2 faults.",
+            '- by=phases: "phases" is no dimension. By takes a part or an '
+            "attribute; the catalogue's dimensions list them.",
+            '- rel=2: "2" is no switch. rel takes 1.',
+            "A By reads by=<dimension>, as in by=project.",
+            "Relative reads rel=1, as in rel=1.",
+        ]
+
+    def test_no_state_is_refused(self, client: FlaskClient) -> None:
+        assert client.get(ADDRESS).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert client.get(ADDRESS, query_string={"state": ""}).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.get(ADDRESS, query_string={"state": ""}).status_code == 401

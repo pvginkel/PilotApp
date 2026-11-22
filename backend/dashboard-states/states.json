@@ -1,0 +1,411 @@
+{
+  "about": [
+    "States of a dashboard view as written, each with what the server reads in it (F154.2, F159).",
+    "An entry that reads has its normal form, the state after #dash/ in the address the server answers, its look-only parts as that form writes them, and its notes where it has any, one per part dropped.",
+    "An entry with a fault has the refusal's exact text, a line an item.",
+    "The backend's suite reads every entry through GET /api/dashboard/address's service (tests/dashboard/test_states.py), on the suite's database, whose quota weeks start on 2 January 2025."
+  ],
+  "states": [
+    {
+      "about": "The scratch, the barest view that draws",
+      "state": "t=qw&by=project&m=cost.sum&col=none",
+      "normal": "t=qw&by=project&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "Nothing is the scratch",
+      "state": "",
+      "normal": "t=qw&by=project&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "An address's #dash/ is read off",
+      "state": "#dash/t=d7&by=model&m=cost.sum&col=none",
+      "normal": "t=d7&by=model&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "Its parts in any order, each left out taking its default",
+      "state": "m=cost&by=psession",
+      "normal": "t=qw&by=psession&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "A figure's default aggregate, and its fact's own grain written as none",
+      "state": "m=ctx&m=cost.sum.call&m=turns.count.pturn&m=cost.median.conversation",
+      "normal": "t=qw&by=project&m=ctx.max&m=cost.sum&m=turns.count&m=cost.median.conversation&col=none",
+      "look": []
+    },
+    {
+      "about": "A measure's own filters",
+      "state": "m=cost.sum(source=chat|pilot;!miss=1)",
+      "normal": "t=qw&by=project&m=cost.sum(source=chat|pilot;!miss=1)&col=none",
+      "look": []
+    },
+    {
+      "about": "A ratio by its key, and one written out",
+      "state": "m=cost.sum&m=r:overhead&m=r:Miss%20share:miss_cost.sum/cost",
+      "normal": "t=qw&by=project&m=cost.sum&m=r:overhead&m=r:Miss%20share:miss_cost.sum/cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "A time dimension as By is over time at that grain",
+      "state": "by=day",
+      "normal": "t=qw&by=project&p=time,day&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "Over time names its grain, the week where none is written",
+      "state": "p=time",
+      "normal": "t=qw&by=project&p=time,qweek&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "An order dimension as By is its part in order",
+      "state": "by=session_start&m=cost.median.psession",
+      "normal": "t=qw&by=psession&p=order&m=cost.median.psession&col=none",
+      "look": []
+    },
+    {
+      "about": "In order names its order only where it is not the By's first",
+      "state": "by=pturn&p=order,turn_seq",
+      "normal": "t=qw&by=pturn&p=order&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "Rows are written as none",
+      "state": "p=rows&by=conversation",
+      "normal": "t=qw&by=conversation&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "Lanes, a part's",
+      "state": "by=conversation&p=lanes",
+      "normal": "t=qw&by=conversation&p=lanes&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "The table",
+      "state": "p=table",
+      "normal": "t=qw&by=project&p=table&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "Quota weeks by their keys, the instants they start, in order and once each",
+      "state": "t=wk,2025-01-09T10:00:00Z,2025-01-02T10%3A00%3A00Z,2025-01-09T11:00:00%2B01:00",
+      "normal": "t=wk,2025-01-02T10%3A00%3A00Z,2025-01-09T10%3A00%3A00Z&by=project&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "A range between a time of day and a date, the date holding its day",
+      "state": "t=c,2026-11-01T08:30:00,2026-11-07",
+      "normal": "t=c,2026-11-01T08%3A30,2026-11-07&by=project&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "A range open at its end",
+      "state": "t=c,2026-11-01,",
+      "normal": "t=c,2026-11-01,&by=project&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "A drill stack, outermost first, each level with what it was drilled from",
+      "state": "dr=project:5B0E6A4C-2F4A-4D7E-9B1E-0C3F0C7C1A2B@project&dr=psession:~@session_start&by=conversation",
+      "normal": "t=qw&by=conversation&m=cost.sum&dr=project:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b@project&dr=psession:~@session_start&col=none",
+      "look": []
+    },
+    {
+      "about": "A time dimension as By, over time by the level under the drill stack",
+      "state": "dr=project:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b@project&by=day",
+      "normal": "t=qw&by=psession&p=time,day&m=cost.sum&dr=project:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b@project&col=none",
+      "look": []
+    },
+    {
+      "about": "Chips on a dimension's values, negated and marked, an order dimension's as its part's",
+      "state": "c=!source:chat,pilot&c=~miss:1&c=session_start:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&c=effort:a%2Cb,~",
+      "normal": "t=qw&by=project&m=cost.sum&c=!source:chat,pilot&c=~miss:1&c=psession:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&c=effort:a%2Cb,~&col=none",
+      "look": []
+    },
+    {
+      "about": "A threshold on the By's rows, a condition on each item and the outlier rows",
+      "state": "c=@rows,gt,100,cost.median.psession&c=~!@items,ge,1.50,cost&c=~@outliers",
+      "normal": "t=qw&by=project&m=cost.sum&c=@rows,gt,100,cost.median.psession&c=~!@items,ge,1.5,cost.sum&c=~@outliers&col=none",
+      "look": []
+    },
+    {
+      "about": "A color, and a sort on a measure spelled otherwise",
+      "state": "col=model&m=cost&o=desc,cost.sum.call",
+      "normal": "t=qw&by=project&m=cost.sum&col=model&o=desc,cost.sum",
+      "look": []
+    },
+    {
+      "about": "The drawer, its row, its grain, the reader and its call",
+      "state": "d=items&sel=5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&ig=call&it=conversation,5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&call=42",
+      "normal": "t=qw&by=project&m=cost.sum&col=none&d=items&sel=5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&ig=call&it=conversation,5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&call=42",
+      "look": [
+        "d=items"
+      ]
+    },
+    {
+      "about": "A focus",
+      "state": "f=psession:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b&by=pturn",
+      "normal": "t=qw&by=pturn&m=cost.sum&col=none&f=psession:5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b",
+      "look": []
+    },
+    {
+      "about": "The look-only parts",
+      "state": "rel=1&mk=model,miss&dw=dots:out,band:off,cols:on&col=source&lit=work,~,%E2%80%A6&ev=hook_error,-cache_miss&z=1763600000.0,1763686400.5&d=items",
+      "normal": "t=qw&by=project&m=cost.sum&col=source&d=items&rel=1&mk=miss,model&dw=dots:out,band:off&lit=%E2%80%A6,work,~&ev=-cache_miss,hook_error&z=1763600000,1763686400.5",
+      "look": [
+        "d=items",
+        "rel=1",
+        "mk=miss,model",
+        "dw=dots:out,band:off",
+        "lit=%E2%80%A6,work,~",
+        "ev=-cache_miss,hook_error",
+        "z=1763600000,1763686400.5"
+      ]
+    },
+    {
+      "about": "The band's length",
+      "state": "roll=5,5&by=psession&p=order",
+      "normal": "t=qw&by=psession&p=order&m=cost.sum&col=none&roll=5,5",
+      "look": []
+    },
+    {
+      "about": "The band's default length is written as none",
+      "state": "roll=10,15",
+      "normal": "t=qw&by=project&m=cost.sum&col=none",
+      "look": []
+    },
+    {
+      "about": "A ratio that is gone is dropped with a note, and the sort on it",
+      "state": "m=cost.sum&m=r:overhaed&o=desc,r:overhaed",
+      "normal": "t=qw&by=project&m=cost.sum&col=none",
+      "look": [],
+      "notes": [
+        "m=r:overhaed: no ratio has the key \"overhaed\", so the measure is dropped. Did you mean \"overhead\"?",
+        "o=desc,r:overhaed: the sort is on a measure dropped, so it is dropped too."
+      ]
+    },
+    {
+      "about": "A view left with no measure takes the scratch's",
+      "state": "m=r:gone",
+      "normal": "t=qw&by=project&m=cost.sum&col=none",
+      "look": [],
+      "notes": [
+        "m=r:gone: no ratio has the key \"gone\", so the measure is dropped.",
+        "m=r:gone: the view keeps no measure, so it takes cost.sum."
+      ]
+    },
+    {
+      "about": "A quick filter that is gone is dropped with a note",
+      "state": "b=no_such_filter",
+      "normal": "t=qw&by=project&m=cost.sum&col=none",
+      "look": [],
+      "notes": [
+        "b=no_such_filter: no quick filter has the key \"no_such_filter\", so it is dropped."
+      ]
+    },
+    {
+      "about": "Every fault at once, in the order written",
+      "state": "x=1&by=phases&m=cost.medain&rel=2",
+      "refusal": [
+        "Cannot read the view because its state has 4 faults.",
+        "- x=1: \"x\" is no part of a state.",
+        "- by=phases: \"phases\" is no dimension. By takes a part or an attribute; the catalogue's dimensions list them.",
+        "- m=cost.medain: \"medain\" is no aggregate. Did you mean \"median\" or \"mean\"? cost takes sum, median, mean, max and p90, and calls.count counts its fact's items.",
+        "- rel=2: \"2\" is no switch. rel takes 1.",
+        "A state reads <part>=<value>&…, its parts t, by, p, m, dr, c, b, col, o, d, sel, ig, it, call, f, rel, mk, dw, roll, lit, ev and z, as in t=qw&by=project&m=cost.sum.",
+        "A By reads by=<dimension>, as in by=project.",
+        "A measure reads m=<figure>.<aggregate>[.<grain>][(<filter>;…)], m=r:<ratio> or m=r:<name>:<measure>/<measure>, as in m=cost.median.conversation or m=cost.sum(miss=1).",
+        "Relative reads rel=1, as in rel=1."
+      ]
+    },
+    {
+      "about": "A part a state has once, written twice",
+      "state": "by=project&by=psession",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- by=psession: by stands 2 times, and a state has one.",
+        "A By reads by=<dimension>, as in by=project."
+      ]
+    },
+    {
+      "about": "A time range the catalogue has not",
+      "state": "t=l3",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- t=l3: \"l3\" is no time range. Did you mean \"l2\", \"l4\" or \"l8\"? A range is today, d2, d7, qw, lqw, l2, l4, l8 or all.",
+        "A time reads t=<range>, t=wk,<week's key>,… or t=c,<from>,<to>, as in t=qw or t=c,2026-11-01,2026-11-07."
+      ]
+    },
+    {
+      "about": "A quota week's label is not its key",
+      "state": "t=wk,2025-W02",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- t=wk,2025-W02: \"2025-W02\" is a quota week's label, which two weeks may share, not its key. Did you mean \"2025-01-09T10:00:00Z\"? A quota week's key is the instant it starts, as in 2025-01-02T10:00:00Z.",
+        "A time reads t=<range>, t=wk,<week's key>,… or t=c,<from>,<to>, as in t=qw or t=c,2026-11-01,2026-11-07."
+      ]
+    },
+    {
+      "about": "An instant inside a quota week is not its key",
+      "state": "t=wk,2025-01-03T00:00:00Z",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- t=wk,2025-01-03T00:00:00Z: \"2025-01-03T00:00:00Z\" is no quota week's key. Did you mean \"2025-01-02T10:00:00Z\"? A quota week's key is the instant it starts, as in 2025-01-02T10:00:00Z.",
+        "A time reads t=<range>, t=wk,<week's key>,… or t=c,<from>,<to>, as in t=qw or t=c,2026-11-01,2026-11-07."
+      ]
+    },
+    {
+      "about": "A range that ends before it starts",
+      "state": "t=c,2026-11-07,2026-11-01",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- t=c,2026-11-07,2026-11-01: the range ends before it starts.",
+        "A time reads t=<range>, t=wk,<week's key>,… or t=c,<from>,<to>, as in t=qw or t=c,2026-11-01,2026-11-07."
+      ]
+    },
+    {
+      "about": "A bound that is no date",
+      "state": "t=c,1%20Nov,",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- t=c,1%20Nov,: \"1 Nov\" is no date or time. A bound reads YYYY-MM-DD, or YYYY-MM-DDTHH:MM[:SS] with a time of day, in Europe/Amsterdam.",
+        "A time reads t=<range>, t=wk,<week's key>,… or t=c,<from>,<to>, as in t=qw or t=c,2026-11-01,2026-11-07."
+      ]
+    },
+    {
+      "about": "A By the catalogue has not",
+      "state": "by=projekt",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- by=projekt: \"projekt\" is no dimension. Did you mean \"project\"? By takes a part or an attribute; the catalogue's dimensions list them.",
+        "A By reads by=<dimension>, as in by=project."
+      ]
+    },
+    {
+      "about": "Lanes for an attribute",
+      "state": "by=source&p=lanes",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- p=lanes: source is no part, and a lane is a part's. Lanes take a By that is a part: project, psession, pturn, sitting, conversation or call.",
+        "A presentation reads p=order[,<order dimension>], p=time,<grain>, p=lanes or p=table, as in p=time,day."
+      ]
+    },
+    {
+      "about": "In order, for a By with no order",
+      "state": "p=order",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- p=order: project has no order. In order takes a By that has one: psession or pturn.",
+        "A presentation reads p=order[,<order dimension>], p=time,<grain>, p=lanes or p=table, as in p=time,day."
+      ]
+    },
+    {
+      "about": "A figure, an aggregate and grains that do not read",
+      "state": "m=coast.sum&m=cost.count&m=turns.sum.call&m=cost.sum.events",
+      "refusal": [
+        "Cannot read the view because its state has 4 faults.",
+        "- m=coast.sum: \"coast\" is no figure. Did you mean \"cost\"? The catalogue's measures list the figures.",
+        "- m=cost.count: count counts a fact's items, on its counting figure alone. cost takes sum, median, mean, max and p90, and calls.count counts its fact's items.",
+        "- m=turns.sum.call: turns is a figure of Pilot turns, which have no call. turns takes the grains project, psession, pturn, sitting and conversation.",
+        "- m=cost.sum.events: \"events\" is no grain. Did you mean \"event\"? cost takes the grains project, psession, pturn, sitting, conversation and call.",
+        "A measure reads m=<figure>.<aggregate>[.<grain>][(<filter>;…)], m=r:<ratio> or m=r:<name>:<measure>/<measure>, as in m=cost.median.conversation or m=cost.sum(miss=1)."
+      ]
+    },
+    {
+      "about": "Values that do not read as their dimension's",
+      "state": "c=pturn:x&c=project:42&c=day:3%20Nov&c=miss:yes&c=source:chats",
+      "refusal": [
+        "Cannot read the view because its state has 5 faults.",
+        "- c=pturn:x: pturn takes a whole number, not \"x\".",
+        "- c=project:42: project takes an id, a UUID, not \"42\".",
+        "- c=day:3%20Nov: day takes a date, YYYY-MM-DD, not \"3 Nov\".",
+        "- c=miss:yes: \"yes\" is no value of miss. The values of miss are 1 and 0.",
+        "- c=source:chats: \"chats\" is no value of source. Did you mean \"chat\"? The values of source are work, pilot and chat.",
+        "A chip reads c=[~][!]<dimension>:<value>,…, c=[~]@rows,<op>,<number>,<measure>, c=[~][!]@items,<op>,<number>,<measure> or c=[~]@outliers, as in c=miss:1 or c=@items,gt,1,cost.sum."
+      ]
+    },
+    {
+      "about": "A drill level on an attribute",
+      "state": "dr=model:x@model",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- dr=model:x@model: model is no part, and a drill level is a part's value. A filter on it is a chip, c=model:<value>.",
+        "A drill level reads dr=<part>:<value>@<dimension it was drilled from>, as in dr=project:<id>@project."
+      ]
+    },
+    {
+      "about": "Chips that do not read",
+      "state": "c=!@rows,gt,1,cost.sum&c=@items,gte,1,cost.sum&c=@row,gt,1,cost",
+      "refusal": [
+        "Cannot read the view because its state has 3 faults.",
+        "- c=!@rows,gt,1,cost.sum: @rows keeps or marks the By's rows, and is never negated.",
+        "- c=@items,gte,1,cost.sum: \"gte\" is no operator. Did you mean \"gt\" or \"ge\"? An operator is gt, ge, lt or le.",
+        "- c=@row,gt,1,cost: \"@row\" is no chip. Did you mean \"@rows\"?",
+        "A chip reads c=[~][!]<dimension>:<value>,…, c=[~]@rows,<op>,<number>,<measure>, c=[~][!]@items,<op>,<number>,<measure> or c=[~]@outliers, as in c=miss:1 or c=@items,gt,1,cost.sum."
+      ]
+    },
+    {
+      "about": "A color, a sort and a drawer that do not read",
+      "state": "col=day&o=down,label&d=rows",
+      "refusal": [
+        "Cannot read the view because its state has 3 faults.",
+        "- col=day: \"day\" is no color, being a time dimension. A color is a part, an attribute, token_kind or none.",
+        "- o=down,label: \"down\" is no direction. A sort is asc or desc.",
+        "- d=rows: \"rows\" is no drawer. d takes items.",
+        "A color reads col=<dimension>, col=token_kind or col=none, as in col=model.",
+        "A sort reads o=<asc|desc>,<column>, as in o=desc,cost.sum.",
+        "The drawer reads d=items, as in d=items."
+      ]
+    },
+    {
+      "about": "A call selected outside the reader",
+      "state": "it=pturn,3&call=7",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- call=7: a call is selected in the reader, which a conversation's item opens. call takes it=conversation,<id> beside it.",
+        "A selected call reads call=<call>, with it=conversation,<id>, as in it=conversation,<id>&call=<call>."
+      ]
+    },
+    {
+      "about": "A focus the catalogue has not",
+      "state": "f=slice:PilotAppSpecs%2F042",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- f=slice:PilotAppSpecs%2F042: \"slice\" is no focus. A focus is project or psession.",
+        "A focus reads f=<dimension>:<key>, as in f=project:<id>."
+      ]
+    },
+    {
+      "about": "Look-only parts that do not read",
+      "state": "rel=yes&dw=dots:some&roll=0,5&lit=work&ev=hook_errors&z=2,1",
+      "refusal": [
+        "Cannot read the view because its state has 6 faults.",
+        "- rel=yes: \"yes\" is no switch. rel takes 1.",
+        "- dw=dots:some: \"some\" is no setting of dots. dots takes all, out or none.",
+        "- roll=0,5: \"0,5\" is no length of the band. It takes two whole numbers above 0, the items it reads and the items before it draws.",
+        "- lit=work: lit lights the color's values, and the view has no color. It takes col=<dimension> or col=token_kind beside it.",
+        "- ev=hook_errors: \"hook_errors\" is no kind of event. Did you mean \"hook_error\"? The catalogue's dimensions list the values of event_kind.",
+        "- z=2,1: \"2,1\" is no window. A window is two epoch seconds, the first the earlier.",
+        "Relative reads rel=1, as in rel=1.",
+        "A series' drawing reads dw=<part>:<value>,…, its parts dots:all|out|none, cols:off, med:off and band:off, as in dw=dots:out,band:off.",
+        "The band's length reads roll=<items it reads>,<items before it draws>, as in roll=5,5.",
+        "A list of values lit reads lit=<value of the color>,…, as in lit=~.",
+        "A list of event kinds reads ev=[-]<event kind>,…, as in ev=-cache_miss.",
+        "A window reads z=<from>,<to>, in epoch seconds, as in z=1763600000,1763686400."
+      ]
+    },
+    {
+      "about": "A percent that encodes nothing",
+      "state": "c=effort:%zz",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- c=effort:%zz: \"%zz\" holds a \"%\" that encodes no character. A value's reserved characters are percent-encoded, as in %2C for a comma.",
+        "A chip reads c=[~][!]<dimension>:<value>,…, c=[~]@rows,<op>,<number>,<measure>, c=[~][!]@items,<op>,<number>,<measure> or c=[~]@outliers, as in c=miss:1 or c=@items,gt,1,cost.sum."
+      ]
+    }
+  ]
+}
