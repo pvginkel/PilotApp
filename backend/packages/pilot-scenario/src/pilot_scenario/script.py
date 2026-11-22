@@ -30,13 +30,26 @@ class Carried:
 
 @dataclass(frozen=True)
 class Occurrence:
-    """What occurred at one moment that no other part of the script says: an
-    API error."""
+    """What occurred at one moment after a Call that no other part of the
+    script says, of an Event Kind Claude Code writes a line of: an API error
+    a request failed with for good, `api_error`, its status the `detail`, or
+    the person's interruption of the response, `interrupt`."""
 
     at: int
     kind: str
     is_error: bool
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class Retry:
+    """An attempt at a Call's request that failed: sent at `sent`, it met an
+    API error of that `status` at `failed`, and Claude Code sent the request
+    again."""
+
+    sent: int
+    failed: int
+    status: int | None = None
 
 
 @dataclass(frozen=True)
@@ -68,7 +81,8 @@ class Call:
     fallback had `model` answer it instead, and `stop` how the response
     ended where it was no ordinary end, a Stop Reason's code. `back_to`
     makes it a rewind: the earlier Call, by name, its chain continues from.
-    `miss` is the cause of a cache miss."""
+    `miss` is the cause of a cache miss. `retried` are the attempts at its
+    request that failed before the one it answered."""
 
     at: int
     tokens: Tokens
@@ -84,6 +98,7 @@ class Call:
     miss: str | None = None
     back_to: str | None = None
     tools: tuple[ToolUse, ...] = ()
+    retried: tuple[Retry, ...] = ()
     occurred: tuple[Occurrence, ...] = ()
     carried: tuple[Carried, ...] = ()
 

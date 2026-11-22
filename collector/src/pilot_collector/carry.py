@@ -13,13 +13,14 @@ the file's last Call, and the place its next would take in a file with none.
 The carry holds the byte the boundary's first line starts at and what the
 lines from there on continue: how many Calls, published Launches, Prompts and
 Compactions lie before it, the last line before it that lines link to and
-where the chain leads from that line, the lines named before it that the
-file holds no line of there, the request lines written since the last one a
-Call named, the directory and the environment the file named first, the
-Launch open there, the prompts waiting in the queue, and those a `remove`
-took out of it that no message taken in the middle of a run has claimed. No
-id of any other line before the boundary is held, and of no Call but the one
-the chain leads to.
+where the chain leads from that line, with what the Call it leads to left
+the next, the lines named before it that the file holds no line of there,
+the request lines written since the last one a Call named, the Events before
+the transcript's first Call, the directory and the environment the file
+named first, the Launch open there, the prompts waiting in the queue, and
+those a `remove` took out of it that no message taken in the middle of a run
+has claimed. No id of any other line before the boundary is held, and of no
+Call but the one the chain leads to.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
@@ -37,11 +38,19 @@ _DIGEST = 16
 _HELD = 1_280
 """The bytes a carry is counted at beside its words and its queue."""
 
+_LEFT = 560
+"""The bytes what the Call the chain leads to left is counted at beside its
+words."""
+
 _AWAITED = 64
 """The bytes a line awaited is counted at beside its id."""
 
-_REQUESTED = 176
-"""The bytes a request line held is counted at beside its id."""
+_REQUESTED = 280
+"""The bytes a request line held is counted at beside its id and its
+shape."""
+
+_OCCURRED = 224
+"""The bytes an Event held is counted at beside its detail."""
 
 _QUEUED = 176
 """The bytes a prompt waiting in the queue, or held once a `remove` took it
@@ -67,6 +76,30 @@ class Open:
 
 
 @dataclass(frozen=True)
+class Left:
+    """What a Call left the next on its chain: what that one's cache miss
+    and its cause read of it."""
+
+    place: int
+    """Its place among the transcript's Calls, from 0."""
+    completed_at: datetime
+    model: str
+    effort: str | None
+    version: str | None
+    """Claude Code's version its first line names."""
+    cached: int
+    """The tokens it left in the cache: those it read from it and those it
+    wrote to it."""
+    hour: bool
+    """Whether it wrote to the cache that lasts an hour: what it left lasts
+    five minutes where it did not."""
+    shape: str | None
+    """Its request's `shapeHash`."""
+    sent: int | None
+    """The messages its request sent."""
+
+
+@dataclass(frozen=True)
 class Lead:
     """Where the chain leads from one line, up its `parentUuid`s and, at a
     compaction's boundary, its `logicalParentUuid`."""
@@ -77,10 +110,39 @@ class Lead:
     compaction: int | None = None
     """The Compaction crossed on the way there, the nearest to the line, by
     its place among the transcript's; none where the chain crosses none."""
+    left: Left | None = None
+    """What that Call left the next, none where the chain reaches none."""
 
 
 ROOT = Lead()
 """Where the chain leads from no line: a chain's first line follows none."""
+
+
+@dataclass(frozen=True)
+class Requested:
+    """A request line: what the Call whose lines name it reads of it."""
+
+    id: str
+    at: datetime
+    """When it was written: when the request was sent."""
+    shape: str | None = None
+    """`shapeHash`, a digest of the system prompt and the tools it sent."""
+    kept: int | None = None
+    """`keep`: the messages it kept of those the request before it sent."""
+    sent: int | None = None
+    """The messages it sent: those it kept and those of its `tail`."""
+
+
+@dataclass(frozen=True)
+class Occurred:
+    """An Event: what occurred at one moment in the transcript that no other
+    fact records."""
+
+    kind: str
+    """The Event Kind's code."""
+    at: datetime
+    detail: str | None = None
+    """Its one qualifier: an API error's status."""
 
 
 @dataclass(frozen=True)
@@ -108,11 +170,13 @@ class Standing:
     compaction's boundary as the one it continues, that no line before it
     carries, in the order they were named: a line of another file, or one
     written later."""
-    requests: tuple[tuple[str, datetime], ...] = ()
+    requests: tuple[Requested, ...] = ()
     """The request lines before it written since the last one a Call named,
-    in the file's order: each one's `id` and time. A Call's first line names
-    its request among them, and that one and those before it are no later
-    Call's."""
+    in the file's order. A Call's first line names its request among them,
+    and that one and those before it are no later Call's."""
+    events: tuple[Occurred, ...] = ()
+    """The Events before it where no Call is: the transcript's first Call
+    marks them."""
     directory: str | None = None
     environment: str | None = None
     launch: Open | None = None
@@ -146,6 +210,7 @@ class Carry:
     def size(self) -> int:
         """The bytes of memory the carry is counted at."""
         stands = self.stands
+        left = stands.leads.left
         words = (
             stands.link,
             stands.leads.call,
@@ -153,13 +218,21 @@ class Carry:
             stands.environment,
             self.collector,
             *stands.awaited,
-            *(named for named, _ in stands.requests),
+            *(word for asked in stands.requests for word in (asked.id, asked.shape)),
+            *(event.detail for event in stands.events),
+            *(
+                ()
+                if left is None
+                else (left.model, left.effort, left.version, left.shape)
+            ),
         )
         return (
             _HELD
             + sum(len(word) for word in words if word is not None)
+            + (0 if left is None else _LEFT)
             + _AWAITED * len(stands.awaited)
             + _REQUESTED * len(stands.requests)
+            + _OCCURRED * len(stands.events)
             + _QUEUED * (len(stands.queue) + len(stands.removed))
         )
 

@@ -4,7 +4,17 @@ import tracemalloc
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from pilot_collector.carry import Carries, Carry, Lead, Open, Standing, digest
+from pilot_collector.carry import (
+    Carries,
+    Carry,
+    Lead,
+    Left,
+    Occurred,
+    Open,
+    Requested,
+    Standing,
+    digest,
+)
 
 STOOD = datetime(2026, 11, 12, 10, 2, 3, 456789, tzinfo=UTC)
 
@@ -15,6 +25,7 @@ def _carry(
     removed: int = 0,
     awaited: int = 0,
     requested: int = 0,
+    occurred: int = 0,
 ) -> Carry:
     """A carry no other shares a word or a time with."""
     return Carry(
@@ -28,17 +39,42 @@ def _carry(
             prompts=400 + place,
             compactions=3 + place,
             link=f"{place:08}-8b2d-4d57-9e3a-71c5d2b8a690",
-            leads=Lead(f"msg_01{place:022}", 3 + place),
+            leads=Lead(
+                f"msg_01{place:022}",
+                3 + place,
+                Left(
+                    place=299 + place,
+                    completed_at=STOOD + timedelta(minutes=place),
+                    model=f"claude-opus-4-{place}",
+                    effort=f"high-{place}",
+                    version=f"2.1.{place}",
+                    cached=40_000 + place,
+                    hour=place % 2 == 0,
+                    shape=f"{place:064}",
+                    sent=80 + place,
+                ),
+            ),
             awaited=tuple(
                 f"{place:08}-{named:04}-4d57-9e3a-71c5d2b8a690"
                 for named in range(awaited)
             ),
             requests=tuple(
-                (
+                Requested(
                     f"{place:08}-{named:04}-4b1e-8c2d-5f0a9e3b7d61",
                     STOOD + timedelta(days=place, hours=named),
+                    f"{place:032}{named:032}",
+                    40 + named,
+                    42 + named,
                 )
                 for named in range(requested)
+            ),
+            events=tuple(
+                Occurred(
+                    "api_retry",
+                    STOOD + timedelta(days=place, seconds=named),
+                    f"{place}{named}",
+                )
+                for named in range(occurred)
             ),
             directory=f"/work/Loom{place}",
             environment=f"cleo-loom-{place:06}",
@@ -68,11 +104,23 @@ def _path(name: str) -> Path:
 
 class TestACarrysSize:
     def test_it_is_counted_at_no_less_than_the_memory_it_takes(self) -> None:
-        for queued, awaited, requested in ((0, 0, 0), (40, 0, 0), (0, 3, 0), (0, 0, 7)):
+        for queued, awaited, requested, occurred in (
+            (0, 0, 0, 0),
+            (40, 0, 0, 0),
+            (0, 3, 0, 0),
+            (0, 0, 7, 0),
+            (0, 0, 0, 9),
+        ):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
             carries = [
-                _carry(place, queued, awaited=awaited, requested=requested)
+                _carry(
+                    place,
+                    queued,
+                    awaited=awaited,
+                    requested=requested,
+                    occurred=occurred,
+                )
                 for place in range(1_000, 1_400)
             ]
             taken = tracemalloc.get_traced_memory()[0] - before
@@ -89,6 +137,9 @@ class TestACarrysSize:
 
     def test_a_request_held_counts(self) -> None:
         assert _carry(requested=2).size > _carry(requested=1).size > _carry().size
+
+    def test_an_event_held_counts(self) -> None:
+        assert _carry(occurred=2).size > _carry(occurred=1).size > _carry().size
 
     def test_a_prompt_a_remove_took_out_and_held_counts_as_one_waiting(
         self,

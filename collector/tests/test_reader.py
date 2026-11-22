@@ -29,11 +29,13 @@ from tests.support import (
     boundary,
     chained,
     cost,
+    erred,
     fallback,
     fell_back,
     filed,
     finished,
     instructions,
+    interruption,
     linked,
     loaded,
     moment,
@@ -42,6 +44,7 @@ from tests.support import (
     request,
     requesting,
     result,
+    retried,
     saved,
     sent,
     summary,
@@ -94,8 +97,10 @@ CALL = (
     "completed_at",
     "model",
     *CHOICES,
+    "miss_cause",
     "tokens",
     "tool_calls",
+    "events",
 )
 
 
@@ -197,6 +202,37 @@ def _chains(publication: PublicationSchema) -> list[tuple[str | None, int | None
     return [(call.predecessor, call.compaction) for call in publication.calls]
 
 
+def _missed(**spent: int) -> list[Line]:
+    """A prompt and two Calls, the first leaving 1,000 tokens in the cache
+    and the second spending `spent`: a chain."""
+    return linked(
+        [
+            typed(0),
+            assistant(4, "msg_01", cache_write_5m=1_000),
+            assistant(9, "msg_02", "claude-opus-4-5", **spent),
+        ]
+    )
+
+
+def _events(
+    publication: PublicationSchema,
+) -> list[list[tuple[str, bool, int, str | None]]]:
+    """Each Call's Events: its kind, whether it is an error, its second and
+    its detail."""
+    return [
+        [
+            (
+                event.kind,
+                event.is_error,
+                round((event.at - moment(0)).total_seconds()),
+                event.detail,
+            )
+            for event in call.events
+        ]
+        for call in publication.calls
+    ]
+
+
 class TestTheScenario:
     @pytest.mark.parametrize(
         "scenario", [SCENARIO, _resumed()], ids=["the scenario", "a resumed thread"]
@@ -296,6 +332,14 @@ class TestTheScenario:
             assert any(chosen in call for call in calls)
             assert not all(chosen in call for call in calls)
         assert any("attributed_plugin" in call for call in calls)
+        assert {call["miss_cause"] for call in calls if "miss_cause" in call} == {
+            "compaction",
+            "rewind",
+            "ttl",
+        }
+        assert [
+            event["kind"] for call in calls for event in call.get("events", [])
+        ] == ["api_retry"]
 
     def test_a_reading_is_a_call_pilot_takes_by_its_shape(self, tmp_path: Path) -> None:
         builder = Builder(SCENARIO, UNTIL)
@@ -1734,6 +1778,382 @@ class TestACallsChain:
 
         assert len(publication.compactions) == 1
         assert _chains(publication) == [(None, None), ("msg_01", 1)]
+
+
+class TestACacheMiss:
+    @pytest.mark.parametrize(
+        ("spent", "missed"),
+        [
+            ({"cache_read": 1_000, "cache_write_5m": 50}, False),
+            ({"cache_read": 500, "cache_write_5m": 550}, False),
+            ({"cache_read": 499, "cache_write_5m": 551}, True),
+            ({"cache_write_5m": 899}, False),
+            ({"cache_write_5m": 900}, True),
+            ({"input": 900}, True),
+            ({"cache_read": 300, "cache_write_5m": 5_000}, True),
+        ],
+        ids=[
+            "read all",
+            "half unread",
+            "more than half unread",
+            "under nine tenths",
+            "nine tenths",
+            "its input counts",
+            "more than was left",
+        ],
+    )
+    def test_a_call_missed_where_more_than_half_of_what_was_left_was_unread(
+        self, spent: dict[str, int], missed: bool, tmp_path: Path
+    ) -> None:
+        """DB 546: of the lesser of what its predecessor left and its own
+        context, and with that context at least nine tenths of what was
+        left."""
+        publication = _read(tmp_path, _missed(**spent))
+
+        assert [call.miss_cause for call in publication.calls] == [
+            None,
+            "unknown" if missed else None,
+        ]
+
+    def test_a_call_with_no_predecessor_missed_nothing(self, tmp_path: Path) -> None:
+        lines = [typed(0), assistant(4, "msg_01", cache_write_5m=1_000)]
+
+        assert _read(tmp_path, linked(lines)).calls[0].miss_cause is None
+        assert (
+            _read(tmp_path, _missed(cache_write_5m=1_000)[:2]).calls[0].miss_cause
+            is None
+        )
+
+    def test_what_a_predecessor_left_is_what_it_read_and_wrote(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01", cache_read=600, cache_write_1h=400),
+                assistant(9, "msg_02", cache_read=400, cache_write_5m=600),
+            ]
+        )
+
+        assert _read(tmp_path, lines).calls[1].miss_cause == "unknown"
+
+    @pytest.mark.parametrize(
+        ("changed", "cause"),
+        [
+            ({"model": "claude-haiku-4-5"}, "model"),
+            ({"effort": "low"}, "model"),
+            ({"version": "2.1.318"}, "version"),
+            ({}, "unknown"),
+        ],
+        ids=["the model", "the effort", "the version", "nothing"],
+    )
+    def test_a_cause_is_what_changed_from_its_predecessor(
+        self, changed: dict[str, str], cause: str, tmp_path: Path
+    ) -> None:
+        lines = _missed(cache_write_5m=1_000)
+        lines[1] |= {"effort": "high"}
+        lines[2] |= {"effort": "high"} | {
+            name: value for name, value in changed.items() if name != "model"
+        }
+        if "model" in changed:
+            lines[2]["message"]["model"] = changed["model"]
+
+        assert _read(tmp_path, lines).calls[1].miss_cause == cause
+
+    def test_an_effort_one_of_them_names_alone_changed_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        lines = _missed(cache_write_5m=1_000)
+        lines[2] |= {"effort": "low"}
+
+        assert _read(tmp_path, lines).calls[1].miss_cause == "unknown"
+
+    def test_a_chain_that_crossed_a_compaction_is_the_first_cause(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01", cache_write_5m=1_000),
+                boundary(500),
+                summary(499.7),
+                assistant(510, "msg_02", model="claude-haiku-4-5", cache_write_5m=950),
+            ]
+        )
+
+        assert _read(tmp_path, lines).calls[1].miss_cause == "compaction"
+
+    @pytest.mark.parametrize(
+        ("written", "seconds", "cause"),
+        [
+            ("cache_write_5m", 304, "unknown"),
+            ("cache_write_5m", 304.001, "ttl"),
+            ("cache_write_1h", 3_604, "unknown"),
+            ("cache_write_1h", 3_604.001, "ttl"),
+        ],
+        ids=[
+            "five minutes",
+            "past five minutes",
+            "an hour",
+            "past an hour",
+        ],
+    )
+    def test_a_wait_past_what_its_predecessor_left_lasts_is_ttl(
+        self, written: str, seconds: float, cause: str, tmp_path: Path
+    ) -> None:
+        """What a Call wrote to the cache that lasts an hour lasts an hour,
+        and anything else five minutes; the wait runs from the predecessor's
+        completion to the Call's completion, where it names no request."""
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01", "claude-opus-4-5", **{written: 1_000}),
+                assistant(seconds, "msg_02", cache_write_5m=1_000),
+            ]
+        )
+
+        assert _read(tmp_path, lines).calls[1].miss_cause == cause
+
+    def test_a_wait_runs_to_the_calls_sending_time(self, tmp_path: Path) -> None:
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01", cache_write_5m=1_000),
+                request(300),
+                sent(assistant(900, "msg_02", cache_write_5m=1_000)),
+            ]
+        )
+
+        assert _read(tmp_path, lines).calls[1].miss_cause == "unknown"
+
+    def test_a_predecessor_that_is_not_the_call_before_is_a_rewind(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01", cache_write_5m=1_000),
+                typed(8),
+                assistant(10, "msg_02", cache_read=1_000),
+                typed(20),
+                assistant(24, "msg_03", cache_write_5m=1_000),
+            ]
+        )
+        lines[4]["parentUuid"] = "line-2"
+
+        assert [call.miss_cause for call in _read(tmp_path, lines).calls] == [
+            None,
+            None,
+            "rewind",
+        ]
+
+    @pytest.mark.parametrize(
+        ("first", "second", "cause"),
+        [
+            ({"shapeHash": "a1"}, {"shapeHash": "b2"}, "system"),
+            ({"shapeHash": "a1"}, {}, "unknown"),
+            ({"keep": 3, "tail": ["d", "e"]}, {"keep": 4, "tail": ["f"]}, "history"),
+            ({"keep": 3, "tail": ["d", "e"]}, {"keep": 5, "tail": []}, "unknown"),
+            ({"keep": 3, "tail": ["d", "e"]}, {"keep": 0, "tail": ["f"]}, "unknown"),
+        ],
+        ids=[
+            "another shape",
+            "a shape one names alone",
+            "fewer kept than were sent",
+            "all kept",
+            "none kept",
+        ],
+    )
+    def test_a_cause_is_what_its_request_sent_unlike_its_predecessors(
+        self,
+        first: dict[str, Any],
+        second: dict[str, Any],
+        cause: str,
+        tmp_path: Path,
+    ) -> None:
+        lines = linked(
+            [
+                typed(0),
+                request(1, "request-1", **first),
+                sent(assistant(4, "msg_01", cache_write_5m=1_000), "request-1"),
+                request(5, "request-2", **second),
+                sent(assistant(9, "msg_02", cache_write_5m=1_000), "request-2"),
+            ]
+        )
+
+        assert _read(tmp_path, lines).calls[1].miss_cause == cause
+
+    @pytest.mark.parametrize(
+        ("causes", "cause"),
+        [
+            ({"model"}, "model"),
+            ({"ttl"}, "ttl"),
+            ({"rewind"}, "rewind"),
+            ({"version"}, "version"),
+            ({"system"}, "system"),
+            ({"history"}, "history"),
+            ({"model", "ttl"}, "model"),
+            ({"ttl", "rewind"}, "ttl"),
+            ({"rewind", "version"}, "rewind"),
+            ({"version", "system"}, "version"),
+            ({"system", "history"}, "system"),
+        ],
+        ids=lambda given: "+".join(sorted(given)) if isinstance(given, set) else None,
+    )
+    def test_the_first_cause_that_holds_is_the_calls(
+        self, causes: set[str], cause: str, tmp_path: Path
+    ) -> None:
+        """The third Call misses: it follows the second, which read what the
+        first left, or with a rewind the first."""
+        lines = linked(
+            [
+                typed(0),
+                request(1, "request-1", shapeHash="a1", keep=0, tail=["a", "b", "c"]),
+                sent(assistant(4, "msg_01", cache_write_5m=1_000), "request-1"),
+                typed(6),
+                request(7, "request-2", shapeHash="a1", keep=3, tail=["d"]),
+                sent(assistant(8, "msg_02", cache_read=1_000), "request-2"),
+                typed(10),
+                request(
+                    310 if "ttl" in causes else 11,
+                    "request-3",
+                    shapeHash="b2" if "system" in causes else "a1",
+                    keep=1 if "history" in causes else 4,
+                    tail=["e"],
+                ),
+                sent(
+                    assistant(
+                        312 if "ttl" in causes else 12,
+                        "msg_03",
+                        "claude-haiku-4-5" if "model" in causes else "claude-opus-4-5",
+                        cache_write_5m=1_000,
+                    ),
+                    "request-3",
+                ),
+            ]
+        )
+        if "rewind" in causes:
+            lines[6]["parentUuid"] = "line-2"
+        if "version" in causes:
+            lines[8]["version"] = "2.1.318"
+
+        assert [call.miss_cause for call in _read(tmp_path, lines).calls] == [
+            None,
+            None,
+            cause,
+        ]
+
+    def test_a_sub_agents_misses_are_read_as_a_main_threads(
+        self, tmp_path: Path
+    ) -> None:
+        lines = _missed(cache_write_5m=1_000)[1:]
+        named = filed(tmp_path, [user(0, "Count the threads."), *lines], AGENT)
+
+        assert [
+            call.miss_cause for call in read(named, SETTINGS).publication.calls
+        ] == [
+            None,
+            "unknown",
+        ]
+
+
+class TestEvents:
+    def test_an_api_error_sent_again_is_a_retry_with_its_status(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                retried(5),
+                retried(6, None, attempt=2),
+                assistant(9, "msg_02"),
+            ],
+        )
+
+        assert _events(publication) == [
+            [("api_retry", True, 5, "529"), ("api_retry", True, 6, None)],
+            [],
+        ]
+
+    def test_a_request_that_failed_for_good_is_an_api_error_and_no_call(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path, [typed(0), assistant(4, "msg_01"), erred(5, 429), erred(6, None)]
+        )
+
+        assert [call.message_id for call in publication.calls] == ["msg_01"]
+        assert _events(publication) == [
+            [("api_error", True, 5, "429"), ("api_error", True, 6, None)]
+        ]
+
+    def test_a_response_the_person_interrupted_is_an_interrupt_and_no_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path, [typed(0), assistant(4, "msg_01"), interruption(5)]
+        )
+
+        assert _events(publication) == [[("interrupt", False, 5, None)]]
+        assert _sources(publication) == ["typed"]
+
+    def test_a_tool_call_the_person_interrupted_is_its_own_and_no_event(
+        self, tmp_path: Path
+    ) -> None:
+        """An Event is stored only where nothing else records the
+        occurrence (DB 79.6)."""
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                requesting(4),
+                result(5, said=INTERRUPTED, error=True),
+                user(
+                    6, [{"type": "text", "text": "[Request interrupted by user] twice"}]
+                ),
+                user(7, "[Request interrupted by user]"),
+            ],
+        )
+
+        assert _events(publication) == [[]]
+        assert _tool_calls(publication)[0].interrupted
+
+    def test_an_event_is_on_the_last_call_before_it_else_on_the_first(
+        self, tmp_path: Path
+    ) -> None:
+        """Placed by the Calls' first lines, in the file's order."""
+        publication = _read(
+            tmp_path,
+            [
+                typed(0),
+                retried(1),
+                assistant(4, "msg_01", output=1),
+                assistant(9, "msg_02"),
+                assistant(10, "msg_01", output=3),
+                interruption(11),
+                erred(12),
+            ],
+        )
+
+        assert _events(publication) == [
+            [("api_retry", True, 1, "529")],
+            [("interrupt", False, 11, None), ("api_error", True, 12, "529")],
+        ]
+
+    def test_a_sub_agents_events_are_read_as_a_main_threads(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(
+            tmp_path,
+            [user(0, "Count the threads."), assistant(4, "msg_01"), retried(5)],
+            AGENT,
+        )
+
+        assert _events(read(named, SETTINGS).publication) == [
+            [("api_retry", True, 5, "529")]
+        ]
 
 
 class TestToolCalls:

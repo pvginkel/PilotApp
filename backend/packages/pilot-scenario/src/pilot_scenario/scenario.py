@@ -2,14 +2,15 @@
 and `ben`, the projects `recipe-box` and `bike-log`.
 
 Pilot is sent to halve the stew in the recipe box, an errand's first leg. Its
-session reads the recipe, has a sub-agent count the servings, meets an API
-error and a failing command, and carries on past a compaction; two of its
-tools' outputs are too large and are saved to disk. The sub-agent asks for
+session reads the recipe, has a sub-agent count the servings, meets a
+failing command and an API error its request is sent again after, and
+carries on past a compaction, missing the cache; two of its tools' outputs
+are too large and are saved to disk. The sub-agent asks for
 Opus once and Haiku answers in its place, and its last answer runs out of
 tokens. Ada, by hand, looks at the bike log's gear table, stops the command
 her second question started, takes that question back and comes back after
-the cache has lapsed: one of the first rides' conversations, a group of work
-done before Pilot ran any.
+the cache has lapsed, each time missing it: one of the first rides'
+conversations, a group of work done before Pilot ran any.
 
 The model names are the public ones. Everything else is invented.
 """
@@ -21,8 +22,8 @@ from pilot_scenario.script import (
     Group,
     HookRun,
     Launch,
-    Occurrence,
     Prompt,
+    Retry,
     Scenario,
     Session,
     SubAgent,
@@ -170,18 +171,11 @@ HALVING = Session(
                                     exit_code=2,
                                 ),
                             ),
-                            occurred=(
-                                Occurrence(
-                                    at=101,
-                                    kind="api_error",
-                                    is_error=True,
-                                    detail="529",
-                                ),
-                            ),
                         ),
                         Call(
                             at=118,
                             sent=102,
+                            retried=(Retry(sent=96, failed=101, status=529),),
                             effort="high",
                             tokens=Tokens(
                                 input=14,
@@ -207,7 +201,9 @@ HALVING = Session(
                             sent=151,
                             effort="high",
                             miss="compaction",
-                            tokens=Tokens(input=30, cache_write_1h=21_300, output=480),
+                            tokens=Tokens(
+                                input=4_630, cache_write_1h=21_300, output=480
+                            ),
                             carried=(Carried("compact_summary", 8_400),),
                             tools=(
                                 ToolUse(
@@ -325,8 +321,8 @@ GEARS = Session(
                             miss="rewind",
                             tokens=Tokens(
                                 input=9,
-                                cache_write_5m=1_920,
-                                cache_read=20_400,
+                                cache_write_5m=20_400,
+                                cache_read=1_920,
                                 output=298,
                             ),
                         ),

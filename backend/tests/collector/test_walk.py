@@ -37,6 +37,7 @@ from app.models import (
     Call,
     Compaction,
     ComponentVersion,
+    Event,
     Launch,
     LaunchComponent,
     Prompt,
@@ -1031,6 +1032,12 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
             .where(ToolCall.transcript_id == thread.id)
             .order_by(ToolCall.id)
         ).all()
+        events = record.scalars(
+            select(Event)
+            .join(Call, Call.id == Event.call_id)
+            .where(Call.transcript_id == thread.id)
+            .order_by(Event.id)
+        ).all()
         return {
             "thread": (
                 thread.working_directory,
@@ -1056,6 +1063,10 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
             "tool_calls": sorted(
                 (_row(row, call_id=call[row.call_id]) for row in tool_calls),
                 key=lambda asked: asked["call_id"],
+            ),
+            "events": sorted(
+                (_row(row, call_id=call[row.call_id]) for row in events),
+                key=lambda event: (event["call_id"], event["at"]),
             ),
         }
 
@@ -1145,6 +1156,9 @@ class TestAFileThatGrows:
         assert len(grown["compactions"]) == len(crossed)
         assert all(
             row["predecessor_id"] for row in grown["calls"] if row["compaction_id"]
+        )
+        assert [row["kind_code"] for row in grown["events"]] == (
+            ["api_retry"] * 2 if name == RECIPES else []
         )
         assert replayed is not None and replayed < path.stat().st_size
         _configure(committed_app, settling=0.0)

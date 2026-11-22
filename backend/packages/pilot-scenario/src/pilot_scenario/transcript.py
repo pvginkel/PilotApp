@@ -37,6 +37,13 @@ process writes as it exits.
   its `compactMetadata` has the trigger, the tokens before and after it and
   how long it took. The summary follows it, a `user` line marked
   `isCompactSummary` and timed before it, and the chain goes on from there.
+- An attempt at a request that failed is its request line and a `system`
+  line of subtype `api_error`, with the error's `status` and the attempt's
+  number; the request is sent again, and the response names the last line.
+- A request that failed for good is an `assistant` line Claude Code wrote
+  itself, of the model `<synthetic>`, marked `isApiErrorMessage` with its
+  `apiErrorStatus`; no request sends it. A response the person interrupted
+  is followed by a `user` line holding Claude Code's words for that.
 
 The shapes are Claude Code's; every word in them is invented.
 """
@@ -49,7 +56,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from pilot_scenario.script import Call, Compaction, ToolUse
+from pilot_scenario.script import Call, Compaction, Occurrence, Retry, ToolUse
 
 SESSION_HOME = "/home/ubuntu/.claude"
 """The home as a session's own process names it: where a result's text says
@@ -71,6 +78,15 @@ _SUMMARISED = timedelta(milliseconds=300)
 
 _SUMMARY = 1_200
 """The characters of a compaction's summary."""
+
+SYNTHETIC = "<synthetic>"
+"""The model of an `assistant` line Claude Code wrote itself."""
+
+INTERRUPTION = "[Request interrupted by user]"
+"""Claude Code's words for a response the person interrupted."""
+
+_RETRIES = 10
+"""The most times Claude Code sends a request again after API errors."""
 
 _ORIGINS = {
     "sdk": "sdk",
@@ -207,8 +223,10 @@ class Lines:
         if self._agent is not None:
             line["agentId"] = self._agent
         self.leaf = self._id("line")
-        if kind == "assistant":
+        if kind == "assistant" and fields["message"]["model"] != SYNTHETIC:
             self._follows[self.leaf] = (line["parentUuid"], fields["message"]["id"])
+        elif kind == "assistant":
+            self._follows[self.leaf] = (line["parentUuid"], None)
         else:
             message = None if kind == "system" else self.leaf
             self._follows[self.leaf] = (line["parentUuid"], message)
@@ -315,6 +333,72 @@ class Lines:
             isVisibleInTranscriptOnly=True,
             isCompactSummary=True,
             message={"role": "user", "content": text(_SUMMARY)},
+        )
+
+    def retried(
+        self, call: Call, retry: Retry, attempt: int, sent: datetime, failed: datetime
+    ) -> None:
+        """An attempt at the request of the response to come, the `attempt`th
+        that failed, sent at `sent`: its request line and the API error it
+        met at `failed`."""
+        self._send(call, sent)
+        error: dict[str, Any] = {"message": text(40), "formatted": text(24)}
+        if retry.status is not None:
+            error["status"] = retry.status
+        self._chained(
+            "system",
+            failed,
+            subtype="api_error",
+            level="error",
+            error=error,
+            retryInMs=600,
+            retryAttempt=attempt,
+            maxRetries=_RETRIES,
+        )
+
+    def occurred(self, occurrence: Occurrence, at: datetime) -> None:
+        """What occurred at `at`, the line Claude Code writes of it."""
+        if occurrence.kind == "interrupt":
+            self._chained(
+                "user",
+                at,
+                message={
+                    "role": "user",
+                    "content": [{"type": "text", "text": INTERRUPTION}],
+                },
+            )
+            return
+        if occurrence.kind != "api_error":
+            raise ValueError(
+                f"No line is written for an occurrence of the kind `{occurrence.kind}`"
+            )
+        self._chained(
+            "assistant",
+            at,
+            message={
+                "id": self._id("message"),
+                "model": SYNTHETIC,
+                "role": "assistant",
+                "type": "message",
+                "content": [{"type": "text", "text": f"API Error: {text(48)}"}],
+                "stop_reason": "stop_sequence",
+                "stop_sequence": "",
+                "usage": {
+                    "input_tokens": 0,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation": {
+                        "ephemeral_5m_input_tokens": 0,
+                        "ephemeral_1h_input_tokens": 0,
+                    },
+                    "output_tokens": 0,
+                },
+            },
+            error="server_error",
+            isApiErrorMessage=True,
+            apiErrorStatus=None
+            if occurrence.detail is None
+            else int(occurrence.detail),
         )
 
     def _messages(self) -> list[str]:

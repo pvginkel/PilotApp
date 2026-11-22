@@ -5,13 +5,24 @@ file is read whole instead."""
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pilot_collection.publication import PublicationSchema
 from pilot_scenario import SCENARIO, Builder, Scenario
 
 from pilot_collector import VERSION
-from pilot_collector.carry import ROOT, Carry, Lead, Open, Standing, digest
+from pilot_collector.carry import (
+    ROOT,
+    Carry,
+    Lead,
+    Left,
+    Occurred,
+    Open,
+    Requested,
+    Standing,
+    digest,
+)
 from pilot_collector.home import Transcript, transcript
 from pilot_collector.reader import NotContinuedError, Read, UnreadableError, read
 from tests import support
@@ -25,11 +36,13 @@ from tests.support import (
     boundary,
     chained,
     cost,
+    erred,
     fallback,
     fell_back,
     filed,
     finished,
     instructions,
+    interruption,
     linked,
     loaded,
     moment,
@@ -37,6 +50,7 @@ from tests.support import (
     request,
     requesting,
     result,
+    retried,
     sent,
     summary,
     taken,
@@ -139,7 +153,20 @@ class TestTheCarry:
             prompts=1,
             compactions=0,
             link="line-3",
-            leads=Lead("msg_01"),
+            leads=Lead(
+                "msg_01",
+                left=Left(
+                    place=0,
+                    completed_at=moment(4),
+                    model="claude-opus-4-5",
+                    effort=None,
+                    version=support.VERSION,
+                    cached=0,
+                    hour=False,
+                    shape=None,
+                    sent=None,
+                ),
+            ),
             directory=DIRECTORY,
             environment=None,
             launch=Open(moment(0), support.VERSION, 1),
@@ -268,7 +295,11 @@ class TestTheCarry:
 
         stands = carry.stands
         assert (stands.calls, stands.compactions) == (40, 1)
-        assert (stands.link, stands.leads) == ("line-83", Lead("msg_40", 1))
+        assert (stands.link, stands.leads.call, stands.leads.compaction) == (
+            "line-83",
+            "msg_40",
+            1,
+        )
         few = read(filed(tmp_path, linked(lines[-5:], "lines")), SETTINGS).carry
         assert (few.stands.calls, few.stands.link) == (1, "lines-4")
         assert carry.size == few.size
@@ -310,7 +341,7 @@ class TestTheCarry:
         stands = read(filed(tmp_path, early), SETTINGS).carry.stands
 
         assert stands.awaited == ()
-        assert (stands.link, stands.leads) == ("line-3", Lead("msg_01"))
+        assert (stands.link, stands.leads.call) == ("line-3", "msg_01")
 
     def test_it_holds_the_requests_written_since_the_last_one_a_call_named(
         self, tmp_path: Path
@@ -329,7 +360,10 @@ class TestTheCarry:
 
         stands = read(filed(tmp_path, lines), SETTINGS).carry.stands
 
-        assert stands.requests == (("request-2", moment(6)), ("request-3", moment(9.5)))
+        assert stands.requests == (
+            Requested("request-2", moment(6)),
+            Requested("request-3", moment(9.5)),
+        )
 
     def test_a_request_held_counts_in_its_size_with_its_id(
         self, tmp_path: Path
@@ -360,6 +394,68 @@ class TestTheCarry:
         ]
 
         assert sizes[1] - sizes[0] == 20
+
+    def test_it_holds_what_the_call_its_chain_leads_to_left_and_no_other_calls(
+        self, tmp_path: Path
+    ) -> None:
+        """Its place and completion, its model, effort and version, what it
+        left in the cache, and what its request sent (D256)."""
+        lines = [typed(0)]
+        for place in range(1, 41):
+            lines += [typed(10 * place), assistant(10 * place + 4, f"msg_{place:02}")]
+        lines += [
+            typed(500),
+            request(501, "request-41", shapeHash="a1", keep=80, tail=["x", "y"]),
+            sent(
+                assistant(504, "msg_41", cache_read=900, cache_write_1h=100)
+                | {"effort": "high"},
+                "request-41",
+            ),
+            typed(510),
+            assistant(514, "msg_42"),
+        ]
+
+        stands = read(filed(tmp_path, linked(lines)), SETTINGS).carry.stands
+
+        assert stands.leads.left == Left(
+            place=40,
+            completed_at=moment(504),
+            model="claude-opus-4-5",
+            effort="high",
+            version=support.VERSION,
+            cached=1_000,
+            hour=True,
+            shape="a1",
+            sent=82,
+        )
+
+    def test_it_holds_the_events_before_the_first_call_and_none_after(
+        self, tmp_path: Path
+    ) -> None:
+        first = read(
+            filed(tmp_path, [typed(0), retried(1), assistant(4, "msg_01")]), SETTINGS
+        ).carry.stands
+        later = read(
+            filed(
+                tmp_path,
+                [typed(0), assistant(2, "msg_01"), retried(3), assistant(4, "msg_02")],
+            ),
+            SETTINGS,
+        ).carry.stands
+
+        assert first.events == (Occurred("api_retry", moment(1), "529"),)
+        assert later.events == ()
+
+    def test_what_the_call_its_chain_leads_to_left_counts_in_its_size(
+        self, tmp_path: Path
+    ) -> None:
+        def size(model: str) -> int:
+            lines = [typed(0), assistant(4, "msg_01", model), assistant(9, "msg_02")]
+            return read(filed(tmp_path, linked(lines)), SETTINGS).carry.size
+
+        assert size("claude-opus-4-5-of-a-loom") - size("claude-opus-4-5") == len(
+            "-of-a-loom"
+        )
 
     def test_a_line_awaited_counts_in_its_size_with_its_id(
         self, tmp_path: Path
@@ -675,7 +771,7 @@ class TestAFileThatGrew:
         assert [
             (call.message_id, call.sent_at) for call in grown.publication.calls
         ] == [("msg_02", moment(5)), ("msg_03", moment(11))]
-        assert grown.carry.stands.requests == (("request-3", moment(11)),)
+        assert grown.carry.stands.requests == (Requested("request-3", moment(11)),)
 
     def test_a_later_call_was_sent_when_its_request_before_the_boundary_was(
         self, tmp_path: Path
@@ -709,6 +805,134 @@ class TestAFileThatGrew:
             == read(named, SETTINGS).publication
         )
 
+    @pytest.mark.parametrize(
+        ("changed", "cause"),
+        [
+            ({}, "unknown"),
+            ({"model": "claude-haiku-4-5"}, "model"),
+            ({"effort": "low"}, "model"),
+            ({"sent": 400}, "ttl"),
+            ({"version": "2.1.318"}, "version"),
+            ({"shapeHash": "b2"}, "system"),
+            ({"keep": 2}, "history"),
+            ({"cache_read": 1_000}, None),
+        ],
+        ids=[
+            "nothing",
+            "the model",
+            "the effort",
+            "the wait",
+            "the version",
+            "the shape",
+            "the history",
+            "no miss",
+        ],
+    )
+    def test_the_boundarys_call_misses_by_what_its_predecessor_behind_it_left(
+        self, changed: dict[str, Any], cause: str | None, tmp_path: Path
+    ) -> None:
+        """Its own request's line lies behind the boundary too."""
+        at = changed.get("sent", 6)
+        boundarys = assistant(
+            at + 3,
+            "msg_02",
+            changed.get("model", "claude-opus-4-5"),
+            cache_write_5m=1_000 - changed.get("cache_read", 0),
+            cache_read=changed.get("cache_read", 0),
+        ) | {"effort": changed.get("effort", "high")}
+        if "version" in changed:
+            boundarys["version"] = changed["version"]
+        before, grown = _grown(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    request(
+                        1, "request-1", shapeHash="a1", keep=0, tail=["a", "b", "c"]
+                    ),
+                    sent(
+                        assistant(4, "msg_01", cache_write_5m=1_000)
+                        | {"effort": "high"},
+                        "request-1",
+                    ),
+                    request(
+                        at,
+                        "request-2",
+                        shapeHash=changed.get("shapeHash", "a1"),
+                        keep=changed.get("keep", 3),
+                        tail=["d"],
+                    ),
+                    sent(boundarys, "request-2"),
+                ]
+            ),
+            _continuing("line-3", [assistant(at + 9, "msg_03", cache_read=1_000)]),
+        )
+
+        whole = read(filed_again(tmp_path), SETTINGS)
+        assert [call.miss_cause for call in grown.publication.calls] == [cause, None]
+        assert _held(before.publication, grown.publication) == whole.publication
+        assert grown.carry == whole.carry
+
+    def test_the_boundarys_call_is_a_rewind_to_the_call_its_line_leads_to(
+        self, tmp_path: Path
+    ) -> None:
+        first = linked(
+            [
+                typed(0),
+                assistant(4, "msg_01", cache_write_5m=1_000),
+                typed(6),
+                assistant(8, "msg_02", cache_read=1_000),
+                typed(10),
+                assistant(12, "msg_03", cache_write_5m=1_000),
+            ]
+        )
+        first[4]["parentUuid"] = "line-2"
+        before, grown = _grown(
+            tmp_path,
+            first,
+            _continuing("line-6", [assistant(16, "msg_04", cache_read=1_000)]),
+        )
+
+        assert [call.miss_cause for call in grown.publication.calls] == ["rewind", None]
+        assert (
+            _held(before.publication, grown.publication)
+            == read(filed_again(tmp_path), SETTINGS).publication
+        )
+
+    def test_an_event_before_the_first_call_is_its_from_the_boundary_on(
+        self, tmp_path: Path
+    ) -> None:
+        before, grown = _grown(
+            tmp_path,
+            [typed(0), retried(1), assistant(4, "msg_01")],
+            [assistant(9, "msg_02")],
+        )
+
+        first, _ = grown.publication.calls
+        assert [(event.kind, event.at) for event in first.events] == [
+            ("api_retry", moment(1))
+        ]
+        whole = read(filed_again(tmp_path), SETTINGS)
+        assert _held(before.publication, grown.publication) == whole.publication
+        assert grown.carry == whole.carry
+
+    def test_an_event_from_the_boundary_on_is_the_call_before_its(
+        self, tmp_path: Path
+    ) -> None:
+        before, grown = _grown(
+            tmp_path,
+            [typed(0), assistant(2, "msg_01"), retried(3), assistant(4, "msg_02")],
+            [interruption(5), erred(6), assistant(9, "msg_03")],
+        )
+
+        assert [
+            [event.kind for event in call.events] for call in grown.publication.calls
+        ] == [["interrupt", "api_error"], []]
+        assert (
+            _held(before.publication, grown.publication)
+            == read(filed_again(tmp_path), SETTINGS).publication
+        )
+
     def test_a_compaction_from_the_boundary_on_is_placed_after_those_before_it(
         self, tmp_path: Path
     ) -> None:
@@ -739,7 +963,10 @@ class TestAFileThatGrew:
             for call in publication.calls
         ] == [("msg_02", "msg_01", 1), ("msg_03", "msg_02", 2)]
         assert grown.carry.stands.compactions == 2
-        assert grown.carry.stands.leads == Lead("msg_02", 2)
+        assert (grown.carry.stands.leads.call, grown.carry.stands.leads.compaction) == (
+            "msg_02",
+            2,
+        )
         assert (
             _held(before.publication, publication)
             == read(filed_again(tmp_path), SETTINGS).publication

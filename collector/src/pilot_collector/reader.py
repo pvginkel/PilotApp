@@ -52,6 +52,35 @@ its newline is written. The facts are read off the lines in the file's order:
   the Call before it named: a retry writes a request line again, and the
   Call names the last. A Call names none where the version writes none, and
   is sent at none where no such line stands before its first line.
+- **A cache miss** (DB 546): a Call missed the cache its predecessor left
+  where more than half of the lesser of what that one left, the tokens it
+  read from the cache and wrote to it, and the Call's own context was not
+  read from the cache, and that context is at least nine tenths of what was
+  left. Its cause is the first that holds, in Miss Cause's order:
+  - `compaction`, its chain crossed one;
+  - `model`, the model that answered or the effort is another than its
+    predecessor's;
+  - `ttl`, it was sent, or where it names no request it completed, longer
+    after its predecessor completed than what that one left lasts: an hour
+    where it wrote to the cache that lasts an hour, else five minutes;
+  - `rewind`, its predecessor is not the Call before it;
+  - `version`, its first line names another version of Claude Code than
+    its predecessor's;
+  - `system`, its request's `shapeHash`, a digest of the system prompt and
+    the tools, is another than its predecessor's request's;
+  - `history`, its request kept fewer messages, `keep`, than its
+    predecessor's sent, those it kept and its `tail`;
+  - else `unknown`.
+- **An Event** is on the last Call whose first line stands before its line,
+  else on the transcript's first Call:
+  - `api_retry`, a `system` line of subtype `api_error`, an error Claude
+    Code sends the request again after, its `error.status` the detail;
+  - `api_error`, an `isApiErrorMessage` line, the response Claude Code
+    wrote itself for a request that failed, its `apiErrorStatus` the
+    detail;
+  - `interrupt`, a `user` line holding a text block of exactly Claude
+    Code's words for a response the person interrupted. A tool call the
+    person interrupted is its Tool Call's, below.
 - **A Compaction** is a `system` line of subtype `compact_boundary`, made
   when the line was written: `compactMetadata` gives its trigger and the
   tokens before it, and where the version records them the tokens after it
@@ -91,9 +120,10 @@ Calls from the boundary's on, the Launches that wrote a line from there on,
 the first with its Prompts from there on, the Compactions made from there
 on, and the four places the boundary names. Such a reading holds no line
 before the boundary's byte but the one the carry names, with where the chain
-leads from it as the lines before that byte stand, and the request lines
-before it written since the last one a Call named, so it stops, and the file
-is read whole, where:
+leads from it as the lines before that byte stand and what the Call it leads
+to left the next, the request lines before it written since the last one a
+Call named, and the Events before it where no Call is, so it stops, and the
+file is read whole, where:
 
 - the file is no larger than the one the carry was built on, or its bytes
   from the boundary's to its old end are other than those read then
@@ -112,7 +142,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -120,7 +150,17 @@ from pilot_collection.publication import CallTokenKind, PublicationSchema
 from pydantic import ValidationError
 
 from pilot_collector import VERSION
-from pilot_collector.carry import ROOT, Carry, Lead, Open, Standing, digest
+from pilot_collector.carry import (
+    ROOT,
+    Carry,
+    Lead,
+    Left,
+    Occurred,
+    Open,
+    Requested,
+    Standing,
+    digest,
+)
 from pilot_collector.home import Transcript, modified_at, saved_output
 from pilot_collector.settings import Settings
 
@@ -143,6 +183,24 @@ request asked for, and the one that answered it."""
 _FALLBACK = "fallback"
 """The type of the block of a response that records the fallback it was
 answered by."""
+
+_API_ERROR = "api_error"
+"""The subtype of the `system` line that records an API error Claude Code
+sends the request again after."""
+
+_INTERRUPTION = "[Request interrupted by user]"
+"""The text of the block a `user` line records the person's interruption of
+a response with."""
+
+_ERRORS = {"api_retry": True, "api_error": True, "interrupt": False}
+"""Whether an Event of each kind the collector reads counts as an error."""
+
+_HOUR = timedelta(hours=1)
+"""How long what a Call wrote to the cache that lasts an hour lasts."""
+
+_FIVE_MINUTES = timedelta(minutes=5)
+"""How long what a Call left in the cache lasts where it wrote nothing to
+the cache that lasts an hour."""
 
 _ORDINARY = (None, "end_turn", "tool_use")
 """How a response ends that is no Stop Reason's: a line written before the
@@ -222,6 +280,9 @@ _BEFORE = -1
 """The place of a Call before a reading's first line: every Call the
 reading takes began later."""
 
+_CACHED = ("cache_write_5m", "cache_write_1h", "cache_read")
+"""The Token Kinds of what a Call wrote to the cache and read from it."""
+
 _USAGE: dict[CallTokenKind, tuple[str, ...]] = {
     "input": ("input_tokens",),
     "cache_write_5m": ("cache_creation", "ephemeral_5m_input_tokens"),
@@ -295,7 +356,10 @@ class _Call:
     place: int
     """Its place among the transcript's Calls, from 0."""
     prompt: int | None
-    sent_at: datetime | None
+    request: Requested | None
+    """The request line its first line names."""
+    version: str | None
+    """Claude Code's version its first line names."""
     chain: _Stop | None
     """The nearest stop up the chain from the line its first line
     follows."""
@@ -314,12 +378,35 @@ class _Call:
     plugin: str | None = None
     tool_calls: dict[str, _ToolCall] = field(default_factory=dict)
     """The tool calls it requested, by Claude's id of the request."""
+    events: list[Occurred] = field(default_factory=list)
+    """The Events it marks, in the file's order."""
 
     @property
     def requested_model(self) -> str | None:
         """The model asked for, none where it is the one that answered."""
         asked = self.fell_back or self.requested
         return None if asked == self.model else asked
+
+    @property
+    def sent_at(self) -> datetime | None:
+        return None if self.request is None else self.request.at
+
+    @property
+    def left(self) -> Left:
+        """What it left the next Call on its chain, as its lines so far
+        stand."""
+        request = self.request
+        return Left(
+            place=self.place,
+            completed_at=self.completed_at,
+            model=self.model,
+            effort=self.effort,
+            version=self.version,
+            cached=sum(self.tokens.get(kind, 0) for kind in _CACHED),
+            hour=bool(self.tokens.get("cache_write_1h")),
+            shape=None if request is None else request.shape,
+            sent=None if request is None else request.sent,
+        )
 
 
 def written_at(line: dict[str, Any]) -> datetime | None:
@@ -340,6 +427,32 @@ def text_of(content: Any) -> str:
     if isinstance(content, str):
         return content
     return "".join(block["text"] for block in content if block["type"] == "text")
+
+
+def _interrupts(content: Any) -> bool:
+    """Whether a `user` line's content records the person's interruption of
+    a response."""
+    return isinstance(content, list) and any(
+        block["type"] == "text" and block["text"] == _INTERRUPTION for block in content
+    )
+
+
+def _status(status: Any) -> str | None:
+    """An API error's status as an Event's detail, none where its line gives
+    none."""
+    return None if status is None else str(status)
+
+
+def _requested(line: dict[str, Any], at: datetime) -> Requested:
+    """A request line, written `at`, as the Call that names it reads it."""
+    kept = line.get("keep")
+    return Requested(
+        line["id"],
+        at,
+        line.get("shapeHash"),
+        kept,
+        None if kept is None else kept + len(line.get("tail") or []),
+    )
 
 
 def _words(text: str) -> bytes:
@@ -473,7 +586,12 @@ class _Thread:
         """The `uuid` of the last line taken that carries one."""
         self._requests = before.requests
         """The request lines taken since the last one a Call named, in the
-        file's order: each one's `id` and time."""
+        file's order."""
+        self._latest: _Call | None = None
+        """The Call whose first line was taken last."""
+        self._early = list(before.events)
+        """The Events taken where no Call is, which the transcript's first
+        Call marks."""
         self._answering: dict[str, _Call] = {}
         """The Calls taken, by the API's id of the request each answered,
         `requestId`."""
@@ -540,15 +658,21 @@ class _Thread:
             if launch.version is None:
                 launch.version = line.get("version")
         if kind == "assistant":
+            if line.get("isApiErrorMessage"):
+                self._occurred("api_error", at, _status(line.get("apiErrorStatus")))
             self._answered(line, at, chain)
         elif kind == _REQUEST:
-            self._requests += ((line["id"], at),)
+            self._requests += (_requested(line, at),)
         elif kind == "system" and line.get("subtype") == _FELL_BACK:
             self._fell_back(line)
+        elif kind == "system" and line.get("subtype") == _API_ERROR:
+            self._occurred("api_retry", at, _status(line["error"].get("status")))
         elif kind == "user":
             content = line["message"]["content"]
             if is_a_tools_result(content):
                 self._returned(content, line.get("toolUseResult"), at)
+            elif _interrupts(content):
+                self._occurred("interrupt", at)
             elif self._main:
                 self._prompted(line, content, at)
         elif not self._main:
@@ -575,6 +699,7 @@ class _Thread:
             else self._reached(self._leads[self._link], calls),
             awaited=self._before.awaited + tuple(self._awaited),
             requests=self._requests,
+            events=tuple(self._early),
             directory=self.directory,
             environment=self.environment,
             launch=None
@@ -614,14 +739,21 @@ class _Thread:
         passed: set[int] = set()
         while stop is not None and id(stop) not in passed:
             if stop.call is not None and stop.place < place:
-                return Lead(stop.call, compaction)
+                return Lead(stop.call, compaction, self._left(stop.call))
             passed.add(id(stop))
             compaction = compaction or stop.compaction
             stop = stop.above
         return Lead(None, compaction)
 
+    def _left(self, message_id: str) -> Left | None:
+        """What the Call of that id left the next: a Call taken, or the one
+        the chain leads to from the line the reading stands after."""
+        call = self.calls.get(message_id)
+        return self._before.leads.left if call is None else call.left
+
     def chain(self, call: _Call) -> Lead:
-        """The Call's predecessor and the compaction its chain crossed."""
+        """The Call's predecessor, what it left, and the compaction the
+        Call's chain crossed."""
         return self._reached(call.chain, call.place)
 
     def _compacted(self, line: dict[str, Any], at: datetime) -> _Stop:
@@ -726,12 +858,15 @@ class _Thread:
                 self._placed(message["id"]),
                 self._prompts or None,
                 self._sent(line.get("requestRef")),
+                line.get("version"),
                 chain,
                 at,
                 model,
                 tokens,
+                events=self._early,
             )
-            self.calls[message["id"]] = call
+            self._early = []
+            self._latest = self.calls[message["id"]] = call
             answered = line.get("requestId")
             if answered is not None:
                 self._answering.setdefault(answered, call)
@@ -765,15 +900,24 @@ class _Thread:
                 "a fallback names a request no Call from its boundary on answered"
             )
 
-    def _sent(self, request: str | None) -> datetime | None:
-        """The time of the request line of that `id` among those taken
-        since the last one a Call named, which it and those before it are
-        no longer; none where none is."""
-        for place, (named, at) in enumerate(self._requests):
-            if named == request:
+    def _sent(self, request: str | None) -> Requested | None:
+        """The request line of that `id` among those taken since the last
+        one a Call named, which it and those before it are no longer; none
+        where none is."""
+        for place, asked in enumerate(self._requests):
+            if asked.id == request:
                 self._requests = self._requests[place + 1 :]
-                return at
+                return asked
         return None
+
+    def _occurred(self, kind: str, at: datetime, detail: str | None = None) -> None:
+        """An Event of that kind, on the Call whose first line was taken
+        last, else held for the first."""
+        event = Occurred(kind, at, detail)
+        if self._latest is None:
+            self._early.append(event)
+        else:
+            self._latest.events.append(event)
 
     def _returned(
         self, content: list[dict[str, Any]], record: Any, at: datetime
@@ -818,6 +962,47 @@ def _repository(directory: str, settings: Settings) -> str | None:
                 return under[0]
             return None
     return None
+
+
+def _changed(was: str | None, now: str | None) -> bool:
+    """Whether a fact two Calls name is another on the later one."""
+    return bool(was) and bool(now) and was != now
+
+
+def _missed(left: Left, tokens: dict[str, int]) -> bool:
+    """Whether a Call of these tokens missed the cache its predecessor left
+    (DB 546)."""
+    context = tokens.get("input", 0) + sum(tokens.get(kind, 0) for kind in _CACHED)
+    compared = min(left.cached, context)
+    unread = compared - tokens.get("cache_read", 0)
+    return 2 * unread > compared and 10 * context >= 9 * left.cached
+
+
+def _cause(call: _Call, chain: Lead) -> str | None:
+    """Why the Call missed the cache its predecessor left, the first cause
+    that holds in Miss Cause's order; none where it did not miss."""
+    left = chain.left
+    if left is None or not _missed(left, call.tokens):
+        return None
+    request = call.request
+    if chain.compaction is not None:
+        return "compaction"
+    if _changed(left.model, call.model) or _changed(left.effort, call.effort):
+        return "model"
+    if (call.sent_at or call.completed_at) - left.completed_at > (
+        _HOUR if left.hour else _FIVE_MINUTES
+    ):
+        return "ttl"
+    if left.place != call.place - 1:
+        return "rewind"
+    if _changed(left.version, call.version):
+        return "version"
+    if _changed(left.shape, None if request is None else request.shape):
+        return "system"
+    kept = None if request is None else request.kept
+    if kept and left.sent and kept < left.sent:
+        return "history"
+    return "unknown"
 
 
 def _named(line: dict[str, Any], key: str, held: str | None) -> str | None:
@@ -875,6 +1060,7 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
             "thinking_tokens": call.thinking_tokens,
             "attributed_skill": call.skill,
             "attributed_plugin": call.plugin,
+            "miss_cause": _cause(call, chain),
             "tokens": call.tokens,
             "tool_calls": [
                 {
@@ -891,6 +1077,15 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
                     "saved_characters": asked.saved_characters,
                 }
                 for tool_use_id, asked in call.tool_calls.items()
+            ],
+            "events": [
+                {
+                    "kind": event.kind,
+                    "is_error": _ERRORS[event.kind],
+                    "at": event.at,
+                    "detail": event.detail,
+                }
+                for event in call.events
             ],
         }
         for message_id, call in thread.calls.items()

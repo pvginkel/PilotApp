@@ -2,7 +2,8 @@
 Code's line shapes, in a home laid out as the fleet's is, and each
 publication what its file says: read back off the lines here, a thread's
 ids and place, its Launches, Prompts, Calls and Tool Calls, its Compactions,
-each Call's place on the chain and when it was sent are the publication's."""
+each Call's place on the chain and when it was sent, and the Events are the
+publication's."""
 
 import json
 import re
@@ -17,12 +18,13 @@ from pilot_scenario.script import (
     Call,
     Compaction,
     Launch,
+    Occurrence,
     Prompt,
     Session,
     Tokens,
     ToolUse,
 )
-from pilot_scenario.transcript import folder, stamp, text
+from pilot_scenario.transcript import INTERRUPTION, SYNTHETIC, folder, stamp, text
 
 UNTIL = datetime(2026, 11, 12, 9, 30, 0, 250_000, tzinfo=UTC)
 
@@ -65,6 +67,7 @@ CALL_FACTS = (
     "attributed_skill",
     "attributed_plugin",
     "tokens",
+    "events",
 )
 TOOL_CALL_FACTS = (
     "tool_use_id",
@@ -172,7 +175,7 @@ def _chain(
         if follows is None:
             return None, crossed
         line = named[follows]
-        if line["type"] == "assistant":
+        if line["type"] == "assistant" and line["message"]["model"] != SYNTHETIC:
             return line["message"]["id"], crossed
 
 
@@ -207,6 +210,17 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
     launches: list[dict[str, Any]] = []
     calls: dict[str, dict[str, Any]] = {}
     exited, prompts, enqueued = True, 0, None
+    early: list[dict[str, Any]] = []
+    """The Events before the first Call, which it marks."""
+
+    def occurred(kind: str, is_error: bool, line: dict[str, Any], status: Any) -> None:
+        """An Event, on the last Call begun before it, else the first."""
+        event = {"kind": kind, "is_error": is_error, "at": _time(line)}
+        if status is not None:
+            event["detail"] = str(status)
+        marks = list(calls.values())[-1] if calls else None
+        (early if marks is None else marks.setdefault("events", [])).append(event)
+
     for line in lines:
         if line["type"] == "cost-state":
             exited = True
@@ -236,6 +250,13 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                 named = re.match(r"# Environment: (\S+)\n", instructions["content"])
                 if instructions["type"] == "Managed" and named is not None:
                     read.setdefault("environment", named.group(1))
+        elif line["type"] == "system" and line["subtype"] == "api_error":
+            occurred("api_retry", True, line, line["error"].get("status"))
+        elif line["type"] == "assistant" and line["message"]["model"] == SYNTHETIC:
+            assert line["isApiErrorMessage"]
+            occurred("api_error", True, line, line["apiErrorStatus"])
+        elif [block["text"] for block in _blocks(line, "text")] == [INTERRUPTION]:
+            occurred("interrupt", False, line, None)
         elif line["type"] == "user" and main and "promptSource" in line:
             said = line["message"]["content"]
             if enqueued is not None:
@@ -274,6 +295,8 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                     call["sent_at"] = _time(requests[line["requestRef"]])
                 if main:
                     call["prompt"] = prompts
+                if early:
+                    call["events"], early = early, []
                 calls[message["id"]] = call
             call = calls[message["id"]]
             spent = message["usage"]
@@ -384,6 +407,9 @@ def _resumed() -> Scenario:
                                         at=8,
                                         tokens=Tokens(input=4, output=2),
                                         tools=(ToolUse("Bash", "sleep 600"),),
+                                        occurred=(
+                                            Occurrence(9, "interrupt", is_error=False),
+                                        ),
                                     ),
                                 ),
                             ),
@@ -401,6 +427,14 @@ def _resumed() -> Scenario:
                                         at=50,
                                         back_to="the first",
                                         tokens=Tokens(output=3),
+                                        occurred=(
+                                            Occurrence(
+                                                51,
+                                                "api_error",
+                                                is_error=True,
+                                                detail="500",
+                                            ),
+                                        ),
                                     ),
                                     Compaction(at=52, trigger="manual", before=900),
                                     Call(at=55, tokens=Tokens(input=6, output=1)),
@@ -510,6 +544,11 @@ class TestAPublicationIsWhatItsFileSays:
         ):
             assert any(chosen in call for call in calls)
         assert not any("sent_at" in call for call in resumed["calls"])
+        assert sorted(
+            event["kind"]
+            for call in [*calls, *resumed["calls"]]
+            for event in call.get("events", [])
+        ) == ["api_error", "api_retry", "interrupt"]
         assert [call.get("predecessor") for call in resumed["calls"]] == [
             None,
             "msg_0001",
@@ -608,7 +647,7 @@ class TestTheLines:
             "permission-mode",
             "queue-operation",
             "queue-operation",
-            *["api-request"] * 6,
+            *["api-request"] * 7,
             "last-prompt",
             "cost-state",
         ]
@@ -616,13 +655,15 @@ class TestTheLines:
         assert [line["type"] for line in beside if "timestamp" in line] == [
             "queue-operation",
             "queue-operation",
-            *["api-request"] * 6,
+            *["api-request"] * 7,
         ]
         assert "cwd" not in _lines(halving)[0]
 
     def test_a_request_is_written_before_its_responses_first_line_which_names_it(
         self,
     ) -> None:
+        """An attempt that failed is followed by its error, and named by no
+        response."""
         builder = Builder(SCENARIO, UNTIL)
         lines = _lines(builder.files()[0])
         places = [
@@ -630,9 +671,13 @@ class TestTheLines:
         ]
 
         assert [lines[place]["timestamp"] for place in places] == [
-            stamp(builder.when(moment)) for moment in (5, 21, 79, 102, 151, 208)
+            stamp(builder.when(moment)) for moment in (5, 21, 79, 96, 102, 151, 208)
         ]
         assert len({lines[place]["id"] for place in places}) == len(places)
+        (failed,) = [place for place in places if lines[place + 1]["type"] == "system"]
+        assert lines[failed + 1]["subtype"] == "api_error"
+        assert lines[failed]["id"] not in {line.get("requestRef") for line in lines}
+        places.remove(failed)
         for place in places:
             answered = lines[place + 1]["message"]["id"]
             assert {
@@ -647,7 +692,8 @@ class TestTheLines:
         self,
     ) -> None:
         """Its process's first keeps none and builds on none; one past a
-        compaction keeps none, and a rewind fewer than the last sent."""
+        compaction keeps none, a rewind fewer than the last sent, and one
+        sent again all the attempt that failed sent."""
         halving, _, gears = _transcripts(Builder(SCENARIO, UNTIL))
 
         def sent(file: HomeFile) -> list[dict[str, Any]]:
@@ -665,6 +711,7 @@ class TestTheLines:
             (2, 2),
             (4, 2),
             (6, 2),
+            (8, 0),
             (0, 1),
             (1, 2),
         ]
@@ -675,6 +722,67 @@ class TestTheLines:
             (5, 1),
             (6, 2),
         ]
+
+    def test_an_attempt_that_failed_is_its_request_and_the_error_it_met(
+        self,
+    ) -> None:
+        """The request is sent again, with what the attempt sent, and the
+        chain goes on through the error's line."""
+        builder = Builder(SCENARIO, UNTIL)
+        lines = _lines(builder.files()[0])
+        (place,) = [
+            place
+            for place, line in enumerate(lines)
+            if line["type"] == "system" and line["subtype"] == "api_error"
+        ]
+        attempt, error, again, answer = lines[place - 1 : place + 3]
+
+        assert error["timestamp"] == stamp(builder.when(101))
+        assert (error["error"]["status"], error["retryAttempt"]) == (529, 1)
+        assert error["parentUuid"] == lines[place - 2]["uuid"]
+        assert (again["base"], again["tail"]) == (attempt["id"], [])
+        assert again["requestDigest"] == attempt["requestDigest"]
+        assert (answer["parentUuid"], answer["requestRef"]) == (
+            error["uuid"],
+            again["id"],
+        )
+
+    def test_an_occurrence_is_the_line_claude_code_writes_of_it(self) -> None:
+        """A request that failed for good is a response Claude Code wrote
+        itself, which no request sends, and the person's interruption a
+        line of their words; each follows the chain's last line."""
+        lines = _lines(Builder(_resumed(), UNTIL).files()[0])
+        (failed,) = [line for line in lines if line.get("isApiErrorMessage")]
+        (interrupted,) = [
+            line for line in lines if _blocks(line, "text") and line["type"] == "user"
+        ]
+        chained = {line["uuid"]: line for line in lines if "uuid" in line}
+
+        assert (failed["message"]["model"], failed["apiErrorStatus"]) == (
+            SYNTHETIC,
+            500,
+        )
+        assert chained[failed["parentUuid"]]["type"] == "assistant"
+        assert interrupted["message"]["content"] == [
+            {"type": "text", "text": INTERRUPTION}
+        ]
+        assert "promptSource" not in interrupted
+        assert chained[interrupted["parentUuid"]]["type"] == "assistant"
+
+    def test_no_line_is_written_for_an_occurrence_of_another_kind(self) -> None:
+        resumed = _resumed()
+        (session,) = resumed.sessions
+        first, *rest = session.launches
+        (prompt,) = first.prompts
+        step = prompt.steps[0]
+        assert isinstance(step, Call)
+        call = replace(step, occurred=(Occurrence(6, "gate_red", is_error=True),))
+        steps = (call, *prompt.steps[1:])
+        launches = (replace(first, prompts=(replace(prompt, steps=steps),)), *rest)
+        other = replace(resumed, sessions=(replace(session, launches=launches),))
+
+        with pytest.raises(ValueError, match="`gate_red`"):
+            Builder(other, UNTIL).files()
 
     def test_a_call_sent_at_no_moment_names_no_request(self) -> None:
         lines = _lines(Builder(_resumed(), UNTIL).files()[0])

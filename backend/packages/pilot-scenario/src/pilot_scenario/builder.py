@@ -11,8 +11,9 @@ A publication is what its thread's file says: the file's size and time, and
 each fact as the lines carry it. The files hold the lines these facts are
 read off: a thread's ids and where it ran, its Launches, Prompts, Calls and
 Tool Calls, its Compactions, each Call's place on the chain, the request it
-answered and what Claude Code records of its choices. No line is written for
-a hook run, an event or a context part, which the publications carry alone.
+answered and those that failed before it, what Claude Code records of its
+choices, and the Events. No line is written for a hook run or a context
+part, which the publications carry alone.
 
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
@@ -106,6 +107,8 @@ def _moments(steps: Sequence[Step]) -> Iterator[int]:
                 step.at + use.took for use in step.tools if use.took is not None
             )
             yield from (occurrence.at for occurrence in step.occurred)
+            for retry in step.retried:
+                yield from (retry.sent, retry.failed)
 
 
 def _launch_moments(launch: Launch) -> Iterator[int]:
@@ -198,6 +201,18 @@ class _Thread:
         if step.name is not None:
             self._named[step.name] = message_id
         tool_calls = [self._tool_call(step, use) for use in step.tools]
+        retried = [
+            _given(
+                kind="api_retry",
+                is_error=True,
+                at=at(retry.failed),
+                detail=None if retry.status is None else str(retry.status),
+            )
+            for retry in step.retried
+        ]
+        if retried and self.calls:
+            self.calls[-1].setdefault("events", []).extend(retried)
+            retried = []
         self.calls.append(
             _given(
                 message_id=message_id,
@@ -220,7 +235,8 @@ class _Thread:
                     if tokens
                 },
                 tool_calls=tool_calls,
-                events=[
+                events=retried
+                + [
                     _given(
                         kind=occurrence.kind,
                         is_error=occurrence.is_error,
@@ -239,6 +255,8 @@ class _Thread:
         self._write(step, message_id, [call["tool_use_id"] for call in tool_calls])
         if step.name is not None:
             self._leaves[step.name] = self.lines.leaf
+        for occurrence in step.occurred:
+            self.lines.occurred(occurrence, self._builder.when(occurrence.at))
 
     def _tool_call(self, call: Call, use: ToolUse) -> dict[str, Any]:
         at = self._builder.time
@@ -261,9 +279,14 @@ class _Thread:
         return tool_call
 
     def _write(self, call: Call, message_id: str, tool_use_ids: list[str]) -> None:
-        """The Call's lines: its response's, then each result that arrived,
-        in the order the tools were requested."""
+        """The Call's lines: each attempt at its request that failed, its
+        response's, then each result that arrived, in the order the tools
+        were requested."""
         when = self._builder.when
+        for attempt, retry in enumerate(call.retried, start=1):
+            self.lines.retried(
+                call, retry, attempt, when(retry.sent), when(retry.failed)
+            )
         asked = []
         for use, tool_use_id in zip(call.tools, tool_use_ids, strict=True):
             spawned = None if use.spawns is None else self._agents[use.spawns]

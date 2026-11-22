@@ -17,7 +17,9 @@ from pilot_scenario.script import (
     Call,
     Compaction,
     Launch,
+    Occurrence,
     Prompt,
+    Retry,
     Session,
     Tokens,
     ToolUse,
@@ -41,6 +43,29 @@ def _built() -> dict[str, dict[str, Any]]:
 
 def _calls(publication: dict[str, Any], fact: str) -> list[Any]:
     return [call.get(fact) for call in publication["calls"]]
+
+
+def _one(*steps: Call | Compaction) -> Scenario:
+    """A scenario of one session a person typed one prompt in, the steps
+    following it."""
+    prompt = Prompt(at=0, source="typed", characters=20, steps=steps)
+    return Scenario(
+        name="one",
+        people=("ada",),
+        projects=(),
+        kinds=(),
+        units=(),
+        sessions=(
+            Session(
+                name="one",
+                directory="/tmp/rides",
+                person="ada",
+                launches=(
+                    Launch(versions=(("claude-code", "2.1.317"),), prompts=(prompt,)),
+                ),
+            ),
+        ),
+    )
 
 
 class TestABuild:
@@ -209,7 +234,7 @@ class TestAMainThread:
                 },
             ],
             "events": [
-                {"kind": "api_error", "is_error": True, "at": _at(101), "detail": "529"}
+                {"kind": "api_retry", "is_error": True, "at": _at(101), "detail": "529"}
             ],
             "context_parts": [
                 {"kind": "skill_body", "name": "pantry:scaling", "characters": 4_300}
@@ -249,6 +274,71 @@ class TestAMainThread:
             None,
             None,
         ]
+
+    def test_an_event_is_on_the_last_call_before_it_else_on_the_first(
+        self,
+    ) -> None:
+        """A failed attempt at a request is before the Call that answered
+        it, and an occurrence after its own."""
+        scenario = _one(
+            Call(
+                at=6,
+                sent=5,
+                retried=(Retry(sent=2, failed=3, status=529), Retry(sent=4, failed=4)),
+                tokens=Tokens(input=10, output=2),
+                occurred=(Occurrence(7, "interrupt", is_error=False),),
+            ),
+            Call(
+                at=12,
+                sent=10,
+                retried=(Retry(sent=8, failed=9, status=500),),
+                tokens=Tokens(input=10, output=2),
+                occurred=(Occurrence(13, "api_error", is_error=True, detail="429"),),
+            ),
+        )
+        first, second = Builder(scenario, UNTIL).publications()[0]["calls"]
+
+        def at(moment: int) -> str:
+            return Builder(scenario, UNTIL).time(moment)
+
+        assert first["events"] == [
+            {"kind": "api_retry", "is_error": True, "at": at(3), "detail": "529"},
+            {"kind": "api_retry", "is_error": True, "at": at(4)},
+            {"kind": "interrupt", "is_error": False, "at": at(7)},
+            {"kind": "api_retry", "is_error": True, "at": at(9), "detail": "500"},
+        ]
+        assert second["events"] == [
+            {"kind": "api_error", "is_error": True, "at": at(13), "detail": "429"}
+        ]
+
+    def test_a_call_the_script_marks_with_a_miss_and_no_other_is_one(self) -> None:
+        """Assertion 546: more than half of the lesser of what its
+        predecessor left and its own context was not read from the cache,
+        and that context is at least nine tenths of what was left."""
+        for publication in Builder(SCENARIO, UNTIL).publications():
+            calls = {call["message_id"]: call for call in publication["calls"]}
+            for call in publication["calls"]:
+                spent = call["tokens"]
+                context = sum(
+                    spent.get(kind, 0)
+                    for kind in (
+                        "input",
+                        "cache_write_5m",
+                        "cache_write_1h",
+                        "cache_read",
+                    )
+                )
+                missed = False
+                if "predecessor" in call:
+                    before = calls[call["predecessor"]]["tokens"]
+                    left = sum(
+                        before.get(kind, 0)
+                        for kind in ("cache_write_5m", "cache_write_1h", "cache_read")
+                    )
+                    compared = min(left, context)
+                    unread = compared - spent.get("cache_read", 0)
+                    missed = 2 * unread > compared and 10 * context >= 9 * left
+                assert ("miss_cause" in call) is missed, call["message_id"]
 
     def test_a_command_the_person_interrupted_says_so(self) -> None:
         gears = _built()["gears"]

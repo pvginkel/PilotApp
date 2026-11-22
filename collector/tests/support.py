@@ -65,10 +65,12 @@ def cost() -> Line:
     return beside("cost-state", totalDuration=1_000)
 
 
-def request(seconds: float, named: str = "request-1") -> Line:
+def request(seconds: float, named: str = "request-1", **asked: Any) -> Line:
     """The line of a request to the model, sent at `seconds`: the lines of
-    its response name it by its `id`, `named`."""
-    return beside("api-request", id=named, timestamp=stamp(seconds), version=VERSION)
+    its response name it by its `id`, `named`; `asked` is what it says it
+    sent, its `shapeHash`, `keep` and `tail`."""
+    line = beside("api-request", id=named, timestamp=stamp(seconds), version=VERSION)
+    return line | asked
 
 
 def sent(line: Line, named: str = "request-1") -> Line:
@@ -207,6 +209,39 @@ def finished(line: Line, thinking: int, ended: str | None) -> Line:
     line["message"]["usage"]["output_tokens_details"] = {"thinking_tokens": thinking}
     line["message"]["stop_reason"] = ended
     return line
+
+
+def retried(seconds: float, status: int | None = 529, attempt: int = 1) -> Line:
+    """The line of an API error of that `status` that Claude Code sends the
+    request again after, the `attempt`th."""
+    error: dict[str, Any] = {"message": "The loom is overloaded."}
+    if status is not None:
+        error["status"] = status
+    return chained(
+        "system",
+        seconds,
+        subtype="api_error",
+        level="error",
+        error=error,
+        retryInMs=600,
+        retryAttempt=attempt,
+        maxRetries=10,
+    )
+
+
+def erred(seconds: float, status: int | None = 529) -> Line:
+    """The response Claude Code writes itself for a request that failed for
+    good with an API error of that `status`."""
+    return synthetic(seconds, "API Error: the loom is overloaded.") | {
+        "isApiErrorMessage": True,
+        "apiErrorStatus": status,
+        "error": "server_error",
+    }
+
+
+def interruption(seconds: float) -> Line:
+    """The line that records the person's interruption of a response."""
+    return user(seconds, [words("[Request interrupted by user]")])
 
 
 def synthetic(seconds: float, said: str) -> Line:

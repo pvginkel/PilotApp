@@ -208,7 +208,7 @@ class TestLoad:
         assert adas[3].predecessor_id == adas[1].id
         assert (error.call_id, error.kind_code, error.detail) == (
             pilots[2].id,
-            "api_error",
+            "api_retry",
             "529",
         )
 
