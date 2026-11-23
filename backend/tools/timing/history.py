@@ -61,6 +61,7 @@ from pilot_scenario.script import (
     ToolUse,
     Turn,
 )
+from pilot_scenario.transcript import MANAGED
 from psycopg.errors import DeadlockDetected, UniqueViolation
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -330,6 +331,7 @@ class _Drawn:
         agents: list[SubAgent] | None,
         effort: str | None,
         rewinds: bool = False,
+        skilled: bool = False,
     ) -> tuple[list[list[Call | Compaction]], int]:
         """A thread's steps from `at`, cut into prompts after the Calls
         `prompts` counts, each prompt's steps after a person's pause where
@@ -400,6 +402,8 @@ class _Drawn:
                         spawns=name,
                     ),
                 )
+            if skilled and n == 0:
+                uses = (*uses, ToolUse("Skill", _SKILL, took=1, characters=31))
             occurred: tuple[Occurrence, ...] = ()
             if rng.random() < 0.003:
                 occurred = (
@@ -414,12 +418,19 @@ class _Drawn:
                 carried = (
                     Carried("system_prompt", rng.randint(8_000, 10_000)),
                     Carried("tool_schemas", rng.randint(30_000, 50_000)),
-                    Carried("instruction_file", rng.randint(2_000, 9_000), "CLAUDE.md"),
+                    Carried("instruction_file", rng.randint(2_000, 9_000), MANAGED),
                 )
                 first = False
+            elif crossed:
+                carried = (Carried("compact_summary", context),)
+            if skilled and n == 1:
+                carried = (*carried, Carried("skill_body", 4_300, _SKILL))
             parts[-1].append(
                 Call(
                     at=self.moments.at(at),
+                    skill=_SKILL if skilled and n == 1 else None,
+                    plugin="pantry" if skilled and n == 1 else None,
+                    sent=self.moments.at(at - 1) if carried else None,
                     name=f"p{len(parts)}" if rewinds and not parts[-1] else None,
                     back_to=back_to,
                     model=model,
@@ -439,7 +450,7 @@ class _Drawn:
             took = max((use.took or 0 for use in uses), default=0)
             self.moments.at(at + took)
             at += took
-            if context > 160_000:
+            if context > 160_000 and n < calls - 1:
                 after = rng.randint(15_000, 30_000)
                 took_ms = rng.randint(20_000, 60_000)
                 at += 1
@@ -462,6 +473,10 @@ class _Drawn:
         calls = self.lognormal(8, 0.8, 1, 200)
         parts, ended = self.thread(at, calls, place, small, "5m", (), None, None)
         return parts[0], ended
+
+
+_SKILL = "pantry:scaling"
+"""The skill a work Launch loads, which is what names its plugin."""
 
 
 def _prompt_cuts(rng: random.Random, calls: int, low: int, high: int) -> list[int]:
@@ -530,8 +545,17 @@ def draw(day: date, calls: int | None = None) -> Day:
             at = start
             for n, span in enumerate(spans):
                 cuts = _prompt_cuts(rng, span, 15, 60) if rng.random() < 0.1 else []
+                skilled = kind == "work" and span >= 2 and n == 0
                 parts, ended = drawn.thread(
-                    at + 4, span, place, model, "1h", cuts, agents, "high"
+                    at + 4,
+                    span,
+                    place,
+                    model,
+                    "1h",
+                    cuts,
+                    agents,
+                    "high",
+                    skilled=skilled,
                 )
                 prompts = []
                 for p, steps in enumerate(parts):
@@ -553,7 +577,7 @@ def draw(day: date, calls: int | None = None) -> Day:
                         )
                     )
                 launches.append(
-                    Launch(versions=_versions(drawn, kind), prompts=tuple(prompts))
+                    Launch(versions=_versions(drawn, skilled), prompts=tuple(prompts))
                 )
                 cause = (
                     TurnCause.PERSON
@@ -676,9 +700,9 @@ def draw(day: date, calls: int | None = None) -> Day:
     return Day(day, scenario, calls, pilots, midnight)
 
 
-def _versions(drawn: _Drawn, kind: str) -> tuple[tuple[str, str], ...]:
+def _versions(drawn: _Drawn, skilled: bool) -> tuple[tuple[str, str], ...]:
     versions: tuple[tuple[str, str], ...] = (("claude-code", drawn.version),)
-    if kind == "work":
+    if skilled:
         versions += (("plugin:pantry", f"0.3.{drawn.day.month}"),)
     return versions
 

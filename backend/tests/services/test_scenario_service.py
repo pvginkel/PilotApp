@@ -232,9 +232,9 @@ class TestLoad:
         """DB §7.4: Ada's fourth Call went back to her second, and her fifth
         waited past the cache's lifetime and missed it; each Call is in the
         Launch it was made in, a sub-agent's in its main thread's. A miss is
-        read from the tokens (DB 546): the Call after the compaction and
-        the rewind read what their predecessors left, whatever cause the
-        scenario names for them."""
+        read from the tokens (DB 546): the Call after the compaction and,
+        in the scenario, Ada's rewind and the Call after her lapse each
+        write what they might have read."""
         halving, counting, gears = loaded
         pilots = _calls(session, halving)
         adas = _calls(session, gears)
@@ -244,12 +244,12 @@ class TestLoad:
 
         assert [call.rewind for call in adas] == [False, False, False, True, False]
         assert [call.past_ttl for call in adas] == [False, False, False, False, True]
-        assert [call.cache_miss for call in adas] == [False, False, False, False, True]
-        assert [call.cache_miss for call in pilots] == [False] * 6
+        assert [call.cache_miss for call in adas] == [False, False, False, True, True]
+        assert [call.cache_miss for call in pilots] == [False] * 4 + [True, False]
         assert adas[0].waited_seconds is None
         assert (
             adas[4].waited_seconds
-            == (adas[4].completed_at - adas[3].completed_at).total_seconds()
+            == (adas[4].sent_at - adas[3].completed_at).total_seconds()
         )
         assert {call.launch_id for call in pilots} == {launch.id}
         assert {call.launch_id for call in _calls(session, counting)} == {launch.id}
