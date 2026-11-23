@@ -448,6 +448,28 @@ class TestCustomRatios:
             "Cannot read the view because its state has 2 faults.\n- m=cots.sum:"
         )
 
+    def test_a_change_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        made = client.post(
+            RATIOS,
+            json={"name": "Cost per turn", "numerator": "cost", "denominator": "turns"},
+        ).get_json()
+
+        response = client.put(
+            f"{RATIOS}/{made['id']}",
+            json={
+                "name": "Cost per turn",
+                "numerator": "cots.sum",
+                "denominator": "turns",
+            },
+        )
+
+        assert response.status_code == 400
+        assert _error(response).startswith(
+            "Cannot read the view because its state has 1 fault.\n- m=cots.sum:"
+        )
+
     def test_a_persons_name_taken_is_refused(self, client: FlaskClient) -> None:
         ratio = {"name": "Cost per turn", "numerator": "cost", "denominator": "turns"}
         client.post(RATIOS, json=ratio)
@@ -573,6 +595,23 @@ class TestLoadWorkflow:
             (ratio["key"], ratio["system"], ratio["offered"])
             for ratio in stored["custom_ratios"]
         ] == [("per_ride", True, True), ("per_serving", True, True)]
+
+    def test_a_loaded_ratio_under_a_built_in_key_is_listed_as_not_offered(
+        self, client: FlaskClient, session: DbSession, person: User
+    ) -> None:
+        """A ratio loaded under a key a later release builds in: the
+        catalogue offers the built-in one under it."""
+        loaded = _loaded_ratio(session)
+        loaded.key = "per_call"
+        session.flush()
+        _sign_in(client)
+
+        stored = _stored(client)
+
+        assert [
+            (ratio["key"], ratio["system"], ratio["offered"])
+            for ratio in stored["custom_ratios"]
+        ] == [("per_call", True, False)]
 
     def test_a_dropped_part_is_a_note(
         self, client: FlaskClient, service_user: User

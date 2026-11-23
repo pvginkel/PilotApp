@@ -970,6 +970,21 @@ class TestQuickFilters:
         keys = [one.key for one in catalogue_service.catalogue(session).quick_filters]
         assert keys[-1] == made.code
 
+    def test_the_catalogue_drops_it_once_its_removal_has_committed(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        catalogue_service = container.catalogue_service()
+        store = container.dashboard_store_service()
+        made = store.add_quick_filter("Opus only", "model:claude-opus-5-5", None, None)
+        run_after_commit_callbacks()
+        catalogue_service.catalogue(session)
+
+        store.remove_quick_filter(made.id)
+        run_after_commit_callbacks()
+
+        keys = [one.key for one in catalogue_service.catalogue(session).quick_filters]
+        assert made.code not in keys
+
     def test_a_chip_with_faults_is_refused(
         self, service: DashboardStoreService
     ) -> None:
@@ -1173,6 +1188,25 @@ class TestCustomRatios:
         assert made.key not in [
             ratio.key for ratio in catalogue_service.catalogue(session).ratios
         ]
+
+    def test_the_catalogue_reads_an_edit_once_it_has_committed(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        catalogue_service = container.catalogue_service()
+        store = container.dashboard_store_service()
+        made = store.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+        run_after_commit_callbacks()
+        catalogue_service.catalogue(session)
+
+        store.edit_ratio(made.id, "Turn cost", "reported_cost.sum", "turns.count", None)
+        run_after_commit_callbacks()
+
+        (edited,) = [
+            ratio
+            for ratio in catalogue_service.catalogue(session).ratios
+            if ratio.key == made.key
+        ]
+        assert (edited.label, edited.numerator) == ("Turn cost", "reported_cost.sum")
 
     def test_no_ratio_is_refused(self, service: DashboardStoreService) -> None:
         with pytest.raises(RecordNotFoundException):
