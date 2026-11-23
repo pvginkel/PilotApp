@@ -77,6 +77,7 @@ HAS_PYTHON313 = shutil.which("python3.13") is not None
 # every app: the same lockfile makes the same store.
 BUILD_CACHE_PREFIX = "pnpm"
 
+
 class StepResult(NamedTuple):
     step: str
     ok: bool
