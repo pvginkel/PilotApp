@@ -44,6 +44,16 @@ items**, each with the dimensions shown on it; and **a thread's calls and
 its events** over all time, each call saying whether the plan's window and
 scope hold it.
 
+The counts read, each one statement of one fact: **the attributes'
+counts**, each dimension's count of values, none counting as one, by a
+grouping of the rows on each, a grouping set apiece, the fact's own row
+counted by its rows; **the quick filters' tally**, a column for each count
+and amount a quick filter takes there, the rows it keeps or the items of its
+grain among them, by a grouping set of the items apiece, and its figure
+summed over those rows; and **a dimension's values**, each with the count of
+its rows and its figure's sum, searched by their name or their key. None is
+a distinct count, which PostgreSQL takes by a sort.
+
 A condition on each item reads its figure over each item's rows of all
 time, its own filters keeping them: on a fact's own rows the row's figure,
 on a part the items whose figure, taken together as it says, passes. The
@@ -70,6 +80,7 @@ from sqlalchemy import (
     ColumnElement,
     Double,
     Select,
+    Text,
     and_,
     any_,
     case,
@@ -107,6 +118,12 @@ LENGTH = 24_000
 """The bound of a statement, which carries its fact's source as SQL text,
 some 2,400 characters for the Call fact, and every measure's and filter's
 expressions over it."""
+
+
+ATTRIBUTES_LENGTH = 2 * LENGTH
+"""The bound of the attributes' counts, which carry a path for every
+dimension a fact is the first to offer: some 12,000 characters for the Call
+fact's under no chip."""
 
 
 @dataclass(frozen=True)
@@ -151,6 +168,16 @@ class Marked:
 
 
 Statement = Scan | Items | Marked
+
+
+@dataclass(frozen=True)
+class Tally:
+    """A column of a fact's tally of the quick filters: the rows `kept`
+    keeps counted, or their items of `grain`, or `figure` summed over them."""
+
+    kept: Kept
+    grain: str | None = None
+    figure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -635,10 +662,10 @@ class _Builder:
 
     # ------------------------------------------------------------ a series'
 
-    def read(self, statement: Select[Any]) -> Read:
+    def read(self, statement: Select[Any], length: int = LENGTH) -> Read:
         return Read(
             fact=self.row.fact.key,
-            select=statement.execution_options(max_statement_length=LENGTH),
+            select=statement.execution_options(max_statement_length=length),
             joins=self.row.taken,
             through=tuple(self.through.items()),
         )
@@ -990,6 +1017,162 @@ class _Builder:
             .order_by(self.row["at"], self.row["kind_code"], self.row["source_id"])
         )
 
+    # ------------------------------------------------------------ the counts
+
+    def attributes(self, keys: Sequence[str]) -> Read:
+        """One row: for each of `keys`, `a<index>` its count of values among
+        the rows; the fact's own part `n<index>`, its rows with one, and
+        `z<index>`, whether any has none."""
+        own = self.row.fact.part
+        columns = [
+            self.catalogue.dimension(key).path(self.row).label(f"a{index}")
+            for index, key in enumerate(keys)
+        ]
+        where = self.scoped()
+        rows = (
+            select(*columns).select_from(self.row.source()).where(*where).subquery("r")
+        )
+        grouped = [index for index, key in enumerate(keys) if key != own]
+        owned = [index for index, key in enumerate(keys) if key == own]
+        inner: list[ColumnElement[Any]] = [
+            func.grouping(rows.c[f"a{index}"]).label(f"g{index}") for index in grouped
+        ]
+        for index in owned:
+            value = rows.c[f"a{index}"]
+            inner += [
+                func.count(value).label(f"n{index}"),
+                func.bool_or(value.is_(None)).label(f"z{index}"),
+            ]
+        sets = [tuple_(rows.c[f"a{index}"]) for index in grouped]
+        if owned:
+            sets.append(tuple_())
+        groups = (
+            select(*inner)
+            .select_from(rows)
+            .group_by(func.grouping_sets(*sets))
+            .subquery("g")
+        )
+        whole = and_(true(), *(groups.c[f"g{index}"] == 1 for index in grouped))
+        outer: list[ColumnElement[Any]] = [
+            func.count().filter(groups.c[f"g{index}"] == 0).label(f"a{index}")
+            for index in grouped
+        ]
+        for index in owned:
+            outer += [
+                func.max(groups.c[f"n{index}"]).filter(whole).label(f"n{index}"),
+                func.bool_or(groups.c[f"z{index}"]).filter(whole).label(f"z{index}"),
+            ]
+        return self.read(select(*outer).select_from(groups), ATTRIBUTES_LENGTH)
+
+    def tallied(self, tallies: Sequence[Tally]) -> Read:
+        """One row: for each tally, `t<index>` its count or its sum."""
+        columns: list[ColumnElement[Any]] = []
+        for index, tally in enumerate(tallies):
+            kept = self.kept(tally.kept)
+            if tally.figure is not None:
+                path = self.catalogue.figure(tally.figure).path(self.row)
+                columns.append(case((kept, path)).label(f"t{index}"))
+            elif tally.grain is not None:
+                item = self.catalogue.dimension(tally.grain).path(self.row)
+                columns.append(case((kept, item)).label(f"t{index}"))
+            else:
+                columns.append(kept.label(f"t{index}"))
+        where = self.scoped()
+        rows = (
+            select(*columns).select_from(self.row.source()).where(*where).subquery("r")
+        )
+        items = [
+            index
+            for index, tally in enumerate(tallies)
+            if tally.figure is None and tally.grain is not None
+        ]
+        inner: list[ColumnElement[Any]] = []
+        for index in items:
+            inner += [
+                func.grouping(rows.c[f"t{index}"]).label(f"g{index}"),
+                rows.c[f"t{index}"],
+            ]
+        for index, tally in enumerate(tallies):
+            if index in items:
+                continue
+            value = rows.c[f"t{index}"]
+            inner.append(
+                (
+                    func.sum(value)
+                    if tally.figure is not None
+                    else func.count().filter(value)
+                ).label(f"t{index}")
+            )
+        sets = [tuple_(), *(tuple_(rows.c[f"t{index}"]) for index in items)]
+        groups = (
+            select(*inner)
+            .select_from(rows)
+            .group_by(func.grouping_sets(*sets))
+            .subquery("g")
+        )
+        whole = and_(true(), *(groups.c[f"g{index}"] == 1 for index in items))
+        outer = [
+            (
+                func.count().filter(
+                    groups.c[f"g{index}"] == 0, groups.c[f"t{index}"].is_not(None)
+                )
+                if index in items
+                else func.max(groups.c[f"t{index}"]).filter(whole)
+            ).label(f"t{index}")
+            for index in range(len(tallies))
+        ]
+        return self.read(select(*outer).select_from(groups))
+
+    def valued(
+        self,
+        dimension: Dimension,
+        figure: Figure | None,
+        search: str | None,
+        most: int | None,
+    ) -> Read:
+        """By each value of the dimension among the rows, `n` its rows and
+        `v` its figure's sum, with its `name` where it has one; those whose
+        name or key holds `search`, the case aside; in the order of their
+        keys for a time, else the largest sum first, then the most rows;
+        with the count of all as `total`, at most `most`."""
+        columns: list[ColumnElement[Any]] = [dimension.path(self.row).label("k")]
+        if dimension.name is not None:
+            columns.append(dimension.name(self.row).label("name"))
+        if figure is not None:
+            columns.append(figure.path(self.row).label("v"))
+        where = self.scoped()
+        rows = (
+            select(*columns).select_from(self.row.source()).where(*where).subquery("r")
+        )
+        grouped: list[ColumnElement[Any]] = [rows.c.k, func.count().label("n")]
+        if "name" in rows.c:
+            grouped.append(func.max(rows.c.name).label("name"))
+        if "v" in rows.c:
+            grouped.append(func.sum(rows.c.v).label("v"))
+        statement = select(*grouped).group_by(rows.c.k)
+        if search is not None:
+            words: ColumnElement[str] = cast(rows.c.k, Text)
+            if "name" in rows.c:
+                words = func.concat(func.max(rows.c.name), " ", words)
+            statement = statement.having(
+                func.strpos(func.lower(words), search.casefold()) > 0
+            )
+        values = statement.subquery("v")
+        order: list[Any] = (
+            [values.c.k.asc().nulls_last()]
+            if dimension.group == "time"
+            else [
+                *([values.c.v.desc().nulls_last()] if "v" in values.c else []),
+                values.c.n.desc(),
+                values.c.k.asc().nulls_last(),
+            ]
+        )
+        return self.read(
+            select(*values.c, func.count().over().label("total"))
+            .order_by(*order)
+            .limit(most)
+        )
+
     def kinds(self, figures: Sequence[Figure]) -> list[ColumnElement[Any]]:
         """Each figure's split by the token kinds, where it has one."""
         return [
@@ -1132,6 +1315,37 @@ def counted(found: Plan, catalogue: Catalogue, kind: str, error: str) -> Read:
     return _Builder(found, catalogue, fact).counted(
         catalogue.dimension(kind), catalogue.dimension(error)
     )
+
+
+def attributes(
+    found: Plan, catalogue: Catalogue, fact: str, keys: Sequence[str]
+) -> Read:
+    """Each of the dimensions `keys`' count of values among the rows of
+    `fact` the plan reads, none counting as one."""
+    return _Builder(found, catalogue, fact).attributes(keys)
+
+
+def tallied(
+    found: Plan, catalogue: Catalogue, fact: str, tallies: Sequence[Tally]
+) -> Read:
+    """Each tally's count or sum among the rows of `fact` the plan reads."""
+    return _Builder(found, catalogue, fact).tallied(tallies)
+
+
+def valued(
+    found: Plan,
+    catalogue: Catalogue,
+    dimension: Dimension,
+    figure: Figure | None,
+    search: str | None,
+    most: int | None,
+) -> Read:
+    """The values of the dimension among the rows the plan reads of the
+    first fact that offers it, each with its rows and `figure`'s sum, where
+    `figure` is that fact's."""
+    fact = catalogue.offered(dimension.key)[0]
+    summed = figure if figure is not None and figure.fact == fact else None
+    return _Builder(found, catalogue, fact).valued(dimension, summed, search, most)
 
 
 def _all_time(found: Plan) -> Plan:

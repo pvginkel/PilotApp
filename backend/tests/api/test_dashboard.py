@@ -4,14 +4,21 @@ at a call (F154.4), with what the dashboard stores (F155);
 normal form (F159); /api/dashboard/rows, a view's rows (F154.1);
 /api/dashboard/series and /api/dashboard/series/events, a view's series and
 its events strip (F163.3, F164.6); /api/dashboard/lanes, a view's lanes
-(F164.6); and /api/dashboard/items and a conversation's calls, a view's
-items (F165)."""
+(F164.6); /api/dashboard/items and a conversation's calls, a view's items
+(F165); /api/dashboard/counts/attributes and
+/api/dashboard/counts/quick-filters, a view's two counts, each started as a
+task whose events reach the caller's stream alone (F154.6); and
+/api/dashboard/values, an attribute's values for a filter's pane."""
 
+import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from queue import Empty
 from typing import Any
 
 import pytest
 from dependency_injector import providers
+from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session as DbSession
@@ -19,19 +26,23 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.dashboard.bounds import Bounds
 from app.dashboard.views import VIEWS
+from app.database import scoped_session
 from app.models import (
     Component,
     CustomRatio,
+    Environment,
     EventKind,
     Project,
     QuickFilter,
     SavedView,
     User,
 )
-from app.models.reference import Origin
+from app.models.reference import Origin, SessionState, UserKind
 from app.services.container import ServiceContainer
+from app.services.sse_connection_manager import SSEConnection
 from tests.support import transcripts
 from tests.support.dashboard import Record, record
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.transcripts import OPUS, STARTED, reference
 
 CATALOGUE = "/api/dashboard/catalogue"
@@ -1255,6 +1266,426 @@ class TestGetConversationCalls:
         assert (
             oidc_client.get(
                 _calls_path(worked.thread.id), query_string={"state": "t=all"}
+            ).status_code
+            == 401
+        )
+
+
+ATTRIBUTE_COUNTS = "/api/dashboard/counts/attributes"
+QUICK_FILTER_COUNTS = "/api/dashboard/counts/quick-filters"
+VALUES = "/api/dashboard/values"
+
+
+@pytest.fixture
+def committed(committed_app: Flask) -> Flask:
+    """An app on a database of its own holding `record`'s record, committed,
+    so that a task's thread reads it on a session of its own while the
+    request that started it ends on another."""
+    with scoped_session(committed_app.container) as db:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        db.add(person)
+        db.flush()
+        project = Project(created_by_user_id=person.id)
+        environment = Environment(
+            id=STORE_ENVIRONMENT_ID,
+            name="Example-1",
+            exempt=False,
+            last_seen_at=datetime.now(UTC),
+        )
+        db.add_all([project, environment])
+        db.flush()
+        work = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="1" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        db.add(work)
+        db.flush()
+        record(db, person, project, work)
+    return committed_app
+
+
+@pytest.fixture
+def streams(committed: Flask) -> Iterator[dict[str, SSEConnection]]:
+    """On the committed app, a stream of ada's, who asks, and one of ben's."""
+    manager = committed.container.sse_connection_manager()
+    opened = {
+        subject: manager.on_connect(f"{subject}-1", subject)
+        for subject in ("ada", "ben")
+    }
+    yield opened
+    for connection in opened.values():
+        manager.on_disconnect(connection)
+
+
+def _sign_in(client: FlaskClient, subject: str) -> None:
+    response = client.post(
+        "/api/testing/auth/session", json={"subject": subject, "roles": ["editor"]}
+    )
+    assert response.status_code == 201, response.get_json()
+
+
+def _task_events(connection: SSEConnection, task_id: str) -> list[dict[str, Any]]:
+    """The task's events on the stream, up to its end."""
+    events: list[dict[str, Any]] = []
+    while not events or events[-1]["event_type"] not in (
+        "task_completed",
+        "task_failed",
+    ):
+        frame = connection.next_frame(timeout=30)
+        assert frame is not None
+        envelope = json.loads(frame.removeprefix("data: "))
+        if (
+            envelope["type"] == "task_event"
+            and envelope["payload"]["task_id"] == task_id
+        ):
+            events.append(envelope["payload"])
+    return events
+
+
+def _queued(connection: SSEConnection) -> list[str]:
+    frames = []
+    while True:
+        try:
+            frame = connection.next_frame(timeout=0)
+        except Empty:
+            return frames
+        assert frame is not None
+        frames.append(frame)
+
+
+class TestStartAttributeCounts:
+    def test_it_answers_at_once_and_the_counts_come_to_the_caller_alone(
+        self, committed: Flask, streams: dict[str, SSEConnection]
+    ) -> None:
+        client = committed.test_client()
+        _sign_in(client, "ada")
+
+        response = client.post(
+            ATTRIBUTE_COUNTS, query_string={"state": "t=all&b=gone&rel=1"}
+        )
+
+        assert response.status_code == 202
+        body = response.get_json()
+        assert (body["address"], body["look"], body["status"]) == (
+            "#dash/t=all&by=project&m=cost.sum&col=none&rel=1",
+            ["rel=1"],
+            "pending",
+        )
+        assert body["notes"] == [
+            'b=gone: no quick filter has the key "gone", so it is dropped.'
+        ]
+        events = _task_events(streams["ada"], body["task_id"])
+        assert [event["event_type"] for event in events] == [
+            "task_started",
+            "progress_update",
+            "progress_update",
+            "task_completed",
+        ]
+        assert events[2]["data"]["data"] == {
+            "counts": [
+                {"dimension": "event_kind", "count": 10},
+                {"dimension": "event_error", "count": 2},
+            ]
+        }
+        counts = {
+            count["dimension"]: count["count"] for count in events[3]["data"]["counts"]
+        }
+        assert (counts["project"], counts["conversation"], counts["call"]) == (2, 4, 6)
+        assert _queued(streams["ben"]) == []
+
+    def test_a_state_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.post(ATTRIBUTE_COUNTS, query_string={"state": "by=phases"})
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
+    def test_an_entrys_read_past_the_engines_bounds_is_refused(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        worked: Record,
+    ) -> None:
+        response = _busy_post(
+            client,
+            container,
+            session,
+            ATTRIBUTE_COUNTS,
+            f"f=project:{worked.project.id}",
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_BUSY"
+
+    def test_no_state_is_refused(self, client: FlaskClient) -> None:
+        assert client.post(ATTRIBUTE_COUNTS).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert (
+            client.post(ATTRIBUTE_COUNTS, query_string={"state": ""}).status_code == 403
+        )
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert (
+            oidc_client.post(ATTRIBUTE_COUNTS, query_string={"state": ""}).status_code
+            == 401
+        )
+
+
+class TestStartQuickFilterCounts:
+    def test_it_answers_at_once_and_the_counts_come_to_the_caller_alone(
+        self, committed: Flask, streams: dict[str, SSEConnection]
+    ) -> None:
+        client = committed.test_client()
+        _sign_in(client, "ada")
+
+        response = client.post(
+            QUICK_FILTER_COUNTS, query_string={"state": "t=all&b=past_ttl"}
+        )
+
+        assert response.status_code == 202
+        body = response.get_json()
+        assert (
+            body["address"] == "#dash/t=all&by=project&m=cost.sum&b=past_ttl&col=none"
+        )
+        events = _task_events(streams["ada"], body["task_id"])
+        assert [event["event_type"] for event in events] == [
+            "task_started",
+            "task_completed",
+        ]
+        assert events[-1]["data"] == {
+            "quick_filters": [
+                {"key": "compactions", "count": 0, "amount": None},
+                {"key": "expensive", "count": 0, "amount": 0.0},
+                {"key": "misses", "count": 0, "amount": 0.0},
+                {"key": "outliers", "count": 0, "amount": None},
+                {"key": "past_ttl", "count": 1, "amount": 0.0},
+            ]
+        }
+        assert _queued(streams["ben"]) == []
+
+    def test_a_task_whose_read_passes_the_bounds_fails_with_why(
+        self, committed: Flask, streams: dict[str, SSEConnection]
+    ) -> None:
+        client = committed.test_client()
+        _sign_in(client, "ada")
+        container = committed.container
+        bounds = Bounds(timeout_seconds=0.2, at_once=1, pool=5)
+
+        with (
+            container.dashboard_bounds.override(providers.Object(bounds)),
+            scoped_session(container) as other,
+            bounds.read(other),
+        ):
+            response = client.post(QUICK_FILTER_COUNTS, query_string={"state": "t=all"})
+            events = _task_events(streams["ada"], response.get_json()["task_id"])
+
+        assert response.status_code == 202
+        assert events[-1]["event_type"] == "task_failed"
+        assert events[-1]["data"]["error"] == (
+            "Cannot answer the dashboard's view because the engine already runs "
+            "its 1 statements at once and none ended within 0.2 s"
+        )
+
+    def test_a_state_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.post(QUICK_FILTER_COUNTS, query_string={"state": "by=phases"})
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
+    def test_an_entrys_read_past_the_engines_bounds_is_refused(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        worked: Record,
+    ) -> None:
+        response = _busy_post(
+            client,
+            container,
+            session,
+            QUICK_FILTER_COUNTS,
+            f"f=project:{worked.project.id}",
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_BUSY"
+
+    def test_no_state_is_refused(self, client: FlaskClient) -> None:
+        assert client.post(QUICK_FILTER_COUNTS).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert (
+            client.post(QUICK_FILTER_COUNTS, query_string={"state": ""}).status_code
+            == 403
+        )
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert (
+            oidc_client.post(
+                QUICK_FILTER_COUNTS, query_string={"state": ""}
+            ).status_code
+            == 401
+        )
+
+
+def _busy_post(
+    client: FlaskClient,
+    container: ServiceContainer,
+    session: DbSession,
+    path: str,
+    state: str,
+) -> Any:
+    """The answer to a start while the engine's one slot is held."""
+    bounds = Bounds(timeout_seconds=0.2, at_once=1, pool=5)
+    bind = session.get_bind()
+    assert not isinstance(bind, Engine)
+    other = DbSession(bind=bind.engine)
+    try:
+        with (
+            container.dashboard_bounds.override(providers.Object(bounds)),
+            bounds.read(other),
+        ):
+            return client.post(path, query_string={"state": state})
+    finally:
+        other.close()
+
+
+class TestGetValues:
+    def test_it_answers_an_attributes_values_without_its_own_chips(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(
+            VALUES,
+            query_string={
+                "state": f"t=all&c=project:{worked.project.id}",
+                "dimension": "project",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "address": (
+                f"#dash/t=all&by=project&m=cost.sum&c=project:{worked.project.id}"
+                "&col=none"
+            ),
+            "look": [],
+            "notes": [],
+            "zone": "Europe/Amsterdam",
+            "dimension": {"key": "project", "label": "Project", "group": "part"},
+            "values": [
+                {
+                    "key": str(worked.project.id),
+                    "label": "Recipe box",
+                    "count": 5,
+                    "cost": 2.6,
+                },
+                {"key": None, "label": "(No project)", "count": 1, "cost": 0.05},
+            ],
+            "total": 2,
+        }
+
+    def test_a_search_keeps_those_whose_label_holds_it(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        body = client.get(
+            VALUES,
+            query_string={"state": "t=all", "dimension": "day", "search": "11-13"},
+        ).get_json()
+
+        assert [(value["key"], value["count"]) for value in body["values"]] == [
+            ("2026-11-13", 1)
+        ]
+
+    def test_no_such_dimension_is_refused_with_the_nearest(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(
+            VALUES, query_string={"state": "t=all", "dimension": "projct"}
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "VALIDATION_FAILED"
+        assert 'Did you mean "project"?' in response.get_json()["error"]
+
+    def test_a_state_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(
+            VALUES, query_string={"state": "by=phases", "dimension": "project"}
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
+    def test_a_read_past_the_engines_bounds_is_refused_with_why(
+        self, client: FlaskClient, container: ServiceContainer, session: DbSession
+    ) -> None:
+        bounds = Bounds(timeout_seconds=0.2, at_once=1, pool=5)
+        bind = session.get_bind()
+        assert not isinstance(bind, Engine)
+        other = DbSession(bind=bind.engine)
+        try:
+            with (
+                container.dashboard_bounds.override(providers.Object(bounds)),
+                bounds.read(other),
+            ):
+                response = client.get(
+                    VALUES, query_string={"state": "t=all", "dimension": "project"}
+                )
+        finally:
+            other.close()
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_BUSY"
+
+    def test_no_dimension_is_refused(self, client: FlaskClient) -> None:
+        assert client.get(VALUES, query_string={"state": "t=all"}).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert (
+            client.get(
+                VALUES, query_string={"state": "", "dimension": "project"}
+            ).status_code
+            == 403
+        )
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert (
+            oidc_client.get(
+                VALUES, query_string={"state": "", "dimension": "project"}
             ).status_code
             == 401
         )

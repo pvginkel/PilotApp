@@ -13,6 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.task_schema import TaskStatus
+
 CataloguePart = Literal["dimensions", "measures", "time", "stored"]
 Group = Literal["part", "attribute", "time", "order"]
 Format = Literal["usd", "tokens", "count", "seconds", "share"]
@@ -971,3 +973,112 @@ class CallsResponseSchema(BaseModel):
     )
     calls: list[CallSchema] = Field(description="In their file's order")
     total: int = Field(description="The calls, those answered and the rest")
+
+
+class CountsStartedSchema(BaseModel):
+    """A task started that answers a view's counts over the stream the page
+    holds, to the caller alone."""
+
+    task_id: str = Field(description="The task, as its events name it")
+    status: TaskStatus = Field(description="The task's status as it starts")
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+
+
+class AttributeCountSchema(BaseModel):
+    """A dimension's count of values in a view's scope."""
+
+    dimension: str = Field(description="The dimension's key", examples=["project"])
+    count: int = Field(
+        description=(
+            "Its values in the scope under every chip, its own included, none "
+            "counting as one; an order dimension its part's"
+        )
+    )
+
+
+class AttributeCountsSchema(BaseModel):
+    """By's counts of a view: the task's result, every dimension's in the
+    catalogue's order, and each progress update's `data`, a fact's as they
+    are counted."""
+
+    counts: list[AttributeCountSchema]
+
+
+class QuickFilterCountSchema(BaseModel):
+    """A quick filter's count in a view's scope, under the quick filters
+    that are on."""
+
+    key: str = Field(description="The quick filter's key", examples=["misses"])
+    count: int = Field(
+        description=(
+            "What it keeps: the rows of the fact its condition is on, the items "
+            "of its grain among them, or the By's rows"
+        )
+    )
+    amount: float | None = Field(
+        description=(
+            "Its figure's sum over what it keeps, 0 where nothing it keeps has "
+            "the figure; null where it names none"
+        )
+    )
+
+
+class QuickFilterCountsSchema(BaseModel):
+    """The quick filters' counts and amounts of a view: the task's result,
+    in the catalogue's order."""
+
+    quick_filters: list[QuickFilterCountSchema]
+
+
+class ValuesQuerySchema(StateQuerySchema):
+    """A view's state, the attribute whose values are listed, and the words
+    they are searched by."""
+
+    dimension: str = Field(description="The attribute's key", examples=["project"])
+    search: str | None = Field(
+        None,
+        description="Words a value's label or key holds, the case aside",
+        examples=["recipe"],
+    )
+
+
+class AttributeValueSchema(BaseModel):
+    """One value of an attribute in a view's scope."""
+
+    key: Key = Field(description="The value, typed as its dimension reads it")
+    label: str | None = Field(
+        description="Its label; null where the key is its own, as a date or a time"
+    )
+    count: int = Field(description="The rows of its fact that hold it")
+    cost: float | None = Field(
+        description="Their cost; null where its fact has no cost"
+    )
+
+
+class ValuesResponseSchema(BaseModel):
+    """An attribute's values in a view's scope, without its own chips."""
+
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+    zone: str = Field(examples=["Europe/Amsterdam"])
+    dimension: RowsDimensionSchema
+    values: list[AttributeValueSchema] = Field(
+        description=(
+            "The largest cost first, else the most rows, a time's in their "
+            "order; at most 200"
+        )
+    )
+    total: int = Field(
+        description="The values the search keeps, those answered and the rest"
+    )

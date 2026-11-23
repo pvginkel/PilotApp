@@ -6,6 +6,7 @@ and its events strip (F163.3, F164.6), its lanes (F164.6), and its items and
 a conversation's calls (F165), each a route of its own."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
@@ -18,9 +19,10 @@ from app.api.dashboard_store import (
     quick_filter_response,
     saved_view_response,
 )
-from app.dashboard.address import AddressService
+from app.dashboard.address import AddressService, View
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.catalogue import Catalogue, Dimension, Grain
+from app.dashboard.counts import CountsService
 from app.dashboard.items import Calls, Column, Detail, Items, ItemsService, Listed
 from app.dashboard.lanes import Lanes, LanesService
 from app.dashboard.planner import Window
@@ -35,11 +37,13 @@ from app.dashboard.rows import (
 )
 from app.dashboard.series import Series, SeriesService
 from app.dashboard.strip import Strip, StripService
+from app.dashboard.tasks import AttributeCountsTask, QuickFilterCountsTask
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.dashboard import (
     AddressQuerySchema,
     AddressResponseSchema,
     AggregateSchema,
+    AttributeValueSchema,
     BandSchema,
     BucketSchema,
     ByRowSchema,
@@ -50,6 +54,7 @@ from app.schemas.dashboard import (
     CatalogueResponseSchema,
     ColorSchema,
     ColorValueSchema,
+    CountsStartedSchema,
     DimensionSchema,
     DotSchema,
     EventDetailSchema,
@@ -84,10 +89,15 @@ from app.schemas.dashboard import (
     StripResponseSchema,
     TimeRangeSchema,
     ValueSchema,
+    ValuesQuerySchema,
+    ValuesResponseSchema,
     WaitSchema,
 )
+from app.services.base_task import BaseTask
 from app.services.container import ServiceContainer
 from app.services.dashboard_store_service import DashboardStoreService
+from app.services.task_service import TaskService
+from app.utils.auth import get_auth_context
 from app.utils.spectree_config import api
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
@@ -387,6 +397,154 @@ def get_conversation_calls(
     """
     return _calls(items_service.calls(query.state, transcript_id)).model_dump(
         mode="json"
+    )
+
+
+@dashboard_bp.route("/counts/attributes", methods=["POST"])
+@api.validate(
+    query=StateQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_202=CountsStartedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def start_attribute_counts(
+    query: StateQuerySchema,
+    address_service: AddressService = Provide[ServiceContainer.address_service],
+    task: AttributeCountsTask = Provide[ServiceContainer.attribute_counts_task],
+    task_service: TaskService = Provide[ServiceContainer.task_service],
+) -> Any:
+    """Start By's counts of a view, asked when By's panel opens: each
+    dimension's count of values in the view's scope, under every chip, its
+    own included, and before a threshold on the By's rows or the outlier
+    rows' chip. The task's events go over the stream to the caller alone:
+    each fact's counts as a progress update as they are counted, its `data`
+    an `AttributeCountsSchema`, then every dimension's as its result.
+
+    Returns:
+        202: The task started, with the view's address, its look-only parts
+            and a note for each part dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: An entry's read passed the engine's bounds (`QUERY_TIMEOUT`,
+            `QUERY_TEMP_FILE_LIMIT` or `QUERY_BUSY`)
+    """
+    return _started(task_service, task, address_service.view(query.state))
+
+
+@dashboard_bp.route("/counts/quick-filters", methods=["POST"])
+@api.validate(
+    query=StateQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_202=CountsStartedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def start_quick_filter_counts(
+    query: StateQuerySchema,
+    address_service: AddressService = Provide[ServiceContainer.address_service],
+    task: QuickFilterCountsTask = Provide[ServiceContainer.quick_filter_counts_task],
+    task_service: TaskService = Provide[ServiceContainer.task_service],
+) -> Any:
+    """Start the quick filters' counts and amounts of a view, asked with the
+    view: each quick filter's count and its figure's sum over what it keeps,
+    in the view's scope and under the quick filters that are on. The task's
+    result, a `QuickFilterCountsSchema`, goes over the stream to the caller
+    alone.
+
+    Returns:
+        202: The task started, with the view's address, its look-only parts
+            and a note for each part dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: An entry's read passed the engine's bounds (`QUERY_TIMEOUT`,
+            `QUERY_TEMP_FILE_LIMIT` or `QUERY_BUSY`)
+    """
+    return _started(task_service, task, address_service.view(query.state))
+
+
+@dashboard_bp.route("/values", methods=["GET"])
+@api.validate(
+    query=ValuesQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=ValuesResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_values(
+    query: ValuesQuerySchema,
+    counts_service: CountsService = Provide[ServiceContainer.counts_service],
+) -> Any:
+    """Answer one attribute's values for a filter's pane, at once: in the
+    view's scope without the attribute's own chips, so that its other
+    values show, each with its rows and their cost, those whose label or
+    key holds the words searched.
+
+    Returns:
+        200: The values, with the view's address, its look-only parts and a
+            note for each part dropped
+        400: The state has faults, every one named, or the catalogue has no
+            such dimension
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The read passed the engine's bounds (`QUERY_TIMEOUT`,
+            `QUERY_TEMP_FILE_LIMIT` or `QUERY_BUSY`)
+    """
+    found = counts_service.values(query.state, query.dimension, query.search)
+    return ValuesResponseSchema(
+        address=found.address.address,
+        look=list(found.address.look),
+        notes=list(found.address.notes),
+        zone=found.zone,
+        dimension=RowsDimensionSchema(
+            key=found.dimension.key,
+            label=found.dimension.label,
+            group=found.dimension.group,
+        ),
+        values=[
+            AttributeValueSchema(
+                key=value.key, label=value.label, count=value.count, cost=value.cost
+            )
+            for value in found.values
+        ],
+        total=found.total,
+    ).model_dump(mode="json")
+
+
+def _started(task_service: TaskService, task: BaseTask, view: View) -> Any:
+    """The task started on the view as it stands now, for the caller."""
+    auth_context = get_auth_context()
+    started = task_service.start_task(
+        task,
+        caller_subject=None if auth_context is None else auth_context.subject,
+        view=view,
+        now=datetime.now(UTC),
+    )
+    return (
+        CountsStartedSchema(
+            task_id=started.task_id,
+            status=started.status,
+            address=view.address.address,
+            look=list(view.address.look),
+            notes=list(view.address.notes),
+        ).model_dump(mode="json"),
+        202,
     )
 
 

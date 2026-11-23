@@ -3622,6 +3622,62 @@
         "title": "ConversationTurnSchema",
         "type": "object"
       },
+      "CountsStartedSchema.b67cf98": {
+        "description": "A task started that answers a view's counts over the stream the page\nholds, to the caller alone.",
+        "properties": {
+          "address": {
+            "description": "The view's address, its state in its normal form after `#dash/`",
+            "title": "Address",
+            "type": "string"
+          },
+          "look": {
+            "description": "Its look-only parts as the address writes them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Look",
+            "type": "array"
+          },
+          "notes": {
+            "description": "A note for each part it dropped",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CountsStartedSchema.b67cf98.TaskStatus",
+            "description": "The task's status as it starts"
+          },
+          "task_id": {
+            "description": "The task, as its events name it",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status",
+          "address",
+          "look",
+          "notes"
+        ],
+        "title": "CountsStartedSchema",
+        "type": "object"
+      },
+      "CountsStartedSchema.b67cf98.TaskStatus": {
+        "description": "Task execution status.",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
       "CustomRatioSchema.b67cf98": {
         "description": "A ratio of two measures kept under a name, for everyone: loaded with the\nworkflow's views, or made by a person.",
         "properties": {
@@ -22332,6 +22388,214 @@
         "title": "ValidationErrorElement",
         "type": "object"
       },
+      "ValuesQuerySchema.b67cf98": {
+        "description": "A view's state, the attribute whose values are listed, and the words\nthey are searched by.",
+        "properties": {
+          "dimension": {
+            "description": "The attribute's key",
+            "examples": [
+              "project"
+            ],
+            "title": "Dimension",
+            "type": "string"
+          },
+          "search": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Words a value's label or key holds, the case aside",
+            "examples": [
+              "recipe"
+            ],
+            "title": "Search"
+          },
+          "state": {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "examples": [
+              "t=qw&by=project&m=cost.sum&col=none"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "dimension"
+        ],
+        "title": "ValuesQuerySchema",
+        "type": "object"
+      },
+      "ValuesResponseSchema.b67cf98": {
+        "description": "An attribute's values in a view's scope, without its own chips.",
+        "properties": {
+          "address": {
+            "description": "The view's address, its state in its normal form after `#dash/`",
+            "title": "Address",
+            "type": "string"
+          },
+          "dimension": {
+            "$ref": "#/components/schemas/ValuesResponseSchema.b67cf98.RowsDimensionSchema"
+          },
+          "look": {
+            "description": "Its look-only parts as the address writes them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Look",
+            "type": "array"
+          },
+          "notes": {
+            "description": "A note for each part it dropped",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "total": {
+            "description": "The values the search keeps, those answered and the rest",
+            "title": "Total",
+            "type": "integer"
+          },
+          "values": {
+            "description": "The largest cost first, else the most rows, a time's in their order; at most 200",
+            "items": {
+              "$ref": "#/components/schemas/ValuesResponseSchema.b67cf98.AttributeValueSchema"
+            },
+            "title": "Values",
+            "type": "array"
+          },
+          "zone": {
+            "examples": [
+              "Europe/Amsterdam"
+            ],
+            "title": "Zone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "look",
+          "notes",
+          "zone",
+          "dimension",
+          "values",
+          "total"
+        ],
+        "title": "ValuesResponseSchema",
+        "type": "object"
+      },
+      "ValuesResponseSchema.b67cf98.AttributeValueSchema": {
+        "description": "One value of an attribute in a view's scope.",
+        "properties": {
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Their cost; null where its fact has no cost",
+            "title": "Cost"
+          },
+          "count": {
+            "description": "The rows of its fact that hold it",
+            "title": "Count",
+            "type": "integer"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value, typed as its dimension reads it",
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its label; null where the key is its own, as a date or a time",
+            "title": "Label"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "count",
+          "cost"
+        ],
+        "title": "AttributeValueSchema",
+        "type": "object"
+      },
+      "ValuesResponseSchema.b67cf98.RowsDimensionSchema": {
+        "description": "The dimension the rows are By.",
+        "properties": {
+          "group": {
+            "enum": [
+              "part",
+              "attribute",
+              "time",
+              "order"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "examples": [
+              "project"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Project"
+            ],
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "group"
+        ],
+        "title": "RowsDimensionSchema",
+        "type": "object"
+      },
       "WebPushSetupSchema.efd40b8": {
         "description": "What a browser needs to turn its notifications on.",
         "properties": {
@@ -24709,6 +24973,170 @@
         "x-required-role": "editor"
       }
     },
+    "/api/dashboard/counts/attributes": {
+      "post": {
+        "description": "Returns:     202: The task started, with the view's address, its look-only parts         and a note for each part dropped     400: The state has faults: the error names every one, and ends on a         correct example of each kind of part refused     401: No one is signed in     403: The caller lacks the editor role     409: An entry's read passed the engine's bounds (`QUERY_TIMEOUT`,         `QUERY_TEMP_FILE_LIMIT` or `QUERY_BUSY`)",
+        "operationId": "post__api_dashboard_counts_attributes",
+        "parameters": [
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountsStartedSchema.b67cf98"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Start By's counts of a view, asked when By's panel opens: each dimension's count of values in the view's scope, under every chip, its own included, and before a threshold on the By's rows or the outlier rows' chip. The task's events go over the stream to the caller alone: each fact's counts as a progress update as they are counted, its `data` an `AttributeCountsSchema`, then every dimension's as its result.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/counts/quick-filters": {
+      "post": {
+        "description": "Returns:     202: The task started, with the view's address, its look-only parts         and a note for each part dropped     400: The state has faults: the error names every one, and ends on a         correct example of each kind of part refused     401: No one is signed in     403: The caller lacks the editor role     409: An entry's read passed the engine's bounds (`QUERY_TIMEOUT`,         `QUERY_TEMP_FILE_LIMIT` or `QUERY_BUSY`)",
+        "operationId": "post__api_dashboard_counts_quick-filters",
+        "parameters": [
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountsStartedSchema.b67cf98"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Start the quick filters' counts and amounts of a view, asked with the view: each quick filter's count and its figure's sum over what it keeps, in the view's scope and under the quick filters that are on. The task's result, a `QuickFilterCountsSchema`, goes over the stream to the caller alone.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/dashboard/custom-ratios": {
       "post": {
         "description": "Returns:     201: The ratio     400: No name, or a side missing; or a side has faults: the error         names every one of both, and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     409: A ratio a person made has the name",
@@ -26147,6 +26575,124 @@
           }
         ],
         "summary": "Answer a series' events strip from the record at the query: the events in each of its points, by their kind, and those that count as errors; asked apart from the series, so that it never holds the chart up.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/values": {
+      "get": {
+        "description": "Returns:     200: The values, with the view's address, its look-only parts and a         note for each part dropped     400: The state has faults, every one named, or the catalogue has no         such dimension     401: No one is signed in     403: The caller lacks the editor role     409: The read passed the engine's bounds (`QUERY_TIMEOUT`,         `QUERY_TEMP_FILE_LIMIT` or `QUERY_BUSY`)",
+        "operationId": "get__api_dashboard_values",
+        "parameters": [
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The attribute's key",
+            "in": "query",
+            "name": "dimension",
+            "required": true,
+            "schema": {
+              "description": "The attribute's key",
+              "examples": [
+                "project"
+              ],
+              "title": "Dimension",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Words a value's label or key holds, the case aside",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Words a value's label or key holds, the case aside",
+              "examples": [
+                "recipe"
+              ],
+              "title": "Search"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValuesResponseSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Answer one attribute's values for a filter's pane, at once: in the view's scope without the attribute's own chips, so that its other values show, each with its rows and their cost, those whose label or key holds the words searched.",
         "tags": [],
         "x-required-role": "editor"
       }

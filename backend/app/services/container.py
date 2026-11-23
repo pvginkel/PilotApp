@@ -11,11 +11,13 @@ from app.config import Settings
 from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.bounds import Bounds
+from app.dashboard.counts import CountsService
 from app.dashboard.items import ItemsService
 from app.dashboard.lanes import LanesService
 from app.dashboard.rows import RowsService
 from app.dashboard.series import SeriesService
 from app.dashboard.strip import StripService
+from app.dashboard.tasks import AttributeCountsTask, QuickFilterCountsTask
 from app.engine.attachments import AttachmentStore, AttachService
 from app.engine.bus import EngineBus
 from app.engine.closed_chats import ClosedChats
@@ -663,6 +665,18 @@ class ServiceContainer(containers.DeclarativeContainer):
         db=db_session,
         address_service=address_service,
         bounds=dashboard_bounds,
+    )
+    # A view's two counts, each answered as a task, and an attribute's values
+    # (F154.6)
+    counts_service = providers.Factory(
+        CountsService,
+        db=db_session,
+        address_service=address_service,
+        bounds=dashboard_bounds,
+    )
+    attribute_counts_task = providers.Factory(AttributeCountsTask, container=__self__)
+    quick_filter_counts_task = providers.Factory(
+        QuickFilterCountsTask, container=__self__
     )
     # What the dashboard stores, Pilot's own system views among it (F155)
     dashboard_store_service = providers.Factory(
