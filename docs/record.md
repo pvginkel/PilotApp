@@ -192,7 +192,8 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   and `session_id`, Claude Code's id of the main thread, the key, deleted with its step (`ON DELETE
   CASCADE`). It holds no transcript's id: a read joins `transcripts` on the session id and no
   `agent_id` (`names_main_thread()`, `backend/app/models/step.py`), and finds none until a
-  collector has published the thread.
+  collector has published the thread. `ix_step_transcripts_session_id` serves the placement of a
+  round under a continuation ([`collection.md`](collection.md#a-launch-of-pilots)).
 - `step_timings`: a finished step of a work item's run, kept whatever becomes of the list, no key
   reaching a progress step from it ([`mcp.md`](mcp.md)): its `work`, `kind_code`, `ended_at`,
   `duration`, whole seconds from 0 (`ck_step_timings_duration`), `listed_ahead` and `marked`. One a
@@ -299,15 +300,17 @@ reaches a person or a member from
   (`ck_transcripts_adopted_project`). `file_size`, `file_modified_at`, `collected_at`, the server's
   time, and `read_under_id`, the collector's Component Version, are its last publication's;
   `replayed_size`, `bigint` as `file_size` is, the file's size at its last whole one, at most
-  `file_size` (`ck_transcripts_replayed_size`).
+  `file_size` (`ck_transcripts_replayed_size`). `first_call_at` and `last_call_at`, caches, are the
+  `completed_at` of its first and its last Call by `position`, both none while it has no Call.
 - `launches`: a run of Claude Code on a main thread, as its transcript's file shows it, from the
   file's first line with a time, the first such line after a cost line, or where a line names
   another version of Claude Code than the run's
   ([`collector.md`](collector.md#a-transcripts-facts)): `started_at` its first line's time and
   `ended_at` its last's that carries one, the open run's the last so far; and Pilot's own two,
   `session_id`, the Session that ran it, and `turn_seq`, that Session's Turn that started it, a Turn
-  of that Session by its key, never without the Session (`ck_launches_turn`), each set once by the
-  placement ([`collection.md`](collection.md#a-launch-of-pilots)). `sessions.conversation_id` is
+  of that Session by its key, never without the Session (`ck_launches_turn`), each set by the
+  placement ([`collection.md`](collection.md#a-launch-of-pilots)), once for a Launch a Turn
+  started. `sessions.conversation_id` is
   indexed for it (`ix_sessions_conversation_id`).
 - `component_versions`: a released version of one Component, unique by both, with `released_at`;
   `launch_components`: one Launch's use of one, one version of each Component a Launch
@@ -326,7 +329,15 @@ reaches a person or a member from
   the output's, `attributed_skill`, `attributed_plugin` and `miss_cause_code`; and its tokens, a
   column per Token Kind nothing is within, required, 0 where the file gives none:
   `input_tokens`, `cache_write_5m_tokens`, `cache_write_1h_tokens`, `cache_read_tokens` and
-  `output_tokens`.
+  `output_tokens`; `context_tokens`, the sum of the input and cache kinds', a generated column
+  PostgreSQL stores; and the caches the publication derives ([below](#the-caches)): `cost`,
+  `waited_seconds`, `rewind`, `cache_miss`, `past_ttl` and `launch_id`, the Launch it was made in,
+  set null when that Launch goes (`ix_calls_launch_id`).
+- `prices`: a rate in US dollars per million tokens for one Model and one Token Kind nothing is
+  within (`ck_prices_kind`), from `effective_at` on, with `above_context`, the context size in
+  tokens from which it applies, none for the base rate; unique by the four, a none counting as a
+  value. Its rows are the price file's: one is added and none is changed or removed
+  ([`collection.md`](collection.md#a-calls-cost-and-caches)).
 - `tool_calls`: a call of one tool a Call requested, with its result, carrying its Call's
   Transcript, its `tool_use_id` unique in it: `tool_code`, `first_argument`, `requested_at`,
   `returned_at`, `failed`, `exit_code` where it was not 0 (`ck_tool_calls_exit_code`),
@@ -376,6 +387,11 @@ Calls, Events and Context Parts; nothing follows a Transcript's, which no public
   `window_code` (`five_hour`, `seven_day`), `share`, a fraction of the window's quota that may pass
   1, `double precision` so that a reading's float compares equal to the one recorded, and
   `resets_at`.
+- `quota_weeks`: a seven-day window of the subscription's usage, from the reset that opened it to
+  the one that closes it, `starts_at` and `ends_at`, the end exclusive (`ck_quota_weeks_period`),
+  no two overlapping (`ex_quota_weeks_overlap`, a GiST exclusion), written by the server from the
+  readings ([`usage.md`](usage.md#the-quota-weeks)). The latest is the running week, and its
+  `ends_at` alone moves.
 - `quota_overrules`: a person's overrule of the week's usage halt: `kind_code` (`allowance`,
   `run_out`), `made_by_user_id`, `made_at`, `target`, the allowance's week share at which it ends,
   which run-out has none (`ck_quota_overrules_target`), and `ended_at`, written once by the server.
@@ -390,6 +406,30 @@ Calls, Events and Context Parts; nothing follows a Transcript's, which no public
   failure, cleared at the next attempt. At most one is not lifted, its `lifted_at` none
   (`uq_store_updates_unlifted`). No column names the jobs an update stopped: they are read from
   their stop, a job's Session stopped by Pilot while the update stood.
+
+**What the dashboard stores** ([`dashboard.md`](dashboard.md#what-the-dashboard-stores)), each row
+everyone's but a person's favourites, its stored expressions kept as a view's state writes them and
+read whole
+
+- `saved_views`: a view kept under a name, `origin_code`, an enum, `pilot` (Pilot's own, changed by
+  its release), `workflow` (loaded from the workflow's file) or `person`; `system`, a stored
+  generated column, true for the first two; `key`, a system view's alone, unique within its Origin,
+  by which a release or a load matches it (`ck_saved_views_key`); `name`, unique among the system
+  views and among the others (`(system, name)`); `state`, the view whole in its normal form without
+  `#dash/`; `note` and `saved_at`.
+- `view_stars`: one person's star on one saved view, `starred_at`, deleted with its view (`ON DELETE
+  CASCADE`).
+- `dimension_favourites`: one person's dimension, the catalogue's key, marked a favourite in one
+  list, `menu_code`, an enum, `by` or `color`.
+- `quick_filters`: a filter under a `label`, turned on by its unique `code`: `condition`, a chip as
+  a state writes it, never with a leading `~` (`ck_quick_filters_condition`), `marks` whether it
+  marks rather than filters, `amount_figure`, the figure summed beside its count, `note` and
+  `saved_at`. Revision 0054 wrote the five the dashboard ships with.
+- `custom_ratios`: two measures under a `name`, `numerator` and `denominator`, of Origin `workflow`
+  or `person` (`ck_custom_ratios_origin`), its `system` and its name's uniqueness as a saved view's;
+  `key`, unique, what a state names it by after `r:`, a word of lower-case letters, digits and
+  underscores (`ck_custom_ratios_key`), beginning `person_` exactly when a person made it
+  (`ck_custom_ratios_key_space`).
 
 **The notifications** ([`notifications.md`](notifications.md))
 
@@ -431,7 +471,9 @@ confirmation's `because` from it.
 
 The collector's ten are tables too, keyed by `code` with a `name`, which no revision writes: a
 publication writes a code's row, its `name` the code, when it first names it
-([`collection.md`](collection.md)): `components`, `models`, `tools` (with `mcp_server`),
+([`collection.md`](collection.md)): `components`, `models` (with `priced_as_code`, the Model whose
+Prices one with none of its own takes; the price file's load writes a model it names too,
+[`collection.md`](collection.md#a-calls-cost-and-caches)), `tools` (with `mcp_server`),
 `prompt_sources`, `stop_reasons`, `miss_causes`, `denial_kinds`, `compaction_triggers`,
 `event_kinds` (with `is_error`) and `context_part_kinds`. So is `step_kinds`, a step's kind, whose
 row a `set_progress` or `seed_step_timings` call writes when it first names the kind
@@ -456,6 +498,13 @@ The project's `state_code`, `archived`, `autopilot` and `paused` are caches of i
 written with each one ([`projects.md`](projects.md)). A session's `turns`, `turn_started_at` and
 `turn_ended_at` are caches of its turns, which the send, the turn's end and the session start
 refresh ([`sessions.md`](sessions.md)).
+
+A Call's `cost`, `waited_seconds`, `rewind`, `cache_miss`, `past_ttl` and `launch_id`, and a
+Transcript's `first_call_at` and `last_call_at`, are caches of the transcripts' facts and the
+Prices, derived in the transaction that takes a publication and, for what a server before them
+left without, at each deploy after the migrations
+([`collection.md`](collection.md#a-calls-cost-and-caches)). The three flags are none together only
+on a Call no derivation has reached yet.
 
 A step timing's `repo` is its work item's when the row was written, its `repo` label, else the
 `repo` of its Session's environment, none with neither (`repo_of_work()`,

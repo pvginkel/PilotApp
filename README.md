@@ -106,9 +106,17 @@ Claude Code records of its own choices, tool calls with their denials, and each 
 spawning call, which the collector, a pod of Pilot's
 own beside each stage's fleet's home, reads off their files every 30 s and publishes through a door
 of its own, whole or appended as a file grows, one live event per walk that wrote a row and
-a conversation's reading served to the backend alone; a launch a Turn of Pilot's started placed under
-its session, and a group of work done before Pilot standing as an adopted project, listed with the
-archived ones ([`docs/collection.md`](docs/collection.md), [`docs/collector.md`](docs/collector.md)).
+a conversation's reading served to the backend alone; a launch placed under the session that
+started it, a round under a continuation counted once, each call's cost from Pilot's dated price
+file, and a group of work done before Pilot standing as an adopted project, listed with the
+archived ones ([`docs/collection.md`](docs/collection.md), [`docs/collector.md`](docs/collector.md));
+and the cost dashboard's query engine behind its API: each view's state its address, a query
+language the server checks whole and refuses with every fault named, its rows, series, events
+strip, lanes, items and a conversation's calls read from the record at the query under a read-only
+deadline, By's and the quick filters' counts as tasks, a conversation's reading kept by the backend
+on a scratch volume, the quota weeks written from the usage readings, and the saved views, quick
+filters, custom ratios and favourites it stores, with Pilot's own system views and the workflow's
+loaded through the projects surface ([`docs/dashboard.md`](docs/dashboard.md)).
 The brain's own repository holds its map, its
 rules, its four skills, and `pilot.py`, the script it edits a project's folder with, on the block
 DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); its four skills' bodies are written:

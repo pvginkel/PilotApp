@@ -192,7 +192,8 @@ parent's lines, so a call a fork copied is held in its parent's thread alone
 **The conversation's turn.** Publications of one conversation, its main thread's and its
 sub-agents', take turns under a transaction's advisory lock, `(247, <a key drawn from the
 session_id>)` (`conversation_turn` in `backend/app/services/launch_placement.py`), which the relay
-takes too when a Session names the conversation (below).
+takes too when a Session names the conversation, and a work item's `set_progress` when a step newly
+names it (below).
 
 ## A launch of Pilot's
 
@@ -204,10 +205,86 @@ Session and no Turn; one started before every Turn of the conversation has neith
 arrive in either order, each in a transaction of its own, and both writers place under the
 conversation's turn: every publication of a main thread as its write ends, whole or appended, and
 the relay when a Session's first line gives it its `conversation_id`
-([`sessions.md`](sessions.md)). A Launch is placed once and keeps what it was placed under; a
-Launch the file lost goes with it. A transcript is on a project through its Launches' Sessions and
-holds no project of its own. A Launch a driver started under a loop session continues a
-transcript no Session's `conversation_id` names, and is not placed.
+([`sessions.md`](sessions.md)). A Launch a Turn started is placed once and keeps what it was placed
+under; a Launch the file lost goes with it. A transcript is on a project through its Launches'
+Sessions and holds no project of its own.
+
+**A round under a continuation** is counted once. A Launch a driver started under a loop session
+continues a transcript no Session's `conversation_id` names and a step of the work item that waited
+on its loop does, its Step Transcript ([`mcp.md`](mcp.md)): it is placed under the Session created
+last before the Launch's start among the Sessions whose steps name that transcript, and under that
+Session's Turn in flight then, none between two of them; one started before every such Session has
+neither. A continuation's list names the conversation again, so a step done before it stands on
+both work items' lists, and the round stays on the work item that was running when its process
+started. Such a Launch moves only to a Session created later than the one it stands under, and
+before its own start, whose step names its thread, so that it lands under the same Session whichever
+Pilot held first, the Launch or the naming; a step that leaves the list moves none. Its writers are
+the publication and `set_progress`, which places what Pilot holds of a conversation a step newly
+names (`PilotWorkService.set_progress`), each under the conversation's turn. A Session's Turns place
+the Launches of a thread its `conversation_id` names, and no step is read for them.
+
+## A Call's cost and caches
+
+**The price file**, `backend/app/prices.csv`, is the models' public list prices, in US dollars per
+million tokens: a row a model, a Token Kind nothing is within, the context size in tokens from which
+the rate applies, none for the base rate, the rate, and the date from which it applies, at 00:00
+UTC; a line that opens with `#` is a comment. A corrected or a new rate is a new row with its own
+date, never an edit of a row.
+
+**Its load** (`PriceService.load` in `backend/app/services/price_service.py`, the container's
+`price_service`) adds each row the Prices do not hold, and changes and removes none; a row that
+gives another rate than a Price held for its model, kind, context size and moment refuses the load
+whole, "a rate that changed is a new row with its own date", writing nothing. A model the file names
+that Pilot has not met is written. A deploy runs it after the migrations, so a refused load fails
+the deploy's `migrate` init container ([`deployment.md`](deployment.md#what-runs)), and so does the
+load of the dev seed. A load and the publications take turns (`prices_turn`): a load waits for the
+publications in flight and holds off the next until it has committed, so that no Call is priced at
+the Prices of before a load and written after it.
+
+**A Model the file does not name** is priced as another, set once, when it is first met
+(`priced_as`, `price_as_family`): a dated snapshot, `claude-haiku-4-5-20251001`, as the model it
+is a snapshot of where the Prices know that one, else as the newest model of its family the Prices
+know, its family the word after `claude-` in its code and the newest the one with the highest
+version in its code. A model priced so keeps it until the file names it, when a load drops it.
+
+**A Call's `cost`** is, for each Token Kind it counts tokens of, those tokens at the Price of that
+kind for its Model, or the Model it is priced as, with the greatest context size not above its
+`context_tokens`, in force at its `completed_at`, the latest one applying from that moment or
+before. A Call that counts tokens of a kind no such Price covers has no cost, which the dashboard
+reads as unpriced, never as 0; a kind it has no tokens of needs none. One statement says it, for a
+publication's Calls before it writes them and for the Calls stored. A load prices again the stored
+Calls of each Model whose prices it changed, writing only where the cost differs, and every stored
+Call with no cost (`ix_calls_unpriced`). A Turn's own `cost`, as `claude` reported it
+([`usage.md`](usage.md#each-turns-tokens)), stays beside the computed one as its cross-check, the
+catalogue's `reported_cost`.
+
+**A Call's other caches** (`backend/app/services/call_caches.py`), with its *predecessor* the Call
+its `predecessor_id` names:
+
+- `waited_seconds`: from its predecessor's `completed_at` to its own `sent_at`, or to its
+  `completed_at` where it has no `sent_at`; none with no predecessor.
+- `rewind`: its predecessor is another Call than the one before it by `position`.
+- `cache_miss`: with *left* the cache-read and cache-write tokens of its predecessor, and *ref* the
+  lesser of *left* and its own `context_tokens`, more than half of *ref* was not read from the
+  cache, and its `context_tokens` is at least nine tenths of *left*. A miss is this flag: the
+  collector's `miss_cause_code` can stand on a Call that is no miss.
+- `past_ttl`: its wait exceeds the lifetime of the cache its predecessor wrote, an hour where it
+  wrote a one-hour cache, else five minutes where it wrote a five-minute one; a predecessor that
+  wrote none left no lifetime to exceed.
+- `launch_id`: its Prompt's Launch, or, on a sub-agent's thread, the Launch of its main thread whose
+  start and end hold its `completed_at`, a Launch with no end holding every moment from its start
+  on; none where Pilot holds none.
+
+A Call with no predecessor is no rewind, no miss and past no lifetime. A Transcript's
+`first_call_at` and `last_call_at` are the `completed_at` of its first and its last Call by
+`position`. One statement says them all, for the publication and the deploy alike: a publication
+derives them for the Calls it carries before it writes them, sets the Transcript's two times with
+its row, and, on a main thread, leaves its sub-agents' Calls in the Launch that now holds them. A
+Call a server from before these caches wrote has none, its three flags none together, until a
+deploy's step after the migrations derives every such Call and then its Transcript's two times
+(`CallCacheService.derive`, the container's `call_cache_service`, through `ix_calls_underived`).
+*Took*, a Call's time from its sending to its completion, is no cache: the dashboard reads it at the
+query ([`dashboard.md`](dashboard.md#the-answers)).
 
 ## The adopted project
 
@@ -232,7 +309,7 @@ where its call names no group, whole or appended: the label is the call's
   is not one line or a summary that holds an ask or does not parse, `400`; no project holding the
   group on a stage with no service user, `409` `NO_SERVICE_USER`; a group on a transcript a Session
   of Pilot's ran, `409` `TRANSCRIPT_NOT_ADOPTABLE`. A Session ran the transcript where one runs a
-  Launch of it, or names its conversation while no project has adopted it. One adopted before a
+  Launch of it, or names its conversation, itself or by a step, while no project has adopted it. One adopted before a
   Session named it stays adopted, and its Launches stay off that Session, the server logging it at
   each placement; once a call names no group, the same write places them.
 
@@ -325,6 +402,11 @@ and the walks' testing route in `tests/api/test_testing_record.py`. The package 
 walk against these routes is `tests/collector/test_walk.py` ([`collector.md`](collector.md#testing-it)).
 `tests/support/publications.py` makes a call (`whole()`, `sub_agent()`, `appended()`,
 `collector_headers()`), `tests/support/transcripts.py` the rows, and `writes()` in
-`tests/support/database.py` counts the rows a block writes, by table. The adopted project's row and
-head are pinned in `frontend/tests/projects/adopted-project.spec.ts`. The Playwright backends have
-no `COLLECTOR_TOKEN` and no collector, so the door refuses every call there.
+`tests/support/database.py` counts the rows a block writes, by table. The cost and the caches are
+pinned in `tests/services/test_price_service.py`, `tests/services/test_call_caches.py` and
+`tests/services/test_quota_week_service.py`, with their revisions' tests in `tests/migrations/`.
+The adopted project's row and head are pinned in
+`frontend/tests/projects/adopted-project.spec.ts`. A Playwright backend's `COLLECTOR_TOKEN` is the
+fake collector's it serves itself ([`dashboard.md`](dashboard.md#testing-it)), so the door takes a
+call that carries it; no collector walks there, so its readiness check `collector` reads as it does
+where no walk has ended lately ([above](#a-walks-end)).

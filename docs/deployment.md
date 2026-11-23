@@ -133,7 +133,14 @@ PilotDeploy's chart `pilot`, on the estate's `homelab-shared` library chart, ren
 objects into each stage's namespace:
 
 - **Deployment `pilot`**, one pod. Its init container `migrate` applies the database migrations
-  (`python -m app.cli upgrade-db`) to completion before the pod's containers start: `backend` (the
+  (`python -m app.cli upgrade-db`) to completion before the pod's containers start, then runs the
+  step after them (`post_migration_hook` in `backend/app/startup.py`), each part logging a line:
+  it loads the price file and prices the Calls it changes ("Prices loaded: …",
+  [`collection.md`](collection.md#a-calls-cost-and-caches)), so that a file that changed a rate
+  it already holds fails the init container and the roll; gives each stored Call with none its
+  caches ("Call caches derived: …"); and makes Pilot's own system views of the dashboard what the
+  release holds ("Pilot's system views: …", [`dashboard.md`](dashboard.md#what-the-dashboard-stores)).
+  The containers: `backend` (the
   Flask API and the SSE stream, port 3501), `mcp` (Pilot's MCP server, the backend image's
   `python -m pilot_mcp`, port 3502) and `ui` (the SPA's nginx, port 3500, which proxies `/api/` to
   the backend and nothing else of it). `migrate` and `backend` run with the stage's `STAGE` and
@@ -168,8 +175,17 @@ objects into each stage's namespace:
   collector's bearer as `COLLECTOR_TOKEN` from the Secret `pilot-collector-token`, key `password`,
   a read that is not optional; where it has none it takes no bearer, so the collector's door
   refuses every call and the readiness check `collector` reads `disabled`
-  ([`collection.md`](collection.md#a-walks-end)). `migrate` sets none. The walk's interval and the
-  settling time are the backend's defaults on both stages.
+  ([`collection.md`](collection.md#a-walks-end)). With the bearer the backend asks the collector's
+  Service for a conversation's reading, `COLLECTOR_URL` `http://pilot-collector:3503`; with no
+  collector it has none and refuses every read of a conversation. It keeps the readings it is
+  served in `DASHBOARD_READINGS_DIR`, `/var/cache/pilot/readings`, the mount of the pod's volume
+  `readings`, an `emptyDir` on the node's disk with a `sizeLimit` of 1Gi, the backend's alone and
+  rendered on every stage: a new pod starts with none, and the two pods of a roll each keep their
+  own. The cache's bound, `DASHBOARD_READINGS_MAX_BYTES`, is the backend's 256 MiB default, and the
+  limit stands at least twice it, since the kubelet evicts the whole pod past the limit and counts
+  the files being written beside the kept ones ([`dashboard.md`](dashboard.md#a-conversations-reading)).
+  No other container gets any of them. The walk's interval and the settling time are the
+  backend's defaults on both stages, and so are the dashboard's engine's settings.
   Production's backend takes YouTrack's webhook token, which its tracker-events endpoint compares
   with each delivery's `X-YouTrack-Token` ([`waits.md`](waits.md)), as `YOUTRACK_WEBHOOK_TOKEN`
   from the Secret `pilot-youtrack-webhook-token`, key `token` ([below](#secrets)). That reference

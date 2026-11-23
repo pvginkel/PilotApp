@@ -33,7 +33,11 @@ alerting again, and the journal: the project's account the pass keeps from each 
 debrief, its row in the Documents tab, and Pilot's notable events with the stages' times in the
 debrief's notice, placed once the pass has ended, and the time a running work item still takes: a
 step's kind and its timing, the seed's tool, and the server's estimate as a badge on the head and
-the running work item, opening its figures on hover or press. Every green build of
+the running work item, opening its figures on hover or press, and the dashboard's query engine: a
+view's state as its address, checked whole, its answers read from the record at the query under its
+bounds, the two counts as tasks, a conversation's reading kept on scratch storage, a call's cost
+and caches and the quota weeks beneath them, and the views, quick filters, ratios and favourites it
+stores. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -153,7 +157,7 @@ the template gives an app no place for a plugin; the Playwright backends' own se
 in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
 the template gives an app no place for a backend setting under Playwright: this app's points each
 backend's controller at the fake it serves itself, and its chats at a store environment in that
-fake, and gives each backend a VAPID key of its own, minted at its start, and holds its waits'
+fake, and its collector at the fake collector it serves itself, and gives each backend a VAPID key of its own, minted at its start, and holds its waits'
 batcher off for a day; the Playwright run's own setup, which `frontend/tests/support/global-setup.ts`
 runs from `loadAppGlobalSetup()` in the app-owned `frontend/tests/support/global-setup-extensions.ts`
 in the runner's process, before it seeds the run's database, where the template gives an app no
@@ -334,8 +338,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   store's tree in step with the record, and its write lock, through which each save is a session's.
 - [`docs/collection.md`](docs/collection.md), [`docs/collector.md`](docs/collector.md): the
   transcripts a collector publishes: its door and bearer, the inventory, a publication whole or
-  appended, a walk's end, its event and readiness, a launch of Pilot's on its Session, the adopted
-  project, and the invented scenario with its load and its files; and the collector: its process
+  appended, a walk's end, its event and readiness, a launch of Pilot's on its Session and a round
+  under a continuation, a call's cost and caches, the adopted project, and the invented scenario with its load and its files; and the collector: its process
   and settings, the home, the walk, a transcript's lines and facts, the carry, the reading it
   serves, its image and its tests.
 - [`docs/jobs.md`](docs/jobs.md), [`docs/controller.md`](docs/controller.md),
@@ -362,10 +366,14 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   their reconcile, spacing and turn, and the fake push service.
 - [`docs/usage.md`](docs/usage.md): the usage limits: the reading, the week's and the five-hour
   halts and their settings, the overrule, the halt file, the hard stop, a run halted at its turn's
-  end, the nudge, the quota wall, and each turn's tokens and cost.
+  end, the nudge, the quota wall, the quota weeks, and each turn's tokens and cost.
 - [`docs/store-update.md`](docs/store-update.md): the store's update: `update-store`, the hold at the
   gate and on a chat's message, the stop, the reset, the reconcile, the retry and the lift, and its
   testing route.
+- [`docs/dashboard.md`](docs/dashboard.md): the dashboard's query engine: the catalogue, a view's
+  state and its refusal, the answers, the bounds, the two counts as tasks, a conversation's reading
+  and the fake collector, what the dashboard stores with its system views and the workflow's load,
+  and the timing.
 - [`docs/waits.md`](docs/waits.md): the brain's card and timed waits: the tracker-events endpoint
   and YouTrack's token, the due timer, a person's request, the batcher, the wait's run and its
   resume, the close and the testing routes.

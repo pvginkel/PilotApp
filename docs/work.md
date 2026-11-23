@@ -221,7 +221,9 @@ without its log. Its session publishes them while its turn runs, through `pilot-
 state, `pending`, `active` or `done`, and where the run gives one a why, a short line the
 workflow writes on the step that opens a repeat round, saying why the round before did not settle
 it. A step also carries, where the run gives them, its kind, its mark and the conversations that
-did its work, and the step going done its duration, which the server keeps as the step's timing
+did its work, by which the rounds its driver started are counted on the work item that ran them
+([`collection.md`](collection.md#a-launch-of-pilots)), and the step going done its duration, which
+the server keeps as the step's timing
 once, for the time a running work item still takes ([below](#the-time-it-still-takes)). The server
 stamps each step's start and end by its own clock, and with its start whether it stood listed
 ahead (`progress_steps`, [`record.md`](record.md)); the status's `progress` carries none of

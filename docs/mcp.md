@@ -18,8 +18,10 @@ the brain's tools serve is [`chats.md`](chats.md)'s.
 
 Beside the two, the same process serves `pilot-projects`, the projects surface, to any session of
 KubeCoder's production fleet, Pilot's own included: tools that read the projects Pilot manages,
-their items and their files, `start_project`, which starts a draft, and the tools of a conversation
-with Pilot about one ([`conversations.md`](conversations.md)). Its callers present one
+their items and their files, `start_project`, which starts a draft, the tools of a conversation
+with Pilot about one ([`conversations.md`](conversations.md)), and `load_workflow_views`, the
+workflow plugin's load of its views and ratios into the dashboard
+([`dashboard.md`](dashboard.md#the-workflows-load)). Its callers present one
 shared token, and its tools call the API's own routes under `/api/` as Pilot's service user
 ([below](#the-projects-surface)).
 
@@ -246,7 +248,9 @@ the work item holds none, after `[]` included. A kind's row is written the first
 it (`step_kinds`, [`record.md`](record.md)). A step's conversations are its Step Transcripts,
 rewritten by their difference, so that a list republished at each move rewrites none; they go with
 their step, and each finds its main thread's Transcript by its session id once a collector has
-published it ([`collection.md`](collection.md)).
+published it ([`collection.md`](collection.md)). A conversation a step newly names has the Launches
+Pilot holds of it placed in the same call, under the conversation's turn, as a round under a
+continuation is ([`collection.md`](collection.md#a-launch-of-pilots)).
 
 **A step's timing.** A step that stood on the list not `done` and goes `done` in a `set_progress`
 call that gives it a kind and a duration leaves a Step Timing: its kind, its duration, its end as
@@ -563,7 +567,8 @@ record's place: a work item's session log ([`work.md`](work.md)), the Chat tab a
 ## The projects surface
 
 `pilot-projects` is any session's: its tools read the projects Pilot manages, their items and their
-files, start a draft, and talk to Pilot about one, for a session in any environment that holds the surface's token, which
+files, start a draft, talk to Pilot about one, and load the workflow's views and ratios into the
+dashboard, for a session in any environment that holds the surface's token, which
 every environment of KubeCoder's production fleet does ([`deployment.md`](deployment.md#secrets)).
 Nothing of it is a session's of Pilot's: it takes no session's bearer, and its calls write no
 effect.
@@ -616,6 +621,7 @@ its id. Each tool is one call (`tools.py`, `register_projects_tools`; `api.py`,
 | `list_conversations(project?)` | `GET /api/conversations[?address=]` | `{conversations}`, the calling environment's, in the order they opened |
 | `interrupt(conversation)` | `POST /api/conversations/<id>/interrupt` | the conversation |
 | `end_conversation(conversation)` | `POST /api/conversations/<id>/end` | the conversation, closed |
+| `load_workflow_views(views, ratios)` | `PUT /api/dashboard/workflow` `{views, ratios}` | `{views, ratios, notes}`, each of the two `{added, changed, removed}` |
 
 The routes answer a list whole and the process pages it (`_page`): `offset`, and a `limit` of 100
 by default and 1,000 at most for `list_items` and `list_files`, 50 and 200 for `find_files`, a
@@ -638,6 +644,13 @@ switch: the draft is the plus's create by a call, its creator the service user, 
 until a person presses Create project ([`projects.md`](projects.md)). A `for` that names no person
 is the API's `404`, and a call while Pilot updates its store the API's `409` ("Pilot is updating");
 neither starts anything.
+
+`load_workflow_views` is the workflow plugin's command's to call (D272): it takes every entry of the
+plugin's file of views and ratios, a view `{key, name, state, note?}` and a ratio `{key, name,
+numerator, denominator, note?}`, at most 200 of each, and leaves the workflow's views and ratios on
+the dashboard those entries, by key, or refuses the call whole and changes nothing
+([`dashboard.md`](dashboard.md#the-workflows-load)). The route is the service user's alone, which
+every call of the surface is.
 
 ### A conversation
 
@@ -689,7 +702,7 @@ The server is pinned in `backend/tests/pilot_mcp/`: a real MCP client drives the
 test's session, and `test_main.py` runs `python -m pilot_mcp` as a process, with the projects
 surface's settings and without them. The projects surface is `TestTheProjectsSurface` and
 `TestTheProjectsDoor` in `test_server.py`, each tool's served schema and words `PROJECTS_SURFACE`
-there, and its tools `TestListProjects` to `TestGetResponse` in `test_tools.py`, a held
+there, and its tools `TestListProjects` to `TestLoadWorkflowViews` in `test_tools.py`, a held
 `get_response` on the API client's clock, the suite's `SteppedClock`
 (`backend/tests/support/pilot_mcp.py`), whose sleep takes no time, through the OIDC app's gate under a token the fake endpoint, `TokenEndpoint`,
 signs with the suite's key; the credential is `test_credential.py`, the settings `test_config.py`,

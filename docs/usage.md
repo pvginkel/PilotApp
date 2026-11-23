@@ -5,7 +5,7 @@ Pilot watches the subscription's usage app-wide, as KubeCoder's controller reads
 store, run under any limit, small in volume and mostly a person's own doing. This page is the
 limits as built: the reading, the week's and the five-hour halts and their settings, the week's
 overrule, what a halt does to running work, a run halted or paused at its turn's end, the nudge,
-the quota wall, and each turn's tokens. The halts show on the gold bar ([`ui.md`](ui.md)), a held
+the quota wall, the quota weeks, and each turn's tokens. The halts show on the gold bar ([`ui.md`](ui.md)), a held
 or stopped work item's line says why, a job's session log ([`work.md`](work.md)), the tables are in
 [`record.md`](record.md), and the loops and timers run as [`jobs.md`](jobs.md) says.
 
@@ -17,6 +17,7 @@ or stopped work item's line says why, a job's session log ([`work.md`](work.md))
 | `QuotaOverruleService` (`quota_overrule_service.py`) | a person's overrule |
 | `HaltFileService` (`halt_file_service.py`) | the halt file |
 | `quota_wall.py` | the quota wall: how it is told, and when there is quota again |
+| `QuotaWeekService` (`quota_week_service.py`) | the quota weeks, brought to each reading's reset |
 | `token_counts.py` | each turn's tokens and cost |
 
 All are in `backend/app/services/`. The hard stop and the nudge are `SessionStartService`'s
@@ -281,6 +282,39 @@ that will not lift, turn after turn. Until that reading comes, a wall no reading
 its nudge owed from the turn's end, and a job's Retry stays refused, until a reading decides it
 (D223).
 
+## The quota weeks
+
+A quota week is a seven-day window of the subscription's usage, from one reset of the seven-day
+window to the next, the end exclusive, the weeks leaving no gap and none overlapping
+(`quota_weeks`, [`record.md`](record.md)). The latest is the running week, its end the reset its
+reading names, and its end alone ever moves. The dashboard counts a Call in the week that holds its
+`completed_at` ([`dashboard.md`](dashboard.md)).
+
+`QuotaWeekService` hears each reading `UsageService` records and brings the weeks to the reset its
+seven-day share names (`follow`), under `LOCK TABLE quota_weeks IN EXCLUSIVE MODE`, so two backends
+in a roll write a week once. A reading names one reset a second or two apart from poll to poll, so
+two resets under a minute apart are one, and a week keeps the end first named. The reset closes a
+window that opened seven days before it:
+
+- a reset the running week ends at, or one not after its start, changes nothing;
+- a window that opened no later than the running week is the running week under another end, and
+  its end moves to the reset;
+- a window that opened inside the running week cut it short: the running week ends where the window
+  opened, and the window is the next week;
+- a window that opened after the running week's end leaves weeks no reading named: they are counted
+  back from the reset, seven days each, the earliest starting at the running week's end, cut short.
+
+So a week enters the record with the first reading recorded after the reset that opened it, and
+until then the latest week is the one before it. The weeks before the first stored reading are
+revision `0052`'s, by the fixed rule, Thursday 10:00 UTC, from Thursday 2 January 2025, and those
+after it are the stored readings' resets followed the same way; with no reading stored, the revision
+writes through the week that holds its run. So the table always holds a running week.
+
+**A week's label** (`label`) is the ISO year and week of its Thursday, the first Thursday in UTC it
+holds a moment of, and a week cut short with no Thursday in it is labelled by its start's date in
+UTC. Two weeks may share a label, where a reset cut a week short on its Thursday, so a view of the
+dashboard names a week by the instant it starts.
+
 ## Each turn's tokens
 
 Every Turn of every Session, a work item's, a job's, a chat's and a conversation's alike, keeps the tokens its run
@@ -311,8 +345,10 @@ raw file the relay reads, and the controller's result frame carries no usage, so
 counted. A line whose `modelUsage` is not a map of per-model counts,
 each a non-negative integer, writes nothing, and a `total_cost_usd` that is no finite non-negative
 number leaves `cost` null: the relay never fails on what `claude` printed. A turn cut short with no
-`result` line keeps none. Nothing in the API or the app shows them; they are read with a query of
-`token_counts` joined to `turns`.
+`result` line keeps none. The dashboard reads them on its Turn fact, a Turn's `cost` as
+`reported_cost`, the cross-check beside the cost computed from each Call's tokens, and a Turn whose
+conversation was never collected stands in for its Calls with its own cost and tokens
+([`dashboard.md`](dashboard.md#the-catalogue)).
 
 ## Testing it
 
@@ -323,7 +359,8 @@ overrule's ends in `test_usage_halts.py`; the overrule in `test_quota_overrule_s
 halt file in `test_halt_file_service.py`; the wall in `test_quota_wall.py`; the hard stop, the nudge
 and the wall's nudge in `test_session_start_service.py`; a halted end, the wall's end and the tokens
 in `test_relay_service.py`, with `test_token_counts.py`, and revision `0027` in
-`backend/tests/migrations/test_0027_turns_own_figures.py`; and the gate's halts in
+`backend/tests/migrations/test_0027_turns_own_figures.py`; the quota weeks in
+`test_quota_week_service.py` and revision `0052` in `test_0052_quota_weeks.py`; and the gate's halts in
 `test_start_gate.py`. The fake controller serves the reading as a test sets it
 ([`controller.md`](controller.md)), `backend/tests/fixtures/raw/turn_wall.jsonl` is an invented
 turn at the wall, and `turn_resumed.jsonl` beside it an invented turn that carries
