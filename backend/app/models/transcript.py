@@ -156,8 +156,8 @@ class Transcript(db.Model):  # type: ignore[name-defined]
 class Launch(db.Model):  # type: ignore[name-defined]
     """A start of a Claude Code process on a main-thread Transcript, with its
     life until the process exits: `started_at` the time of the first line it
-    wrote, `ended_at` of the last that carries one, none while it runs (DB
-    586).
+    wrote, `ended_at` of the last that carries one, the open one's the last
+    so far (DB 586).
 
     `session_id` and `turn_seq` are Pilot's: the Session that ran it and,
     of that Session, the Turn that started it, none for a Launch started

@@ -103,7 +103,9 @@ class PublishedLaunchSchema(_Published):
     )
     ended_at: AwareDatetime | None = Field(
         default=None,
-        description="The time of its last line that carries one, none while it runs",
+        description=(
+            "The time of its last line that carries one, the open one's the last so far"
+        ),
     )
     components: list[PublishedComponentSchema] = Field(
         min_length=1, description="The versions it ran with, one of each Component"

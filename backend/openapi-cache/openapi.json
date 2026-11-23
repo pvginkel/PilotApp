@@ -10089,7 +10089,7 @@
               }
             ],
             "default": null,
-            "description": "The time of its last line that carries one, none while it runs",
+            "description": "The time of its last line that carries one, the open one's the last so far",
             "title": "Ended At"
           },
           "prompts": {
