@@ -5301,13 +5301,22 @@
               4380
             ],
             "title": "Ran Seconds"
+          },
+          "step_figures": {
+            "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.StepFiguresSchema"
+            },
+            "title": "Step Figures",
+            "type": "array"
           }
         },
         "required": [
           "minutes",
           "longer_than_usual",
           "kind",
-          "ran_seconds"
+          "ran_seconds",
+          "step_figures"
         ],
         "title": "EstimateSchema",
         "type": "object"
@@ -5899,6 +5908,69 @@
         ],
         "title": "SessionState",
         "type": "string"
+      },
+      "ItemDocumentSchema.1fdd8ae.StepFiguresSchema": {
+        "description": "A running step's row of the figures a badge opens on hover or press\n(F156.13), read against the last timings of its kind that had ended when\nit began, so that they hold still while it runs (F156.5). Each time is\nin minutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "kind": {
+            "description": "The step's kind, as its run published it",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "longest_minutes": {
+            "description": "The longest of them, to the nearest minute: past it the badge turns red, `longer_than_usual` `outrun`",
+            "examples": [
+              52
+            ],
+            "title": "Longest Minutes",
+            "type": "integer"
+          },
+          "normal_minutes": {
+            "description": "Normal: the median of the timings it is read against, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              20
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: their 90th percentile, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              32
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the time it has run, from the later of its start and the running turn's, to the nearest minute",
+            "examples": [
+              18
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          },
+          "timings": {
+            "description": "How many timings it is read against: the setting's 60, fewer while its kind's history holds fewer",
+            "examples": [
+              60
+            ],
+            "title": "Timings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes",
+          "longest_minutes",
+          "timings"
+        ],
+        "title": "StepFiguresSchema",
+        "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.StepSchema": {
         "description": "The plan task an item serves, whose title its step divider carries (F9).",
@@ -8405,13 +8477,22 @@
               4380
             ],
             "title": "Ran Seconds"
+          },
+          "step_figures": {
+            "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
+            "items": {
+              "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.StepFiguresSchema"
+            },
+            "title": "Step Figures",
+            "type": "array"
           }
         },
         "required": [
           "minutes",
           "longer_than_usual",
           "kind",
-          "ran_seconds"
+          "ran_seconds",
+          "step_figures"
         ],
         "title": "EstimateSchema",
         "type": "object"
@@ -8489,6 +8570,14 @@
               4380
             ],
             "title": "Ran Seconds"
+          },
+          "step_figures": {
+            "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
+            "items": {
+              "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.StepFiguresSchema"
+            },
+            "title": "Step Figures",
+            "type": "array"
           }
         },
         "required": [
@@ -8496,9 +8585,73 @@
           "longer_than_usual",
           "kind",
           "ran_seconds",
+          "step_figures",
           "item_id"
         ],
         "title": "ProjectEstimateSchema",
+        "type": "object"
+      },
+      "ProjectEstimatesSchema.e86ccd6.StepFiguresSchema": {
+        "description": "A running step's row of the figures a badge opens on hover or press\n(F156.13), read against the last timings of its kind that had ended when\nit began, so that they hold still while it runs (F156.5). Each time is\nin minutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "kind": {
+            "description": "The step's kind, as its run published it",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "longest_minutes": {
+            "description": "The longest of them, to the nearest minute: past it the badge turns red, `longer_than_usual` `outrun`",
+            "examples": [
+              52
+            ],
+            "title": "Longest Minutes",
+            "type": "integer"
+          },
+          "normal_minutes": {
+            "description": "Normal: the median of the timings it is read against, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              20
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: their 90th percentile, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              32
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the time it has run, from the later of its start and the running turn's, to the nearest minute",
+            "examples": [
+              18
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          },
+          "timings": {
+            "description": "How many timings it is read against: the setting's 60, fewer while its kind's history holds fewer",
+            "examples": [
+              60
+            ],
+            "title": "Timings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes",
+          "longest_minutes",
+          "timings"
+        ],
+        "title": "StepFiguresSchema",
         "type": "object"
       },
       "ProjectEstimatesSchema.e86ccd6.WorkItemEstimateSchema": {
@@ -8958,6 +9111,14 @@
               4380
             ],
             "title": "Ran Seconds"
+          },
+          "step_figures": {
+            "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
+            "items": {
+              "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.StepFiguresSchema"
+            },
+            "title": "Step Figures",
+            "type": "array"
           }
         },
         "required": [
@@ -8965,6 +9126,7 @@
           "longer_than_usual",
           "kind",
           "ran_seconds",
+          "step_figures",
           "item_id"
         ],
         "title": "ProjectEstimateSchema",
@@ -9049,6 +9211,69 @@
           "environment"
         ],
         "title": "RunningWorkSchema",
+        "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6.StepFiguresSchema": {
+        "description": "A running step's row of the figures a badge opens on hover or press\n(F156.13), read against the last timings of its kind that had ended when\nit began, so that they hold still while it runs (F156.5). Each time is\nin minutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "kind": {
+            "description": "The step's kind, as its run published it",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "longest_minutes": {
+            "description": "The longest of them, to the nearest minute: past it the badge turns red, `longer_than_usual` `outrun`",
+            "examples": [
+              52
+            ],
+            "title": "Longest Minutes",
+            "type": "integer"
+          },
+          "normal_minutes": {
+            "description": "Normal: the median of the timings it is read against, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              20
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: their 90th percentile, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              32
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the time it has run, from the later of its start and the running turn's, to the nearest minute",
+            "examples": [
+              18
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          },
+          "timings": {
+            "description": "How many timings it is read against: the setting's 60, fewer while its kind's history holds fewer",
+            "examples": [
+              60
+            ],
+            "title": "Timings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes",
+          "longest_minutes",
+          "timings"
+        ],
+        "title": "StepFiguresSchema",
         "type": "object"
       },
       "ProjectHeadSchema.e86ccd6.TaskStatus": {
@@ -13507,13 +13732,22 @@
               4380
             ],
             "title": "Ran Seconds"
+          },
+          "step_figures": {
+            "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.StepFiguresSchema"
+            },
+            "title": "Step Figures",
+            "type": "array"
           }
         },
         "required": [
           "minutes",
           "longer_than_usual",
           "kind",
-          "ran_seconds"
+          "ran_seconds",
+          "step_figures"
         ],
         "title": "EstimateSchema",
         "type": "object"
@@ -14105,6 +14339,69 @@
         ],
         "title": "SessionState",
         "type": "string"
+      },
+      "TimelineSchema.1fdd8ae.StepFiguresSchema": {
+        "description": "A running step's row of the figures a badge opens on hover or press\n(F156.13), read against the last timings of its kind that had ended when\nit began, so that they hold still while it runs (F156.5). Each time is\nin minutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "kind": {
+            "description": "The step's kind, as its run published it",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "longest_minutes": {
+            "description": "The longest of them, to the nearest minute: past it the badge turns red, `longer_than_usual` `outrun`",
+            "examples": [
+              52
+            ],
+            "title": "Longest Minutes",
+            "type": "integer"
+          },
+          "normal_minutes": {
+            "description": "Normal: the median of the timings it is read against, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              20
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: their 90th percentile, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              32
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the time it has run, from the later of its start and the running turn's, to the nearest minute",
+            "examples": [
+              18
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          },
+          "timings": {
+            "description": "How many timings it is read against: the setting's 60, fewer while its kind's history holds fewer",
+            "examples": [
+              60
+            ],
+            "title": "Timings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes",
+          "longest_minutes",
+          "timings"
+        ],
+        "title": "StepFiguresSchema",
+        "type": "object"
       },
       "TimelineSchema.1fdd8ae.StepSchema": {
         "description": "The plan task an item serves, whose title its step divider carries (F9).",
@@ -15951,13 +16248,22 @@
               4380
             ],
             "title": "Ran Seconds"
+          },
+          "step_figures": {
+            "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
+            "items": {
+              "$ref": "#/components/schemas/WorkSchema.1fdd8ae.StepFiguresSchema"
+            },
+            "title": "Step Figures",
+            "type": "array"
           }
         },
         "required": [
           "minutes",
           "longer_than_usual",
           "kind",
-          "ran_seconds"
+          "ran_seconds",
+          "step_figures"
         ],
         "title": "EstimateSchema",
         "type": "object"
@@ -16199,6 +16505,69 @@
         ],
         "title": "SessionState",
         "type": "string"
+      },
+      "WorkSchema.1fdd8ae.StepFiguresSchema": {
+        "description": "A running step's row of the figures a badge opens on hover or press\n(F156.13), read against the last timings of its kind that had ended when\nit began, so that they hold still while it runs (F156.5). Each time is\nin minutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "kind": {
+            "description": "The step's kind, as its run published it",
+            "examples": [
+              "code-writer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "longest_minutes": {
+            "description": "The longest of them, to the nearest minute: past it the badge turns red, `longer_than_usual` `outrun`",
+            "examples": [
+              52
+            ],
+            "title": "Longest Minutes",
+            "type": "integer"
+          },
+          "normal_minutes": {
+            "description": "Normal: the median of the timings it is read against, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              20
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: their 90th percentile, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              32
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the time it has run, from the later of its start and the running turn's, to the nearest minute",
+            "examples": [
+              18
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          },
+          "timings": {
+            "description": "How many timings it is read against: the setting's 60, fewer while its kind's history holds fewer",
+            "examples": [
+              60
+            ],
+            "title": "Timings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes",
+          "longest_minutes",
+          "timings"
+        ],
+        "title": "StepFiguresSchema",
+        "type": "object"
       },
       "WorkSchema.1fdd8ae.StopCause": {
         "description": "Why a work item stopped when no person did. A stop made elsewhere, its\nenvironment stopped under its turn (design 2 §9.6; F71): it settled\n`stopped`, it settled `deleting`, the controller has it no longer, or it\nsettled `error`; the `server` record that ended the turn holds it. A\nusage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that\nholds it, the week's or the five-hour's, or neither once both lifted,\nread at display (decision 66). A job's stop by Pilot at the store's\nupdate, derived from its stop (F144.4; DB 280).",

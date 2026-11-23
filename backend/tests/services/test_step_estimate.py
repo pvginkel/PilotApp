@@ -1,5 +1,6 @@
 """The time a running work item still takes (F156.4 to F156.7): the price,
-the running step, the repeats owed, no estimate, longer than usual and the
+the running step and the timings it is read against, the repeats owed, no
+estimate, longer than usual, the running step's figures (F156.13) and the
 project's pick."""
 
 import itertools
@@ -26,6 +27,7 @@ from app.schemas.timeline import LongerThanUsual
 from app.services.container import ServiceContainer
 from app.services.step_estimate import (
     StepEstimates,
+    StepFigures,
     WorkEstimate,
     project_estimate,
     work_estimates,
@@ -183,6 +185,34 @@ def _timed(
             repo=repo,
         )
         for older, each in enumerate(minutes)
+    )
+    db.flush()
+
+
+def _timed_at(
+    db: DbSession,
+    work_id: uuid.UUID,
+    kind: str,
+    minutes: Sequence[float],
+    *,
+    ended: float,
+    listed: bool | None = True,
+    repo: str | None = REPO,
+) -> None:
+    """Timings of `kind` on the Work, one per figure of `minutes`, every one
+    ended `ended` minutes ago."""
+    _kinds(db, {kind})
+    db.add_all(
+        StepTiming(
+            work_id=work_id,
+            kind_code=kind,
+            ended_at=_ago(ended),
+            duration=round(each * MINUTE),
+            listed_ahead=listed,
+            code=f"timed-{next(_numbers)}",
+            repo=repo,
+        )
+        for each in minutes
     )
     db.flush()
 
@@ -898,6 +928,295 @@ class TestWorkEstimatesLongerThanUsual:
         assert _estimates(session, [run])[run].longer_than_usual is None
 
 
+class TestWorkEstimatesAsTheStepBegan:
+    """A running step is read against the timings of its kind that had
+    ended when it began, so that they hold still while it runs (F156.5); a
+    step not begun and the repeats owed read the window as it stands
+    (F156.4)."""
+
+    def test_a_timing_ended_since_it_began_moves_neither_its_time_left_nor_its_row(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        _timed(session, past, "write", [20] * 9 + [45])
+        _list(session, run, [_active("write", 30)])
+        before = _estimates(session, [run])[run]
+
+        _timed_at(session, past, "write", [100] * 10, ended=10)
+        after = _estimates(session, [run])[run]
+
+        assert after == before
+        assert _minutes(after) == pytest.approx(15)
+
+    def test_a_timing_ended_since_it_began_does_not_keep_its_estimate(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        _timed(session, past, "write", [20] * 9 + [45])
+        _list(session, run, [_active("write", 46)])
+        _timed_at(session, past, "write", [100], ended=1)
+
+        estimate = _estimates(session, [run])[run]
+
+        assert (estimate.seconds, estimate.longer_than_usual) == (
+            None,
+            LongerThanUsual.OUTRUN,
+        )
+
+    def test_a_timing_ended_at_the_instant_it_began_had_ended_when_it_began(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """One publication ends a step and begins the next at one instant."""
+        _timed(session, past, "write", [20] * 9)
+        _timed_at(session, past, "write", [45], ended=30)
+        _list(session, run, [_active("write", 30)])
+
+        estimate = _estimates(session, [run])[run]
+
+        assert estimate.longer_than_usual is None
+        assert _minutes(estimate) == pytest.approx(15)
+        assert [row.timings for row in estimate.step_figures] == [10]
+
+    def test_the_repos_ten_are_counted_among_the_timings_ended_when_it_began(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """Nine of the repo's own when it began, and ten in another repo: it
+        is read against all repos', 35 more, though the repo's tenth has
+        ended since and its own would leave 5."""
+        _timed(session, past, "write", [10] * 9)
+        _timed(session, past, "write", [40] * 10, repo=OTHER_REPO)
+        _list(session, run, [_active("write", 5)])
+        _timed_at(session, past, "write", [10], ended=1)
+
+        estimate = _estimates(session, [run])[run]
+
+        assert _minutes(estimate) == pytest.approx(35)
+        assert [row.timings for row in estimate.step_figures] == [19]
+
+    def test_the_five_that_began_as_it_did_are_counted_among_those_ended_when_it_began(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """Four unlisted when it began: the kind's last taken whole, 10
+        more, though a fifth has ended since and they alone would leave 90."""
+        _timed(session, past, "write", [20] * 6)
+        _timed(session, past, "write", [100] * 4, listed=False, age=1.5)
+        _list(session, run, [_active("write", 10, listed=False)])
+        _timed_at(session, past, "write", [100], listed=False, ended=1)
+
+        assert _minutes(_estimates(session, [run])[run]) == pytest.approx(10)
+
+    def test_a_kind_with_fewer_than_five_timings_when_it_began_leaves_none(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """However many have ended since; a mark stands alone, with no
+        row."""
+        _timed(session, past, "write", [20] * 4)
+        _list(session, run, [_active("write", 5)])
+        _timed_at(session, past, "write", [20] * 6, ended=1)
+
+        assert _estimates(session, [run]) == {}
+
+        _list_again(session, run, [_active("write", 5, marked=True)])
+        estimate = _estimates(session, [run])[run]
+
+        assert (
+            estimate.seconds,
+            estimate.longer_than_usual,
+            estimate.step_figures,
+        ) == (None, LongerThanUsual.MARKED, ())
+
+    def test_a_step_not_begun_and_the_repeats_owed_read_the_window_as_it_stands(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """Ten listed and five unlisted of 40 minutes ended since the step
+        began, before five of the ten listed of 20 that had ended then: the
+        window prices a `write` at 700 / 15 minutes, 200 / 15 of them its
+        repeats' share; the running step is read against the ten of 20, 15
+        more."""
+        _timed(session, past, "write", [20] * 10)
+        _list(session, run, [_active("write", 5), _pending("write")])
+        _timed_at(session, past, "write", [40] * 10, ended=1)
+        _timed_at(session, past, "write", [40] * 5, listed=False, ended=1)
+
+        assert _minutes(_estimates(session, [run])[run]) == pytest.approx(
+            15 + 700 / 15 + 200 / 15
+        )
+
+
+class TestWorkEstimatesStepFigures:
+    """A running step's row of the figures on hover or press (F156.13), of
+    the timings it is read against."""
+
+    def test_its_row_is_its_time_run_and_the_median_the_90th_percentile_and_the_longest(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """The 90th percentile between the ninth and the tenth of ten: 26
+        and a tenth of the 34 minutes to 60."""
+        _timed(session, past, "write", [10, 12, 14, 16, 18, 20, 22, 24, 26, 60])
+        _list(session, run, [_active("write", 7), _pending("write")])
+
+        [row] = _estimates(session, [run])[run].step_figures
+
+        assert (row.kind, row.so_far_seconds, row.longest_seconds, row.timings) == (
+            "write",
+            7 * MINUTE,
+            60 * MINUTE,
+            10,
+        )
+        assert row.normal_seconds == pytest.approx(19 * MINUTE)
+        assert row.slow_seconds == pytest.approx(29.4 * MINUTE)
+        assert (
+            row.so_far_minutes,
+            row.normal_minutes,
+            row.slow_minutes,
+            row.longest_minutes,
+        ) == (7, 19, 29, 60)
+
+    def test_it_reads_the_timings_the_time_left_reads(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """Those that began as it did where five did, under the running
+        step's setting."""
+        _timed(session, past, "write", [20] * 6)
+        _timed(session, past, "write", [40, 60, 80, 100, 120], listed=False, age=1.5)
+        _list(session, run, [_active("write", 10, listed=False)])
+
+        [row] = _estimates(session, [run])[run].step_figures
+        [fewer] = _estimates(session, [run], running=3)[run].step_figures
+
+        assert (row.normal_seconds, row.longest_seconds, row.timings) == (
+            80 * MINUTE,
+            120 * MINUTE,
+            5,
+        )
+        assert (fewer.normal_seconds, fewer.longest_seconds, fewer.timings) == (
+            60 * MINUTE,
+            80 * MINUTE,
+            3,
+        )
+
+    def test_several_running_steps_have_a_row_each_in_the_lists_order(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        _timed(session, past, "write", [30] * 10)
+        _timed(session, past, "review", [8] * 10)
+        _list(session, run, [_active("review", 2), _active("write", 10)])
+
+        rows = _estimates(session, [run])[run].step_figures
+
+        assert [(row.kind, row.so_far_minutes, row.normal_minutes) for row in rows] == [
+            ("review", 2, 8),
+            ("write", 10, 30),
+        ]
+
+    def test_a_step_with_no_kind_or_too_few_timings_has_no_row_and_the_rest_stand(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """A work item with no estimate whose marked step's alert stands
+        alone keeps that step's row."""
+        _timed(session, past, "write", [20] * 10)
+        _timed(session, past, "sweep", [5] * 4)
+        _list(
+            session,
+            run,
+            [
+                _active("sweep", 3),
+                _active("write", 5, marked=True),
+                _active(None, 2),
+            ],
+        )
+
+        estimate = _estimates(session, [run])[run]
+
+        assert (estimate.seconds, estimate.longer_than_usual) == (
+            None,
+            LongerThanUsual.MARKED,
+        )
+        assert [row.kind for row in estimate.step_figures] == ["write"]
+
+    def test_a_step_that_outran_its_60_keeps_its_row(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        _timed(session, past, "write", [20] * 9 + [45])
+        _list(session, run, [_active("write", 46)])
+
+        estimate = _estimates(session, [run])[run]
+
+        assert estimate.longer_than_usual is LongerThanUsual.OUTRUN
+        assert [
+            (row.so_far_minutes, row.longest_minutes) for row in estimate.step_figures
+        ] == [(46, 45)]
+
+    def test_its_time_run_counts_from_the_later_of_its_start_and_the_turns(
+        self,
+        session: DbSession,
+        project: Project,
+        project_session: models.Session,
+        past: uuid.UUID,
+    ) -> None:
+        resumed = _run(session, project, project_session, turn=4)
+        _timed(session, past, "write", [30] * 10)
+        _list(session, resumed, [_active("write", 10)])
+
+        [row] = _estimates(session, [resumed])[resumed].step_figures
+
+        assert row.so_far_seconds == 4 * MINUTE
+
+
+def _row(seconds: float) -> StepFigures:
+    return StepFigures(
+        kind="write",
+        so_far_seconds=seconds,
+        normal_seconds=seconds,
+        slow_seconds=seconds,
+        longest_seconds=round(seconds),
+        timings=60,
+    )
+
+
+class TestStepFiguresMinutes:
+    @pytest.mark.parametrize(
+        ("seconds", "words"),
+        [
+            (0, 0),
+            (29, 0),
+            (30, 1),
+            (18 * MINUTE + 29, 18),
+            (18 * MINUTE + 30, 19),
+            (59 * MINUTE + 40, 60),
+            (130 * MINUTE + 20, 130),
+            (132 * MINUTE + 31, 133),
+        ],
+    )
+    def test_a_time_run_and_the_longest_are_to_the_nearest_minute(
+        self, seconds: float, words: int
+    ) -> None:
+        row = _row(seconds)
+
+        assert (row.so_far_minutes, row.longest_minutes) == (words, words)
+
+    @pytest.mark.parametrize(
+        ("minutes", "words"),
+        [
+            (0.4, 0),
+            (19.4, 19),
+            (19.5, 20),
+            (59.4, 59),
+            (59.5, 60),
+            (62.4, 60),
+            (62.5, 65),
+            (130.4, 130),
+            (132.4, 130),
+            (132.5, 135),
+            (627, 625),
+        ],
+    )
+    def test_normal_and_slow_are_to_the_nearest_minute_under_an_hour_and_five_from_one(
+        self, minutes: float, words: int
+    ) -> None:
+        row = _row(minutes * MINUTE)
+
+        assert (row.normal_minutes, row.slow_minutes) == (words, words)
+
+
 class TestWorkEstimatesRead:
     def test_the_estimates_stand_in_the_order_asked_with_the_time_each_has_run(
         self,
@@ -942,24 +1261,26 @@ class TestWorkEstimatesRead:
         past: uuid.UUID,
     ) -> None:
         """The running Sessions, their lists, their repos' own timings and
-        all repos'."""
+        all repos', as they stand and as they stood when each running step
+        began."""
         works = [
             _run(session, project, project_session, repo=repo)
             for repo in (REPO, OTHER_REPO, None)
         ]
         for kind in ("write", "review", "ship"):
             _timed(session, past, kind, [20] * 10)
-        for work_id in works:
+        for began, work_id in enumerate(works, start=5):
             _list(
                 session,
                 work_id,
-                [_active("write", 5), _pending("review"), _pending("ship")],
+                [_active("write", began), _active("review", 2), _pending("ship")],
             )
 
         with sent(session) as statements:
             estimates = _estimates(session, works)
 
         assert list(estimates) == works
+        assert [len(each.step_figures) for each in estimates.values()] == [2, 2, 2]
         assert len(statements.texts) == 4
 
     def test_each_read_of_a_kinds_last_timings_ends_on_an_index(
@@ -969,8 +1290,9 @@ class TestWorkEstimatesRead:
         project_session: models.Session,
         past: uuid.UUID,
     ) -> None:
-        """In a repo's own and in all repos', with no sort and no walk of
-        the kind's other listing or another repo's timings: the plan the
+        """In a repo's own and in all repos', as they stand and as they
+        stood when a step began, with no sort and no walk of the kind's other
+        listing, another repo's timings or those ended since: the plan the
         planner has once a table this small is not read whole."""
         works = [
             _run(session, project, project_session, repo=repo)
@@ -978,7 +1300,7 @@ class TestWorkEstimatesRead:
         ]
         _timed(session, past, "write", [20] * 10)
         for work_id in works:
-            _list(session, work_id, [_pending("write")])
+            _list(session, work_id, [_active("write", 5), _pending("write")])
         with sent(session) as statements:
             _estimates(session, works)
         connection = session.connection()
@@ -1048,6 +1370,7 @@ def _shown(
         longer_than_usual=longer,
         kind="write",
         ran_seconds=600,
+        step_figures=(),
     )
 
 

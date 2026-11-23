@@ -203,9 +203,10 @@ class AppEnvironment(BaseSettings):
         default=60,
         gt=0,
         description=(
-            "The last Step Timings of its kind a running step is read against, "
-            "for the time it still takes and for longer than usual (F156.5, "
-            "F156.10)"
+            "The last Step Timings of its kind, of those that had ended when "
+            "a running step began, that it is read against, for the time it "
+            "still takes, for longer than usual and for its figures (F156.5, "
+            "F156.10, F156.13)"
         ),
     )
     WEEK_FIRST_LIMIT: float = Field(

@@ -3868,9 +3868,14 @@ class TestWorkStatusEstimate:
             "longer_than_usual": None,
             "kind": None,
             "ran_seconds": None,
+            "step_figures": [],
         }
         assert container.timeline_service().work(work.id).estimate == EstimateSchema(
-            minutes=40, longer_than_usual=None, kind=None, ran_seconds=None
+            minutes=40,
+            longer_than_usual=None,
+            kind=None,
+            ran_seconds=None,
+            step_figures=[],
         )
 
 

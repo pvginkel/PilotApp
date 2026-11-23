@@ -723,6 +723,53 @@ class RetriedSchema(BaseModel):
     at: datetime = Field(description="When Retry was pressed, the new job placed")
 
 
+class StepFiguresSchema(BaseModel):
+    """A running step's row of the figures a badge opens on hover or press
+    (F156.13), read against the last timings of its kind that had ended when
+    it began, so that they hold still while it runs (F156.5). Each time is
+    in minutes as the table words it, computed by the server (F156.12)."""
+
+    kind: str = Field(
+        description="The step's kind, as its run published it",
+        examples=["code-writer"],
+    )
+    so_far_minutes: int = Field(
+        description=(
+            "So far: the time it has run, from the later of its start and "
+            "the running turn's, to the nearest minute"
+        ),
+        examples=[18],
+    )
+    normal_minutes: int = Field(
+        description=(
+            "Normal: the median of the timings it is read against, to the "
+            "nearest minute under an hour and to the nearest five from one"
+        ),
+        examples=[20],
+    )
+    slow_minutes: int = Field(
+        description=(
+            "Slow: their 90th percentile, to the nearest minute under an hour "
+            "and to the nearest five from one"
+        ),
+        examples=[32],
+    )
+    longest_minutes: int = Field(
+        description=(
+            "The longest of them, to the nearest minute: past it the badge "
+            "turns red, `longer_than_usual` `outrun`"
+        ),
+        examples=[52],
+    )
+    timings: int = Field(
+        description=(
+            "How many timings it is read against: the setting's 60, fewer "
+            "while its kind's history holds fewer"
+        ),
+        examples=[60],
+    )
+
+
 class EstimateSchema(BaseModel):
     """What the badge of a running work item shows of the time it still
     takes (F156.8): computed as it is read, by the server, and never stored
@@ -761,6 +808,13 @@ class EstimateSchema(BaseModel):
             "has no start"
         ),
         examples=[4380],
+    )
+    step_figures: list[StepFiguresSchema] = Field(
+        description=(
+            "The figures' row of each running step, in the list's order: none "
+            "for a step whose kind had fewer than five timings in all repos "
+            "when it began, or that has no kind (F156.6, F156.13)"
+        )
     )
 
 

@@ -359,6 +359,7 @@ class TestProjectEventService:
             "longer_than_usual": None,
             "kind": None,
             "ran_seconds": None,
+            "step_figures": [],
         }
 
     def test_a_jobs_move_carries_its_status_as_the_items_it_shows_on_hold_it(

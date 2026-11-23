@@ -1472,8 +1472,9 @@ class TestGetEstimates:
         session: Session,
         environment: Environment,
     ) -> None:
-        """F156.8, F156.12: what the page reads each minute is what its head
-        and its timeline's work items carry, computed again."""
+        """F156.8, F156.12, F156.13: what the page reads each minute is what
+        its head and its timeline's work items carry, computed again, the
+        running step's figures with it."""
         camp = _make(container, name="Camp", environment_id=environment.id)
         tents = _running(container, session, camp, environment, "Pitching the tents")
         fire = _running(container, session, camp, environment, "Laying the fire")
@@ -1492,6 +1493,16 @@ class TestGetEstimates:
             "longer_than_usual": "outrun",
             "kind": "code-writer",
             "ran_seconds": None,
+            "step_figures": [
+                {
+                    "kind": "code-writer",
+                    "so_far_minutes": 30,
+                    "normal_minutes": 20,
+                    "slow_minutes": 20,
+                    "longest_minutes": 20,
+                    "timings": 10,
+                }
+            ],
         }
         assert body == {
             "estimate": {**outrun, "item_id": str(fire.id)},
@@ -1503,6 +1514,7 @@ class TestGetEstimates:
                         "longer_than_usual": None,
                         "kind": None,
                         "ran_seconds": None,
+                        "step_figures": [],
                     },
                 },
                 {"id": str(fire.id), "estimate": outrun},
