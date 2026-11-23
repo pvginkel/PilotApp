@@ -1,7 +1,7 @@
 """The time a running work item still takes (F156.4 to F156.7): the price,
 the running step and the timings it is read against, the repeats owed, no
-estimate, longer than usual, the running step's figures (F156.13) and the
-project's pick."""
+estimate, longer than usual and the run's mark, the running step's and the
+run's figures (F156.13, F156.14) and the project's pick."""
 
 import itertools
 import uuid
@@ -20,12 +20,14 @@ from app.models import (
     Project,
     StepKind,
     StepTiming,
+    Turn,
     Work,
 )
-from app.models.reference import ProgressState, SessionState
+from app.models.reference import ProgressState, SessionState, TurnCause
 from app.schemas.timeline import LongerThanUsual
 from app.services.container import ServiceContainer
 from app.services.step_estimate import (
+    RunFigures,
     StepEstimates,
     StepFigures,
     WorkEstimate,
@@ -56,9 +58,11 @@ def _run(
     state: SessionState = SessionState.RUNNING,
     began: float = 240,
     turn: float = 240,
+    conversation: str | None = None,
 ) -> uuid.UUID:
-    """A worker's run of `project`, placed in `repo`, whose Session began
-    `began` minutes ago and its turn `turn` minutes ago; its id."""
+    """A worker's run of `project`, placed in `repo`, on `conversation`,
+    whose Session and its first turn began `began` minutes ago and its
+    running turn `turn` minutes ago; its id."""
     work_id = uuid.uuid4()
     db.add_all(
         [
@@ -78,12 +82,22 @@ def _run(
                 cwd="/work/Example",
                 token_hash=uuid.uuid4().hex * 2,
                 state_code=state,
+                conversation_id=conversation,
                 started_at=_ago(began),
                 turn_started_at=_ago(turn),
             ),
         ]
     )
     db.flush()
+    db.add(
+        Turn(
+            session_id=work_id,
+            seq=1,
+            message="Fix the client for v4.",
+            started_at=_ago(began),
+            cause_code=TurnCause.BRIEF,
+        )
+    )
     db.add(
         Work(
             id=work_id,
@@ -223,8 +237,16 @@ def _estimates(
     *,
     window: int = 20,
     running: int = 60,
+    slow_factor: float = 1.6,
 ) -> dict[uuid.UUID, WorkEstimate]:
-    return work_estimates(db, work_ids, now=NOW, window=window, running=running)
+    return work_estimates(
+        db,
+        work_ids,
+        now=NOW,
+        window=window,
+        running=running,
+        slow_factor=slow_factor,
+    )
 
 
 def _minutes(estimate: WorkEstimate) -> float:
@@ -831,7 +853,10 @@ class TestWorkEstimatesLongerThanUsual:
         estimate = _estimates(session, [run])[run]
 
         assert (estimate.seconds, estimate.minutes) == (None, None)
-        assert estimate.longer_than_usual is LongerThanUsual.OUTRUN
+        assert (estimate.longer_than_usual, estimate.marked) == (
+            LongerThanUsual.OUTRUN,
+            False,
+        )
         assert estimate.kind == "write"
 
     def test_a_step_one_of_its_60_ran_as_long_as_keeps_its_estimate(
@@ -874,20 +899,39 @@ class TestWorkEstimatesLongerThanUsual:
 
         estimate = _estimates(session, [run])[run]
 
-        assert estimate.longer_than_usual is LongerThanUsual.MARKED
+        assert (estimate.longer_than_usual, estimate.marked) == (
+            LongerThanUsual.MARKED,
+            True,
+        )
         assert _minutes(estimate) == pytest.approx(15 + 8)
         assert estimate.minutes == 25
 
-    def test_a_marked_step_that_outran_its_60_gives_no_time_left(
+    def test_a_marked_step_that_outran_its_60_gives_no_time_left_and_keeps_its_mark(
         self, session: DbSession, run: uuid.UUID
     ) -> None:
+        """The badge's em dash, and the sentence that its run marks it: a
+        step its run marks keeps the marked sentence once it has outrun too
+        (F156.14)."""
         _list(session, run, [_active("write", 46, marked=True)])
 
         estimate = _estimates(session, [run])[run]
 
-        assert (estimate.seconds, estimate.longer_than_usual) == (
+        assert (estimate.seconds, estimate.longer_than_usual, estimate.marked) == (
             None,
             LongerThanUsual.OUTRUN,
+            True,
+        )
+
+    def test_a_mark_on_one_running_step_with_another_outrun_is_the_runs_mark(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        _list(session, run, [_active("review", 2, marked=True), _active("write", 46)])
+
+        estimate = _estimates(session, [run])[run]
+
+        assert (estimate.longer_than_usual, estimate.marked) == (
+            LongerThanUsual.OUTRUN,
+            True,
         )
 
     @pytest.mark.parametrize("kind", ["sweep", None])
@@ -899,11 +943,12 @@ class TestWorkEstimatesLongerThanUsual:
 
         estimate = _estimates(session, [run])[run]
 
-        assert (estimate.seconds, estimate.longer_than_usual, estimate.kind) == (
-            None,
-            LongerThanUsual.MARKED,
-            "write",
-        )
+        assert (
+            estimate.seconds,
+            estimate.longer_than_usual,
+            estimate.marked,
+            estimate.kind,
+        ) == (None, LongerThanUsual.MARKED, True, "write")
 
     def test_a_step_outrun_on_a_work_item_with_no_estimate_shows_nothing(
         self, session: DbSession, run: uuid.UUID
@@ -925,7 +970,9 @@ class TestWorkEstimatesLongerThanUsual:
             ],
         )
 
-        assert _estimates(session, [run])[run].longer_than_usual is None
+        estimate = _estimates(session, [run])[run]
+
+        assert (estimate.longer_than_usual, estimate.marked) == (None, False)
 
 
 class TestWorkEstimatesAsTheStepBegan:
@@ -1217,6 +1264,408 @@ class TestStepFiguresMinutes:
         assert (row.normal_minutes, row.slow_minutes) == (words, words)
 
 
+class TestWorkEstimatesRunFigures:
+    """The run's row of the figures on hover or press (F156.13): its time so
+    far, which the alert's sentence says too (F156.14), its list at its
+    kinds' prices as the timings stood at its start, and its slow, its
+    normal times the factor."""
+
+    @pytest.fixture(autouse=True)
+    def _history(self, session: DbSession, past: uuid.UUID) -> None:
+        _timed(session, past, "write", [20] * 10)
+        _timed(session, past, "review", [8] * 10)
+
+    def test_its_row_is_its_so_far_its_list_at_its_kinds_prices_and_its_slow(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """A done step's 30 minutes and the running one's 6 so far; 20, 8
+        and 20 normal; and 1.6 times that slow, 76.8 minutes, to the nearest
+        five."""
+        _timed_at(session, run, "write", [30], ended=49)
+        _list(
+            session,
+            run,
+            [_done("write", 50), _active("review", 6), _pending("write")],
+        )
+
+        estimate = _estimates(session, [run])[run]
+
+        figures = estimate.run_figures
+        assert figures is not None
+        assert figures.so_far_seconds == 36 * MINUTE
+        assert figures.normal_seconds == pytest.approx(48 * MINUTE)
+        assert figures.slow_seconds == pytest.approx(76.8 * MINUTE)
+        assert (
+            figures.so_far_minutes,
+            figures.normal_minutes,
+            figures.slow_minutes,
+        ) == (36, 48, 75)
+        assert estimate.ran_seconds == 36 * MINUTE
+
+    def test_a_list_of_one_step_has_none_and_its_so_far_still_stands(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """A timing of a step its list no longer holds counts in it."""
+        _timed_at(session, run, "review", [8], ended=20)
+        _list(session, run, [_active("write", 12)])
+
+        estimate = _estimates(session, [run])[run]
+
+        assert (estimate.run_figures, estimate.ran_seconds) == (None, 20 * MINUTE)
+
+    def test_a_step_not_listed_ahead_adds_nothing_to_its_normal(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        _list(
+            session,
+            run,
+            [
+                _done("review", 50, listed=False),
+                _active("write", 5),
+                _pending("review"),
+            ],
+        )
+
+        figures = _estimates(session, [run])[run].run_figures
+
+        assert figures is not None
+        assert figures.normal_seconds == pytest.approx((20 + 8) * MINUTE)
+
+    def test_its_prices_are_the_timings_as_they_stood_at_its_start(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """A `write` ended since the run began is not among them, a `review`
+        ended at the instant it began is: 20 and 110 over 11."""
+        _timed_at(session, past, "write", [200], ended=239)
+        _timed_at(session, past, "review", [30], ended=240)
+        _list(session, run, [_active("review", 5), _pending("write")])
+
+        figures = _estimates(session, [run])[run].run_figures
+
+        assert figures is not None
+        assert figures.normal_seconds == pytest.approx((10 + 20) * MINUTE)
+
+    def test_its_normal_grows_only_as_its_list_gains_a_step(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        _list(session, run, [_active("write", 5), _pending("review")])
+        before = _estimates(session, [run])[run].run_figures
+        _timed_at(session, past, "write", [200], ended=2)
+        moved = _estimates(session, [run])[run].run_figures
+        _list_again(
+            session,
+            run,
+            [_active("write", 5), _pending("review"), _pending("write")],
+        )
+        grown = _estimates(session, [run])[run].run_figures
+
+        assert before is not None and moved is not None and grown is not None
+        assert [each.normal_seconds for each in (before, moved, grown)] == [
+            pytest.approx(28 * MINUTE),
+            pytest.approx(28 * MINUTE),
+            pytest.approx(48 * MINUTE),
+        ]
+
+    def test_a_kind_with_no_price_at_its_start_leaves_no_row(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """Ten timings of a kind, every one ended since the run began: the
+        time left prices it, the run's normal could not."""
+        _timed_at(session, past, "ship", [10] * 10, ended=60)
+        _list(session, run, [_active("write", 5), _pending("ship")])
+
+        estimate = _estimates(session, [run])[run]
+
+        assert estimate.seconds is not None
+        assert estimate.run_figures is None
+
+    @pytest.mark.parametrize(("listed", "stands"), [(True, False), (False, True)])
+    def test_a_step_with_no_kind_listed_ahead_leaves_no_row(
+        self, session: DbSession, run: uuid.UUID, listed: bool, stands: bool
+    ) -> None:
+        """A done step with no kind is no matter to the time left; to the
+        run's normal it is unless it was not listed ahead."""
+        _list(
+            session,
+            run,
+            [_done(None, 30, listed=listed), _active("write", 5), _pending("write")],
+        )
+
+        estimate = _estimates(session, [run])[run]
+
+        assert estimate.seconds is not None
+        assert (estimate.run_figures is not None) is stands
+
+    def test_its_slow_factor_is_a_setting(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        _list(session, run, [_active("write", 5), _pending("write")])
+
+        figures = _estimates(session, [run], slow_factor=2.5)[run].run_figures
+
+        assert figures is not None
+        assert (figures.normal_seconds, figures.slow_seconds) == (
+            pytest.approx(40 * MINUTE),
+            pytest.approx(100 * MINUTE),
+        )
+
+
+class TestWorkEstimatesTheRun:
+    """The run is the work items on the running one's conversation, the
+    running one alone where it has none; its start its first work item's
+    first turn (F156.13)."""
+
+    @pytest.fixture(autouse=True)
+    def _history(self, session: DbSession, past: uuid.UUID) -> None:
+        _timed(session, past, "write", [20] * 10)
+
+    def _on(
+        self,
+        session: DbSession,
+        project: Project,
+        project_session: models.Session,
+        conversation: str | None,
+        *,
+        began: float,
+        state: SessionState = SessionState.ENDED,
+    ) -> uuid.UUID:
+        return _run(
+            session,
+            project,
+            project_session,
+            state=state,
+            began=began,
+            turn=began,
+            conversation=conversation,
+        )
+
+    def test_its_so_far_counts_every_work_item_on_its_conversation_and_no_other(
+        self, session: DbSession, project: Project, project_session: models.Session
+    ) -> None:
+        """Not another conversation's, nor one with none, `past`."""
+        earlier = self._on(session, project, project_session, "run-1", began=300)
+        _timed_at(session, earlier, "write", [25], ended=280)
+        other = self._on(session, project, project_session, "run-2", began=200)
+        _timed_at(session, other, "write", [50], ended=100)
+        current = self._on(
+            session,
+            project,
+            project_session,
+            "run-1",
+            began=100,
+            state=SessionState.RUNNING,
+        )
+        _timed_at(session, current, "write", [15], ended=60)
+        _list(
+            session,
+            current,
+            [_done("write", 75, listed=None), _active("write", 10)],
+        )
+
+        estimate = _estimates(session, [current])[current]
+
+        assert estimate.ran_seconds == (25 + 15 + 10) * MINUTE
+        assert estimate.run_figures is not None
+        assert estimate.run_figures.so_far_seconds == (25 + 15 + 10) * MINUTE
+
+    def test_its_start_is_its_first_work_items_first_turn(
+        self,
+        session: DbSession,
+        project: Project,
+        project_session: models.Session,
+        past: uuid.UUID,
+    ) -> None:
+        """A timing ended after the first work item's first turn and before
+        the running one's is not among its prices."""
+        self._on(session, project, project_session, "run-1", began=300)
+        current = self._on(
+            session,
+            project,
+            project_session,
+            "run-1",
+            began=100,
+            state=SessionState.RUNNING,
+        )
+        _timed_at(session, past, "write", [200], ended=200)
+        _list(session, current, [_active("write", 10), _pending("write")])
+
+        figures = _estimates(session, [current])[current].run_figures
+
+        assert figures is not None
+        assert figures.normal_seconds == pytest.approx(40 * MINUTE)
+
+    def test_a_resume_restarts_neither_its_start_nor_its_so_far(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """The Session's clock, which a Resume restarts, is not the run's:
+        its done step's timing stays in its so far, its running step counts
+        from the resumed turn, and its prices stay its first turn's."""
+        _timed_at(session, run, "write", [40], ended=60)
+        _timed_at(session, past, "write", [200], ended=10)
+        resumed = session.get_one(models.Session, run)
+        resumed.started_at = resumed.turn_started_at = _ago(2)
+        session.add(
+            Turn(
+                session_id=run,
+                seq=2,
+                message="Go on.",
+                started_at=_ago(2),
+                cause_code=TurnCause.RESUME,
+            )
+        )
+        _list(
+            session,
+            run,
+            [_done("write", 61), _active("write", 30), _pending("write")],
+        )
+
+        estimate = _estimates(session, [run])[run]
+
+        assert estimate.ran_seconds == (40 + 2) * MINUTE
+        assert estimate.run_figures is not None
+        assert estimate.run_figures.normal_seconds == pytest.approx(60 * MINUTE)
+
+    @pytest.mark.parametrize(("known", "normal"), [(True, 60), (False, 40), (None, 60)])
+    def test_a_step_its_list_brings_begun_counts_as_the_run_listed_it(
+        self,
+        session: DbSession,
+        project: Project,
+        project_session: models.Session,
+        known: bool | None,
+        normal: float,
+    ) -> None:
+        """A continuation's first list brings the run's done steps begun,
+        their listing unknown: as the work item that ran them listed them,
+        listed where none knows."""
+        earlier = self._on(session, project, project_session, "run-1", began=300)
+        _list(session, earlier, [_done("write", 290, listed=known), _pending("write")])
+        current = self._on(
+            session,
+            project,
+            project_session,
+            "run-1",
+            began=100,
+            state=SessionState.RUNNING,
+        )
+        _list(
+            session,
+            current,
+            [
+                _done("write", 290, listed=None),
+                _active("write", 10, listed=None),
+                _pending("write"),
+            ],
+        )
+
+        figures = _estimates(session, [current])[current].run_figures
+
+        assert figures is not None
+        assert figures.normal_seconds == pytest.approx(normal * MINUTE)
+
+    def test_another_conversations_listing_is_not_the_runs(
+        self, session: DbSession, project: Project, project_session: models.Session
+    ) -> None:
+        other = self._on(session, project, project_session, "run-2", began=300)
+        _list(session, other, [_done("write", 290, listed=False)])
+        current = self._on(
+            session,
+            project,
+            project_session,
+            "run-1",
+            began=100,
+            state=SessionState.RUNNING,
+        )
+        _list(
+            session,
+            current,
+            [_done("write", 90, listed=None), _active("write", 10)],
+        )
+
+        figures = _estimates(session, [current])[current].run_figures
+
+        assert figures is not None
+        assert figures.normal_seconds == pytest.approx(40 * MINUTE)
+
+    def test_a_work_item_with_no_conversation_is_a_run_of_its_own(
+        self,
+        session: DbSession,
+        project: Project,
+        project_session: models.Session,
+        past: uuid.UUID,
+    ) -> None:
+        """Another with none counts in neither its so far nor its start: a
+        `write` of 200 ended between the other's first turn and its own is
+        among its prices, with the other's of 50."""
+        other = self._on(session, project, project_session, None, began=600)
+        _timed_at(session, other, "write", [50], ended=500)
+        _timed_at(session, past, "write", [200], ended=300)
+        current = self._on(
+            session,
+            project,
+            project_session,
+            None,
+            began=240,
+            state=SessionState.RUNNING,
+        )
+        _list(session, current, [_active("write", 10), _pending("write")])
+
+        estimate = _estimates(session, [current])[current]
+
+        assert estimate.ran_seconds == 10 * MINUTE
+        assert estimate.run_figures is not None
+        assert estimate.run_figures.normal_seconds == pytest.approx(
+            2 * (200 + 200 + 50) / 12 * MINUTE
+        )
+
+    def test_a_seeded_timing_on_its_work_item_is_not_the_runs(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """A seed's timings hang on the work item that ran the seed."""
+        session.add(
+            StepTiming(
+                work_id=run,
+                kind_code="write",
+                ended_at=_ago(60),
+                duration=30 * MINUTE,
+                listed_ahead=True,
+                key="seeded-1",
+                repo=REPO,
+            )
+        )
+        session.flush()
+        _list(session, run, [_active("write", 10)])
+
+        assert _estimates(session, [run])[run].ran_seconds == 10 * MINUTE
+
+
+def _run_row(seconds: float) -> RunFigures:
+    return RunFigures(
+        so_far_seconds=seconds, normal_seconds=seconds, slow_seconds=seconds
+    )
+
+
+class TestRunFiguresMinutes:
+    @pytest.mark.parametrize(
+        ("seconds", "words"),
+        [(29, 0), (30, 1), (18 * MINUTE + 30, 19), (132 * MINUTE + 31, 133)],
+    )
+    def test_its_so_far_is_to_the_nearest_minute(
+        self, seconds: float, words: int
+    ) -> None:
+        assert _run_row(seconds).so_far_minutes == words
+
+    @pytest.mark.parametrize(
+        ("minutes", "words"),
+        [(19.4, 19), (59.5, 60), (62.4, 60), (62.5, 65), (132.5, 135)],
+    )
+    def test_its_normal_and_slow_are_to_the_nearest_minute_under_an_hour_and_five_from_one(
+        self, minutes: float, words: int
+    ) -> None:
+        row = _run_row(minutes * MINUTE)
+
+        assert (row.normal_minutes, row.slow_minutes) == (words, words)
+
+
 class TestWorkEstimatesRead:
     def test_the_estimates_stand_in_the_order_asked_with_the_time_each_has_run(
         self,
@@ -1225,27 +1674,18 @@ class TestWorkEstimatesRead:
         project_session: models.Session,
         past: uuid.UUID,
     ) -> None:
-        first = _run(session, project, project_session, began=12.5)
-        second = _run(session, project, project_session, began=200)
-        _timed(session, past, "write", [20] * 10)
-        for work_id in (first, second):
-            _list(session, work_id, [_pending("write")])
+        first = _run(session, project, project_session)
+        second = _run(session, project, project_session)
+        _timed(session, past, "write", [30] * 10)
+        _list(session, first, [_active("write", 12.5)])
+        _list(session, second, [_active("write", 20)])
 
         estimates = _estimates(session, [second, uuid.uuid4(), first])
 
         assert [
             (estimate.work_id, estimate.ran_seconds) for estimate in estimates.values()
-        ] == [(second, 200 * MINUTE), (first, 750)]
+        ] == [(second, 20 * MINUTE), (first, 750)]
         assert list(estimates) == [second, first]
-
-    def test_a_session_with_no_start_has_run_no_time(
-        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
-    ) -> None:
-        session.get_one(models.Session, run).started_at = None
-        _timed(session, past, "write", [20] * 10)
-        _list(session, run, [_pending("write")])
-
-        assert _estimates(session, [run])[run].ran_seconds is None
 
     def test_no_work_item_asked_reads_nothing(self, session: DbSession) -> None:
         with sent(session) as statements:
@@ -1260,20 +1700,47 @@ class TestWorkEstimatesRead:
         project_session: models.Session,
         past: uuid.UUID,
     ) -> None:
-        """The running Sessions, their lists, their repos' own timings and
-        all repos', as they stand and as they stood when each running step
-        began."""
-        works = [
-            _run(session, project, project_session, repo=repo)
-            for repo in (REPO, OTHER_REPO, None)
-        ]
+        """The running Sessions with their runs' starts and timings, their
+        lists with their runs' other listings, their repos' own timings and
+        all repos', as they stand, as they stood when each running step
+        began and as they stood when each run began; the runs here on a
+        conversation of two, three and none."""
+        works = []
+        for number, repo in enumerate((REPO, OTHER_REPO, None)):
+            conversation = None if repo is None else f"conversation-{number}"
+            for _earlier in range(number + 1):
+                earlier = _run(
+                    session,
+                    project,
+                    project_session,
+                    repo=repo,
+                    state=SessionState.ENDED,
+                    began=300,
+                    conversation=conversation,
+                )
+                _list(session, earlier, [_done("write", 290), _pending("review")])
+                _timed_at(session, earlier, "sweep", [10], ended=280, repo=repo)
+            works.append(
+                _run(
+                    session,
+                    project,
+                    project_session,
+                    repo=repo,
+                    conversation=conversation,
+                )
+            )
         for kind in ("write", "review", "ship"):
             _timed(session, past, kind, [20] * 10)
         for began, work_id in enumerate(works, start=5):
             _list(
                 session,
                 work_id,
-                [_active("write", began), _active("review", 2), _pending("ship")],
+                [
+                    _done("write", 290, listed=None),
+                    _active("write", began),
+                    _active("review", 2),
+                    _pending("ship"),
+                ],
             )
 
         with sent(session) as statements:
@@ -1281,6 +1748,11 @@ class TestWorkEstimatesRead:
 
         assert list(estimates) == works
         assert [len(each.step_figures) for each in estimates.values()] == [2, 2, 2]
+        assert [
+            (each.run_figures.normal_minutes, each.ran_seconds // MINUTE)
+            for each in estimates.values()
+            if each.run_figures is not None
+        ] == [(80, 10 + 5 + 2), (80, 20 + 6 + 2), (80, 7 + 2)]
         assert len(statements.texts) == 4
 
     def test_each_read_of_a_kinds_last_timings_ends_on_an_index(
@@ -1329,21 +1801,30 @@ class TestWorkEstimatesRead:
 
 
 class TestStepEstimates:
-    def test_it_reads_under_its_two_settings(
+    def test_it_reads_under_its_settings(
         self, session: DbSession, run: uuid.UUID, past: uuid.UUID
     ) -> None:
         """The window of 2 prices the step not begun at 40 minutes, where 5
         would at 22; the running step's 5 leave it 5 more, where 2 would
-        35."""
+        35; the run's slow is twice its normal of 80 minutes."""
         _timed(session, past, "write", [40] * 2 + [10] * 8)
         _list(session, run, [_active("write", 5), _pending("write")])
 
-        estimates = StepEstimates(window=2, running=5).of(session, [run], NOW)
+        estimates = StepEstimates(window=2, running=5, slow_factor=2).of(
+            session, [run], NOW
+        )
 
         assert _minutes(estimates[run]) == pytest.approx(40 + 5)
-        assert estimates == _estimates(session, [run], window=2, running=5)
+        assert estimates[run].run_figures == RunFigures(
+            so_far_seconds=5 * MINUTE,
+            normal_seconds=80 * MINUTE,
+            slow_seconds=160 * MINUTE,
+        )
+        assert estimates == _estimates(
+            session, [run], window=2, running=5, slow_factor=2
+        )
 
-    def test_the_container_hands_it_the_window_and_the_60(
+    def test_the_container_hands_it_the_window_the_60_and_the_slow_factor(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -1352,13 +1833,18 @@ class TestStepEstimates:
     ) -> None:
         """Twenty timings of 10 minutes, the newest, before forty of 40: the
         window of 20 prices the step not begun at 10 minutes, where 60 would
-        at 30; the running step's 60 leave it 35 more, where 20 would 5."""
+        at 30; the running step's 60 leave it 35 more, where 20 would 5; the
+        run's normal of 20 minutes is 32 slow."""
         _timed(session, past, "write", [10] * 20 + [40] * 40)
         _list(session, run, [_active("write", 5), _pending("write")])
 
         estimates = container.step_estimates().of(session, [run], NOW)
 
         assert _minutes(estimates[run]) == pytest.approx(35 + 10)
+        run_figures = estimates[run].run_figures
+        assert run_figures is not None
+        assert run_figures.normal_seconds == pytest.approx(20 * MINUTE)
+        assert run_figures.slow_seconds == pytest.approx(32 * MINUTE)
 
 
 def _shown(
@@ -1368,9 +1854,11 @@ def _shown(
         work_id=uuid.uuid4(),
         seconds=seconds,
         longer_than_usual=longer,
+        marked=longer is LongerThanUsual.MARKED,
         kind="write",
         ran_seconds=600,
         step_figures=(),
+        run_figures=None,
     )
 
 

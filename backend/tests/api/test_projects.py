@@ -57,6 +57,7 @@ from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
 from tests.support.starts import configured_starts
 from tests.support.store_updates import hold
 from tests.support.supervisor import Supervise
+from tests.support.turns import turn_in_flight
 
 PROJECTS = "/api/projects"
 
@@ -1478,8 +1479,9 @@ class TestGetEstimates:
         camp = _make(container, name="Camp", environment_id=environment.id)
         tents = _running(container, session, camp, environment, "Pitching the tents")
         fire = _running(container, session, camp, environment, "Laying the fire")
-        _running(container, session, camp, environment, "Fetching water")
-        timed(session, tents.id, "code-writer", 20)
+        water = _running(container, session, camp, environment, "Fetching water")
+        timed(session, water.id, "code-writer", 20)
+        turn_in_flight(session, tents)
         listed(session, tents.id, "code-writer", pending=3)
         listed(session, fire.id, "code-writer", running=30, marked=True)
         _sign_in(client)
@@ -1488,11 +1490,15 @@ class TestGetEstimates:
 
         assert response.status_code == 200
         body = response.get_json()
+        # Its running step's seconds move from one read to the next.
+        ran = body["estimate"].pop("ran_seconds")
+        assert 30 * 60 <= ran < 31 * 60
+        assert body["work_items"][1]["estimate"].pop("ran_seconds") == ran
         outrun = {
             "minutes": None,
             "longer_than_usual": "outrun",
+            "marked": True,
             "kind": "code-writer",
-            "ran_seconds": None,
             "step_figures": [
                 {
                     "kind": "code-writer",
@@ -1503,6 +1509,7 @@ class TestGetEstimates:
                     "timings": 10,
                 }
             ],
+            "run_figures": None,
         }
         assert body == {
             "estimate": {**outrun, "item_id": str(fire.id)},
@@ -1512,22 +1519,29 @@ class TestGetEstimates:
                     "estimate": {
                         "minutes": 60,
                         "longer_than_usual": None,
+                        "marked": False,
                         "kind": None,
-                        "ran_seconds": None,
+                        "ran_seconds": 0,
                         "step_figures": [],
+                        "run_figures": {
+                            "so_far_minutes": 0,
+                            "normal_minutes": 60,
+                            "slow_minutes": 95,
+                        },
                     },
                 },
                 {"id": str(fire.id), "estimate": outrun},
             ],
         }
-        assert (
-            client.get(f"{PROJECTS}/{camp}").get_json()["estimate"] == body["estimate"]
-        )
+        head = client.get(f"{PROJECTS}/{camp}").get_json()["estimate"]
+        assert 30 * 60 <= head.pop("ran_seconds") < 31 * 60
+        assert head == body["estimate"]
         works = {
             item["id"]: item["work"]["estimate"]
             for item in client.get(f"{PROJECTS}/{camp}/timeline").get_json()["items"]
             if item["work"] is not None
         }
+        assert 30 * 60 <= works[str(fire.id)].pop("ran_seconds") < 31 * 60
         assert [works[each["id"]] for each in body["work_items"]] == [
             each["estimate"] for each in body["work_items"]
         ]

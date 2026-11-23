@@ -3645,7 +3645,7 @@ class _Asked(StepEstimates):
     each read asks it for."""
 
     def __init__(self) -> None:
-        super().__init__(window=20, running=60)
+        super().__init__(window=20, running=60, slow_factor=1.6)
         self.asked: list[list[uuid.UUID]] = []
 
     def of(
@@ -3667,7 +3667,9 @@ class TestWorkStatusEstimate:
         environment: Environment,
     ) -> None:
         """A step that has run 5 of its kind's 20 minutes, and one not begun:
-        15 and 20."""
+        15 and 20; its run has taken the ten timings of 20 minutes it holds,
+        the kind's history here, and the step's 5, whatever its Session's
+        clock says."""
         project = _make(container)
         work = _work(session, project, environment, SessionState.RUNNING)
         _began(session, work, 73)
@@ -3689,16 +3691,15 @@ class TestWorkStatusEstimate:
             None,
             "code-writer",
         )
-        assert estimate.ran_seconds is not None
-        assert 73 * 60 <= estimate.ran_seconds < 74 * 60
+        assert 205 * 60 <= estimate.ran_seconds < 206 * 60
 
     @pytest.mark.parametrize(
         ("ran", "marked", "priced", "shown"),
         [
-            (5, True, True, (15, LongerThanUsual.MARKED)),
-            (30, None, True, (None, LongerThanUsual.OUTRUN)),
-            (30, True, True, (None, LongerThanUsual.OUTRUN)),
-            (5, True, False, (None, LongerThanUsual.MARKED)),
+            (5, True, True, (15, LongerThanUsual.MARKED, True)),
+            (30, None, True, (None, LongerThanUsual.OUTRUN, False)),
+            (30, True, True, (None, LongerThanUsual.OUTRUN, True)),
+            (5, True, False, (None, LongerThanUsual.MARKED, True)),
         ],
     )
     def test_the_alerts_three_forms(
@@ -3709,11 +3710,12 @@ class TestWorkStatusEstimate:
         ran: int,
         marked: bool | None,
         priced: bool,
-        shown: tuple[int | None, LongerThanUsual],
+        shown: tuple[int | None, LongerThanUsual, bool],
     ) -> None:
         """F156.7: a marked step keeps its time left; one that has outrun its
         kind's every timing has none, marked or not; a marked one with no
-        estimate stands alone."""
+        estimate stands alone. F156.14: a marked one's sentence says its run
+        marks it, outrun or not."""
         project = _make(container)
         work = _work(session, project, environment, SessionState.RUNNING)
         if priced:
@@ -3730,7 +3732,7 @@ class TestWorkStatusEstimate:
         )[work.id].estimate
 
         assert estimate is not None
-        assert (estimate.minutes, estimate.longer_than_usual) == shown
+        assert (estimate.minutes, estimate.longer_than_usual, estimate.marked) == shown
 
     def test_one_with_no_estimate_has_none(
         self,
@@ -3863,19 +3865,25 @@ class TestWorkStatusEstimate:
 
         _opening, entry = _items(container, project)
 
+        # Its run has taken the ten timings of 20 minutes it holds, the
+        # kind's history here; with no turn it has no start, and no row.
         assert entry["work"]["estimate"] == {
             "minutes": 40,
             "longer_than_usual": None,
+            "marked": False,
             "kind": None,
-            "ran_seconds": None,
+            "ran_seconds": 200 * 60,
             "step_figures": [],
+            "run_figures": None,
         }
         assert container.timeline_service().work(work.id).estimate == EstimateSchema(
             minutes=40,
             longer_than_usual=None,
+            marked=False,
             kind=None,
-            ran_seconds=None,
+            ran_seconds=200 * 60,
             step_figures=[],
+            run_figures=None,
         )
 
 

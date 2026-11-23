@@ -770,6 +770,37 @@ class StepFiguresSchema(BaseModel):
     )
 
 
+class RunFiguresSchema(BaseModel):
+    """The run's row of the figures a badge opens on hover or press
+    (F156.13): the work items on the running one's conversation, the running
+    one alone where it has none, none of it by phases. Each time is in
+    minutes as the table words it, computed by the server (F156.12)."""
+
+    so_far_minutes: int = Field(
+        description=(
+            "So far: the durations of the Step Timings of the run's work items "
+            "and its running steps' time run, to the nearest minute"
+        ),
+        examples=[95],
+    )
+    normal_minutes: int = Field(
+        description=(
+            "Normal: every step on its list listed ahead at its kind's price, "
+            "as the timings stood at the run's start, its first work item's "
+            "first turn, a step not listed ahead adding nothing; to the nearest "
+            "minute under an hour and to the nearest five from one"
+        ),
+        examples=[130],
+    )
+    slow_minutes: int = Field(
+        description=(
+            "Slow: the normal times the run's slow factor, to the nearest "
+            "minute under an hour and to the nearest five from one"
+        ),
+        examples=[210],
+    )
+
+
 class EstimateSchema(BaseModel):
     """What the badge of a running work item shows of the time it still
     takes (F156.8): computed as it is read, by the server, and never stored
@@ -793,6 +824,14 @@ class EstimateSchema(BaseModel):
             "rest, where `minutes` is set (F156.7)"
         )
     )
+    marked: bool = Field(
+        description=(
+            "Whether the workflow marks a running step as in trouble: the "
+            "alert's sentence then says its run marks it, outrun or not, and "
+            "otherwise that it runs longer than such work usually takes "
+            "(F156.14)"
+        )
+    )
     kind: str | None = Field(
         description=(
             "The kind of the running step, as its run published it, the "
@@ -801,11 +840,12 @@ class EstimateSchema(BaseModel):
         ),
         examples=["code-writer"],
     )
-    ran_seconds: int | None = Field(
+    ran_seconds: int = Field(
         description=(
-            "The seconds since the work item's run began, by the server's "
-            "clock, which the alert's sentence says; null while its session "
-            "has no start"
+            "The time the run has taken so far, in seconds, which the alert's "
+            "sentence says: the durations of the Step Timings of its work "
+            "items and its running steps' time run, as the run's figures count "
+            "it, on a list of one step too (F156.14)"
         ),
         examples=[4380],
     )
@@ -814,6 +854,13 @@ class EstimateSchema(BaseModel):
             "The figures' row of each running step, in the list's order: none "
             "for a step whose kind had fewer than five timings in all repos "
             "when it began, or that has no kind (F156.6, F156.13)"
+        )
+    )
+    run_figures: RunFiguresSchema | None = Field(
+        description=(
+            "The run's row of the figures: null on a list of one step, and "
+            "where a step listed ahead has no kind or its kind had no price "
+            "at the run's start (F156.6, F156.13)"
         )
     )
 

@@ -302,6 +302,23 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match=name):
             AppEnvironment.model_validate({name: 0})
 
+    def test_the_runs_slow_factor_is_1_6_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.estimate_run_slow_factor == 1.6
+
+    def test_load_reads_the_runs_slow_factor_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, ESTIMATE_RUN_SLOW_FACTOR=1.8)
+        )
+
+        assert settings.estimate_run_slow_factor == 1.8
+
+    def test_load_refuses_a_slow_factor_below_one(self) -> None:
+        """A run's slow is never under its normal."""
+        with pytest.raises(ValidationError, match="ESTIMATE_RUN_SLOW_FACTOR"):
+            AppEnvironment.model_validate({"ESTIMATE_RUN_SLOW_FACTOR": 0.9})
+
     def test_the_usage_limits_and_halt_settings_are_the_ruled_ones_by_default(
         self,
     ) -> None:
@@ -535,6 +552,7 @@ class TestAppSettings:
             "project_parallelism_max": "3",
             "estimate_window_steps": "20",
             "estimate_running_steps": "60",
+            "estimate_run_slow_factor": repr(1.6),
             "week_first_limit": "0.9",
             "week_allowance": "0.05",
             "week_second_limit": "0.98",
@@ -645,6 +663,7 @@ class TestAppSettings:
             "project_parallelism_max": "3",
             "estimate_window_steps": "20",
             "estimate_running_steps": "60",
+            "estimate_run_slow_factor": repr(1.6),
             "week_first_limit": "0.9",
             "week_allowance": "0.05",
             "week_second_limit": "0.98",

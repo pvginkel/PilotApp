@@ -16,13 +16,22 @@ kind's price, the price less the mean of the window's listed timings, while
 it runs and, done, until the next listed step on the list is done or an
 unlisted step of its kind has begun after it.
 
+The run's row of the figures is the whole run's: its work items, those on the
+running one's conversation, the running one alone where it has none. Its
+time so far is their Step Timings and its running steps' time run, which the
+alert's sentence says too; its normal every step on the list listed ahead at
+its kind's price as the timings stood at the run's start, its first work
+item's first turn, so that it grows only as the list gains a step; its slow
+normal times a set factor (F156.13).
+
 A kind's timings are the repo's own once the repo holds `OWN` of the kind,
 all repos' until then, for the price and the running step alike, a running
 step's counted among those that had ended when it began. A timing whose
 listing is unknown counts in none of it.
 
-Nothing here reads a step's code or label, or orders two kinds (F92.13), and
-no estimate is stored (F156.10).
+Nothing here reads a step's code or label, a code only matched to its own
+in the run's other work items' lists, or orders two kinds (F92.13), and no
+estimate is stored (F156.10).
 """
 
 import math
@@ -41,6 +50,7 @@ from sqlalchemy import (
     func,
     literal,
     literal_column,
+    or_,
     select,
     true,
     values,
@@ -48,7 +58,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session, aliased
 
-from app.models import Item, ProgressStep, StepTiming
+from app.models import Item, ProgressStep, StepTiming, Turn
 from app.models import Session as AgentSession
 from app.models.reference import ProgressState, SessionState
 from app.models.step import repo_of_work
@@ -106,6 +116,38 @@ class StepFigures:
 
 
 @dataclass(frozen=True)
+class RunFigures:
+    """The run's row of the figures on hover or press (F156.13): its time so
+    far, and the normal and the slow of its list, priced as the timings stood
+    at its start, none of it by phases."""
+
+    so_far_seconds: float
+    """The durations of the Step Timings of the run's work items and its
+    running steps' time run."""
+    normal_seconds: float
+    """Each step on its list listed ahead at its kind's price, as the
+    timings stood at the run's start; a step not listed ahead adds nothing,
+    its cost in the price."""
+    slow_seconds: float
+    """`normal_seconds` times the run's slow factor."""
+
+    @property
+    def so_far_minutes(self) -> int:
+        """`so_far_seconds` as the table words it."""
+        return _clock_minutes(self.so_far_seconds)
+
+    @property
+    def normal_minutes(self) -> int:
+        """`normal_seconds` as the table words it."""
+        return _usual_minutes(self.normal_seconds)
+
+    @property
+    def slow_minutes(self) -> int:
+        """`slow_seconds` as the table words it."""
+        return _usual_minutes(self.slow_seconds)
+
+
+@dataclass(frozen=True)
 class WorkEstimate:
     """What a running work item's badge shows."""
 
@@ -114,15 +156,21 @@ class WorkEstimate:
     """The time left as the rules sum it, which `minutes` rounds and
     `project_estimate` compares; none where none shows."""
     longer_than_usual: LongerThanUsual | None
+    marked: bool
+    """Whether the workflow marks a running step, which the alert's sentence
+    then says, outrun or not (F156.14)."""
     kind: str | None
     """The kind of the first running step on the list, as published; none
     where no step runs or it has none."""
-    ran_seconds: int | None
-    """The seconds since the work item's run began, which its line's running
-    time counts from; none while its Session has no start."""
+    ran_seconds: int
+    """The time the run has taken so far, in whole seconds, as its row of
+    the figures counts it, which the alert's sentence says (F156.14)."""
     step_figures: tuple[StepFigures, ...]
     """The row of each running step, in the list's order, of those whose
     kind had at least `FEW` timings in all repos when it began."""
+    run_figures: RunFigures | None
+    """The run's row; none on a list of one step, and none where a step
+    listed ahead has no kind or its kind had no price at the run's start."""
 
     @property
     def minutes(self) -> int | None:
@@ -183,6 +231,7 @@ def work_estimates(
     now: datetime,
     window: int,
     running: int,
+    slow_factor: float,
 ) -> dict[uuid.UUID, WorkEstimate]:
     """What the badge of each work item among `work_ids` shows at `now`, in
     their order; one that shows nothing is left out: one whose Session is
@@ -190,7 +239,8 @@ def work_estimates(
     with no estimate whose running steps the workflow has not marked.
     `window` is the number of a kind's last timings its price reads,
     `running` the number of those that had ended when a running step began
-    that it is read against."""
+    that it is read against, `slow_factor` what the run's normal is
+    multiplied by for its slow."""
     runs = {run.id: run for run in _runs(db, work_ids)}
     # At least `OWN` of each listing, so that the ten and the five are counted
     # off rows the settings do not cut.
@@ -200,7 +250,12 @@ def work_estimates(
         if work_id not in runs:
             continue
         estimate = _estimate(
-            runs[work_id], figures, now=now, window=window, running=running
+            runs[work_id],
+            figures,
+            now=now,
+            window=window,
+            running=running,
+            slow_factor=slow_factor,
         )
         if estimate is not None:
             estimates[work_id] = estimate
@@ -208,33 +263,48 @@ def work_estimates(
 
 
 class StepEstimates:
-    """The estimate under its two settings, both counted in steps
-    (F156.10): `window`, the number of a kind's last timings its price
-    reads, and `running`, the number of those that had ended when a running
-    step began that it is read against."""
+    """The estimate under its settings (F156.10): `window`, the number of a
+    kind's last timings its price reads, and `running`, the number of those
+    that had ended when a running step began that it is read against, both
+    counted in steps; and `slow_factor`, what the run's normal is multiplied
+    by for its slow (F156.13)."""
 
-    def __init__(self, window: int, running: int) -> None:
+    def __init__(self, window: int, running: int, slow_factor: float) -> None:
         self._window = window
         self._running = running
+        self._slow_factor = slow_factor
 
     def of(
         self, db: Session, work_ids: Collection[uuid.UUID], now: datetime
     ) -> dict[uuid.UUID, WorkEstimate]:
         """`work_estimates` of `work_ids` at `now`."""
         return work_estimates(
-            db, work_ids, now=now, window=self._window, running=self._running
+            db,
+            work_ids,
+            now=now,
+            window=self._window,
+            running=self._running,
+            slow_factor=self._slow_factor,
         )
 
 
 @dataclass(frozen=True)
 class _Run:
-    """An open work item whose Session runs, with its list in order."""
+    """An open work item whose Session runs, with its list in order, and
+    what its run holds beside: the work items on its conversation, the work
+    item alone where it has none."""
 
     id: uuid.UUID
-    started_at: datetime | None
     turn_started_at: datetime | None
     repo: str | None
     steps: tuple[ProgressStep, ...]
+    started: datetime | None
+    """The run's start: the start of its first work item's first turn."""
+    timed: int
+    """The seconds of the Step Timings its run's work items wrote."""
+    listings: dict[str, bool]
+    """Whether the run's other work items listed a step ahead, by its code,
+    where one knows: the earliest that does."""
 
     @cached_property
     def left(self) -> list[ProgressStep]:
@@ -313,15 +383,44 @@ class _Run:
         return _Read(step.kind_code, self.repo, step.started_at)
 
     @cached_property
+    def priced(self) -> list[str] | None:
+        """The kind of each step the run's normal prices, those on the list
+        listed ahead; none on a list of one step, or where the run has no
+        start or such a step has no kind."""
+        if len(self.steps) < 2 or self.started is None:
+            return None
+        kinds = []
+        for step in self.steps:
+            if not self._listed(step):
+                continue
+            if step.kind_code is None:
+                return None
+            kinds.append(step.kind_code)
+        return kinds
+
+    def _listed(self, step: ProgressStep) -> bool:
+        """Whether `step` stood on the run's list ahead: as its listing says,
+        a step never begun standing pending; a begun one whose listing this
+        work item does not know, one a continuation's first list brings, as
+        the run's other work items listed it, and listed where none knows."""
+        if step.listed_ahead is not None:
+            return step.listed_ahead
+        if step.started_at is None:
+            return True
+        return self.listings.get(step.code, True)
+
+    @cached_property
     def reads(self) -> set["_Read"]:
         """The reads of the timings the estimate makes: each kind it prices
-        as its timings stand, none where it prices nothing, and each running
-        step's kind as they stood when it began."""
+        as its timings stand, none where it prices nothing, each running
+        step's kind as they stood when it began, and each kind the run's
+        normal prices as they stood at the run's start."""
         reads = {_Read(kind, self.repo, None) for kind in self.kinds or ()}
         for step in self.active:
             began = self.began(step)
             if began is not None:
                 reads.add(began)
+        reads.update(_Read(kind, self.repo, self.started) for kind in self.priced or ())
         return reads
 
     def ran(self, step: ProgressStep, now: datetime) -> float:
@@ -331,19 +430,45 @@ class _Run:
         since = max(step.started_at, self.turn_started_at or step.started_at)
         return max(0.0, (now - since).total_seconds())
 
+    def so_far(self, now: datetime) -> float:
+        """The seconds the run has taken at `now`: its work items' Step
+        Timings and its running steps' time run."""
+        return self.timed + sum(self.ran(step, now) for step in self.active)
+
 
 def _runs(db: Session, work_ids: Collection[uuid.UUID]) -> list[_Run]:
     """Those of `work_ids` that are open, whose Session is `running` and has
-    a step left to do, each with its whole list."""
+    a step left to do, each with its whole list and its run's start, its
+    Step Timings and its other work items' listings."""
     if not work_ids:
         return []
-    run = aliased(AgentSession)
+    run, part = aliased(AgentSession), aliased(AgentSession)
+    # A Session with no conversation is a run of its own.
+    of_run = or_(part.id == run.id, part.conversation_id == run.conversation_id)
+    started = (
+        select(func.min(Turn.started_at))
+        .select_from(Turn)
+        .join(part, part.id == Turn.session_id)
+        .where(of_run)
+        .scalar_subquery()
+    )
+    # A seeded timing hangs on the Work that ran the seed: only the live
+    # ones, which hold their step's code, are the run's.
+    timed = (
+        select(func.coalesce(func.sum(StepTiming.duration), 0))
+        .select_from(StepTiming)
+        .join(part, part.id == StepTiming.work_id)
+        .where(of_run, StepTiming.code.is_not(None))
+        .scalar_subquery()
+    )
     rows = db.execute(
         select(
             run.id,
-            run.started_at,
+            run.conversation_id,
             run.turn_started_at,
             repo_of_work(run.id).scalar_subquery().label("repo"),
+            started.label("started"),
+            timed.label("timed"),
         )
         .join(Item, Item.id == run.id)
         .where(
@@ -354,20 +479,47 @@ def _runs(db: Session, work_ids: Collection[uuid.UUID]) -> list[_Run]:
     ).all()
     if not rows:
         return []
+    ids = {row.id for row in rows}
+    conversations = [row.conversation_id for row in rows if row.conversation_id]
     steps: dict[uuid.UUID, list[ProgressStep]] = {}
-    for step in db.scalars(
-        select(ProgressStep)
-        .where(ProgressStep.work_id.in_([row.id for row in rows]))
-        .order_by(ProgressStep.work_id, ProgressStep.position)
+    listings: dict[str, dict[str, bool]] = {}
+    for step, conversation in db.execute(
+        select(ProgressStep, AgentSession.conversation_id)
+        .join(AgentSession, AgentSession.id == ProgressStep.work_id)
+        .join(Item, Item.id == ProgressStep.work_id)
+        .where(
+            or_(
+                AgentSession.id.in_(list(ids)),
+                AgentSession.conversation_id.in_(conversations),
+            ),
+            or_(
+                ProgressStep.work_id.in_(list(ids)),
+                ProgressStep.listed_ahead.is_not(None),
+            ),
+        )
+        .order_by(Item.seq, ProgressStep.work_id, ProgressStep.position)
     ):
-        steps.setdefault(step.work_id, []).append(step)
+        if step.work_id in ids:
+            steps.setdefault(step.work_id, []).append(step)
+        else:
+            # Another work item's, by its conversation, the earliest first.
+            assert conversation is not None and step.listed_ahead is not None
+            listings.setdefault(conversation, {}).setdefault(
+                step.code, step.listed_ahead
+            )
     runs = [
         _Run(
             row.id,
-            row.started_at,
             row.turn_started_at,
             row.repo,
             tuple(steps.get(row.id, ())),
+            started=row.started,
+            timed=row.timed,
+            listings=(
+                {}
+                if row.conversation_id is None
+                else listings.get(row.conversation_id, {})
+            ),
         )
         for row in rows
     ]
@@ -524,14 +676,21 @@ def _last(
 
 
 def _estimate(
-    run: _Run, figures: _Figures, *, now: datetime, window: int, running: int
+    run: _Run,
+    figures: _Figures,
+    *,
+    now: datetime,
+    window: int,
+    running: int,
+    slow_factor: float,
 ) -> WorkEstimate | None:
     active = run.active
     seconds, outrun = _left(run, figures, now=now, window=window, running=running)
+    marked = any(step.marked for step in active)
     longer = None
     if outrun:
         longer = LongerThanUsual.OUTRUN
-    elif any(step.marked for step in active):
+    elif marked:
         longer = LongerThanUsual.MARKED
     if seconds is None and longer is None:
         return None
@@ -539,17 +698,44 @@ def _estimate(
         work_id=run.id,
         seconds=seconds,
         longer_than_usual=longer,
+        marked=marked,
         kind=active[0].kind_code if active else None,
-        ran_seconds=(
-            None
-            if run.started_at is None
-            else max(0, int((now - run.started_at).total_seconds()))
-        ),
+        ran_seconds=int(run.so_far(now)),
         step_figures=tuple(
             row
             for step in active
             if (row := _row(run, step, figures, now=now, running=running)) is not None
         ),
+        run_figures=_run_row(
+            run, figures, now=now, window=window, slow_factor=slow_factor
+        ),
+    )
+
+
+def _run_row(
+    run: _Run,
+    figures: _Figures,
+    *,
+    now: datetime,
+    window: int,
+    slow_factor: float,
+) -> RunFigures | None:
+    """The run's row of the figures; none where it prices no list, or a kind
+    it prices had no price at the run's start."""
+    kinds = run.priced
+    if kinds is None:
+        return None
+    normal = 0.0
+    for kind in kinds:
+        of_kind = figures[_Read(kind, run.repo, run.started)]
+        price = None if of_kind is None else of_kind.price(window)
+        if price is None:
+            return None
+        normal += price[0]
+    return RunFigures(
+        so_far_seconds=run.so_far(now),
+        normal_seconds=normal,
+        slow_seconds=normal * slow_factor,
     )
 
 

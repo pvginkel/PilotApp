@@ -11,7 +11,7 @@ from app.models import ProgressStep, StepKind, StepTiming
 from app.models.reference import ProgressState
 from app.services.step_estimate import StepEstimates
 
-ESTIMATES = StepEstimates(window=20, running=60)
+ESTIMATES = StepEstimates(window=20, running=60, slow_factor=1.6)
 """The estimate under the settings' defaults."""
 
 

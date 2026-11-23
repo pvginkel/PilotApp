@@ -209,6 +209,16 @@ class AppEnvironment(BaseSettings):
             "F156.10, F156.13)"
         ),
     )
+    ESTIMATE_RUN_SLOW_FACTOR: float = Field(
+        default=1.6,
+        ge=1,
+        description=(
+            "What a run's normal, its list at its kinds' prices, is multiplied "
+            "by for its slow in the figures (F156.10, F156.13): the 90th "
+            "percentile of past runs' work over their list's price, set from "
+            "the backtest each time it is run"
+        ),
+    )
     WEEK_FIRST_LIMIT: float = Field(
         default=0.90,
         gt=0,
@@ -458,6 +468,10 @@ class AppSettings(BaseModel):
     """The last Step Timings of its kind a running step is read against
     (F156.5, F156.7)."""
 
+    estimate_run_slow_factor: float = 1.6
+    """What a run's normal is multiplied by for its slow (F156.10,
+    F156.13)."""
+
     week_first_limit: float = 0.90
     """The week's share at or over which the week's halt holds the work items,
     unless a Quota Overrule holds (F135.1; DB 266)."""
@@ -561,6 +575,7 @@ class AppSettings(BaseModel):
             ),
             estimate_window_steps=env.ESTIMATE_WINDOW_STEPS,
             estimate_running_steps=env.ESTIMATE_RUNNING_STEPS,
+            estimate_run_slow_factor=env.ESTIMATE_RUN_SLOW_FACTOR,
             week_first_limit=env.WEEK_FIRST_LIMIT,
             week_allowance=env.WEEK_ALLOWANCE,
             week_second_limit=env.WEEK_SECOND_LIMIT,

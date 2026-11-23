@@ -252,12 +252,12 @@ class ServiceContainer(containers.DeclarativeContainer):
         project_max=app_config.provided.project_parallelism_max,
     )
 
-    # The time a running work item still takes, under its two settings
-    # (F156.10)
+    # The time a running work item still takes, under its settings (F156.10)
     step_estimates = providers.Singleton(
         StepEstimates,
         window=app_config.provided.estimate_window_steps,
         running=app_config.provided.estimate_running_steps,
+        slow_factor=app_config.provided.estimate_run_slow_factor,
     )
 
     # The KubeCoder controller's client (design 2 §14). Its starter is

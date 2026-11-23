@@ -5272,6 +5272,11 @@
             ],
             "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
           },
+          "marked": {
+            "description": "Whether the workflow marks a running step as in trouble: the alert's sentence then says its run marks it, outrun or not, and otherwise that it runs longer than such work usually takes (F156.14)",
+            "title": "Marked",
+            "type": "boolean"
+          },
           "minutes": {
             "anyOf": [
               {
@@ -5288,19 +5293,23 @@
             "title": "Minutes"
           },
           "ran_seconds": {
+            "description": "The time the run has taken so far, in seconds, which the alert's sentence says: the durations of the Step Timings of its work items and its running steps' time run, as the run's figures count it, on a list of one step too (F156.14)",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds",
+            "type": "integer"
+          },
+          "run_figures": {
             "anyOf": [
               {
-                "type": "integer"
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.RunFiguresSchema"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
-            "examples": [
-              4380
-            ],
-            "title": "Ran Seconds"
+            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -5314,9 +5323,11 @@
         "required": [
           "minutes",
           "longer_than_usual",
+          "marked",
           "kind",
           "ran_seconds",
-          "step_figures"
+          "step_figures",
+          "run_figures"
         ],
         "title": "EstimateSchema",
         "type": "object"
@@ -5853,6 +5864,42 @@
           "at"
         ],
         "title": "RetriedSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.RunFiguresSchema": {
+        "description": "The run's row of the figures a badge opens on hover or press\n(F156.13): the work items on the running one's conversation, the running\none alone where it has none, none of it by phases. Each time is in\nminutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "normal_minutes": {
+            "description": "Normal: every step on its list listed ahead at its kind's price, as the timings stood at the run's start, its first work item's first turn, a step not listed ahead adding nothing; to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              130
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: the normal times the run's slow factor, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              210
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the durations of the Step Timings of the run's work items and its running steps' time run, to the nearest minute",
+            "examples": [
+              95
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes"
+        ],
+        "title": "RunFiguresSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.SectionSchema": {
@@ -8448,6 +8495,11 @@
             ],
             "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
           },
+          "marked": {
+            "description": "Whether the workflow marks a running step as in trouble: the alert's sentence then says its run marks it, outrun or not, and otherwise that it runs longer than such work usually takes (F156.14)",
+            "title": "Marked",
+            "type": "boolean"
+          },
           "minutes": {
             "anyOf": [
               {
@@ -8464,19 +8516,23 @@
             "title": "Minutes"
           },
           "ran_seconds": {
+            "description": "The time the run has taken so far, in seconds, which the alert's sentence says: the durations of the Step Timings of its work items and its running steps' time run, as the run's figures count it, on a list of one step too (F156.14)",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds",
+            "type": "integer"
+          },
+          "run_figures": {
             "anyOf": [
               {
-                "type": "integer"
+                "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.RunFiguresSchema"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
-            "examples": [
-              4380
-            ],
-            "title": "Ran Seconds"
+            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -8490,9 +8546,11 @@
         "required": [
           "minutes",
           "longer_than_usual",
+          "marked",
           "kind",
           "ran_seconds",
-          "step_figures"
+          "step_figures",
+          "run_figures"
         ],
         "title": "EstimateSchema",
         "type": "object"
@@ -8541,6 +8599,11 @@
             ],
             "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
           },
+          "marked": {
+            "description": "Whether the workflow marks a running step as in trouble: the alert's sentence then says its run marks it, outrun or not, and otherwise that it runs longer than such work usually takes (F156.14)",
+            "title": "Marked",
+            "type": "boolean"
+          },
           "minutes": {
             "anyOf": [
               {
@@ -8557,19 +8620,23 @@
             "title": "Minutes"
           },
           "ran_seconds": {
+            "description": "The time the run has taken so far, in seconds, which the alert's sentence says: the durations of the Step Timings of its work items and its running steps' time run, as the run's figures count it, on a list of one step too (F156.14)",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds",
+            "type": "integer"
+          },
+          "run_figures": {
             "anyOf": [
               {
-                "type": "integer"
+                "$ref": "#/components/schemas/ProjectEstimatesSchema.e86ccd6.RunFiguresSchema"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
-            "examples": [
-              4380
-            ],
-            "title": "Ran Seconds"
+            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -8583,12 +8650,50 @@
         "required": [
           "minutes",
           "longer_than_usual",
+          "marked",
           "kind",
           "ran_seconds",
           "step_figures",
+          "run_figures",
           "item_id"
         ],
         "title": "ProjectEstimateSchema",
+        "type": "object"
+      },
+      "ProjectEstimatesSchema.e86ccd6.RunFiguresSchema": {
+        "description": "The run's row of the figures a badge opens on hover or press\n(F156.13): the work items on the running one's conversation, the running\none alone where it has none, none of it by phases. Each time is in\nminutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "normal_minutes": {
+            "description": "Normal: every step on its list listed ahead at its kind's price, as the timings stood at the run's start, its first work item's first turn, a step not listed ahead adding nothing; to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              130
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: the normal times the run's slow factor, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              210
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the durations of the Step Timings of the run's work items and its running steps' time run, to the nearest minute",
+            "examples": [
+              95
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes"
+        ],
+        "title": "RunFiguresSchema",
         "type": "object"
       },
       "ProjectEstimatesSchema.e86ccd6.StepFiguresSchema": {
@@ -9082,6 +9187,11 @@
             ],
             "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
           },
+          "marked": {
+            "description": "Whether the workflow marks a running step as in trouble: the alert's sentence then says its run marks it, outrun or not, and otherwise that it runs longer than such work usually takes (F156.14)",
+            "title": "Marked",
+            "type": "boolean"
+          },
           "minutes": {
             "anyOf": [
               {
@@ -9098,19 +9208,23 @@
             "title": "Minutes"
           },
           "ran_seconds": {
+            "description": "The time the run has taken so far, in seconds, which the alert's sentence says: the durations of the Step Timings of its work items and its running steps' time run, as the run's figures count it, on a list of one step too (F156.14)",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds",
+            "type": "integer"
+          },
+          "run_figures": {
             "anyOf": [
               {
-                "type": "integer"
+                "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.RunFiguresSchema"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
-            "examples": [
-              4380
-            ],
-            "title": "Ran Seconds"
+            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -9124,9 +9238,11 @@
         "required": [
           "minutes",
           "longer_than_usual",
+          "marked",
           "kind",
           "ran_seconds",
           "step_figures",
+          "run_figures",
           "item_id"
         ],
         "title": "ProjectEstimateSchema",
@@ -9155,6 +9271,42 @@
         ],
         "title": "ProjectStatus",
         "type": "string"
+      },
+      "ProjectHeadSchema.e86ccd6.RunFiguresSchema": {
+        "description": "The run's row of the figures a badge opens on hover or press\n(F156.13): the work items on the running one's conversation, the running\none alone where it has none, none of it by phases. Each time is in\nminutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "normal_minutes": {
+            "description": "Normal: every step on its list listed ahead at its kind's price, as the timings stood at the run's start, its first work item's first turn, a step not listed ahead adding nothing; to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              130
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: the normal times the run's slow factor, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              210
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the durations of the Step Timings of the run's work items and its running steps' time run, to the nearest minute",
+            "examples": [
+              95
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes"
+        ],
+        "title": "RunFiguresSchema",
+        "type": "object"
       },
       "ProjectHeadSchema.e86ccd6.RunningWorkSchema": {
         "description": "A work item whose session runs, starts or waits at the gate.",
@@ -13703,6 +13855,11 @@
             ],
             "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
           },
+          "marked": {
+            "description": "Whether the workflow marks a running step as in trouble: the alert's sentence then says its run marks it, outrun or not, and otherwise that it runs longer than such work usually takes (F156.14)",
+            "title": "Marked",
+            "type": "boolean"
+          },
           "minutes": {
             "anyOf": [
               {
@@ -13719,19 +13876,23 @@
             "title": "Minutes"
           },
           "ran_seconds": {
+            "description": "The time the run has taken so far, in seconds, which the alert's sentence says: the durations of the Step Timings of its work items and its running steps' time run, as the run's figures count it, on a list of one step too (F156.14)",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds",
+            "type": "integer"
+          },
+          "run_figures": {
             "anyOf": [
               {
-                "type": "integer"
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.RunFiguresSchema"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
-            "examples": [
-              4380
-            ],
-            "title": "Ran Seconds"
+            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -13745,9 +13906,11 @@
         "required": [
           "minutes",
           "longer_than_usual",
+          "marked",
           "kind",
           "ran_seconds",
-          "step_figures"
+          "step_figures",
+          "run_figures"
         ],
         "title": "EstimateSchema",
         "type": "object"
@@ -14284,6 +14447,42 @@
           "at"
         ],
         "title": "RetriedSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.RunFiguresSchema": {
+        "description": "The run's row of the figures a badge opens on hover or press\n(F156.13): the work items on the running one's conversation, the running\none alone where it has none, none of it by phases. Each time is in\nminutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "normal_minutes": {
+            "description": "Normal: every step on its list listed ahead at its kind's price, as the timings stood at the run's start, its first work item's first turn, a step not listed ahead adding nothing; to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              130
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: the normal times the run's slow factor, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              210
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the durations of the Step Timings of the run's work items and its running steps' time run, to the nearest minute",
+            "examples": [
+              95
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes"
+        ],
+        "title": "RunFiguresSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.SectionSchema": {
@@ -16219,6 +16418,11 @@
             ],
             "description": "Why the badge is the alert's: `outrun`, a running step has run longer than every past step it is read against, and `minutes` is null, the badge's em dash; `marked`, the workflow marked a running step, and `minutes` is the time left, or null where the work item has no estimate, the alert alone; null on a badge at rest, where `minutes` is set (F156.7)"
           },
+          "marked": {
+            "description": "Whether the workflow marks a running step as in trouble: the alert's sentence then says its run marks it, outrun or not, and otherwise that it runs longer than such work usually takes (F156.14)",
+            "title": "Marked",
+            "type": "boolean"
+          },
           "minutes": {
             "anyOf": [
               {
@@ -16235,19 +16439,23 @@
             "title": "Minutes"
           },
           "ran_seconds": {
+            "description": "The time the run has taken so far, in seconds, which the alert's sentence says: the durations of the Step Timings of its work items and its running steps' time run, as the run's figures count it, on a list of one step too (F156.14)",
+            "examples": [
+              4380
+            ],
+            "title": "Ran Seconds",
+            "type": "integer"
+          },
+          "run_figures": {
             "anyOf": [
               {
-                "type": "integer"
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.RunFiguresSchema"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The seconds since the work item's run began, by the server's clock, which the alert's sentence says; null while its session has no start",
-            "examples": [
-              4380
-            ],
-            "title": "Ran Seconds"
+            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -16261,9 +16469,11 @@
         "required": [
           "minutes",
           "longer_than_usual",
+          "marked",
           "kind",
           "ran_seconds",
-          "step_figures"
+          "step_figures",
+          "run_figures"
         ],
         "title": "EstimateSchema",
         "type": "object"
@@ -16491,6 +16701,42 @@
           "at"
         ],
         "title": "RetriedSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.RunFiguresSchema": {
+        "description": "The run's row of the figures a badge opens on hover or press\n(F156.13): the work items on the running one's conversation, the running\none alone where it has none, none of it by phases. Each time is in\nminutes as the table words it, computed by the server (F156.12).",
+        "properties": {
+          "normal_minutes": {
+            "description": "Normal: every step on its list listed ahead at its kind's price, as the timings stood at the run's start, its first work item's first turn, a step not listed ahead adding nothing; to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              130
+            ],
+            "title": "Normal Minutes",
+            "type": "integer"
+          },
+          "slow_minutes": {
+            "description": "Slow: the normal times the run's slow factor, to the nearest minute under an hour and to the nearest five from one",
+            "examples": [
+              210
+            ],
+            "title": "Slow Minutes",
+            "type": "integer"
+          },
+          "so_far_minutes": {
+            "description": "So far: the durations of the Step Timings of the run's work items and its running steps' time run, to the nearest minute",
+            "examples": [
+              95
+            ],
+            "title": "So Far Minutes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "so_far_minutes",
+          "normal_minutes",
+          "slow_minutes"
+        ],
+        "title": "RunFiguresSchema",
         "type": "object"
       },
       "WorkSchema.1fdd8ae.SessionState": {

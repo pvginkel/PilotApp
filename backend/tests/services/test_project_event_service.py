@@ -354,12 +354,16 @@ class TestProjectEventService:
             container.engine_bus().emit(WorkMoved(project.id, project_session.id))
 
         [moved] = frames(tab)
+        # Its run has taken the ten timings of 20 minutes it holds, the
+        # kind's history here.
         assert moved["payload"]["work"]["estimate"] == {
             "minutes": 40,
             "longer_than_usual": None,
+            "marked": False,
             "kind": None,
-            "ran_seconds": None,
+            "ran_seconds": 200 * 60,
             "step_figures": [],
+            "run_figures": None,
         }
 
     def test_a_jobs_move_carries_its_status_as_the_items_it_shows_on_hold_it(
