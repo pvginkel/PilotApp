@@ -323,7 +323,7 @@ def _on_rows(
             kept[place]
             for place, index in enumerate(judged)
             if held[index].key in view.address.state.quick_filters
-            and not chips[index].marked
+            and not held[index].marks
         ]
     )
     answered: dict[int, QuickFilterCount] = {}

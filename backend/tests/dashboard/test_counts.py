@@ -75,14 +75,18 @@ def _quick_filters(
 
 
 def _quick_filter(
-    session: DbSession, code: str, condition: str, amount: str | None = None
+    session: DbSession,
+    code: str,
+    condition: str,
+    amount: str | None = None,
+    marks: bool = False,
 ) -> None:
     session.add(
         models.QuickFilter(
             code=code,
             label=code.capitalize(),
             condition=condition,
-            marks=False,
+            marks=marks,
             amount_figure=amount,
             saved_at=NOW,
         )
@@ -354,6 +358,18 @@ class TestQuickFilters:
         assert counts["big"] == QuickFilterCount("big", 1, 1.85)
         assert (counts["misses"].count, counts["past_ttl"].count) == (1, 1)
         assert counts["expensive"] == QuickFilterCount("expensive", 0, 0.0)
+
+    def test_one_on_the_bys_rows_that_marks_narrows_none_of_the_others(
+        self, container: ServiceContainer, service: CountsService, session: DbSession
+    ) -> None:
+        _quick_filter(
+            session, "small", "@rows,lt,1,cost.sum", amount="cost", marks=True
+        )
+
+        on = _quick_filters(container, service, "t=all&by=psession&b=small")
+        off = _quick_filters(container, service, "t=all&by=psession")
+
+        assert on == off
 
     def test_the_outlier_rows_count_the_outliers_among_the_bys_rows(
         self, container: ServiceContainer, service: CountsService, session: DbSession
