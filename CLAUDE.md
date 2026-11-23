@@ -165,7 +165,12 @@ specs outrun on a node other environments load; a passing Playwright test's outp
 kept every test's folder, each with a `backend.log` holding its worker's whole log so far, so that
 `test-results/` grew with the square of the test count, some 500 MB a run, and a copy of it under
 a size cap left out the failing test's own log, the HTML report keeping every test's logs as
-attachments; the detect-flakes mode of a session's runs, which `frontend/playwright.config.ts`
+attachments; a test's service logs, which the log collector's `stop` in
+`frontend/tests/support/process/backend-logs.ts` attaches only to a test that did not end as
+expected, where the template attached them to every test, so that the HTML reporter held each body,
+a replay of its worker's whole log so far, in the runner, its memory growing with the square of a
+worker's test count until the `modern-app` container was OOMKilled at 8Gi;
+the detect-flakes mode of a session's runs, which `frontend/playwright.config.ts`
 takes from `detectFlakes()` in the app-owned `frontend/tests/support/detect-flakes.ts`: in a run
 that takes the test suite lock, two retries, `failOnFlakyTests` and, before the list reporter, the
 reporter that takes a failing test's retries away past the cap of 10 failed tests a run, where the
